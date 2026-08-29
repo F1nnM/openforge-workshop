@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "openforge-workshop",
+  "compatibility_date": "2026-08-01",
+
+  // Static assets only. There is no Worker script in v1: the catalog index ships
+  // as a static asset and every query runs in the browser, so nothing needs edge
+  // compute. Static asset requests are free and unmetered on Cloudflare, and
+  // adding a script would put a billed CPU hop in front of them for no benefit.
+  //
+  // The one Worker v1 may still gain is the bulk-download fallback for iOS and
+  // multi-gigabyte packs (plan section 11). It is deliberately not here yet.
+  "assets": {
+    "directory": "./dist",
+    // Client-side routing: unknown paths serve index.html rather than 404ing.
+    "not_found_handling": "single-page-application"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "env": {
+    "staging": {
+      "name": "openforge-workshop-staging"
+    },
+    "production": {
+      "name": "openforge-workshop"
+    }
+  }
+}
