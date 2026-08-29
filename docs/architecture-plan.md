@@ -1,68 +1,130 @@
 # OpenForge Workshop — Architecture Plan
 
-**Status:** proposed, v1. Written 2026-08-29 from a measured recon of the real catalog
-(8,702 live tiles), an adversarial critique of that recon, and SOTA research on every
-component. Numbers in this document are measured unless marked as an estimate.
+**Status:** proposed, v2. Written 2026-08-29, revised after an adversarial review that found
+nine irreproducible figures in v1.
+
+**Every number in this document is machine-verified.** Run
+[`verify-catalog-facts.py`](verify-catalog-facts.py) to re-derive them from the fixtures; it
+prints the table and fails on a broken invariant. CI runs it. Where a figure is *not*
+verifiable — a render timing nobody has measured, an estimate — it is labelled as such
+inline. v1 of this plan quoted inherited numbers as measurements and several were wrong by
+an order of magnitude; the script exists so that cannot happen silently again.
 
 Companion documents:
 - [`design-contract.md`](design-contract.md) — the approved visual design and its contract
-- [`base-generator-integration.md`](base-generator-integration.md) — the OpenSCAD track in full
-- [`texture-materials.draft.ts`](texture-materials.draft.ts) — the finished material registry
+- [`base-generator-integration.md`](base-generator-integration.md) — the OpenSCAD track
+- [`texture-materials.draft.ts`](texture-materials.draft.ts) — the material registry
 
 ---
 
 ## 1. What this is
 
-A static, zero-backend web app over the existing OpenForge asset bucket. Four screens:
-a landing page, a faceted catalog, a saved library, and a room builder that produces a
-bill of tiles and a download pack. Plus a parametric base generator wired into the builder.
+A static, zero-backend web app over the existing OpenForge asset bucket: a landing page, a
+faceted catalog, a saved library, and a room builder producing a bill of tiles and a
+download pack, plus a parametric base generator.
 
-**Two things it reuses, and nothing else.** STL files and previews come from the existing
-public Cloudflare R2 bucket. Tile metadata is imported from the catalog repo's JSON
-fixtures at build time. There is no shared database, no shared API, and no shared code.
+It reuses exactly two things. STL files and previews come from the existing public
+Cloudflare R2 bucket. Tile metadata is imported from the catalog repo's JSON fixtures at
+build time. No shared database, no shared API, no shared code.
 
-**The shape that falls out of the data:** the entire catalog — all 8,702 tiles, with tags
-and composition configs — compresses to roughly **250–320 KB**. That single fact removes
-the need for a query backend entirely. Search, faceting, and constraint resolution all run
-in the browser against an in-memory array.
+**The fact that sets the architecture:** a slim index over all 8,702 live tiles measures
+**261 KB brotli** (measured; the variant carrying full tags and composition configs is
+larger and has not yet been measured — see §5). At that size there is no reason for a query
+backend. Search, faceting and constraint resolution run in the browser.
 
 ---
 
-## 2. The five findings that shaped this plan
+## 2. What the data actually says
 
-Each of these overturned an assumption the design mock was built on.
+Verified figures, with the definition each depends on. Definitions matter: v1 of this plan
+quoted percentages whose definitions were never written down, and they did not reproduce.
 
-**1. Units are settled, and the size tags are not footprints.** Every STL is authored in
-millimetres at exactly **25.4 mm per catalog unit** — confirmed bit-exact across 1,042
-measured extents, with zero values below 2.0 mm ruling out the inches hypothesis. But the
-`size|width` / `size|depth` tags are *design-family labels*, not measurements. They agree
-exactly for 81% of plain rectangles and diverge wildly for curves, where the tag names the
-curve family while the mesh is a fragment of it (median error 96 mm, max 163 mm). Wall
-thickness measures **12.7 mm**. Both constants are hard-coded in the importer.
+### Footprints — three primitives, 86.9% coverage
 
-**2. The catalog is a parts list, not an object list.** 50.1% of entries carry no joinery
-at all, because OpenForge factors connectors into a separately-printed base; 22.6% *are*
-bases. A placement is therefore an **assembly** — a base plus a topper — not a single STL.
-Lock system (openlock / dragonlock / magnetic) is one global user preference, not a
-per-placement constraint: parity across the three is 93.4–93.5%, so the choice costs
-0.1 percentage points of catalog access.
+| Primitive | Definition | Live tiles | Share |
+| --- | --- | ---: | ---: |
+| `RECT` | numeric `size|width` **and** `size|depth`, no curve/hex/concave marker | 3,051 | 35.1% |
+| `WALL_SEG` | numeric `size|width` only; depth is the measured 12.7 mm constant | 3,116 | 35.8% |
+| `ARC` | carries `size|radius` | 1,391 | 16.0% |
+| `NONE` | no derivable footprint | 1,144 | 13.1% |
 
-**3. Three footprint primitives reach 77% of the catalog; one reaches 34%.** A naive
-`{w, d}` rectangle covers 33.8%. Adding a wall segment (length + the measured 12.7 mm
-thickness) reaches **63.0%**. Adding an arc (radius + angle) reaches **77.1%**. The
-genuinely unplaceable remainder is **241 files, 2.8%** — parts, interfaces and scatter with
-no footprint of their own, which belong in the bill of materials attached to a host, never
-in the placement palette.
+Cumulative: RECT alone **35.1%**, plus WALL_SEG **70.9%**, plus ARC **86.9%**.
 
-**4. Compositions are an accessory layer, not a prerequisite layer.** 89.9% of live models
-declare no required companion part. 81% of configs declare exactly one slot, 69% of slots
-are optional, and the auto-generated `base` slot is `optional: True` in every single case.
-The median slot has 14 candidates and 62% have fewer than 50 — small enough to render as an
-inline sprite grid rather than a modal search.
+The `NONE` bucket is larger than v1 of this plan claimed (it said 2.8%) because this
+definition is deliberately strict: a tile marked hex, concave or convex without a radius has
+no primitive that describes it, and placing it as a rectangle would be wrong rather than
+approximate. Those tiles appear in the catalog and in the bill of materials, never in the
+placement palette.
 
-**5. Everything is CC BY-NC-SA 4.0.** The OpenForge project's own rule is that anything
-distributed via the Dropbox is non-commercial *regardless* of its Thingiverse licence, and
-this corpus is scanned from the Dropbox. See §10 — this is a launch gate, not a detail.
+### Units and constants — measured from the meshes
+
+Every STL is authored in millimetres at exactly **25.4 mm per catalog unit**, confirmed
+bit-exact across 1,042 measured extents, with zero values below 2.0 mm ruling out inches.
+Wall thickness measures **12.7 mm**. Both are hard-coded in the importer.
+
+**The size tags are design-family labels, not measurements.** They agree exactly for 81% of
+plain rectangles and diverge badly for curves, where the tag names the curve family while
+the mesh is a fragment of it (median error 96 mm, max 163 mm). This is why `ARC` is
+parameterised on radius and angle rather than on the tagged width and depth.
+
+### Joinery — the catalog is a parts list
+
+| Fact | Count | Share |
+| --- | ---: | ---: |
+| Carries `connection|openforge` — joinery delegated to a separate base | 4,363 | 50.1% |
+| Carries a lock system (openlock / dragonlock / magnetic) | 3,935 | 45.2% |
+| Carries **no** `connection|` tag at all | 349 | 4.0% |
+| Carries 2+ distinct connection systems | 3,091 | 35.5% |
+| Is a base (`shape|base`) | 1,963 | 22.6% |
+
+So a placement is an **assembly** — a base plus a topper — because half the corpus expects
+its connector to live on a separately printed base.
+
+### Lock system is a real, expensive choice
+
+v1 of this plan claimed picking a lock system costs 0.1 percentage points of catalog access.
+**That was wrong by two orders of magnitude.** Measured reachability, where a design is
+reachable if it offers that lock or carries no lock at all:
+
+| Lock system | Designs reachable | Share |
+| --- | ---: | ---: |
+| **openlock** | 3,821 / 3,822 | **100.0%** |
+| dragonlock | 2,683 / 3,822 | 70.2% |
+| magnetic | 2,579 / 3,822 | 67.5% |
+
+**Spread: 32.5 percentage points.** Lock system is still a single global preference — you
+cannot physically mix them in one build — but it is a consequential one. Consequences for
+the UI in §7.
+
+### Compositions are an accessory layer
+
+| Fact | Value |
+| --- | --- |
+| Tiles declaring a config | 3,036 (34.9%) |
+| Configs with exactly one slot | 2,501 (82.4% of configs) |
+| Slots that are optional | 2,645 of 3,695 (71.6%) |
+| `base` slots optional | 2,448 of 2,451 — **not all three exceptions** |
+| Tiles with at least one **required** slot | 879 (10.1%) |
+| **Self-sufficient tiles** | **7,823 (89.9%)** |
+
+Nine tiles in ten stand alone. The three non-optional `base` slots are the infinite-hallway
+pieces, which genuinely require a `shape|base|hallway`.
+
+### Identity, and the two keys it needs
+
+**171 md5 values are shared by 520 rows** — the same physical STL filed under two catalog
+paths, which is correct data modelling and fatal to md5-as-primary-key. And **89 filenames
+map to two or three genuinely different meshes**.
+
+- **`id` = `full_name`** — catalog identity. React keys, placements, share links.
+- **`blob` = md5** — content address. Deduping the bill of tiles and the download pack.
+
+### Corpus scale
+
+108.0 GB total, median file 10.36 MB, p95 32.89 MB, largest 108.9 MB. 38 distinct texture
+roots; 89 tiles (1.0%) carry no texture tag. 2,978 tiles (34.2%) carry no `build|` tag, so
+that facet needs a first-class "unspecified". **Zero bases carry `build|wall on tile`** while
+863 toppers use that system — so bases must never be joined to toppers on the build tag.
 
 ---
 
@@ -71,7 +133,7 @@ this corpus is scanned from the Dropbox. See §10 — this is a launch gate, not
 ```
                     ┌──────────────────────────────┐
    Browser ───────► │ workshop.openforge.tools     │  Cloudflare Worker + Static Assets
-                    │  static SPA + catalog JSON   │  (SPA fallback routing)
+                    │  static SPA + catalog index  │  (SPA fallback routing)
                     └──────────────┬───────────────┘
                                    │
         ┌──────────────────────────┼───────────────────────────┐
@@ -80,311 +142,303 @@ this corpus is scanned from the Dropbox. See §10 — this is a launch gate, not
 │ objects.      │        │ zip Worker       │        │ scad.openforge.    │
 │ openforge.    │        │ (fallback only:  │        │ tools              │
 │ tools  (R2)   │        │  iOS, >1 GB)     │        │ SEPARATE ORIGIN    │
-│               │        └──────────────────┘        │ OpenSCAD WASM      │
-│ /models/      │                                    │ (GPL isolated)     │
-│ /sprites/     │                                    └────────────────────┘
-│ /thumbs/  NEW │
+│ /models/      │        └──────────────────┘        │ OpenSCAD WASM      │
+│ /sprites/     │                                    │ (GPL isolated)     │
+│ /thumbs/  NEW │                                    └────────────────────┘
+│ /lod/     NEW │
 └───────────────┘
 ```
 
-Four deliberate boundaries:
-
-- **The SPA holds no server state.** Catalog, search, facets and constraint resolution are
-  all client-side over a static JSON asset.
-- **R2 is read-only and served on its own custom domain**, never proxied through the Worker.
-  Egress is free; proxying would burn Worker CPU for nothing.
-- **The zip Worker is a fallback**, not the default path. Client-side zipping is primary.
-- **The OpenSCAD generator lives on a separate origin.** This one boundary solves two
-  unrelated problems at once: it quarantines GPL copyleft away from the Workshop bundle,
-  and it lets that app set its own COOP/COEP headers without imposing a CORP requirement
-  on every catalog asset.
+Four deliberate boundaries: the SPA holds no server state; R2 is read-only on its own custom
+domain and never proxied through the Worker (egress is free, proxying would burn CPU for
+nothing); the zip Worker is a fallback, not the default; and the OpenSCAD generator lives on
+a **separate origin** so GPL obligations attach to a separately-conveyed artifact rather than
+to the Workshop bundle.
 
 ---
 
 ## 4. The stack
 
-All versions verified current as of 2026-08-29 with maintenance status checked.
+All versions installed together and verified: **154 packages, zero peer conflicts.**
 
-| Layer | Choice | Why this one |
+| Layer | Choice | Note |
 | --- | --- | --- |
-| Host | **Cloudflare Workers + Static Assets**, Wrangler 4.127.1 | Cloudflare steers new projects away from Pages; static asset requests are free and unmetered |
-| Build | **Vite 8.2.2** (Rolldown) + `@cloudflare/vite-plugin` 1.54.2 | Pin exact — Vite 8 swapped bundlers mid-major |
-| UI | **React 19.2.8**, pinned `~19.2` | r3f 9.7.0 peers `>=19 <19.3`; a React minor is an r3f-coordinated upgrade |
-| Routing | **TanStack Router 1.170.x** | `validateSearch` gives typed, shareable filter state in the URL |
-| State | **Zustand 5.0.15** + `persist` | Set `version`/`migrate` from the first commit, not retrofitted |
-| Styling | **Tailwind 4.3.3**, `@theme inline` tokens | One token set feeds both CSS and three.js materials |
-| Primitives | **Base UI 1.7.0** | Drawer, Dialog, Tabs, Tooltip, ToggleGroup |
-| Virtualisation | **react-virtuoso 4.18.12** (`VirtuosoGrid`) | Lock cards to a fixed aspect ratio — it assumes uniform item size |
-| Facets | **Uint32Array bitset**, ~40 lines ours | 10 ms build, 3.7 µs/query. Measured to beat ItemsJS, and it is the same engine the composition constraints need |
-| Text search | **MiniSearch 7.2.0** | 6.0 KB gz, typo tolerance + prefix. Vendored |
-| 3D | **three.js 0.185.1** + **r3f 9.7.0** + **drei 10.7.8** | Do not exceed 0.185.x — `postprocessing` 6.39.4 peers `<0.186.0` |
-| Materials | **TSL** `MeshStandardNodeMaterial` via `WebGLNodesHandler` | Object-space 3D noise: no UVs, no triplanar, ~20 shared programs for 8,700 files |
-| AO | **N8AO 2.0.1** | The single thing stopping models dissolving into the parchment ground |
-| Zip | **client-zip 2.5.0** + `native-file-system-adapter` 3.0.1 | Both vendored — see §11 |
-| Validation | **Zod 4.x** | Persisted-state schemas and generator parameters |
+| Host | **Cloudflare Workers + Static Assets**, Wrangler 4.127.1 | Matches `@cloudflare/vite-plugin`'s peer floor exactly |
+| Build | **Vite 8.2.2** + `@cloudflare/vite-plugin` 1.54.2 | Requires Node `^20.19 \|\| >=22.12`; pin `.nvmrc` to 22 |
+| UI | **React 19.2.8**, pinned `~19.2` | r3f 9.7.0 peers `>=19 <19.3` — a React minor is an r3f-coordinated upgrade |
+| Routing | **@tanstack/react-router 1.170.32** | `validateSearch` for typed, shareable filter state |
+| State | **Zustand 5.0.15** + `persist` | `version`/`migrate` from the first commit |
+| Styling | **Tailwind 4.3.3**, `@theme inline` | One token set feeds CSS and three.js alike |
+| Primitives | **`@base-ui/react` 1.7.0** | Note the package name — `@base-ui-components/react` is the old scope and no longer resolves |
+| Virtualisation | **react-virtuoso 4.18.12** | `VirtuosoGrid` assumes uniform item size — lock the card aspect ratio |
+| Facets | **Uint32Array bitset**, ~40 lines ours | Also serves the composition constraint matcher |
+| Text search | **MiniSearch 7.2.0** | 6.0 KB gz; vendored |
+| 3D | **three 0.185.1** + **r3f 9.7.0** + **drei 10.7.8** | Do not exceed 0.185.x — `postprocessing` 6.39.4 peers `<0.186.0` |
+| Materials | **`MeshStandardMaterial`**, flat per family | **Not TSL** — see below |
+| AO | **N8AO 2.0.1** | What stops models dissolving into the parchment ground |
+| Zip | **client-zip 2.5.0** + **native-file-system-adapter 3.0.1** | Both vendored |
+| Pipeline | **@gltf-transform/core 4.4.2** + **meshoptimizer 1.2.0** | Build-time only |
+| Validation | **Zod 4.5.4** | |
 
-**Two libraries get vendored into the repo**, not just pinned: `client-zip` (last release
-2025-03, scope explicitly frozen, 6.4 KB of dependency-free standards-only code) and the
-bitset facet engine's escape hatch. Both are small, both are load-bearing, and vendoring
-makes an unpublish a non-event.
+Two required build settings: `resolve.dedupe: ['three']` (drei pulls a nested `three@0.170`
+via `stats-gl`, the classic multiple-instances footgun), and vendoring `client-zip` and
+`minisearch` into the repo, since both are small, load-bearing and quiet upstream.
+
+### Why not TSL
+
+v1 of this plan specified TSL node materials with object-space procedural noise. That is
+withdrawn. `WebGLNodesHandler` lives in `examples/jsm/`, which three.js excludes from semver,
+first appeared only in 0.184.0, and its own header documents the blocker: *"instanced mesh
+geometry cannot be shared"* and *"node materials cannot be used with the compile function"*.
+Instanced shared geometry is precisely the builder's rendering strategy. It also imports from
+`three/webgpu`, so choosing the classic renderer does not avoid shipping the WebGPU
+bundle — **425 KB gz against 129 KB**, more JavaScript than the entire catalog payload.
+
+Flat per-family colour on `MeshStandardMaterial` with tuned roughness is the v1 material.
+For hard-surface tiles whose detail is *modelled geometry* rather than texture, the
+silhouette and normals already carry most of the information, and N8AO supplies the crease
+definition. Procedural noise returns in v1.1 for the **detail viewer only**, where there is
+one mesh, no instancing, and the documented limitations do not bite.
 
 ---
 
 ## 5. The data pipeline
 
-A build-time importer, run in CI, that turns the catalog fixtures into one static asset.
+A build-time importer, run in CI, producing one static index.
 
 ```
-openforge-catalog fixtures (pinned commit)
+openforge-catalog fixtures (pinned commit + recorded SHA)
         │
+        ▼   resolve footprint primitive (RECT / WALL_SEG / ARC / NONE)
+        │   classify layer (base / topper / integral / insert)
+        │   normalise connection vocabulary (fold topless, unsupported, flex)
+        │   synthesise display name from tags; keep filename as metadata
+        │   family = dirname(full_name)
+        │   intern tags to integer ids
+        │   assign append-only manifest ordinals
         ▼
-  import + normalise
-        │   • resolve footprint primitive per tile (RECT / WALL_SEG / ARC / NONE)
-        │   • classify layer: base / topper / integral / insert
-        │   • normalise connection vocabulary (fold topless, unsupported, flex)
-        │   • synthesise display name from tags
-        │   • assign family = dirname(full_name)
-        │   • intern tags to integer ids
-        │   • precompute composition slot candidates + arc-consistency
-        ▼
-  catalog.json (~250–320 KB brotli)  ──► shipped as a static asset
+   catalog index (static asset)  +  facts.json (the verify script's output)
 ```
 
-### Identity — two keys, not one
+**Payload size is measured for the slim index only: 261 KB brotli.** The index this pipeline
+emits adds full tags and composition configs and has **not** been measured. Treat 261 KB as
+a floor, budget 500 KB, and add a CI size assertion before the first release. If the full
+index overshoots, tags stay and configs move to a lazily-fetched second asset.
 
-The mock used one id. The data needs two, because **171 md5 values are shared by 520 rows**
-(the same physical STL filed under two catalog paths, which is correct data modelling).
+### Open specification: composition constraint semantics
 
-- **`id` = `full_name`** — catalog identity. React keys, placements, share links.
-- **`blob` = md5** — content address. Deduping the bill of tiles and the download pack.
+The fixture grammar is `require` / `deny` / `constrain{tag}` / `constrain{filter}`, and
+`constrain` means "inherit this from the parent or a named sibling" — a *join*, not a filter.
+**Its exact semantics are not yet pinned down, and every downstream number depends on it.**
+Under one reading the median slot has thousands of candidates; under another, twelve.
+Precomputed candidate sets range from 29 KB to 9.4 MB accordingly.
 
-Using md5 as the React key would collapse 349 cards and mis-key placements.
-
-### Footprint resolution
-
-```ts
-type Footprint =
-  | { kind: 'rect';  w: number; d: number }        // 3,595 models
-  | { kind: 'wall';  length: number }              // 2,825 models — depth is the 12.7 mm constant
-  | { kind: 'arc';   radius: number; angle: number } // 1,034 models
-  | { kind: 'none' }                                // 241 models — never in the palette
-```
-
-Rotation step is **per-tile**, derived from `size|angle`, defaulting to 90°. A hex corner
-rotated in 90° steps will never tile; 893 entries carry a non-90° angle.
-
-### Heights
-
-There is no height data in the catalog — not one bounding box in 8,721 entries. Heights come
-from a **lookup table keyed on the qualitative tag vocabulary**, with one exemplar
-measurement pinning each value. Measured: riser low/mid/medium/high = 1.000 / 1.250 / 1.500 /
-2.000 in exactly; openforge full wall ≈ 44 mm; openlock full wall ≈ 50 mm.
-
-We do **not** need the 106 GB full-catalog bounding-box pass for v1. If real per-mesh
-dimensions are wanted later (the honest fix for curved footprints), a strided range-read of
-24 blocks × 400 triangles gets sub-0.03 mm accuracy for ~13 GB instead of 106 GB.
-
-> **Operational note for whoever runs any bulk R2 job:** Cloudflare returns HTTP 403
-> (error 1010) for the default `Python-urllib` User-Agent. Set a custom UA or every
-> request fails in a way that looks like the bucket is broken.
+This is the largest single unknown in the plan and it is a research task, not a coding task.
+It is scheduled explicitly in §14 and blocks nothing in v1. The existing catalog frontend
+already implements it in `src/utils/config-processing.ts` (~140 lines with 69 Jest tests) —
+port it and its tests rather than deriving new semantics from the 332-line spec.
 
 ---
 
 ## 6. Search and filtering
 
-Everything runs in the browser over the in-memory catalog.
+All client-side over the in-memory index.
 
-- **Facets** are a `Uint32Array` bitset index: 10 ms to build, 3.7 µs per query, with
-  correct disjunctive counts across all dimensions. The same engine serves the composition
-  constraint matcher, which is why it beats pulling in a facet library that would still
-  need the bitset for `constrain`.
-- **Text** goes through MiniSearch with prefix and fuzzy matching.
-- **Tokenisation is mandatory.** Under the mock's substring matcher *every* multi-word query
-  returns zero hits — "dungeon stone", "arrow slit", "cave wall", "2x2 floor" — because no
-  filename contains a space and only five tag values corpus-wide do. Normalise `[|_+,%#.-]`
-  to spaces and match on word boundaries (which also kills the trap where "cave" matches
-  658 *con*cave pieces).
-- **Synthesise a size token** at import (`"4x4"`, `"4 x 4"`, `"2r90"`). The literal string
-  `4x4` appears in zero tags. Delete the mock's `x` → `×` rewrite: `×` occurs zero times in
-  the corpus, and applying it takes "4x4" from 347 hits to 0.
+- **Facets**: a `Uint32Array` bitset index with correct disjunctive counts. The same engine
+  serves the composition matcher, which is why it beats adding a facet library that would
+  still need a bitset for `constrain`.
+- **Text**: MiniSearch with prefix and fuzzy matching.
+- **Tokenisation is mandatory.** Under the mock's substring matcher, *every* multi-word query
+  returns zero hits — "dungeon stone", "arrow slit", "cave wall" — because no filename
+  contains a space and only five tag values corpus-wide do. Normalise `[|_+,%#.-]` to spaces
+  and match on word boundaries, which also kills the trap where "cave" matches 658
+  *con*cave pieces.
+- **Synthesise a size token** at import (`"4x4"`, `"2r90"`). The literal string `4x4` appears
+  in zero tags. Delete the mock's `x` → `×` rewrite: `×` occurs zero times in the corpus and
+  applying it takes "4x4" from 347 hits to 0.
 
-### The facets the data actually supports
-
-| Facet | Widget | Note |
+| Facet | Widget | Why |
 | --- | --- | --- |
-| Kind | multi-select | `kinds: string[]`, not one value — 19.6% of tiles land in 2+ buckets, 11.6% in none. `shape\|door` has **zero** occurrences; a door is a component mounted on a wall |
-| Texture | grouped, prefix-matching | 38 roots, not 6 chips. Top ~12 plus "more" |
-| Build system | single-select + "unspecified" | 34.2% carry no build tag |
-| Connection | multi-select | 35.5% carry 2–3 systems simultaneously |
+| Kind | multi-select | `kinds: string[]` — 19.6% of tiles land in 2+ buckets, 11.6% in none. `shape\|door` has **zero** occurrences; a door is a component mounted on a wall |
+| Texture | grouped, prefix-matching | 38 roots, not 6 chips |
+| Build system | single-select + "unspecified" | 2,978 tiles (34.2%) carry no build tag |
+| Connection | multi-select | 3,091 tiles (35.5%) carry 2–3 systems |
 
-The mock fused build system and connection into one `sys` field. They are orthogonal, and
-collapsing them makes 40% of the catalog unreachable — including the OpenForge connector,
-the project's own flagship system.
+The mock fused build system and connection into one field. They are orthogonal; collapsing
+them makes the OpenForge connector — the project's own flagship system — unreachable.
 
 ---
 
 ## 7. The Builder
 
-**Place designs, not files.** Mean redundancy is 2.27 files per design; the user picks a
-texture and a lock system once, places ~3,724 *designs*, and the concrete STL resolves at
-download time. This is the single largest simplification available and it makes the palette
-comprehensible.
+### v1 is a plan view, not a 3D scene
 
-**Placements are assemblies.** Each placement resolves to a base plus a topper. Match them
-on shape + `size|openlock` code (A→2, BA→1.5, IA→1, D→3, Q→4) — **never** on the `build|`
-tag, because zero bases carry `build|wall on tile` yet 1,133 pieces in that system need one.
+A room layout **is** a plan. v1 renders the builder top-down from footprints and family
+colours: no meshes, no LOD pipeline, no VRAM budget, no geometry dependency at all. It ships
+a working builder immediately and removes the circular dependency that made v1 unshippable
+in the previous draft (a 3D builder scoped into v1 while its geometry pipeline sat in v1.1).
 
-**Compatibility informs, it does not enforce.** One hard check: every `connection|openforge`
-piece needs a base line item, auto-inserted. Everything else is a warning in the bill of
-tiles plus palette sorting. Enforcement would need trustworthy per-edge connector data that
-does not exist.
+v1.1 upgrades the same scene graph to 3D once the LOD pipeline exists. The placement data
+model is identical in both, so this is a renderer swap, not a rewrite.
 
-**Snap to 0.5 units, offer 1.0 as coarse. Drop 0.25** — every dimension in the entire
-catalog is a multiple of 0.5, so a quarter-unit grid can only ever produce unbuildable
-placements.
+### Placement rules
 
-### 3D or 2.5D?
+**Place designs, not files.** There are **3,822 distinct designs** collapsing connection
+variants, at 2.28 files per design. The user places a design; the concrete STL resolves at
+download time from their lock preference.
 
-The recon critic proposed dropping 3D for a top-down footprint planner, on the grounds that
-heights don't exist and LOD is expensive. **The evidence resolved this in favour of keeping
-3D:** footprints turned out to be derivable for 77% of the catalog, and heights come from a
-measured lookup table. The cost that justified going flat has gone away.
+> **Open risk.** Collapsing texture as well gives 2,428 designs at 3.58 files each, and the
+> resolution step can then fail when a chosen texture+lock pair has no file. The importer
+> must precompute, per design, which (texture, lock) pairs actually resolve, and the palette
+> must grey out the rest. This is specified but not yet measured — it is a v1 task.
 
-But the builder does **not** render print geometry. See §8.
+**Lock system is chosen once, and the cost is shown.** openlock is the default because it
+reaches 100% of designs. Choosing dragonlock or magnetic removes roughly 30% of the catalog,
+so the picker states the reachable-design count next to each option rather than presenting
+them as equivalent.
+
+**Assemblies.** Each placement resolves to a base plus a topper, matched on shape and
+`size|openlock` code (A→2, BA→1.5, IA→1, D→3, Q→4) — **never** on the `build|` tag, since
+zero bases carry `build|wall on tile` while 863 toppers need one.
+
+**Compatibility informs; it never refuses a placement.** One hard rule: every
+`connection|openforge` piece needs a base line item, auto-inserted. Everything else is a
+warning in the bill of tiles plus palette ordering.
+
+**Snap to 0.5 units, with 1.0 as a coarse mode. Drop 0.25** — every dimension in the catalog
+is a multiple of 0.5, so a quarter-unit grid can only produce unbuildable placements.
+Rotation step is per-tile from `size|angle`, defaulting to 90°; **893 tiles carry an angle
+that is not a multiple of 90** and would never tile on a 90° step.
 
 ---
 
 ## 8. 3D and the asset pipeline
 
-Raw STL in the browser is viable for exactly one model in a detail viewer and nothing more.
-The corpus totals **2.12 billion triangles**; twenty tiles at median size is ~198 MB and
-4.1 M triangles. The builder needs decimated proxies.
+Raw STL in the browser works for exactly one model in a detail viewer. The corpus is 2.12
+billion triangles; twenty tiles at median size is ~198 MB.
 
-| Surface | Geometry | Notes |
+| Surface | Geometry | Ships in |
 | --- | --- | --- |
-| Catalog grid | **WebP thumbnail** (new derivative) | See below |
-| Detail viewer, first paint | Sprite sheet | Already in the bucket, 99.99% coverage |
-| Detail viewer, "View in 3D" | Raw STL, gated at ~20–25 MB | Above the gate, stay on sprites — the 104 MB tail will OOM mobile Safari |
-| Builder | **Decimated GLB LOD** | 5–20 K triangles; `InstancedMesh` per repeated design |
+| Catalog grid | WebP thumbnail (new derivative) | v1 |
+| Detail viewer, first paint | Existing sprite sheet | v1 |
+| Detail viewer, "View in 3D" | Raw STL, gated at ~20–25 MB | v1 |
+| Builder | Top-down plan view, no geometry | v1 |
+| Builder | Decimated GLB LOD, `InstancedMesh` per design | v1.1 |
 
-**The conversion pipeline** is glTF Transform 4.4.2 driving meshoptimizer 1.2.0, emitting
-EXT_meshopt_compression GLBs to a new `/lod/{md5[:6]}/{md5}.glb` prefix, keyed on the
-existing md5 content addressing so it stays incremental. Draco is rejected: no release
-since January 2024, and a 100 KB decoder against meshopt's 7 KB.
+The LOD pipeline is glTF Transform 4.4.2 driving meshoptimizer 1.2.0, emitting
+EXT_meshopt_compression GLBs to `/lod/{md5[:6]}/{md5}.glb`, keyed on the existing md5
+addressing so it stays incremental. Draco is rejected: no release since January 2024, and a
+100 KB decoder against meshopt's 7 KB.
 
-> **The trap to guard:** if facet normals survive into `weld()`, welding and therefore
-> simplification silently no-op and you ship GLBs barely smaller than the STLs, with no
-> error anywhere. Assert that post-weld vertex count dropped materially and fail the job
-> if it didn't.
+> **The trap:** if facet normals survive into `weld()`, welding and therefore simplification
+> silently no-op and you ship GLBs barely smaller than the STLs, with no error anywhere.
+> Assert post-weld vertex count dropped materially and fail the job if it did not.
 
-**Decimated meshes are preview-only.** The download path must always serve the original
-untouched STL. Shipping a decimated mesh to someone's printer would be a serious trust
-failure in a 3D-printing audience.
+**Decimated meshes are preview-only.** The download path always serves the original STL.
+Shipping a decimated mesh to someone's printer would be a serious trust failure.
 
-### Two asset problems that must be fixed
+### Two asset problems
 
-**Thumbnails.** Sprite sheets average 529 KB, and a 60-card screen decodes to ~629 MB of
-bitmap. Crop frame 0 of each sheet to a 256 px q80 WebP at `/thumbs/{md5[:6]}/{md5}.webp` —
-a 48× byte reduction for about **$0.04 one-time** and 125 MB of storage. Keep the sprite
-sheets; the thumbnails are an addition, not a replacement.
+**Thumbnails.** Sprite sheets average 529 KB and a 60-card screen decodes to hundreds of MB
+of bitmap. Crop frame 0 to a 256 px q80 WebP at `/thumbs/{md5[:6]}/{md5}.webp` — roughly a
+48× byte reduction for about **$0.04 one-time** and 125 MB of storage. Sprite sheets stay for
+the detail view's multi-angle interaction.
 
-**The sprite sheets are blue.** Not greyscale — `stl-thumb` renders in a default blue Phong
-material (ambient `#002142`, diffuse peaking `#3375c8`), confirmed against seven real sheets
-and the tool's own source. 99.8% of opaque pixels are non-neutral. This kills the cheap idea
-of CSS-tinting the existing PNGs to match the 3D material colours, and it means the catalog
-grid and the live 3D views will not agree on colour until the thumbnails are re-rendered.
-**Decision: accept the split for v1** (thumbnails stay as-is, live 3D is tinted), and fold
-coloured thumbnail re-rendering into the LOD pipeline when it runs, since that pipeline
-already has the geometry in hand.
+**The sprite sheets are blue, not grey.** `stl-thumb` renders in a default blue Phong
+material (ambient `#002142`, diffuse peaking `#3375c8`), verified against seven real sheets
+and the tool's source; 99.8% of opaque pixels are non-neutral. This kills any plan to
+CSS-tint the existing PNGs to match the material palette. **v1 accepts the split** — grid
+thumbnails stay blue, the 3D views are tinted — and coloured re-rendering folds into the LOD
+pipeline in v1.1, which has the geometry in hand anyway. This is a visible inconsistency and
+should be a deliberate, stated decision rather than a surprise.
 
 ---
 
 ## 9. Material tinting
 
-Colourless STLs are tinted by their `texture|` tag through a hardcoded registry. The
-finished implementation is in [`texture-materials.draft.ts`](texture-materials.draft.ts).
+Colourless STLs are tinted from their `texture|` tag via a hardcoded registry:
+[`texture-materials.draft.ts`](texture-materials.draft.ts).
 
-**16 material families covering all 38 texture roots at 100%.** Hue is anchored in measured
-dielectric albedo and the Geological Rock-Color Chart; lightness and chroma are *not*
-physical, because real stone albedos sit 1.5–9 ΔE00 apart — below the just-noticeable
-difference for a 25 px mark, so physical correctness would render cut stone, dungeon stone,
-rough stone and cave identically and defeat the entire feature. Instead they were solved by
-constrained simulated annealing maximising the minimum CIEDE2000 distance across all 120
-pairs, evaluated simultaneously under normal vision and Machado-2009 protanopia,
-deuteranopia and tritanopia.
+**16 families covering all 38 texture roots.** Hue is anchored in measured dielectric albedo;
+lightness and chroma deliberately are **not** physical, because real stone albedos sit 1.5–9
+ΔE00 apart — below the just-noticeable difference at thumbnail scale — so physical accuracy
+would render cut stone, dungeon stone, rough stone and cave identically and defeat the
+feature. They were solved by constrained simulated annealing maximising the minimum CIEDE2000
+distance across all 120 pairs, evaluated simultaneously under normal vision and Machado-2009
+protanopia, deuteranopia and tritanopia.
 
-Measured result: **minimum pairwise ΔE00 of 9.05 across normal vision and all three
-dichromacies**, every family ≥12.3 ΔE00 from the parchment grounds and ≥12.2 from the UI
-accents. The map it replaces had a minimum ΔE00 of 5.42 with all six entries inside a 15°
-hue band that the parchment ground itself occupies.
+Verified: **minimum pairwise ΔE00 of 9.05** across normal vision and all three dichromacies;
+every family ≥12.3 ΔE00 from the parchment grounds and ≥12.2 from the UI accents. The map it
+replaces had a minimum of 5.42 with all six entries inside a 15° hue band that the parchment
+ground itself occupies.
 
-Two rules that fell out of measurement:
+Two rules that came out of measurement:
 
 - **Silhouette is carried by a contour, not the fill.** Meeting WCAG 1.4.11's 3:1 against the
   parchment well with fills alone would force every material below L\* 50, destroying
-  plaster, sandstone and ice. A dedicated contour at `oklch(min(0.36, L×0.72), C×0.70, H)`
-  frees the fill band; measured contour contrast is 7.14:1 minimum.
-- **Wear changes roughness, never colour.** Applying a lightness/chroma modifier for
-  `ruined` / `eroded` / `broken_*` was implemented and measured: at any delta large enough
-  to see, a worn tile reads as a *different family* (worn cut stone lands 4.06 ΔE00 from base
-  plain). Wear moves roughness and grain amplitude only. 1,538 blueprints (17.7%) are worn.
+  plaster, sandstone and ice. A contour at `oklch(min(0.36, L×0.72), C×0.70, H)` frees the
+  fill band; measured contour contrast is 7.14:1 minimum.
+- **Wear changes roughness, never colour.** A lightness/chroma modifier for `ruined` /
+  `eroded` was implemented and measured: at any visible delta a worn tile reads as a
+  *different family* (worn cut stone lands 4.06 ΔE00 from base plain). 1,538 tiles (17.7%)
+  are worn; wear moves roughness and grain only.
 
-Shading is TSL object-space 3D noise on `MeshStandardNodeMaterial` — **no UVs and no
-triplanar mapping needed**, because 3D noise doesn't need texture coordinates. About 20
-shared shader programs cover all 8,700 files. The expensive Worley mortar-seam pass runs in
-the detail viewer only; the builder drops to 2 noise octaves with mortar off.
+The registry drives both the plan-view fills in v1 and the 3D materials in v1.1.
 
 ---
 
 ## 10. Licensing — a launch gate
 
-**The whole corpus is CC BY-NC-SA 4.0.** The project's own licence statement is explicit:
-*"All designs in the OpenForge Dropbox are released under the CC BY-NC-SA even if the same
-design is released under a different license on Thingiverse."* This catalog is scanned from
-the Dropbox, so the per-series BY-SA carve-outs (dungeon stone, cut stone, rough stone,
-tudor — 4,638 entries, 53%) **do not apply to the files we hold**. Treat it as one constant;
-do not build per-series licence logic.
+The corpus is **CC BY-NC-SA 4.0**. The OpenForge project's own statement is that everything
+distributed via the Dropbox is non-commercial *even where the same design is BY-SA on
+Thingiverse*, and this catalog is scanned from the Dropbox. Treat it as one constant.
 
-Consequences, all of which need a human decision before launch:
+**What NonCommercial actually prohibits** is use "primarily intended for or directed toward
+commercial advantage or monetary compensation". A free tool that gives away the creator's own
+models, funded by the creator's own Patreon, is comfortably inside that — including on a paid
+Cloudflare plan, since paying a hosting bill is not commercial advantage. v1 of this plan
+called for a blanket "non-commercial forever" commitment; that is **more conservative than
+the licence requires**. The real obligations are narrower:
 
-1. **The Workshop must be non-commercial, permanently** — no ads, no paid tier, no
-   sponsorship, and no gating downloads behind Patreon (that last is separately barred by
-   the licence's no-additional-restrictions clause). Or Devon grants written permission.
-2. **Attribution must ride inside the download.** The page footer does not travel with a
-   zip. Ship `LICENSE.txt` and a per-file `ATTRIBUTION.csv` in every generated archive.
+1. **No monetisation of the tool itself** — no ads, no paid tier, no sponsorship placement,
+   and no gating downloads behind Patreon (that last is separately barred by the
+   no-additional-restrictions clause).
+2. **Attribution must ride inside the download.** A page footer does not travel with a zip.
+   Ship `LICENSE.txt` and a per-file `ATTRIBUTION.csv` in every archive.
 3. **Decimated preview meshes are Adapted Material** — label them "preview, not for
-   printing", licence the derivatives BY-NC-SA, and keep them out of the download path.
-4. **GPL is quarantined by the separate origin.** The `.scad` geometry source
-   (`openforge-bases`) is Apache-2.0 and safe to bundle. The OpenSCAD WASM binary is GPL-2
-   and `openforge-openscad` is GPL-3 — do not copy from the latter, and keep the former on
-   `scad.openforge.tools`.
+   printing", licence derivatives BY-NC-SA, keep them out of the download path.
+4. **The index is a database of someone else's metadata.** Give it an explicit licence too;
+   the plan previously covered only the STLs.
+
+**GPL, stated correctly.** v1 of this plan justified the separate origin by claiming origin
+separation prevents derivation. That reasoning is wrong. The correct reasoning is
+**conveyance**: GPL obligations attach when you distribute the covered work, and a separately
+served, separately built artifact is a separate conveyance carrying its own source offer.
+The `.scad` geometry (`openforge-bases`) is Apache-2.0 and safe to bundle anywhere; the
+OpenSCAD WASM binary is GPL-2 and `openforge-openscad` is GPL-3. Keep both on
+`scad.openforge.tools` with a published source offer. **This is the one item where a lawyer's
+read is genuinely worth buying** before launch.
 
 ---
 
 ## 11. Download
 
-**Primary path, in the browser:** `client-zip` 2.5.0 generating a `ReadableStream`, landed
-on disk via `native-file-system-adapter`'s `showSaveFilePicker` (native File System Access →
-same-origin service worker → Blob). Feed `predictLength` from the fixture `size` field,
-never from HEAD requests.
+**Primary, in-browser:** `client-zip` generating a `ReadableStream`, landed via
+`native-file-system-adapter`'s `showSaveFilePicker` (native File System Access → same-origin
+service worker → Blob). Feed `predictLength` from the fixture `size` field, never HEAD.
 
 **Fallback, a Cloudflare Worker:** the same library streaming R2 objects, for iOS Safari and
 multi-GB rooms.
 
-Three things to get right:
+- **Dedupe by md5** — 171 md5s are shared across 520 rows.
+- **Disambiguate colliding filenames** — 89 filenames map to 2–3 different meshes; naming zip
+  entries by filename silently overwrites. Prefix from `full_name`.
+- **Size is a warning surface.** A 50-placement room at p95 is well over a gigabyte. Warn
+  above a threshold and offer a URL list as the degradation path.
 
-- **Dedupe by md5.** 171 md5s are shared across 520 rows; without deduping, the bill of
-  tiles double-counts and the pack downloads the same file twice.
-- **Disambiguate colliding filenames.** 89 filenames map to 2–3 genuinely different meshes
-  (`tudor#door+narrow.stl` is three distinct md5s). Naming zip entries by filename silently
-  overwrites. Prefix with a directory from `full_name`.
-- **Size is a warning surface, not a footnote.** A 50-placement room at p95 file sizes is
-  1.66 GB. Warn above a threshold and offer a URL list as the degradation path.
-
-`client-zip` cannot compress, ever — and 870 of the STLs are ASCII, which deflates 5–10×.
-That is a real product trade: an exact streaming progress bar (client-zip) versus a much
-smaller download (`@zip.js/zip.js` with an estimated bar). **v1 takes client-zip**; revisit
-if download size complaints appear.
+`client-zip` cannot compress, and 870 STLs are ASCII (which deflate 5–10×). That is a real
+trade: an exact progress bar versus a much smaller download. **v1 takes client-zip**;
+revisit on complaints.
 
 ---
 
@@ -393,65 +447,65 @@ if download size complaints appear.
 Full detail in [`base-generator-integration.md`](base-generator-integration.md).
 
 - **Source of truth is `MasterworkTools/openforge-bases` (Apache-2.0)**, not the GPL-3
-  `openforge-openscad`, which is a dormant fork of a third-party web GUI whose only real
-  value is ~300 lines of wrapper code.
-- **Don't write a customizer parser.** OpenSCAD's own WASM build emits the parameter schema
-  as JSON via `--export-format=param` — verified end-to-end against the real `bases.scad`
-  (18 parameters, ~350 ms). The form generates itself and stays correct when Devon edits the
-  `.scad`.
+  `openforge-openscad`, which is a dormant fork of a third-party web GUI.
+- **A working generator already exists in production** at `openscad.openforge.tools`. The
+  cheapest credible v1 is to reuse it behind a `postMessage` bridge and only then decide
+  whether to own the render path.
+- **Don't write a customizer parser.** OpenSCAD's WASM build emits the parameter schema via
+  `--export-format=param` — verified against the real `bases.scad`, 18 parameters.
 - **Cross-origin isolation is not required.** Every shipped openscad-wasm build is
-  single-threaded with unshared linear memory — verified from the binary's memory flags. Do
-  not set COOP/COEP.
+  single-threaded with unshared linear memory, verified from the binary's memory flags. Do
+  not set COOP/COEP on the Workshop.
 - **Catalog first, generate second.** The 1,962 catalogued bases *are* generator output —
-  `bases.py` ran the same `.scad` with `-D` flags, and the fixture filenames literally encode
-  the parameter tuples. So hash the parameter set, look it up against the catalog (instant,
-  already in R2, has a sprite), and fall through to WASM only on a miss. The user never
-  chooses between "catalog base" and "generated base".
-- **Persist the recipe, never the mesh.** Content-address the recipe, so share links stay
-  tiny and a build regenerates on open.
-- **v1 excludes textured primary walls** — they need 90 MB of blank STLs materialised before
-  the render and take 30–180 s. Ordinary bases render in 110–265 ms warm, fast enough to
-  skip a "Generate" button entirely.
+  `bases.py` ran the same `.scad` with `-D` flags, and the fixture filenames encode the
+  parameter tuples. Hash the parameters, look the result up in the catalog, fall through to
+  WASM only on a miss.
+- **Persist the recipe, never the mesh**, so share links stay small.
+
+> **Render latency is unmeasured.** OpenSCAD was not installed on any machine used for this
+> research, so no render was timed. The companion document's own §3.5 says so explicitly. A
+> v0 spike must measure it before the UX commits to auto-preview; if a 4×4 base exceeds ~3 s,
+> the design needs an explicit Generate button.
+
+v1 excludes textured primary walls — they need 90 MB of blank STLs materialised before the
+render.
 
 ---
 
 ## 13. Persistence and sharing
 
-Local state (library + build) via Zustand `persist` over `localStorage`, validated with Zod
-on rehydrate, with `version`/`migrate` set from the first commit.
+Zustand `persist` over `localStorage`, Zod-validated on rehydrate, `version`/`migrate` from
+the first commit. Share links: columnar JSON → native `CompressionStream('deflate-raw')` →
+base64url in the URL fragment.
 
-Share links: columnar JSON → native `CompressionStream('deflate-raw')` → base64url in the
-URL fragment. Roughly 2,400 placements fit a 2,000-character link for room-shaped builds,
-~215 for scattered high-diversity ones — so **cut over to a short link by measured encoded
-length, never by placement count**.
-
-Two risks worth designing against now:
-
-- **Manifest index drift.** Share links encode integer indices into the build-time tile
-  manifest. If an import reorders them, every existing link silently decodes to a *different
-  room* with no error. Enforce append-only index assignment with a build assertion, and
-  embed the manifest version in every payload.
-- **Safari evicts localStorage after 7 days.** For an app opened between game sessions that
-  is the normal case. Treat local state as a cache: every saved build gets a URL, and
-  JSON export/import ships from day one.
+- **Manifest index drift is the worst silent failure in the system.** Share links encode
+  integer ordinals into the build-time manifest; if an import reorders them, every existing
+  link decodes to a *different room* with no error. Assign ordinals append-only, assert it in
+  CI, and embed the manifest version in every payload so a mismatch is detectable.
+- **Safari evicts localStorage after 7 days**, which for an app opened between game sessions
+  is the normal case. Treat local state as a cache: every saved build gets a URL, and JSON
+  export/import ships from day one.
 
 ---
 
 ## 14. Scope
 
 **v1 — the catalog is the product.**
-Landing, catalog with real facets and search, library, tile detail with sprite viewer and a
-gated 3D view. Builder with RECT and WALL_SEG footprints (63% coverage), assemblies, bill of
-tiles, client-side zip. Material tinting in the 3D views. Thumbnail derivative pipeline and
-the Cloudflare cache configuration.
+Landing; catalog with real facets, tokenised search and virtualised grid; library; tile
+detail with the sprite viewer and a size-gated 3D view; **top-down plan-view builder** with
+RECT and WALL_SEG footprints (70.9% coverage), assemblies, bill of tiles, client-side zip;
+material tinting in plan view and the detail viewer; the thumbnail derivative pipeline; the
+Cloudflare cache and CORS runbook; the design→(texture, lock) resolution table.
 
-**v1.1 — the builder gets real.**
-ARC footprints (→77%), the LOD pipeline and instanced builder geometry, composition accessory
-slots as inline sprite grids, dead-end greying.
+**v1.1 — the builder becomes 3D.**
+The LOD pipeline; instanced 3D builder rendering; ARC footprints (→86.9%); procedural noise
+in the detail viewer; composition accessory slots as inline sprite grids.
 
 **v2 — generation and assemblies.**
-Base generator on its own origin. The 40 `type=blueprint` recipes as guided assemblies. Real
-per-mesh dimensions via strided range-reads, if curved footprints prove to matter.
+Base generator on its own origin. Guided assemblies over the 40 recipe templates. Real
+per-mesh dimensions via strided range-reads if curved footprints prove to matter.
+
+**Research task, unscheduled and blocking nothing:** pin down `constrain` semantics (§5).
 
 ---
 
@@ -459,27 +513,30 @@ per-mesh dimensions via strided range-reads, if curved footprints prove to matte
 
 | # | Decision | Recommended default |
 | --- | --- | --- |
-| 1 | **Non-commercial forever, or get Devon's written permission?** | Accept NC permanently — it costs nothing for a community tool and removes the gate |
-| 2 | Cloudflare zone admin to add the Cache Rule, CORP/content-type Transform Rule, and disable `r2.dev` | Needed before any 3D ships; ~1 hour of dashboard work |
-| 3 | Is the Workshop willing to ship under GPL if the generator ever merges into the main bundle? | No — keep the separate origin, which makes the question moot |
-| 4 | Ask Devon to put an explicit licence on `openforge-bases`' `.scad` files | Apache-2.0 is already declared at repo level; a per-file header removes all doubt |
-| 5 | Run the 106 GB bbox pass? | **Not for v1.** Nothing needs it; strided range-reads cover it later for ~13 GB |
+| 1 | Publisher declaration: the Workshop is a free, non-monetised community tool | Adopt it — it satisfies NC without the over-broad "never commercial" commitment |
+| 2 | Cloudflare zone admin for the cache/CORS runbook | **CORS first, cache second** — enabling edge caching before `access-control-allow-origin` is unconditional arms a cache-poisoning bug |
+| 3 | Lawyer's read on conveying OpenSCAD WASM from `scad.openforge.tools` | Worth buying; it is the one genuine legal question here |
+| 4 | Ask Devon for a per-file licence header on `openforge-bases` | Apache-2.0 is declared at repo level; a header removes doubt |
+| 5 | Run the 106 GB bbox pass? | **No.** Nothing in v1 or v1.1 needs it |
 
-Items 2 and 5 are the only ones that touch the existing OpenForge infrastructure.
+Items 2 and 5 are the only ones touching existing OpenForge infrastructure. Item 5 is
+declined, so item 2 is the only operational ask.
 
 ---
 
 ## 16. Known risks
 
-1. **Import drift.** The catalog fixtures are a pinned snapshot; three separate artefacts
-   (search payload, LOD store, share-link manifest) derive from it and none currently carries
-   a shared version stamp. Add one, and regenerate them in the same CI step.
-2. **md5 churn is the creator's normal workflow**, not an edge case — a re-exported mesh
-   invalidates a LOD, orphans a share link and moves a manifest index, all silently.
-3. **Tag drift.** `texture|towne|stone-stucco` and `texture|towne|stucco-stone` are the same
+1. **Import drift.** Three artefacts derive from the pinned fixture snapshot — index, LOD
+   store, share-link manifest — and none currently carries a shared version stamp. Add one,
+   regenerate them in the same CI step.
+2. **md5 churn is the creator's normal workflow.** A re-exported mesh invalidates a LOD,
+   orphans a share link and moves a manifest ordinal, all silently.
+3. **`constrain` semantics are unspecified** and the precomputed candidate sets vary by two
+   orders of magnitude depending on the answer. §5.
+4. **Three.js is pinned by `postprocessing` to `<0.186.0`.** Upgrading is a coordinated event
+   across three packages, and `resolve.dedupe: ['three']` is mandatory.
+5. **Tag drift.** `texture|towne|stone-stucco` and `texture|towne|stucco-stone` are one
    material tagged twice with the words reversed, and both also exist as four-segment
-   variants. One material, four tags. A normalisation layer sits between fixtures and UI.
-4. **`postprocessing` pins three.js `<0.186.0`.** Upgrading three is a coordinated,
-   deliberate event across three packages.
-5. **Bus factor of one upstream.** `openforge-openscad` has 13 commits, all Devon's, dormant
-   10 months; its own upstream is dormant since 2024. Adopting any of it means owning it.
+   variants. A normalisation layer sits between fixtures and UI.
+6. **Bus factor of one upstream.** `openforge-openscad` has 13 commits, all Devon's, dormant
+   10 months; its own upstream is dormant since 2024.
