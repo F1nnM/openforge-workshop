@@ -35,3 +35,6 @@ public/catalog/*.br
 # scratch
 tmp/
 scratch/
+
+# npm
+package-lock.json.bak

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'epic/**']
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  catalog-facts:
+    # Re-derives every load-bearing number the architecture plan quotes and fails
+    # on a broken invariant. Needs the openforge-catalog fixtures; PR 4 (importer)
+    # owns wiring those in. Until then this reports SKIPPED rather than passing
+    # silently — a green board that ran nothing is worse than a red one.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Verify catalog facts
+        run: |
+          FIXTURES="${OPENFORGE_FIXTURES:-}"
+          if [ -z "$FIXTURES" ] || [ ! -d "$FIXTURES" ]; then
+            echo "::notice title=Catalog facts::SKIPPED — fixtures not available in CI yet (see PR 4)."
+            exit 0
+          fi
+          python3 docs/verify-catalog-facts.py "$FIXTURES"
