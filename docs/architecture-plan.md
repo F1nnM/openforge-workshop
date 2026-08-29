@@ -73,10 +73,17 @@ parameterised on radius and angle rather than on the tagged width and depth.
 | Fact | Count | Share |
 | --- | ---: | ---: |
 | Carries `connection|openforge` — joinery delegated to a separate base | 4,363 | 50.1% |
-| Carries a lock system (openlock / dragonlock / magnetic) | 3,935 | 45.2% |
+| Carries a lock system (openlock / dragonlock / magnetic) | 5,271 | 60.6% |
 | Carries **no** `connection|` tag at all | 349 | 4.0% |
-| Carries 2+ distinct connection systems | 3,091 | 35.5% |
+| Carries 2+ distinct connection systems | 2,499 | 28.7% |
+| Carries a *position* segment, e.g. `connection\|side\|openlock` | 2,079 | 23.9% |
 | Is a base (`shape|base`) | 1,963 | 22.6% |
+
+> **Reading `connection|` tags correctly matters.** The second segment is not always the
+> system: `connection|side|openlock` names a *position* (2,079 tiles, 23.9%). Taking segment
+> one blindly invents a "side" system and, worse, hides openlock from every tile that mounts
+> it on the side. The first version of the verify script had exactly that bug, and it moved
+> the lock reachability figures by up to 8 percentage points.
 
 So a placement is an **assembly** — a base plus a topper — because half the corpus expects
 its connector to live on a separately printed base.
@@ -89,11 +96,11 @@ reachable if it offers that lock or carries no lock at all:
 
 | Lock system | Designs reachable | Share |
 | --- | ---: | ---: |
-| **openlock** | 3,821 / 3,822 | **100.0%** |
-| dragonlock | 2,683 / 3,822 | 70.2% |
-| magnetic | 2,579 / 3,822 | 67.5% |
+| **openlock** | 3,817 / 3,822 | **99.9%** |
+| dragonlock | 2,854 / 3,822 | 74.7% |
+| magnetic | 2,282 / 3,822 | 59.7% |
 
-**Spread: 32.5 percentage points.** Lock system is still a single global preference — you
+**Spread: 40.2 percentage points.** Lock system is still a single global preference — you
 cannot physically mix them in one build — but it is a consequential one. Consequences for
 the UI in §7.
 
@@ -294,9 +301,9 @@ download time from their lock preference.
 > must grey out the rest. This is specified but not yet measured — it is a v1 task.
 
 **Lock system is chosen once, and the cost is shown.** openlock is the default because it
-reaches 100% of designs. Choosing dragonlock or magnetic removes roughly 30% of the catalog,
-so the picker states the reachable-design count next to each option rather than presenting
-them as equivalent.
+reaches 100% of designs. Choosing magnetic removes about 40% of the catalog and
+dragonlock about 25%, so the picker states the reachable-design count next to each option
+rather than presenting them as equivalent.
 
 **Assemblies.** Each placement resolves to a base plus a topper, matched on shape and
 `size|openlock` code (A→2, BA→1.5, IA→1, D→3, Q→4) — **never** on the `build|` tag, since
