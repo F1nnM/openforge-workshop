@@ -11,6 +11,7 @@ inline. v1 of this plan quoted inherited numbers as measurements and several wer
 an order of magnitude; the script exists so that cannot happen silently again.
 
 Companion documents:
+- [`v1-pr-series.md`](v1-pr-series.md) — how v1 is cut into reviewable PRs, and what blocks them
 - [`design-contract.md`](design-contract.md) — the approved visual design and its contract
 - [`base-generator-integration.md`](base-generator-integration.md) — the OpenSCAD track
 - [`texture-materials.draft.ts`](texture-materials.draft.ts) — the material registry
