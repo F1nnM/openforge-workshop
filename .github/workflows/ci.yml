@@ -15,10 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: npm
+      - uses: jdx/mise-action@v3
 
       - run: npm ci
 
@@ -43,9 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
+      - uses: jdx/mise-action@v3
 
       - name: Verify catalog facts
         run: |

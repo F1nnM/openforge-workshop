@@ -30,6 +30,22 @@ It deliberately does not follow the catalog's architecture, conventions, or stac
 Static single-page app, no always-on backend. The whole catalog index ships to the browser,
 so search and filtering need no server at all. See the plan for the full picture.
 
+## Getting started
+
+The toolchain is pinned in `mise.toml` — Node and Python versions, and the tasks
+that wrap them. [mise](https://mise.jdx.dev) is the only prerequisite.
+
+```bash
+mise install      # fetch the pinned toolchain
+mise run setup    # npm ci
+mise run check    # lint, typecheck, test, build — the same order CI runs
+mise run facts    # re-derive the catalog numbers the plan quotes
+npm run dev       # dev server
+```
+
+Node 22.14 is a floor rather than a preference: `wrangler` requires it, and on
+Node 20 npm silently resolves down to a version that violates its own peer range.
+
 ## Repository layout
 
 | Path | What it holds |

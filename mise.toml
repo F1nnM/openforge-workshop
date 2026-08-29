@@ -1,0 +1,34 @@
+# Toolchain for OpenForge Workshop.
+#
+# Single source of truth: CI uses this file too (jdx/mise-action), so there is
+# no .nvmrc to drift out of sync with it.
+#
+#   mise install     # fetch everything below
+#   mise run setup   # ...and install npm dependencies
+
+[tools]
+# 22.14 is a floor, not a preference. wrangler 4.127.1 — the version
+# @cloudflare/vite-plugin requires via its peer range — declares node >=22.0.0,
+# and on Node 20 npm silently resolves down to 4.86.0, violating the peer
+# without erroring. jsdom 30 pulls whatwg-url wanting >=22.14. Vite 8 alone
+# would run on 20.19, which is why a lower floor looks fine until it isn't.
+node = "22.21.1"
+
+# docs/verify-catalog-facts.py re-derives every load-bearing number the
+# architecture plan quotes, and CI fails on a broken invariant.
+python = "3.12"
+
+[env]
+_.path = ["./node_modules/.bin"]
+
+[tasks.setup]
+description = "Install the toolchain and npm dependencies"
+run = "npm ci"
+
+[tasks.check]
+description = "Everything CI runs, in the same order"
+run = ["npm run lint", "npm run typecheck", "npm test", "npm run build"]
+
+[tasks.facts]
+description = "Re-derive the catalog facts the architecture plan quotes"
+run = "python3 docs/verify-catalog-facts.py"
