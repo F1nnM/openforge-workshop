@@ -100,8 +100,13 @@ production** without them. Build them, hold the execution.
 ## Running it
 
 - Every branch is `pr/NN-slug`, branched from `epic/v1`. Flat, never stacked.
-- Two or three agents at a time on disjoint `Owns` sets, each in its own worktree with
-  distinct scratch names.
+- Two or three agents at a time on disjoint `Owns` sets.
+- **Do not give agents their own git worktree.** This repo is nested inside
+  `openforge-catalog`, which is a *different* git repo, so worktree isolation provisions a
+  worktree of the outer repo and then refuses every git command targeting a path beneath it —
+  including this one. Agents write files only; branch, commit and merge are done from the
+  main checkout. Disjoint `Owns` sets make concurrent file writes safe, and serialising the
+  git operations avoids two agents fighting over `HEAD` in one working tree.
 - Each agent brief states: goal, `Owns`, **what it must not touch and which PR owns that
   instead**, how to verify, how to finish.
 - A PR is ready only when the agent has finished, CI is green, and review comments are
