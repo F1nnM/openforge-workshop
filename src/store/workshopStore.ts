@@ -1,0 +1,295 @@
+/**
+ * OpenForge Workshop — the store.
+ *
+ * One store, three slices of state, and no actions inside it. Actions are
+ * module-level functions that call `setState`, which buys three things:
+ *
+ *   - **The store's state and its persisted state are the same object.** With
+ *     actions in the state you need a `partialize` to strip them back out, and
+ *     then the migration functions operate on a projection that has to be kept
+ *     in step with the type the app reads. Here there is one shape, so a
+ *     migration is written against exactly what `schema.ts` describes.
+ *   - **Components never subscribe to an action.** An action reached through
+ *     `useStore((s) => s.addToLibrary)` is a subscription; an imported function
+ *     is not, so a component that only *writes* never re-renders.
+ *   - **Non-React callers work unchanged.** The share codec and the download
+ *     builder read this store from plain modules.
+ *
+ * **Re-render granularity** (the reason the selectors below are shaped as they
+ * are): every exported selector returns either a primitive or a state slice that
+ * is replaced only when that slice changes. Zustand compares with `Object.is`,
+ * so a selector that builds a new array or object on each call re-renders its
+ * component on *every* store write — placing a tile would then re-render the
+ * catalog grid. Concretely: a catalog card subscribes through
+ * {@link useIsInLibrary}, whose value is a boolean derived from `library`, so
+ * the two hundred writes of a drag across the grid touch `placements` only and
+ * the card never re-renders.
+ */
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+
+import type { TileId } from '@/catalog'
+
+import type { RecoveredState } from './migrations'
+import { STORE_VERSION, migrateWorkshopState, salvageWorkshopState } from './migrations'
+import type { LockSystem, Placement, PlacementId, WorkshopState } from './schema'
+import { Placement as PlacementSchema, PlacementId as PlacementIdSchema, defaultWorkshopState, normalizeRotation } from './schema'
+import { STORAGE_KEY, clearPersistedWorkshopState, workshopStorage } from './storage'
+
+/**
+ * Say out loud what recovery discarded.
+ *
+ * Silent salvage is the failure mode this whole module exists to avoid: a user
+ * whose room quietly comes back one tile short has no way to tell that from
+ * having mis-remembered placing it. Warned once per hydration, not per dropped
+ * entry, so a thoroughly corrupt blob produces one message rather than four
+ * hundred.
+ */
+function reportRecovery(recovered: RecoveredState, phase: string): WorkshopState {
+  if (recovered.dropped.length > 0) {
+    console.warn(
+      `[openforge-workshop] recovered saved state during ${phase}; discarded:\n  ${recovered.dropped.join('\n  ')}`,
+    )
+  }
+  return recovered.state
+}
+
+/**
+ * The store.
+ *
+ * `version`/`migrate` are set from the first commit rather than added when first
+ * needed, because by then every user's browser already holds an unstamped blob
+ * and the migration has to guess at its shape.
+ *
+ * Validation is wired into **both** hydration paths, which is not the same as
+ * wiring it into one:
+ *
+ *   - `migrate` runs only when the stored version differs from
+ *     {@link STORE_VERSION}.
+ *   - `merge` runs on every rehydrate, including the far more common case of a
+ *     correctly stamped current-version blob that is corrupt anyway — a tab
+ *     killed mid-write, or a hand edit.
+ *
+ * Validating only in `migrate` would leave that second case unchecked, which is
+ * the one most likely to occur. The two do not double-report: `migrate` returns
+ * an already-valid state, so the `merge` that follows it salvages nothing.
+ */
+export const useWorkshopStore = create<WorkshopState>()(
+  persist(() => defaultWorkshopState(), {
+    name: STORAGE_KEY,
+    version: STORE_VERSION,
+    storage: workshopStorage,
+    migrate: (persisted, version) => reportRecovery(migrateWorkshopState(persisted, version), 'migration'),
+    merge: (persisted, current) =>
+      persisted === undefined ? current : reportRecovery(salvageWorkshopState(persisted), 'rehydration'),
+    onRehydrateStorage: () => (state, error) => {
+      if (error === undefined && state !== undefined) return
+      // Reached when the stored value is not even JSON, so `set` was never
+      // called and the store still holds its defaults — nothing to reset, only
+      // poison to remove so the next load starts clean instead of reproducing
+      // this every time. Deliberately does not touch `useWorkshopStore`: with
+      // synchronous storage this callback runs inside `create(...)`, before the
+      // binding above exists.
+      console.warn('[openforge-workshop] saved state could not be read; starting fresh', error)
+      clearPersistedWorkshopState()
+    },
+  }),
+)
+
+/* ------------------------------------------------------------------- library */
+
+/**
+ * Add a tile to the library. Idempotent, and a no-op returns the identical state
+ * object so subscribers are not woken for a click that changed nothing.
+ */
+export function addToLibrary(id: TileId): void {
+  useWorkshopStore.setState((state) =>
+    state.library[id] === true ? state : { library: { ...state.library, [id]: true } },
+  )
+}
+
+/** Remove a tile from the library. No-op if it was never there. */
+export function removeFromLibrary(id: TileId): void {
+  useWorkshopStore.setState((state) => {
+    if (state.library[id] === undefined) return state
+    const library = { ...state.library }
+    delete library[id]
+    return { library }
+  })
+}
+
+/** Add or remove, whichever the tile is not. */
+export function toggleLibrary(id: TileId): void {
+  useWorkshopStore.setState((state) => {
+    if (state.library[id] === undefined) return { library: { ...state.library, [id]: true } }
+    const library = { ...state.library }
+    delete library[id]
+    return { library }
+  })
+}
+
+/** Empty the library. Placements are untouched — they are a separate decision. */
+export function clearLibrary(): void {
+  useWorkshopStore.setState({ library: {} })
+}
+
+/* ---------------------------------------------------------------- placements */
+
+/**
+ * A fresh placement key.
+ *
+ * `crypto.randomUUID` needs a secure context, which a LAN dev server over plain
+ * http is not, so the fallbacks are real code paths rather than defensive
+ * decoration. All three produce an opaque, collision-free-in-practice string;
+ * this keys a local scene, so entropy beyond that buys nothing.
+ */
+function newPlacementId(): PlacementId {
+  const webCrypto: Crypto | undefined = globalThis.crypto
+  if (typeof webCrypto?.randomUUID === 'function') return PlacementIdSchema.parse(webCrypto.randomUUID())
+  if (typeof webCrypto?.getRandomValues === 'function') {
+    const bytes = webCrypto.getRandomValues(new Uint8Array(16))
+    return PlacementIdSchema.parse(Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(''))
+  }
+  return PlacementIdSchema.parse(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`)
+}
+
+/**
+ * Put a tile on the grid and return its key.
+ *
+ * Parsed on the way in, which is not redundant with the rehydrate check: this
+ * catches a bad value at the call that produced it, where the stack still names
+ * the culprit, instead of at a hydration months later where it looks like
+ * storage corruption.
+ */
+export function placeTile(placement: Placement): PlacementId {
+  const id = newPlacementId()
+  const validated = PlacementSchema.parse({ ...placement, rotation: normalizeRotation(placement.rotation) })
+  useWorkshopStore.setState((state) => ({ placements: { ...state.placements, [id]: validated } }))
+  return id
+}
+
+/** Move a placed tile. No-op if the key is unknown, which a stale drag can be. */
+export function movePlacement(id: PlacementId, x: number, z: number): void {
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    const moved = PlacementSchema.parse({ ...current, x, z })
+    return { placements: { ...state.placements, [id]: moved } }
+  })
+}
+
+/** Rotate a placed tile. The angle is folded into `[0, 360)`; see the schema. */
+export function rotatePlacement(id: PlacementId, rotation: number): void {
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    const rotated = { ...current, rotation: normalizeRotation(rotation) }
+    return { placements: { ...state.placements, [id]: rotated } }
+  })
+}
+
+/** Take a tile off the grid. */
+export function removePlacement(id: PlacementId): void {
+  useWorkshopStore.setState((state) => {
+    if (state.placements[id] === undefined) return state
+    const placements = { ...state.placements }
+    delete placements[id]
+    return { placements }
+  })
+}
+
+/** Clear the builder scene, keeping the library and the lock preference. */
+export function clearPlacements(): void {
+  useWorkshopStore.setState({ placements: {} })
+}
+
+/* --------------------------------------------------------------------- locks */
+
+/** Choose the joinery system for the whole build. See `DEFAULT_LOCK_SYSTEM`. */
+export function setLockSystem(lock: LockSystem): void {
+  useWorkshopStore.setState({ lock })
+}
+
+/* --------------------------------------------------------------------- reset */
+
+/**
+ * Wipe everything — state and the persisted copy both.
+ *
+ * `replace: true` rather than a merge, so a field removed in a future version
+ * cannot survive a reset.
+ */
+export function resetWorkshop(): void {
+  useWorkshopStore.setState(defaultWorkshopState(), true)
+}
+
+/* ----------------------------------------------------------------- selectors */
+
+/** The library as a keyed set. Stable identity until the library changes. */
+export const selectLibrary = (state: WorkshopState): WorkshopState['library'] => state.library
+
+/** How many tiles are in the library. A number, so equal counts do not re-render. */
+export const selectLibraryCount = (state: WorkshopState): number => Object.keys(state.library).length
+
+/**
+ * Membership for one tile.
+ *
+ * Curried so the tile id is bound once: the resulting selector returns a
+ * boolean, which is what keeps eight thousand catalog cards out of the
+ * re-render path when an unrelated tile is added.
+ */
+export const selectIsInLibrary =
+  (id: TileId) =>
+  (state: WorkshopState): boolean =>
+    state.library[id] === true
+
+/** The whole scene. Changes on every placement — subscribe from the canvas only. */
+export const selectPlacements = (state: WorkshopState): WorkshopState['placements'] => state.placements
+
+/** One placement, for a component that renders exactly one tile. */
+export const selectPlacement =
+  (id: PlacementId) =>
+  (state: WorkshopState): Placement | undefined =>
+    state.placements[id]
+
+/** How many tiles are on the grid. */
+export const selectPlacementCount = (state: WorkshopState): number => Object.keys(state.placements).length
+
+/** The global lock preference. */
+export const selectLockSystem = (state: WorkshopState): LockSystem => state.lock
+
+/* --------------------------------------------------------------------- hooks */
+
+/** @see selectLibrary */
+export function useLibrary(): WorkshopState['library'] {
+  return useWorkshopStore(selectLibrary)
+}
+
+/** @see selectLibraryCount */
+export function useLibraryCount(): number {
+  return useWorkshopStore(selectLibraryCount)
+}
+
+/** @see selectIsInLibrary */
+export function useIsInLibrary(id: TileId): boolean {
+  return useWorkshopStore((state) => state.library[id] === true)
+}
+
+/** @see selectPlacements */
+export function usePlacements(): WorkshopState['placements'] {
+  return useWorkshopStore(selectPlacements)
+}
+
+/** @see selectPlacement */
+export function usePlacement(id: PlacementId): Placement | undefined {
+  return useWorkshopStore((state) => state.placements[id])
+}
+
+/** @see selectPlacementCount */
+export function usePlacementCount(): number {
+  return useWorkshopStore(selectPlacementCount)
+}
+
+/** @see selectLockSystem */
+export function useLockSystem(): LockSystem {
+  return useWorkshopStore(selectLockSystem)
+}
