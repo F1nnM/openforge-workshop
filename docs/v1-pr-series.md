@@ -67,7 +67,7 @@ Row 12 is a seam: three screens need the same app frame, so it lands alone first
 | --- | --- | --- | --- | --- | --- |
 | 17 | Plan-view canvas | Top-down builder: grid, snap at 0.5 units, per-tile rotation step, place/erase, RECT + WALL_SEG rendering from footprints and family colours | `src/builder/canvas/**` | 8, 9, 12 | no |
 | 18 | Builder shell | Three-column layout, palette with catalog search, floating toolbar, bill-of-tiles panel with size warning surface, download action | `src/builder/panels/**`, `src/screens/builder/**` | 11, 17 | no |
-| 19 | Lock preference UI | One-time lock system picker showing reachable-design counts (openlock 100%, dragonlock 70.2%, magnetic 67.5%) | `src/screens/settings/**`, `src/ui/lock-picker/**` | 5, 12 | no |
+| 19 | Lock preference UI | One-time lock system picker showing reachable-design counts (openlock 99.9%, dragonlock 74.7%, magnetic 59.7%) | `src/screens/settings/**`, `src/ui/lock-picker/**` | 5, 12 | no |
 
 ---
 

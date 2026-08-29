@@ -29,6 +29,11 @@ NON_RECT_MARKERS = ("curved", "radial", "concave", "convex", "hex")
 
 LOCK_SYSTEMS = ("openlock", "dragonlock", "magnetic")
 
+# `connection|side|openlock` puts a POSITION in the second segment, not a system.
+# Reading segment 1 blindly invents a "side" connection system on the 2,081 tiles
+# carrying any connection|side tag. Found by the PR 3 schema work.
+CONNECTION_POSITIONS = ("side",)
+
 
 def load(fixtures: pathlib.Path) -> list[dict]:
     rows: list[dict] = []
@@ -59,6 +64,24 @@ def numeric(row: dict, prefix: str) -> float | None:
         return float(raw)
     except ValueError:
         return None  # e.g. size|width|sw and size|width|wot are build markers, not widths
+
+
+def connection_systems(row: dict) -> set[str]:
+    """The joinery systems a tile offers, ignoring position and variant segments.
+
+    `connection|side|openlock` is openlock mounted on the side, not a "side"
+    system. `connection|openlock|topless` is still openlock.
+    """
+    systems: set[str] = set()
+    for tag in tags_of(row):
+        if not tag.startswith("connection|"):
+            continue
+        parts = tag.split("|")[1:]
+        if parts and parts[0] in CONNECTION_POSITIONS:
+            parts = parts[1:]
+        if parts:
+            systems.add(parts[0])
+    return systems
 
 
 def is_non_rect(row: dict) -> bool:
@@ -133,21 +156,22 @@ def main() -> int:
     # ---------------------------------------------------------------- joinery
     no_conn = sum(1 for r in live if not any(t.startswith("connection|") for t in tags_of(r)))
     openforge = sum(1 for r in live if any(t.startswith("connection|openforge") for t in tags_of(r)))
-    has_lock = sum(
-        1
-        for r in live
-        if any(t.startswith(f"connection|{s}") for s in LOCK_SYSTEMS for t in tags_of(r))
-    )
+    has_lock = sum(1 for r in live if connection_systems(r) & set(LOCK_SYSTEMS))
     out.append(("no connection tag at all", f"{no_conn} ({pct(no_conn, n)})", "zero connection| tags"))
     out.append(("carries connection|openforge", f"{openforge} ({pct(openforge, n)})", "delegates joinery to a separate base"))
     out.append(("carries a lock system", f"{has_lock} ({pct(has_lock, n)})", "openlock, dragonlock or magnetic"))
 
-    multi_conn = sum(
-        1
-        for r in live
-        if len({t.split("|")[1] for t in tags_of(r) if t.startswith("connection|")}) >= 2
+    multi_conn = sum(1 for r in live if len(connection_systems(r)) >= 2)
+    out.append(
+        ("2+ connection systems", f"{multi_conn} ({pct(multi_conn, n)})", "distinct systems, position segment skipped")
     )
-    out.append(("2+ connection systems", f"{multi_conn} ({pct(multi_conn, n)})", "distinct second segments"))
+
+    positional = sum(
+        1 for r in live if any(t.startswith(f"connection|{p}|") for p in CONNECTION_POSITIONS for t in tags_of(r))
+    )
+    out.append(
+        ("connection carries a position", f"{positional} ({pct(positional, n)})", "e.g. connection|side|openlock")
+    )
 
     # ------------------------------------------------- lock reachability by design
     # The real question the plan needs: if a user commits to ONE lock system, what
@@ -155,9 +179,7 @@ def main() -> int:
     by_design: dict[tuple, set[str]] = defaultdict(set)
     for r in live:
         key = design_key(r, collapse=("connection",))
-        for s in LOCK_SYSTEMS:
-            if any(t.startswith(f"connection|{s}") for t in tags_of(r)):
-                by_design[key].add(s)
+        by_design[key] |= connection_systems(r) & set(LOCK_SYSTEMS)
         by_design[key]  # ensure present even with no lock
     total_designs = len(by_design)
     for s in LOCK_SYSTEMS:
