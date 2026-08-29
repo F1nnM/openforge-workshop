@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+.output/
+.vite/
+*.tsbuildinfo
+
+# environment
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# cloudflare
+.wrangler/
+
+# editors
+.vscode/
+.idea/
+.*.sw?
+.DS_Store
+
+# test / coverage
+coverage/
+.nyc_output/
+
+# generated catalog artefacts — reproducible from the fixtures, never committed
+docs/index-sample-*.json
+public/catalog/*.json
+public/catalog/*.br
+
+# scratch
+tmp/
+scratch/
