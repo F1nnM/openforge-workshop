@@ -1,4 +1,2 @@
 @import 'tailwindcss';
-
-/* The Parchment token set lands in PR 2 (src/tokens/). Until then this file
-   only pulls in Tailwind so the scaffold builds. */
+@import './tokens/tokens.css';

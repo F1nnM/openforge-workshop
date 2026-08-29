@@ -1,0 +1,90 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — Parchment design tokens
+
+   The values here are transcribed from docs/design-contract.md §1. That table
+   is the source of truth: do not adjust a hex in this file without changing the
+   contract first.
+
+   Two layers, deliberately:
+
+     1. `:root` carries the raw token set under the contract's own names
+        (`--bg`, `--ink`, `--acc`, …). This is the theming API. The contract
+        specifies that a theme is applied by setting custom properties on the
+        root element, so every consumer — Tailwind utilities, hand-written CSS
+        and three.js materials alike — reads through these names.
+
+     2. `@theme inline` aliases each raw token into a Tailwind 4 namespace
+        (`--color-*`, `--font-*`) so utilities exist for them: `bg-bg2`,
+        `text-ink`, `border-line`, `font-mono`, and so on.
+
+        The `inline` keyword is load-bearing. Without it a utility compiles to
+        `var(--color-ink)`; with it, it compiles to `var(--ink)` — the raw token
+        itself. That keeps layer 1 the single point of override: retinting a
+        subtree is a matter of setting `--ink` on it, and the utilities follow.
+
+   No dark theme, and there should not be one. The design is committed to
+   Parchment, which is a light theme — it is the only light option of the three
+   the mock shipped, and the contract chooses it precisely because the
+   production app is light-first. A `prefers-color-scheme: dark` block here
+   would fork the palette that the 3D material tints are calibrated against.
+
+   src/tokens/tokens.ts mirrors this file for JavaScript consumers, and
+   src/tokens/tokens.test.ts fails the build if the two ever disagree.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Light-first, and committed to it. This also keeps form controls,
+     scrollbars and caret colours on the light side of the UA stylesheet. */
+  color-scheme: light;
+
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  --bg: #e7dcc4;
+  --bg2: #f1e8d3;
+  --bg3: #dfd2b5;
+
+  /* ── Text ─────────────────────────────────────────────────────────────── */
+  --ink: #2c2418;
+  --mut: #79684d;
+
+  /* ── Accents ──────────────────────────────────────────────────────────── */
+  --acc: #8f5b21;
+  --accink: #f6efe0;
+  --acc2: #5d7a68;
+
+  /* ── Incidentals ──────────────────────────────────────────────────────── */
+  --line: rgba(80,60,30,0.2);
+  --chip: #d8caab;
+  --scrim: rgba(60,45,25,0.4);
+
+  /* ── Typefaces ────────────────────────────────────────────────────────────
+     Loaded in index.html. Named `--face-*` rather than `--font-*` so the raw
+     layer does not collide with the Tailwind `--font-*` namespace that layer 2
+     aliases into.
+
+     The three-way split is load-bearing: anything that is a measured fact —
+     counts, sizes, dimensions, tag chips, storage addresses, eyebrow labels —
+     is set in mono. That is what makes the design read as a workshop tool
+     rather than a shop.
+     ──────────────────────────────────────────────────────────────────────── */
+  --face-display: 'Alegreya', 'Iowan Old Style', Palatino, Georgia, serif;
+  --face-body: 'Alegreya Sans', ui-sans-serif, system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --face-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg2: var(--bg2);
+  --color-bg3: var(--bg3);
+  --color-ink: var(--ink);
+  --color-mut: var(--mut);
+  --color-acc: var(--acc);
+  --color-accink: var(--accink);
+  --color-acc2: var(--acc2);
+  --color-line: var(--line);
+  --color-chip: var(--chip);
+  --color-scrim: var(--scrim);
+
+  --font-display: var(--face-display);
+  --font-body: var(--face-body);
+  --font-mono: var(--face-mono);
+}
