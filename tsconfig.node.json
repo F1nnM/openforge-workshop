@@ -12,5 +12,17 @@
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "eslint.config.js", "pipeline", "scripts", "tools"]
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "eslint.config.js",
+    "pipeline",
+    "scripts",
+    "tools",
+    // The build-time pipeline validates its output against the catalog contract,
+    // so it imports it. A composite project rejects an import of a file outside
+    // its own file list (TS6307), and the app project cannot be referenced
+    // because it is noEmit and so publishes no declarations.
+    "src/catalog"
+  ]
 }

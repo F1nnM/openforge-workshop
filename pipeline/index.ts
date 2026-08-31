@@ -1,0 +1,52 @@
+/**
+ * The build-time catalog pipeline.
+ *
+ * Import from `pipeline`, not from its modules, so the internal split can change
+ * without touching the CLI or the tests. Nothing here runs in the browser: this
+ * whole directory exists to turn the `openforge-catalog` fixtures into one
+ * static `catalog.json`, at build time, once.
+ */
+export { buildCatalog } from './build'
+export type { BuildOptions, BuildResult, BuildStats } from './build'
+export { buildDesignIndex, designId, designKey } from './design'
+export {
+  assertWithinBudget,
+  compressCatalog,
+  formatBytes,
+  measureCatalog,
+  serialiseCatalog,
+} from './emit'
+export type { SizeReport } from './emit'
+export {
+  LOCK_SYSTEMS,
+  buildSystem,
+  classifyLayer,
+  connectionSystems,
+  kindBuckets,
+  openlockSizeCode,
+  rotationStep,
+  textureRoot,
+} from './facets'
+export {
+  DEFAULT_FIXTURES_DIR,
+  fixturesDir,
+  liveRows,
+  loadFixtureRows,
+  resolveFixturesRef,
+} from './fixtures'
+export type { FixtureConfig, FixtureRow } from './fixtures'
+export { DEFAULT_ARC_SWEEP_DEG, footprintKind, hasCurveMarker, resolveFootprint, sizeToken } from './footprint'
+export { displayName, fallbackName } from './naming'
+export {
+  MANIFEST_PATH,
+  OrdinalManifest,
+  assertAppendOnly,
+  assignOrdinals,
+  emptyManifest,
+  loadManifest,
+  serialiseManifest,
+  writeManifest,
+} from './ordinals'
+export type { OrdinalAssignment } from './ordinals'
+export { buildTagTable, hasTagPrefix, namespaceRoots, numericTagValue, tagValue } from './tags'
+export { ASSET_BASES, PIPELINE_VERSION, SIZE_BUDGET_BYTES, buildTimestamp } from './version'
