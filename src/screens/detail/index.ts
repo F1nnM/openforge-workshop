@@ -15,7 +15,7 @@
  * (row 18). They matter here rather than as inline strings because two of the
  * four spec fields are *refusals* over most of the corpus: `Height` has no
  * numeric basis anywhere in the catalog and falls back for 79.0% of tiles, and
- * only 35.1% of footprints are a printable `W × D`. Anything re-deriving those
+ * only 39.7% of footprints are a printable `W × D`. Anything re-deriving those
  * from a record by hand will end up printing a blank or a guess.
  */
 export type { TileDrawerProps } from './TileDrawer'

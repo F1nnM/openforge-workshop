@@ -23,6 +23,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import type { PrintOption as BarrelPrintOption } from '@/assembly'
+import { PRINT_OPTIONS as BARREL_PRINT_OPTIONS, printOption as barrelPrintOption } from '@/assembly'
 import type { CatalogFile, CatalogRecord } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, TileId } from '@/catalog'
 import type { LockSystem, Placement } from '@/store'
@@ -143,6 +145,25 @@ describe('note vocabulary', () => {
     expect(NOTE_SEVERITY['base-unmatchable']).toBe('warn')
   })
 
+  it('warns when the base handed out is a print variant rather than the plain base', () => {
+    // `warn` and not `info`, and the frequency is what makes that defensible:
+    // the corpus block below measures it at 3 placements out of 4,363 under
+    // magnetic and 0 under every other preference. A code that fires on a third
+    // of the corpus would be wallpaper; this one cannot become wallpaper without
+    // the ranking regressing, which is the thing worth being loud about.
+    expect(NOTE_SEVERITY['base-option-chosen']).toBe('warn')
+  })
+
+  it('publishes the print-option vocabulary through the barrel', () => {
+    // `BaseMatch.option` is of type `PrintOption` and `BaseMatch` is on the
+    // public surface, so without these three names a consumer could hold the
+    // value and be unable to declare it. The annotation is the assertion — this
+    // fails at compile time, not at run time.
+    const option: BarrelPrintOption = 'topless'
+    expect(BARREL_PRINT_OPTIONS).toBe(PRINT_OPTIONS)
+    expect(barrelPrintOption(['connection|openlock|topless'])).toBe(option)
+  })
+
   it('rolls up per code, warnings first, and counts rather than repeats', () => {
     const tile = TileId.parse('tiles/x/a.stl')
     const other = TileId.parse('tiles/x/b.stl')
@@ -230,11 +251,15 @@ describeCorpus(corpusSuite, () => {
     expect(mismatches).toEqual([])
   })
 
-  it('shows why the code beats the width: 361 coded tiles have no measurable footprint', () => {
+  it('shows why the code beats the width: 299 coded tiles have no measurable footprint', () => {
     const codedWithoutFootprint = records.filter(
       (record) => record.sizeCode !== undefined && record.foot.shape !== 'rect' && record.foot.shape !== 'wall',
     )
-    expect(codedWithoutFootprint).toHaveLength(361)
+    // 361 before row W3. The 62 that gained a footprint are the `IL+corner`
+    // cells, whose `concave`/`convex` tag is the sense of a right angle and not
+    // curvature, and which measure 1.000 x 1.000. The argument is unchanged and
+    // 299 tiles still make it: a size code reaches tiles a width cannot.
+    expect(codedWithoutFootprint).toHaveLength(299)
   })
 
   /* ------------------------------------------------------------ the hard rule */
@@ -379,22 +404,25 @@ describeCorpus(corpusSuite, () => {
     for (const topper of toppers) expect(index.basePrintOption.has(topper.id)).toBe(false)
   })
 
-  it('collapses the topless auto-insert rate under openlock from 79.1% to zero', () => {
+  it('collapses the topless auto-insert rate under openlock from 79.9% to zero', () => {
     const before = survey(legacyBase, 'openlock')
     const after = survey(shippedBase, 'openlock')
 
     // Same toppers matched either way: the ranking chooses, it never refuses.
-    expect(before.matched).toBe(3769)
-    expect(after.matched).toBe(3769)
+    // 3,769 before row W3 gave 403 tiles a footprint; the extra 209 are toppers
+    // that now have a footprint key to match a base on, so the denominator grew
+    // and the defect it measures got worse rather than smaller.
+    expect(before.matched).toBe(3978)
+    expect(after.matched).toBe(3978)
 
     // The defect, measured on this corpus by the old ranking written out above.
-    expect(before.byOption.topless).toBe(2983)
-    expect(before.byOption.topless / before.matched).toBeCloseTo(0.791, 3)
-    expect(before.byOption.unsupported).toBe(164)
+    expect(before.byOption.topless).toBe(3179)
+    expect(before.byOption.topless / before.matched).toBeCloseTo(0.799, 3)
+    expect(before.byOption.unsupported).toBe(177)
     expect(before.byOption.plain).toBe(622)
 
     // And after: every auto-inserted openlock base is the full base.
-    expect(after.byOption).toEqual({ plain: 3769, unsupported: 0, topless: 0 })
+    expect(after.byOption).toEqual({ plain: 3978, unsupported: 0, topless: 0 })
   })
 
   it('collapses it under every lock preference, to the three cases the corpus forces', () => {
@@ -404,13 +432,16 @@ describeCorpus(corpusSuite, () => {
       after: survey(shippedBase, lock).byOption,
     }))
 
-    const allPlain: Record<PrintOption, number> = { plain: 3769, unsupported: 0, topless: 0 }
-    const magneticAfter: Record<PrintOption, number> = { plain: 3766, unsupported: 0, topless: 3 }
+    // Every `before` row grew by row W3's 209 newly matchable toppers and every
+    // `after` row is still all-plain but for the three magnetic cases the corpus
+    // forces. The shape of the finding is what is asserted; the totals moved.
+    const allPlain: Record<PrintOption, number> = { plain: 3978, unsupported: 0, topless: 0 }
+    const magneticAfter: Record<PrintOption, number> = { plain: 3975, unsupported: 0, topless: 3 }
     expect(measured).toEqual([
-      { lock: 'openlock', before: { plain: 622, unsupported: 164, topless: 2983 }, after: allPlain },
-      { lock: 'dragonlock', before: { plain: 3610, unsupported: 156, topless: 3 }, after: allPlain },
-      { lock: 'magnetic', before: { plain: 2120, unsupported: 27, topless: 1622 }, after: magneticAfter },
-      { lock: 'none', before: { plain: 819, unsupported: 320, topless: 2630 }, after: allPlain },
+      { lock: 'openlock', before: { plain: 622, unsupported: 177, topless: 3179 }, after: allPlain },
+      { lock: 'dragonlock', before: { plain: 3819, unsupported: 156, topless: 3 }, after: allPlain },
+      { lock: 'magnetic', before: { plain: 2256, unsupported: 35, topless: 1687 }, after: magneticAfter },
+      { lock: 'none', before: { plain: 824, unsupported: 333, topless: 2821 }, after: allPlain },
     ])
   })
 
@@ -452,12 +483,14 @@ describeCorpus(corpusSuite, () => {
     // After: the count barely moves — one candidate set collapses onto a base
     // another already reached — but every base it reaches is now a full base, so
     // the reachable *product* range is six times wider.
-    expect(after.reach.size).toBe(109)
-    expect(after.reachByOption).toEqual({ plain: 109, unsupported: 0, topless: 0 })
+    expect(after.reach.size).toBe(110)
+    expect(after.reachByOption).toEqual({ plain: 110, unsupported: 0, topless: 0 })
     expect(after.reachByOption.plain).toBeGreaterThan(6 * before.reachByOption.plain)
 
     // Across the four preferences a user can actually pick, the reachable set
-    // itself grows: 300 → 314 distinct bases, 179 → 313 of them full bases.
+    // itself grows: 303 → 317 distinct bases, 181 → 316 of them full bases. Row
+    // W3's 403 new footprints widened both unions by 3, so the gain the ranking
+    // is responsible for is unchanged at 14 bases and 135 full ones.
     const union = (rank: (tile: CatalogRecord, lock: LockSystem | undefined) => CatalogRecord | undefined) => {
       const reach = new Set<TileId>()
       for (const lock of preferences) for (const id of survey(rank, lock).reach) reach.add(id)
@@ -465,14 +498,14 @@ describeCorpus(corpusSuite, () => {
     }
     const beforeUnion = union(legacyBase)
     const afterUnion = union(shippedBase)
-    expect(beforeUnion.size).toBe(300)
-    expect(afterUnion.size).toBe(314)
+    expect(beforeUnion.size).toBe(303)
+    expect(afterUnion.size).toBe(317)
     expect(afterUnion.size).toBeGreaterThan(beforeUnion.size)
 
     const full = (reach: Set<TileId>) =>
       [...reach].filter((id) => optionOf(index.byId.get(id) as CatalogRecord) === 'plain').length
-    expect(full(beforeUnion)).toBe(179)
-    expect(full(afterUnion)).toBe(313)
+    expect(full(beforeUnion)).toBe(181)
+    expect(full(afterUnion)).toBe(316)
   })
 
   /* ----------------------------------------------------------- the disclosure */
@@ -545,16 +578,17 @@ describeCorpus(corpusSuite, () => {
     expect(basesByBuild.get('wall on tile')).toBeUndefined()
 
     // The shipped resolver, on the same tiles, finds a base for nearly all of them.
-    // The shipped join, on the same tiles, finds a base for 468 of them. The
-    // other 389 carry neither a size code nor a footprint — a topper-side data
-    // gap, reported as `base-unmatchable`, not a failure of the key. The
-    // contrast is the point: 468 against the build join's 0.
+    // The shipped join, on the same tiles, finds a base for 630 of them — 468
+    // before row W3 gave 403 tiles a footprint, and the whole of that gain landed
+    // in this population. The remainder carry neither a size code nor a footprint
+    // — a topper-side data gap, reported as `base-unmatchable`, not a failure of
+    // the key. The contrast is the point: 630 against the build join's 0.
     const topperSide = wallOnTile.filter((record) => record.layer === 'topper')
     const resolvedBases = topperSide.filter(
       (record) => resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts.length === 2,
     )
-    expect(resolvedBases).toHaveLength(468)
-    expect(topperSide.filter((record) => footprintKey(record.foot) === undefined)).toHaveLength(389)
+    expect(resolvedBases).toHaveLength(630)
+    expect(topperSide.filter((record) => footprintKey(record.foot) === undefined)).toHaveLength(227)
   })
 
   /* ------------------------------------------------------ the honest size gap */
@@ -581,17 +615,228 @@ describeCorpus(corpusSuite, () => {
       }
     }
     // 129 bases the corpus should have and does not; 21 footprints nothing
-    // supports; 444 toppers with neither a code nor a shape to match on.
-    expect(gaps).toEqual({ 'no-matching-base': 129, 'no-congruent-base': 21, 'base-unmatchable': 444 })
+    // supports; 235 toppers with neither a code nor a shape to match on. That
+    // last was 444 before row W3: giving 403 tiles a footprint halved the
+    // population that has nothing to match on, and moved none of it into the
+    // other two causes, which are unchanged.
+    expect(gaps).toEqual({ 'no-matching-base': 129, 'no-congruent-base': 21, 'base-unmatchable': 235 })
   })
 
-  it('reaches 80.3% of the code-less toppers through the footprint fallback', () => {
+  const GAP_CODES = ['no-matching-base', 'no-congruent-base', 'base-unmatchable']
+
+  it('classifies every gap by the step that failed, and by exactly one of them', () => {
+    // The substance of D5: the three-way split is not a heuristic over the data,
+    // it is a partition of the toppers with no base by *which key was missing*.
+    // Asserted as the biconditional rather than as three counts, so it survives
+    // a corpus rebuild — row W3 reclassified 403 tiles out of `none` and moved
+    // tiles between the second and third buckets without changing the rule.
+    let gapped = 0
+    for (const record of toppers) {
+      const resolved = resolvePlacement(place(record.id), index, { lock: 'openlock' })
+      const gapNotes = resolved.notes.filter((entry) => GAP_CODES.includes(entry.code))
+      if (resolved.parts.length === 2) {
+        expect(gapNotes, record.id).toHaveLength(0)
+        continue
+      }
+      gapped += 1
+      // One cause, never two, and never a bare "no base found".
+      expect(gapNotes, record.id).toHaveLength(1)
+      const expected =
+        record.sizeCode !== undefined
+          ? 'no-matching-base'
+          : footprintKey(record.foot) !== undefined
+            ? 'no-congruent-base'
+            : 'base-unmatchable'
+      expect(gapNotes[0]?.code, record.id).toBe(expected)
+      expect(gapNotes[0]?.tileId, record.id).toBe(record.id)
+      // Each cause is `warn`: a piece with nothing under it is not a footnote.
+      expect(gapNotes[0]?.severity).toBe('warn')
+    }
+    expect(gapped).toBeGreaterThan(0)
+  })
+
+  it('measures the same gap under every lock preference, and under none', () => {
+    // The load-bearing claim of `docs/corpus-base-gap.md`: the gap is a property
+    // of the corpus, not of the ranking. D1 re-ranked base candidates and took
+    // the topless rate under openlock from 79.1% to 0 without moving one tile of
+    // this. If a ranking change *does* move it, that is a bug in the ranking — a
+    // candidate set is either empty or it is not, and which member wins cannot
+    // decide whether one exists.
+    //
+    // The split itself is pinned by `separates the three ways a base can be
+    // missing` above; what this adds is that all four preferences agree, which no
+    // single-preference measurement can show.
+    const preferences: (LockSystem | undefined)[] = [undefined, 'openlock', 'dragonlock', 'magnetic']
+    const measured = preferences.map((lock) => {
+      const gaps = { 'no-matching-base': 0, 'no-congruent-base': 0, 'base-unmatchable': 0 }
+      let withBase = 0
+      for (const record of toppers) {
+        const resolved = resolvePlacement(place(record.id), index, lock === undefined ? {} : { lock })
+        if (resolved.parts.length === 2) withBase += 1
+        for (const entry of resolved.notes) {
+          if (entry.code in gaps) gaps[entry.code as keyof typeof gaps] += 1
+        }
+      }
+      const total = Object.values(gaps).reduce((sum, count) => sum + count, 0)
+      // Every topper is either given a base or told why not — no silent third
+      // outcome, which is the failure mode this row exists to remove.
+      expect(withBase + total, `lock: ${lock ?? 'none'}`).toBe(toppers.length)
+      return gaps
+    })
+
+    for (const gaps of measured) expect(gaps).toEqual(measured[0])
+    // The size-code half of the gap is invariant under W3 as well: size codes come
+    // from tags, not from footprints, so no reclassification can close it.
+    expect(measured[0]?.['no-matching-base']).toBe(129)
+    expect(toppers).toHaveLength(4363)
+  })
+
+  it('names the nine size codes the base range is missing', () => {
+    // The classification's first cause, enumerated: this is the part of the 594
+    // that is an archive gap somebody could close, and the codes are what a
+    // report upstream would have to name. `docs/corpus-base-gap.md` lists all
+    // 129 tiles behind them.
+    const missing = new Map<string, number>()
+    for (const record of toppers) {
+      const code = record.sizeCode
+      if (code === undefined || index.basesBySizeCode.has(code)) continue
+      missing.set(code, (missing.get(code) ?? 0) + 1)
+    }
+    expect(Object.fromEntries([...missing.entries()].sort())).toEqual({
+      II: 11,
+      IO: 16,
+      IX: 16,
+      L: 20,
+      O: 5,
+      P: 12,
+      PA: 6,
+      PB: 20,
+      PC: 23,
+    })
+    expect([...missing.values()].reduce((total, count) => total + count, 0)).toBe(129)
+
+    // 26 codes on the base side against 27 on the topper side — the whole of the
+    // gap this key can produce.
+    expect(index.basesBySizeCode.size).toBe(26)
+    expect(new Set(toppers.map((record) => record.sizeCode).filter((code) => code !== undefined)).size).toBe(27)
+  })
+
+  it('shows the 21 unsupportable shapes are geometry, not an omission', () => {
+    // The classification's second cause. The distinction matters for the copy:
+    // 17 of these are half a unit wide and the base range starts at a full unit,
+    // so no base can carry them and telling somebody to go and find one would
+    // send them after an object that does not exist. The other four are a real
+    // hole in an otherwise complete range.
+    const shapeless = toppers.filter((record) => {
+      const resolved = resolvePlacement(place(record.id), index, { lock: 'openlock' })
+      return resolved.notes.some((entry) => entry.code === 'no-congruent-base')
+    })
+    const keys = new Map<string, number>()
+    for (const record of shapeless) {
+      const key = footprintKey(record.foot) ?? '(none)'
+      keys.set(key, (keys.get(key) ?? 0) + 1)
+    }
+    expect(Object.fromEntries([...keys.entries()].sort())).toEqual({
+      'rect:0.5x1': 3,
+      'rect:0.5x2': 14,
+      'rect:2x6': 4,
+    })
+
+    // Why no base can carry the 17: nothing in the base range has an extent
+    // below one grid unit.
+    const baseExtents = new Set<number>()
+    for (const base of bases) {
+      if (base.foot.shape === 'rect') baseExtents.add(Math.min(base.foot.w, base.foot.d))
+      if (base.foot.shape === 'wall') baseExtents.add(base.foot.length)
+    }
+    expect(Math.min(...baseExtents)).toBe(1)
+
+    // And why the four `2x6` slabs are the arguable omission: the range holds
+    // both neighbours.
+    expect(index.basesByFootprint.has('rect:2x4')).toBe(true)
+    expect(index.basesByFootprint.has('rect:2x8')).toBe(true)
+    expect(index.basesByFootprint.has('rect:2x6')).toBe(false)
+  })
+
+  it('shows the unmatchable toppers carry no shape at all', () => {
+    // The classification's third cause, and the one that is neither an archive
+    // gap nor geometry: the topper publishes no key. `foot.shape === 'none'` is
+    // the only way `footprintKey` can be absent, and it is the same fact that
+    // keeps these off the plan view — so there is nothing to file upstream,
+    // because nothing says what shape of base to look for.
+    //
+    // The count is deliberately *not* pinned here. It was 444 when this row was
+    // written and `separates the three ways a base can be missing` above pins
+    // that; row W3 reclassified 403 corpus tiles out of `none`, and every tile
+    // that gains a footprint leaves this bucket. What cannot change is which
+    // bucket a keyless topper lands in.
+    const unmatchable = toppers.filter((record) => {
+      const resolved = resolvePlacement(place(record.id), index, { lock: 'openlock' })
+      return resolved.notes.some((entry) => entry.code === 'base-unmatchable')
+    })
+    expect(unmatchable.length).toBeGreaterThan(0)
+    expect(unmatchable.every((record) => record.foot.shape === 'none')).toBe(true)
+    expect(unmatchable.every((record) => record.sizeCode === undefined)).toBe(true)
+    expect(unmatchable.every((record) => footprintKey(record.foot) === undefined)).toBe(true)
+  })
+
+  /* ------------------------------------------------- the print-option disclosure */
+
+  it('names the print option as its own note, and only when it is not the plain base', () => {
+    // §5.3 item 2 of `docs/tile-aggregation.md`: "The bill must name the option:
+    // `base-option-chosen` alongside `base-auto-inserted`." One code per
+    // decision, so a panel can count and colour the variant without parsing the
+    // auto-insert sentence.
+    const preferences: (LockSystem | undefined)[] = [undefined, 'openlock', 'dragonlock', 'magnetic']
+    const fired = new Map<string, number>()
+    for (const lock of preferences) {
+      let count = 0
+      for (const record of toppers) {
+        const resolved = resolvePlacement(place(record.id), index, lock === undefined ? {} : { lock })
+        const match = resolved.parts[1]?.match
+        const notes = resolved.notes.filter((entry) => entry.code === 'base-option-chosen')
+        // The biconditional, on every topper: the note fires exactly when the
+        // chosen base is a print variant.
+        expect(notes).toHaveLength(match !== undefined && match.option !== 'plain' ? 1 : 0)
+        if (notes.length === 1) {
+          count += 1
+          expect(notes[0]?.message).toContain(String(match?.option))
+          expect(notes[0]?.tileId).toBe(resolved.parts[1]?.record.id)
+        }
+      }
+      fired.set(lock ?? 'none', count)
+    }
+    // Post-D1 the plain base wins unless the lock forces otherwise, so this is
+    // near-silent: 3 toppers under magnetic whose only magnetic base is topless.
+    // Pre-D1 the same measurement over openlock was 3,179.
+    expect(Object.fromEntries(fired)).toEqual({ none: 0, openlock: 0, dragonlock: 0, magnetic: 3 })
+  })
+
+  it('says which print and why in the option note', () => {
+    const forced = toppers
+      .map((topper) => resolvePlacement(place(topper.id), index, { lock: 'magnetic' }))
+      .filter((resolved) => resolved.parts[1]?.match?.option === 'topless')
+    expect(forced).toHaveLength(3)
+
+    for (const resolved of forced) {
+      const message = resolved.notes.find((entry) => entry.code === 'base-option-chosen')?.message ?? ''
+      expect(message).toContain('is the topless print of this base')
+      expect(message).toContain('no top surface')
+      // The cause, and it is the actionable half: a plainer base exists and does
+      // not carry magnetic, so the lock preference is what to change.
+      expect(message).toContain('every plainer base carrying size code D+SA lacks magnetic')
+    }
+  })
+
+  it('reaches 89.2% of the code-less toppers through the footprint fallback', () => {
     const codeless = toppers.filter((record) => record.sizeCode === undefined)
     const matched = codeless.filter(
       (record) => resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts.length === 2,
     )
+    // 1,899 of 2,364 before row W3. The fallback is unchanged; what changed is
+    // that 209 more code-less toppers now have a footprint for it to key on.
     expect(codeless).toHaveLength(2364)
-    expect(matched).toHaveLength(1899)
+    expect(matched).toHaveLength(2108)
   })
 
   /* --------------------------------------------------------------- md5 dedupe */

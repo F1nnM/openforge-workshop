@@ -39,7 +39,14 @@ export {
   resolveFixturesRef,
 } from './fixtures'
 export type { FixtureConfig, FixtureRow } from './fixtures'
-export { DEFAULT_ARC_SWEEP_DEG, footprintKind, hasCurveMarker, resolveFootprint, sizeToken } from './footprint'
+export {
+  DEFAULT_ARC_SWEEP_DEG,
+  footprintKind,
+  hasCurveMarker,
+  isDesignFragment,
+  resolveFootprint,
+  sizeToken,
+} from './footprint'
 export { displayName, fallbackName } from './naming'
 export {
   MANIFEST_PATH,

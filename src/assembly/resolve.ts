@@ -375,6 +375,15 @@ function appendBase(
   parts.push({ role: 'base', record: base, match })
 
   notes.push(note('base-auto-inserted', autoInsertedMessage(tile, base, match, lock), base.id))
+  // The option gets a code of its own as well as a clause in the sentence above,
+  // because it is the one criterion whose answer is a *different product* — see
+  // `notes.ts#base-option-chosen`. Fires only when the answer is not the plain
+  // base: 0 of 4,363 toppers under openlock, dragonlock or no preference, 3 under
+  // magnetic.
+  if (match.option !== 'plain') {
+    const message = `${base.name} is the ${match.option} print of this base: ${optionClause(match, lock)}.`
+    notes.push(note('base-option-chosen', message, base.id))
+  }
   if (!match.lockAgrees && lock !== undefined) {
     const message = `${base.name} does not offer ${lock}; no ${lock} base carries ${match.on}.`
     notes.push(note('base-lock-mismatch', message, base.id))

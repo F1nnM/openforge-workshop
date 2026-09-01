@@ -65,7 +65,7 @@ function formatUnit(value: number): string {
  * | `rect`    | `2×2`    | width × depth in grid units |
  * | `wall`    | `4×`     | length only; the depth is the measured 12.7 mm constant, not data |
  * | `arc`     | `4r22.5` | radius and sweep; the tagged width/depth are design-family labels, not measurements |
- * | `none`    | the `size|openlock` code, or `—` | 1,144 tiles have no derivable footprint |
+ * | `none`    | the `size|openlock` code, or `—` | 741 tiles have no derivable footprint |
  *
  * `—` rather than an omitted chip: `VirtuosoGrid` assumes a uniform item size,
  * so a card that sometimes drops a row of content would drift the scroll

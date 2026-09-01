@@ -22,7 +22,14 @@ import {
   rotationStep,
   textureRoot,
 } from './facets'
-import { formatUnit, footprintKind, hasCurveMarker, resolveFootprint, sizeToken } from './footprint'
+import {
+  formatUnit,
+  footprintKind,
+  hasCurveMarker,
+  isDesignFragment,
+  resolveFootprint,
+  sizeToken,
+} from './footprint'
 import { displayName, fallbackName } from './naming'
 import { buildTagTable, namespaceRoots, numericTagValue, tagValue } from './tags'
 import { buildTimestamp } from './version'
@@ -97,18 +104,56 @@ describe('footprint', () => {
     })
   })
 
-  it('refuses to call a curved tile a rectangle', () => {
-    // 1,144 tiles are hex, concave or convex without a radius. Placing one as a
-    // rectangle would be wrong rather than approximate.
-    expect(footprintKind(['shape|curved', 'size|width|6', 'size|depth|6'])).toBe('none')
-    expect(footprintKind(['shape|base|hex', 'size|width|2', 'size|depth|2'])).toBe('none')
-    expect(resolveFootprint(['shape|curved', 'size|width|6', 'size|depth|6'])).toEqual({ shape: 'none' })
+  it('gives a curved tile with a trusted pair the pair as its footprint', () => {
+    // W3. A curve marker says the outline is a sector; it does not say the
+    // width/depth pair is wrong. Where a curve carries no radius and no segment
+    // letter the mesh measures the tagged pair exactly —
+    // `cut-stone#floor+curved.4x4` is 4.000 × 4.000 units — so vetoing on the
+    // marker stranded 403 placeable tiles in NONE. The box is an
+    // over-approximation of the sector, which is W5's to refine, not a lie.
+    expect(footprintKind(['shape|curved', 'size|width|6', 'size|depth|6'])).toBe('rect')
+    expect(resolveFootprint(['shape|curved', 'size|width|6', 'size|depth|6'])).toEqual({
+      shape: 'rect',
+      w: 6,
+      d: 6,
+    })
+    // The 62 `IL+corner` cells: `concave`/`convex` here is the *sense* of a right
+    // angle, not curvature, and the cell measures 1.000 × 1.000.
+    expect(footprintKind(['shape|corner|concave', 'size|openlock|IL', 'size|width|1', 'size|depth|1'])).toBe('rect')
   })
 
-  it('scans for curve markers as substrings, exactly as the verify script does', () => {
+  it('refuses a design fragment, whose pair names the design and not the piece', () => {
+    // 283 tiles. `dungeon_stone%block#floor+curved+concave.8x8+b` is tagged 8 × 8
+    // and measures 4.000 × 4.000; the same `+b` on another design measures
+    // 2.079 × 1.931, so there is no rule to derive and the pair must not be
+    // believed. W1 measures them.
+    const fragment = ['shape|curved', 'size|segment|b', 'size|width|8', 'size|depth|8']
+    expect(isDesignFragment(fragment)).toBe(true)
+    expect(footprintKind(fragment)).toBe('none')
+    expect(resolveFootprint(fragment)).toEqual({ shape: 'none' })
+    // A radius still wins: it is the piece's own parameter, not the family's.
+    expect(footprintKind([...fragment, 'size|radius|4'])).toBe('arc')
+  })
+
+  it('matches curve markers on whole segments, and does not count hex as a curve', () => {
     expect(hasCurveMarker(['shape|curved|concave'])).toBe(true)
     expect(hasCurveMarker(['shape|base|radial'])).toBe(true)
+    expect(hasCurveMarker(['shape|corner|convex'])).toBe(true)
     expect(hasCurveMarker(['shape|wall', 'size|width|2'])).toBe(false)
+
+    // The false positive W2's NON_CURVE_TAG_SEGMENTS names: 56 live tiles. A hex
+    // is a different geometry family, and calling it a curve places hex corners
+    // as bogus arcs. They stay NONE, but because they carry no size tag at all —
+    // their only tagged dimension is a 60/120/240/300 sweep that is not a sweep.
+    expect(hasCurveMarker(['shape|base|hex', 'shape|hex'])).toBe(false)
+    expect(footprintKind(['shape|base|hex', 'shape|corner', 'size|angle|120'])).toBe('none')
+
+    // Segment-exact, so a segment that merely contains a marker does not hit.
+    // The corpus's own near-miss is `shape|option|curved_interface`, harmless
+    // only because those 111 tiles also carry a bare `shape|curved`.
+    expect(hasCurveMarker(['texture|hexagonal'])).toBe(false)
+    expect(hasCurveMarker(['shape|option|curved_interface'])).toBe(false)
+    expect(hasCurveMarker(['shape|option|curved_interface', 'shape|curved'])).toBe(true)
   })
 
   it('formats units the way the filenames do', () => {

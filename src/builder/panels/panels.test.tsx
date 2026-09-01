@@ -467,6 +467,246 @@ describe('the bill of tiles', () => {
   })
 })
 
+/* ------------------------------------------------- the three missing-base gaps */
+
+/**
+ * The three ways a topper can end up with nothing under it, rendered.
+ *
+ * 385 of the 4,363 live openforge toppers reach one of them, and the whole of
+ * row D5 is that they are **three different problems with three different
+ * remedies** — the archive is missing a base (129 tiles), no base can carry the
+ * shape (21), or the tile publishes no key to search bases by (235). One generic
+ * "no base found" would tell the first group they had made a mistake and send the
+ * second group looking for an object that cannot exist.
+ *
+ * The shared fixture only covers the first case, so this block extends it rather
+ * than editing it: `src/builder/canvas` and `src/screens/builder` parse the same
+ * nine records, and adding tiles to it would change what their palettes list.
+ * New tags are **appended**, because the existing records index into that array
+ * by position.
+ */
+const GAP_TAGS = [...FIXTURE_CATALOG.tags, 'connection|openlock|topless'] as const
+
+const GAP_IDS = {
+  strip: 'tiles/cut-stone/misc/risers/risers/cut-stone#riser+high.2x0.5.openforge.stl',
+  shapeless: 'tiles/cavern/volcanic/thick_wall/corner/cavern%volcanic#corner.corner,120°.openforge.stl',
+  toplessTopper: 'tiles/towne/floors/floor/openforge/towne#floor.2x2.T.openforge.stl',
+  toplessBase: 'tiles/bases/plain/base/openlock/plain#base.T.openlock+topless.stl',
+} as const
+
+const GAP_NAMES = {
+  strip: 'Cut Stone High Riser 2x0.5',
+  shapeless: 'Cavern Volcanic Hex Corner 120°',
+  toplessTopper: 'Towne Floor 2x2 T',
+  toplessBase: 'Plain Base T Topless',
+} as const
+
+function gapCatalog(): CatalogFile {
+  const tag = (name: string): number => GAP_TAGS.indexOf(name as (typeof GAP_TAGS)[number])
+  const next = FIXTURE_CATALOG.records.length
+  return CatalogFileSchema.parse({
+    ...FIXTURE_CATALOG,
+    tags: [...GAP_TAGS],
+    records: [
+      ...FIXTURE_CATALOG.records,
+      {
+        // A half-unit strip. `footprintKey` gives `rect:0.5x2`; no base in this
+        // catalog — or in the live one — is half a unit wide. `no-congruent-base`.
+        id: GAP_IDS.strip,
+        ord: next,
+        blob: '9'.repeat(32),
+        file: 'cut-stone#riser+high.2x0.5.openforge.stl',
+        bytes: 2_000_000,
+        sprite: true,
+        family: 'tiles/cut-stone/misc/risers/risers',
+        design: 'd-strip',
+        name: GAP_NAMES.strip,
+        kinds: ['riser'],
+        conn: ['openforge'],
+        layer: 'topper',
+        texture: 'cut-stone',
+        tags: [tag('connection|openforge')],
+        foot: { shape: 'rect', w: 2, d: 0.5 },
+      },
+      {
+        // No size code and no derivable footprint: nothing to search bases by.
+        // `base-unmatchable`.
+        id: GAP_IDS.shapeless,
+        ord: next + 1,
+        blob: 'a'.repeat(32),
+        file: 'cavern%volcanic#corner.corner,120°.openforge.stl',
+        bytes: 8_000_000,
+        sprite: true,
+        family: 'tiles/cavern/volcanic/thick_wall/corner',
+        design: 'd-shapeless',
+        name: GAP_NAMES.shapeless,
+        kinds: [],
+        conn: ['openforge'],
+        build: 'wall on tile',
+        layer: 'topper',
+        texture: 'cavern',
+        tags: [tag('connection|openforge'), tag('build|wall on tile')],
+        foot: { shape: 'none' },
+      },
+      {
+        // A topper whose only base is the topless print — the case D1 left a note
+        // code for and could not add. `base-auto-inserted` *and*
+        // `base-option-chosen`.
+        id: GAP_IDS.toplessTopper,
+        ord: next + 2,
+        blob: 'b'.repeat(32),
+        file: 'towne#floor.2x2.T.openforge.stl',
+        bytes: 4_000_000,
+        sprite: true,
+        family: 'tiles/towne/floors/floor/openforge',
+        design: 'd-topless-topper',
+        name: GAP_NAMES.toplessTopper,
+        kinds: ['floor'],
+        conn: ['openforge'],
+        layer: 'topper',
+        texture: 'towne',
+        tags: [tag('connection|openforge')],
+        foot: { shape: 'rect', w: 2, d: 2 },
+        sizeCode: 'T',
+      },
+      {
+        id: GAP_IDS.toplessBase,
+        ord: next + 3,
+        blob: 'c'.repeat(32),
+        file: 'plain#base.T.openlock+topless.stl',
+        bytes: 300_000,
+        sprite: true,
+        family: 'tiles/bases/plain/base/openlock',
+        design: 'd-topless-base',
+        name: GAP_NAMES.toplessBase,
+        kinds: ['base', 'floor'],
+        conn: ['openlock'],
+        layer: 'base',
+        texture: 'plain',
+        tags: [tag('shape|base'), tag('connection|openlock|topless')],
+        foot: { shape: 'rect', w: 2, d: 2 },
+        sizeCode: 'T',
+      },
+    ],
+  })
+}
+
+/** Both id maps, so a scene can mix a shared-fixture tile with a gap one. */
+const ALL_IDS = { ...FIXTURE_IDS, ...GAP_IDS }
+
+/** The panel over `gapCatalog`, with the placements passed in rather than stored. */
+function GapHarness({ tiles }: { tiles: readonly (keyof typeof ALL_IDS)[] }) {
+  const gapFile = useMemo(gapCatalog, [])
+  const gapAssembly = useMemo(() => buildAssemblyIndex(gapFile), [gapFile])
+  const placements = useMemo<Record<string, Placement>>(
+    () =>
+      Object.fromEntries(
+        tiles.map((key, i) => [`p${String(i)}`, { tileId: ALL_IDS[key] as TileId, x: i * 2, z: 0, rotation: 0 }]),
+      ),
+    [tiles],
+  )
+  const bill = useMemo(
+    () => buildBillOfTiles(Object.values(placements), gapAssembly, { lock: 'openlock' }),
+    [placements, gapAssembly],
+  )
+  return (
+    <BillPanel
+      bill={bill}
+      placements={placements}
+      assets={gapFile.assets}
+      sheet={gapFile.sprite}
+      download={inertDownload(bill)}
+    />
+  )
+}
+
+describe('the missing-base gap', () => {
+  /** The warning paragraphs, in the order the panel renders them. */
+  function warnings(): string[] {
+    return [...document.querySelectorAll('.of-bill-note[data-tone="warn"]')].map(
+      (element) => element.textContent ?? '',
+    )
+  }
+
+  it('tells a user with no base in the archive that the library is what is missing', () => {
+    render(<GapHarness tiles={['wallNoBase']} />)
+
+    const note = screen.getByText(/1 piece has no base in the archive/).closest('.of-bill-note')
+    expect(note).toHaveAttribute('data-tone', 'warn')
+    // Not the user's mistake — the sentence that has to be there.
+    expect(note).toHaveTextContent(/a gap in the library rather than anything you did/)
+    // The consequence, and something to do about it.
+    expect(note).toHaveTextContent(/nothing to lock to and will not stay upright/)
+    expect(note).toHaveTextContent(/pair each one with a base you already own/)
+    expect(note?.closest('details')).toBeNull()
+  })
+
+  it('tells a user with an unsupportable shape that it is geometry, not a gap', () => {
+    render(<GapHarness tiles={['strip']} />)
+
+    const note = screen.getByText(/1 piece has a shape no base is built to carry/).closest('.of-bill-note')
+    expect(note).toHaveAttribute('data-tone', 'warn')
+    // The distinction from the case above, in as many words: nobody should go
+    // looking for a base that cannot exist.
+    expect(note).toHaveTextContent(/this is geometry, not an omission/)
+    expect(note).toHaveTextContent(/the narrowest base in the archive is a full unit wide/)
+    expect(note).toHaveTextContent(/print them standalone/)
+    expect(note?.closest('details')).toBeNull()
+  })
+
+  it('tells a user with nothing to match on that the tile, not the archive, is silent', () => {
+    render(<GapHarness tiles={['shapeless']} />)
+
+    const note = screen.getByText(/1 piece gives nothing to match a base on/).closest('.of-bill-note')
+    expect(note).toHaveAttribute('data-tone', 'warn')
+    expect(note).toHaveTextContent(/no key to search bases by/)
+    // Which is the opposite advice to the geometry case: the base may well exist.
+    expect(note).toHaveTextContent(/A base for these probably does exist/)
+    expect(note?.closest('details')).toBeNull()
+  })
+
+  it('renders the three causes as three separate warnings, never as one', () => {
+    render(<GapHarness tiles={['wallNoBase', 'strip', 'shapeless']} />)
+
+    const shown = warnings()
+    expect(shown).toHaveLength(3)
+    // Three distinct headlines and three distinct bodies — the defect this row
+    // fixes is one sentence standing in for all three.
+    expect(new Set(shown).size).toBe(3)
+    expect(shown.join(' ')).toMatch(/no base in the archive/)
+    expect(shown.join(' ')).toMatch(/a shape no base is built to carry/)
+    expect(shown.join(' ')).toMatch(/gives nothing to match a base on/)
+  })
+
+  it('names the print option when the base handed out is not the plain one', () => {
+    render(<GapHarness tiles={['toplessTopper']} />)
+
+    // The base *was* inserted, so this is not a gap — it is the disclosure D1
+    // left the code for: what you print is a different product.
+    const note = screen.getByText(/1 matched base is a print variant, not the plain base/).closest('.of-bill-note')
+    expect(note).toHaveAttribute('data-tone', 'warn')
+    expect(note).toHaveTextContent(/topless — has no top surface at all/)
+    // Both causes, distinguished: `option` ranks directly below `lock` and above
+    // everything else, so either the archive has nothing plainer or the lock beat
+    // it — and only the second one has a lever. Saying only the second would be a
+    // false promise on this very fixture, where the topless print is the only `T`
+    // base there is.
+    expect(note).toHaveTextContent(/the archive holds no plainer print of this base/)
+    expect(note).toHaveTextContent(/changing the lock preference gets the full base back; in the first, nothing will/)
+
+    // Two lines in the bill, one of them the base nobody placed.
+    expect(screen.getByText(/2 parts to print/)).toBeInTheDocument()
+    expect(screen.getByText(GAP_NAMES.toplessBase)).toBeInTheDocument()
+  })
+
+  it('keeps the option disclosure out of the way when the plain base wins', () => {
+    render(<GapHarness tiles={['floor2']} />)
+
+    expect(screen.queryByText(/print variant/)).toBeNull()
+    expect(warnings()).toHaveLength(0)
+  })
+})
+
 /* ------------------------------------------------------------- the download */
 
 /**

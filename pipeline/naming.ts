@@ -120,14 +120,20 @@ function sizeWords(tags: readonly string[], foot: Footprint): string[] {
 }
 
 /**
- * The size a tile is *labelled* with, for the 1,144 tiles whose footprint is
+ * The size a tile is *labelled* with, for the 741 tiles whose footprint is
  * `none`.
  *
  * §2 is explicit that the size tags are design-family labels rather than mesh
  * measurements, which is exactly why they must not reach `Footprint` — and
- * exactly why they belong in a *name*, which is a label. Without this, all 80
- * `plain#base+curved` files are called "Plain Curved Base" and the 2x2 is
- * indistinguishable from the 8x8; with it they read "Plain Curved Base 2x2".
+ * exactly why they belong in a *name*, which is a label.
+ *
+ * Row W3 shrank what this serves without changing why it exists. A curve with a
+ * trusted width/depth pair now gets that pair as its footprint, so `sizeToken`
+ * supplies its token and this is never reached; what is left is the 283
+ * `size|segment` fragments, whose pair names the *whole* design and so is a label
+ * in the strongest sense. Without it, the 40 `plain#base+curved.6x6+a/b/c` files
+ * read "Plain Curved Base A" and the 6x6 family is indistinguishable from the
+ * 8x8; with it they read "Plain Curved Base 6x6 A".
  *
  * `120°` is the last resort for the hex corners, whose only tagged dimension is
  * a sweep. The degree sign matches the corpus's own filenames and the search

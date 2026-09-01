@@ -23,20 +23,25 @@
  * fabricated measurement in mono type next to three real ones. `corpus.test.ts`
  * asserts the 21.0% so the fallback rate stays a measured fact.
  *
- * ## Footprint is a union, and only 35.1% of it is a `W×D`
+ * ## Footprint is a union, and only 39.7% of it is a `W×D`
  *
- * `CatalogRecord.foot` is `rect` (35.1%) / `wall` (35.8%) / `arc` (16.0%) /
- * `none` (13.1%). {@link footprintLabel} is a six-tier cascade, and every tier
+ * `CatalogRecord.foot` is `rect` (39.7%) / `wall` (35.8%) / `arc` (16.0%) /
+ * `none` (8.5%). {@link footprintLabel} is a six-tier cascade, and every tier
  * reports which one it came from so the cell can name its own provenance:
  *
  * | tier | label            | source                                  | live tiles |
  * | ---- | ---------------- | --------------------------------------- | ---------- |
- * | 1    | `1 × 1`          | `rect` — tagged width and depth          | 35.1%      |
+ * | 1    | `1 × 1`          | `rect` — tagged width and depth          | 39.7%      |
  * | 2    | `2 × 0.5`        | `wall` — tagged length × measured 12.7mm | 35.8%      |
  * | 3    | `2r 90°`         | `arc` — radius and sweep                 | 16.0%      |
- * | 4    | `OpenLOCK D`     | `size|openlock`, when there is no shape  | 2.6%       |
- * | 5    | `Curved`         | a geometry word from `shape|…`           | 8.1%       |
- * | 6    | `Size not specified` | nothing to go on                     | 2.4%       |
+ * | 4    | `OpenLOCK D`     | `size|openlock`, when there is no shape  | 1.9%       |
+ * | 5    | `Curved`         | a geometry word from `shape|…`           | 4.6%       |
+ * | 6    | `Size not specified` | nothing to go on                     | 2.1%       |
+ *
+ * Row W3 moved 403 tiles from tier 5 / tier 4 / tier 6 up into tier 1: a curve
+ * marker no longer vetoes a tagged width/depth pair, because the mesh honours
+ * that pair wherever the tile is not one lettered `size|segment` of a larger
+ * design. Tiers 4 to 6 lost 62, 310 and 31 tiles respectively.
  *
  * Tier 2 is the one deliberate addition to the cascade the brief specified. A
  * `wall` footprint has a real tagged length and no depth field at all, because
@@ -48,7 +53,9 @@
  * reader stating the constant it uses to place the tile.
  *
  * Tier 5's vocabulary is ordered, and the order is load-bearing for the measured
- * coverage above: a tile carrying both `hex` and `curved` resolves to `hex`.
+ * coverage above: a tile carrying both `hex` and `curved` resolves to `hex`. This
+ * is a *word for a human*, not a footprint, so it is unaffected by W3's finding
+ * that `hex` is not a curve — the 56 hex tiles reach tier 5 either way.
  */
 import type { CatalogAssets, CatalogRecord } from '@/catalog'
 import { WALL_THICKNESS_MM, WALL_THICKNESS_UNITS, shardedPath } from '@/catalog'

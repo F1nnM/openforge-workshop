@@ -75,24 +75,30 @@ const heights = records.map((record) => heightLabel(tagsOf(record)))
 describeCorpus('footprint cascade over the live corpus', () => {
   it('covers every tile, with the documented tier distribution', () => {
     expect(records).toHaveLength(8702)
+    // Row W3 moved 403 tiles into tier 1. `rect` went 3,051 → 3,454 and the three
+    // fallback tiers gave up exactly those 403: `size-code` 223 → 161 (the 62
+    // `IL+corner` cells, which are measured 1.000 × 1.000 and were being labelled
+    // by their code because a `concave`/`convex` *corner sense* was read as a
+    // curve), `shape-word` 709 → 399, `unspecified` 212 → 181. `wall` and `arc`
+    // are untouched, which is the check that W3 stayed inside its own bucket.
     expect(tally(footprints.map((value) => value.basis))).toEqual({
-      rect: 3051,
+      rect: 3454,
       wall: 3116,
       arc: 1391,
-      'size-code': 223,
-      'shape-word': 709,
-      unspecified: 212,
+      'size-code': 161,
+      'shape-word': 399,
+      unspecified: 181,
     })
   })
 
-  it('is a printable dimension for 86.9% of the corpus', () => {
+  it('is a printable dimension for 91.5% of the corpus', () => {
     const dimensioned = footprints.filter(
       (value) => value.basis === 'rect' || value.basis === 'wall' || value.basis === 'arc',
     ).length
-    expect(dimensioned / records.length).toBeCloseTo(0.869, 3)
-    // The contract's own figure: a `W × D` alone reaches only a third.
+    expect(dimensioned / records.length).toBeCloseTo(0.915, 3)
+    // The contract's own figure: a `W × D` alone reaches only two fifths.
     const rects = footprints.filter((value) => value.basis === 'rect').length
-    expect(rects / records.length).toBeCloseTo(0.351, 3)
+    expect(rects / records.length).toBeCloseTo(0.397, 3)
   })
 
   it('never renders a blank, and refuses explicitly where it must', () => {

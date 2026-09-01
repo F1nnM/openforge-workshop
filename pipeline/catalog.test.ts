@@ -32,6 +32,7 @@ import { CONNECTION_POSITIONS, classifyLayer, connectionSystems, connectionsByPo
 import type { FixtureRow } from './fixtures'
 import { fixturesDir, liveRows, loadFixtureRows } from './fixtures'
 import { emptyManifest } from './ordinals'
+import { CURVE_TAG_SEGMENTS, NON_CURVE_TAG_SEGMENTS } from './tessellation'
 import { SIZE_BUDGET_BYTES } from './version'
 
 const FIXTURES_DIR = fixturesDir()
@@ -64,6 +65,17 @@ describeCorpus(title, () => {
     builtAt: BUILT_AT,
   })
   const json = serialiseCatalog(result.file)
+
+  /**
+   * Every record's footprint case, keyed by the *fixture row's* path.
+   *
+   * `record.id` is a branded `TileId` and `file_metadata.full_name` is a plain
+   * string, so the map is declared over `string` once here rather than cast at
+   * every lookup. Four of the footprint tests below need the join.
+   */
+  const shapeByPath = new Map<string, string>(
+    result.file.records.map((record) => [record.id, record.foot.shape]),
+  )
 
   /* ------------------------------------------------------------ the contract */
 
@@ -125,12 +137,21 @@ describeCorpus(title, () => {
   /* ------------------------------------------------ cross-check: the oracle */
 
   describe('matches docs/verify-catalog-facts.py', () => {
-    it('agrees on the corpus size', () => {
-      const facts = verifyFacts()
-      expect(result.stats.fixtureRows).toBe(leading(facts, 'total fixture rows'))
-      expect(result.stats.deprecated).toBe(leading(facts, 'deprecated'))
-      expect(result.stats.records).toBe(leading(facts, 'live tiles'))
-    })
+    it(
+      'agrees on the corpus size',
+      () => {
+        const facts = verifyFacts()
+        expect(result.stats.fixtureRows).toBe(leading(facts, 'total fixture rows'))
+        expect(result.stats.deprecated).toBe(leading(facts, 'deprecated'))
+        expect(result.stats.records).toBe(leading(facts, 'live tiles'))
+      },
+      // This is the test that pays for the whole `describe` block: `verifyFacts`
+      // is memoised, so the first caller runs the Python oracle over all 8,721
+      // fixture rows as a subprocess. That is ~2.5 s alone, and under the rest of
+      // the suite it crossed the 5 s default and failed as a timeout rather than
+      // as a disagreement.
+      SLOW_MS,
+    )
 
     it('agrees on all four footprint counts', () => {
       const facts = verifyFacts()
@@ -138,6 +159,114 @@ describeCorpus(title, () => {
       expect(result.stats.footprints.wall).toBe(leading(facts, 'footprint WALL_SEG'))
       expect(result.stats.footprints.arc).toBe(leading(facts, 'footprint ARC'))
       expect(result.stats.footprints.none).toBe(leading(facts, 'footprint NONE'))
+
+      // W3's movement, pinned so it cannot drift back. 403 tiles left NONE for
+      // RECT and nothing else moved: WALL and ARC are untouched, which is what
+      // makes DEFAULT_ARC_SWEEP_DEG's reach W1's and W4's problem and not this
+      // row's. The literals are the only ones in this block, because they are
+      // the claim the row is accountable for.
+      expect(result.stats.footprints.rect).toBe(3_454)
+      expect(result.stats.footprints.wall).toBe(3_116)
+      expect(result.stats.footprints.arc).toBe(1_391)
+      expect(result.stats.footprints.none).toBe(741)
+      const covered = result.stats.records - (result.stats.footprints.none ?? 0)
+      expect(((100 * covered) / result.stats.records).toFixed(1)).toBe('91.5')
+    })
+
+    it('agrees that the only curve markers the substring scan added were hex', () => {
+      // The claim `footprint.ts` used to make and decline to test: that making
+      // the scan segment-exact "would move the NONE bucket". It moves nothing.
+      // Both scans are computed here rather than imported, so a change to
+      // `hasCurveMarker` cannot make this test agree with itself.
+      const facts = verifyFacts()
+      const markers = [...CURVE_TAG_SEGMENTS, ...NON_CURVE_TAG_SEGMENTS]
+      const substring = live.filter((row) => {
+        const joined = row.tags.join(' ')
+        return markers.some((marker) => joined.includes(marker))
+      })
+      const segmentExact = live.filter((row) =>
+        row.tags.some((tag) => tag.split('|').some((seg) => CURVE_TAG_SEGMENTS.includes(seg))),
+      )
+      const falsePositives = substring.filter((row) => !segmentExact.includes(row))
+
+      expect(segmentExact).toHaveLength(leading(facts, 'curve-marked \u00b7 segment scan'))
+      expect(substring).toHaveLength(leading(facts, 'curve-marked \u00b7 substring scan'))
+      expect(falsePositives).toHaveLength(leading(facts, 'curve marker false positives'))
+      // Every one of them is a hex tile, and every one of them still has no
+      // footprint — because it carries no size tag, not because a hex is a curve.
+      expect(
+        falsePositives.every((row) =>
+          row.tags.some((tag) => tag.split('|').some((seg) => NON_CURVE_TAG_SEGMENTS.includes(seg))),
+        ),
+      ).toBe(true)
+      expect(falsePositives).toHaveLength(56)
+      expect(
+        falsePositives.every((row) => shapeByPath.get(row.file_metadata.full_name) === 'none'),
+      ).toBe(true)
+    })
+
+    it('agrees on the fragments it refuses and the sectors it approximates', () => {
+      const facts = verifyFacts()
+      const fragments = live.filter((row) => row.tags.some((tag) => tag.startsWith('size|segment|')))
+      const shapeOf = (row: FixtureRow) => shapeByPath.get(row.file_metadata.full_name)
+
+      // A fragment's width/depth pair names the design it is one lettered piece
+      // of, so there is nothing to place. `8x8+b` measures 4.000 x 4.000 in one
+      // design and 2.079 x 1.931 in another, so it is not derivable either.
+      expect(fragments).toHaveLength(leading(facts, 'size|segment fragments'))
+      expect(fragments.filter((row) => shapeOf(row) === 'arc')).toHaveLength(
+        leading(facts, 'fragments \u00b7 radius wins'),
+      )
+      expect(fragments.filter((row) => shapeOf(row) === 'none')).toHaveLength(
+        leading(facts, 'fragments \u00b7 vetoed to NONE'),
+      )
+      // A fragment is arc or none. Never rect, never wall.
+      expect(fragments.filter((row) => shapeOf(row) === 'rect' || shapeOf(row) === 'wall')).toEqual([])
+
+      // The 403 movers, and the honest label on them: a curve-marked RECT is an
+      // axis-aligned over-approximation of an annular sector. W5 reshapes it.
+      const curvedRects = live.filter(
+        (row) =>
+          shapeOf(row) === 'rect' &&
+          row.tags.some((tag) => tag.split('|').some((seg) => CURVE_TAG_SEGMENTS.includes(seg))),
+      )
+      expect(curvedRects).toHaveLength(leading(facts, 'RECT that is really a sector'))
+      expect(curvedRects).toHaveLength(403)
+    })
+
+    it('agrees on what is left in NONE, and whose row can move it', () => {
+      const facts = verifyFacts()
+      const stranded = live.filter((row) => shapeByPath.get(row.file_metadata.full_name) === 'none')
+      const coded = stranded.filter((row) => row.tags.some((tag) => tag.startsWith('size|openlock|')))
+      const fragments = stranded.filter((row) => row.tags.some((tag) => tag.startsWith('size|segment|')))
+      const neither = stranded.filter((row) => !coded.includes(row) && !fragments.includes(row))
+
+      expect(stranded).toHaveLength(leading(facts, 'footprint NONE'))
+      expect(coded).toHaveLength(leading(facts, 'NONE \u00b7 carries a tessellation code'))
+      expect(fragments).toHaveLength(leading(facts, 'NONE \u00b7 a fragment'))
+      expect(neither).toHaveLength(leading(facts, 'NONE \u00b7 no code, no fragment letter'))
+      // The three are disjoint and exhaustive: no NONE tile carries both a code
+      // and a fragment letter, so the breakdown is a partition and W1's and W4's
+      // shares of the remaining 741 do not overlap.
+      expect(coded.filter((row) => fragments.includes(row))).toEqual([])
+      expect(coded.length + fragments.length + neither.length).toBe(stranded.length)
+      expect(coded).toHaveLength(161)
+      expect(fragments).toHaveLength(283)
+    })
+
+    it('agrees that W3 did not change how many arcs get a fabricated sweep', () => {
+      // `DEFAULT_ARC_SWEEP_DEG` invents 90 degrees for every arc with no
+      // `size|angle`. W3 moves nothing into or out of ARC, so the count it
+      // reaches must be exactly what it was: 165. W1 measures them, W4 settles
+      // them, and this asserts that neither inherits a moved target.
+      const facts = verifyFacts()
+      const fabricated = live.filter(
+        (row) =>
+          !row.tags.some((tag) => tag.startsWith('size|angle|')) &&
+          row.tags.some((tag) => tag.startsWith('size|radius|')),
+      )
+      expect(fabricated).toHaveLength(leading(facts, 'ARC with no size|angle'))
+      expect(fabricated).toHaveLength(165)
     })
 
     it('agrees on the connection vocabulary, position segment and all', () => {
@@ -483,7 +612,7 @@ function runVerifyScript(): ReadonlyMap<string, string> {
   return facts
 }
 
-/** The leading integer of a cell like `3051 (35.1%)`. */
+/** The leading integer of a cell like `3454 (39.7%)`. */
 function leading(facts: ReadonlyMap<string, string>, fact: string): number {
   const value = facts.get(fact)
   if (value === undefined) throw new Error(`verify-catalog-facts.py did not report "${fact}"`)

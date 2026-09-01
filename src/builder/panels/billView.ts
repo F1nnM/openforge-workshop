@@ -19,7 +19,7 @@
  *      ("no base in the catalog carries size code Q, so … has no base to sit
  *      on"). A panel showing one entry per code with a count needs a sentence
  *      about the *class* of problem, and — for the three that matter — what the
- *      user should do about it. 594 openforge toppers in the live corpus have no
+ *      user should do about it. 385 openforge toppers in the live corpus have no
  *      base the archive can supply, in three distinct categories with three
  *      different remedies; a panel that folded them into "some warnings" would
  *      hand somebody a wall that cannot stand.
@@ -157,12 +157,32 @@ export interface NoteCopy {
  * what tells a user whether they have hit a gap in the archive or a gap in the
  * tile's metadata — those have different remedies, which is why the resolver
  * emits three codes instead of one.
+ *
+ * The split is **129 / 21 / 235** over 4,363 toppers, measured identically under
+ * every lock preference and under none, so each sentence below is written to say
+ * which of the three a reader has hit and whose problem it is:
+ *
+ *   - `no-matching-base` — **the library is missing a base it should have.** The
+ *     one sentence that must never read as user error. `docs/corpus-base-gap.md`
+ *     enumerates all 129 for whoever fixes the archive.
+ *   - `no-congruent-base` — **no base can carry this shape.** Geometry: 17 are
+ *     half a unit wide against a base range that starts at one unit, and the
+ *     copy says so, because "a gap in the range" would send someone looking for
+ *     a base that cannot exist.
+ *   - `base-unmatchable` — **the tile publishes no key.** The base may well be
+ *     in the archive; nothing joins it to this tile.
+ *
+ * **Two figures below moved together, and W3 updated both:** the 235 here and
+ * the 741 in `no-footprint` are the same `foot.shape === 'none'` population, and
+ * row W3 reclassified 403 tiles out of it — 444 → 235 and 1,144 → 741. Nothing
+ * else in this function depends on the footprint classifier.
  */
 export function noteCopy(note: BillNote): NoteCopy {
   const n = countLabel(note.count)
   const pieces = note.count === 1 ? 'piece' : 'pieces'
   const has = note.count === 1 ? 'has' : 'have'
   const is = note.count === 1 ? 'is' : 'are'
+  const give = note.count === 1 ? 'gives' : 'give'
   const base = { code: note.code, severity: note.severity }
 
   switch (note.code) {
@@ -180,29 +200,31 @@ export function noteCopy(note: BillNote): NoteCopy {
         ...base,
         headline: `${n} ${pieces} ${has} no base in the archive`,
         detail:
-          'These mount on a separate base and carry a size code no base in the catalog answers to — 129 tiles ' +
-          'corpus-wide are in this position. Printed as they stand they have nothing to lock to and will not ' +
-          'stay upright. Swap them for a piece with an integral base, or supply your own.',
+          'These mount on a separate base and carry a size code no base in the catalog answers to. That is a gap ' +
+          'in the library rather than anything you did — nine size codes are affected, over 129 tiles ' +
+          'corpus-wide. Printed as they stand they have nothing to lock to and will not stay upright, so pair ' +
+          'each one with a base you already own, or swap it for a piece with an integral base.',
       }
 
     case 'no-congruent-base':
       return {
         ...base,
-        headline: `${n} ${pieces} ${has} a footprint no base supports`,
+        headline: `${n} ${pieces} ${has} a shape no base is built to carry`,
         detail:
-          'A base was looked for by shape and none is congruent. All 21 corpus tiles in this state are thin ' +
-          'strips, which nothing in the archive is built to carry: this is a gap in the base range, not a ' +
-          'mistake in your build.',
+          'A base was looked for by shape and none is congruent — this is geometry, not an omission. 17 of the 21 ' +
+          'corpus tiles in this state are half-unit strips, risers and stairs, and the narrowest base in the ' +
+          'archive is a full unit wide; the other four are 2×6 slabs in a range that holds 2×4 and 2×8. Nothing ' +
+          'can sit under one, so print them standalone and expect no joint along that edge.',
       }
 
     case 'base-unmatchable':
       return {
         ...base,
-        headline: `${n} ${pieces} give nothing to match a base on`,
+        headline: `${n} ${pieces} ${give} nothing to match a base on`,
         detail:
-          'Neither a size code nor a derivable footprint, so the resolver has no key to search bases by — 444 ' +
-          'corpus tiles are like this. The base these need may well exist; the tile does not say which. Check the ' +
-          'design notes before printing.',
+          'Neither a size code nor a derivable footprint, so there is no key to search bases by — 235 corpus ' +
+          'tiles are in this position, and it is the same missing shape that keeps them off the plan view. A ' +
+          'base for these probably does exist; the tile does not say which. Expect to choose it yourself.',
       }
 
     case 'base-auto-inserted':
@@ -212,6 +234,18 @@ export function noteCopy(note: BillNote): NoteCopy {
         detail:
           'Every OpenForge topper delegates its joinery to a base, so the base is a line item whether or not it ' +
           'was placed. The rows below mark which files those are.',
+      }
+
+    case 'base-option-chosen':
+      return {
+        ...base,
+        headline: `${n} matched ${note.count === 1 ? 'base is a print variant' : 'bases are print variants'}, not the plain base`,
+        detail:
+          'A base is published in up to three prints of the same part, and one of them — topless — has no top ' +
+          'surface at all. Two things can put a variant here and they are not the same: the archive holds no ' +
+          'plainer print of this base, or it does and every one of them is missing your lock system. Only the ' +
+          'lock outranks the print option, so in the second case changing the lock preference gets the full base ' +
+          'back; in the first, nothing will.',
       }
 
     case 'base-lock-mismatch':
@@ -247,7 +281,7 @@ export function noteCopy(note: BillNote): NoteCopy {
         headline: `${n} ${pieces} cannot be drawn in plan view`,
         detail:
           'The tile is in the bill and will be downloaded. It has no footprint the plan view can derive, so it ' +
-          'has no shape on the grid — 1,144 corpus tiles are in this state.',
+          'has no shape on the grid — 741 corpus tiles are in this state.',
       }
 
     case 'insert-on-grid':
