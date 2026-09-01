@@ -1,0 +1,17 @@
+# Results. Reproducible from a run; the numbers that matter are quoted in the PR
+# body, not carried here.
+out/
+
+# A hand-managed engine, if somebody puts one here rather than in the cache
+# directory `engine.ts` documents (`node_modules/.cache/scad-bench/engines`).
+#
+# Row S2 measures how long OpenSCAD takes. It does not ship OpenSCAD. Blocker B4
+# — the legal read on bundling the GPL-2 WASM engine *inside the app* — is S3's
+# to answer, and nothing here may pre-empt it: no engine enters git, the shipped
+# bundle, `vendor/` or `src/`. `engine.ts` resolves one from the cache directory,
+# from here, from $OPENSCAD / $OPENSCAD_WASM, or from PATH, and fails loudly when
+# there is none.
+#
+# Prefer the cache directory: the WASM glue is a 14 MB minified .cjs and ESLint
+# globs `**/*.cjs` outside its ignore list, which includes this path.
+.engines/
