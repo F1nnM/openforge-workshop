@@ -1,0 +1,161 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the plan-view builder canvas.
+
+   Hand-written rather than Tailwind utilities, for the reason set out at the top
+   of `../../ui/shell/shell.css`: the numbers here are measurements from
+   design-contract.md §2.4 and from what the drawing needs, not roundings, and
+   written as utilities they would all look equally arbitrary.
+
+   Unlayered, same as the rest of the app's own CSS: this file arrives through a
+   JS import while Tailwind's Preflight arrives through `src/index.css`, and
+   unlayered CSS beats every layer regardless of source order.
+
+   ── Three things to know before editing ────────────────────────────────────
+
+   **No colour literals.** Every colour is a Parchment token (`../../tokens/
+   tokens.css`) or comes from the material registry through an inline `fill` /
+   `stroke` attribute. A hex here would be a fourth source of colour after the
+   tokens, the registry and the mock.
+
+   **Line weights live in the JSX, not here.** Every stroke on the drawing
+   carries `vector-effect="non-scaling-stroke"` so it stays constant through a
+   zoom; putting a `stroke-width` in CSS would silently be overridden by the
+   attribute on the element, or worse, half-override it.
+
+   **`touch-action: none` is load-bearing.** Without it a touch drag scrolls the
+   page instead of panning the plan, and `setPointerCapture` never sees the move
+   events.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-plan-canvas {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  /* The viewport well, one step darker than the page — the ground the material
+     palette's 3:1 contours are calibrated against. */
+  background: var(--bg3);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.of-plan-canvas[data-tool='erase'] {
+  cursor: cell;
+}
+
+/* A canvas that takes the arrow keys must show that it has them. Not
+   `:focus-visible`: this element is focused by a click as well as by Tab, and
+   after a click the keys are live, so hiding the ring would be a lie. */
+.of-plan-canvas:focus {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+}
+
+.of-plan-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.of-plan-grid {
+  /* The pattern carries the ink; this only keeps the rect from inheriting one. */
+  color: var(--line);
+}
+
+/* The world origin. Stronger than a grid line so there is an absolute reference
+   for the announced coordinates, weaker than a contour so it never reads as a
+   placed piece. */
+.of-plan-axes {
+  stroke: var(--mut);
+  opacity: 0.45;
+}
+
+.of-plan-caret {
+  stroke: var(--ink);
+  opacity: 0.7;
+}
+
+/* ── Corner plates (§2.4) ────────────────────────────────────────────────────
+   "Both sit on translucent plates and are pointer-transparent." Pointer
+   transparency is not decoration: the plates sit over the drawing, and a hint
+   string that swallowed a click would eat the bottom-left corner of the room.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-plan-plate {
+  position: absolute;
+  bottom: 12px;
+  max-width: 46ch;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg2) 88%, transparent);
+  color: var(--mut);
+  font-family: var(--face-body);
+  font-size: 12.5px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.of-plan-hint {
+  left: 12px;
+}
+
+.of-plan-armed {
+  right: 12px;
+  color: var(--ink);
+  text-align: right;
+}
+
+.of-plan-readout {
+  display: block;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* ── The key map, and the live region ────────────────────────────────────────
+   Both are clipped rather than `display: none`, which would take them out of the
+   accessibility tree as well as out of the layout — and the whole point of them
+   is to be in it. The key map surfaces on `[data-keys='on']`, which
+   `PlanCanvas.tsx` sets when the canvas is reached from the keyboard or a key is
+   pressed — deliberately not on `:focus-visible`, which Chromium grants to the
+   programmatic focus this canvas takes on `pointerdown`, and which therefore put
+   the plate over the drawing after every single click.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-plan-keys,
+.of-plan-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.of-plan-canvas[data-keys='on'] .of-plan-keys {
+  top: 12px;
+  left: 50%;
+  width: min(52ch, calc(100% - 24px));
+  height: auto;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: visible;
+  clip-path: none;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg2) 94%, transparent);
+  color: var(--ink);
+  font-family: var(--face-body);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: normal;
+}
