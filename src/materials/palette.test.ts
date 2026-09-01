@@ -12,6 +12,10 @@
  * 40% of the way to a collision and still pass; pinning to ±0.02 fails on any
  * edit at all, and the failure message says which pair moved.
  *
+ * The sprite Phong triples and the silhouette contours are re-derived too, from
+ * the same `tint` and the rules stated in `palette.ts`. Every hex in that file
+ * except the sixteen tints is now a computed value with a test behind it.
+ *
  * Grounds and accents are asserted to be exactly the `@/tokens` values. Reading
  * them from the tokens module rather than `getComputedStyle` is deliberate: PR 2
  * measured that Lightning CSS rewrites the `rgba()` tokens to eight-digit hex,
@@ -141,21 +145,21 @@ describe('derived scalars re-derive', () => {
 })
 
 describe('separation between families', () => {
-  it('clears 9.0 ΔE00 under normal vision, at the measured 9.211', () => {
+  it('clears 9.0 ΔE00 under normal vision, at the measured 9.934', () => {
     const { distance, pair } = worstPair('normal')
-    expect(pair).toBe('cut_stone/plain')
+    expect(pair).toBe('plain/rough_stone')
     expect(distance).toBeGreaterThanOrEqual(PALETTE_INVARIANTS.minPairwise)
-    expect(distance).toBeCloseTo(9.211, 2)
+    expect(distance).toBeCloseTo(9.934, 2)
   })
 
   it('holds its floor under all three dichromacies, at the measured minima', () => {
-    // Pinned, not merely bounded — see this file's header. The deuteranopia row
-    // is 0.136 short of the 9.0 design target; `palette.ts` records why that is
-    // left standing rather than papered over or re-solved.
+    // Pinned, not merely bounded — see this file's header. All three clear the
+    // 9.0 design target; the pre-P2 palette measured 8.864 under deuteranopia,
+    // and `palette.ts` records the re-solve that closed it.
     const measured: Readonly<Record<string, readonly [number, string]>> = {
-      protanopia: [9.041, 'stucco/water'],
-      deuteranopia: [8.864, 'cut_stone/necro'],
-      tritanopia: [9.043, 'rough_stone/sewer'],
+      protanopia: [9.787, 'rough_stone/brick'],
+      deuteranopia: [9.807, 'plain/rough_stone'],
+      tritanopia: [9.9, 'rough_stone/sewer'],
     }
     for (const model of VISION_MODELS) {
       if (model === 'normal') continue
@@ -168,17 +172,20 @@ describe('separation between families', () => {
     }
   })
 
-  it('records the dichromacy shortfall honestly rather than claiming the target', () => {
-    // If a future palette edit closes the gap, this test fails and the invariant
-    // should be raised to the target. It exists so the gap cannot be forgotten.
+  it('meets the 9.0 dichromacy target the design pass aimed for', () => {
+    // The invariant IS the target now: the palette used to record an 8.8 floor
+    // and a 9.0 target it missed by 0.136, and P2 re-solved rather than leaving
+    // a documented exception in place. The floor and the target being one number
+    // is the whole point — a target stated separately from what is enforced is a
+    // target nothing defends.
     const worst = Math.min(
       ...VISION_MODELS.filter((model) => model !== 'normal').map((model) => worstPair(model).distance),
     )
-    expect(PALETTE_INVARIANTS.minPairwiseUnderCvd).toBeLessThan(
-      PALETTE_INVARIANTS.pairwiseTargetUnderCvd,
-    )
-    expect(worst).toBeLessThan(PALETTE_INVARIANTS.pairwiseTargetUnderCvd)
+    expect(PALETTE_INVARIANTS.minPairwiseUnderCvd).toBe(9.0)
     expect(worst).toBeGreaterThanOrEqual(PALETTE_INVARIANTS.minPairwiseUnderCvd)
+    // And it is met with room, not on the boundary, so an 8-bit rounding
+    // difference somewhere downstream cannot quietly reopen the gap.
+    expect(worst).toBeGreaterThan(9.7)
   })
 
   it('keeps every family clear of the parchment grounds and the UI accents', () => {
@@ -196,21 +203,122 @@ describe('separation between families', () => {
     }
   })
 
-  it('measures 12.34 to the nearest ground and 12.22 to the nearest accent', () => {
+  it('measures 12.06 to the nearest ground and 11.16 to the nearest accent', () => {
     const toGround = Math.min(
       ...families.flatMap((family) => grounds.map((g) => deltaE2000Hex(family.tint, g))),
     )
     const toAccent = Math.min(
       ...families.flatMap((family) => accents.map((a) => deltaE2000Hex(family.tint, a))),
     )
-    expect(toGround).toBeCloseTo(12.34, 2)
-    expect(toAccent).toBeCloseTo(12.22, 2)
+    expect(toGround).toBeCloseTo(12.064, 2)
+    expect(toAccent).toBeCloseTo(11.159, 2)
   })
 
   it('judges the palette against the real tokens, not a stale copy of them', () => {
     expect(grounds).toEqual([color.bg, color.bg2, color.bg3, color.chip])
     expect(accents).toEqual([color.acc, color.acc2])
     expect(well).toBe(color.bg3)
+  })
+})
+
+/**
+ * The sixteen tints `docs/texture-materials.draft.ts` shipped, before the P2
+ * re-solve. They are stated here — not imported from the draft, which is a
+ * design artefact and not part of the build — so the two claims the re-solve
+ * rests on are checkable: that no family's albedo moved by a perceptible
+ * amount, and that the semantic hue anchors held.
+ */
+const DRAFT_TINTS: Readonly<Record<MaterialId, string>> = {
+  dungeon_stone: '#6b7280',
+  cut_stone: '#8f8c81',
+  plain: '#76746c',
+  rough_stone: '#665d4e',
+  wood: '#593931',
+  stucco: '#8b9ba1',
+  aztlan: '#a97f62',
+  sandstone: '#b5a36d',
+  cave: '#4a526e',
+  brick: '#7c442b',
+  sewer: '#7f743c',
+  necro: '#a3a890',
+  water: '#518ea4',
+  metal: '#2f2f35',
+  ice: '#a3d0e3',
+  unknown: '#505050',
+}
+
+/** CIELAB hue, or null for a colour too achromatic for hue to mean anything. */
+function labHue(hex: string): number | null {
+  const [, a, b] = hexToLab(hex)
+  if (Math.hypot(a, b) < 5) return null
+  return ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360
+}
+
+describe('the re-solve stayed inside the design artefact', () => {
+  it('moves no family further than 1.5 ΔE00 from the draft it re-solved', () => {
+    // 1.5 is the low end of the 1.5–9 ΔE00 spread `palette.ts` measures between
+    // real stone albedos and calls sub-JND for a 25 px mark. Every family is
+    // inside it, so the palette gained 0.9 ΔE00 of separation under dichromacy
+    // without any family visibly changing colour.
+    for (const family of families) {
+      expect(deltaE2000Hex(family.tint, DRAFT_TINTS[family.id])).toBeLessThanOrEqual(1.5)
+    }
+    // And three are untouched, `dungeon_stone` because it is pinned: 3,082 live
+    // blueprints and `src/three/material.test.ts` asserts its hex.
+    expect(families.filter((f) => f.tint === DRAFT_TINTS[f.id]).map((f) => f.id)).toEqual([
+      'dungeon_stone',
+      'cave',
+      'ice',
+    ])
+  })
+
+  it('holds every semantic hue anchor, to within a third of a Munsell step', () => {
+    // Hue is the one axis taken from measurement rather than optimised, so the
+    // solve carried a hue window and this is it, measured. A Munsell hue family
+    // spans 36°; every chromatic family moved at most 3.2°.
+    for (const family of families) {
+      const before = labHue(DRAFT_TINTS[family.id])
+      const after = labHue(family.tint)
+      if (before === null || after === null) continue
+      let rotation = Math.abs(after - before)
+      if (rotation > 180) rotation = 360 - rotation
+      expect(rotation).toBeLessThanOrEqual(3.3)
+    }
+    // The three families excluded above are excluded because they have no hue
+    // to preserve: `plain` asserts nothing, `metal` is near-black, `unknown` is
+    // chroma-zero by construction. `plain` is the one that used its freedom,
+    // rotating 9.3° at C* 3.7.
+    expect(families.filter((f) => labHue(f.tint) === null).map((f) => f.id)).toEqual([
+      'plain',
+      'metal',
+      'unknown',
+    ])
+  })
+
+  it('keeps the value order the notes describe', () => {
+    const lightness = (id: MaterialId) => hexToLab(MATERIALS[id].tint)[0]
+    // `ice` is the only fill above L* 70 — it survives up there on hue distance
+    // from the parchment, not on value, and nothing else may follow it.
+    expect(families.filter((family) => lightness(family.id) > 70).map((family) => family.id)).toEqual(
+      ['ice'],
+    )
+    // `cave` is the darkest rock. (`brick` is fired clay, `wood` timber, `metal`
+    // iron, `unknown` no claim at all — none of them is stone.)
+    const rock: readonly MaterialId[] = [
+      'dungeon_stone',
+      'cut_stone',
+      'plain',
+      'rough_stone',
+      'stucco',
+      'aztlan',
+      'sandstone',
+      'sewer',
+      'necro',
+      'ice',
+    ]
+    for (const id of rock) {
+      expect(lightness('cave')).toBeLessThan(lightness(id))
+    }
   })
 })
 
@@ -239,20 +347,14 @@ describe('chroma and hue constraints', () => {
 })
 
 describe('the silhouette contour', () => {
-  it('derives every edge from its fill by the §9 rule, within a code point', () => {
-    // `oklch(min(0.36, L × 0.72), C × 0.70, H)`. Ten of the sixteen reproduce
-    // byte-exactly; the other six differ by 1/255 in one or two channels, which
-    // is a rounding convention in the design pass, not a different rule. The
-    // shipped literals are what the measured 7.14:1 minimum was taken on, so
-    // they stay authoritative and this asserts the rule that produced them.
+  it('derives every edge from its fill by the §9 rule, to the byte', () => {
+    // `oklch(min(0.36, L × 0.72), C × 0.70, H)`. The draft's contours were
+    // rounded by hand and six of the sixteen sat 1/255 off the rule; the P2
+    // re-solve regenerated all sixteen from the rule itself, so this is now an
+    // exact equality and the `edge` column has no authored digits left in it.
     for (const family of families) {
       const [lightness, chroma, hue] = family.oklch
-      const derived = oklchToHex(...contourOklch(lightness, chroma, hue))
-      const shipped = parseHex(family.edge).map((channel) => Math.round(channel * 255))
-      const computed = parseHex(derived).map((channel) => Math.round(channel * 255))
-      for (let channel = 0; channel < 3; channel += 1) {
-        expect(Math.abs((shipped[channel] ?? 0) - (computed[channel] ?? 0))).toBeLessThanOrEqual(1)
-      }
+      expect(oklchToHex(...contourOklch(lightness, chroma, hue))).toBe(family.edge)
     }
   })
 
@@ -262,7 +364,7 @@ describe('the silhouette contour', () => {
     }
   })
 
-  it('clears WCAG 1.4.11 against every parchment ground, at 7.14:1 on the well', () => {
+  it('clears WCAG 1.4.11 against every parchment ground, at 7.13:1 on the well', () => {
     let minimum = Number.POSITIVE_INFINITY
     for (const family of families) {
       for (const ground of grounds) {
@@ -271,11 +373,11 @@ describe('the silhouette contour', () => {
         minimum = Math.min(minimum, measured)
       }
     }
-    // 7.14 is the figure against `--bg3`, the well a tile is normally seen on,
+    // 7.13 is the figure against `--bg3`, the well a tile is normally seen on,
     // and it is the one §9 quotes. The darkest ground is `--chip`, where the
     // same contours measure 6.59 — still more than double the 3:1 obligation.
     const againstWell = Math.min(...families.map((family) => contrastRatio(family.edge, well)))
-    expect(againstWell).toBeCloseTo(7.14, 2)
+    expect(againstWell).toBeCloseTo(7.133, 2)
     expect(minimum).toBeCloseTo(6.59, 2)
   })
 
@@ -297,6 +399,35 @@ describe('the silhouette contour', () => {
 })
 
 describe('the sprite triples', () => {
+  it('solves ambient + 0.525 × diffuse back to the family’s own albedo', () => {
+    // The relation `palette.ts` documents, inverted: diffuse carries the lit
+    // term at 0.75 of the albedo, ambient carries the rest. Both are stated as
+    // 8-bit hex, so the sum is exact only to within the rounding of two
+    // channels — hence ±1/255 rather than equality. `sandstone` and `ice` clip
+    // the diffuse term at 255 and are the reason ambient is defined as the
+    // remainder rather than a fixed fraction of the tint.
+    const GAIN = 0.75 / 0.525
+    for (const family of families) {
+      const tint = parseHex(family.tint).map((channel) => Math.round(channel * 255))
+      const diffuse = parseHex(family.sprite.diffuse).map((channel) => Math.round(channel * 255))
+      const ambient = parseHex(family.sprite.ambient).map((channel) => Math.round(channel * 255))
+      for (let channel = 0; channel < 3; channel += 1) {
+        const value = tint[channel] ?? 0
+        expect(diffuse[channel]).toBe(Math.round(Math.min(255, value * GAIN)))
+        expect(ambient[channel]).toBe(Math.round(value - 0.525 * (diffuse[channel] ?? 0)))
+        const rebuilt = (ambient[channel] ?? 0) + 0.525 * (diffuse[channel] ?? 0)
+        expect(Math.abs(rebuilt - value)).toBeLessThanOrEqual(1)
+      }
+    }
+    // Two families clip, and they are the two lightest fills. Asserted so the
+    // clipping branch above stays a real case rather than dead defence.
+    expect(
+      families
+        .filter((family) => parseHex(family.sprite.diffuse).some((channel) => channel === 1))
+        .map((family) => family.id),
+    ).toEqual(['sandstone', 'ice'])
+  })
+
   it('gives every family a parseable Phong triple with one shared specular', () => {
     for (const family of families) {
       expect(() => parseHex(family.sprite.ambient)).not.toThrow()
