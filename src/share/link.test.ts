@@ -395,7 +395,7 @@ describe('damaged links never throw', () => {
       '#s=' + 'A'.repeat(10_000),
       '{"placements":[]}',
       'https://example.com/#s=nope!',
-      ' ',
+      '\u0000\u0001\u0002',
       '#'.repeat(500),
     ]
     for (const shape of shapes) {
