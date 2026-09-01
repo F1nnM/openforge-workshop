@@ -40,8 +40,14 @@ export function Chip({ tone = 'count', className, children }: ChipProps) {
 export interface EyebrowProps {
   /** `accent` for the landing hero's; muted everywhere else. */
   tone?: 'muted' | 'accent'
-  /** Render as something other than a `<span>` — usually `'div'`. */
-  as?: 'span' | 'div' | 'p'
+  /**
+   * Render as something other than a `<span>`.
+   *
+   * `'h2'` and `'h3'` are here because a group rule is a real heading, and
+   * `'dt'` because a figure label is a real definition term — rows 14 and 16
+   * both had to nest an Eyebrow inside one of those to keep the semantics.
+   */
+  as?: 'span' | 'div' | 'p' | 'h2' | 'h3' | 'dt'
   className?: string
   children: ReactNode
 }
