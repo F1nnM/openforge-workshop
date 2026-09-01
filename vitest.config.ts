@@ -12,6 +12,9 @@ export default defineConfig({
     // codec are all headless. Component tests opt in per file with a docblock:
     //   // @vitest-environment jsdom
     environment: 'node',
+    // Only loaded for suites that opt into jsdom; a node-environment suite
+    // importing @testing-library would fail on a missing document.
+    setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.{ts,tsx}', 'pipeline/**/*.test.ts'],
   },
 })

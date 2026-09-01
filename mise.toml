@@ -12,7 +12,7 @@
 # and on Node 20 npm silently resolves down to 4.86.0, violating the peer
 # without erroring. jsdom 30 pulls whatwg-url wanting >=22.14. Vite 8 alone
 # would run on 20.19, which is why a lower floor looks fine until it isn't.
-node = "22.21.1"
+node = "22.23.2"
 
 # docs/verify-catalog-facts.py re-derives every load-bearing number the
 # architecture plan quotes, and CI fails on a broken invariant.
