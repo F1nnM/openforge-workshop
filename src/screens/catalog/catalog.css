@@ -1,0 +1,536 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the catalog screen.
+
+   design-contract.md §2.2, transcribed. The load-bearing numbers are the
+   contract's own and are marked where they appear: a **238px** sidebar, a grid at
+   **repeat(auto-fill, minmax(215px, 1fr))** with a **16px** gap, and a search
+   input capped at **520px**.
+
+   Hand-written CSS rather than Tailwind utilities, following `../../ui/shell/
+   shell.css`: this file holds two things a utility string states badly — a fixed
+   transcription of measurements, and a set of invariants the virtualiser depends
+   on (see "Fixed card height" below). Unlayered, for the reason set out at the
+   top of that file.
+
+   ## Fixed card height is a correctness requirement
+
+   `VirtuosoGrid` measures one item and extrapolates to the whole list. Anything
+   that lets one card be taller than another makes the scrollbar wrong and the
+   grid jump when it corrects. Three rules below exist for that reason and must
+   not be relaxed without changing the virtualiser:
+
+     - `.of-card-title` is clamped to two lines at a fixed `height`, not
+       `max-height` — a one-line title still occupies two.
+     - `.of-thumb` has an `aspect-ratio`, so the well is the same size before and
+       after its image lands.
+     - `.of-card-texture` and `.of-card-meta` are single lines with no wrap.
+
+   Light only. There is no dark block, for the same reason there is none in
+   tokens.css: Parchment is the committed direction.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
+
+.of-catalog {
+  display: grid;
+  /* 238px is the contract's sidebar. `minmax(0, 1fr)` and not `1fr`: a grid
+     track's default `min-width: auto` would let the card grid's own minimum
+     widen the column and push the sidebar off. */
+  grid-template-columns: 238px minmax(0, 1fr);
+  gap: 26px;
+  padding: 22px 26px 48px;
+  align-items: start;
+}
+
+.of-catalog-results {
+  min-width: 0;
+}
+
+/* ── Facet sidebar ───────────────────────────────────────────────────────── */
+
+.of-facets {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  /* Sticky under the real header rather than under a repeated 60px. The frame
+     publishes `--of-header-h` for exactly this. */
+  position: sticky;
+  top: calc(var(--of-header-h) + 22px);
+  max-height: calc(100dvh - var(--of-header-h) - 44px);
+  overflow-y: auto;
+  /* Room for the focus ring on the rightmost pill in a wrapped row. */
+  padding-right: 4px;
+}
+
+.of-facet-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.of-facet-heading {
+  display: block;
+}
+
+.of-facet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-facet-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* The checkbox or radio fills its label and is transparent, so the whole pill is
+   the hit target and Space still toggles it. `appearance: none` removes the
+   native box; the ring is put back on the label by the `:has()` rule below. */
+.of-facet-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.of-facet-row,
+.of-facet-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mut);
+  cursor: pointer;
+  transition:
+    background-color 110ms ease,
+    border-color 110ms ease,
+    color 110ms ease;
+}
+
+.of-facet-row:has(.of-facet-input:focus-visible),
+.of-facet-pill:has(.of-facet-input:focus-visible) {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+/* ── Component rows ──────────────────────────────────────────────────────── */
+
+.of-facet-row {
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 7px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.of-facet-row:hover:not([data-empty]) {
+  background: var(--bg2);
+  color: var(--ink);
+}
+
+.of-facet-row[data-selected],
+.of-facet-all[aria-pressed='true'] {
+  background: var(--chip);
+  color: var(--ink);
+}
+
+.of-facet-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Texture / build / connection pills ──────────────────────────────────── */
+
+.of-facet-pill {
+  gap: 5px;
+  padding: 3px 8px 3px 9px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  font-size: 12px;
+}
+
+.of-facet-pill:hover:not([data-empty]) {
+  color: var(--ink);
+  border-color: var(--acc);
+}
+
+.of-facet-pill[data-selected] {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--accink);
+}
+
+/* The count chip's own fill would read as a hole punched in the accent. */
+.of-facet-pill[data-selected] .of-chip {
+  background: rgb(246 239 224 / 22%);
+  color: var(--accink);
+}
+
+/* A bucket the other facets have reduced to zero. Dimmed and inert rather than
+   removed: hiding it would reflow the sidebar on every keystroke, and a control
+   that vanishes cannot explain itself. */
+.of-facet-row[data-empty],
+.of-facet-pill[data-empty] {
+  opacity: 0.42;
+  cursor: default;
+}
+
+/* ── Sidebar actions ─────────────────────────────────────────────────────── */
+
+.of-facet-more {
+  align-self: flex-start;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--acc);
+  cursor: pointer;
+}
+
+.of-facet-more:hover {
+  text-decoration: underline;
+}
+
+.of-facet-clear {
+  align-self: flex-start;
+  padding: 6px 11px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--acc);
+  cursor: pointer;
+  transition: border-color 110ms ease;
+}
+
+.of-facet-clear:hover {
+  border-color: var(--acc);
+}
+
+/* ── Search row ──────────────────────────────────────────────────────────── */
+
+.of-catalog-search {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.of-search-input {
+  flex: 1 1 auto;
+  /* 520px — the contract's cap. */
+  max-width: 520px;
+  min-width: 0;
+  padding: 9px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 14px;
+}
+
+.of-search-input::placeholder {
+  color: var(--mut);
+  opacity: 0.85;
+}
+
+/* The live count. Mono, because it is a measured fact. */
+.of-result-count {
+  margin: 0;
+  flex: none;
+  font-family: var(--face-mono);
+  font-size: 11px;
+  color: var(--mut);
+  white-space: nowrap;
+}
+
+.of-result-total {
+  color: var(--ink);
+}
+
+/* ── Card grid ───────────────────────────────────────────────────────────── */
+
+.of-card-grid {
+  display: grid;
+  /* The contract's grid, verbatim. */
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 16px;
+}
+
+.of-card-cell {
+  min-width: 0;
+}
+
+.of-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 9px 9px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.of-card-open {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.of-card-open:hover {
+  text-decoration: none;
+}
+
+.of-card-open:hover .of-card-title {
+  color: var(--acc);
+}
+
+/* ── Thumbnail well ──────────────────────────────────────────────────────── */
+
+.of-thumb {
+  position: relative;
+  /* Reserved before the sheet lands, which is what keeps every card the same
+     height while images stream in. */
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  /* The contract's recurring device: a radial-gradient well behind every
+     thumbnail. */
+  background: radial-gradient(circle at 50% 38%, var(--bg2) 0%, var(--bg3) 66%, #d3c5a6 100%);
+}
+
+/* Square, so the 512px frame is never distorted, and the well's gradient stays
+   visible at the sides of a 4:3 card. */
+.of-thumb-frame {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+}
+
+/* The whole 2×5 sheet, scaled so one frame fills the square above, and offset to
+   the requested frame. Percentages on `left`/`top` resolve against the frame
+   box, so `-100%` is exactly one column or one row.
+
+   `max-width: none` is load-bearing, not defensive. Tailwind's Preflight sets
+   `img { max-width: 100% }`, which silently clamps the 500%-wide sheet back to
+   one frame's width and squeezes all ten camera angles into the well — the
+   thumbnail still renders, still has the right aspect ratio, and is wrong. */
+.of-thumb-sheet {
+  position: absolute;
+  left: var(--of-sheet-x, 0%);
+  top: var(--of-sheet-y, 0%);
+  width: calc(var(--of-sheet-cols, 1) * 100%);
+  height: calc(var(--of-sheet-rows, 1) * 100%);
+  max-width: none;
+  max-height: none;
+}
+
+.of-thumb-missing {
+  opacity: 0.72;
+}
+
+/* ── Card body ───────────────────────────────────────────────────────────── */
+
+.of-card-title {
+  margin: 7px 0 0;
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 14.5px;
+  line-height: 1.25;
+  /* Two lines, always — `height`, not `max-height`. See the header note. */
+  height: 2.5em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  transition: color 110ms ease;
+}
+
+.of-card-texture {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--mut);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The material the 3D views tint this mesh with (PR 8), as a dot beside the
+   texture set it resolved from. Supplementary — the set name is beside it, so
+   colour never carries anything on its own. */
+.of-card-swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 18%);
+}
+
+.of-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+}
+
+.of-card-bytes {
+  font-family: var(--face-mono);
+  font-size: 11px;
+  color: var(--mut);
+}
+
+/* ── Library toggle ──────────────────────────────────────────────────────── */
+
+.of-card-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: auto;
+  padding: 7px 8px;
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--mut);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition:
+    background-color 110ms ease,
+    border-color 110ms ease,
+    color 110ms ease;
+}
+
+.of-card-add:hover {
+  border-color: var(--acc);
+  color: var(--ink);
+}
+
+/* Verdigris, the contract's secondary accent — §1 gives it the role of the "in
+   library" confirmation. */
+.of-card-add[data-in-library] {
+  background: color-mix(in srgb, var(--acc2) 16%, transparent);
+  border-color: var(--acc2);
+  color: var(--acc2);
+}
+
+.of-card-add[data-in-library]:hover {
+  border-color: var(--acc2);
+  color: var(--acc2);
+}
+
+/* ── Pending ─────────────────────────────────────────────────────────────── */
+
+.of-card-pending .of-thumb {
+  background: var(--bg3);
+}
+
+.of-pending-line {
+  height: 10px;
+  border-radius: 3px;
+  background: var(--chip);
+}
+
+.of-pending-short {
+  width: 58%;
+}
+
+/* ── Empty and error states ──────────────────────────────────────────────── */
+
+.of-catalog-empty,
+.of-catalog-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 52px 0 64px;
+}
+
+.of-catalog-error {
+  grid-column: 1 / -1;
+  padding: 64px 0;
+}
+
+.of-empty-title {
+  margin: 0;
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.of-empty-note {
+  margin: 0;
+  max-width: 52ch;
+  font-size: 13.5px;
+  color: var(--mut);
+}
+
+.of-empty-clear {
+  margin-top: 8px;
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────────
+   The contract's catalog is a desktop two-column layout and does not specify a
+   phone treatment. Below the point where a 238px sidebar plus one 215px card no
+   longer fit, the sidebar stops being sticky and stacks above the grid — filters
+   first, which is the reading order the markup already has.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 700px) {
+  .of-catalog {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+    padding: 18px 16px 40px;
+  }
+
+  /* Capped with its own scroll rather than allowed to run the document's full
+     height. Stacked, the four groups come to roughly 1,000px, so an uncapped
+     sidebar puts the first tile a whole screen below the fold and a phone
+     visitor meets 35 filter controls before ever seeing a tile. */
+  .of-facets {
+    position: static;
+    max-height: 42dvh;
+    overflow-y: auto;
+  }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .of-facet-row,
+  .of-facet-pill,
+  .of-facet-clear,
+  .of-card-add,
+  .of-card-title {
+    transition: none;
+  }
+}
