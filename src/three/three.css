@@ -1,0 +1,173 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the gated 3D viewer (PR 21).
+
+   Sits inside the tile detail drawer, under the sprite well, so the well
+   geometry is transcribed from `../screens/detail/detail.css` rather than
+   invented: the same 288px height, the same
+   `radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg))` ground, the same
+   1px `--line` border and 6px radius. That matters beyond tidiness — the canvas
+   is drawn with a transparent buffer (`Stage.tsx`), so this gradient *is* the
+   background of the 3D scene, and the AO contour is tuned against it.
+
+   Unlayered, matching the rest of the app's CSS.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-3d-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* ── The refusal ─────────────────────────────────────────────────────────────
+   978 tiles (11.2%) are over the gate. This is the whole of their UI: a
+   sentence, on the same recessed plate the storage address uses, saying what the
+   size is and that the angles above are the preview. No disabled button. */
+.of-3d-refusal {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg3);
+  color: var(--mut);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* ── The action ──────────────────────────────────────────────────────────── */
+
+.of-3d-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg2);
+  color: var(--ink);
+  font-family: var(--face-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.of-3d-action:hover {
+  background: var(--bg3);
+}
+
+.of-3d-action[data-variant='ghost'] {
+  background: transparent;
+  font-weight: 500;
+  color: var(--mut);
+}
+
+/* The byte count is part of the label, not decoration: pressing this starts a
+   download of up to 25 MB and the size should be legible before the press. */
+.of-3d-action-note {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--mut);
+}
+
+/* ── The well ───────────────────────────────────────────────────────────── */
+
+.of-3d,
+.of-3d-well {
+  display: grid;
+}
+
+.of-3d {
+  gap: 6px;
+}
+
+.of-3d-well {
+  position: relative;
+  place-items: center;
+  height: 288px;
+  background: radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg));
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* r3f sizes the canvas from this element, so it has to be told to fill it. The
+   drag is an orbit, so the browser must not also read it as a pan. */
+.of-3d-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  touch-action: none;
+  cursor: grab;
+}
+
+.of-3d-canvas:active {
+  cursor: grabbing;
+}
+
+/* ── Progress, plates and caption ────────────────────────────────────────── */
+
+.of-3d-progress {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  width: min(240px, 80%);
+  color: var(--mut);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.of-3d-progress p {
+  margin: 0;
+}
+
+.of-3d-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 12%, transparent);
+  overflow: hidden;
+}
+
+.of-3d-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--acc);
+  transition: width 120ms linear;
+}
+
+.of-3d-plate {
+  display: grid;
+  gap: 6px;
+  max-width: 264px;
+  padding: 0 12px;
+  color: var(--mut);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.of-3d-plate p {
+  margin: 0;
+}
+
+.of-3d-plate-note {
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+
+.of-3d-caption {
+  margin: 0;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--mut);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of-3d-bar > span {
+    transition: none;
+  }
+}
