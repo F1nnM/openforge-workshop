@@ -2,40 +2,73 @@
  * OpenForge Workshop — texture tag → material family.
  *
  * Ported from `docs/texture-materials.draft.ts`. Every count in the comments is
- * live blueprints carrying that tag, re-derived over the whole 8,702-row index;
- * all 38 root counts and all 25 sub-tag counts in the draft reproduce exactly.
+ * live blueprints carrying that tag, re-derived over the whole 8,702-row index.
+ * All 38 root counts and all 25 sub-tag counts in the draft reproduced exactly
+ * on the port; the only one that has moved since is `foundation`, 51 → 53, which
+ * is D3's collapse and not port drift.
  *
  * ── How many roots there are, and how many you can reach ────────────────────
- * **38 roots exist. 37 can appear in a record's `texture` field. All 38 are
- * mapped here.** Those are three different numbers and conflating them is how a
- * mapping ends up with a hole in it.
+ * **37 roots exist in the index. 36 can appear in a record's `texture` field.
+ * 38 are mapped here.** Those are three different numbers and conflating them
+ * is how a mapping ends up with a hole in it.
  *
  * `CatalogRecord.texture` is derived by PR 4's `textureRoot`, which takes the
  * root of the *first* texture tag on the tile. `texture|stucco` occurs on 24
  * tiles and every one of them also carries `texture|shingles`, which sorts
- * earlier, so `stucco` never wins that position — measured: 38 distinct roots
- * across all texture tags, 37 distinct roots in first position, and `stucco` is
+ * earlier, so `stucco` never wins that position — measured: 37 distinct roots
+ * across all texture tags, 36 distinct roots in first position, and `stucco` is
  * the one that is never first.
  *
  * That is a fact about the derived field, not about the corpus. This module
- * resolves from a record's **full tag list**, where all 38 roots are reachable,
- * and `texture|stucco` resolves to `stucco` on exactly those 24 tiles because
- * `ROOT_PRECEDENCE` prefers the inset material. So:
+ * resolves from a record's **full tag list**, where all 37 present roots are
+ * reachable, and `texture|stucco` resolves to `stucco` on exactly those 24
+ * tiles because `ROOT_PRECEDENCE` prefers the inset material. So:
  *
- *   - the root table below is complete at 38, because a root that cannot
- *     currently reach the `texture` field may reach it after any retag, and a
- *     hole would then surface as a wrong colour rather than a build failure;
- *   - `mapping.test.ts` asserts 38 mapped roots and 37 reachable-as-`texture`,
- *     separately, rather than asserting one number that is only half true.
+ *   - the root table below carries 38 entries against 37 present roots, because
+ *     a root that cannot currently reach the `texture` field may reach it after
+ *     any retag, and a hole would then surface as a wrong colour rather than a
+ *     build failure. The 38th is the retired `foundations` spelling, kept as
+ *     belt and braces for a caller that resolves straight off the fixtures
+ *     rather than off the normalised index;
+ *   - `corpus.test.ts` asserts the mapped count, the present count and the
+ *     first-position count **separately**, rather than asserting one number
+ *     that is only half true.
  *
- * ── `foundation` vs `foundations` ───────────────────────────────────────────
- * PR 4 deliberately left this to PR 8: `texture|foundation` (51) and
- * `texture|foundations` (2) are distinct roots and almost certainly one
- * material, and collapsing them would take the root count 38 → 37. **The
- * material question is already answered — both map to `rough_stone`, so as an
- * appearance they are one material today.** Collapsing the *tag* is a facet
- * label question (it changes a user-visible filter count), which belongs to
- * whoever owns the facet list, not to a tint table. No collapse here.
+ * ── `foundation` vs `foundations`: collapsed upstream ───────────────────────
+ * PR 4 left this to PR 8, which left it to D3, which did it — but not here.
+ * `texture|foundations` (2 tiles) is rewritten to `texture|foundation` (51 →
+ * 53) by `pipeline/normalise.ts`, on the way into the index, because the split
+ * was never a material question. **The material question was already answered
+ * — both mapped to `rough_stone`, so as an appearance they were one material
+ * already.** What was open was the *facet label*, and a tint table is the wrong
+ * place to decide a user-visible filter count. That module states what the
+ * collapse costs; this one only stops being the place it is worked around.
+ *
+ * ── The two-material `towne` walls: unified here, on purpose ────────────────
+ * `texture|towne|stone-stucco` (72) and `texture|towne|stucco-stone` (72) are
+ * **not** one material with two spellings, which is what §16 risk 15 recorded
+ * and what a string heuristic would conclude. Measured: the two sets are a
+ * perfect 1:1 mirror over 72 shape keys, in the same directories, with
+ * different md5s and different byte sizes. They are 144 distinct models of the
+ * same geometry with the two courses swapped, and the same holds for the
+ * four-segment pair `texture|towne|stone|stucco` / `texture|towne|stucco|stone`
+ * (7 + 7, likewise mirrored and likewise distinct meshes).
+ *
+ * The tags therefore stay, because collapsing them would erase a real
+ * distinction. (`pipeline/facets.ts` gives a second reason — that a rewrite
+ * would desynchronise the `require`/`deny` refs in `config` — and that one does
+ * **not** hold: the corpus has 99 distinct config refs and only four name a
+ * texture tag at all, none of them these. Right conclusion, wrong argument.)
+ * What was wrong was **here**: first-named-wins split the four spellings across
+ * `cut_stone` and `stucco`, so 158 tiles carrying the same *pair* of materials
+ * rendered in two colours, and the colour encoded the course order. A
+ * one-colour-per-tile renderer cannot show a two-material wall in either order,
+ * so a per-spelling answer states a distinction it cannot draw and gets it
+ * wrong half the time by construction. All four now resolve to `stucco`, for
+ * the reason the root itself already does: on a rendered wall the stone is a
+ * base course and the plaster is most of the visible area — the same argument
+ * `towne` and `tudor` are decided on. `TAG_CONFIDENCE` keeps all four at `low`,
+ * which is the honest way to say "two materials, one colour".
  *
  * ── Divergence from `CatalogRecord.texture`, on purpose ─────────────────────
  * On the 80 tiles carrying two roots, this module's answer and the record's
@@ -50,7 +83,8 @@ import type { Confidence, GrainSpec, MaterialId, MortarSpec, SurfaceTreatment } 
 /* ------------------------------------------------------------- level-1 roots */
 
 /**
- * All 38 level-1 texture roots, so root lookup never fails for a known tag.
+ * Every level-1 texture root, so root lookup never fails for a known tag: the
+ * 37 present in the index plus the retired `foundations` spelling.
  *
  * `%` and `+` in a filename both produce deeper tags, and the scanner's output
  * makes the two indistinguishable — `towne+stone` and `towne%stone` both yield
@@ -77,7 +111,7 @@ export const TEXTURE_ROOT_MATERIAL: Readonly<Record<string, MaterialId | undefin
   mine: 'cave', //   69 — hewn rock; its timber shoring is a separate part
   timber: 'wood', //   59
   stone: 'cut_stone', //   57 — orphaned by the `%` parse; dressed is the safe default
-  foundation: 'rough_stone', //   51
+  foundation: 'rough_stone', //   53 — 51 + the 2 collapsed from `foundations`
   mortar_and_stone: 'rough_stone', //   40
   cavern: 'cave', //   39
   ironbound_wood: 'wood', //   35
@@ -90,7 +124,11 @@ export const TEXTURE_ROOT_MATERIAL: Readonly<Record<string, MaterialId | undefin
   cracked_ice: 'ice', //    8
   goblin_fireplace: 'rough_stone', //    5 — a named prop, not a texture
   sandstone: 'sandstone', //    5
-  foundations: 'rough_stone', //    2 — spelling split of `foundation`
+  // Retired: `pipeline/normalise.ts` rewrites `texture|foundations` to
+  // `texture|foundation`, so this root reaches no record in the emitted index.
+  // Kept because a caller resolving straight off the fixtures still meets it,
+  // and an unmapped root is a hole with a colour in it.
+  foundations: 'rough_stone', //    0 in the index, 2 in the raw fixtures
   catacombs: 'cut_stone', //    2
   bamboo: 'wood', //    1
   calendar: 'aztlan', //    1 — carved relief motif, not a substance
@@ -127,14 +165,16 @@ export const TEXTURE_TAG_MATERIAL: Readonly<Record<string, MaterialId | undefine
   'texture|towne|ruined_stucco-a': 'stucco', //   1
   'texture|towne|ruined_stucco-b': 'stucco', //   1
 
-  // Hyphenated pairs encode a genuinely TWO-material wall (stone base course,
-  // stucco above, or the reverse) in a single mesh. First-named wins: it is a
-  // deterministic coin-flip on 144 models, and it is honestly wrong on ~half.
-  // The four-segment forms `texture|towne|stone|stucco` (7) and
-  // `texture|towne|stucco|stone` (7) need no entry — they inherit the same
-  // first-named answer from their parent, and no tile carries both (verified).
-  'texture|towne|stone-stucco': 'cut_stone', //  72
+  // A genuinely TWO-material wall — stone base course, stucco above, or the
+  // reverse — in a single mesh, on 158 models. The order is real: each pair is a
+  // 1:1 mirror of distinct meshes, so the tags stay. See the header for why the
+  // answer does not vary with it. All four are explicit rather than left to
+  // inherit, because the four-segment forms would otherwise take their answer
+  // from whichever three-segment sibling they carry and split 7/7 again.
+  'texture|towne|stone-stucco': 'stucco', //  72
   'texture|towne|stucco-stone': 'stucco', //  72
+  'texture|towne|stone|stucco': 'stucco', //   7
+  'texture|towne|stucco|stone': 'stucco', //   7
 
   'texture|streets|cobble': 'rough_stone', //  62
   'texture|streets|fan_cobble': 'rough_stone', //  11

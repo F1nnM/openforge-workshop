@@ -24,7 +24,7 @@
  * | facet   | semantics                                    | the fact that forces it |
  * | ------- | -------------------------------------------- | ----------------------- |
  * | `kinds` | multi-select OR, plus {@link KIND_OTHER}      | 19.5% of tiles are in 2+ buckets and 11.9% in none — neither is expressible as one value, and without an explicit "other" bucket 1,032 tiles are unreachable from the sidebar |
- * | `tex`   | multi-select OR of **namespace prefixes**     | 38 roots with 45 deeper paths beneath them; selecting `dungeon_stone` must also match `texture\|dungeon_stone\|eroded` |
+ * | `tex`   | multi-select OR of **namespace prefixes**     | 37 roots with 45 deeper paths beneath them; selecting `dungeon_stone` must also match `texture\|dungeon_stone\|eroded` |
  * | `build` | single-select, plus {@link BUILD_UNSPECIFIED} | 2,978 tiles (34.2%) carry no `build\|` tag, so absence is a value |
  * | `conn`  | multi-select OR                              | 2,493 tiles (28.6%) carry 2+ systems |
  *
@@ -34,9 +34,9 @@
  * That is right for the material registry (one tile, one tint) and wrong for a
  * filter, and it is wrong in a measurable way: 80 tiles carry two roots, and
  * `stucco` is **always** alphabetically later than its co-tag, so it never wins
- * the field and a vocabulary read off `record.texture` has 37 entries where the
- * tag table has 38. Rather than assert 38 and get 37, this indexes every
- * `texture|…` tag a record carries — which gives all 38 roots a non-zero count
+ * the field and a vocabulary read off `record.texture` has 36 entries where the
+ * tag table has 37. Rather than assert 37 and get 36, this indexes every
+ * `texture|…` tag a record carries — which gives all 37 roots a non-zero count
  * (`stucco` reaches 24 tiles), makes the two-root tiles findable under both
  * names, and gets prefix matching for free because the deeper paths are just
  * longer keys in the same map.

@@ -2,9 +2,14 @@
  * Fixtures → one validated `CatalogFile`.
  *
  * This is the whole pipeline of §5 in one function, in the order the plan draws
- * it: resolve the footprint primitive, classify the layer, normalise the
- * connection vocabulary, synthesise a display name, take the family from the
- * path, intern the tags, assign append-only ordinals.
+ * it: collapse tag drift, resolve the footprint primitive, classify the layer,
+ * normalise the connection vocabulary, synthesise a display name, take the
+ * family from the path, intern the tags, assign append-only ordinals.
+ *
+ * Tag drift is collapsed **first**, on the way in, because everything after it
+ * derives from a tag list: the design index, the intern table, `textureRoot`,
+ * the facet vocabulary and the search tokens. One seam, so no consumer has to
+ * know a second spelling ever existed. See `pipeline/normalise.ts`.
  *
  * Two properties are deliberate and tested:
  *
@@ -36,6 +41,7 @@ import { resolveFootprint } from './footprint'
 import type { FixtureRow } from './fixtures'
 import { liveRows } from './fixtures'
 import { displayName } from './naming'
+import { normaliseTags } from './normalise'
 import type { OrdinalManifest } from './ordinals'
 import { assignOrdinals } from './ordinals'
 import { buildTagTable } from './tags'
@@ -78,13 +84,15 @@ export interface BuildResult {
 }
 
 export function buildCatalog(options: BuildOptions): BuildResult {
-  const live = liveRows(options.rows).sort((a, b) =>
-    a.file_metadata.full_name < b.file_metadata.full_name
-      ? -1
-      : a.file_metadata.full_name > b.file_metadata.full_name
-        ? 1
-        : 0,
-  )
+  const live = liveRows(options.rows)
+    .sort((a, b) =>
+      a.file_metadata.full_name < b.file_metadata.full_name
+        ? -1
+        : a.file_metadata.full_name > b.file_metadata.full_name
+          ? 1
+          : 0,
+    )
+    .map((row) => ({ ...row, tags: normaliseTags(row.tags) }))
 
   const ids = live.map((row) => row.file_metadata.full_name)
   const { manifest, ordinalOf, added, retired } = assignOrdinals(options.manifest, ids)

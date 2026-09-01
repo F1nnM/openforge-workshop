@@ -24,7 +24,7 @@
  * | facet      | shape                       | why it cannot be simpler                     |
  * | ---------- | --------------------------- | -------------------------------------------- |
  * | kind       | multi-select                | 19.6% of tiles land in 2+ buckets, 11.6% in none — a single value cannot express either |
- * | texture    | multi-select **prefixes**   | 38 roots, matched by prefix; not a 6-value enum |
+ * | texture    | multi-select **prefixes**   | 37 roots, matched by prefix; not a 6-value enum |
  * | build      | single-select + unspecified | 2,978 tiles (34.2%) carry no `build\|` tag, so absence is a filter state |
  * | connection | multi-select                | 3,091 tiles (35.5%) carry 2–3 systems         |
  *
@@ -37,7 +37,7 @@
  *   - The encoding is compact. TanStack's default `stringifySearch` JSON-encodes
  *     and then percent-encodes arrays, so four selected textures cost
  *     `tex=%5B%22dungeon_stone%22%2C%22cave%22%2C…%5D` — about 3.5× the bytes of
- *     the values themselves. At 38 texture roots that is a URL nobody can read
+ *     the values themselves. At 37 texture roots that is a URL nobody can read
  *     or paste. `searchSchema.test.ts` measures both.
  *
  * **What this module deliberately does not do.** It does not match anything.
@@ -72,7 +72,7 @@ export const MAX_FACET_VALUE_LENGTH = 64
 /**
  * Most values kept in one multi-select facet.
  *
- * 38 texture roots is the largest real vocabulary (§9), so this is that plus
+ * 37 texture roots is the largest real vocabulary (§9), so this is that plus
  * head-room. Selecting more than the vocabulary holds is not a state the UI can
  * produce; it is what a rotted or hand-built link looks like.
  */

@@ -19,7 +19,7 @@
  *      12. Sampling it means the post-fix figure for the same cards is measured
  *      rather than modelled. It is also the worst case: the aztlan floors that
  *      lead the ordinal order are the heaviest sheets in the corpus.
- *   2. **`texture`** — the lowest-ordinal sheet of each of the 38 texture roots.
+ *   2. **`texture`** — the lowest-ordinal sheet of each of the 37 texture roots.
  *      A thumbnail's byte size is driven by how much of the frame is opaque and
  *      how busy the surface is, and that is a property of the texture family, so
  *      this is the stratum that makes the corpus extrapolation defensible.
@@ -29,7 +29,7 @@
  */
 import type { SheetTarget } from './catalog'
 
-/** Default sample size. Wide enough to cover all 38 texture roots plus a screenful. */
+/** Default sample size. Wide enough to cover all 37 texture roots plus a screenful. */
 export const DEFAULT_SAMPLE_SIZE = 56
 
 /**

@@ -278,9 +278,9 @@ function build(
 
   // Confidence is the WEAKEST claim involved: the family's own, anything the
   // matched tag or its siblings downgrade, and the resolution path itself. This
-  // is where the four-segment `texture|towne|stone|stucco` gets its 'low' —
-  // the decision was taken on its parent, but the sibling tag is still on the
-  // tile and still says two materials share the mesh.
+  // is where the four-segment `texture|towne|stone|stucco` gets its 'low': since
+  // D3 the decision is taken on the tag itself, which `TAG_CONFIDENCE` marks
+  // down because two materials share the mesh and one colour cannot say so.
   let confidence: Confidence = family.confidence
   const downgrade = (candidate: Confidence | undefined): void => {
     if (candidate !== undefined && CONFIDENCE_RANK[candidate] < CONFIDENCE_RANK[confidence]) {

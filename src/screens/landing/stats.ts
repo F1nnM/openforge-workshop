@@ -41,10 +41,10 @@ export interface LandingStats {
  *
  *   - **textureSets** — distinct roots across the *tag intern table*, not
  *     distinct `record.texture` values. The two disagree, and the difference is
- *     documented in `src/materials/mapping.ts`: 38 roots exist, but only 37 can
+ *     documented in `src/materials/mapping.ts`: 37 roots exist, but only 36 can
  *     ever appear in `record.texture`, because `stucco` is always outranked by
  *     an earlier tag in first position. The catalog sidebar filters textures by
- *     prefix over the whole tag list, so all 38 are reachable as a filter — and
+ *     prefix over the whole tag list, so all 37 are reachable as a filter — and
  *     the landing stat should count what the catalog can actually offer.
  *
  *   - **buildSystems** — distinct `record.build`. Five: `s2w`, `wall on tile`,
