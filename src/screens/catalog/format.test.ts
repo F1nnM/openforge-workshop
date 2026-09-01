@@ -1,0 +1,102 @@
+/**
+ * Formatter tests.
+ *
+ * Node environment — these are pure functions over the catalog contract. What is
+ * worth asserting here is not that `toFixed` works but the four decisions the
+ * formatters encode: the size chip mirrors the importer's own size token, the
+ * `none` footprint has a visible fallback rather than an empty chip, file sizes
+ * are decimal, and the sentinel facet values (`!other`, `!none`) get prose
+ * labels rather than leaking a `!` into the sidebar.
+ */
+import { describe, expect, it } from 'vitest'
+
+import { Footprint } from '@/catalog'
+import { BUILD_UNSPECIFIED, KIND_OTHER } from '@/search'
+
+import { buildLabel, connLabel, countLabel, fileSizeLabel, humaniseSegment, kindLabel, sizeLabel } from './format'
+
+const foot = (value: unknown): Footprint => Footprint.parse(value)
+
+describe('sizeLabel', () => {
+  it('renders a rectangle as width × depth', () => {
+    expect(sizeLabel(foot({ shape: 'rect', w: 2, d: 2 }))).toBe('2×2')
+    expect(sizeLabel(foot({ shape: 'rect', w: 1, d: 3 }))).toBe('1×3')
+  })
+
+  it('renders a wall as its length only, because its depth is not data', () => {
+    // 3,116 tiles carry a numeric `size|width` and no `size|depth` at all; the
+    // depth is the measured 12.7 mm constant, so a chip that showed one would be
+    // inventing it.
+    expect(sizeLabel(foot({ shape: 'wall', length: 4 }))).toBe('4×')
+    expect(sizeLabel(foot({ shape: 'wall', length: 1.5 }))).toBe('1.5×')
+  })
+
+  it('renders an arc as radius and sweep', () => {
+    expect(sizeLabel(foot({ shape: 'arc', radius: 4, angle: 22.5 }))).toBe('4r22.5')
+  })
+
+  it('falls back to the openlock size code when no footprint is derivable', () => {
+    expect(sizeLabel(foot({ shape: 'none' }), 'IL')).toBe('IL')
+  })
+
+  it('renders an em dash rather than nothing, so the card keeps its height', () => {
+    // The chip is never absent: `VirtuosoGrid` extrapolates from one item, so a
+    // card that dropped a row would drift the scroll position.
+    expect(sizeLabel(foot({ shape: 'none' }))).toBe('—')
+  })
+
+  it('drops trailing zeros the way the filenames do', () => {
+    expect(sizeLabel(foot({ shape: 'rect', w: 1, d: 1 }))).toBe('1×1')
+    expect(sizeLabel(foot({ shape: 'arc', radius: 2, angle: 90 }))).toBe('2r90')
+  })
+})
+
+describe('fileSizeLabel', () => {
+  it('is decimal, to agree with the archive and the OS', () => {
+    expect(fileSizeLabel(10_360_000)).toBe('10.4 MB')
+    expect(fileSizeLabel(1_000_000)).toBe('1.0 MB')
+  })
+
+  it('uses kilobytes below a megabyte', () => {
+    expect(fileSizeLabel(838_214)).toBe('838 KB')
+    expect(fileSizeLabel(45_284)).toBe('45 KB')
+  })
+
+  it('handles the extremes of the corpus', () => {
+    expect(fileSizeLabel(0)).toBe('0 B')
+    // The largest live file.
+    expect(fileSizeLabel(108_900_000)).toBe('108.9 MB')
+  })
+})
+
+describe('countLabel', () => {
+  it('separates thousands', () => {
+    expect(countLabel(8702)).toBe('8,702')
+    expect(countLabel(0)).toBe('0')
+  })
+})
+
+describe('labels', () => {
+  it('humanises both tag separators', () => {
+    expect(humaniseSegment('dungeon_stone')).toBe('Dungeon stone')
+    expect(humaniseSegment('cut-stone')).toBe('Cut stone')
+    expect(humaniseSegment('mortar_and_stone')).toBe('Mortar and stone')
+  })
+
+  it('never leaks a sentinel into the sidebar', () => {
+    expect(kindLabel(KIND_OTHER)).toBe('Other')
+    expect(buildLabel(BUILD_UNSPECIFIED)).toBe('Unspecified')
+  })
+
+  it('spells the connection systems the way their makers do', () => {
+    expect(connLabel('openforge')).toBe('OpenForge')
+    expect(connLabel('openlock')).toBe('OpenLOCK')
+    expect(connLabel('dragonlock')).toBe('DragonLock')
+  })
+
+  it('falls back to humanised prose for a value it has never seen', () => {
+    expect(kindLabel('trapdoor')).toBe('Trapdoor')
+    expect(connLabel('new_system')).toBe('New system')
+    expect(buildLabel('half wall')).toBe('Half wall')
+  })
+})
