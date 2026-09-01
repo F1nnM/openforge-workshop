@@ -12,8 +12,12 @@ import { afterEach } from 'vitest'
 
 // jsdom does not implement navigation-adjacent APIs and prints "Not implemented"
 // once per mount, which buries real failures in noise.
-if (typeof window !== 'undefined' && !('scrollTo' in window)) {
-  Object.defineProperty(window, 'scrollTo', { value: () => {}, writable: true })
+//
+// The obvious guard — `!('scrollTo' in window)` — never fires: jsdom 30 *defines*
+// scrollTo, as a stub that throws. So overwrite unconditionally.
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'scrollTo', { value: () => {}, writable: true, configurable: true })
+  Object.defineProperty(window, 'scrollBy', { value: () => {}, writable: true, configurable: true })
 }
 
 afterEach(() => {
