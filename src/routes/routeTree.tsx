@@ -57,9 +57,9 @@ import {
   validateCatalogSearch,
   validateFacetSearch,
 } from '@/search/searchSchema'
+import { AppFrame } from '@/ui/shell'
 
 import {
-  AppFramePlaceholder,
   BuilderPlaceholder,
   CatalogPlaceholder,
   ErrorPlaceholder,
@@ -73,10 +73,11 @@ import {
  *
  * `notFoundComponent` and `errorComponent` are set here rather than left to the
  * router's defaults so that a bad path and a thrown screen both render
- * something. PR 12 replaces the component; it should keep both boundaries.
+ * something. Both render *inside* `AppFrame` — they are children of this route —
+ * so a 404 keeps the header and the user keeps a way out.
  */
 export const rootRoute = createRootRoute({
-  component: AppFramePlaceholder,
+  component: AppFrame,
   notFoundComponent: NotFoundPlaceholder,
   errorComponent: ErrorPlaceholder,
 })
