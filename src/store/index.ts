@@ -25,6 +25,7 @@ export { MIGRATION_STEPS, STORE_VERSION, migrateWorkshopState, salvageWorkshopSt
 export { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 
 export {
+  acknowledgeLockSystem,
   addToLibrary,
   clearLibrary,
   clearPlacements,
@@ -37,6 +38,7 @@ export {
   selectIsInLibrary,
   selectLibrary,
   selectLibraryCount,
+  selectLockChosen,
   selectLockSystem,
   selectPlacement,
   selectPlacementCount,
@@ -46,6 +48,7 @@ export {
   useIsInLibrary,
   useLibrary,
   useLibraryCount,
+  useLockChosen,
   useLockSystem,
   usePlacement,
   usePlacementCount,

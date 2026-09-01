@@ -50,7 +50,7 @@ import {
  * (N+1)-shaped one, and add an N entry to the fixture table in
  * `migrations.test.ts`. The suite fails if any of the three is missing.
  */
-export const STORE_VERSION = 1
+export const STORE_VERSION = 2
 
 /**
  * One rung of the migration ladder: given a blob in version `N-1`'s shape,
@@ -74,14 +74,44 @@ export type MigrationStep = (input: unknown) => unknown
 /**
  * The ladder, keyed by the version each rung produces.
  *
- * Empty today: version 1 is the first shape, so there is nothing below it to
- * climb from. It is declared anyway, with the loop that walks it, because the
- * moment this is needed there are already scenes in the wild — writing the
- * harness then means writing it under pressure and without a test that proves it
- * ever worked.
+ * One rung so far. It is keyed by the version it *produces*, so the step under
+ * `2` reads a version 1 blob and returns a version 2 one.
  */
 export const MIGRATION_STEPS: Readonly<Record<number, MigrationStep>> = {
-  // 2: (input) => { ... map a v1 blob to the v2 shape ... },
+  /**
+   * 1 → 2: add `lockChosen`.
+   *
+   * Version 2 records whether the user has ever decided the lock system, which
+   * version 1 could not express. The interesting part is what to infer for a
+   * blob written before the flag existed, and the answer follows from the
+   * default being openlock:
+   *
+   *   - **`lock` is a lock system other than openlock.** Version 1 only ever
+   *     wrote that through `setLockSystem`, which nothing but a deliberate
+   *     change called — so this user chose. `lockChosen: true`, and they are not
+   *     asked again.
+   *   - **`lock` is openlock, missing, or unreadable.** Indistinguishable from
+   *     "never touched it", so `lockChosen: false` and the notice appears once.
+   *     Being asked once more is the cheap error here; silently locking someone
+   *     out of the choice is the expensive one.
+   *
+   * `unknown` in, `unknown` out (see {@link MigrationStep}), so every read is
+   * guarded: a blob that is not a plain object is returned untouched for
+   * {@link salvageWorkshopState} to reduce to defaults, and a blob that already
+   * carries a boolean `lockChosen` is passed through — a preview build on the
+   * same origin can have written a version 2 shape under a version 1 stamp.
+   *
+   * Spread rather than assignment, deliberately: object spread defines own data
+   * properties, so a `__proto__` key surviving from `JSON.parse` is copied as
+   * data rather than invoking the prototype setter. `salvage*` then drops it.
+   */
+  2: (input) => {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) return input
+    const source = input as Record<string, unknown>
+    if (typeof source.lockChosen === 'boolean') return source
+    const chosen = LockSystemSchema.safeParse(source.lock)
+    return { ...source, lockChosen: chosen.success && chosen.data !== DEFAULT_LOCK_SYSTEM }
+  },
 }
 
 /** A state recovered from untrusted input, plus what had to be thrown away. */
@@ -230,6 +260,21 @@ function salvagePlacements(input: unknown, dropped: string[]): WorkshopState['pl
   return out
 }
 
+/**
+ * Recover the "has chosen" flag.
+ *
+ * Absent means `false`, which is the safe direction: a user who has in fact
+ * chosen sees one dismissible notice, whereas defaulting to `true` would hide
+ * the choice from someone who never made it. Anything present but not a boolean
+ * is corruption and is reported.
+ */
+function salvageLockChosen(input: unknown, dropped: string[]): boolean {
+  if (input === undefined) return false
+  if (typeof input === 'boolean') return input
+  dropped.push(`lockChosen: ${describeValue(input)} is not a boolean, reset to false`)
+  return false
+}
+
 function salvageLock(input: unknown, dropped: string[]): LockSystem {
   if (input === undefined) return DEFAULT_LOCK_SYSTEM
   const parsed = LockSystemSchema.safeParse(input)
@@ -263,6 +308,7 @@ export function salvageWorkshopState(input: unknown): RecoveredState {
       library: salvageLibrary(source.library, dropped),
       placements: salvagePlacements(source.placements, dropped),
       lock: salvageLock(source.lock, dropped),
+      lockChosen: salvageLockChosen(source.lockChosen, dropped),
     },
     dropped,
   }

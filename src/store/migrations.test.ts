@@ -43,10 +43,13 @@ const PLACEMENT_B = PlacementId.parse('b2c3d4e5-6f70-4812-9a3b-4c5d6e7f8091')
 /**
  * One shipped version's persisted payload, and what it must become.
  *
- * **Adding version 2:** add a `2:` entry whose `blob` is a scene exactly as
- * version 2 writes it, update every `expected` to the version 2 shape, and add
- * the `2:` step to `MIGRATION_STEPS`. The completeness tests below fail until
- * all three exist, and the migration tests then cover 1→2 and 2→2 for free.
+ * **Adding version N:** add an `N:` entry whose `blob` is a scene exactly as
+ * version N writes it, update every `expected` to the version N shape, and add
+ * the `N:` step to `MIGRATION_STEPS`. The completeness tests below fail until
+ * all three exist, and the migration tests then cover (N-1)→N and N→N for free.
+ * That is exactly what version 2 did, and the two `expected` shapes below are
+ * the receipt: the version 1 blob's `lock: 'dragonlock'` is what makes its
+ * `lockChosen` come out `true`.
  */
 interface VersionFixture {
   /** A payload byte-for-byte as that version wrote it. */
@@ -55,24 +58,28 @@ interface VersionFixture {
   readonly expected: WorkshopState
 }
 
+const SCENE = {
+  library: { [TILE_A]: true, [TILE_B]: true },
+  placements: {
+    [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 },
+    [PLACEMENT_B]: { tileId: TILE_B, x: 2.5, z: -1.5, rotation: 270 },
+  },
+} as const
+
 const VERSION_FIXTURES: Readonly<Record<number, VersionFixture>> = {
   1: {
-    blob: {
-      library: { [TILE_A]: true, [TILE_B]: true },
-      placements: {
-        [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 },
-        [PLACEMENT_B]: { tileId: TILE_B, x: 2.5, z: -1.5, rotation: 270 },
-      },
-      lock: 'dragonlock',
-    },
-    expected: WorkshopStateSchema.parse({
-      library: { [TILE_A]: true, [TILE_B]: true },
-      placements: {
-        [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 },
-        [PLACEMENT_B]: { tileId: TILE_B, x: 2.5, z: -1.5, rotation: 270 },
-      },
-      lock: 'dragonlock',
-    }),
+    // No `lockChosen`: version 1 had no such field. `lock: 'dragonlock'` is not
+    // the default, so version 1 can only have written it through
+    // `setLockSystem` — a deliberate change — and the rung infers `true`.
+    blob: { ...SCENE, lock: 'dragonlock' },
+    expected: WorkshopStateSchema.parse({ ...SCENE, lock: 'dragonlock', lockChosen: true }),
+  },
+  2: {
+    // As version 2 writes it: the flag is explicit, and `false` beside a
+    // non-default lock is a shape only version 2 can produce (an import of
+    // someone else's exported scene). It must survive, not be re-inferred.
+    blob: { ...SCENE, lock: 'magnetic', lockChosen: false },
+    expected: WorkshopStateSchema.parse({ ...SCENE, lock: 'magnetic', lockChosen: false }),
   },
 }
 
@@ -152,7 +159,9 @@ describe('migrating every prior version to current', () => {
   })
 
   it('reads a payload from a future version best-effort instead of discarding it', () => {
-    const fixture = VERSION_FIXTURES[1]
+    // The **current** version's fixture, not version 1's: a future blob climbs
+    // no rungs, so it is read exactly as a current-shaped one would be.
+    const fixture = VERSION_FIXTURES[STORE_VERSION]
     const recovered = migrateWorkshopState(fixture?.blob, STORE_VERSION + 5)
     // A stale tab or a rolled-back deploy is the common cause, and emptying
     // someone's library over it is worse than showing them a scene that is
@@ -170,6 +179,88 @@ describe('migrating every prior version to current', () => {
   ])('survives %s in the version slot', (_label, version) => {
     const recovered = migrateWorkshopState(VERSION_FIXTURES[1]?.blob, version)
     expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
+  })
+})
+
+/* ------------------------------------------------------- the 1 -> 2 rung */
+
+/**
+ * The rung that added `lockChosen`, tested on its own.
+ *
+ * Two separate obligations, and the fixture table above only covers the first:
+ *
+ *   1. **It upgrades a well-formed version 1 blob**, inferring the flag from
+ *      `lock` — the fixtures do that.
+ *   2. **It tolerates garbage stamped version 1.** A step is reached with
+ *      whatever `localStorage` held, and a step that reads `input.lock` off a
+ *      `null` throws a `TypeError` that white-screens the app on its own home
+ *      page. The rung is called directly here rather than through
+ *      `migrateWorkshopState`, because that function catches a throw and would
+ *      report the bug as a successful reset.
+ */
+describe('the lockChosen rung', () => {
+  const step = MIGRATION_STEPS[2]
+
+  it('exists', () => {
+    expect(step).toBeTypeOf('function')
+  })
+
+  it.each([
+    ['openlock, which is the default', 'openlock', false],
+    ['dragonlock', 'dragonlock', true],
+    ['magnetic', 'magnetic', true],
+  ])('reads a version 1 lock of %s as chosen=%s', (_label, lock, chosen) => {
+    const recovered = migrateWorkshopState({ ...SCENE, lock }, 1)
+    expect(recovered.state.lock).toBe(lock)
+    expect(recovered.state.lockChosen).toBe(chosen)
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it.each([
+    ['no lock field at all', {}],
+    ['an unreadable lock', { lock: 'padlock' }],
+    ['a numeric lock', { lock: 3 }],
+    ['a null lock', { lock: null }],
+  ])('treats a version 1 blob with %s as not yet chosen', (_label, blob) => {
+    // Not `true`: an unreadable lock resolves to openlock, and pretending the
+    // user picked openlock would hide the choice from someone who never made it.
+    expect(migrateWorkshopState(blob, 1).state.lockChosen).toBe(false)
+  })
+
+  it('keeps a flag the blob already carries rather than re-inferring it', () => {
+    // A preview build on the same origin can write a version 2 shape under a
+    // version 1 stamp. Re-inferring would flip an explicit `false` beside a
+    // non-default lock to `true`.
+    expect(migrateWorkshopState({ lock: 'magnetic', lockChosen: false }, 1).state.lockChosen).toBe(false)
+    expect(migrateWorkshopState({ lock: 'openlock', lockChosen: true }, 1).state.lockChosen).toBe(true)
+  })
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['an array', []],
+    ['an array of placements', [{ tileId: TILE_A, x: 0, z: 0, rotation: 0 }]],
+    ['a string', 'openforge'],
+    ['a number', 42],
+    ['a boolean', false],
+    ['a wrong-typed flag', { lockChosen: 'yes' }],
+    ['a numeric flag', { lockChosen: 1 }],
+    ['a function-valued lock', { lock: () => 'magnetic' }],
+    ['a prototype payload', JSON.parse('{"__proto__":{"polluted":true},"lock":"magnetic"}') as unknown],
+  ])('does not throw on %s, and the result still salvages', (_label, input) => {
+    expect(() => step?.(input)).not.toThrow()
+    const recovered = salvageWorkshopState(step?.(input))
+    expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
+    const probe: Record<string, unknown> = {}
+    expect(probe.polluted).toBeUndefined()
+  })
+
+  it('leaves a non-object blob for the salvage pass rather than inventing one', () => {
+    // The rung is not the place to decide what an unreadable blob becomes —
+    // `salvageWorkshopState` owns that, and duplicating the decision here is how
+    // the two drift apart.
+    expect(step?.(null)).toBeNull()
+    expect(step?.('nonsense')).toBe('nonsense')
   })
 })
 
@@ -206,6 +297,9 @@ const GARBAGE: readonly (readonly [string, unknown])[] = [
   ['a numeric tile id', { placements: { [PLACEMENT_A]: { tileId: 42, x: 0, z: 0, rotation: 0 } } }],
   ['an empty tile id', { placements: { [PLACEMENT_A]: { tileId: '', x: 0, z: 0, rotation: 0 } } }],
   ['an unknown lock system', { lock: 'openlok' }],
+  ['a string where the chosen flag belongs', { lockChosen: 'yes' }],
+  ['a numeric chosen flag', { lockChosen: 1 }],
+  ['a null chosen flag', { lockChosen: null }],
   ['a numeric lock system', { lock: 3 }],
   ['a library value that is not true', { library: { [TILE_A]: 1 } }],
   ['a nested prototype payload', { library: JSON.parse(`{"__proto__":{"polluted":true}}`) as unknown }],
@@ -312,6 +406,21 @@ describe('salvaging keeps what it can', () => {
     expect(recovered.state.lock).toBe(DEFAULT_LOCK_SYSTEM)
     expect(recovered.state.library).toEqual({ [TILE_A]: true })
     expect(recovered.dropped[0]).toContain('lock')
+  })
+
+  it('reads an absent chosen flag as not chosen, silently', () => {
+    // Absence is the normal case for every blob written before version 2, so it
+    // is not corruption and must not be reported as such.
+    const recovered = salvageWorkshopState({ library: { [TILE_A]: true }, lock: 'openlock' })
+    expect(recovered.state.lockChosen).toBe(false)
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('resets a wrong-typed chosen flag to false and says so', () => {
+    const recovered = salvageWorkshopState({ lock: 'magnetic', lockChosen: 'yes' })
+    expect(recovered.state.lockChosen).toBe(false)
+    expect(recovered.state.lock).toBe('magnetic')
+    expect(recovered.dropped[0]).toContain('lockChosen')
   })
 
   it('refuses keys that are not tile or placement ids', () => {

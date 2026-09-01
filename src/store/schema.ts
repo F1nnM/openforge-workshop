@@ -1,8 +1,9 @@
 /**
  * OpenForge Workshop — the shape of the persisted client state.
  *
- * Three things survive a reload: the **library** (tiles the user kept), the
- * **placements** (the builder scene) and the **lock preference**. Nothing else.
+ * Four things survive a reload: the **library** (tiles the user kept), the
+ * **placements** (the builder scene), the **lock preference** and whether the
+ * user has ever chosen that preference. Nothing else.
  * Anything derivable from the catalog — the assembly a placement resolves to,
  * the bill of tiles, the base auto-inserted for a `connection|openforge` piece —
  * is deliberately absent, because a derived value written to `localStorage` goes
@@ -168,6 +169,27 @@ export const WorkshopState = z.object({
   library: z.record(TileId, z.literal(true)),
   placements: z.record(PlacementId, Placement),
   lock: LockSystem,
+  /**
+   * Whether the user has ever decided the lock system for themselves.
+   *
+   * `lock` alone cannot answer that question, and this is why the flag exists
+   * rather than being inferred: `lock === 'openlock'` is indistinguishable from
+   * "never opened the picker", because openlock *is* the default. So without a
+   * second bit there is no way to offer the choice once and then stop offering
+   * it — the app would either nag a user who has already decided or never
+   * mention a preference that costs up to 40.2 percentage points of catalog
+   * reach (see {@link DEFAULT_LOCK_SYSTEM}).
+   *
+   * Set by `setLockSystem` — picking a system, including re-picking openlock, is
+   * a decision — and by `acknowledgeLockSystem`, which is "I read the notice and
+   * the default is fine" without touching `lock`. Both live in
+   * `workshopStore.ts`.
+   *
+   * Persisted, because the whole point is that it survives a reload. It is also
+   * the reason the store is at version 2: a version 1 blob has no such field,
+   * and `migrations.ts` fills it in.
+   */
+  lockChosen: z.boolean(),
 })
 export type WorkshopState = z.infer<typeof WorkshopState>
 
@@ -179,5 +201,5 @@ export type WorkshopState = z.infer<typeof WorkshopState>
  * migration's fallback alias the store's live state.
  */
 export function defaultWorkshopState(): WorkshopState {
-  return { library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM }
+  return { library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false }
 }

@@ -205,9 +205,38 @@ export function clearPlacements(): void {
 
 /* --------------------------------------------------------------------- locks */
 
-/** Choose the joinery system for the whole build. See `DEFAULT_LOCK_SYSTEM`. */
+/**
+ * Choose the joinery system for the whole build. See `DEFAULT_LOCK_SYSTEM`.
+ *
+ * Also marks the preference as **chosen**, including when the value picked is
+ * the one already in effect. That coupling is deliberate rather than incidental:
+ * the flag's only job is to decide whether the app still needs to tell the user
+ * this choice exists, and someone who has opened the picker and clicked
+ * "OpenLOCK" has been told. Leaving the two writes separate would produce the
+ * obvious bug — a toolbar control that changes the lock and leaves the
+ * first-run notice on screen — and nothing would catch it.
+ *
+ * Placements are untouched. Changing the lock system does not invalidate a
+ * scene: `@/assembly` treats lock as a weighted preference over base matching
+ * (`MATCH_WEIGHTS.lock`), not a filter, so switching re-resolves the bill of
+ * tiles and may add `base-lock-mismatch` or `lock-unavailable` warnings to
+ * placements that no longer line up. Nothing is removed from the grid.
+ */
 export function setLockSystem(lock: LockSystem): void {
-  useWorkshopStore.setState({ lock })
+  useWorkshopStore.setState({ lock, lockChosen: true })
+}
+
+/**
+ * Record that the user has seen the lock choice and is keeping what is set.
+ *
+ * The dismiss action on the first-run notice, and the only way to set the flag
+ * without touching `lock`. Kept separate from {@link setLockSystem} so that
+ * "keep the default" does not have to be spelled
+ * `setLockSystem(DEFAULT_LOCK_SYSTEM)` — which reads as a change and would be
+ * wrong the day the default moves.
+ */
+export function acknowledgeLockSystem(): void {
+  useWorkshopStore.setState({ lockChosen: true })
 }
 
 /* --------------------------------------------------------------------- reset */
@@ -257,6 +286,14 @@ export const selectPlacementCount = (state: WorkshopState): number => Object.key
 /** The global lock preference. */
 export const selectLockSystem = (state: WorkshopState): LockSystem => state.lock
 
+/**
+ * Whether the user has ever decided the lock preference.
+ *
+ * A boolean, so the component that renders the first-run notice re-renders when
+ * the answer changes and on no other store write.
+ */
+export const selectLockChosen = (state: WorkshopState): boolean => state.lockChosen
+
 /* --------------------------------------------------------------------- hooks */
 
 /** @see selectLibrary */
@@ -292,4 +329,9 @@ export function usePlacementCount(): number {
 /** @see selectLockSystem */
 export function useLockSystem(): LockSystem {
   return useWorkshopStore(selectLockSystem)
+}
+
+/** @see selectLockChosen */
+export function useLockChosen(): boolean {
+  return useWorkshopStore(selectLockChosen)
 }
