@@ -11,9 +11,12 @@ import { describe, expect, it } from 'vitest'
 
 import { designId, designKey } from './design'
 import {
+  CONNECTION_POSITIONS,
   buildSystem,
   classifyLayer,
   connectionSystems,
+  connectionsByPosition,
+  isLockSystem,
   kindBuckets,
   openlockSizeCode,
   rotationStep,
@@ -147,6 +150,110 @@ describe('connection systems', () => {
 
   it('returns nothing for the 349 tiles with no connection tag', () => {
     expect(connectionSystems(['shape|floor'])).toEqual([])
+  })
+
+  it('reads bottom, left and right as positions too', () => {
+    // The eight records this row is about. Every one of them is a bare position
+    // tag beside the tag that names the system, so the position contributes no
+    // system of its own — it used to contribute one named after the face.
+    expect(CONNECTION_POSITIONS).toEqual(['side', 'bottom', 'left', 'right'])
+    expect(connectionSystems(['connection|bottom', 'connection|openforge'])).toEqual(['openforge'])
+    expect(connectionSystems(['connection|left', 'connection|openforge'])).toEqual(['openforge'])
+    expect(connectionSystems(['connection|right', 'connection|openforge'])).toEqual(['openforge'])
+    expect(
+      connectionSystems([
+        'connection|bottom',
+        'connection|openforge',
+        'connection|side',
+        'connection|side|dragonlock',
+      ]),
+    ).toEqual(['dragonlock', 'openforge'])
+  })
+})
+
+describe('connections by position', () => {
+  it('is total, so an unmounted face is an empty list rather than undefined', () => {
+    expect(connectionsByPosition(['shape|floor'])).toEqual({ bottom: [], side: [], left: [], right: [] })
+  })
+
+  it('files an unpositioned tag on the tile own underside', () => {
+    // `connection|openlock` is openlock underneath. This is the reading a base
+    // matcher needs, and the one the flattened list cannot express.
+    expect(connectionsByPosition(['connection|openlock', 'connection|openlock|topless'])).toEqual({
+      bottom: ['openlock'],
+      side: [],
+      left: [],
+      right: [],
+    })
+  })
+
+  it('keeps a side lock off the underside', () => {
+    // The topper shape: openforge underneath (so it needs a base) and dragonlock
+    // to the neighbour. 1,283 corpus records look like this, and reading them off
+    // `conn` alone says they offer dragonlock as table joinery. They do not.
+    const topper = ['connection|openforge', 'connection|side', 'connection|side|dragonlock']
+    expect(connectionsByPosition(topper)).toEqual({
+      bottom: ['openforge'],
+      side: ['dragonlock'],
+      left: [],
+      right: [],
+    })
+    expect(connectionsByPosition(topper).bottom.filter(isLockSystem)).toEqual([])
+    expect(connectionsByPosition(topper).side.filter(isLockSystem)).toEqual(['dragonlock'])
+    // …while the flattened projection still answers the question it is for.
+    expect(connectionSystems(topper)).toEqual(['dragonlock', 'openforge'])
+  })
+
+  it('folds the explicit bottom spelling into the unstated one', () => {
+    // `connection|bottom` names the same face an unpositioned tag names, so the
+    // two land in one key rather than leaving every caller to union them. The
+    // corpus never puts a system after it, which is why the fold is free.
+    expect(connectionsByPosition(['connection|bottom', 'connection|openlock']).bottom).toEqual(['openlock'])
+    expect(connectionsByPosition(['connection|bottom|openlock']).bottom).toEqual(['openlock'])
+  })
+
+  it('gives left and right their own faces even though the corpus never fills them', () => {
+    expect(connectionsByPosition(['connection|left', 'connection|openforge'])).toEqual({
+      bottom: ['openforge'],
+      side: [],
+      left: [],
+      right: [],
+    })
+    expect(connectionsByPosition(['connection|right|magnetic']).right).toEqual(['magnetic'])
+  })
+
+  it('reads a trailing position segment as a variant, not as a face', () => {
+    // `connection|openlock|side` (3 tags) spells "openlock on the side" the other
+    // way round and is deliberately NOT folded: the verify script defines a side
+    // lock as segment two of `connection|side|…` and the plan's 23.9% is measured
+    // against that. All 3 tiles also carry a bare `connection|openlock`, so the
+    // system survives; only its position is understated. Pinned so a future change
+    // to that definition is a decision rather than an accident.
+    expect(connectionsByPosition(['connection|openlock', 'connection|openlock|side'])).toEqual({
+      bottom: ['openlock'],
+      side: [],
+      left: [],
+      right: [],
+    })
+  })
+
+  it('is the single source the flattened projection is derived from', () => {
+    const tags = [
+      'connection|bottom',
+      'connection|magnetic',
+      'connection|magnetic|flex',
+      'connection|side',
+      'connection|side|openlock',
+    ]
+    const byPosition = connectionsByPosition(tags)
+    const union = [...new Set([...byPosition.bottom, ...byPosition.side, ...byPosition.left, ...byPosition.right])].sort()
+    expect(connectionSystems(tags)).toEqual(union)
+    expect(connectionSystems(tags)).toEqual(['magnetic', 'openlock'])
+  })
+
+  it('names the lock systems and nothing else', () => {
+    expect(['openlock', 'dragonlock', 'magnetic'].every(isLockSystem)).toBe(true)
+    expect(['openforge', 'dual', 'pegs', 'filament', 'side'].some(isLockSystem)).toBe(false)
   })
 })
 

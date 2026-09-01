@@ -26,7 +26,7 @@
  * | `kinds` | multi-select OR, plus {@link KIND_OTHER}      | 19.5% of tiles are in 2+ buckets and 11.9% in none — neither is expressible as one value, and without an explicit "other" bucket 1,032 tiles are unreachable from the sidebar |
  * | `tex`   | multi-select OR of **namespace prefixes**     | 38 roots with 45 deeper paths beneath them; selecting `dungeon_stone` must also match `texture\|dungeon_stone\|eroded` |
  * | `build` | single-select, plus {@link BUILD_UNSPECIFIED} | 2,978 tiles (34.2%) carry no `build\|` tag, so absence is a value |
- * | `conn`  | multi-select OR                              | 2,499 tiles (28.7%) carry 2+ systems |
+ * | `conn`  | multi-select OR                              | 2,493 tiles (28.6%) carry 2+ systems |
  *
  * ## The texture facet is matched on tags, not on `record.texture`
  *

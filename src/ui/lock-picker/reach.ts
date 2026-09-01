@@ -33,15 +33,23 @@
  *
  * ## Reading a connection tag
  *
- * `conn` arrives normalised by the importer, so an entry is usually a bare
- * system name. It is still parsed segment-wise here, and that is not belt and
- * braces: the raw tag `connection|side|openlock` puts a *position* in the second
- * segment, and taking segment one blindly invents a phantom `side` system while
- * hiding openlock from the 2,079 tiles that mount it on the side. That bug was
- * in the first version of the verify script and moved these figures by up to 8
- * points. Matching on *any* segment is immune to it, and also survives the
- * position values the current importer does not fold (`bottom`, `left`, `right`
- * still leak through on 8 records).
+ * `conn` arrives normalised by the importer, so an entry is a bare system name.
+ * It is still parsed segment-wise here, and that is not belt and braces: the raw
+ * tag `connection|side|openlock` puts a *position* in the second segment, and
+ * taking segment one blindly invents a phantom `side` system while hiding
+ * openlock from the 2,079 tiles that mount it on the side. That bug was in the
+ * first version of the verify script and moved these figures by up to 8 points.
+ * Matching on *any* segment is immune to it, so this module keeps working on a
+ * hand-written `side|openlock` entry and on whatever the importer's vocabulary
+ * grows into.
+ *
+ * `bottom`, `left` and `right` used to leak through as phantom systems on 8
+ * records; `pipeline/facets.ts` folds all four positions now, so the vocabulary
+ * reaching here is 7 systems and none of them is a face. **Reachability is a
+ * whole-tile question and stays position-blind on purpose** — a design is
+ * reachable if it offers the lock *anywhere*. The question that does need the
+ * face is base matching ("is this lock on the underside, where the base meets
+ * it?"), and that one reads `connectionsByPosition` rather than `conn`.
  */
 import type { LockSystem } from '@/store'
 

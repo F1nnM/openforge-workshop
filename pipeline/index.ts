@@ -18,15 +18,19 @@ export {
 } from './emit'
 export type { SizeReport } from './emit'
 export {
+  CONNECTION_POSITIONS,
   LOCK_SYSTEMS,
   buildSystem,
   classifyLayer,
   connectionSystems,
+  connectionsByPosition,
+  isLockSystem,
   kindBuckets,
   openlockSizeCode,
   rotationStep,
   textureRoot,
 } from './facets'
+export type { ConnectionPosition, ConnectionsByPosition } from './facets'
 export {
   DEFAULT_FIXTURES_DIR,
   fixturesDir,

@@ -205,7 +205,7 @@ parameterised on radius and angle rather than on the tagged width and depth.
 | Carries `connection|openforge` — joinery delegated to a separate base | 4,363 | 50.1% |
 | Carries a lock system (openlock / dragonlock / magnetic) | 5,271 | 60.6% |
 | Carries **no** `connection|` tag at all | 349 | 4.0% |
-| Carries 2+ distinct connection systems | 2,499 | 28.7% |
+| Carries 2+ distinct connection systems | 2,493 | 28.6% |
 | Carries a *position* segment, e.g. `connection\|side\|openlock` | 2,079 | 23.9% |
 | Is a base (`shape|base`) | 1,963 | 22.6% |
 
@@ -214,6 +214,14 @@ parameterised on radius and angle rather than on the tagged width and depth.
 > one blindly invents a "side" system and, worse, hides openlock from every tile that mounts
 > it on the side. The first version of the verify script had exactly that bug, and it moved
 > the lock reachability figures by up to 8 percentage points.
+>
+> `bottom` (6 tags), `left` (1) and `right` (1) are the same bug at a 260th of the scale, and
+> were missing from the position vocabulary until they minted phantom systems on 8 records —
+> which is why "2+ distinct connection systems" reads 2,493 rather than the 2,499 earlier
+> drafts quoted. **Position is now carried rather than flattened**, because 0 of the 4,363
+> toppers carry a lock on their own underside: the 1,283 that name one name it on the side.
+> `connections_by_position()` in the verify script and `connectionsByPosition()` in
+> `pipeline/facets.ts` are the two implementations, cross-checked per layer.
 
 So a placement is an **assembly** — a base plus a topper — because half the corpus expects
 its connector to live on a separately printed base.
