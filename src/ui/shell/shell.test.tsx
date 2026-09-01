@@ -178,7 +178,12 @@ describe('keyboard', () => {
     const shell = container.querySelector('.of-shell')
     expect(shell).not.toBeNull()
 
-    expect(tabStops(shell as HTMLElement)).toEqual([
+    // The frame's own five controls, in order, and *first* — everything after
+    // them belongs to whichever screen is mounted (the catalog contributes a
+    // search field and ~35 facet controls). Asserting the prefix rather than the
+    // whole list is what keeps this a test of the frame's tab order instead of a
+    // test that no screen has any controls.
+    expect(tabStops(shell as HTMLElement).slice(0, 5)).toEqual([
       screen.getByRole('link', { name: 'Skip to content' }),
       screen.getByRole('link', { name: 'OpenForge Catalog & Workshop — home' }),
       screen.getByRole('link', { name: 'Catalog' }),
