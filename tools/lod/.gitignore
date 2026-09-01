@@ -1,0 +1,9 @@
+# Fetched source meshes. Content-addressed and re-fetchable; a full pass is
+# 108 GB, which is not something git should ever be asked to hold. The cache is
+# opt-in for the same reason (`--cache`).
+.cache/
+
+# The derived GLBs, the run journal and the upload manifest. Reproducible from
+# the index plus the bucket, and staged here only until a human with R2 write
+# credentials uploads them (blocker B2).
+out/
