@@ -40,35 +40,56 @@ Search, faceting and constraint resolution run in the browser.
 Verified figures, with the definition each depends on. Definitions matter: v1 of this plan
 quoted percentages whose definitions were never written down, and they did not reproduce.
 
-### Footprints — six primitives, 95.1% coverage
+### Footprints — 86.9% today, 95.1% the target
 
-Revised after researching the OpenLOCK tessellation system
-([`openlock-tessellation.md`](openlock-tessellation.md)). The three-primitive model below it
-reached 86.9% and placed 165 tiles wrongly.
+**Two classifiers are in play and they disagree. This section states both, because an earlier
+draft quoted only the second and presented it as measured.**
 
-| Primitive | Definition | Share |
-| --- | --- | ---: |
-| `RECT` | axis-aligned rectangle, w × d | 42.9% |
-| `WALL_SEG` | length × the measured 0.5-unit thickness | 36.5% |
-| `ARC` | **annular sector** — `(centre, rIn, rOut, startAngle, sweep)` | 14.1% |
-| `COLUMN` | 0.5 × 0.5, measured | 1.6% |
-| `DIAGONAL` | 45° wall run | (within wall/rect) |
-| `NONE` | no derivable footprint | **4.9%** |
+| Primitive | **Shipped classifier — what our code says today** | Research classifier — the target |
+| --- | ---: | ---: |
+| `RECT` | 3,051 (35.1%) | 42.9% |
+| `WALL_SEG` | 3,116 (35.8%) | 36.5% |
+| `ARC` | 1,391 (16.0%) | 14.1% |
+| `COLUMN` | — (not a primitive yet) | 1.6% |
+| `DIAGONAL` | — (not a primitive yet) | within wall/rect |
+| `NONE` | **1,144 (13.1%)** | 428 (4.9%) |
+| **Coverage** | **86.9%** | **95.1%** |
 
-**8,274 tiles (95.1%) placeable**, up from 6,167 (70.9%) in v1. 428 tiles (4.9%) remain
-genuinely unplaceable and stay out of the palette.
+Run [`verify-catalog-facts.py`](verify-catalog-facts.py) for the left column; it is what the
+1,276 tests assert against.
+
+**Most of the gap is one line of code, and it was unscheduled.** `pipeline/footprint.ts` detects
+curve markers with a **substring scan**, and **742 of the 1,144 `none` tiles carry a curve marker
+but no `size|radius`** — so they are classified unplaceable by a string match rather than by
+lacking a footprint. Making that scan segment-exact is where the bulk of 86.9% → 95.1% comes
+from, and it is now its own row rather than a side effect of the tessellation work.
+
+Two further primitives are genuinely new: **`COLUMN`** (0.5 × 0.5, measured, ~133 tiles) and
+**`DIAGONAL`** — a right triangle for the `O`/`OA` family and a 45° wall run (`2√2 × 0.5`) for
+the `P` family, 121 tiles.
 
 **Curved tiles are placeable, and the primitive is an annular sector, not an arc segment.**
-Centre sits at a bounding-box corner, with `bboxX = rOut − rIn·cos θ` and
-`bboxY = rOut·sin θ` — verified to **±0.002 units** across eight plain-base samples. The band
-width comes from the modifier: `radial` → `[R−2, R]`, `convex` → `[R−0.5, R]`, `concave` →
-`[R, R+0.5]`, `s2w` radial → `[R−1.5, R]`. Edge bands are 0.5 wide — the same wall thickness,
-bent.
+Centre sits at a bounding-box corner, with `bboxX = rOut − rIn·cos θ` and `bboxY = rOut·sin θ`
+— verified to ±0.002 units. The band width comes from the modifier: `radial` → `[R−2, R]`,
+`convex` → `[R−0.5, R]`, `concave` → `[R, R+0.5]`, `s2w` radial → `[R−1.5, R]`.
 
-**Only 11 radius × angle combinations exist, not the 45 the tag cross-product implies.**
-Radius 3 and angles 60/120/240/270/300 are **not curves** — they are hex corners and `IL`
-markers. Routing them through the arc path places 84 tiles as bogus arcs, which is what the
-current importer does.
+**But that rule does not cover a fifth of the tiles it would be applied to.** The evidence base
+is 21 measurements across 4 bands, and **292 of the 1,391 arc-bucket tiles (21.0%) carry no
+`radial` / `concave` / `convex` modifier at all** — their shape tags are `shape|base|inverted`,
+`shape|option|curved_interface`, or bare `shape|curved`, none of which appears anywhere in the
+tessellation research. **So the measurement pass must precede the reshape**, not run beside it.
+
+**165 arc tiles carry no `size|angle`, and the importer fabricates one.**
+`DEFAULT_ARC_SWEEP_DEG = 90` invents a sweep for 84 `xG` plus 81 others. That is the real defect
+in the arc path.
+
+> **A correction to an earlier draft of this plan.** It claimed *"radius 3 and angles
+> 60/120/240/270/300 place 84 tiles as bogus arcs."* Measured, that is wrong twice.
+> `footprintKind` enters the arc path **only** on `size|radius`, and those tiles have none — the
+> 48 tiles at angle 60 all classify as `wall`, and the 82 at 120/240/270/300 all as `none`. Zero
+> are routed through the arc path. The 84 mis-shaped tiles are the `xG` codes, by a different
+> mechanism. Sixteen radius × angle combinations exist, not eleven — and the five *without* an
+> angle are the fabricated-sweep bug.
 
 ### The OpenLOCK tessellation codes are footprints, not sizes
 
@@ -731,7 +752,7 @@ magnitude at one end.
 **v1 — shipped.** Landing; catalog with real facets, tokenised search and a virtualised grid;
 library; tile detail with the sprite viewer and a size-gated 3D view; top-down plan-view builder
 with RECT and WALL_SEG footprints, assemblies, bill of tiles, client-side zip; material tinting;
-the thumbnail pipeline; the deployment surface. 36 PRs, 1,276 tests.
+the thumbnail pipeline; the deployment surface. 34 PRs, 1,276 tests.
 
 **v2 — the target, and the end of the plan.** One series, no further deferral. Detailed in
 [`v2-pr-series.md`](v2-pr-series.md). Nine workstreams:
@@ -807,9 +828,25 @@ declined, so item 2 is the only operational ask.
    footprint-congruence fallback catches them and the mismatch is **latent, not live**. It
    becomes live the moment a base with code `O` is added. Guard it with a test rather than a
    comment.
-9. **165 tiles are given `foot.shape: "arc"` and are not arcs.** 84 `xG` pieces measure as
-   straight walls. Radius 3 and angles 60/120/240/270/300 are hex corners and `IL` markers, not
-   curves. The arc path must exclude them.
+9. **165 arc tiles have no angle, and the importer fabricates one.**
+   `DEFAULT_ARC_SWEEP_DEG = 90` invents a sweep for 84 `xG` pieces (which measure as straight
+   walls) plus 81 others. Separately, **292 of 1,391 arc tiles carry no band modifier**, so the
+   annular-sector rule cannot be applied to them without measurement. *An earlier version of
+   this risk blamed radius 3 and the 60/120/240/270/300 angles; measured, those tiles never enter
+   the arc path at all — see §2.*
+13. **The plan's footprint percentages and the shipped classifier's disagree by 742 tiles**, and
+   the gap is a substring curve-marker scan rather than missing data. §2 states both columns.
+   Reconciling them is scheduled, not incidental.
+14. **`hasCurveMarker` cannot be made segment-exact casually.** `pipeline/footprint.ts:18-21`
+   records that doing so *"would move the NONE bucket and break the plan's numbers"* — which is
+   exactly the reconciliation above, and exactly why it needs its own row with the oracle and the
+   corpus test in the same diff.
+15. **Tag drift is now load-bearing rather than cosmetic.** `texture|towne|stone-stucco` (72) and
+   `texture|towne|stucco-stone` (72) are one material, and `src/materials/mapping.ts` maps them to
+   **two different families** — `cut_stone` and `stucco`. Once previews are tinted from the family,
+   that is a visible wrong colour on 144 tiles, not a taxonomy nit. Collapsing
+   `foundation`/`foundations` also takes the root count 38 → 37, which the material registry
+   asserts.
 10. **`record.conn` flattens connection position away.** **0 of 4,363 toppers carry a bottom
    lock** — the 1,283 that carry one carry it on the *side*. An aggregate built on `conn` would
    advertise bottom joinery 1,283 records do not have. Also `connection|bottom`, `|left` and
