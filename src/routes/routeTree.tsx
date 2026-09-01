@@ -1,8 +1,10 @@
 /**
  * OpenForge Workshop — the route tree.
  *
- * Four routes, matching architecture-plan.md §14's v1 scope and
- * design-contract.md §2's screen inventory: landing, catalog, library, builder.
+ * Five routes: landing, catalog, library and builder — architecture-plan.md
+ * §14's v1 scope and design-contract.md §2's screen inventory — plus `/settings`,
+ * which the contract does not list because the lock preference had no home in it.
+ * §2's 40.2-point lock spread gave it one.
  * The mock made all four client-side *state*, which is why nothing in it was
  * linkable — no filtered view, no open tile, no shared build. This module is the
  * fix, and the point of it is that the URL is the app's state.
@@ -57,12 +59,14 @@ import {
   validateCatalogSearch,
   validateFacetSearch,
 } from '@/search/searchSchema'
+import { BuilderScreen } from '@/screens/builder'
 import { CatalogScreen } from '@/screens/catalog'
 import { Landing } from '@/screens/landing'
 import { LibraryScreen } from '@/screens/library'
+import { SettingsScreen } from '@/screens/settings'
 import { AppFrame } from '@/ui/shell'
 
-import { BuilderPlaceholder, ErrorPlaceholder, NotFoundPlaceholder } from './placeholders'
+import { ErrorPlaceholder, NotFoundPlaceholder } from './placeholders'
 
 /**
  * The frame every screen renders inside.
@@ -123,7 +127,37 @@ export const builderRoute = createRoute({
   path: '/builder',
   validateSearch: validateFacetSearch,
   search: { middlewares: [stripSearchParams(defaultFacetSearch())] },
-  component: BuilderPlaceholder,
+  component: BuilderScreen,
 })
 
-export const routeTree = rootRoute.addChildren([landingRoute, catalogRoute, libraryRoute, builderRoute])
+/**
+ * `/settings` — the lock system, and nothing else yet.
+ *
+ * No search params, for the same reason `/library` has none: there is nothing on
+ * this screen worth linking to but the screen itself. The one piece of state it
+ * edits is the global lock preference, which is persisted in the store rather
+ * than in the URL — putting it in a search param would make a shared link
+ * silently change the recipient's build settings.
+ *
+ * Not in the header's nav. The header (`src/ui/shell/Header.tsx`) belongs to
+ * PR 12 and lists the three screens a visitor moves between; a fourth tab for a
+ * one-line setting would spend a permanent slot in the primary navigation on
+ * something almost nobody needs to change. The route is reached from
+ * `LockNotice`, which the builder mounts. That leaves a real gap while the
+ * notice is dismissed and unmounted, and it is called out in this PR's report:
+ * one line in `Header.tsx` or in row 16's footer closes it, and neither file is
+ * this PR's to edit.
+ */
+export const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  component: SettingsScreen,
+})
+
+export const routeTree = rootRoute.addChildren([
+  landingRoute,
+  catalogRoute,
+  libraryRoute,
+  builderRoute,
+  settingsRoute,
+])

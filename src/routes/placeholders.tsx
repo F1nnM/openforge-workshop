@@ -15,7 +15,7 @@
  * | `/`        | `LandingPlaceholder`  | PR 16 — `src/screens/landing/`         |
  * | `/catalog` | *landed*              | PR 13 — `src/screens/catalog/` (+ PR 15's drawer) |
  * | `/library` | *landed*              | PR 14 — `src/screens/library/`         |
- * | `/builder` | `BuilderPlaceholder`  | PR 18 — `src/screens/builder/`         |
+ * | `/builder` | *landed*              | PR 18 — `src/screens/builder/`         |
  *
  * Each of those changes exactly one `component:` reference in `routeTree.tsx`.
  * Nothing else in `src/routes/` moves, and the search-param contract does not
@@ -42,10 +42,6 @@ function Screen({ title, note }: { title: string; note: string }) {
 
 export function LandingPlaceholder() {
   return <Screen title="Landing" note="Placeholder — PR 16 owns this screen." />
-}
-
-export function BuilderPlaceholder() {
-  return <Screen title="Builder" note="Placeholder — PR 18 owns this screen." />
 }
 
 /**
