@@ -13,7 +13,7 @@
  * | ---------- | ------------------ | ---------------------------------------- |
  * | root frame | *landed*              | PR 12 — `src/ui/shell/AppFrame.tsx`    |
  * | `/`        | `LandingPlaceholder`  | PR 16 — `src/screens/landing/`         |
- * | `/catalog` | `CatalogPlaceholder`  | PR 13 — `src/screens/catalog/` (+ PR 15's drawer) |
+ * | `/catalog` | *landed*              | PR 13 — `src/screens/catalog/` (+ PR 15's drawer) |
  * | `/library` | `LibraryPlaceholder`  | PR 14 — `src/screens/library/`         |
  * | `/builder` | `BuilderPlaceholder`  | PR 18 — `src/screens/builder/`         |
  *
@@ -29,14 +29,7 @@
  * `<main>` landmark, and a nested one is invalid and breaks the skip link.
  * Screens land the same way.
  */
-import { Link, getRouteApi, useRouterState } from '@tanstack/react-router'
-
-/**
- * Reached by route id rather than by importing `catalogRoute`, which would make
- * this module and `routeTree.tsx` import each other. The id is checked against
- * the registered route tree, so a renamed route is a compile error here.
- */
-const catalogApi = getRouteApi('/catalog')
+import { Link, useRouterState } from '@tanstack/react-router'
 
 function Screen({ title, note }: { title: string; note: string }) {
   return (
@@ -49,24 +42,6 @@ function Screen({ title, note }: { title: string; note: string }) {
 
 export function LandingPlaceholder() {
   return <Screen title="Landing" note="Placeholder — PR 16 owns this screen." />
-}
-
-/**
- * Catalog placeholder.
- *
- * Unlike the others it reads its search params, because reading them is the
- * thing this PR has to demonstrate: the values below are fully typed, come from
- * the URL, and are already normalised and defaulted by `validateCatalogSearch`.
- */
-export function CatalogPlaceholder() {
-  const search = catalogApi.useSearch()
-  return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold">Catalog</h1>
-      <p className="mt-2 text-sm">Placeholder — PR 13 owns this screen, PR 15 owns the drawer.</p>
-      <pre className="mt-4 text-xs">{JSON.stringify(search, null, 2)}</pre>
-    </div>
-  )
 }
 
 export function LibraryPlaceholder() {

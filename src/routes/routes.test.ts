@@ -263,7 +263,9 @@ describe('mounting', () => {
   }
 
   it.each([
-    ['/', 'Landing'],
+    // The real landing screen (PR 16) replaced `LandingPlaceholder`, so the
+    // marker is a phrase from its headline rather than the placeholder's title.
+    ['/', 'Every tile in the archive'],
     ['/catalog', 'Catalog'],
     ['/library', 'Library'],
     ['/builder', 'Builder'],
@@ -281,10 +283,16 @@ describe('mounting', () => {
   })
 
   it('hands the screen its validated search params', async () => {
-    const { text, unmount } = await mount(routerAt('/catalog?kinds=wall~floor&tile=4821'))
-    // Sorted, defaulted and typed by the time the component sees them.
-    expect(text).toContain('"floor"')
-    expect(text).toContain('"tile": 4821')
+    const router = routerAt('/catalog?kinds=wall~floor&tile=4821')
+    const { unmount } = await mount(router)
+    // The real catalog screen (PR 13) replaced `CatalogPlaceholder`, so the
+    // params are no longer dumped as JSON — they are the facet state the sidebar
+    // renders from. What is asserted is unchanged: sorted, defaulted and typed by
+    // the time the component sees them, with the screen mounted against them.
+    expect(router.state.matches.at(-1)?.search).toMatchObject({
+      kinds: ['floor', 'wall'],
+      tile: 4821,
+    })
     unmount()
   })
 })

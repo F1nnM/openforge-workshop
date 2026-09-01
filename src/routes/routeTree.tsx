@@ -57,13 +57,13 @@ import {
   validateCatalogSearch,
   validateFacetSearch,
 } from '@/search/searchSchema'
+import { CatalogScreen } from '@/screens/catalog'
+import { Landing } from '@/screens/landing'
 import { AppFrame } from '@/ui/shell'
 
 import {
   BuilderPlaceholder,
-  CatalogPlaceholder,
   ErrorPlaceholder,
-  LandingPlaceholder,
   LibraryPlaceholder,
   NotFoundPlaceholder,
 } from './placeholders'
@@ -85,7 +85,7 @@ export const rootRoute = createRootRoute({
 export const landingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  component: LandingPlaceholder,
+  component: Landing,
 })
 
 /**
@@ -102,7 +102,7 @@ export const catalogRoute = createRoute({
   path: '/catalog',
   validateSearch: validateCatalogSearch,
   search: { middlewares: [stripSearchParams(defaultCatalogSearch())] },
-  component: CatalogPlaceholder,
+  component: CatalogScreen,
 })
 
 export const libraryRoute = createRoute({
