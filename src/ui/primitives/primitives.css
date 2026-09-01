@@ -1,0 +1,392 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — primitive styling.
+
+   The components in this directory are thin wrappers over Base UI: Base UI
+   supplies behaviour (focus trapping, focus restoration, roving tabindex, ARIA
+   wiring, collision-aware positioning) and these rules supply the Parchment
+   look. Nothing here is a variant system — a primitive gets exactly the knobs
+   the design contract asks for, published as CSS custom properties where a
+   screen legitimately needs to change one (`--of-drawer-width`).
+
+   Unlayered, for the reason set out at the top of `../shell/shell.css`.
+
+   Every animated rule has a `prefers-reduced-motion` counterpart at the bottom
+   of the file. All of it is decorative — a fade, a scale, a slide — so all of it
+   reduces to an instant state change rather than to a shorter one.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Assistive-technology-only text ──────────────────────────────────────────
+   Clipped rather than `display: none`, which would take it out of the
+   accessibility tree as well as out of the layout. Lives with the primitives
+   because `VisuallyHidden` is one of them, so any consumer of that component has
+   this rule loaded.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Overlay backdrop ────────────────────────────────────────────────────────
+   The app's stacking order, in one place because it is only correct as a whole:
+
+     40  the sticky header      (../shell/shell.css)
+     60  a modal's backdrop     (here)
+     61  a modal's popup        (here)
+     70  the skip link          (../shell/shell.css)
+
+   60/61 are the mock's own values, and they are above the header on purpose: the
+   detail drawer covers it, so the scrim dims everything and the header's nav is
+   not clickable behind an open modal. The skip link sits above all of it and
+   loses nothing by doing so — while a modal is open, focus is trapped and the
+   link cannot be reached.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-backdrop {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  min-height: 100dvh;
+  background: var(--scrim);
+  transition: opacity 160ms ease;
+}
+
+/* Base UI stamps these while the popup is entering and leaving. */
+.of-backdrop[data-starting-style],
+.of-backdrop[data-ending-style] {
+  opacity: 0;
+}
+
+/* ── Dialog and drawer ───────────────────────────────────────────────────── */
+
+.of-dialog,
+.of-drawer {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg2);
+  color: var(--ink);
+  /* The popup is what focus lands on when it holds nothing tabbable, and it is
+     what `Escape` is heard on. The ring belongs on the controls inside it. */
+  outline: none;
+}
+
+.of-dialog {
+  /* Overridable per dialog; the contract specifies no centred modal width. */
+  --of-dialog-width: 420px;
+
+  position: fixed;
+  z-index: 61;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: var(--of-dialog-width);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 18px 44px -14px var(--scrim);
+  transition:
+    opacity 140ms ease,
+    scale 140ms ease;
+}
+
+.of-dialog[data-starting-style],
+.of-dialog[data-ending-style] {
+  opacity: 0;
+  scale: 0.98;
+}
+
+.of-drawer {
+  /* 442px is design-contract.md §2.5's tile detail drawer. Published as a
+     property so row 15 does not restate it and a wider panel elsewhere does not
+     need a second class. */
+  --of-drawer-width: 442px;
+
+  position: fixed;
+  z-index: 61;
+  inset-block: 0;
+  right: 0;
+  width: var(--of-drawer-width);
+  max-width: 100vw;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--line);
+  box-shadow: -18px 0 44px -18px var(--scrim);
+  /* The mock's easing for edge panels: fast out of the edge, long settle. */
+  transition: translate 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.of-drawer[data-starting-style],
+.of-drawer[data-ending-style] {
+  translate: 100% 0;
+}
+
+.of-overlay-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.of-overlay-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.of-overlay-title {
+  margin: 0;
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.of-overlay-description {
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+
+.of-overlay-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--mut);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.of-overlay-close:hover {
+  color: var(--ink);
+  border-color: var(--acc);
+}
+
+.of-overlay-body {
+  flex: 1;
+  min-height: 0;
+  padding: 18px 20px 20px;
+}
+
+/* ── Tooltip ─────────────────────────────────────────────────────────────── */
+
+.of-tooltip {
+  max-width: 26ch;
+  padding: 6px 9px;
+  /* Inverted against the parchment ground: a tooltip is the one surface that
+     should read as floating above the page rather than cut out of it. */
+  background: var(--ink);
+  color: var(--accink);
+  border-radius: 4px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  transition:
+    opacity 120ms ease,
+    scale 120ms ease;
+}
+
+.of-tooltip[data-starting-style],
+.of-tooltip[data-ending-style] {
+  opacity: 0;
+  scale: 0.96;
+}
+
+/* ── Toggle group ────────────────────────────────────────────────────────── */
+
+.of-toggle-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.of-toggle-group[data-orientation='vertical'] {
+  flex-direction: column;
+}
+
+.of-toggle {
+  padding: 5px 12px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--mut);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.of-toggle:hover:not([data-pressed]):not([data-disabled]) {
+  color: var(--ink);
+}
+
+.of-toggle[data-pressed] {
+  background: var(--acc);
+  color: var(--accink);
+}
+
+.of-toggle[data-disabled] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+
+.of-tab-list {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.of-tab {
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  color: var(--mut);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.of-tab:hover {
+  color: var(--ink);
+}
+
+.of-tab[data-selected] {
+  color: var(--ink);
+}
+
+/* Same inset-accent device as the header's active nav tab, so a tab strip and
+   the nav read as the same idea. */
+.of-tab-indicator {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  width: var(--active-tab-width);
+  translate: var(--active-tab-left);
+  background: var(--acc);
+  transition:
+    translate 160ms ease,
+    width 160ms ease;
+}
+
+.of-tab-panel {
+  padding-top: 16px;
+}
+
+.of-tab-panel:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ── Chips and eyebrows ──────────────────────────────────────────────────────
+   Two devices the contract uses on every screen, in mono because both carry
+   measured facts (a count, a size code, a tag). They live in the primitives so
+   four screens cannot each arrive at a slightly different one.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-chip {
+  display: inline-block;
+  font-family: var(--face-mono);
+  background: var(--chip);
+  white-space: nowrap;
+}
+
+.of-chip[data-tone='count'] {
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  color: var(--acc);
+}
+
+.of-chip[data-tone='size'] {
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.of-chip[data-tone='tag'] {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  color: var(--mut);
+}
+
+.of-eyebrow {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 2.2px;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+
+.of-eyebrow[data-tone='accent'] {
+  color: var(--acc);
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .of-backdrop,
+  .of-dialog,
+  .of-drawer,
+  .of-tooltip,
+  .of-toggle,
+  .of-tab,
+  .of-tab-indicator,
+  .of-overlay-close {
+    transition: none;
+  }
+
+  /* Enter and leave become a cut. Without this the drawer would still be
+     positioned off-screen by its starting-style rule and then jump. */
+  .of-dialog[data-starting-style],
+  .of-dialog[data-ending-style],
+  .of-tooltip[data-starting-style],
+  .of-tooltip[data-ending-style] {
+    opacity: 1;
+    scale: 1;
+  }
+
+  .of-drawer[data-starting-style],
+  .of-drawer[data-ending-style] {
+    translate: 0 0;
+  }
+
+  .of-backdrop[data-starting-style],
+  .of-backdrop[data-ending-style] {
+    opacity: 1;
+  }
+}

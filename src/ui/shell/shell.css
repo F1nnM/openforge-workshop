@@ -1,0 +1,369 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the app frame, and the document's base typography.
+
+   Two jobs, both of them global:
+
+     1. **The base layer PR 2 deliberately left out.** `tokens.css` publishes the
+        palette and the three faces; it does not decide what `body` looks like.
+        This does: parchment ground, umber ink, Alegreya Sans as the default
+        face, and the small set of element defaults the mock set globally
+        (`button`/`input` inherit the face, links take the accent, `canvas` is a
+        block).
+
+     2. **The 60px sticky header** of design-contract.md §2.0, transcribed from
+        the approved mock (`design/OpenForge-Studio.dc.html`, lines 23–37). The
+        odd-looking numbers — 1.5px, 13px, 1.6px, 10.5px — are the mock's, not
+        approximations of it.
+
+   ## Why hand-written CSS rather than Tailwind utilities
+
+   Tailwind is available and the token utilities exist (`bg-bg2`, `text-ink`,
+   `border-line`, `font-mono`). The header is still written out here because it
+   is a fixed transcription of specific measurements: `text-[13px]
+   tracking-[1.6px] uppercase font-semibold shadow-[inset_0_-2px_var(--acc)]`
+   states the same thing while hiding which numbers are load-bearing. Screens
+   are a different case — rows 13–18 lay out grids that Tailwind expresses
+   well — so this file styles the frame and nothing beyond it.
+
+   ## Why these rules are not in a cascade layer
+
+   `@import 'tailwindcss'` puts Preflight in `@layer base`, and unlayered CSS
+   beats every layer regardless of source order. That matters because this file
+   arrives through a JS import (`AppFrame.tsx`) while Preflight arrives through
+   `src/index.css`, and Vite does not guarantee which `<style>` lands first in
+   dev. Staying unlayered makes the `body` rule below deterministic instead of
+   dependent on module evaluation order.
+
+   Light only. There is no `prefers-color-scheme: dark` block here for the same
+   reason there is none in tokens.css: Parchment is the committed direction.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Document base ───────────────────────────────────────────────────────── */
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--face-body);
+  font-size: 15px;
+  line-height: 1.5;
+  /* The parchment ground is a warm off-white; letting the UA hint text darker
+     than the design intends is the one place a browser default shows. */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--acc);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+canvas {
+  display: block;
+}
+
+/* One focus ring for the whole app, on the accent. Applied here rather than per
+   component so a control added later cannot forget it — including the ones
+   rows 13–18 write. `:focus-visible` (not `:focus`) so a mouse press does not
+   ring, but every keyboard arrival does. */
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--chip);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* The mock's pending-thumbnail animation (design-contract.md §1, "recurring
+   devices"). Lives here because rows 13, 15 and 16 all show pending thumbnails
+   and one keyframe should serve all three. */
+@keyframes ofShimmer {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
+
+.of-shimmer {
+  animation: ofShimmer 1.6s ease-in-out infinite;
+}
+
+/* ── Frame ───────────────────────────────────────────────────────────────── */
+
+.of-shell {
+  /* Published so row 18's three-column builder can size itself against the
+     real header instead of restating 60px: `height: calc(100dvh - var(--of-header-h))`. */
+  --of-header-h: 60px;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.of-main {
+  flex: 1;
+  /* A flex child's default `min-height: auto` would let the builder's
+     no-page-scroll layout push the document taller than the viewport. */
+  min-height: 0;
+}
+
+.of-main:focus {
+  /* Focused only as the skip link's target, so the ring would be noise. */
+  outline: none;
+}
+
+.of-skip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Above the header and above an open modal's popup. See the stacking order
+     documented in ../primitives/primitives.css. */
+  z-index: 70;
+  padding: 10px 16px;
+  background: var(--acc);
+  color: var(--accink);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  /* Off-screen until focused: `display: none` would take it out of the tab
+     order, which is the one thing it needs to be in. */
+  translate: 0 -120%;
+  transition: translate 120ms ease-out;
+}
+
+.of-skip:focus-visible {
+  translate: 0 0;
+  outline-offset: -2px;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.of-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  height: var(--of-header-h);
+  padding: 0 26px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--line);
+  /* `clip`, not `hidden`: it never becomes a scroll container, so the sticky
+     positioning above still resolves against the viewport. This is the backstop
+     that makes a narrow viewport impossible to scroll sideways — the media
+     queries at the bottom of this file are what keep it from ever clipping
+     anything that matters. */
+  overflow-x: clip;
+}
+
+/* ── Wordmark ────────────────────────────────────────────────────────────── */
+
+.of-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: var(--ink);
+  text-decoration: none;
+  flex: none;
+}
+
+.of-wordmark:hover {
+  text-decoration: none;
+}
+
+/* A tile seen in plan: a square outline turned 45°, with a filled square
+   inside. The rotated outline overflows its 24px box on the diagonal, which is
+   what the mock does and why the gap beside it is 13px rather than 8px. */
+.of-mark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1.5px solid var(--acc);
+  rotate: 45deg;
+}
+
+.of-mark::after {
+  content: '';
+  width: 9px;
+  height: 9px;
+  background: var(--acc);
+}
+
+.of-wordmark-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.of-wordmark-name {
+  font-family: var(--face-display);
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: 3px;
+  line-height: 1;
+}
+
+/* The mock set this in the body face; the contract's typography rule puts
+   eyebrow labels in mono, and the eyebrow is the same device that appears above
+   every section and sidebar group. Mono, so all of them agree. */
+.of-wordmark-eyebrow {
+  margin-top: 3px;
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  letter-spacing: 2.2px;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--mut);
+}
+
+/* ── Nav ─────────────────────────────────────────────────────────────────── */
+
+.of-nav {
+  display: flex;
+  gap: 4px;
+  height: 100%;
+  margin-left: 12px;
+  min-width: 0;
+}
+
+.of-nav-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--mut);
+  text-decoration: none;
+  /* Inset rather than a border so the tab's height — and therefore the
+     header's — does not change when it becomes active. */
+  box-shadow: inset 0 0 var(--acc);
+  transition:
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.of-nav-tab:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* TanStack Router stamps `data-status="active"` on a matching Link. The
+   matching `aria-current="page"` is set in Header.tsx — this rule is the
+   visual half only. */
+.of-nav-tab[data-status='active'] {
+  color: var(--ink);
+  box-shadow: inset 0 -2px var(--acc);
+}
+
+/* ── Right-aligned archive stat ──────────────────────────────────────────── */
+
+.of-stat {
+  margin: 0 0 0 auto;
+  font-family: var(--face-mono);
+  font-size: 11px;
+  color: var(--mut);
+  white-space: nowrap;
+  flex: none;
+}
+
+.of-stat-count {
+  color: var(--ink);
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────────
+   The contract's builder is a fixed three-column desktop layout, so there is no
+   mobile nav to design — but the header is on every screen and must survive a
+   phone. Two steps, worst case first: at 320px the mark plus three tightened
+   tabs come to roughly 280px inside a 28px gutter.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .of-header {
+    gap: 18px;
+  }
+
+  /* The stat is the only thing in the header that is neither navigation nor
+     identity, so it is the first thing to go. */
+  .of-stat {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .of-header {
+    gap: 10px;
+    padding: 0 14px;
+  }
+
+  /* The mark alone still links home and still reads as the wordmark. */
+  .of-wordmark-text {
+    display: none;
+  }
+
+  .of-nav {
+    margin-left: 0;
+    gap: 0;
+  }
+
+  .of-nav-tab {
+    gap: 5px;
+    padding: 0 9px;
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────────
+   Everything the frame animates is decorative: a shimmer, a colour fade, and a
+   skip link sliding into view. None of it carries meaning, so all of it stops.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .of-shimmer {
+    animation: none;
+  }
+
+  .of-nav-tab {
+    transition: none;
+  }
+
+  .of-skip {
+    /* Still hidden, still revealed on focus — just without the slide. */
+    transition: none;
+  }
+}

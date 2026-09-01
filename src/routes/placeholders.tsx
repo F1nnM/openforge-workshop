@@ -11,7 +11,7 @@
  *
  * | route      | placeholder        | replaced by                              |
  * | ---------- | ------------------ | ---------------------------------------- |
- * | root frame | `AppFramePlaceholder` | PR 12 — `src/ui/shell/`                |
+ * | root frame | *landed*              | PR 12 — `src/ui/shell/AppFrame.tsx`    |
  * | `/`        | `LandingPlaceholder`  | PR 16 — `src/screens/landing/`         |
  * | `/catalog` | `CatalogPlaceholder`  | PR 13 — `src/screens/catalog/` (+ PR 15's drawer) |
  * | `/library` | `LibraryPlaceholder`  | PR 14 — `src/screens/library/`         |
@@ -24,8 +24,12 @@
  * There is deliberately no styling here beyond what makes the text legible. The
  * Parchment palette is PR 2's and the frame is PR 12's; a placeholder that
  * looked finished would invite someone to keep it.
+ *
+ * These render `<div>` rather than `<main>`: `AppFrame` owns the document's one
+ * `<main>` landmark, and a nested one is invalid and breaks the skip link.
+ * Screens land the same way.
  */
-import { Link, Outlet, getRouteApi, useRouterState } from '@tanstack/react-router'
+import { Link, getRouteApi, useRouterState } from '@tanstack/react-router'
 
 /**
  * Reached by route id rather than by importing `catalogRoute`, which would make
@@ -34,36 +38,12 @@ import { Link, Outlet, getRouteApi, useRouterState } from '@tanstack/react-route
  */
 const catalogApi = getRouteApi('/catalog')
 
-/**
- * The frame every screen renders inside — the root route's component.
- *
- * It exists in this PR for one reason: to prove `<Outlet />` is wired and that
- * nav links are typed against the route tree. PR 12 replaces it with the real
- * sticky header, wordmark and live count chips from design-contract.md §2.0.
- */
-export function AppFramePlaceholder() {
-  return (
-    <div className="min-h-screen font-sans">
-      <header className="flex items-center gap-6 border-b px-6 py-4">
-        <strong className="font-bold">OPENFORGE</strong>
-        <nav className="flex gap-4 text-sm">
-          <Link to="/">Home</Link>
-          <Link to="/catalog">Catalog</Link>
-          <Link to="/library">Library</Link>
-          <Link to="/builder">Builder</Link>
-        </nav>
-      </header>
-      <Outlet />
-    </div>
-  )
-}
-
 function Screen({ title, note }: { title: string; note: string }) {
   return (
-    <main className="p-8">
+    <div className="p-8">
       <h1 className="text-2xl font-bold">{title}</h1>
       <p className="mt-2 text-sm">{note}</p>
-    </main>
+    </div>
   )
 }
 
@@ -81,11 +61,11 @@ export function LandingPlaceholder() {
 export function CatalogPlaceholder() {
   const search = catalogApi.useSearch()
   return (
-    <main className="p-8">
+    <div className="p-8">
       <h1 className="text-2xl font-bold">Catalog</h1>
       <p className="mt-2 text-sm">Placeholder — PR 13 owns this screen, PR 15 owns the drawer.</p>
       <pre className="mt-4 text-xs">{JSON.stringify(search, null, 2)}</pre>
-    </main>
+    </div>
   )
 }
 
@@ -107,7 +87,7 @@ export function BuilderPlaceholder() {
 export function NotFoundPlaceholder() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   return (
-    <main className="p-8">
+    <div className="p-8">
       <h1 className="text-2xl font-bold">Not found</h1>
       <p className="mt-2 text-sm">
         Nothing is routed at <code>{pathname}</code>.
@@ -115,7 +95,7 @@ export function NotFoundPlaceholder() {
       <p className="mt-4 text-sm">
         <Link to="/catalog">Browse the catalog</Link>
       </p>
-    </main>
+    </div>
   )
 }
 
@@ -128,9 +108,9 @@ export function NotFoundPlaceholder() {
  */
 export function ErrorPlaceholder({ error }: { error: Error }) {
   return (
-    <main className="p-8">
+    <div className="p-8">
       <h1 className="text-2xl font-bold">Something broke</h1>
       <p className="mt-2 text-sm">{error.message}</p>
-    </main>
+    </div>
   )
 }
