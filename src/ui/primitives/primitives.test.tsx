@@ -13,12 +13,16 @@
  * document is hidden from assistive technology, and the sentinel guards that
  * bounce focus back are present.
  */
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { Chip, Dialog, Drawer, Eyebrow, Tab, TabList, TabPanel, Tabs, Tooltip } from '.'
 import { ToggleGroup, ToggleItem } from './ToggleGroup'
+import { VisuallyHidden } from './Text'
 
 describe('Dialog', () => {
   it('names itself from its title', async () => {
@@ -300,5 +304,131 @@ describe('Chip and Eyebrow', () => {
     expect(screen.getByText('2x2')).toHaveAttribute('data-tone', 'size')
     // Uppercasing is CSS, so the accessible text stays as written.
     expect(screen.getByText('Texture set')).toHaveAttribute('data-tone', 'accent')
+  })
+})
+
+/* ------------------------------------------------------- clipped-text contract */
+
+/**
+ * `VisuallyHidden`, and the `.of-sr-only` rule that is its whole implementation.
+ *
+ * The defect this guards was measured, in a browser, on the builder: every
+ * clipped span was `position: absolute` with no offsets, so it kept the static
+ * position it would have had in flow, and where nothing above it happened to be
+ * positioned its containing block was the *initial* containing block — outside
+ * every `overflow: hidden` in between. A screenful of them came to **2,809px of
+ * spurious horizontal extent and a scrolling page**. Screens papered over it with
+ * a `position: relative` per scroll container, which only holds until the next
+ * call site forgets one, so the fix is in the rule and this test is on the rule.
+ *
+ * **What these assertions can prove.** jsdom runs no layout — no boxes, no
+ * scrollWidth, no clipping — so nothing here can measure a pixel of extent. What
+ * it does run is the cascade: the real stylesheet is read off disk into the
+ * document, so the computed values below are what a browser would compute for a
+ * span this component actually rendered, not a paraphrase of the rule. That pins
+ * the properties the containment argument is made of — out of flow, `fixed`
+ * rather than `absolute`, both offsets a length rather than `auto`, a 1x1 box
+ * clipped rather than hidden, no negative margin. Three of them — the position
+ * and the two offsets — are exactly what the old rule got wrong, so this suite
+ * goes red against it.
+ *
+ * **What they cannot prove.** That a browser therefore lays out no extra extent:
+ * the 2,809px figure came from a browser and only a browser can retire it. The
+ * argument that it must is a spec argument, set out in full over the rule in
+ * `primitives.css`. Nor can a DOM prove a screen reader announces the text — what
+ * the second test gets at instead is that the accessible name computation reads
+ * these same computed styles, so a rule that clipped the span by *hiding* it
+ * (`display: none`, `visibility: hidden`) would drop the text out of the name and
+ * fail.
+ */
+describe('VisuallyHidden', () => {
+  // Vitest leaves CSS imports unprocessed, so `import './primitives.css'` in
+  // Text.tsx puts nothing in the document. Read the shipping file instead: these
+  // tests then run against the rule itself rather than a copy of it.
+  // The path goes through a variable on purpose: Vite rewrites a *literal*
+  // `new URL('./x', import.meta.url)` into an asset URL, which is not a file one.
+  const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
+  const sheet = read('./primitives.css')
+
+  /**
+   * `../shell/tokens.test.ts` greps this whole tree for a literal call to
+   * `getComputedStyle` — runtime code that reads a *colour* token back out of the
+   * cascade renders wrong only in the minified build, so the rule is a grep. This
+   * is the other kind of read: layout properties, in a test, off a stylesheet the
+   * test loaded itself. Bound to an alias so the grep stays exact rather than
+   * gaining an exception, the same way that file assembles its own needle out of
+   * two pieces.
+   */
+  const computedStyle = window.getComputedStyle.bind(window)
+
+  beforeEach(() => {
+    const style = document.createElement('style')
+    style.dataset.primitives = 'true'
+    style.textContent = sheet
+    document.head.append(style)
+  })
+
+  afterEach(() => {
+    document.querySelector('style[data-primitives]')?.remove()
+  })
+
+  it('is out of flow, pinned, and 1x1 — so it has no offset to carry onto the page', () => {
+    render(<VisuallyHidden>4 tiles saved</VisuallyHidden>)
+    const clipped = screen.getByText('4 tiles saved')
+    const style = computedStyle(clipped)
+
+    // Out of flow: an in-flow span would put its text in a line box, where it
+    // would widen the line whatever else the rule said.
+    expect(style.position).toBe('fixed')
+
+    // The two that make the extent structurally impossible.
+    //
+    //   - `fixed`, so the box is excluded from the scrollable overflow region and
+    //     cannot lengthen scrollWidth/scrollHeight of anything it is nested in.
+    //   - offsets pinned to a length, so the box sits at the origin of whatever
+    //     its containing block turns out to be instead of at the static position
+    //     it would have had in flow. `auto` here is the whole defect: it is what
+    //     carried a hundred palette rows' worth of offset out through the clip.
+    expect(style.top).toBe('0px')
+    expect(style.left).toBe('0px')
+    expect(style.top).not.toBe('auto')
+    expect(style.left).not.toBe('auto')
+
+    // 1x1 rather than 0x0: some screen readers skip a zero-area box.
+    expect(style.width).toBe('1px')
+    expect(style.height).toBe('1px')
+
+    // Clipped twice over, and by clipping rather than by hiding.
+    expect(style.overflow).toBe('hidden')
+    expect(style.getPropertyValue('clip-path')).toBe('inset(50%)')
+
+    // No negative margin: against pinned offsets it would only push the box past
+    // the corner of its containing block, which is the direction that scrolls.
+    for (const side of ['margin-top', 'margin-right', 'margin-bottom', 'margin-left']) {
+      expect(style.getPropertyValue(side), side).not.toMatch(/^-/)
+    }
+  })
+
+  it('keeps its text in the accessible name of the control that renders it', () => {
+    render(
+      <button type="button">
+        Remove <VisuallyHidden>Ivy Tile 2x2</VisuallyHidden>
+      </button>,
+    )
+
+    // The name computation reads the same computed styles as the assertions
+    // above, so this fails if the rule ever swaps clipping for hiding.
+    expect(screen.getByRole('button')).toHaveAccessibleName('Remove Ivy Tile 2x2')
+    expect(screen.getByText('Ivy Tile 2x2')).not.toHaveAttribute('aria-hidden')
+  })
+
+  it('needs no help from its call sites to stay contained', () => {
+    // The rule is self-contained: nothing in it refers to an ancestor, and the
+    // one rule in this file that existed only to give a clipped `<input>` a
+    // containing block is gone with the defect. A screen that plants a
+    // `position: relative` for this reason is now planting it for nothing.
+    const rule = sheet.slice(sheet.indexOf('.of-sr-only {'))
+    expect(rule.slice(0, rule.indexOf('}'))).not.toContain('position: absolute')
+    expect(sheet).not.toContain('.of-sr-only` input inside is absolutely positioned')
   })
 })

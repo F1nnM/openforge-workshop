@@ -20,13 +20,46 @@
    accessibility tree as well as out of the layout. Lives with the primitives
    because `VisuallyHidden` is one of them, so any consumer of that component has
    this rule loaded.
+
+   **The positioning is the load-bearing part, and it is deliberately not the
+   usual `position: absolute` with no offsets.** That recipe is what put 2,809px
+   of horizontal extent and a page scroll into the builder: an out-of-flow box
+   with `inset: auto` keeps the *static position* it would have had in flow — a
+   hundred palette rows down and a panel-width across — and an absolute box whose
+   nearest positioned ancestor happens to be nothing at all resolves against the
+   *initial* containing block, so it is not clipped by any `overflow: hidden`
+   between it and the root and it carries that offset straight onto the document's
+   scrollable area. Every screen then has to remember to plant a positioned
+   ancestor over every clipped span it renders, which is a rule no call site can
+   be relied on to keep.
+
+   Two changes remove the possibility rather than the symptom:
+
+     - `position: fixed`. A fixed box is excluded from the scrollable overflow
+       region of the viewport (CSS Overflow 3 § scrollable overflow), so it cannot
+       lengthen `scrollWidth`/`scrollHeight` no matter what it is nested in. Where
+       an ancestor's `transform`, `filter` or `contain` makes it behave as an
+       absolute box instead, the pinned offsets below keep it inside — and clipped
+       by — that ancestor.
+     - `top: 0; left: 0`. There is no static position left to carry: the box sits
+       at the origin of whatever its containing block turns out to be, which is a
+       point already inside that box's own area. A 1x1 box at a containing block's
+       top-left corner adds no extent in the two directions that scroll.
+
+   The rest is the standard clip recipe, unchanged: a 1x1 box — not 0x0, which
+   some screen readers skip — with its text clipped away twice over, by `overflow`
+   and by `clip-path`. It stays in the layout, in the tab order and in the
+   accessibility tree. `margin: -1px` is gone along with the static position it
+   existed to cancel out; against pinned offsets it only pushed the box 1px past
+   the corner.
    ──────────────────────────────────────────────────────────────────────────── */
 
 .of-sr-only {
-  position: absolute;
+  position: fixed;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
-  margin: -1px;
   padding: 0;
   overflow: hidden;
   clip-path: inset(50%);
@@ -334,13 +367,6 @@
 .of-lib-action:has(input:focus-visible) {
   outline: 2px solid var(--acc);
   outline-offset: 2px;
-}
-
-.of-button:has(input),
-.of-lib-action:has(input) {
-  /* The `.of-sr-only` input inside is absolutely positioned; without this it
-     would resolve against the page. */
-  position: relative;
 }
 
 /* ── Toggle group ────────────────────────────────────────────────────────── */
