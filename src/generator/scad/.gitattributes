@@ -1,0 +1,8 @@
+# Every file in this directory is a byte-for-byte vendored copy whose SHA-256 is
+# asserted by MANIFEST.sha256 and by src/generator/scad.test.ts. Twelve of the
+# .scad sources are CRLF upstream and fifteen have no trailing newline, so any
+# EOL normalisation — a future `* text=auto` at the repo root, or a checkout on
+# Windows — would rewrite the bytes, break every hash, and produce a diff that
+# looks like tampering. `-text` disables that conversion for good. Diffs are
+# still text diffs; only the line-ending rewriting is off.
+* -text
