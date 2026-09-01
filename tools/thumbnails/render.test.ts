@@ -93,7 +93,11 @@ describe('renderThumbnail', () => {
   })
 
   it('carries frame 0’s content, and is nearest to it of all ten', async () => {
-    const rendered = await sharp(await renderThumbnail(sheetBytes, { sheet: FIXTURE_SHEET, size: FIXTURE_TILE }))
+    // tone is pinned rather than inherited: this asserts the crop *geometry*,
+    // so it must not start failing when the default tone changes.
+    const rendered = await sharp(
+      await renderThumbnail(sheetBytes, { sheet: FIXTURE_SHEET, size: FIXTURE_TILE, tone: 'blue' }),
+    )
       .ensureAlpha()
       .raw()
       .toBuffer()

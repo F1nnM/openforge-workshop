@@ -160,7 +160,7 @@ function parseArgs(argv: readonly string[]): Args {
     mode: { kind: 'sample', limit: DEFAULT_SAMPLE_SIZE },
     size: THUMB_SIZE,
     quality: THUMB_QUALITY,
-    tone: 'blue',
+    tone: 'neutral',
     force: false,
     colour: true,
     dryRun: false,
@@ -336,7 +336,7 @@ function results(
   lines.push(
     `units         1024-based, as pipeline/emit.ts prints them · ${PR13_UNIT_NOTE}`,
     `manifest      ${manifestPath} — ${String(report.files.length)} objects, nothing uploaded`,
-    `tone          ${args.tone}${args.tone === 'blue' ? ' (architecture-plan.md §8’s stated v1 position)' : ''}`,
+    `tone          ${args.tone}${args.tone === 'blue' ? ' (the raw stl-thumb render; see architecture-plan.md §8)' : ''}`,
     '',
   )
   return `${lines.join('\n')}\n`
