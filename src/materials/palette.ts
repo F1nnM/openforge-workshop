@@ -2,14 +2,20 @@
  * OpenForge Workshop — the material palette. 16 families, and the invariants
  * that make them a palette rather than 16 opinions.
  *
- * Ported from `docs/texture-materials.draft.ts`, which stays in place as the
- * design artefact of record. The values here are that file's values: they were
- * solved by constrained simulated annealing maximising the minimum CIEDE2000
+ * `docs/texture-materials.draft.ts` stays in place as the design artefact of
+ * record. Its hues, its material responses and its reasoning are what is below;
+ * its lightness and chroma values were **re-solved here**, because the port
+ * measured the draft's palette 0.136 ΔE00 short of its own 9.0 dichromacy
+ * target and the shortfall stood as a documented exception instead of being
+ * closed. See `PALETTE_INVARIANTS` for the re-solve: what bound it, what moved,
+ * and by how little.
+ *
+ * The solve is constrained simulated annealing maximising the minimum CIEDE2000
  * distance across all 120 family pairs, evaluated simultaneously under normal
- * vision and Machado-2009 protanopia, deuteranopia and tritanopia. Nothing was
- * re-solved in the port — `palette.test.ts` re-derives every scalar below from
- * the hex literals and the draft's own reported figures reproduce exactly, with
- * one documented exception recorded in `PALETTE_INVARIANTS`.
+ * vision and Machado-2009 protanopia, deuteranopia and tritanopia, subject to
+ * the hard constraints in `PALETTE_INVARIANTS`. `palette.test.ts` re-derives
+ * every scalar below from the hex literals — nothing here is a number you have
+ * to take on trust.
  *
  * ── What this is for ────────────────────────────────────────────────────────
  * The STLs are colourless. Every blueprint carries one or more `texture|…` tags
@@ -37,10 +43,11 @@
  *   material below L* 50, destroying plaster, sandstone and ice.
  * - **Wear changes roughness, never colour.** Darkening and desaturating for
  *   `ruined` / `eroded` was implemented and measured, then rejected: at a
- *   visible delta a worn `cut_stone` lands 4.06 ΔE00 from base `plain` — it
- *   becomes a different family — and at a delta small enough to stop that, it
- *   is 1.09 ΔE00 from its parent, i.e. invisible. See `applyWear` in
- *   `resolve.ts`.
+ *   visible delta a worn `cut_stone` lands 5.17 ΔE00 from base `plain` and only
+ *   5.04 from its own parent — it stops belonging to either — and at a delta
+ *   small enough to stop that, it is 1.39 ΔE00 from its parent, i.e. invisible.
+ *   See `applyWear` in `resolve.ts`, whose docblock still quotes the pre-P2
+ *   figures (4.06 / 1.09) for the same conclusion.
  *
  * ── No renderer, by requirement ─────────────────────────────────────────────
  * Nothing in `src/materials/` imports three.js, and there is no TSL here. §4
@@ -101,6 +108,12 @@ export interface MortarSpec {
  * the pre-baked sprite sheets. Derived from the measured response of the live
  * bucket sprites: output = ambient + 0.525 × diffuse, verified to three decimal
  * places against the shipped default material on real sheets.
+ *
+ * Every triple below is that relation solved for the family's own `tint`, so a
+ * retuned palette retints the sprites too: `diffuse` is the tint scaled by
+ * 0.75 / 0.525 and clamped to 8-bit, `ambient` is whatever is left over
+ * (`tint − 0.525 × diffuse`) so the two still sum back to the albedo even where
+ * the diffuse term clipped. `palette.test.ts` re-derives all sixteen.
  *
  * Carried here, unused by v1. §5 records that every sheet in the bucket today
  * is rendered in `stl-thumb`'s default **blue** Phong material (ambient
@@ -188,13 +201,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   cut_stone: {
     id: 'cut_stone',
     label: 'Cut stone',
-    tint: '#8f8c81',
-    oklch: [0.639, 0.016, 94.3],
-    cielab: [58.2, 6.3, 98.4],
-    luminance: 0.2618,
-    contrastVsWell: 2.25,
-    deltaEVsWell: 21.1,
-    edge: '#3f3d36',
+    tint: '#918e85',
+    oklch: [0.646, 0.014, 93.3],
+    cielab: [59.0, 5.2, 96.3],
+    luminance: 0.2706,
+    contrastVsWell: 2.19,
+    deltaEVsWell: 20.7,
+    edge: '#3f3d37',
     contour: 'solid',
     roughness: 0.72,
     metalness: 0.0,
@@ -203,7 +216,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise+mortar',
     grain: { scale: 3.0, amplitude: 0.05 },
     mortar: { scale: 2.2, width: 0.06, darken: 0.32 },
-    sprite: { ambient: '#242320', diffuse: '#ccc8b8', specular: '#6b6357' },
+    sprite: { ambient: '#242321', diffuse: '#cfcbbe', specular: '#6b6357' },
     liveBlueprints: 1425,
     confidence: 'high',
     note: 'Worked ashlar with mortar joints. Warm-neutral light olive grey (5Y 6/1); the Worley mask draws the joints the tint cannot.',
@@ -211,13 +224,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   plain: {
     id: 'plain',
     label: 'Plain / bare',
-    tint: '#76746c',
-    oklch: [0.558, 0.012, 95.3],
-    cielab: [48.8, 4.8, 99.5],
-    luminance: 0.1743,
-    contrastVsWell: 3.13,
-    deltaEVsWell: 29.8,
-    edge: '#3e3d38',
+    tint: '#76736d',
+    oklch: [0.557, 0.01, 89.7],
+    cielab: [48.5, 3.7, 90.2],
+    luminance: 0.1722,
+    contrastVsWell: 3.16,
+    deltaEVsWell: 30.3,
+    edge: '#3e3d39',
     contour: 'solid',
     roughness: 0.9,
     metalness: 0.0,
@@ -226,7 +239,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'flat',
     grain: null,
     mortar: null,
-    sprite: { ambient: '#1e1d1b', diffuse: '#a9a69a', specular: '#6b6357' },
+    sprite: { ambient: '#1d1d1b', diffuse: '#a9a49c', specular: '#6b6357' },
     liveBlueprints: 1235,
     confidence: 'high',
     note: 'Base plates and risers — "no surface sculpt", not a material. Deliberately untextured and near-neutral; it asserts nothing.',
@@ -234,13 +247,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   rough_stone: {
     id: 'rough_stone',
     label: 'Rough stone',
-    tint: '#665d4e',
-    oklch: [0.482, 0.026, 80.5],
-    cielab: [39.9, 10.0, 84.8],
-    luminance: 0.112,
-    contrastVsWell: 4.33,
-    deltaEVsWell: 38.3,
-    edge: '#3f392f',
+    tint: '#655c4c',
+    oklch: [0.479, 0.027, 82.1],
+    cielab: [39.5, 10.6, 86.0],
+    luminance: 0.1094,
+    contrastVsWell: 4.4,
+    deltaEVsWell: 38.7,
+    edge: '#3e382e',
     contour: 'solid',
     roughness: 0.97,
     metalness: 0.0,
@@ -249,7 +262,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise',
     grain: { scale: 1.2, amplitude: 0.16 },
     mortar: null,
-    sprite: { ambient: '#1a1714', diffuse: '#92856f', specular: '#6b6357' },
+    sprite: { ambient: '#191713', diffuse: '#90836d', specular: '#6b6357' },
     liveBlueprints: 721,
     confidence: 'high',
     note: 'Undressed rubble, cobble and mortared footings. Brown-grey (5YR 6/1 light brownish gray), darker than cut stone.',
@@ -257,13 +270,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   wood: {
     id: 'wood',
     label: 'Timber',
-    tint: '#593931',
-    oklch: [0.38, 0.048, 34.7],
-    cielab: [27.5, 17.0, 39.5],
-    luminance: 0.0527,
-    contrastVsWell: 6.83,
-    deltaEVsWell: 55.5,
-    edge: '#36211c',
+    tint: '#54362d',
+    oklch: [0.367, 0.046, 38.2],
+    cielab: [25.9, 16.5, 42.4],
+    luminance: 0.0471,
+    contrastVsWell: 7.22,
+    deltaEVsWell: 57.4,
+    edge: '#332019',
     contour: 'solid',
     roughness: 0.78,
     metalness: 0.0,
@@ -272,7 +285,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise',
     grain: { scale: 0.6, amplitude: 0.12 },
     mortar: null,
-    sprite: { ambient: '#160e0c', diffuse: '#7f5146', specular: '#6b6357' },
+    sprite: { ambient: '#150e0b', diffuse: '#784d40', specular: '#6b6357' },
     liveBlueprints: 446,
     confidence: 'high',
     note: 'Stained and weathered timber, planking, shingles. Dark red-brown — the light end of real timber albedo is unusable on parchment.',
@@ -280,12 +293,12 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   stucco: {
     id: 'stucco',
     label: 'Stucco / plaster',
-    tint: '#8b9ba1',
-    oklch: [0.679, 0.02, 222.3],
-    cielab: [62.9, 6.7, 229.1],
-    luminance: 0.315,
-    contrastVsWell: 1.92,
-    deltaEVsWell: 23.6,
+    tint: '#8d9da3',
+    oklch: [0.686, 0.02, 223.1],
+    cielab: [63.7, 6.7, 229.1],
+    luminance: 0.3242,
+    contrastVsWell: 1.87,
+    deltaEVsWell: 23.1,
     edge: '#353f43',
     contour: 'solid',
     roughness: 0.88,
@@ -295,7 +308,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise',
     grain: { scale: 3.2, amplitude: 0.06 },
     mortar: null,
-    sprite: { ambient: '#232728', diffuse: '#c7dde6', specular: '#6b6357' },
+    sprite: { ambient: '#232729', diffuse: '#c9e0e9', specular: '#6b6357' },
     liveBlueprints: 428,
     confidence: 'medium',
     note: 'Limewash and rendered plaster. Deliberately COOL: a warm plaster at its true value is invisible on parchment.',
@@ -303,12 +316,12 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   aztlan: {
     id: 'aztlan',
     label: 'Aztlan tuff',
-    tint: '#a97f62',
-    oklch: [0.63, 0.067, 55.8],
-    cielab: [56.6, 25.3, 60.7],
-    luminance: 0.245,
-    contrastVsWell: 2.38,
-    deltaEVsWell: 24.8,
+    tint: '#aa8164',
+    oklch: [0.637, 0.065, 56.8],
+    cielab: [57.2, 24.9, 61.4],
+    luminance: 0.2517,
+    contrastVsWell: 2.32,
+    deltaEVsWell: 24.1,
     edge: '#503725',
     contour: 'solid',
     roughness: 0.82,
@@ -318,7 +331,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise',
     grain: { scale: 2.2, amplitude: 0.08 },
     mortar: null,
-    sprite: { ambient: '#2a2018', diffuse: '#f1b58c', specular: '#6b6357' },
+    sprite: { ambient: '#2a2019', diffuse: '#f3b88f', specular: '#6b6357' },
     liveBlueprints: 326,
     confidence: 'medium',
     note: 'Carved Mesoamerican temple stone. Warm red-ochre volcanic tuff; motif sub-levels (mosaic, calendar, trim) inherit it.',
@@ -326,13 +339,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   sandstone: {
     id: 'sandstone',
     label: 'Sandstone',
-    tint: '#b5a36d',
-    oklch: [0.718, 0.075, 91.7],
-    cielab: [67.4, 30.5, 92.4],
-    luminance: 0.3712,
-    contrastVsWell: 1.66,
-    deltaEVsWell: 14.3,
-    edge: '#473c1a',
+    tint: '#b9a66c',
+    oklch: [0.728, 0.08, 91.9],
+    cielab: [68.5, 32.6, 92.4],
+    luminance: 0.3867,
+    contrastVsWell: 1.61,
+    deltaEVsWell: 14.0,
+    edge: '#483c17',
     contour: 'solid',
     roughness: 0.9,
     metalness: 0.0,
@@ -341,7 +354,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise',
     grain: { scale: 1.4, amplitude: 0.14 },
     mortar: null,
-    sprite: { ambient: '#2f291b', diffuse: '#ffe99c', specular: '#6b6357' },
+    sprite: { ambient: '#332a1b', diffuse: '#ffed9a', specular: '#6b6357' },
     liveBlueprints: 257,
     confidence: 'high',
     note: 'Bedded sandstone. Warm ochre; the one place a genuinely chromatic warm reads as measurement, not decoration.',
@@ -350,12 +363,12 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     id: 'cave',
     label: 'Cave rock',
     tint: '#4a526e',
-    oklch: [0.443, 0.047, 272.0],
+    oklch: [0.443, 0.048, 272.2],
     cielab: [35.2, 17.6, 283.5],
     luminance: 0.0862,
     contrastVsWell: 5.15,
     deltaEVsWell: 50.6,
-    edge: '#2d3244',
+    edge: '#2c3244',
     contour: 'solid',
     roughness: 0.98,
     metalness: 0.0,
@@ -364,21 +377,21 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise',
     grain: { scale: 0.9, amplitude: 0.18 },
     mortar: null,
-    sprite: { ambient: '#12141c', diffuse: '#6a759d', specular: '#6b6357' },
+    sprite: { ambient: '#12151c', diffuse: '#6a759d', specular: '#6b6357' },
     liveBlueprints: 224,
     confidence: 'high',
-    note: 'Damp natural rock and hewn mine passage. Dark blue-violet (5PB 3/2 dusky blue) — the darkest mineral entry.',
+    note: 'Damp natural rock and hewn mine passage. Dark blue-violet (5PB 3/2 dusky blue) — the darkest of the rock entries.',
   },
   brick: {
     id: 'brick',
     label: 'Fired brick',
-    tint: '#7c442b',
-    oklch: [0.449, 0.086, 44.1],
-    cielab: [35.2, 33.4, 49.6],
-    luminance: 0.0859,
-    contrastVsWell: 5.16,
-    deltaEVsWell: 46.9,
-    edge: '#4d2919',
+    tint: '#7b4427',
+    oklch: [0.447, 0.086, 47.4],
+    cielab: [35.0, 34.6, 52.8],
+    luminance: 0.0849,
+    contrastVsWell: 5.2,
+    deltaEVsWell: 46.8,
+    edge: '#4c2916',
     contour: 'solid',
     roughness: 0.86,
     metalness: 0.0,
@@ -387,7 +400,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise+mortar',
     grain: { scale: 2.6, amplitude: 0.07 },
     mortar: { scale: 2.6, width: 0.07, darken: 0.28 },
-    sprite: { ambient: '#1f110b', diffuse: '#b1613d', specular: '#6b6357' },
+    sprite: { ambient: '#1f110a', diffuse: '#b06138', specular: '#6b6357' },
     liveBlueprints: 196,
     confidence: 'high',
     note: 'Fired clay (10R 4/6 moderate reddish brown), close to the measured brick albedo 0.262/0.095/0.061 linear.',
@@ -395,13 +408,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   sewer: {
     id: 'sewer',
     label: 'Sewer stone',
-    tint: '#7f743c',
-    oklch: [0.556, 0.077, 98.4],
-    cielab: [48.7, 32.4, 96.7],
-    luminance: 0.1733,
-    contrastVsWell: 3.14,
+    tint: '#817438',
+    oklch: [0.557, 0.081, 97.2],
+    cielab: [48.8, 34.7, 95.3],
+    luminance: 0.1744,
+    contrastVsWell: 3.12,
     deltaEVsWell: 30.1,
-    edge: '#443d19',
+    edge: '#453d17',
     contour: 'solid',
     roughness: 0.8,
     metalness: 0.0,
@@ -410,21 +423,21 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise+mortar',
     grain: { scale: 1.5, amplitude: 0.13 },
     mortar: { scale: 2.0, width: 0.05, darken: 0.24 },
-    sprite: { ambient: '#201d0f', diffuse: '#b5a656', specular: '#6b6357' },
+    sprite: { ambient: '#201d0e', diffuse: '#b8a650', specular: '#6b6357' },
     liveBlueprints: 101,
     confidence: 'medium',
-    note: 'Algal olive-green over sewer masonry. Held at hue 98 to stay clear of the reserved verdigris band (139–175).',
+    note: 'Algal olive-green over sewer masonry. Held at hue 97 to stay clear of the reserved verdigris band (139–175).',
   },
   necro: {
     id: 'necro',
     label: 'Ossuary / bone',
-    tint: '#a3a890',
-    oklch: [0.721, 0.034, 116.8],
-    cielab: [67.9, 13.3, 117.4],
-    luminance: 0.3781,
-    contrastVsWell: 1.64,
-    deltaEVsWell: 14.3,
-    edge: '#3c3f31',
+    tint: '#a7ad94',
+    oklch: [0.735, 0.035, 117.9],
+    cielab: [69.6, 13.8, 118.6],
+    luminance: 0.4024,
+    contrastVsWell: 1.55,
+    deltaEVsWell: 13.5,
+    edge: '#3c3f30',
     contour: 'solid',
     roughness: 0.85,
     metalness: 0.0,
@@ -433,7 +446,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'noise',
     grain: { scale: 2.0, amplitude: 0.09 },
     mortar: null,
-    sprite: { ambient: '#292a24', diffuse: '#e9f0ce', specular: '#6b6357' },
+    sprite: { ambient: '#2a2b25', diffuse: '#eff7d3', specular: '#6b6357' },
     liveBlueprints: 92,
     confidence: 'low',
     note: 'A theme, not a substance. Pallid green-grey bone is an authored aesthetic call for the necromancer sets.',
@@ -441,13 +454,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   water: {
     id: 'water',
     label: 'Water',
-    tint: '#518ea4',
-    oklch: [0.614, 0.071, 223.4],
-    cielab: [55.9, 22.3, 232.7],
-    luminance: 0.2378,
+    tint: '#4e8ea6',
+    oklch: [0.612, 0.075, 224.6],
+    cielab: [55.8, 23.4, 234.3],
+    luminance: 0.2372,
     contrastVsWell: 2.44,
-    deltaEVsWell: 34.8,
-    edge: '#1b4350',
+    deltaEVsWell: 35.3,
+    edge: '#194352',
     contour: 'solid',
     roughness: 0.15,
     metalness: 0.0,
@@ -456,7 +469,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'flat',
     grain: null,
     mortar: null,
-    sprite: { ambient: '#142429', diffuse: '#74cbea', specular: '#6b6357' },
+    sprite: { ambient: '#14232a', diffuse: '#6fcbed', specular: '#6b6357' },
     liveBlueprints: 82,
     confidence: 'medium',
     note: 'Pool surfaces. The material response (low roughness, transmission) carries more of the read than the albedo does.',
@@ -464,13 +477,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   metal: {
     id: 'metal',
     label: 'Iron',
-    tint: '#2f2f35',
-    oklch: [0.308, 0.011, 285.8],
-    cielab: [19.6, 4.1, 291.2],
-    luminance: 0.0289,
-    contrastVsWell: 8.88,
-    deltaEVsWell: 66.1,
-    edge: '#1a1a1e',
+    tint: '#2e2e34',
+    oklch: [0.304, 0.01, 289.0],
+    cielab: [19.2, 4.1, 291.2],
+    luminance: 0.0278,
+    contrastVsWell: 9.01,
+    deltaEVsWell: 66.7,
+    edge: '#1a1a1d',
     contour: 'solid',
     roughness: 0.55,
     metalness: 0.85,
@@ -479,7 +492,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'flat',
     grain: null,
     mortar: null,
-    sprite: { ambient: '#0c0c0d', diffuse: '#43434c', specular: '#6b6357' },
+    sprite: { ambient: '#0b0b0d', diffuse: '#42424a', specular: '#6b6357' },
     liveBlueprints: 75,
     confidence: 'high',
     note: 'Wrought iron: grates, portcullises, bell metal, torch sconces. Also the target of the untextured part-tag fallback.',
@@ -488,7 +501,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     id: 'ice',
     label: 'Ice',
     tint: '#a3d0e3',
-    oklch: [0.832, 0.054, 225.6],
+    oklch: [0.831, 0.054, 225.7],
     cielab: [81.0, 17.6, 233.9],
     luminance: 0.5844,
     contrastVsWell: 1.11,
@@ -510,13 +523,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
   unknown: {
     id: 'unknown',
     label: 'Unclassified',
-    tint: '#505050',
-    oklch: [0.431, 0.0, 89.9],
-    cielab: [34.0, 0.0, 142.5],
-    luminance: 0.0802,
-    contrastVsWell: 5.38,
-    deltaEVsWell: 46.4,
-    edge: '#303030',
+    tint: '#4d4d4d',
+    oklch: [0.42, 0.0, 89.9],
+    cielab: [32.7, 0.0, 142.5],
+    luminance: 0.0742,
+    contrastVsWell: 5.64,
+    deltaEVsWell: 47.9,
+    edge: '#2e2e2e',
     contour: 'dashed',
     roughness: 0.9,
     metalness: 0.0,
@@ -525,7 +538,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialFamily>> = {
     surface: 'flat',
     grain: null,
     mortar: null,
-    sprite: { ambient: '#141414', diffuse: '#727272', specular: '#6b6357' },
+    sprite: { ambient: '#131313', diffuse: '#6e6e6e', specular: '#6b6357' },
     liveBlueprints: 4,
     confidence: 'low',
     note: 'No data. The only chroma-zero entry in the system and the only dashed contour: absence of colour means absence of a claim. It must read as unclassified, not as a wrong guess.',
@@ -558,38 +571,69 @@ export const MATERIAL_ORDER: readonly MaterialId[] = [
  * The palette's hard constraints. Asserted by `palette.test.ts`, never read at
  * runtime — a floor that the code silently enforces is a floor nobody can see.
  *
- * ── The one figure that did not reproduce ───────────────────────────────────
- * `docs/texture-materials.draft.ts` reports a worst-case minimum of **9.05
- * ΔE00** across the four vision conditions, limited by `wood`/`brick`. Every
- * other scalar in that file re-derives here to the digit — all 16 `oklch`
- * triples project to their `tint` exactly, and `luminance`,
- * `contrastVsWell`, `deltaEVsWell`, min-to-ground 12.34, min-to-accent 12.22
- * and min edge contrast 7.14 all reproduce — and the normal-vision minimum
- * reproduces at 9.211 on the same limiting pair (`cut_stone`/`plain`). So the
- * hexes were ported without drift; what differs is the dichromacy instrument.
+ * ── The re-solve, and what it cost ──────────────────────────────────────────
+ * The ported palette measured **8.864 ΔE00** under deuteranopia
+ * (`cut_stone`/`necro`), 0.136 short of its own 9.0 target, while clearing 9.0
+ * under normal vision (9.211), protanopia (9.041) and tritanopia (9.043). Every
+ * other figure in the draft reproduced exactly, so the shortfall was not port
+ * drift: the draft was solved against Machado-2009 applied to *gamma-encoded*
+ * sRGB, and this registry measures it in **linear** sRGB, the space the paper
+ * derives the matrices in. Applying the gamma convention reproduces the draft's
+ * limiting pair (`wood`/`brick`, protanopia) but at 8.576 — further from 9.0,
+ * not closer. So the shipped colours sat at an optimum of the wrong objective,
+ * which is exactly why there was headroom to recover.
  *
- * Re-derived with Machado-2009 at severity 1.0 applied in linear sRGB (the
- * space the paper derives the matrices in), with CIEDE2000 validated against
- * all 34 Sharma test vectors:
+ * Re-solved against the linear-light instrument, with CIEDE2000 validated
+ * against all 34 Sharma test vectors:
  *
- *   normal ……………… 9.211  (cut_stone / plain)   — clears 9.0
- *   protanopia ……… 9.041  (stucco / water)      — clears 9.0
- *   tritanopia ……… 9.043  (rough_stone / sewer) — clears 9.0
- *   deuteranopia … 8.864  (cut_stone / necro)   — 0.136 SHORT of 9.0
+ *   normal ……………… 9.934  (plain / rough_stone)  — was 9.211
+ *   protanopia ……… 9.787  (rough_stone / brick)  — was 9.041
+ *   deuteranopia … 9.807  (plain / rough_stone)  — was 8.864
+ *   tritanopia ……… 9.900  (rough_stone / sewer)  — was 9.043
  *
- * Applying the same matrices to gamma-encoded sRGB instead — the convention
- * several browser and JS implementations use — reproduces the draft's limiting
- * *pair* (`wood`/`brick`, protanopia) but at 8.576, further from 9.0 rather
- * than closer. No standard application of the published severity-1.0 matrices
- * puts this palette at 9.05.
+ * The 9.0 target is met on all four axes with 0.78 ΔE00 to spare, so
+ * `minPairwiseUnderCvd` is now the target rather than an exception to it.
  *
- * So the floor asserted under dichromacy is **8.8**, and the 9.0 target is
- * recorded separately as `pairwiseTargetUnderCvd`. Closing the 0.136 gap means
- * re-running the annealing, which would move every other verified scalar in
- * this file; that is a palette decision, not a porting one, and it is
- * deliberately not taken here. `palette.test.ts` additionally pins all four
- * measured minima and their limiting pairs, which is a far tighter clamp on
- * hex drift than a `≥ 9.0` inequality would be.
+ * ── Why the colours barely moved ────────────────────────────────────────────
+ * The search was capped so that **no family's albedo moves more than 1.5 ΔE00**
+ * from the draft's value. 1.5 is the low end of the 1.5–9 ΔE00 spread this
+ * file's own header measures between real stone albedos and calls sub-JND for a
+ * 25 px mark: a move inside that bound is invisible by the palette's own
+ * instrument. Three of the sixteen tints — `dungeon_stone`, `cave`, `ice` — are
+ * byte-identical to the draft's, the worst move of the other thirteen is
+ * 1.49 ΔE00, and no CIELAB hue moves more than 3.2° except `plain`, which moves
+ * 9.3° at C* 3.7 — a hue rotation on a colour that has essentially no hue, and
+ * whose whole brief is to assert nothing. `palette.test.ts` states the draft's
+ * sixteen tints and checks both bounds, so neither claim is just prose.
+ *
+ * `dungeon_stone` is pinned outright: 3,082 live blueprints, the anchor of the
+ * cool-grey axis, and `src/three/material.test.ts` asserts its hex.
+ *
+ * That cap is what binds the result: at 1.5 ΔE00 the search tops out at 9.787,
+ * and every family that could still gain is pressed against it. Lifting it
+ * entirely reaches about 10.4 ΔE00, where `brick` and `sewer` are instead
+ * pressed against the 0.086 chroma ceiling and the hue windows bind — but at a
+ * 10.0 target five families already exceed the sub-JND bound and the worst move
+ * is 2.0 ΔE00. Separation the palette does not need is not worth repainting
+ * anchors that came from measurement.
+ *
+ * ── Everything the solve had to honour ──────────────────────────────────────
+ * The floors and ceilings below, all of them, plus:
+ *
+ *   - hue windows of ±10° in OKLCH per family — under a third of a Munsell hue
+ *     family, so `cave` stays 5PB and `brick` stays 10R;
+ *   - `dungeon_stone` pinned, and `unknown` chroma-zero (it is the only such
+ *     entry, and the only dashed contour: absence of colour is the claim);
+ *   - `plain` and `metal` held below chroma 0.03, because "near-neutral" is
+ *     their brief and not an accident of the last solve;
+ *   - `ice` alone above CIELAB L* 70, `metal` alone below OKLCH L 0.36 — the
+ *     latter is what makes the `min()` in `contourOklch` load-bearing;
+ *   - `cave` the darkest rock entry;
+ *   - every `tint` and every `edge` inside the sRGB gamut without clamping, so
+ *     the OKLCH column stays an honest description of the hex beside it.
+ *
+ * `palette.test.ts` pins all four measured minima and their limiting pairs,
+ * which is a far tighter clamp on hex drift than a `≥ 9.0` inequality would be.
  */
 export const PALETTE_INVARIANTS = {
   /**
@@ -604,26 +648,24 @@ export const PALETTE_INVARIANTS = {
   accents: ['#8f5b21', '#5d7a68'] as readonly string[],
   /** The viewport well floor a tile is normally seen on — `--bg3`. */
   well: '#dfd2b5',
-  /** Minimum pairwise CIEDE2000 under normal vision. Measured: 9.211. */
+  /** Minimum pairwise CIEDE2000 under normal vision. Measured: 9.934. */
   minPairwise: 9.0,
   /**
-   * Minimum pairwise CIEDE2000 under each dichromacy. Measured worst: 8.864
-   * (deuteranopia, `cut_stone`/`necro`). See the note above for why this is
-   * 8.8 and not the 9.0 target.
+   * Minimum pairwise CIEDE2000 under each dichromacy. Measured worst: 9.787
+   * (protanopia, `rough_stone`/`brick`). This is the design target, met — see
+   * the note above for the re-solve that closed the 0.136 ΔE00 gap.
    */
-  minPairwiseUnderCvd: 8.8,
-  /** What the design pass aimed for under dichromacy, and reported as 9.05. */
-  pairwiseTargetUnderCvd: 9.0,
-  /** Minimum CIEDE2000 from every ground token. Measured: 12.34 (sandstone). */
+  minPairwiseUnderCvd: 9.0,
+  /** Minimum CIEDE2000 from every ground token. Measured: 12.06 (sandstone vs `--chip`). */
   minToGround: 12.0,
-  /** Minimum CIEDE2000 from every UI accent. Measured: 12.22 (brick vs `--acc`). */
+  /** Minimum CIEDE2000 from every UI accent. Measured: 11.16 (brick vs `--acc`). */
   minToAccent: 10.0,
   /** `--acc` sits at OKLCH chroma 0.099; nothing sculpted may out-saturate it. */
   maxChroma: 0.086,
   /** `--acc2` verdigris hue band. No material with chroma > 0.02 may enter it. */
   reservedHue: [139, 175] as readonly [number, number],
   /**
-   * Contour floor against the parchment, per WCAG 1.4.11. Measured: 7.14
+   * Contour floor against the parchment, per WCAG 1.4.11. Measured: 7.13
    * against the well `--bg3` (`water`, the lightest contour), and 6.59 against
    * `--chip`, the darkest ground any tile is drawn on. Both more than double
    * the obligation, which is the headroom that lets the *fills* stay light

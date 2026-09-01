@@ -221,11 +221,15 @@ function applyOverride(base: ResolvedFinish, override: FinishOverride): Resolved
  * Wear: rougher, coarser grain, deeper joints. **Never a colour change.**
  *
  * Darkening and desaturating the parent was implemented and measured, then
- * rejected: at a visible delta (L×0.93, C×0.86 → 4.1 ΔE00 from its parent) a
- * worn `cut_stone` lands 4.06 ΔE00 from base `plain`, i.e. it reads as a
- * different family. Shrinking the delta until that stops (L×0.98) leaves it
- * 1.09 ΔE00 from its parent — invisible. There is no usable window between the
- * two, so wear moves the response and nothing else.
+ * rejected: at a visible delta (L×0.93, C×0.86) a worn `cut_stone` lands
+ * 5.17 ΔE00 from base `plain` and 5.04 from its own parent, i.e. it belongs to
+ * neither. Shrinking the delta until that stops (L×0.98) leaves it 1.39 ΔE00
+ * from its parent — invisible. There is no usable window between the two, so
+ * wear moves the response and nothing else.
+ *
+ * Those four figures were 4.06 and 1.09 against the palette as first shipped.
+ * Re-solving the annealing moved them and strengthened the conclusion; the
+ * palette's own header records why the two objectives differed.
  */
 export function applyWear(base: ResolvedFinish): ResolvedFinish {
   return {
