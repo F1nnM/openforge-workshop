@@ -48,6 +48,7 @@ export {
   sizeToken,
 } from './footprint'
 export { displayName, fallbackName } from './naming'
+export { NOT_COLLAPSED, TAG_ALIASES, normaliseTag, normaliseTags } from './normalise'
 export {
   MANIFEST_PATH,
   OrdinalManifest,

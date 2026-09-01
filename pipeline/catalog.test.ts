@@ -31,6 +31,7 @@ import { measureCatalog, serialiseCatalog } from './emit'
 import { CONNECTION_POSITIONS, classifyLayer, connectionSystems, connectionsByPosition, isLockSystem } from './facets'
 import type { FixtureRow } from './fixtures'
 import { fixturesDir, liveRows, loadFixtureRows } from './fixtures'
+import { TAG_ALIASES, normaliseTags } from './normalise'
 import { emptyManifest } from './ordinals'
 import { CURVE_TAG_SEGMENTS, NON_CURVE_TAG_SEGMENTS } from './tessellation'
 import { SIZE_BUDGET_BYTES } from './version'
@@ -124,14 +125,36 @@ describeCorpus(title, () => {
     expect(wrong.map((record) => record.id)).toEqual([])
   })
 
-  it('interns every tag and de-interns back to the original list', () => {
+  it('interns every tag and de-interns back to the normalised list', () => {
+    // `normaliseTags` is applied on the way in, so the round trip is against the
+    // canonical list rather than the raw fixture one. Comparing to the raw list
+    // was right until tag drift was collapsed, and would now report the two
+    // `foundations` tiles as corruption.
     const bySource = new Map(live.map((row) => [row.file_metadata.full_name, row]))
     const wrong = result.file.records.filter(
       (record) =>
         record.tags.map((id) => result.file.tags[id]).join('\u0000') !==
-        (bySource.get(record.id)?.tags ?? []).join('\u0000'),
+        normaliseTags(bySource.get(record.id)?.tags ?? []).join('\u0000'),
     )
     expect(wrong.map((record) => record.id)).toEqual([])
+  })
+
+  it('normalises exactly the records the alias table names, and no others', () => {
+    // The guard on the test above: if `normaliseTags` became the identity, the
+    // round trip would still pass and prove nothing. This asserts the collapse
+    // actually happened, and that its blast radius is two records.
+    const bySource = new Map(live.map((row) => [row.file_metadata.full_name, row]))
+    const moved = result.file.records.filter((record) => {
+      const raw = bySource.get(record.id)?.tags ?? []
+      return normaliseTags(raw).join('\u0000') !== raw.join('\u0000')
+    })
+    expect(moved.map((record) => record.id).sort()).toEqual(
+      result.file.records
+        .filter((record) => (bySource.get(record.id)?.tags ?? []).includes('texture|foundations'))
+        .map((record) => record.id)
+        .sort(),
+    )
+    expect(moved).toHaveLength(2)
   })
 
   /* ------------------------------------------------ cross-check: the oracle */
@@ -367,7 +390,16 @@ describeCorpus(title, () => {
       const noBuild = result.file.records.filter((r) => r.build === undefined).length
       const bases = live.filter((row) => row.tags.some((t) => t.startsWith('shape|base'))).length
 
-      expect(roots.size).toBe(leading(facts, 'distinct texture roots'))
+      // Against the normalised row, not the raw one. The script reads raw
+      // fixtures and reports both, so this cross-check names which reading it
+      // means — and the row below pins that the two differ by exactly the alias.
+      expect(roots.size).toBe(leading(facts, 'distinct texture roots (normalised)'))
+      const retiredTextureRoots = new Set(
+        TAG_ALIASES.filter(([retired]) => retired.startsWith('texture|')).map(
+          ([retired]) => retired.split('|')[1],
+        ),
+      )
+      expect(leading(facts, 'distinct texture roots')).toBe(roots.size + retiredTextureRoots.size)
       expect(noBuild).toBe(leading(facts, 'no build| tag'))
       expect(bases).toBe(leading(facts, 'shape|base tiles'))
       expect(result.stats.withConfig).toBe(leading(facts, 'tiles with a config'))
@@ -442,17 +474,28 @@ describeCorpus(title, () => {
     expect(((100 * none) / result.stats.records).toFixed(1)).toBe('11.9')
   })
 
-  it('resolves 37 of the 38 texture roots onto a record', () => {
+  it('resolves 36 of the 37 texture roots onto a record', () => {
     // `texture` is the root of a tile's *first* texture tag. `texture|stucco`
     // (24 occurrences) is always secondary to an alphabetically earlier root, so
-    // it never lands on a record even though it is one of the 38 the material
-    // registry (PR 8) is specified against. Asserted so the discrepancy is a
-    // documented fact rather than a surprise in that PR.
+    // it never lands on a record even though the material registry is specified
+    // against it. Asserted so the discrepancy stays a documented fact.
+    //
+    // Both counts dropped by one when `foundations` was collapsed into
+    // `foundation`. Three different numbers are in play and were being conflated,
+    // so all three are now asserted separately:
+    //
+    //   37  roots across all texture tags        (was 38)
+    //   36  roots that win first position        (was 37)
+    //   38  roots the material registry maps     (unchanged — it keeps the alias
+    //       as the fallback for a caller resolving off raw fixtures)
+    //
+    // `stucco` is still exactly the root that exists but never wins.
     const onRecords = new Set(result.file.records.map((r) => r.texture).filter((r) => r !== undefined))
     const inTags = new Set(
       result.file.tags.filter((tag) => tag.startsWith('texture|')).map((tag) => tag.split('|')[1]),
     )
-    expect(onRecords.size).toBe(37)
+    expect(inTags.size).toBe(37)
+    expect(onRecords.size).toBe(36)
     expect([...inTags].filter((root) => root !== undefined && !onRecords.has(root))).toEqual(['stucco'])
     expect(result.file.records.filter((r) => r.texture === undefined)).toHaveLength(89)
   })

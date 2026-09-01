@@ -152,19 +152,38 @@ describeCorpus(title, () => {
     expect(engine.search(search({ kinds: [KIND_OTHER] })).total).toBe(none)
   })
 
-  it('tex — all 38 roots reach a record, including the one `record.texture` never reports', () => {
-    // PR 4 measured that only 37 roots ever win `record.texture`, because
-    // `texture|stucco` is always secondary to an alphabetically earlier root.
-    // Matching on tags rather than on that field is what keeps all 38 usable.
-    expect(engine.vocabulary.tex).toHaveLength(38)
+  it('tex — all 37 roots reach a record, including the one `record.texture` never reports', () => {
+    // Two numbers, one behind the other. Only 36 roots ever win
+    // `record.texture`, because `texture|stucco` is always secondary to an
+    // alphabetically earlier root; matching on tags rather than on that field is
+    // what keeps all 37 usable.
+    //
+    // Both were one higher until D3 collapsed `texture|foundations` (2 tiles)
+    // into `texture|foundation` (51) in `pipeline/normalise.ts`. The facet
+    // vocabulary is derived from the tags, so it lost that value with them:
+    // 38 → 37 present, 37 → 36 in first position. That is the user-visible cost
+    // of the collapse, and it is asserted below rather than left implicit.
+    expect(engine.vocabulary.tex).toHaveLength(37)
 
     const buckets = engine.search(search()).facets.tex
     for (const bucket of buckets) expect(bucket.count, bucket.value).toBeGreaterThan(0)
 
     const reported = new Set(file.records.map((record) => record.texture).filter((root) => root !== undefined))
-    expect(reported.size).toBe(37)
+    expect(reported.size).toBe(36)
     expect(reported.has('stucco')).toBe(false)
     expect(engine.search(search({ tex: ['stucco'] })).total).toBe(24)
+  })
+
+  it('tex — the collapsed spelling is gone from the facet, and its tiles are not', () => {
+    // What a user loses: `foundations` is no longer selectable, so the 2 tiles
+    // that carried it cannot be isolated by texture any more. What they keep:
+    // the canonical root reaches them, and free text still finds them, because
+    // the text index tokenises `record.file`, whose stem is `foundations`.
+    expect(engine.vocabulary.tex).not.toContain('foundations')
+    expect(engine.vocabulary.tex).toContain('foundation')
+    expect(engine.search(search({ tex: ['foundations'] })).total).toBe(0)
+    expect(engine.search(search({ tex: ['foundation'] })).total).toBe(53)
+    expect(engine.search(search({ q: 'foundations' })).total).toBeGreaterThan(0)
   })
 
   it('tex — a root matches everything nested under it, and nothing that merely shares a prefix', () => {

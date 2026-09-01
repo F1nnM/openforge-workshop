@@ -13,7 +13,10 @@
  *      matches itself.
  *   2. **Every count `palette.ts` and `mapping.ts` state is live.** All 16
  *      `liveBlueprints` figures, the 89 untagged tiles, the 85 the part chain
- *      rescues, both wear counts, and the 38-vs-37 root discrepancy.
+ *      rescues, both wear counts, and the 37-vs-36 root discrepancy.
+ *   3. **That D3's tag-drift collapse actually happened**, end to end: the
+ *      retired spelling is present upstream, absent from the index, and its
+ *      tiles landed on the canonical root instead of vanishing.
  *
  * The corpus is the emitted `public/catalog/catalog.json` (`npm run
  * import:catalog`), matching the convention in `src/assembly` and
@@ -129,15 +132,69 @@ describeCorpus('coverage', () => {
   })
 
   it('maps every root, including the one that cannot currently reach `texture`', () => {
-    // 38 roots exist; 37 reach `CatalogRecord.texture`, because `texture|stucco`
-    // only ever appears alongside an alphabetically earlier root. Both numbers
-    // are asserted, separately, because asserting either alone would be half a
-    // truth. `mapping.ts` explains why the table stays complete at 38.
-    expect(allRoots.size).toBe(38)
-    expect(firstPositionRoots.size).toBe(37)
+    // Three numbers, and asserting any one alone would be a third of a truth:
+    //
+    //   37 roots are present on some texture tag in the index (was 38 before
+    //      D3 collapsed `texture|foundations` into `texture|foundation`);
+    //   36 of them reach `CatalogRecord.texture`, because `texture|stucco` only
+    //      ever appears alongside an alphabetically earlier root (was 37);
+    //   38 are mapped, because the table also keeps the retired `foundations`
+    //      spelling for a caller that resolves off the raw fixtures.
+    //
+    // The gap between the first two is still exactly `stucco`, which is the
+    // check that matters: a normalisation that perturbed tag *order* would move
+    // which root wins first position, and this is what would catch it.
+    expect(allRoots.size).toBe(37)
+    expect(firstPositionRoots.size).toBe(36)
+    expect(Object.keys(TEXTURE_ROOT_MATERIAL)).toHaveLength(38)
     const neverFirst = [...allRoots].filter((root) => !firstPositionRoots.has(root))
     expect(neverFirst).toEqual(['stucco'])
     expect(TEXTURE_ROOT_MATERIAL['stucco']).toBe('stucco')
+  })
+
+  it('shows the tag-drift collapse in the index it was supposed to change', () => {
+    // D3. `texture|foundations` (2 tiles) is rewritten to `texture|foundation`
+    // (51) on the way in, so the canonical tag carries 53 and the retired
+    // spelling carries none. Asserted on the emitted index rather than on the
+    // alias table, because the alias table agreeing with itself proves nothing.
+    const carrying = (tag: string): number =>
+      tiles.filter((tile) => tile.tags.includes(tag)).length
+    expect(carrying('texture|foundations')).toBe(0)
+    expect(carrying('texture|foundation')).toBe(53)
+    expect(allRoots.has('foundations')).toBe(false)
+    // The collapse must not have changed the appearance, which is the whole
+    // reason it was safe: both spellings already resolved to `rough_stone`.
+    const resolved = tiles
+      .map((tile, position) => ({ tile, resolved: resolutions[position] }))
+      .filter(({ tile }) => tile.tags.includes('texture|foundation'))
+    expect(resolved).toHaveLength(53)
+    expect([...new Set(resolved.map(({ resolved: r }) => r?.material))]).toEqual(['rough_stone'])
+  })
+
+  it('gives the two-material `towne` walls one colour across all four spellings', () => {
+    // The other half of D3, and the reason P1 needed it: `stone-stucco`,
+    // `stucco-stone` and their two four-segment forms are 158 distinct models
+    // carrying the SAME pair of materials in mirrored order. A one-colour-per-
+    // tile renderer cannot draw the order, so a per-spelling family made the
+    // colour mean something it cannot mean. The tags stay distinct — they name
+    // real, separately-printable models — and only the material answer unifies.
+    const spellings = [
+      'texture|towne|stone-stucco',
+      'texture|towne|stucco-stone',
+      'texture|towne|stone|stucco',
+      'texture|towne|stucco|stone',
+    ]
+    const carriers = tiles
+      .map((tile, position) => ({ tile, resolved: resolutions[position] }))
+      .filter(({ tile }) => spellings.some((tag) => tile.tags.includes(tag)))
+    expect(carriers).toHaveLength(158)
+    expect([...new Set(carriers.map(({ resolved }) => resolved?.material))]).toEqual(['stucco'])
+    // Still `low`: one colour for two materials is a weak claim, not a fixed one.
+    expect([...new Set(carriers.map(({ resolved }) => resolved?.confidence))]).toEqual(['low'])
+    // And all four spellings survive in the index, or the collapse went too far.
+    for (const tag of spellings) {
+      expect(tiles.some((tile) => tile.tags.includes(tag)), tag).toBe(true)
+    }
   })
 
   it('never resolves a texture-tagged tile to unknown', () => {
@@ -173,10 +230,46 @@ describeCorpus('coverage', () => {
   })
 })
 
+/**
+ * The two `liveBlueprints` figures `palette.ts` states that D3 made stale, and
+ * that D3 is not allowed to fix.
+ *
+ * Unifying the four two-material `towne` wall spellings onto `stucco` (see
+ * `mapping.ts` for why) moves exactly 79 tiles out of `cut_stone` and into
+ * `stucco`. `palette.ts` belongs to row P2 and is being re-annealed
+ * concurrently, so the two-field edit has to land there:
+ *
+ *     cut_stone.liveBlueprints   1425 → 1346
+ *     stucco.liveBlueprints       428 →  507
+ *
+ * Nothing but this suite reads `liveBlueprints`, so the staleness is a wrong
+ * comment rather than a wrong tint, and the stated total is still 8,702 because
+ * the move is between two families.
+ *
+ * **This block cannot rot into a permanent exemption.** It asserts the measured
+ * value *and* the stale stated value, so the moment `palette.ts` carries the new
+ * figures the assertion fails and the block must be deleted with them.
+ */
+const PENDING_PALETTE_MOVE: Readonly<
+  Partial<Record<MaterialId, { readonly stated: number; readonly measured: number }>>
+> = {
+  cut_stone: { stated: 1425, measured: 1346 },
+  stucco: { stated: 428, measured: 507 },
+}
+
 describeCorpus('the stated family counts', () => {
   it('re-derives all 16 `liveBlueprints` figures', () => {
     const counts = countBy(resolutions.map((resolved) => resolved.material))
     for (const id of MATERIAL_ORDER) {
+      const pending = PENDING_PALETTE_MOVE[id]
+      if (pending !== undefined) {
+        expect(
+          MATERIALS[id].liveBlueprints,
+          `palette.ts has moved ${id}: delete its PENDING_PALETTE_MOVE entry`,
+        ).toBe(pending.stated)
+        expect(counts.get(id) ?? 0, `measured liveBlueprints for ${id}`).toBe(pending.measured)
+        continue
+      }
       expect(counts.get(id) ?? 0, `liveBlueprints for ${id}`).toBe(MATERIALS[id].liveBlueprints)
     }
   })
@@ -184,6 +277,9 @@ describeCorpus('the stated family counts', () => {
   it('accounts for every tile exactly once', () => {
     const total = MATERIAL_ORDER.reduce((sum, id) => sum + MATERIALS[id].liveBlueprints, 0)
     expect(total).toBe(8702)
+    // The measured side too, so the 79-tile move cannot have leaked a tile.
+    const counts = countBy(resolutions.map((resolved) => resolved.material))
+    expect([...counts.values()].reduce((sum, n) => sum + n, 0)).toBe(8702)
   })
 
   it('leaves no family with a stated count of zero', () => {
@@ -317,12 +413,37 @@ describeFixtures(fixturesTitle, () => {
     }
   }
 
+  /**
+   * The one spelling `pipeline/normalise.ts` collapses on the way in, so the
+   * upstream root set is legitimately one larger than the index's.
+   *
+   * Restated here rather than imported: `tsconfig.app.json` scopes this project
+   * to `src`, and a composite project rejects an import of a file outside its
+   * own list, so a test under `src/` cannot import `pipeline/`. Restating it is
+   * also what makes the assertion below a cross-check rather than a tautology —
+   * if the importer stopped collapsing, or started collapsing something else,
+   * this is what fails.
+   */
+  const COLLAPSED_ROOTS: Readonly<Record<string, string | undefined>> = {
+    foundations: 'foundation',
+  }
+
   it('confirms the checked-in index still describes the live corpus', () => {
     // If this fails, the emitted index has gone stale and every count above is
     // measuring history. That is the one way this suite could pass while being
     // wrong.
     expect(liveRows).toBe(tiles.length)
-    expect([...fixtureRoots].sort()).toEqual([...allRoots].sort())
+    const canonical = new Set([...fixtureRoots].map((root) => COLLAPSED_ROOTS[root] ?? root))
+    expect([...canonical].sort()).toEqual([...allRoots].sort())
+  })
+
+  it('confirms the importer collapsed exactly the spellings it claims to', () => {
+    // Upstream has 38 roots, the index has 37, and the difference is named
+    // rather than tolerated as a count.
+    expect(fixtureRoots.size).toBe(38)
+    expect(allRoots.size).toBe(37)
+    expect([...fixtureRoots].filter((root) => !allRoots.has(root))).toEqual(['foundations'])
+    expect([...allRoots].filter((root) => !fixtureRoots.has(root))).toEqual([])
   })
 
   it('confirms every root in the upstream fixtures is mapped', () => {

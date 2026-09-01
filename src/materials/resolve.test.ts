@@ -266,9 +266,9 @@ describe('confidence', () => {
     // cut_stone is a 'high' family, but `texture|stone` is an orphan of the `%`
     // parse and the tag says so.
     expect(resolveMaterial(['texture|stone']).confidence).toBe('low')
-    // Downgrades reach a sibling tag too, not just the matched one: the decision
-    // here is taken on the parent, and the four-segment sibling is the reason to
-    // distrust it.
+    // Downgrades reach a sibling tag too, not just the matched one. Since D3 the
+    // four-segment tag is matched exactly rather than through its parent, and
+    // both it and the sibling say the same thing: two materials, one mesh.
     expect(
       resolveMaterial(['texture|towne', 'texture|towne|stone', 'texture|towne|stone|stucco'])
         .confidence,

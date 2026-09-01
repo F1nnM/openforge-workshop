@@ -74,6 +74,11 @@ LOCK_SYSTEMS = ("openlock", "dragonlock", "magnetic")
 # side-lock definition below is segment 2 of `connection|side|...` and the plan's
 # 23.9% is measured against it. All 3 also carry a bare `connection|openlock`, so no
 # system is lost there; only its position is understated.
+# Tag drift collapsed on the way into the index. Mirrors `TAG_ALIASES` in
+# `pipeline/normalise.ts`; `pipeline/catalog.test.ts` asserts the two agree, so a
+# divergence fails rather than drifting silently.
+TEXTURE_ROOT_ALIASES = {"foundations": "foundation"}
+
 CONNECTION_POSITIONS = ("side", "bottom", "left", "right")
 
 # The position an unpositioned `connection|<sys>` tag describes: the tile's own
@@ -525,7 +530,21 @@ def main() -> int:
             if t.startswith("texture|"):
                 roots[t.split("|")[1]] += 1
     untextured = sum(1 for r in live if not any(t.startswith("texture|") for t in tags_of(r)))
-    out.append(("distinct texture roots", str(len(roots)), "the tint map must cover all of these"))
+    # Two different true numbers, and they were being conflated. The corpus holds
+    # 38 spellings; the shipped index holds 37, because `pipeline/normalise.ts`
+    # collapses `texture|foundations` (2 tiles) into `texture|foundation` (51).
+    # This script reads raw fixtures and stays the authority on the corpus, so it
+    # reports both rather than being taught to forget one.
+    canonical = {root for root in roots if root not in TEXTURE_ROOT_ALIASES}
+    canonical |= {TEXTURE_ROOT_ALIASES[root] for root in roots if root in TEXTURE_ROOT_ALIASES}
+    out.append(("distinct texture roots", str(len(roots)), "spellings present in the fixtures"))
+    out.append(
+        (
+            "distinct texture roots (normalised)",
+            str(len(canonical)),
+            "what the shipped index carries; the tint map must cover these",
+        )
+    )
     out.append(("tiles with no texture tag", f"{untextured} ({pct(untextured, n)})", "fall back to the unknown material"))
 
     # ---------------------------------------------------------------- build tags

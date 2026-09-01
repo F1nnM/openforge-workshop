@@ -61,7 +61,9 @@ describe('selectSample', () => {
     expect(() => selectSample(targets, { limit: 0 })).toThrow(/must be positive/)
   })
 
-  it('defaults wide enough to cover the 38 texture roots and a screenful', () => {
+  it('defaults wide enough to cover the 37 texture roots and a screenful', () => {
+    // 37 since D3 collapsed `texture|foundations`; the bound is deliberately the
+    // old 38 plus the screenful, so a re-split does not silently undersample.
     expect(DEFAULT_SAMPLE_SIZE).toBeGreaterThanOrEqual(38 + 12)
   })
 })
