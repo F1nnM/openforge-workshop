@@ -1,0 +1,133 @@
+/**
+ * The floating toolbar — design-contract.md §2.4's centred plate at the top of
+ * the canvas.
+ *
+ * `Place` / `Erase`, `⟳ Rotate`, `Clear`, and a mono `snap {value}` readout.
+ *
+ * ## Snap offers 0.5 and 1.0, and there is no 0.25
+ *
+ * The mock offered a quarter-unit grid; architecture-plan.md §7 removed it,
+ * because every dimension in the catalog is a multiple of 0.5 units and a
+ * quarter-unit grid can therefore only produce placements that cannot physically
+ * assemble. `SNAP_STEP` in the canvas package is the only place the two values
+ * are written down and this component reads them from `tools.step` — it does not
+ * spell them out.
+ *
+ * ## The rotate step is the tile's own
+ *
+ * Never 90. 893 tiles carry a `size|angle` that is not a multiple of it (45,
+ * 22.5, 11.25, 60, 120, 240, 300) and would never tile on a 90° step, so the step
+ * comes from `rotationStepFor(record)` for whichever tile is armed. With nothing
+ * armed there is nothing to turn and the button is disabled — a rotation applied
+ * to no tile is state the user cannot see.
+ *
+ * ## `role="group"`, not `role="toolbar"`
+ *
+ * A `toolbar` promises arrow-key movement between its controls with one tab stop.
+ * Implementing that around a Base UI `ToggleGroup` — which already owns arrow
+ * keys inside itself — would mean two composites fighting over the same keys, and
+ * the WAI pattern's own guidance is not to nest them. Four tab stops with a
+ * labelled group is the honest markup, and the canvas's own key map (`R`, `P`,
+ * `E`, `G`) is the fast path for anyone who wants one.
+ */
+import type { CatalogRecord } from '@/catalog'
+import type { PlanStatus, PlanTools } from '@/builder/canvas'
+import { formatUnits, rotationStepFor } from '@/builder/canvas'
+import { Button, ToggleGroup, ToggleItem, VisuallyHidden } from '@/ui/primitives'
+
+import './panels.css'
+
+export interface PlanToolbarProps {
+  readonly tools: PlanTools
+  /** The canvas's readout. `null` until the canvas has reported once. */
+  readonly status: PlanStatus | null
+  /** The armed tile, for its rotation step. */
+  readonly armed: CatalogRecord | undefined
+  readonly placed: number
+  readonly onClear: () => void
+}
+
+/** "half a unit" / "one unit" — the two snap steps, said rather than shown. */
+function stepLabel(step: number): string {
+  return step === 1 ? 'one unit' : 'half a unit'
+}
+
+export function PlanToolbar({ tools, status, armed, placed, onClear }: PlanToolbarProps) {
+  const step = armed === undefined ? undefined : rotationStepFor(armed)
+  const conflicts = status?.conflicts ?? 0
+
+  return (
+    <div className="of-build-toolbar" role="group" aria-label="Builder tools">
+      <ToggleGroup
+        label="Tool"
+        value={tools.tool}
+        onValueChange={(next) => {
+          // Always one mode: Base UI reports `null` when the pressed item is
+          // pressed again, and a builder with neither tool up would swallow every
+          // click on the canvas.
+          if (next !== null) tools.setTool(next)
+        }}
+      >
+        <ToggleItem value="place">Place</ToggleItem>
+        <ToggleItem value="erase">Erase</ToggleItem>
+      </ToggleGroup>
+
+      <Button
+        size="sm"
+        disabled={step === undefined}
+        onClick={() => {
+          if (step !== undefined) tools.rotate(step)
+        }}
+      >
+        <span aria-hidden="true">⟳</span>
+        <span>Rotate</span>{' '}
+        {/*
+          Every clipped span in this file is preceded by a real space:
+          `dom-accessibility-api` trims each text node before joining, so a
+          leading space inside the string does not separate the words and the
+          button would announce as "Rotatethe armed tile".
+        */}
+        <VisuallyHidden>
+          {step === undefined
+            ? '— no tile is armed yet'
+            : `the armed tile by ${formatUnits(step)} degrees, shortcut R`}
+        </VisuallyHidden>
+        <kbd className="of-build-key" aria-hidden="true">
+          R
+        </kbd>
+      </Button>
+
+      <Button size="sm" disabled={placed === 0} onClick={onClear}>
+        Clear{' '}
+        <VisuallyHidden>
+          {placed === 0 ? '— nothing is placed' : `all ${String(placed)} placed tiles`}
+        </VisuallyHidden>
+      </Button>
+
+      <Button size="sm" className="of-build-snap" onClick={tools.toggleSnap}>
+        snap {formatUnits(tools.step)}{' '}
+        <VisuallyHidden>{`— switch to ${stepLabel(tools.step === 1 ? 0.5 : 1)}`}</VisuallyHidden>
+      </Button>
+
+      {/*
+        The mono status tail. Only ever shows what is true: a pending rotation the
+        user has to be able to see (it applies to the *next* placement, so nothing
+        on the drawing carries it yet) and the overlap count, which is the canvas's
+        own conflict hatch counted up.
+      */}
+      <p className="of-build-readout">
+        {tools.rotation === 0 ? null : (
+          <span>
+            <span aria-hidden="true">⟳ </span>
+            {formatUnits(tools.rotation)}° <VisuallyHidden>pending rotation</VisuallyHidden>
+          </span>
+        )}
+        {conflicts === 0 ? null : (
+          <span className="of-build-conflicts">
+            {String(conflicts)} overlapping
+          </span>
+        )}
+      </p>
+    </div>
+  )
+}

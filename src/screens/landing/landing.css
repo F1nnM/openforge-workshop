@@ -91,53 +91,16 @@
 }
 
 /* Anchors, not buttons — they navigate, and a router `Link` should be a link so
-   that middle-click, cmd-click and "copy link address" all work. The underline
-   `shell.css` gives every anchor on hover is cancelled here; on a filled button
-   it reads as a rendering fault. */
-.of-action {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 4px;
-  font-size: 15px;
-  letter-spacing: 0.4px;
-  text-decoration: none;
-  cursor: pointer;
-  transition:
-    filter 120ms ease,
-    background-color 120ms ease;
-}
+   that middle-click, cmd-click and "copy link address" all work.
 
-.of-action:hover {
-  text-decoration: none;
-}
-
-.of-action[data-tone='primary'] {
-  padding: 13px 24px;
-  background: var(--acc);
-  color: var(--accink);
-  border: none;
-  font-weight: 700;
-}
-
-.of-action[data-tone='primary']:hover {
-  filter: brightness(1.12);
-}
-
-.of-action[data-tone='secondary'] {
-  /* One pixel less padding than the primary, so the border does not make the
-     outlined button taller than the filled one. The mock's own trick. */
-  padding: 12px 24px;
-  background: none;
-  color: var(--acc);
-  border: 1px solid var(--acc);
-  font-weight: 600;
-}
-
-.of-action[data-tone='secondary']:hover {
-  /* The accent at a tenth, mixed in the browser rather than pasted as a fourth
-     rgba() literal of the same colour — so retinting `--acc` retints the hover. */
-  background: color-mix(in srgb, var(--acc) 10%, transparent);
-}
+   The whole look is the shared button primitive's. `.of-action` is one of the
+   two legacy class names `../../ui/primitives/primitives.css` still answers to —
+   the tones, the hover, the hero's `lg` size and the outlined tone's one-pixel
+   padding trick all live there now, in one block instead of the two this file and
+   `../library/library.css` had each grown. The size is declared beside the
+   primitive's other sizes rather than here so it cannot depend on which of the two
+   stylesheets the bundler emits first. New call sites use `<Button size="lg">`;
+   this alias goes when row 16's markup is next opened. */
 
 /* ── The four figures ────────────────────────────────────────────────────────
    The mock sets these as one 12px mono line of four items. They are the page's
@@ -420,7 +383,6 @@
 
   .of-action {
     flex: 1 1 100%;
-    justify-content: center;
   }
 }
 
