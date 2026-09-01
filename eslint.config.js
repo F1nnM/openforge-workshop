@@ -6,7 +6,19 @@ export default tseslint.config(
   {
     // design/ mirrors the approved Claude Design source and docs/ holds design
     // artefacts; both are reference material, not project code.
-    ignores: ['dist', 'node_modules', 'vendor', '.wrangler', 'public/catalog', 'design', 'docs'],
+    ignores: [
+      'dist',
+      'node_modules',
+      'vendor',
+      '.wrangler',
+      'public/catalog',
+      'design',
+      'docs',
+      // Downloaded engines, not source. A flat config's `ignores` does not read
+      // .gitignore, so a gitignored directory is still linted — and the OpenSCAD
+      // WASM glue is a 14 MB minified .cjs that `**/*.cjs` picks up.
+      '**/.engines',
+    ],
   },
   js.configs.recommended,
   {
