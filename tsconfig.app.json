@@ -5,7 +5,10 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "types": ["vitest/globals"],
+    // vite/client declares the asset-suffix modules (`?url`, `?raw`, `?worker`).
+    // The generator imports its WASM binary and its .scad sources that way, and
+    // without this every such import is an unresolved-module error.
+    "types": ["vitest/globals", "vite/client"],
 
     "strict": true,
     "noUncheckedIndexedAccess": true,

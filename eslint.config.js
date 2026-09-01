@@ -32,6 +32,12 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
+    // Workers run in neither the browser nor Node: no `window`, no `process`,
+    // but `fetch`, `Response` and `caches` are ambient.
+    files: ['workers/**/*.ts'],
+    languageOptions: { globals: globals.serviceworker },
+  },
+  {
     files: ['**/*.js'],
     languageOptions: { globals: globals.node },
   },
