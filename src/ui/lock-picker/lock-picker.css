@@ -1,0 +1,337 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the lock picker.
+
+   Hand-written CSS on the Parchment tokens, following `../shell/shell.css` and
+   `../primitives/primitives.css`. Unlayered, for the reason set out at the top
+   of that shell file. Light only: Parchment is the committed direction and
+   `../../tokens/tokens.css` has no dark block to mirror.
+
+   ## The one rule this file exists to serve
+
+   Three options at 99.9% / 74.7% / 59.7% must not *look* like a neutral
+   three-way choice. Everything below is in service of that:
+
+     - Every option gets the same full-width track, so the three fills are
+       directly comparable rather than each scaled to itself.
+     - The distance between an option's reach and the best option's reach is
+       drawn as a **hatched** region, not left as empty track. Empty space reads
+       as "nothing there"; a hatch reads as "something removed".
+     - A dashed line sits at the best option's reach, crossing all three bars at
+       the same x. That is what turns three widths into one measurement.
+     - Selection is expressed structurally — border, inset rule, ground — and not
+       with colour alone, so it cannot compete with the cost figure, which is the
+       only thing on the row printed in the accent.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-picker {
+  /* Ink for the hatch and the reference line. Derived from `--line`'s own
+     rgb so the device sits in the same family as every other rule in the app. */
+  --of-lock-hatch: rgba(80, 60, 30, 0.34);
+  --of-lock-void: rgba(80, 60, 30, 0.1);
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── The group ───────────────────────────────────────────────────────────── */
+
+.of-lock-options {
+  /* A fieldset carries a UA border, padding and min-inline-size, all three of
+     which fight a grid. Reset explicitly rather than relying on Preflight. */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+  border: 0;
+}
+
+/* ── One option ──────────────────────────────────────────────────────────── */
+
+.of-lock-option {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  grid-template-areas:
+    'radio head'
+    'blank track'
+    'blank figures'
+    'blank note';
+  align-items: center;
+  gap: 7px 11px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.of-lock-option:hover {
+  border-color: color-mix(in srgb, var(--acc) 45%, var(--line));
+}
+
+.of-lock-option[data-selected] {
+  background: var(--bg2);
+  border-color: var(--acc);
+  /* The same inset-accent device as the header's active nav tab and the tab
+     strip's indicator, so "this one is in effect" reads as one idea across the
+     app. */
+  box-shadow: inset 3px 0 0 0 var(--acc);
+}
+
+/* The ring goes on the row, not on the 15px radio: the whole card is the click
+   target, so the whole card should be the focus target visually. */
+.of-lock-option:has(.of-lock-radio:focus-visible) {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.of-lock-radio {
+  grid-area: radio;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  /* The UA radio, tinted. Re-implementing it as a styled span would cost the
+     platform's own high-contrast and forced-colours handling for a dot. */
+  accent-color: var(--acc);
+  cursor: pointer;
+}
+
+/* ── Head: name, default chip, share ─────────────────────────────────────── */
+
+.of-lock-head {
+  grid-area: head;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+
+.of-lock-name {
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 19px;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.of-lock-share {
+  margin-left: auto;
+  font-family: var(--face-mono);
+  font-size: 17px;
+  /* Digits must not shift width between 99.9% and 74.7%, or the three figures
+     stop lining up and the comparison stops being one. */
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* ── The track ───────────────────────────────────────────────────────────── */
+
+.of-lock-track {
+  grid-area: track;
+  position: relative;
+  height: 14px;
+  background: var(--of-lock-void);
+  border-radius: 2px;
+}
+
+.of-lock-fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: var(--of-lock-reach, 0%);
+  background: var(--acc);
+  border-radius: 2px 0 0 2px;
+}
+
+/* Reach is 99.87% at the top of the list, not 100%, so the fill's right edge
+   would otherwise show a 2px sliver of unrounded corner. */
+.of-lock-option[data-best] .of-lock-fill {
+  border-radius: 2px;
+}
+
+/**
+ * What this option cannot print.
+ *
+ * `calc()` over two percentages resolves against the same containing block, so
+ * this is exactly the shortfall. It is zero-width on the best option, where the
+ * two custom properties are equal — no special case needed.
+ */
+.of-lock-gap {
+  position: absolute;
+  inset-block: 0;
+  left: var(--of-lock-reach, 0%);
+  width: calc(var(--of-lock-best, 0%) - var(--of-lock-reach, 0%));
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 3px,
+    var(--of-lock-hatch) 3px 4px
+  );
+}
+
+/** The best option's reach, at the same x on all three bars. */
+.of-lock-mark {
+  position: absolute;
+  inset-block: -3px;
+  left: var(--of-lock-best, 0%);
+  width: 0;
+  border-left: 1px dashed var(--ink);
+}
+
+/* ── Figures ─────────────────────────────────────────────────────────────── */
+
+.of-lock-figures {
+  grid-area: figures;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.of-lock-count {
+  color: var(--mut);
+}
+
+/**
+ * The cost, and the only accent-coloured text on the row.
+ *
+ * Absent entirely when nothing is hidden, because a cost line that is always
+ * present stops being read. Muted on the best option, which on the real corpus
+ * still hides five designs: that number is worth stating and is not worth
+ * flagging, since no other choice does better.
+ */
+.of-lock-cost {
+  color: var(--acc);
+}
+
+.of-lock-option[data-best] .of-lock-cost {
+  color: var(--mut);
+}
+
+/* ── Note ────────────────────────────────────────────────────────────────── */
+
+.of-lock-note {
+  grid-area: note;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--mut);
+}
+
+/* ── Spread ──────────────────────────────────────────────────────────────── */
+
+.of-lock-spread {
+  margin: 0;
+  padding: 10px 13px;
+  background: var(--bg3);
+  border-radius: 5px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+
+.of-lock-spread-value {
+  font-family: var(--face-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.of-lock-spread-note::before {
+  content: ' ';
+}
+
+.of-lock-spread-unknown {
+  color: var(--ink);
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .of-lock-option {
+    transition: none;
+  }
+}
+
+/* ── The one-time notice ─────────────────────────────────────────────────────
+   A banner, not a modal — `LockNotice.tsx` carries the reasoning. It is styled
+   as a bordered aside with an accent rule down its leading edge, the same device
+   the selected option uses, so "the app is telling you about the lock system"
+   and "this lock system is in effect" read as one family.
+
+   Deliberately not alarming: no warning colour, no icon. The default is right
+   for 99.9% of the catalog, and dressing the notice as a problem would push
+   people into changing a setting most of them should leave alone.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 0 var(--acc);
+}
+
+.of-lock-notice-body {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.of-lock-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  margin: 3px 0 0;
+}
+
+.of-lock-notice-link,
+.of-lock-notice-dismiss {
+  padding: 0;
+  background: none;
+  border: 0;
+  font-family: var(--face-mono);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.of-lock-notice-link {
+  color: var(--acc);
+  text-decoration: none;
+  border-bottom: 1px solid currentcolor;
+}
+
+.of-lock-notice-link:hover {
+  color: var(--ink);
+}
+
+/* Secondary by weight, not by being hidden: "keep what I have" is a real answer
+   and must not read as the way to close the thing without answering. */
+.of-lock-notice-dismiss {
+  color: var(--mut);
+}
+
+.of-lock-notice-dismiss:hover {
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of-lock-notice-link,
+  .of-lock-notice-dismiss {
+    transition: none;
+  }
+}

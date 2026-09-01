@@ -1,0 +1,177 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the settings screen.
+
+   Hand-written CSS on the Parchment tokens, following `../library/library.css`
+   and `../catalog/catalog.css`. Unlayered, for the reason set out at the top of
+   `../../ui/shell/shell.css`. Light only: Parchment is the committed direction.
+
+   The page padding and the 34px display `<h1>` are the library screen's, so
+   moving between the two screens does not move the first line of content.
+
+   ## Why the measure is narrow
+
+   This screen is prose about a consequence, not a grid of cards. The library and
+   catalog cap at 1,340px because cards are the widest thing on them; here the
+   widest thing is a sentence, and a sentence at 1,340px is unreadable. 760px
+   keeps the body copy near 80 characters and keeps the picker's bars short enough
+   that the difference between 74.7% and 59.7% is a visible distance rather than a
+   subtle one — a 1,200px bar makes 15 percentage points look like a rounding
+   error.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  padding: 22px 26px 56px;
+  max-width: 760px;
+}
+
+/* ── Head ────────────────────────────────────────────────────────────────── */
+
+.of-set-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.of-set-title {
+  margin: 0;
+  font-family: var(--face-display);
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1.1;
+  letter-spacing: -0.2px;
+  color: var(--ink);
+}
+
+.of-set-sub {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--mut);
+}
+
+/* ── A section ───────────────────────────────────────────────────────────── */
+
+.of-set-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The mono uppercase rule the library uses above each group, so a section break
+   reads the same on both screens. */
+.of-set-rule {
+  margin: 0;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+}
+
+.of-set-lead {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+/* ── What is in effect ───────────────────────────────────────────────────── */
+
+.of-set-current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--mut);
+}
+
+.of-set-current-default {
+  color: var(--mut);
+}
+
+/* ── Honesty block ───────────────────────────────────────────────────────── */
+
+.of-set-honesty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.of-set-honesty > h3 {
+  margin: 0;
+  font-weight: 400;
+}
+
+.of-set-fact {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.of-set-fact strong {
+  font-weight: 600;
+}
+
+/* ── Consequences ────────────────────────────────────────────────────────────
+   Two tones, and the difference is whether there is a scene to disturb. With an
+   empty grid it is a plain muted line; with tiles placed it becomes a bordered
+   block with the accent inset — the same device as the selected picker option and
+   the one-time notice, because all three mean "this concerns the lock system".
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-set-note {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--mut);
+}
+
+.of-set-note[data-tone='warn'] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 0 var(--acc);
+  color: var(--ink);
+}
+
+.of-set-note-lead {
+  margin: 0;
+}
+
+.of-set-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--mut);
+}
+
+.of-set-list::marker {
+  color: var(--line);
+}
+
+/* ── Mono ────────────────────────────────────────────────────────────────────
+   Everything measured, and every note code, is mono. The note codes are set in
+   mono for a second reason: `base-lock-mismatch` is a literal string the bill of
+   tiles shows, so a user should be able to recognise it there from having read it
+   here.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-set-mono {
+  font-family: var(--face-mono);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}

@@ -23,6 +23,7 @@ import { DEFAULT_LOCK_SYSTEM, WorkshopState } from './schema'
 import { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 import { WORKSHOP_EXPORT_KIND, WorkshopExport, exportWorkshop, importWorkshop } from './transfer'
 import {
+  acknowledgeLockSystem,
   addToLibrary,
   clearLibrary,
   clearPlacements,
@@ -34,6 +35,7 @@ import {
   rotatePlacement,
   selectIsInLibrary,
   selectLibraryCount,
+  selectLockChosen,
   selectPlacementCount,
   setLockSystem,
   toggleLibrary,
@@ -203,6 +205,56 @@ describe('lock preference', () => {
     setLockSystem('dragonlock')
     expect(state().lock).toBe('dragonlock')
   })
+
+  it('starts out unchosen, so a one-time prompt can exist', () => {
+    // Without this bit, `lock === 'openlock'` is indistinguishable from "never
+    // opened the picker" — which is why PR 14 flagged the flag as missing.
+    expect(state().lockChosen).toBe(false)
+    expect(selectLockChosen(state())).toBe(false)
+  })
+
+  it('counts picking a system as choosing, including re-picking the default', () => {
+    setLockSystem('magnetic')
+    expect(state().lockChosen).toBe(true)
+
+    resetWorkshop()
+    setLockSystem(DEFAULT_LOCK_SYSTEM)
+    // The value did not change; the decision did. A toolbar control that left
+    // this false would leave the first-run notice on screen after the user had
+    // answered it.
+    expect(state().lock).toBe(DEFAULT_LOCK_SYSTEM)
+    expect(state().lockChosen).toBe(true)
+  })
+
+  it('lets the user accept the default without restating it', () => {
+    acknowledgeLockSystem()
+    expect(state().lockChosen).toBe(true)
+    expect(state().lock).toBe(DEFAULT_LOCK_SYSTEM)
+  })
+
+  it('survives a persist round trip', () => {
+    setLockSystem('dragonlock')
+    const payload = storedPayload()
+    expect((payload?.state as WorkshopState).lockChosen).toBe(true)
+    expect((payload?.state as WorkshopState).lock).toBe('dragonlock')
+
+    resetWorkshop()
+    expect(state().lockChosen).toBe(false)
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+    void useWorkshopStore.persist.rehydrate()
+    expect(state().lockChosen).toBe(true)
+    expect(state().lock).toBe('dragonlock')
+  })
+
+  it('survives an export and re-import', () => {
+    setLockSystem('magnetic')
+    const file = exportWorkshop()
+    resetWorkshop()
+    expect(importWorkshop(file)).toEqual({ ok: true, dropped: [] })
+    expect(state().lockChosen).toBe(true)
+    expect(state().lock).toBe('magnetic')
+  })
 })
 
 /* ----------------------------------------------------------------- selectors */
@@ -288,7 +340,7 @@ describe('persistence', () => {
     setLockSystem('dragonlock')
 
     resetWorkshop()
-    expect(state()).toEqual({ library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM })
+    expect(state()).toEqual({ library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false })
     expect(storedPayload()?.state).toEqual(state())
   })
 
@@ -357,7 +409,7 @@ describe('rehydrating', () => {
     localStorage.setItem(STORAGE_KEY, '{"state":{"library"')
     await useWorkshopStore.persist.rehydrate()
 
-    expect(state()).toEqual({ library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM })
+    expect(state()).toEqual({ library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false })
     // Removed, so the next load starts clean instead of reproducing this
     // forever — which is the difference between a bad session and a dead app.
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
