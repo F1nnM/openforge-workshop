@@ -32,6 +32,9 @@ docs/index-sample-*.json
 public/catalog/*.json
 public/catalog/*.br
 
+# python bytecode — docs/verify-catalog-facts.py is imported by the pipeline tests
+__pycache__/
+
 # scratch
 tmp/
 scratch/
