@@ -24,12 +24,32 @@
       "https://www.printablescenery.com/forums/topic/proposed-new-naming-convention-for-openlock-system/",
       "https://github.com/devonjones/openforge-cut_stone-openlock",
       "https://github.com/MasterworkTools/openforge-bases/blob/master/lock_openlock.scad"
-    ]
+    ],
+    "columnTokenProvenance": "columnTokens is the col+ namespace, keyed by filename token. It collides with codes on the single letter, so a consumer must gate on shape|column before any letter lookup.",
+    "ambiguousProvenance": "ambiguous marks a code whose size|openlock value covers more than one distinct footprint in this corpus: I (1x1 cell / col+I), O (2x2 triangle / 4x4 OA / col+O), U (4x4 floor / Y,YA,Z,ZA octagon segments), X (r4 90-degree wall band / col+X). size|openlock is not a key you can join on."
   },
   "primitives": {
     "unitMm": 25.4,
     "wallThicknessUnits": 0.5,
     "arcConventions": [
+      {
+        "name": "disc_sector",
+        "band": "[0, R]",
+        "measured": [
+          {
+            "token": "F (openlock)",
+            "inner": 0.0,
+            "outer": 2.0
+          },
+          {
+            "token": "V (openlock)",
+            "inner": 0.0,
+            "outer": 4.0
+          }
+        ],
+        "confidence": "measured",
+        "note": "A full quarter disc, not an annular band. Only the named codes F and V take it; no size|radius modifier selects it, so it is reachable by code lookup alone. At R = 2 it coincides with radial_floor_sector, because R - 2 = 0."
+      },
       {
         "name": "radial_floor_sector",
         "band": "[R-2, R]",
@@ -191,7 +211,11 @@
       "depthUnits": 0.5,
       "widthMm": 50.8,
       "depthMm": 12.7,
-      "measuredFrom": "plain#base.A.openlock+topless.stl"
+      "measuredFrom": "plain#base.A.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "A+S",
@@ -207,7 +231,11 @@
       "widthMm": 50.8,
       "depthMm": 44.53,
       "measuredFrom": "foundation#base+wall,chimney.A+S.openlock+topless,magnetic+flex.stl",
-      "note": "Single sample in the corpus, a chimney model. Measured depth 1.753 vs scanner nominal 1.5. Nominal composition A (2 x 0.5 wall) + S (2 x 1 floor) = depth 1.5; the measured excess is probably model-specific protrusion, but it is unverified."
+      "note": "Single sample in the corpus, a chimney model. Measured depth 1.753 vs scanner nominal 1.5. Nominal composition A (2 x 0.5 wall) + S (2 x 1 floor) = depth 1.5; the measured excess is probably model-specific protrusion, but it is unverified.",
+      "ports": {
+        "kind": "unrecorded"
+      },
+      "ambiguous": false
     },
     {
       "code": "AS",
@@ -223,7 +251,12 @@
       "widthMm": 50.8,
       "depthMm": 12.7,
       "measuredFrom": "plain#base.AS.magnetic+flex.stl",
-      "note": "Same footprint as A. \"2x2 Internal Wall\" in the 2022 Printable Scenery rename; differs from A only in port/dual-sided configuration, not in outline."
+      "note": "Same footprint as A. \"2x2 Internal Wall\" in the 2022 Printable Scenery rename; differs from A only in port/dual-sided configuration, not in outline.",
+      "ports": {
+        "kind": "pictorial",
+        "note": "Same outline as A. The 2022 Printable Scenery rename calls it \"2x2 Internal Wall\"; AS differs from A in port/dual-sided configuration, not outline. No source states the port coordinates."
+      },
+      "ambiguous": false
     },
     {
       "code": "AxG",
@@ -239,7 +272,11 @@
       "widthMm": 50.57,
       "depthMm": 12.7,
       "measuredFrom": "plain#base+curved.AxG.openlock.stl",
-      "note": "Measured as a STRAIGHT 0.5-thick wall 1.991 long, not an arc. The catalog assigns foot {shape:arc, radius:2.5, angle:90} to all 28 AxG tiles; that is wrong."
+      "note": "Measured as a STRAIGHT 0.5-thick wall 1.991 long, not an arc. The catalog assigns foot {shape:arc, radius:2.5, angle:90} to all 28 AxG tiles; that is wrong.",
+      "ports": {
+        "kind": "unrecorded"
+      },
+      "ambiguous": false
     },
     {
       "code": "BA",
@@ -254,7 +291,11 @@
       "depthUnits": 0.5,
       "widthMm": 38.1,
       "depthMm": 12.7,
-      "measuredFrom": "plain#base.BA.openlock+topless.stl"
+      "measuredFrom": "plain#base.BA.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "BAxG",
@@ -270,7 +311,11 @@
       "widthMm": 39.29,
       "depthMm": 12.7,
       "measuredFrom": "plain#base+curved.BAxG.magnetic+flex.stl",
-      "note": "Measured as a STRAIGHT 0.5-thick wall 1.547 long, not an arc. Same wrong arc footprint in the catalog."
+      "note": "Measured as a STRAIGHT 0.5-thick wall 1.547 long, not an arc. Same wrong arc footprint in the catalog.",
+      "ports": {
+        "kind": "unrecorded"
+      },
+      "ambiguous": false
     },
     {
       "code": "D",
@@ -285,7 +330,11 @@
       "depthUnits": 0.5,
       "widthMm": 76.2,
       "depthMm": 12.7,
-      "measuredFrom": "plain#base.D.openlock+topless.stl"
+      "measuredFrom": "plain#base.D.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "D+SA",
@@ -301,7 +350,11 @@
       "widthMm": 76.2,
       "depthMm": 48.06,
       "measuredFrom": "goblin_fireplace#base.D+SA.openlock+topless,magnetic+flex.stl",
-      "note": "Single sample, a fireplace model. Measured depth 1.892 vs scanner nominal 1.5. Same caveat as A+S."
+      "note": "Single sample, a fireplace model. Measured depth 1.892 vs scanner nominal 1.5. Same caveat as A+S.",
+      "ports": {
+        "kind": "unrecorded"
+      },
+      "ambiguous": false
     },
     {
       "code": "E",
@@ -316,7 +369,11 @@
       "depthUnits": 2.0,
       "widthMm": 50.8,
       "depthMm": 50.8,
-      "measuredFrom": "plain#base+electronics+square.E.openlock+topless.stl"
+      "measuredFrom": "plain#base+electronics+square.E.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "EA",
@@ -331,7 +388,11 @@
       "depthUnits": 3.0,
       "widthMm": 76.2,
       "depthMm": 76.2,
-      "measuredFrom": "plain#base+square.EA.openlock+topless.stl"
+      "measuredFrom": "plain#base+square.EA.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "F",
@@ -346,10 +407,16 @@
         "innerRadiusUnits": 0.0,
         "outerRadiusUnits": 2.0,
         "angleDeg": 90,
-        "bandWidthUnits": 2.0
+        "bandWidthUnits": 2.0,
+        "band": "disc",
+        "interfaceRadiusUnits": 2
       },
       "measuredFrom": "plain#base+curved.F.magnetic+flex.stl",
-      "note": "Measured as a full quarter disc [0.000,2.000]. Identical footprint to the modern 2r90-degree radial floor; openforge-tutorials sets/openlock.md states F floors were renamed to floor,curved.2x2 / floor,curved,radial.2r."
+      "note": "Measured as a full quarter disc [0.000,2.000]. Identical footprint to the modern 2r90-degree radial floor; openforge-tutorials sets/openlock.md states F floors were renamed to floor,curved.2x2 / floor,curved,radial.2r.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "G",
@@ -360,7 +427,20 @@
       "scannerNominalWidthUnits": null,
       "scannerNominalDepthUnits": null,
       "confidence": "unmeasured",
-      "note": "Defined in the scanner sizes dict but ZERO tiles carry it. Its renamed equivalent IS in the corpus: openforge-tutorials sets/openlock.md says G walls were renamed to curved+concave,wall.2r90-degree, and that token measures exactly [2.000,2.500] at 90 degrees."
+      "note": "Defined in the scanner sizes dict but ZERO tiles carry it. Its renamed equivalent IS in the corpus: openforge-tutorials sets/openlock.md says G walls were renamed to curved+concave,wall.2r90-degree, and that token measures exactly [2.000,2.500] at 90 degrees.",
+      "arc": {
+        "innerRadiusUnits": 2.0,
+        "outerRadiusUnits": 2.5,
+        "angleDeg": 90,
+        "bandWidthUnits": 0.5,
+        "band": "concave",
+        "interfaceRadiusUnits": 2
+      },
+      "derivedFrom": "openforge-tutorials sets/openlock.md rename to curved+concave,wall.2r90-degree, measured [2.000, 2.500] at 90.00 degrees. No tile carries the code G itself.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "GA",
@@ -371,7 +451,20 @@
       "scannerNominalWidthUnits": null,
       "scannerNominalDepthUnits": null,
       "confidence": "inferred",
-      "note": "Defined in the scanner sizes dict but ZERO tiles carry it. Inferred to be the 45-degree counterpart of G, i.e. the [2.0,2.5] band at 45 degrees. Unmeasured."
+      "note": "Defined in the scanner sizes dict but ZERO tiles carry it. Inferred to be the 45-degree counterpart of G, i.e. the [2.0,2.5] band at 45 degrees. Unmeasured.",
+      "arc": {
+        "innerRadiusUnits": 2.0,
+        "outerRadiusUnits": 2.5,
+        "angleDeg": 45,
+        "bandWidthUnits": 0.5,
+        "band": "concave",
+        "interfaceRadiusUnits": 2
+      },
+      "derivedFrom": "Inferred as the 45-degree counterpart of G by the same rename argument. Unmeasured.",
+      "ports": {
+        "kind": "unrecorded"
+      },
+      "ambiguous": false
     },
     {
       "code": "I",
@@ -387,7 +480,11 @@
       "widthMm": 25.4,
       "depthMm": 25.4,
       "measuredFrom": "plain#base+square.I.openlock+topless,magnetic+flex.stl",
-      "note": "Overloaded: 84 tiles are the 1x1 floor cell; 24 are col+I columns (0.500 x 0.500 measured). Disambiguate on shape|column."
+      "note": "Overloaded: 84 tiles are the 1x1 floor cell; 24 are col+I columns (0.500 x 0.500 measured). Disambiguate on shape|column.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": true
     },
     {
       "code": "IA",
@@ -402,7 +499,11 @@
       "depthUnits": 0.5,
       "widthMm": 25.4,
       "depthMm": 12.7,
-      "measuredFrom": "plain#base.IA.openlock+topless.stl"
+      "measuredFrom": "plain#base.IA.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "II",
@@ -418,7 +519,13 @@
       "widthMm": 25.68,
       "depthMm": 25.4,
       "measuredFrom": "dungeon_stone%eroded#s_system,corner+low.II.openforge,side.stl",
-      "note": "1x1 cell, I (two opposite ports) topology."
+      "note": "1x1 cell, I (two opposite ports) topology.",
+      "ports": {
+        "kind": "junction",
+        "junction": "opposite",
+        "portCount": 2
+      },
+      "ambiguous": false
     },
     {
       "code": "IL",
@@ -434,7 +541,14 @@
       "widthMm": 25.4,
       "depthMm": 25.4,
       "measuredFrom": "plain#base,thick_wall.IL+corner,270.openlock+topless.stl",
-      "note": "1x1 cell, L (corner) port topology. 60 of 86 also carry size|angle 90 (concave) or 270 (convex) and get foot {shape:none} in the catalog despite being a 1x1 cell."
+      "note": "1x1 cell, L (corner) port topology. 60 of 86 also carry size|angle 90 (concave) or 270 (convex) and get foot {shape:none} in the catalog despite being a 1x1 cell.",
+      "ports": {
+        "kind": "junction",
+        "junction": "corner",
+        "portCount": 2,
+        "note": "60 of the 86 IL tiles also carry size|angle 90 (concave) or 270 (convex) - the corner marker, not a sweep."
+      },
+      "ambiguous": false
     },
     {
       "code": "IO",
@@ -450,7 +564,14 @@
       "widthMm": 25.5,
       "depthMm": 25.4,
       "measuredFrom": "dungeon_stone%eroded#s_system,corner+low.IO.openforge,side.stl",
-      "note": "1x1 cell, O port topology (no side ports / ring)."
+      "note": "1x1 cell, O port topology (no side ports / ring).",
+      "ports": {
+        "kind": "junction",
+        "junction": "none",
+        "portCount": 0,
+        "note": "The section 1 letter map gives O = no ports. The Printable Scenery 2022 column list instead names five arrangements (Corner, Straight, End, T-junction, X-junction) without binding them to letters, so whether O reads as \"none\" or as \"end\" is not settled by that source; the letter map is."
+      },
+      "ambiguous": false
     },
     {
       "code": "IT",
@@ -466,7 +587,13 @@
       "widthMm": 25.4,
       "depthMm": 25.4,
       "measuredFrom": "legacy_sewers#base,thick_wall.IT.openlock+topless.stl",
-      "note": "1x1 cell, T (three-way) port topology."
+      "note": "1x1 cell, T (three-way) port topology.",
+      "ports": {
+        "kind": "junction",
+        "junction": "tee",
+        "portCount": 3
+      },
+      "ambiguous": false
     },
     {
       "code": "IX",
@@ -482,7 +609,13 @@
       "widthMm": 25.78,
       "depthMm": 25.76,
       "measuredFrom": "dungeon_stone%block#s_corner.IX.openforge,side.stl",
-      "note": "1x1 cell, X (four-way) port topology."
+      "note": "1x1 cell, X (four-way) port topology.",
+      "ports": {
+        "kind": "junction",
+        "junction": "cross",
+        "portCount": 4
+      },
+      "ambiguous": false
     },
     {
       "code": "L",
@@ -498,7 +631,14 @@
       "widthMm": 12.67,
       "depthMm": 12.7,
       "measuredFrom": "dungeon_stone#column+corner+low.col+L.openforge,side.stl",
-      "note": "Column code only in this corpus (col+L, 50 tiles). NOT the sheet/legacy L, which is a 3.0 x 1.0 inch wall. Letter reuse across namespaces."
+      "note": "Column code only in this corpus (col+L, 50 tiles). NOT the sheet/legacy L, which is a 3.0 x 1.0 inch wall. Letter reuse across namespaces.",
+      "ports": {
+        "kind": "junction",
+        "junction": "corner",
+        "portCount": 2,
+        "note": "Column letter. On the cheat sheet and in the legacy filenames L is a 3.0 x 1.0 inch wall instead; the letter is reused across namespaces."
+      },
+      "ambiguous": false
     },
     {
       "code": "O",
@@ -514,7 +654,11 @@
       "widthMm": 101.6,
       "depthMm": 101.6,
       "measuredFrom": "dungeon_stone%eroded#floor,angled.OA.openforge.stl (OA variant)",
-      "note": "Overloaded three ways: col+O column (0.500 x 0.500 measured), O right-triangle floor in a 2x2 cell, OA right-triangle floor in a 4x4 cell (4.000 x 4.000 measured). The scanner maps both O and OA to size|openlock|O, losing the size distinction."
+      "note": "Overloaded three ways: col+O column (0.500 x 0.500 measured), O right-triangle floor in a 2x2 cell, OA right-triangle floor in a 4x4 cell (4.000 x 4.000 measured). The scanner maps both O and OA to size|openlock|O, losing the size distinction.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": true
     },
     {
       "code": "P",
@@ -530,7 +674,11 @@
       "widthMm": 89.81,
       "depthMm": 18.06,
       "measuredFrom": "dungeon_stone#wall+low.P.openforge,side.stl",
-      "note": "Diagonal (45-degree) wall. Core run is 2*sqrt(2) = 2.828; P adds a mitre at both ends, measured 3.536 = 2.5*sqrt(2). Only textured wall+low samples exist, so +/-0.01 unit texture noise."
+      "note": "Diagonal (45-degree) wall. Core run is 2*sqrt(2) = 2.828; P adds a mitre at both ends, measured 3.536 = 2.5*sqrt(2). Only textured wall+low samples exist, so +/-0.01 unit texture noise.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "PA",
@@ -546,7 +694,11 @@
       "widthMm": 71.83,
       "depthMm": 13.26,
       "measuredFrom": "dungeon_stone#wall+low.PA.openforge.stl",
-      "note": "Diagonal wall, measured run 2.828 = 2*sqrt(2) exactly (the diagonal of a 2x2 cell)."
+      "note": "Diagonal wall, measured run 2.828 = 2*sqrt(2) exactly (the diagonal of a 2x2 cell).",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "PB",
@@ -562,7 +714,11 @@
       "widthMm": 72.01,
       "depthMm": 13.21,
       "measuredFrom": "dungeon_stone#wall+low.PB+mirror.openforge.stl",
-      "note": "Diagonal wall, measured run 2.835 ~= 2*sqrt(2). One end reducing, one flat."
+      "note": "Diagonal wall, measured run 2.835 ~= 2*sqrt(2). One end reducing, one flat.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "PC",
@@ -578,7 +734,11 @@
       "widthMm": 84.68,
       "depthMm": 13.21,
       "measuredFrom": "dungeon_stone#wall+low.PC+mirror.openforge,side.stl",
-      "note": "Diagonal wall, measured run 3.334. Does not reduce to a clean multiple; 2*sqrt(2)+0.5 = 3.328 is within texture noise but unconfirmed."
+      "note": "Diagonal wall, measured run 3.334. Does not reduce to a clean multiple; 2*sqrt(2)+0.5 = 3.328 is within texture noise but unconfirmed.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "Q",
@@ -593,7 +753,11 @@
       "depthUnits": 0.5,
       "widthMm": 101.6,
       "depthMm": 12.7,
-      "measuredFrom": "plain#base.Q.openlock+topless.stl"
+      "measuredFrom": "plain#base.Q.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "QxG",
@@ -609,7 +773,11 @@
       "widthMm": 76.2,
       "depthMm": 12.7,
       "measuredFrom": "plain#base+curved.QxG.magnetic+flex.stl",
-      "note": "Measured as a STRAIGHT 0.5-thick wall 3.000 long. Both the arc footprint AND the size|width|4 tag are wrong: measured run is 3.000, not 4."
+      "note": "Measured as a STRAIGHT 0.5-thick wall 3.000 long. Both the arc footprint AND the size|width|4 tag are wrong: measured run is 3.000, not 4.",
+      "ports": {
+        "kind": "unrecorded"
+      },
+      "ambiguous": false
     },
     {
       "code": "R",
@@ -624,7 +792,11 @@
       "depthUnits": 2.0,
       "widthMm": 101.6,
       "depthMm": 50.8,
-      "measuredFrom": "plain#base+square.R.openlock+topless.stl"
+      "measuredFrom": "plain#base+square.R.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "S",
@@ -639,7 +811,11 @@
       "depthUnits": 1.0,
       "widthMm": 50.8,
       "depthMm": 25.4,
-      "measuredFrom": "plain#base+square.S.openlock+topless.stl"
+      "measuredFrom": "plain#base+square.S.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "SA",
@@ -654,7 +830,11 @@
       "depthUnits": 1.0,
       "widthMm": 76.2,
       "depthMm": 25.4,
-      "measuredFrom": "plain#base+square.SA.openlock+topless.stl"
+      "measuredFrom": "plain#base+square.SA.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "SB",
@@ -669,7 +849,11 @@
       "depthUnits": 1.0,
       "widthMm": 101.6,
       "depthMm": 25.4,
-      "measuredFrom": "plain#base+square.SB.openlock+topless.stl"
+      "measuredFrom": "plain#base+square.SB.openlock+topless.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "T",
@@ -680,7 +864,19 @@
       "scannerNominalWidthUnits": null,
       "scannerNominalDepthUnits": null,
       "confidence": "unmeasured",
-      "note": "Column code only in this corpus (col+T, 14 tiles). NOT the sheet/legacy T, which is a 4x4 curved floor. The only col+T STL in the bucket is an 84-byte empty binary STL with zero triangles."
+      "note": "Column code only in this corpus (col+T, 14 tiles). NOT the sheet/legacy T, which is a 4x4 curved floor. The only col+T STL in the bucket is an 84-byte empty binary STL with zero triangles.",
+      "widthUnits": 0.5,
+      "depthUnits": 0.5,
+      "widthMm": 12.7,
+      "depthMm": 12.7,
+      "derivedFrom": "The column rule: all columns are 0.5 x 0.5 units (Printable Scenery 2022 naming thread). Not measured - the only col+T STL in the bucket is an 84-byte header declaring zero triangles.",
+      "ports": {
+        "kind": "junction",
+        "junction": "tee",
+        "portCount": 3,
+        "note": "Column letter. On the cheat sheet and in the legacy filenames T is a 4 x 4 curved floor instead; the letter is reused across namespaces."
+      },
+      "ambiguous": false
     },
     {
       "code": "U",
@@ -696,7 +892,11 @@
       "widthMm": 101.6,
       "depthMm": 101.6,
       "measuredFrom": "plain#base+square.U.openlock+topless.stl",
-      "note": "Overloaded: 7 tiles are the 4x4 floor (4.000 x 4.000 measured); 28 are Y/YA/Z/ZA octagon-segment pieces that the scanner also maps to size|openlock|U. The tag cannot distinguish them."
+      "note": "Overloaded: 7 tiles are the 4x4 floor (4.000 x 4.000 measured); 28 are Y/YA/Z/ZA octagon-segment pieces that the scanner also maps to size|openlock|U. The tag cannot distinguish them.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": true
     },
     {
       "code": "V",
@@ -711,10 +911,16 @@
         "innerRadiusUnits": 0.0,
         "outerRadiusUnits": 4.0,
         "angleDeg": 90,
-        "bandWidthUnits": 4.0
+        "bandWidthUnits": 4.0,
+        "band": "disc",
+        "interfaceRadiusUnits": 4
       },
       "measuredFrom": "plain#base+curved.V.openlock.stl",
-      "note": "Measured as a full quarter disc [0.000,4.000], not an annular band. Independently described as a \"quarter disk\" by github.com/rdolbeau/OpenLOCKTrack."
+      "note": "Measured as a full quarter disc [0.000,4.000], not an annular band. Independently described as a \"quarter disk\" by github.com/rdolbeau/OpenLOCKTrack.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
     },
     {
       "code": "VxE",
@@ -729,10 +935,16 @@
         "innerRadiusUnits": 2.0,
         "outerRadiusUnits": 4.0,
         "angleDeg": 90,
-        "bandWidthUnits": 2.0
+        "bandWidthUnits": 2.0,
+        "band": "radial",
+        "interfaceRadiusUnits": 4
       },
       "measuredFrom": "plain#base+curved.VxE.openlock.stl",
-      "note": "Measured as the [2.000,4.000] annular band, NOT the [0,4] quarter disc that V is. The scanner gives V and VxE identical size tags (radius 4, angle 90); the geometry differs."
+      "note": "Measured as the [2.000,4.000] annular band, NOT the [0,4] quarter disc that V is. The scanner gives V and VxE identical size tags (radius 4, angle 90); the geometry differs.",
+      "ports": {
+        "kind": "unrecorded"
+      },
+      "ambiguous": false
     },
     {
       "code": "X",
@@ -747,10 +959,16 @@
         "innerRadiusUnits": 4.0,
         "outerRadiusUnits": 4.5,
         "angleDeg": 90,
-        "bandWidthUnits": 0.5
+        "bandWidthUnits": 0.5,
+        "band": "concave",
+        "interfaceRadiusUnits": 4
       },
       "measuredFrom": "plain#base+curved.X.openlock.stl",
-      "note": "Overloaded: 18 tiles are the radius-4 90-degree curved wall band (measured [4.000,4.500]); 11 are col+X columns (0.500 x 0.503 measured). Disambiguate on shape|column."
+      "note": "Overloaded: 18 tiles are the radius-4 90-degree curved wall band (measured [4.000,4.500]); 11 are col+X columns (0.500 x 0.503 measured). Disambiguate on shape|column.",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": true
     },
     {
       "code": "XA",
@@ -765,9 +983,102 @@
         "innerRadiusUnits": 3.984,
         "outerRadiusUnits": 4.489,
         "angleDeg": 45,
-        "bandWidthUnits": 0.505
+        "bandWidthUnits": 0.505,
+        "band": "concave",
+        "interfaceRadiusUnits": 4
       },
-      "measuredFrom": "plain#base+curved.XA.openlock.stl"
+      "measuredFrom": "plain#base+curved.XA.openlock.stl",
+      "ports": {
+        "kind": "pictorial"
+      },
+      "ambiguous": false
+    }
+  ],
+  "columnTokens": [
+    {
+      "token": "col+I",
+      "letter": "I",
+      "liveTiles": 24,
+      "confidence": "measured",
+      "widthUnits": 0.5,
+      "depthUnits": 0.5,
+      "widthMm": 12.7,
+      "depthMm": 12.7,
+      "ports": {
+        "kind": "junction",
+        "junction": "opposite",
+        "portCount": 2
+      },
+      "measuredFrom": "col+I column, measured 0.500 x 0.500",
+      "note": "Collides with the 1x1 floor cell on size|openlock|I. 84 of the 108 I tiles are the cell; 24 are this column."
+    },
+    {
+      "token": "col+L",
+      "letter": "L",
+      "liveTiles": 50,
+      "confidence": "measured",
+      "widthUnits": 0.499,
+      "depthUnits": 0.5,
+      "widthMm": 12.67,
+      "depthMm": 12.7,
+      "ports": {
+        "kind": "junction",
+        "junction": "corner",
+        "portCount": 2
+      },
+      "measuredFrom": "dungeon_stone#column+corner+low.col+L.openforge,side.stl",
+      "note": "The only source of size|openlock|L in this corpus. 0.499 is texture noise on 0.5; the sample is a textured dungeon_stone part."
+    },
+    {
+      "token": "col+O",
+      "letter": "O",
+      "liveTiles": null,
+      "confidence": "measured",
+      "widthUnits": 0.5,
+      "depthUnits": 0.5,
+      "widthMm": 12.7,
+      "depthMm": 12.7,
+      "ports": {
+        "kind": "junction",
+        "junction": "none",
+        "portCount": 0
+      },
+      "measuredFrom": "col+O column, measured 0.500 x 0.500",
+      "note": "Collides with the O/OA right triangles on size|openlock|O. No section of the research splits the 43 O tiles into column and triangle counts, so liveTiles is unrecorded rather than guessed."
+    },
+    {
+      "token": "col+T",
+      "letter": "T",
+      "liveTiles": 14,
+      "confidence": "unmeasured",
+      "widthUnits": 0.5,
+      "depthUnits": 0.5,
+      "widthMm": 12.7,
+      "depthMm": 12.7,
+      "ports": {
+        "kind": "junction",
+        "junction": "tee",
+        "portCount": 3
+      },
+      "derivedFrom": "The column rule (Printable Scenery 2022: all columns are 0.5 x 0.5 inch pillars). The only col+T STL in the bucket is an 84-byte binary header declaring zero triangles.",
+      "note": "The one row in this table whose geometry rests on the column rule alone."
+    },
+    {
+      "token": "col+X",
+      "letter": "X",
+      "liveTiles": 11,
+      "confidence": "measured",
+      "widthUnits": 0.5,
+      "depthUnits": 0.503,
+      "widthMm": 12.7,
+      "depthMm": 12.78,
+      "ports": {
+        "kind": "junction",
+        "junction": "cross",
+        "portCount": 4
+      },
+      "measuredFrom": "col+X column, measured 0.500 x 0.503",
+      "note": "Collides with the radius-4 90-degree curved wall band on size|openlock|X. 18 of the 29 X tiles are the band; 11 are this column."
     }
   ]
 }
