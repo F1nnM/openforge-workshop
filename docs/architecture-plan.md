@@ -185,7 +185,7 @@ All versions installed together and verified: **154 packages, zero peer conflict
 | 3D | **three 0.185.1** + **r3f 9.7.0** + **drei 10.7.8** | Do not exceed 0.185.x — `postprocessing` 6.39.4 peers `<0.186.0` |
 | Materials | **`MeshStandardMaterial`**, flat per family | **Not TSL** — see below |
 | AO | **N8AO 2.0.1** | What stops models dissolving into the parchment ground |
-| Zip | **client-zip 2.5.0** + **native-file-system-adapter 3.0.1** | Both vendored |
+| Zip | **client-zip 2.5.0**, vendored | No `native-file-system-adapter` — its service-worker fallback truncates downstream of any byte counter we can write |
 | Pipeline | **@gltf-transform/core 4.4.2** + **meshoptimizer 1.2.0** | Build-time only |
 | Validation | **Zod 4.5.4** | |
 
@@ -479,8 +479,23 @@ read is genuinely worth buying** before launch.
 ## 11. Download
 
 **Primary, in-browser:** `client-zip` generating a `ReadableStream`, landed via
-`native-file-system-adapter`'s `showSaveFilePicker` (native File System Access → same-origin
-service worker → Blob). Feed `predictLength` from the fixture `size` field, never HEAD.
+the platform's own `showSaveFilePicker` where it exists, buffering to a Blob below 512 MB
+where it does not. Feed `predictLength` from the index's `bytes` field, never HEAD — a HEAD
+per file is hundreds of requests before the download starts.
+
+**`native-file-system-adapter` was evaluated and rejected.** Its middle fallback is a
+same-origin service worker, and a worker killed mid-transfer truncates the file *downstream
+of any byte counter we can write* — in the browser's download manager, where we cannot see
+it. An unverifiable streaming path is worse than an honest refusal, so the chosen path uses
+no service worker at all and that failure mode does not exist. iOS Safari has no
+`showSaveFilePicker`, so it always buffers and refuses above 512 MB; a gigabyte-scale room
+cannot be downloaded as one file on an iPhone from a static site, and the Worker fallback
+and URL list are the answers there.
+
+Because STORE makes the predicted length exact, the stream counts its own bytes and fails if
+they differ in either direction. That catches a short body behind an HTTP 200 — the classic
+silent truncation, which is invisible in a streamed ZIP because entry sizes are written
+last.
 
 **Fallback, a Cloudflare Worker:** the same library streaming R2 objects, for iOS Safari and
 multi-GB rooms.
@@ -530,13 +545,36 @@ render.
 ## 13. Persistence and sharing
 
 Zustand `persist` over `localStorage`, Zod-validated on rehydrate, `version`/`migrate` from
-the first commit. Share links: columnar JSON → native `CompressionStream('deflate-raw')` →
-base64url in the URL fragment.
+the first commit. Share links: a columnar **varint** payload → native
+`CompressionStream('deflate-raw')` → base64url in the URL fragment.
+
+**Measured capacity** in a 2,000-character URL, printed by the test suite on every run:
+
+| Encoding | Room-shaped build | Scattered build |
+| --- | ---: | ---: |
+| naive array of objects | 554 | 159 |
+| columnar JSON | 17,128 | 204 |
+| **columnar varint (shipped)** | **29,713** | **243** |
+
+A 50-tile room is a 116-character URL. Layout carries the room case; representation carries
+the scattered case, which is genuinely incompressible — below about a hundred placements
+`deflate-raw` returns more bytes than it is given. Delta-coding was measured and rejected at
+~11% worse on the tight case.
+
+**Cut over to a short link on measured encoded length, never on a placement count** — the
+spread between the two shapes is 122×, so any count threshold is wrong by two orders of
+magnitude at one end.
 
 - **Manifest index drift is the worst silent failure in the system.** Share links encode
   integer ordinals into the build-time manifest; if an import reorders them, every existing
-  link decodes to a *different room* with no error. Assign ordinals append-only, assert it in
-  CI, and embed the manifest version in every payload so a mismatch is detectable.
+  link decodes to a *different room* with no error. Ordinals are append-only by
+  representation (the manifest is an id array whose index *is* the ordinal), and drift is
+  caught twice: the manifest version travels in every payload, and a 32-bit checksum over
+  the `(ordinal, tileId)` pairs a link references catches renumbering nobody version-bumped.
+  Scoping the checksum to referenced pairs means appending tiles leaves existing links
+  valid. A link naming a *retired* ordinal cannot have its checksum recomputed, so that
+  placement is dropped and reported — deliberately not flagged as drift, since a false alarm
+  on a legal import would be worse.
 - **Safari evicts localStorage after 7 days**, which for an app opened between game sessions
   is the normal case. Treat local state as a cache: every saved build gets a URL, and JSON
   export/import ships from day one.
