@@ -21,7 +21,7 @@
  * Nothing else is normalised. `arc` keys on radius *and* sweep because §2
  * records that the size tags diverge from the mesh on curves (median error
  * 96 mm) — so radius alone would match a 90° elbow to a 270° sweep. `none`
- * collapses to a single key, which is correct rather than convenient: the 1,144
+ * collapses to a single key, which is correct rather than convenient: the 741
  * tiles with no derivable footprint are not congruent to each other, so the
  * `none` key is treated as **no key at all** by {@link footprintKey}'s callers
  * and never used to match.
@@ -33,9 +33,10 @@ import type { Footprint } from '@/catalog'
  * footprint carries no shape to be congruent about.
  *
  * `undefined` for `shape: 'none'` is the load-bearing return. Returning the
- * string `'none'` instead would make every one of the 510 openforge toppers with
- * no footprint match every one of the 208 shapeless bases — 106,080 false pairs,
- * each of which would look like a resolved assembly.
+ * string `'none'` instead would make every one of the 269 openforge toppers with
+ * no footprint match every one of the 104 shapeless bases — 27,976 false pairs,
+ * each of which would look like a resolved assembly. (510 × 208 = 106,080 before
+ * row W3 gave 403 tiles a footprint; the trap it describes is unchanged.)
  */
 export function footprintKey(foot: Footprint): string | undefined {
   switch (foot.shape) {

@@ -23,9 +23,42 @@ DEFAULT_FIXTURES = pathlib.Path(
     "/home/finn/Repos/openforge-catalog/openforge/db/fixtures/blueprints"
 )
 
-# Tags whose presence means a width/depth pair does NOT describe an axis-aligned
-# rectangle. Derived from the shape vocabulary actually present in the corpus.
-NON_RECT_MARKERS = ("curved", "radial", "concave", "convex", "hex")
+# Tag SEGMENTS that mark curved geometry. A segment, not a substring: the earlier
+# version of this list scanned the joined tag string, and its own comment claimed
+# that making the scan segment-exact "would move the NONE bucket". It does not.
+# Every one of these occurs in the corpus only as a whole `|`-segment; the single
+# near-miss, `shape|option|curved_interface` (111 tags), sits on tiles that also
+# carry a bare `shape|curved`. The substring scan flags 2,133 tiles and the
+# segment scan 2,077, and the difference is exactly NON_CURVE_SEGMENTS below.
+#
+# Mirrors CURVE_TAG_SEGMENTS in pipeline/tessellation.ts.
+CURVE_SEGMENTS = ("curved", "radial", "concave", "convex")
+
+# What the substring scan caught that is NOT a curve: `hex`, on 56 tiles. A hex
+# is a different geometry family with its own primitive, and calling it a curve
+# places hex corners as bogus arcs. Kept as data rather than deleted because the
+# 56 are the whole difference between the two scans, and the test asserts it.
+#
+# Mirrors NON_CURVE_TAG_SEGMENTS in pipeline/tessellation.ts.
+NON_CURVE_SEGMENTS = ("hex",)
+
+# The corpus's explicit fragment marker: `size|segment|<letter>` says this file is
+# one lettered piece of a design whose size token names the WHOLE design. 319 live
+# tiles carry one. Measured, in catalog units:
+#
+#   dungeon_stone%block#floor+curved+concave.8x8+b    tagged 8x8  measured 4.000 x 4.000
+#   cut-stone#floor+curved+concave.6x6+b              tagged 6x6  measured 3.000 x 3.000
+#   dungeon_stone%eroded#floor+curved,orthagonal+b.8x8+b  tagged 8x8  measured 2.079 x 1.931
+#
+# Not a rule, either -- the same letter on the same nominal size measures
+# differently in different designs -- so there is nothing to derive and the pair
+# must not be believed. Contrast a curve with no segment letter, whose pair the
+# mesh honours exactly (cut-stone#floor+curved.4x4 measures 4.000 x 4.000).
+#
+# Deliberately narrow. A single-letter LAST segment is the corpus's plain variant
+# suffix across 25 tag families (component|torch|a, texture|towne|long_planks|b),
+# so it is not a fragment signal; only `size|segment` is.
+FRAGMENT_PREFIX = "size|segment|"
 
 LOCK_SYSTEMS = ("openlock", "dragonlock", "magnetic")
 
@@ -140,17 +173,49 @@ def layer_of(row: dict) -> str:
     return "integral"
 
 
-def is_non_rect(row: dict) -> bool:
+def segments_of(row: dict) -> set[str]:
+    """Every `|`-separated segment of every tag, as a set."""
+    return {segment for tag in tags_of(row) for segment in tag.split("|")}
+
+
+def has_curve_marker(row: dict) -> bool:
+    """Whether the tile's outline is curved. Segment-exact; `hex` is not a curve.
+
+    No longer a veto on the footprint -- see `footprint_kind`. It records that a
+    RECT is an axis-aligned over-approximation of an annular sector rather than
+    the outline itself, which is the fact W5's reshape needs.
+    """
+    return bool(segments_of(row) & set(CURVE_SEGMENTS))
+
+
+def has_substring_curve_marker(row: dict) -> bool:
+    """The scan this file used to do, kept so the table can report the difference.
+
+    If a `texture|hexagonal`-shaped tag ever lands, this and `has_curve_marker`
+    diverge by more than the 56 hex tiles and the table says so.
+    """
     joined = " ".join(tags_of(row))
-    return any(marker in joined for marker in NON_RECT_MARKERS)
+    return any(marker in joined for marker in CURVE_SEGMENTS + NON_CURVE_SEGMENTS)
+
+
+def is_design_fragment(row: dict) -> bool:
+    """Whether the width/depth pair names a larger design this file is part of."""
+    return any(tag.startswith(FRAGMENT_PREFIX) for tag in tags_of(row))
 
 
 def footprint_kind(row: dict) -> str:
     """The single primitive the Builder would use to place this tile.
 
-    Order matters: a tile with width+depth that is also marked curved is an arc,
-    not a rectangle, because the width/depth tags name its design family rather
-    than its mesh extent.
+    Order matters, and the two vetoes are the order. A tile with width+depth that
+    also carries a radius is an arc, because on a curve the pair names the design
+    family and the radius names this fragment. A tile with width+depth that also
+    carries `size|segment` has no derivable footprint at all, because the pair
+    names a design this file is only one lettered piece of.
+
+    A curve marker is neither. It says the outline is a sector, not that the pair
+    is wrong -- and where a curve has no radius and no segment letter, the mesh
+    measures the tagged pair to three decimal places. Vetoing on it stranded 403
+    placeable tiles in NONE.
     """
     width = numeric(row, "size|width")
     depth = numeric(row, "size|depth")
@@ -158,7 +223,7 @@ def footprint_kind(row: dict) -> str:
 
     if radius is not None:
         return "arc"
-    if is_non_rect(row):
+    if is_design_fragment(row):
         return "none"
     if width is not None and depth is not None:
         return "rect"
@@ -196,18 +261,91 @@ def main() -> int:
     out.append(("live tiles", str(n), "the denominator for everything below"))
 
     # ---------------------------------------------------------------- footprints
-    kinds = Counter(footprint_kind(r) for r in live)
+    # Resolved once and carried: the W3 rows below slice the same partition five
+    # ways, and re-deriving it each time tripled the script's runtime and pushed
+    # catalog.test.ts's subprocess call past its timeout.
+    kind_of = {id(r): footprint_kind(r) for r in live}
+    kinds = Counter(kind_of.values())
     rect, wall, arc, none = kinds["rect"], kinds["wall"], kinds["arc"], kinds["none"]
     if rect + wall + arc + none != n:
         failures.append("footprint kinds do not partition the live set")
 
-    out.append(("footprint RECT", f"{rect} ({pct(rect, n)})", "numeric size|width AND size|depth, no curve marker"))
+    out.append(("footprint RECT", f"{rect} ({pct(rect, n)})", "numeric size|width AND size|depth, no radius and no size|segment"))
     out.append(("footprint WALL_SEG", f"{wall} ({pct(wall, n)})", "numeric size|width only; depth is the 12.7 mm constant"))
     out.append(("footprint ARC", f"{arc} ({pct(arc, n)})", "has size|radius"))
-    out.append(("footprint NONE", f"{none} ({pct(none, n)})", "no derivable footprint — never in the palette"))
+    out.append(("footprint NONE", f"{none} ({pct(none, n)})", "no derivable footprint (no size tags, or a fragment whose pair names its design) — never in the palette"))
     out.append(("coverage RECT only", pct(rect, n), "v1 lower bound"))
     out.append(("coverage RECT+WALL", pct(rect + wall, n), "v1 scope"))
     out.append(("coverage RECT+WALL+ARC", pct(rect + wall + arc, n), "v1.1 scope"))
+
+    # --------------------------------------------------- W3: the classifier itself
+    # The four counts above moved for one reason, and these rows are that reason
+    # spelled out so it cannot drift back into a comment. Every figure the W3 row
+    # of docs/v2-pr-series.md quotes is here.
+    substring_curves = sum(1 for r in live if has_substring_curve_marker(r))
+    segment_curves = sum(1 for r in live if has_curve_marker(r))
+    substring_only = sum(1 for r in live if has_substring_curve_marker(r) and not has_curve_marker(r))
+    hex_tiles = sum(1 for r in live if segments_of(r) & set(NON_CURVE_SEGMENTS))
+    out.append(("curve-marked · segment scan", str(segment_curves), "a whole |-segment is curved/radial/concave/convex"))
+    out.append(("curve-marked · substring scan", str(substring_curves), "the pre-W3 scan over the joined tag string"))
+    out.append(
+        (
+            "curve marker false positives",
+            f"{substring_only} ({hex_tiles} of them hex)",
+            "flagged by the substring scan and not by the segment scan -- MUST be all hex",
+        )
+    )
+    if substring_only != hex_tiles:
+        failures.append(
+            f"a non-hex substring-only curve marker appeared: {substring_only} flagged, {hex_tiles} hex"
+        )
+
+    curved_rects = sum(1 for r in live if kind_of[id(r)] == "rect" and has_curve_marker(r))
+    out.append(
+        (
+            "RECT that is really a sector",
+            f"{curved_rects} ({pct(curved_rects, rect)} of RECT)",
+            "curve-marked with a trusted width/depth pair -- the axis-aligned box is an over-approximation, W5 reshapes it",
+        )
+    )
+
+    fragments = [r for r in live if is_design_fragment(r)]
+    frag_arc = sum(1 for r in fragments if kind_of[id(r)] == "arc")
+    frag_none = sum(1 for r in fragments if kind_of[id(r)] == "none")
+    out.append(("size|segment fragments", str(len(fragments)), "one lettered piece of a larger design"))
+    out.append(("fragments · radius wins", str(frag_arc), "carry size|radius, which is the piece's own parameter"))
+    out.append(
+        (
+            "fragments · vetoed to NONE",
+            str(frag_none),
+            "the width/depth pair names the whole design, so there is nothing to place -- W1 measures them",
+        )
+    )
+    if frag_arc + frag_none != len(fragments):
+        failures.append("size|segment fragments are neither arc nor none")
+    if frag_none != none - sum(1 for r in live if kind_of[id(r)] == "none" and not is_design_fragment(r)):
+        failures.append("the fragment veto and the NONE bucket disagree")
+
+    # What is left in NONE, and whose row can move it. 161 carry a tessellation code
+    # W4 can resolve; 283 are fragments only W1 can measure; the rest have no tagged
+    # dimension at all.
+    none_rows = [r for r in live if kind_of[id(r)] == "none"]
+    none_coded = sum(1 for r in none_rows if tag_value(r, "size|openlock") is not None)
+    none_sizeless = sum(
+        1
+        for r in none_rows
+        if not is_design_fragment(r) and tag_value(r, "size|openlock") is None
+    )
+    out.append(("NONE · carries a tessellation code", str(none_coded), "W4 resolves the footprint from the code"))
+    out.append(("NONE · a fragment", str(frag_none), "W1 measures the piece"))
+    out.append(("NONE · no code, no fragment letter", str(none_sizeless), "nothing in the tags to resolve from"))
+    if none_coded + frag_none + none_sizeless != none:
+        failures.append("the NONE breakdown does not sum to the NONE bucket")
+
+    # DEFAULT_ARC_SWEEP_DEG's reach: arcs with no tagged sweep, for which 90 is
+    # fabricated. W3 moves nothing into or out of ARC, so this must not have moved.
+    arc_no_angle = sum(1 for r in live if kind_of[id(r)] == "arc" and numeric(r, "size|angle") is None)
+    out.append(("ARC with no size|angle", str(arc_no_angle), "DEFAULT_ARC_SWEEP_DEG fabricates 90 for these"))
 
     # ---------------------------------------------------------------- joinery
     no_conn = sum(1 for r in live if not any(t.startswith("connection|") for t in tags_of(r)))

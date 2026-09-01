@@ -14,9 +14,13 @@
  * own. {@link buildAssemblyIndex} is a deterministic function of the catalog, so
  * a caller may memoise it on the catalog's version stamp and never think about
  * it again.
+ *
+ * `PrintOption` is re-exported for a reason worth stating: `BaseMatch.option` is
+ * of that type and `BaseMatch` is part of this surface, so without the name here
+ * a consumer could hold the value and not be able to declare it.
  */
-export type { AssemblyIndex, AssemblyIndexStats } from './assemblyIndex'
-export { buildAssemblyIndex } from './assemblyIndex'
+export type { AssemblyIndex, AssemblyIndexStats, PrintOption } from './assemblyIndex'
+export { PRINT_OPTIONS, buildAssemblyIndex, printOption } from './assemblyIndex'
 
 export type { BillLine, BillOfTiles, DownloadSize, DownloadVerdict, FilenameCollision } from './bill'
 export { DOWNLOAD_HUGE_BYTES, DOWNLOAD_LARGE_BYTES, buildBillOfTiles, downloadSize } from './bill'
