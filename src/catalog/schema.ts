@@ -406,8 +406,8 @@ export const CatalogRecord = z.object({
   /**
    * Connection systems, normalised — also multi-valued.
    *
-   * 3,091 tiles (35.5%) carry 2–3 distinct systems, 4,363 (50.1%) carry
-   * `connection|openforge`, 3,935 (45.2%) carry a lock system, and 349 (4.0%)
+   * 2,499 tiles (28.7%) carry 2+ distinct systems, 4,363 (50.1%) carry
+   * `connection|openforge`, 5,271 (60.6%) carry a lock system, and 349 (4.0%)
    * carry no `connection|` tag at all.
    *
    * §5 folds the third-segment modifiers (`topless`, `unsupported`, `flex`,

@@ -28,10 +28,10 @@ It reuses exactly two things. STL files and previews come from the existing publ
 Cloudflare R2 bucket. Tile metadata is imported from the catalog repo's JSON fixtures at
 build time. No shared database, no shared API, no shared code.
 
-**The fact that sets the architecture:** a slim index over all 8,702 live tiles measures
-**261 KB brotli** (measured; the variant carrying full tags and composition configs is
-larger and has not yet been measured — see §5). At that size there is no reason for a query
-backend. Search, faceting and constraint resolution run in the browser.
+**The fact that sets the architecture:** the full index over all 8,702 live tiles — carrying
+tags *and* composition configs — measures **355.7 KB brotli** (5.42 MB raw, 465.7 KB gzip),
+emitted and measured by the importer. At that size there is no reason for a query backend.
+Search, faceting and constraint resolution run in the browser.
 
 ---
 
@@ -228,10 +228,15 @@ openforge-catalog fixtures (pinned commit + recorded SHA)
    catalog index (static asset)  +  facts.json (the verify script's output)
 ```
 
-**Payload size is measured for the slim index only: 261 KB brotli.** The index this pipeline
-emits adds full tags and composition configs and has **not** been measured. Treat 261 KB as
-a floor, budget 500 KB, and add a CI size assertion before the first release. If the full
-index overshoots, tags stay and configs move to a lazily-fetched second asset.
+**Measured: 355.7 KB brotli**, 71% of the 500 KB budget, asserted at import time.
+
+The contingency this plan originally named — moving tags and configs to a lazily-fetched
+second asset — turned out to be the wrong lever, and it was worth measuring rather than
+assuming. Dropping every config saves 5.4 KB brotli; every tag array, 19.7 KB; both, 24.8 KB
+(7%). They are enormous raw and nearly free compressed because there are only 916 distinct
+tags and 104 distinct config refs. **The payload is the 8,702 catalog paths themselves.** At
+41.8 bytes per record the budget is reached at roughly 12,200 records — 40% corpus growth —
+and the fix at that point is shortening ids, not shedding fields.
 
 ### Open specification: composition constraint semantics
 
