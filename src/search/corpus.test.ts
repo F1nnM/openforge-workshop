@@ -194,8 +194,18 @@ describeCorpus(title, () => {
     expect(engine.search(search({ build: buildSystemFilter('separate wall') })).total).toBe(3_351)
   })
 
-  it('conn — 2,499 tiles (28.7%) carry two or more systems', () => {
-    expect(file.records.filter((record) => record.conn.length >= 2).length).toBe(2_499)
+  it('conn — 2,493 tiles (28.6%) carry two or more systems', () => {
+    // Was 2,499 (28.7%) while `pipeline/facets.ts` read `bottom`, `left` and
+    // `right` as connection systems rather than as positions. Six of the eight
+    // records that carried such a phantom had it as their *second* value — e.g.
+    // `connection|bottom` + `connection|openlock` counted as two systems where the
+    // tile offers one — so removing the phantoms takes 2,499 to 2,493. The other
+    // two keep two real systems and stay in the count. The definition of record is
+    // `connection_systems()` in `docs/verify-catalog-facts.py`, which the pipeline
+    // corpus suite cross-checks against.
+    expect(file.records.filter((record) => record.conn.length >= 2).length).toBe(2_493)
+    // No `conn` value is a position name: the whole vocabulary is 7 systems, not 10.
+    expect(new Set(file.records.flatMap((record) => record.conn)).size).toBe(7)
     const openlock = engine.search(search({ conn: ['openlock'] })).total
     const magnetic = engine.search(search({ conn: ['magnetic'] })).total
     const both = engine.search(search({ conn: ['openlock', 'magnetic'] })).total

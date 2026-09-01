@@ -12,7 +12,7 @@
  * | Component | single-select | **multi-select checkboxes** + an "All components" row | 19.5% of tiles are in 2+ buckets, 11.9% in none — so a tile is not in exactly one group, and `Other` has to be a visible value or 1,032 tiles are unreachable |
  * | Texture set | 6 chips | **38 roots, prefix-matched**, top 12 with a "more" affordance | selecting `dungeon_stone` must also match `texture\|dungeon_stone\|eroded`, and 38 chips is not a sidebar |
  * | Build system | single-select | single-select **plus a first-class Unspecified** | 2,978 tiles (34.2%) carry no `build\|` tag, so absence is a filter value |
- * | Connection | absent | **multi-select** | 2,499 tiles (28.7%) carry 2+ systems; fusing it into build would make `openforge` — the project's own flagship connector — unreachable |
+ * | Connection | absent | **multi-select** | 2,493 tiles (28.6%) carry 2+ systems; fusing it into build would make `openforge` — the project's own flagship connector — unreachable |
  *
  * ## Native inputs, not buttons
  *
