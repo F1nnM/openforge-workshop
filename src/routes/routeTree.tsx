@@ -59,14 +59,10 @@ import {
 } from '@/search/searchSchema'
 import { CatalogScreen } from '@/screens/catalog'
 import { Landing } from '@/screens/landing'
+import { LibraryScreen } from '@/screens/library'
 import { AppFrame } from '@/ui/shell'
 
-import {
-  BuilderPlaceholder,
-  ErrorPlaceholder,
-  LibraryPlaceholder,
-  NotFoundPlaceholder,
-} from './placeholders'
+import { BuilderPlaceholder, ErrorPlaceholder, NotFoundPlaceholder } from './placeholders'
 
 /**
  * The frame every screen renders inside.
@@ -108,7 +104,7 @@ export const catalogRoute = createRoute({
 export const libraryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library',
-  component: LibraryPlaceholder,
+  component: LibraryScreen,
 })
 
 /**

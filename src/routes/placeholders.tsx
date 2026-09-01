@@ -14,7 +14,7 @@
  * | root frame | *landed*              | PR 12 — `src/ui/shell/AppFrame.tsx`    |
  * | `/`        | `LandingPlaceholder`  | PR 16 — `src/screens/landing/`         |
  * | `/catalog` | *landed*              | PR 13 — `src/screens/catalog/` (+ PR 15's drawer) |
- * | `/library` | `LibraryPlaceholder`  | PR 14 — `src/screens/library/`         |
+ * | `/library` | *landed*              | PR 14 — `src/screens/library/`         |
  * | `/builder` | `BuilderPlaceholder`  | PR 18 — `src/screens/builder/`         |
  *
  * Each of those changes exactly one `component:` reference in `routeTree.tsx`.
@@ -42,10 +42,6 @@ function Screen({ title, note }: { title: string; note: string }) {
 
 export function LandingPlaceholder() {
   return <Screen title="Landing" note="Placeholder — PR 16 owns this screen." />
-}
-
-export function LibraryPlaceholder() {
-  return <Screen title="Library" note="Placeholder — PR 14 owns this screen." />
 }
 
 export function BuilderPlaceholder() {

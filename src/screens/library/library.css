@@ -1,0 +1,494 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the library screen.
+
+   design-contract.md §2.3: a heading, a mono summary, an "Open in builder →"
+   primary action, tiles grouped by component kind under mono uppercase rules,
+   cards that are "a lighter variant of the catalog card", and an empty state.
+
+   Hand-written CSS rather than Tailwind utilities, following
+   `../../ui/shell/shell.css` and `../catalog/catalog.css`. Unlayered, for the
+   reason set out at the top of that shell file.
+
+   ## Why this file imports the catalog's
+
+   The library reuses `TileThumb` (see `LibraryCard.tsx`), and the sprite-sheet
+   rules that component depends on — `.of-thumb`, `.of-thumb-frame`, and the
+   `max-width: none` on `.of-thumb-sheet` without which Tailwind's Preflight
+   squeezes all ten camera angles into the well — live in `../catalog/
+   catalog.css`. Restating them here would mean two definitions of one class, and
+   whichever `<style>` Vite emitted second would win. Importing is what keeps the
+   thumbnail's styling in the same file as the component that owns it. The same
+   import brings `.of-empty-title` / `.of-empty-note` and the pending lines, which
+   are shared for the same reason.
+
+   Light only. There is no dark block, for the same reason there is none in
+   tokens.css: Parchment is the committed direction.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@import '../catalog/catalog.css';
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
+
+.of-library {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  /* The catalog's page padding, so the two screens' content starts on the same
+     line when the header's nav is used to move between them. */
+  padding: 22px 26px 48px;
+  /* The contract's screens are desktop-first and the cards are the widest thing
+     here; past ~1,500px a full-bleed grid puts eight cards on a row and the
+     summary line a metre from the first card. */
+  max-width: 1340px;
+}
+
+/* ── Head ────────────────────────────────────────────────────────────────── */
+
+.of-lib-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 18px;
+}
+
+.of-lib-title {
+  margin: 0;
+  font-family: var(--face-display);
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1.1;
+  letter-spacing: -0.2px;
+}
+
+/* The contract's `{n} tiles · {mb} MB`. Mono, because both halves are measured
+   facts — design-contract.md §1. */
+.of-lib-summary {
+  margin: 0;
+  font-family: var(--face-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.6px;
+  color: var(--mut);
+}
+
+/* Size is a warning surface, not a footnote (see `LibraryNotes`). The figure
+   itself carries the verdict, so the number a user glances at is already tinted
+   before they read the sentence under it. `ok` stays muted on purpose — a total
+   that is fine should not shout. */
+.of-lib-summary [data-verdict='large'] {
+  color: var(--acc);
+  font-weight: 600;
+}
+
+.of-lib-summary [data-verdict='huge'] {
+  color: var(--acc);
+  font-weight: 700;
+  /* Underlined rather than reddened: the palette has no alarm colour, and
+     inventing one for this would put a hex outside the contract's table. */
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+/* Pushed to the end of the head row, so the primary action sits opposite the
+   heading rather than trailing the summary. */
+.of-lib-head .of-lib-action[data-tone='primary'] {
+  margin-left: auto;
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────────────
+   The same two tones the landing hero uses, restated here rather than shared:
+   `.of-action` lives in `../landing/landing.css`, which is the landing screen's
+   file, and reaching into it would make one screen's stylesheet a dependency of
+   another's markup. Extracting a button primitive is `../../ui/primitives/`'s
+   call to make, not this screen's.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lib-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 4px;
+  font-size: 14px;
+  letter-spacing: 0.4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    filter 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.of-lib-action:hover {
+  text-decoration: none;
+}
+
+.of-lib-action[data-tone='primary'] {
+  padding: 11px 20px;
+  background: var(--acc);
+  color: var(--accink);
+  border: none;
+  font-weight: 700;
+}
+
+.of-lib-action[data-tone='primary']:hover {
+  filter: brightness(1.12);
+}
+
+.of-lib-action[data-tone='secondary'] {
+  /* One pixel less than the primary, so the border does not make the outlined
+     button taller than the filled one. */
+  padding: 10px 20px;
+  background: none;
+  color: var(--acc);
+  border: 1px solid var(--acc);
+  font-weight: 600;
+}
+
+.of-lib-action[data-tone='secondary']:hover {
+  background: color-mix(in srgb, var(--acc) 10%, transparent);
+}
+
+/* A label wrapping a clipped file input. The input is what takes focus, so the
+   ring has to be moved onto the thing the user can see. */
+.of-lib-action:has(input:focus-visible) {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.of-lib-action:has(input) {
+  /* The `.of-sr-only` input inside is absolutely positioned; without this it
+     would resolve against the page. */
+  position: relative;
+}
+
+/* A verb inside a sentence — a button that must not look like one. */
+.of-lib-inline-action {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--acc);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ── Notes ───────────────────────────────────────────────────────────────── */
+
+.of-lib-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Negative top margin against the page's 26px gap: the notes explain the
+     summary above them and belong to it visually. */
+  margin-top: -16px;
+}
+
+.of-lib-note {
+  margin: 0;
+  max-width: 74ch;
+  font-size: 13px;
+  color: var(--mut);
+}
+
+.of-lib-note[data-tone='large'],
+.of-lib-note[data-tone='huge'],
+.of-lib-note[data-tone='warn'] {
+  padding: 9px 12px;
+  border-radius: 4px;
+  /* The accent at a tenth, mixed in the browser rather than pasted as another
+     rgba() literal — so retinting `--acc` retints this too. */
+  background: color-mix(in srgb, var(--acc) 8%, transparent);
+  /* The bar is the whole warning device: a left rule in the accent, which is
+     the contract's own way of marking an aside. */
+  border-left: 2px solid var(--acc);
+  color: var(--ink);
+}
+
+/* ── Groups ──────────────────────────────────────────────────────────────── */
+
+.of-lib-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The contract's "mono uppercase rule": the label sits on a hairline that runs
+   to the end of the column. `::after` rather than a border on the heading, so
+   the rule starts after the count chip instead of behind it. */
+.of-lib-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.of-lib-group-heading::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.of-lib-grid {
+  display: grid;
+  /* 215px is the contract's catalog grid minimum and the cards are the same
+     width here, so a tile is the same size on both screens. */
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 16px;
+}
+
+/* ── Card ────────────────────────────────────────────────────────────────────
+   "A lighter variant of the catalog card" — no texture line, no material
+   swatch, no full-width toggle. Nothing here needs the catalog card's fixed
+   height: this is a plain CSS grid, not `VirtuosoGrid`, so no scrollbar is
+   extrapolated from one card's measurement.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lib-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.of-lib-card-open {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.of-lib-card-open:hover {
+  text-decoration: none;
+}
+
+.of-lib-card-open:hover .of-lib-card-title {
+  color: var(--acc);
+}
+
+.of-lib-card-title {
+  margin: 7px 0 0;
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 14.5px;
+  line-height: 1.25;
+  /* Clamped, not fixed: a one-line name here may occupy one line, because the
+     row's height is the tallest card's and there is no virtualiser to mislead.
+     The clamp is only to stop a 51-character filename-derived name from setting
+     the height of its whole row. */
+  max-height: 2.5em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  transition: color 110ms ease;
+}
+
+.of-lib-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+}
+
+.of-lib-card-bytes {
+  font-family: var(--face-mono);
+  font-size: 11px;
+  color: var(--mut);
+}
+
+.of-lib-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: auto;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--mut);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition:
+    background-color 110ms ease,
+    border-color 110ms ease,
+    color 110ms ease;
+}
+
+/* Removal is the destructive action on this screen, and it is one click with no
+   confirmation — so it stays quiet until pointed at, and then says clearly that
+   it is the one that takes something away. Verdigris, the contract's secondary
+   accent, is already the "in library" colour; this is its opposite, so it uses
+   the primary accent rather than a third hue. */
+.of-lib-remove:hover {
+  background: color-mix(in srgb, var(--acc) 10%, transparent);
+  border-color: var(--acc);
+  color: var(--acc);
+}
+
+.of-lib-card-pending {
+  gap: 9px;
+}
+
+.of-lib-card-pending .of-thumb {
+  background: var(--bg3);
+}
+
+/* ── Empty and error states ──────────────────────────────────────────────── */
+
+.of-lib-empty,
+.of-lib-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 30px 0 40px;
+}
+
+.of-lib-empty .of-lib-action,
+.of-lib-error .of-lib-action {
+  margin-top: 8px;
+}
+
+/* ── Backup ──────────────────────────────────────────────────────────────────
+   Not in the contract's §2.3 — architecture-plan.md §13 is why it exists (see
+   `LibraryTransfer.tsx`). Set as a bordered block at the foot of the page so it
+   reads as page furniture rather than as one more group of tiles.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lib-transfer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 18px 20px 20px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.of-lib-transfer-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.of-lib-transfer-note {
+  margin: 0;
+  max-width: 68ch;
+  font-size: 13px;
+  color: var(--mut);
+}
+
+.of-lib-transfer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.of-lib-transfer-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 9px 12px;
+  max-width: 74ch;
+  border-radius: 4px;
+  border-left: 2px solid var(--acc2);
+  background: color-mix(in srgb, var(--acc2) 10%, transparent);
+  font-size: 13px;
+}
+
+/* A failed import changed nothing, and a partial one kept less than the file
+   held; both are the accent, which is this palette's "look here". Success keeps
+   verdigris, the contract's confirmation colour. */
+.of-lib-transfer-report[data-tone='error'],
+.of-lib-transfer-report[data-tone='warn'] {
+  border-left-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 8%, transparent);
+}
+
+.of-lib-transfer-report-line {
+  margin: 0;
+}
+
+/* The discarded entries are `src/store/migrations.ts`'s own strings — paths and
+   values, so mono, and small because a badly damaged file produces six of them. */
+.of-lib-dropped {
+  margin: 0;
+  padding-left: 18px;
+  font-family: var(--face-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mut);
+  overflow-wrap: anywhere;
+}
+
+.of-lib-dropped [data-tone='more'] {
+  list-style: none;
+  margin-left: -18px;
+  font-style: italic;
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────────
+   The contract specifies no phone treatment. Below the point where two 215px
+   cards plus the page padding stop fitting, the page padding narrows and the
+   head stacks — the primary action goes full width, because a 160px button
+   floated opposite a 34px heading reads as a mistake once the two are on
+   separate lines.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 620px) {
+  .of-library {
+    gap: 22px;
+    padding: 18px 16px 40px;
+  }
+
+  .of-lib-title {
+    font-size: 28px;
+  }
+
+  .of-lib-head .of-lib-action[data-tone='primary'] {
+    margin-left: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .of-lib-transfer-actions .of-lib-action {
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* Two cards per row rather than one. At 420px the contract's 215px minimum
+     leaves room for a single 388px-wide card, and a 4:3 thumbnail that wide turns
+     a twenty-tile library into an eleven-thousand-pixel scroll. 150px is the
+     narrowest a card can be and still fit a two-line title and the size chip
+     beside the file size. */
+  .of-lib-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .of-lib-action,
+  .of-lib-card-title,
+  .of-lib-remove {
+    transition: none;
+  }
+}
