@@ -132,7 +132,8 @@ map to two or three genuinely different meshes**.
 108.0 GB total, median file 10.36 MB, p95 32.89 MB, largest 108.9 MB. 38 distinct texture
 roots; 89 tiles (1.0%) carry no texture tag. 2,978 tiles (34.2%) carry no `build|` tag, so
 that facet needs a first-class "unspecified". **Zero bases carry `build|wall on tile`** while
-863 toppers use that system — so bases must never be joined to toppers on the build tag.
+857 toppers use that system — so bases must never be joined to toppers on the build tag.
+(863 is the corpus-wide count: 857 toppers, 6 integral, **0 bases**.)
 
 ---
 
@@ -180,7 +181,7 @@ All versions installed together and verified: **154 packages, zero peer conflict
 | Primitives | **`@base-ui/react` 1.7.0** | Note the package name — `@base-ui-components/react` is the old scope and no longer resolves |
 | Virtualisation | **react-virtuoso 4.18.12** | `VirtuosoGrid` assumes uniform item size — lock the card aspect ratio |
 | Facets | **Uint32Array bitset**, ~40 lines ours | Also serves the composition constraint matcher |
-| Text search | **MiniSearch 7.2.0** | 6.0 KB gz; vendored |
+| Text search | **ours** — a CSR inverted index, ~200 lines | No MiniSearch: fuzzy matching conflates `2x2` with `2x1`, so a size query silently returns the wrong size |
 | 3D | **three 0.185.1** + **r3f 9.7.0** + **drei 10.7.8** | Do not exceed 0.185.x — `postprocessing` 6.39.4 peers `<0.186.0` |
 | Materials | **`MeshStandardMaterial`**, flat per family | **Not TSL** — see below |
 | AO | **N8AO 2.0.1** | What stops models dissolving into the parchment ground |
@@ -257,10 +258,14 @@ port it and its tests rather than deriving new semantics from the 332-line spec.
 
 All client-side over the in-memory index.
 
-- **Facets**: a `Uint32Array` bitset index with correct disjunctive counts. The same engine
-  serves the composition matcher, which is why it beats adding a facet library that would
-  still need a bitset for `constrain`.
-- **Text**: MiniSearch with prefix and fuzzy matching.
+- **Facets**: a `Uint32Array` bitset index with correct disjunctive counts — each facet's own
+  counts computed with its own filter excluded, or selecting one texture makes every other
+  read zero and the UI dead-ends. The same engine serves the composition matcher, which is
+  why it beats adding a facet library that would still need a bitset for `constrain`.
+- **Text**: a hand-rolled CSR inverted index over display name, filename and tags, with
+  prefix matching and **no fuzzy matching**. Fuzzy was rejected on measurement, not taste:
+  at edit distance 1 it makes `2x2`/`2x1` and `4x4`/`4x6` neighbours, so a size search
+  silently returns the wrong size. Prefix matching is ~9 lines over a sorted token array.
 - **Tokenisation is mandatory.** Under the mock's substring matcher, *every* multi-word query
   returns zero hits — "dungeon stone", "arrow slit", "cave wall" — because no filename
   contains a space and only five tag values corpus-wide do. Normalise `[|_+,%#.-]` to spaces
@@ -269,6 +274,20 @@ All client-side over the in-memory index.
 - **Synthesise a size token** at import (`"4x4"`, `"2r90"`). The literal string `4x4` appears
   in zero tags. Delete the mock's `x` → `×` rewrite: `×` occurs zero times in the corpus and
   applying it takes "4x4" from 347 hits to 0.
+
+**Measured over the real 8,702-record corpus:** index build **32–40 ms warm, 73 ms cold**;
+per query **45–375 µs**. The floor is the disjunctive pass itself (62 facet values × 272
+words of fused `popcountAnd`); the ceiling is `wall` at 5,706 results to score and sort.
+Build was optimised down from 92 ms with flat CSR buffers instead of ~900k `Array.push`
+calls; the remaining ~60% is unavoidable tokenisation of 123,184 tokens. It runs alongside a
+5.4 MB `JSON.parse` that costs more, so perceived load is unaffected, and every query is a
+small fraction of a 16 ms frame.
+
+Note that `tex` matches the texture *tag namespace*, not `record.texture` — that field holds
+only the first root, so a vocabulary read off it has 37 values against a 38-root table.
+Indexing the tags at every segment depth keeps all 38 usable and makes two-root tiles
+findable under both names. Prefixes match on segment boundaries, so `cave` does not match
+`cavern`.
 
 | Facet | Widget | Why |
 | --- | --- | --- |
@@ -312,7 +331,17 @@ rather than presenting them as equivalent.
 
 **Assemblies.** Each placement resolves to a base plus a topper, matched on shape and
 `size|openlock` code (A→2, BA→1.5, IA→1, D→3, Q→4) — **never** on the `build|` tag, since
-zero bases carry `build|wall on tile` while 863 toppers need one.
+zero bases carry `build|wall on tile` while 857 toppers need one.
+
+**The code alone is not enough.** 2,364 of 4,363 openforge toppers (54.2%) publish no
+`size|openlock` code at all, so a code-only join cannot satisfy the rule for the majority.
+Footprint congruence is a second key and recovers 1,899 of them (80.3%); without it the
+unmatched gap is 2,493 toppers rather than 594. Texture is a weighted preference only —
+bases cover 15 texture roots against the toppers' 23 — and family is worthless as a join
+key, since exactly **0** coded toppers have a same-family same-code base.
+
+Of the 594 that still get no base: 129 are a base the corpus should have and does not,
+21 are thin strips nothing supports, and 444 carry neither a code nor a footprint.
 
 **Compatibility informs; it never refuses a placement.** One hard rule: every
 `connection|openforge` piece needs a base line item, auto-inserted. Everything else is a
@@ -380,7 +409,18 @@ feature. They were solved by constrained simulated annealing maximising the mini
 distance across all 120 pairs, evaluated simultaneously under normal vision and Machado-2009
 protanopia, deuteranopia and tritanopia.
 
-Verified: **minimum pairwise ΔE00 of 9.05** across normal vision and all three dichromacies;
+Verified, per condition, re-derived from the shipped hex literals rather than restated:
+normal **9.211**, protanopia **9.041**, tritanopia **9.043**, deuteranopia **8.864**.
+
+The research pass claimed a single figure of 9.05 across all four. That does not reproduce —
+**deuteranopia is 0.136 short of the 9.0 target**, and the port did not drift (every other
+scalar reproduces to the digit, and the CIEDE2000 implementation passes all 34
+Sharma–Wu–Dalal reference vectors). The shortfall is recorded in the invariants with the
+target held separately, and each minimum is pinned to ±0.02 with its limiting pair, which
+detects drift far more tightly than a `≥ 9.0` assertion would. Closing it means re-running
+the annealing.
+
+Also verified:
 every family ≥12.3 ΔE00 from the parchment grounds and ≥12.2 from the UI accents. The map it
 replaces had a minimum of 5.42 with all six entries inside a 15° hue band that the parchment
 ground itself occupies.
@@ -393,7 +433,9 @@ Two rules that came out of measurement:
   fill band; measured contour contrast is 7.14:1 minimum.
 - **Wear changes roughness, never colour.** A lightness/chroma modifier for `ruined` /
   `eroded` was implemented and measured: at any visible delta a worn tile reads as a
-  *different family* (worn cut stone lands 4.06 ΔE00 from base plain). 1,538 tiles (17.7%)
+  *different family* (worn cut stone lands 4.06 ΔE00 from base plain). **1,562 tiles carry a
+  wear tag; 1,538 resolve worn** — both are right and measure different things, the 24-tile
+  gap being the pool set where the inset root wins and water has no grain to roughen
   are worn; wear moves roughness and grain only.
 
 The registry drives both the plan-view fills in v1 and the 3D materials in v1.1.

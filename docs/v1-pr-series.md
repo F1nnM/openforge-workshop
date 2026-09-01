@@ -39,7 +39,7 @@ rather than by the UI.
 
 | # | Title | Goal | Owns | Depends on | Neutral? |
 | --- | --- | --- | --- | --- | --- |
-| 7 | Facet and search engine | `Uint32Array` bitset facet index with disjunctive counts + MiniSearch text layer. Tokenised matching, size-token synthesis, word boundaries | `src/search/**` (except `searchSchema.ts`) | 3, 6 | yes (inert) |
+| 7 | Facet and search engine | `Uint32Array` bitset facet index with disjunctive counts + a hand-rolled CSR inverted index for text (no MiniSearch — fuzzy conflates `2x2` with `2x1`). Tokenised matching, size-token synthesis, word boundaries | `src/search/**` (except `searchSchema.ts`) | 3, 6 | yes (inert) |
 | 8 | Material registry | `resolveMaterial(tags)` over 16 families / 38 roots, with the ΔE00 separation asserted in a test | `src/materials/**` | 3 | yes (inert) |
 | 9 | Assembly resolution | Base↔topper matching on shape + `size|openlock` code; the `connection\|openforge` base auto-insert rule; bill-of-tiles roll-up with md5 dedupe | `src/assembly/**` | 3 | yes (inert) |
 | 10 | Share-link codec | Columnar JSON → `CompressionStream('deflate-raw')` → base64url, with manifest-version checking and round-trip tests | `src/share/**` | 3, 5 | yes (inert) |
