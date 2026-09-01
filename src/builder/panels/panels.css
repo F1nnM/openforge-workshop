@@ -1,0 +1,669 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the builder's three panels.
+
+   design-contract.md §2.4: a 272px palette, a floating toolbar centred at the
+   top of the canvas, and a 302px bill of tiles. The column widths and the plate
+   idiom are the contract's; everything else here follows from the two facts that
+   neither column may scroll the page and both are narrow enough that a long tile
+   name is the normal case rather than the exception.
+
+   Hand-written rather than Tailwind utilities, for the reason at the top of
+   `../../ui/shell/shell.css`. Unlayered, same as the rest of the app's own CSS.
+
+   ## Why this file imports the catalog's
+
+   The same reason `../../screens/library/library.css` does: both panels render
+   `TileThumb`, and the sprite-sheet rules it depends on — `.of-thumb`,
+   `.of-thumb-frame`, and the `max-width: none` on `.of-thumb-sheet` without which
+   Tailwind's Preflight squeezes all ten camera angles into the well — live in the
+   catalog's stylesheet with the component that owns them. Restating them would
+   mean two definitions of one class and a race over which `<style>` Vite emits
+   second. The import also brings `.of-search-input`, which is the same field as
+   the catalog's with a narrower cap.
+
+   Light only. Parchment is the committed direction; see `tokens.css`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@import '../../screens/catalog/catalog.css';
+
+/* ── The palette ─────────────────────────────────────────────────────────────
+   272px, and its own scroll container. Two independently scrolling columns
+   either side of a fixed canvas is the whole point of the layout: a builder
+   whose palette scrolls the drawing off screen is unusable.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  /* **Load-bearing, and it is what stops the page scrolling.** Every
+     `VisuallyHidden` span in here is `position: absolute` with no positioned
+     ancestor, so its containing block would be the *initial* containing block —
+     which means it escapes every `overflow: hidden` between here and the root and
+     contributes its offset to `documentElement.scrollHeight`. With a hundred
+     palette rows that was measured at 2,809px of page scroll on a 900px viewport,
+     on a screen specified to have none. `library.css` has the same note on its
+     file-input label, for the same reason. */
+  position: relative;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 12px 24px;
+  background: var(--bg2);
+  border-right: 1px solid var(--line);
+}
+
+.of-pal-search {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.of-pal-input {
+  /* The catalog's field caps at 520px; in a 272px column it fills the width. */
+  max-width: none;
+  flex: none;
+}
+
+.of-pal-count {
+  margin: 0;
+  /* Reserved whether or not there is a count to show, so the list below does not
+     jump by a line the moment the first keystroke lands. */
+  min-height: 14px;
+  font-family: var(--face-mono);
+  font-size: 11px;
+  color: var(--mut);
+}
+
+.of-pal-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The contract's "mono uppercase rule", as on the library screen: the label sits
+   on a hairline that runs to the end of the column. */
+.of-pal-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.of-pal-heading::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.of-pal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-pal-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.of-pal-pick {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+/* A `<div>`, not a button: the tile has no footprint the plan view can draw, so
+   there is nothing to arm. See `PalettePanel.tsx` on why it is not a disabled
+   button. */
+.of-pal-row:not([data-placeable]) .of-pal-pick {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.of-pal-row[data-placeable] .of-pal-pick:hover {
+  background: var(--bg3);
+}
+
+/* The contract's accent tint and border on the armed row. */
+.of-pal-row[data-selected] .of-pal-pick {
+  background: color-mix(in srgb, var(--acc) 12%, transparent);
+  border-color: var(--acc);
+}
+
+.of-pal-thumb {
+  flex: none;
+  /* 52×40 — the contract's palette thumbnail. Both dimensions are set, so the
+     4:3 `aspect-ratio` the catalog card relies on does not apply and the square
+     frame inside sits 6px in from each side of the well. */
+  width: 52px;
+  height: 40px;
+}
+
+.of-pal-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.25;
+  color: var(--ink);
+  /* Two lines, then ellipsis. The corpus's display names run to five words and a
+     size token, and a 272px column cannot hold one on a line. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.of-pal-size {
+  flex: none;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  color: var(--mut);
+  white-space: nowrap;
+}
+
+.of-pal-add {
+  flex: none;
+  /* Tighter than the `sm` default: this button sits in a 272px row beside a
+     thumbnail and a two-line name. */
+  --of-button-px: 8px;
+  --of-button-py: 4px;
+  --of-button-fs: 11.5px;
+
+  gap: 3px;
+}
+
+.of-pal-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+
+.of-pal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 0 8px;
+}
+
+/* ── The floating toolbar ────────────────────────────────────────────────────
+   §2.4: centred at the top of the canvas, on a translucent plate. Positioned by
+   the screen's grid (`../../screens/builder/builder.css`); this file styles it.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-build-toolbar {
+  display: flex;
+  /* Wraps rather than overflowing the canvas: at 860px the four controls plus the
+     readout are wider than the stage, and a toolbar that overflowed would put its
+     last button under the bill column. */
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  /* `max-content` so the row stays on one line wherever it fits: the slot around
+     it is absolutely positioned, and a wrapping flex container's shrink-to-fit
+     width is not its one-line width, so without this the mono readout dropped to
+     a second line even at 1440px. */
+  width: max-content;
+  max-width: 100%;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  /* The canvas's own plate treatment, so the toolbar and the two corner plates
+     read as one family of surface. */
+  background: color-mix(in srgb, var(--bg2) 92%, transparent);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 6px 18px -12px var(--scrim);
+}
+
+.of-build-key {
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg3);
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.of-build-snap {
+  font-family: var(--face-mono);
+  letter-spacing: 0.02em;
+  /* "snap 0.5" is two words and must never become two lines. */
+  white-space: nowrap;
+  /* Fixed width across both values, so toggling the snap does not shuffle the
+     buttons either side of it. */
+  min-width: 84px;
+}
+
+.of-build-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  /* Only ever holds what is true, so it collapses to nothing rather than
+     reserving space for an empty readout. */
+  font-family: var(--face-mono);
+  font-size: 11px;
+  color: var(--mut);
+  white-space: nowrap;
+}
+
+.of-build-conflicts {
+  color: var(--acc);
+}
+
+/* ── The bill of tiles ───────────────────────────────────────────────────────
+   302px. Three bands: a head that does not scroll, a scrolling body, and a foot
+   that does not scroll — so the download action and the total are always on
+   screen however long the room gets. That is the whole reason this column is a
+   grid rather than one overflowing block.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-bill {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  background: var(--bg2);
+  border-left: 1px solid var(--line);
+}
+
+.of-bill-head {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.of-bill-title {
+  margin: 4px 0 0;
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 19px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.of-bill-sub {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--mut);
+}
+
+.of-bill-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  /* Same reason as `.of-palette`: the clipped spans inside the row buttons and
+     the Remove actions would otherwise resolve against the page. */
+  position: relative;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 14px 16px;
+}
+
+.of-bill-empty {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+
+/* ── Notes ───────────────────────────────────────────────────────────────────
+   The library screen's warning device, because it is the same warning: an accent
+   bar down the left and the accent at a tenth behind it. No alarm colour — the
+   Parchment palette has none, and inventing one would put a hex outside the
+   contract's table.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-bill-note,
+.of-bill-fail {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--acc) 8%, transparent);
+  border-left: 2px solid var(--acc);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+/* The `huge` verdict is the one state where the honest answer is "do not start
+   this download", so it is the one that gets a heavier bar. */
+.of-bill-note[data-tone='huge'] {
+  border-left-width: 3px;
+  background: color-mix(in srgb, var(--acc) 14%, transparent);
+}
+
+.of-bill-note-head {
+  font-weight: 700;
+}
+
+.of-bill-infos {
+  font-size: 12px;
+  color: var(--mut);
+}
+
+.of-bill-infos > summary {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.of-bill-info {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+
+/* ── Rows ────────────────────────────────────────────────────────────────── */
+
+.of-bill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-bill-row {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.of-bill-row:last-child {
+  border-bottom: none;
+}
+
+.of-bill-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 4px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.of-bill-open:hover {
+  background: var(--bg3);
+}
+
+/* Not a button — nothing placed this file, so there is nothing to expand. */
+div.of-bill-open {
+  cursor: default;
+}
+
+.of-bill-thumb {
+  flex: none;
+  width: 52px;
+  height: 40px;
+}
+
+.of-bill-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.of-bill-spec {
+  display: block;
+  font-family: var(--face-mono);
+  font-size: 10px;
+  color: var(--mut);
+  /* The disambiguated entry name can be a five-level catalog path. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.of-bill-figures {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--face-mono);
+  font-size: 11px;
+}
+
+.of-bill-mb {
+  color: var(--mut);
+}
+
+.of-bill-count {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.of-bill-caret {
+  flex: none;
+  width: 12px;
+  font-family: var(--face-mono);
+  font-size: 12px;
+  color: var(--mut);
+  text-align: center;
+}
+
+/* A base the resolver added, not a tile the user placed. */
+.of-bill-auto {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 3px 60px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--mut);
+}
+
+.of-bill-row[data-auto] .of-bill-open {
+  /* Hatched left edge, echoing the drawing's own "this was added for you" mark
+     without borrowing the canvas's pattern id. */
+  border-left: 2px dashed var(--line);
+  padding-left: 6px;
+}
+
+/* ── Placements under a row ──────────────────────────────────────────────── */
+
+.of-bill-places {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 6px 60px;
+  padding: 0;
+  list-style: none;
+}
+
+.of-bill-place {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.of-bill-at {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  color: var(--mut);
+}
+
+.of-bill-remove {
+  flex: none;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--acc);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+
+.of-bill-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+}
+
+.of-bill-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  color: var(--mut);
+}
+
+.of-bill-bytes {
+  font-size: 14px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Over a threshold the total is the warning, so it carries the accent rather
+   than leaving the note above to do all the work. */
+.of-bill-bytes[data-verdict='large'],
+.of-bill-bytes[data-verdict='huge'] {
+  color: var(--acc);
+  font-weight: 500;
+}
+
+.of-bill-download {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.of-bill-fail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.of-bill-saved {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.of-bill-file {
+  font-family: var(--face-mono);
+  font-size: 11px;
+}
+
+.of-bill-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.of-bill-bar {
+  width: 100%;
+  height: 6px;
+  /* Both pseudo-elements are needed: Firefox styles the bar through
+     `::-moz-progress-bar` and Chromium through `::-webkit-progress-value`. */
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg3);
+  overflow: hidden;
+}
+
+.of-bill-bar::-webkit-progress-bar {
+  background: var(--bg3);
+}
+
+.of-bill-bar::-webkit-progress-value {
+  background: var(--acc);
+}
+
+.of-bill-bar::-moz-progress-bar {
+  background: var(--acc);
+}
+
+.of-bill-progress-text {
+  margin: 0;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  color: var(--mut);
+}
+
+.of-bill-cancel {
+  align-self: flex-start;
+}
+
+.of-bill-caption {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+
+.of-bill-caption code {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .of-pal-pick,
+  .of-bill-open {
+    transition: none;
+  }
+
+  .of-build-toolbar {
+    /* A blur is not motion, but it is a compositing effect that some users
+       disable alongside it, and the plate reads fine without one. */
+    backdrop-filter: none;
+    background: var(--bg2);
+  }
+}

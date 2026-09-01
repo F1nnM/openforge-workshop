@@ -9,6 +9,9 @@
  *
  * Importing any of them pulls in `primitives.css`.
  */
+export { Button, buttonProps } from './Button'
+export type { ButtonProps, ButtonSize, ButtonStyleProps, ButtonTone } from './Button'
+
 export { Dialog, Drawer } from './Overlay'
 export type { DialogProps } from './Overlay'
 

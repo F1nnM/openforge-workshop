@@ -210,6 +210,139 @@
   scale: 0.96;
 }
 
+/* ── Button ──────────────────────────────────────────────────────────────────
+   Two tones, three sizes, one declaration block. See ./Button.tsx for why the
+   styling is published as data attributes and as a `buttonProps()` helper rather
+   than as a polymorphic component.
+
+   `.of-action` (the landing hero) and `.of-lib-action` (the library head and its
+   backup controls) are the two class names that had each grown their own copy of
+   this block. They are listed here rather than aliased from those screens'
+   stylesheets, because a custom property set in another file would resolve
+   differently depending on which stylesheet the bundler emitted first — and
+   because the markup that carries them belongs to rows 16 and 14, which are not
+   this PR's to edit. Both aliases go the next time either screen's components are
+   opened, and nothing but the selector lists changes when they do.
+
+   The size is three custom properties rather than a full block per size, so a
+   surface that needs a size the contract does not name can set them locally
+   without a fourth `data-size` value being invented.
+
+   No focus ring here: ../shell/shell.css sets one for the whole app on
+   `:focus-visible`, deliberately so a control added later cannot forget it.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-button,
+.of-action,
+.of-lib-action {
+  /* `md`: the library head's size, and the default. */
+  --of-button-py: 10px;
+  --of-button-px: 20px;
+  --of-button-fs: 14px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Only ever between two flex items — a glyph and its label — so a button whose
+     content is one text node measures identically with it or without it. */
+  gap: 7px;
+  padding: var(--of-button-py) var(--of-button-px);
+  border-radius: 4px;
+  font-family: var(--face-body);
+  font-size: var(--of-button-fs);
+  letter-spacing: 0.4px;
+  text-align: center;
+  /* Anchors are buttons here too, and the underline shell.css gives every anchor
+     on hover reads as a rendering fault on a filled button. */
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    filter 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.of-button:hover,
+.of-action:hover,
+.of-lib-action:hover {
+  text-decoration: none;
+}
+
+.of-button[data-size='lg'],
+.of-action {
+  --of-button-py: 12px;
+  --of-button-px: 24px;
+  --of-button-fs: 15px;
+}
+
+.of-button[data-size='sm'] {
+  --of-button-py: 6px;
+  --of-button-px: 12px;
+  --of-button-fs: 12.5px;
+}
+
+.of-button[data-full] {
+  width: 100%;
+}
+
+/* The filled tone carries no border, so it takes one pixel more padding than the
+   outlined one to come out the same height. The mock's own trick, and the reason
+   the padding property holds the *secondary* value. */
+.of-button[data-tone='primary'],
+.of-action[data-tone='primary'],
+.of-lib-action[data-tone='primary'] {
+  padding: calc(var(--of-button-py) + 1px) var(--of-button-px);
+  background: var(--acc);
+  color: var(--accink);
+  border: none;
+  font-weight: 700;
+}
+
+.of-button[data-tone='primary']:hover:not(:disabled),
+.of-action[data-tone='primary']:hover,
+.of-lib-action[data-tone='primary']:hover {
+  filter: brightness(1.12);
+}
+
+.of-button[data-tone='secondary'],
+.of-action[data-tone='secondary'],
+.of-lib-action[data-tone='secondary'] {
+  background: none;
+  color: var(--acc);
+  border: 1px solid var(--acc);
+  font-weight: 600;
+}
+
+.of-button[data-tone='secondary']:hover:not(:disabled),
+.of-action[data-tone='secondary']:hover,
+.of-lib-action[data-tone='secondary']:hover {
+  /* The accent at a tenth, mixed in the browser rather than pasted as a fourth
+     rgba() literal of the same colour — so retinting `--acc` retints the hover. */
+  background: color-mix(in srgb, var(--acc) 10%, transparent);
+}
+
+.of-button:disabled {
+  /* Still in the tab order and still named: a download action that vanishes when
+     the room is empty gives a keyboard user nothing to read the reason from. */
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* A `<label>` wrapping a clipped file input. The input is what takes focus, so
+   the ring has to be moved onto the thing the user can see. */
+.of-button:has(input:focus-visible),
+.of-lib-action:has(input:focus-visible) {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.of-button:has(input),
+.of-lib-action:has(input) {
+  /* The `.of-sr-only` input inside is absolutely positioned; without this it
+     would resolve against the page. */
+  position: relative;
+}
+
 /* ── Toggle group ────────────────────────────────────────────────────────── */
 
 .of-toggle-group {
@@ -359,6 +492,9 @@
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
+  .of-button,
+  .of-action,
+  .of-lib-action,
   .of-backdrop,
   .of-dialog,
   .of-drawer,

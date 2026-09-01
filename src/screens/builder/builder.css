@@ -1,0 +1,216 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the builder screen's layout.
+
+   design-contract.md §2.4: three columns, `calc(100vh - 60px)`, no page scroll.
+   The 60px is not restated — `../../ui/shell/shell.css` publishes the header's
+   height as `--of-header-h` for exactly this, so a change to the header cannot
+   silently push the builder past the viewport.
+
+   `100dvh`, not `100vh`: on mobile Safari `100vh` is the *largest* viewport
+   height, so a page sized to it is scrollable by the height of the collapsing
+   toolbar — which is precisely the page scroll this screen is specified not to
+   have.
+
+   ## Why the whole screen is a grid and every column a scroll container
+
+   "No page scroll" is a structural requirement, not a `overflow: hidden` on the
+   body. Three things have to hold at once: the drawing must fill the height it is
+   given and never move, either sidebar must be able to hold a hundred rows, and
+   the bill's download action must stay on screen when it does. A grid with fixed
+   outer tracks and `minmax(0, 1fr)` in the middle gives all three — the `0`
+   minimum is what stops a long tile name in the palette from widening its track
+   and pushing the canvas out of the viewport, which is the default behaviour of
+   a grid item and the single commonest way a layout like this breaks.
+
+   Hand-written rather than Tailwind utilities, for the reason at the top of
+   `../../ui/shell/shell.css`. The panel styling lives with the panels, in
+   `../../builder/panels/panels.css`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* ── The three columns ───────────────────────────────────────────────────── */
+
+.of-builder {
+  /* The positioning context of last resort. A `position: absolute` descendant
+     with no positioned ancestor resolves against the *initial* containing block
+     and is therefore not clipped by the `overflow: hidden` below — which is how a
+     screenful of clipped `VisuallyHidden` spans turned into 2,809px of page
+     scroll before this line existed. Each scroll container declares its own too;
+     this is the backstop for anything added later. */
+  position: relative;
+  display: grid;
+  /* §2.4's widths. The middle track takes what is left. */
+  grid-template-columns: 272px minmax(0, 1fr) 302px;
+  height: calc(100dvh - var(--of-header-h));
+  /* A grid child's default `min-height: auto` would let a tall column grow the
+     row past the viewport, which is the page scroll this layout forbids. */
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── The stage ───────────────────────────────────────────────────────────────
+   The canvas fills it; the toolbar and the two corner plates float over it. The
+   stage is the positioning context for all three, so none of them needs to know
+   the layout's dimensions.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-builder-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.of-builder-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* §2.4: "a floating toolbar, centred at the top". A wrapper rather than absolute
+   positioning on the toolbar itself, so the toolbar component stays a plain
+   flex row and this screen owns where it sits. */
+.of-builder-toolbar-slot {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 2;
+  /* The slot is the full width the toolbar may use; the toolbar itself is
+     `inline-flex` and sizes to its contents. */
+  max-width: calc(100% - 24px);
+}
+
+/* ── The corner plates ───────────────────────────────────────────────────────
+   §2.4's contextual hint (bottom left) and armed-tile name (bottom right), on
+   translucent plates and pointer-transparent so a click near the bottom of the
+   drawing still places a tile.
+
+   This screen draws them rather than the canvas (`chrome={false}`): the canvas's
+   own armed plate carries the `snap` readout as well, and the contract puts that
+   in the toolbar. Two of them on screen would be a designer's bug report. The
+   ~14 lines below are the canvas's plate treatment restated; if a third surface
+   ever wants a plate, it belongs in `../../ui/primitives/`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-build-plate {
+  position: absolute;
+  bottom: 12px;
+  z-index: 1;
+  max-width: 44%;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg2) 88%, transparent);
+  color: var(--mut);
+  font-size: 12.5px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.of-build-hint {
+  left: 12px;
+}
+
+.of-build-armed {
+  right: 12px;
+  color: var(--ink);
+  text-align: right;
+}
+
+.of-build-at {
+  display: block;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* ── The bill column ─────────────────────────────────────────────────────────
+   A column rather than the panel directly, because the lock notice sits above
+   it: the preference decides which base is matched under every openforge topper
+   in the bill, so that is where it belongs. The notice renders `null` once
+   answered, and this track then collapses to the panel alone.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-builder-bill {
+  display: grid;
+  /* The notice takes what it needs; the panel takes the rest and does its own
+     three-band scrolling inside. */
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg2);
+  border-left: 1px solid var(--line);
+}
+
+/* The panel's own left border would double this column's. */
+.of-builder-bill > .of-bill {
+  border-left: none;
+}
+
+.of-builder-lock {
+  margin: 10px 12px 0;
+}
+
+/* ── Waiting and failing ─────────────────────────────────────────────────────
+   Deliberately not a three-column skeleton. The catalog screen shows one because
+   its sidebar and grid arrive at different times and the grid would jump 264px;
+   here every column depends on the same 5.6 MB index, so there is nothing to
+   reserve space for — a whole shimmering builder would be a picture of an
+   application that does not exist yet.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-builder-wait {
+  display: grid;
+  place-items: center;
+  height: calc(100dvh - var(--of-header-h));
+  padding: 24px;
+}
+
+.of-builder-loading {
+  margin: 0;
+}
+
+.of-builder-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: 56ch;
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────────
+   The contract's screens are desktop-first and this one is the most desktop of
+   them: a 272px palette, a drawing and a 302px bill do not fit beside each other
+   below about 900px. Rather than invent a phone builder the contract does not
+   specify, the two side columns narrow to their minimum and then the bill drops
+   below the stage — one column of drawing over parts list, which is still a
+   builder, and still no page scroll because the whole thing stays a grid at the
+   viewport's height.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  .of-builder {
+    grid-template-columns: 236px minmax(0, 1fr) 268px;
+  }
+}
+
+@media (max-width: 900px) {
+  .of-builder {
+    grid-template-columns: 236px minmax(0, 1fr);
+    /* The stage keeps two thirds of the height; the bill takes the rest and
+       scrolls inside itself as it always did. */
+    grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
+  }
+
+  .of-palette {
+    /* Down the left of both rows, so the palette is still beside the drawing. */
+    grid-row: 1 / span 2;
+  }
+
+  .of-builder-bill {
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+}

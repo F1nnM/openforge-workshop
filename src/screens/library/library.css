@@ -96,70 +96,16 @@
 }
 
 /* ── Actions ─────────────────────────────────────────────────────────────────
-   The same two tones the landing hero uses, restated here rather than shared:
-   `.of-action` lives in `../landing/landing.css`, which is the landing screen's
-   file, and reaching into it would make one screen's stylesheet a dependency of
-   another's markup. Extracting a button primitive is `../../ui/primitives/`'s
-   call to make, not this screen's.
+   Nothing left. What was a 45-line copy of `../landing/landing.css`'s button
+   block is now `../../ui/primitives/primitives.css`, which answers to
+   `.of-lib-action` as well as to `.of-button` — the tones, the hover, the
+   outlined tone's one-pixel padding trick and this screen's `md` size all live
+   there in one place. New call sites use `<Button>` and `buttonProps()`; this
+   alias goes when row 14's markup is next opened.
+
+   The rules below are the two things that are genuinely this screen's: where a
+   button sits in this layout, not what it looks like.
    ──────────────────────────────────────────────────────────────────────────── */
-
-.of-lib-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border-radius: 4px;
-  font-size: 14px;
-  letter-spacing: 0.4px;
-  text-decoration: none;
-  cursor: pointer;
-  transition:
-    filter 120ms ease,
-    background-color 120ms ease,
-    border-color 120ms ease;
-}
-
-.of-lib-action:hover {
-  text-decoration: none;
-}
-
-.of-lib-action[data-tone='primary'] {
-  padding: 11px 20px;
-  background: var(--acc);
-  color: var(--accink);
-  border: none;
-  font-weight: 700;
-}
-
-.of-lib-action[data-tone='primary']:hover {
-  filter: brightness(1.12);
-}
-
-.of-lib-action[data-tone='secondary'] {
-  /* One pixel less than the primary, so the border does not make the outlined
-     button taller than the filled one. */
-  padding: 10px 20px;
-  background: none;
-  color: var(--acc);
-  border: 1px solid var(--acc);
-  font-weight: 600;
-}
-
-.of-lib-action[data-tone='secondary']:hover {
-  background: color-mix(in srgb, var(--acc) 10%, transparent);
-}
-
-/* A label wrapping a clipped file input. The input is what takes focus, so the
-   ring has to be moved onto the thing the user can see. */
-.of-lib-action:has(input:focus-visible) {
-  outline: 2px solid var(--acc);
-  outline-offset: 2px;
-}
-
-.of-lib-action:has(input) {
-  /* The `.of-sr-only` input inside is absolutely positioned; without this it
-     would resolve against the page. */
-  position: relative;
-}
 
 /* A verb inside a sentence — a button that must not look like one. */
 .of-lib-inline-action {
@@ -464,12 +410,10 @@
   .of-lib-head .of-lib-action[data-tone='primary'] {
     margin-left: 0;
     width: 100%;
-    justify-content: center;
   }
 
   .of-lib-transfer-actions .of-lib-action {
     flex: 1;
-    justify-content: center;
   }
 
   /* Two cards per row rather than one. At 420px the contract's 215px minimum
@@ -486,7 +430,6 @@
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
-  .of-lib-action,
   .of-lib-card-title,
   .of-lib-remove {
     transition: none;
