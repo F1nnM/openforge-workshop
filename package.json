@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "import:catalog": "tsx scripts/import-catalog.ts",
+    "thumbs": "tsx tools/thumbnails/cli.ts",
     "verify:facts": "python3 docs/verify-catalog-facts.py",
     "deploy:staging": "npm run build && wrangler deploy --env staging",
     "deploy:production": "npm run build && wrangler deploy --env production"
@@ -41,6 +42,7 @@
     "eslint": "10.9.1",
     "globals": "^17.11.0",
     "jsdom": "30.0.1",
+    "sharp": "0.35.2",
     "tailwindcss": "4.3.3",
     "tsx": "^4.23.12",
     "typescript": "5.9.3",
