@@ -388,11 +388,29 @@ the detail view's multi-angle interaction.
 
 **The sprite sheets are blue, not grey.** `stl-thumb` renders in a default blue Phong
 material (ambient `#002142`, diffuse peaking `#3375c8`), verified against seven real sheets
-and the tool's source; 99.8% of opaque pixels are non-neutral. This kills any plan to
-CSS-tint the existing PNGs to match the material palette. **v1 accepts the split** — grid
-thumbnails stay blue, the 3D views are tinted — and coloured re-rendering folds into the LOD
-pipeline in v1.1, which has the geometry in hand anyway. This is a visible inconsistency and
-should be a deliberate, stated decision rather than a surprise.
+and the tool's source; 99.9% of opaque pixels are non-neutral, mean rgb (54,117,192).
+
+**The thumbnail derivative is therefore desaturated, and this replaces the earlier "accept
+the split" position.** That position was taken before the pipeline existed; measuring it
+overturned it on three independent grounds:
+
+- **14.7% smaller** — 29.6 MB against 34.7 MB corpus-wide.
+- **It halves the grid/builder disagreement even untinted.** Against the 16 material family
+  tints the plan view fills with, sprite blue sits at a mean **31.6 ΔE00**; a neutral grey at
+  **17.7**. The nearest family to sprite blue is `water` at 15.0 — so with blue thumbnails
+  *every stone tile in the grid reads closer to water than to its own material.*
+- **It is the only variant that can be tinted later.** A luma-preserving greyscale with alpha
+  can be tinted per material through `feColorMatrix`, keeping both alpha and shading. Blue
+  cannot. So this is the enabling step for the grid ever agreeing with the builder, and it
+  needs no re-render when the LOD pipeline lands.
+
+Blue remains available (`--tone blue`) for anyone who wants the raw render.
+
+Two things measurement weakened rather than confirmed: frame 0 wastes ~85% of its area on
+transparency, but so does **every** frame (10.8–15.1% opaque), so that is the renderer's
+fixed camera margin and not a bad choice of frame; and a trim-to-content crop is the real
+win but breaks the uniform square the grid needs, so it belongs with the v1.1 LOD
+re-render.
 
 ---
 

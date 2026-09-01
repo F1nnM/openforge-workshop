@@ -114,7 +114,7 @@ export async function renderThumbnail(bytes: Buffer, options: RenderOptions): Pr
   let pipeline = sharp(bytes, { failOn: 'error' })
     .extract(rect)
     .resize(size, size, { fit: 'cover', kernel: 'lanczos3', withoutEnlargement: false })
-  if ((options.tone ?? 'blue') === 'neutral') pipeline = pipeline.greyscale()
+  if ((options.tone ?? 'neutral') === 'neutral') pipeline = pipeline.greyscale()
 
   return pipeline
     .webp({
