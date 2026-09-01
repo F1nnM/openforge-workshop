@@ -43,7 +43,7 @@ rather than by the UI.
 | 8 | Material registry | `resolveMaterial(tags)` over 16 families / 38 roots, with the ΔE00 separation asserted in a test | `src/materials/**` | 3 | yes (inert) |
 | 9 | Assembly resolution | Base↔topper matching on shape + `size|openlock` code; the `connection\|openforge` base auto-insert rule; bill-of-tiles roll-up with md5 dedupe | `src/assembly/**` | 3 | yes (inert) |
 | 10 | Share-link codec | Columnar JSON → `CompressionStream('deflate-raw')` → base64url, with manifest-version checking and round-trip tests | `src/share/**` | 3, 5 | yes (inert) |
-| 11 | Zip download | `client-zip` + `native-file-system-adapter`, md5 dedupe, filename disambiguation, `predictLength` from fixture sizes, `ATTRIBUTION.csv` + `LICENSE.txt` entries | `src/download/**`, `vendor/client-zip/**` | 3, 9 | yes (inert) |
+| 11 | Zip download | vendored `client-zip` (no `native-file-system-adapter` — its service-worker fallback truncates unobservably), md5 dedupe, filename disambiguation, `predictLength` from the index's `bytes` field, `ATTRIBUTION.csv` + `LICENSE.txt` entries | `src/download/**`, `vendor/client-zip/**` | 3, 9 | yes (inert) |
 
 ---
 
