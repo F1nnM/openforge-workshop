@@ -40,22 +40,131 @@ Search, faceting and constraint resolution run in the browser.
 Verified figures, with the definition each depends on. Definitions matter: v1 of this plan
 quoted percentages whose definitions were never written down, and they did not reproduce.
 
-### Footprints — three primitives, 86.9% coverage
+### Footprints — six primitives, 95.1% coverage
 
-| Primitive | Definition | Live tiles | Share |
-| --- | --- | ---: | ---: |
-| `RECT` | numeric `size|width` **and** `size|depth`, no curve/hex/concave marker | 3,051 | 35.1% |
-| `WALL_SEG` | numeric `size|width` only; depth is the measured 12.7 mm constant | 3,116 | 35.8% |
-| `ARC` | carries `size|radius` | 1,391 | 16.0% |
-| `NONE` | no derivable footprint | 1,144 | 13.1% |
+Revised after researching the OpenLOCK tessellation system
+([`openlock-tessellation.md`](openlock-tessellation.md)). The three-primitive model below it
+reached 86.9% and placed 165 tiles wrongly.
 
-Cumulative: RECT alone **35.1%**, plus WALL_SEG **70.9%**, plus ARC **86.9%**.
+| Primitive | Definition | Share |
+| --- | --- | ---: |
+| `RECT` | axis-aligned rectangle, w × d | 42.9% |
+| `WALL_SEG` | length × the measured 0.5-unit thickness | 36.5% |
+| `ARC` | **annular sector** — `(centre, rIn, rOut, startAngle, sweep)` | 14.1% |
+| `COLUMN` | 0.5 × 0.5, measured | 1.6% |
+| `DIAGONAL` | 45° wall run | (within wall/rect) |
+| `NONE` | no derivable footprint | **4.9%** |
 
-The `NONE` bucket is larger than v1 of this plan claimed (it said 2.8%) because this
-definition is deliberately strict: a tile marked hex, concave or convex without a radius has
-no primitive that describes it, and placing it as a rectangle would be wrong rather than
-approximate. Those tiles appear in the catalog and in the bill of materials, never in the
-placement palette.
+**8,274 tiles (95.1%) placeable**, up from 6,167 (70.9%) in v1. 428 tiles (4.9%) remain
+genuinely unplaceable and stay out of the palette.
+
+**Curved tiles are placeable, and the primitive is an annular sector, not an arc segment.**
+Centre sits at a bounding-box corner, with `bboxX = rOut − rIn·cos θ` and
+`bboxY = rOut·sin θ` — verified to **±0.002 units** across eight plain-base samples. The band
+width comes from the modifier: `radial` → `[R−2, R]`, `convex` → `[R−0.5, R]`, `concave` →
+`[R, R+0.5]`, `s2w` radial → `[R−1.5, R]`. Edge bands are 0.5 wide — the same wall thickness,
+bent.
+
+**Only 11 radius × angle combinations exist, not the 45 the tag cross-product implies.**
+Radius 3 and angles 60/120/240/270/300 are **not curves** — they are hex corners and `IL`
+markers. Routing them through the arc path places 84 tiles as bogus arcs, which is what the
+current importer does.
+
+### The OpenLOCK tessellation codes are footprints, not sizes
+
+Full detail in [`openlock-tessellation.md`](openlock-tessellation.md).
+
+38 codes appear in `size|openlock`, on 4,030 tiles (46.3%). This plan previously treated them
+as a width lookup (A→2, BA→1.5, IA→1, D→3, Q→4). **That is not what they are.** Printable
+Scenery's own developer documentation is explicit: *"Footprint Code: this refers to the
+tessellation footprint for each tile… any A-Tile will have the same footprint as any other
+A-tile."*
+
+They are a **shape taxonomy with per-family size ladders**, plus a second colliding namespace
+for columns. Six families: straight wall runs (IA/BA/A/D/Q = 1/1.5/2/3/4), rect floors, 1×1
+cells distinguished by port topology, 45° diagonal walls, curves, and columns.
+
+**`I` does not mean "inch" or "interior"** — it denotes the **1×1 cell**, and the second
+letter is junction topology on the plumbing-fitting convention: `O` none, `I` two opposite,
+`L` corner, `T` three, `X` four. `IA` is the exception and belongs to the wall ladder.
+`xG` is a modifier meaning "cut to mate with a G curve". The trailing A/B/C is a family
+ladder that is **inconsistent** — sometimes a larger footprint, sometimes only an alternate
+port layout — so it must not be implemented as a rule.
+
+Two constants this plan was missing, both measured and independently cited: **wall thickness
+is 0.5 units (12.70 mm)**, so a wall's footprint is `length × 0.5` rather than a line; and
+**a column is 0.5 × 0.5**.
+
+**`size|openlock` is not a footprint key.** Code `O` carries both 2×2 and 4×4 tiles (43 of
+them). It also merges `U` with `Y`/`YA`/`Z`/`ZA`. The assembly resolver matches bases to
+toppers on this code — see §16 for why that is currently latent rather than live.
+
+Nine codes (≥100 tiles) account for 83.7% of coded tiles; the five wall-run codes alone are
+2,822 tiles, 32% of the whole corpus. Thirteen codes are a sub-20-tile tail.
+
+**The official cheat sheet carries no dimensions at all.** It is purely pictorial — read at 3×
+across four quadrants, its 59 labels give shape identity and port positions only. No complete
+official code-to-dimension table exists; Printable Scenery was asked on its own forum and
+never answered, and `openforge-tutorials` defers to them. Every dimension in our table is
+therefore either measured from a mesh or explicitly marked an inference.
+
+### Tiles aggregate into one catalog item per design
+
+Full detail in [`tile-aggregation.md`](tile-aggregation.md).
+
+A design's base-integrated and base-less variants become **one catalog item**. The builder
+resolves a variant from the build's lock system at download time, falling back to the base
+auto-insertion the assembly resolver already performs.
+
+**Integrated bases are detectable at 100% precision / 99.9% recall** via `layer === 'topper'`
+(equivalently, `connection|openforge`), validated against the filename's connection token — an
+independently authored signal no candidate rule reads. Four false negatives, all corpus
+defects.
+
+The intuitive rule is a trap: **`shape|base` plus another kind is 0% precise on 1,277 tiles.**
+`shape|base|wall` means *a base shaped to receive a wall*, not a wall carrying a base. Polarity
+exactly inverted.
+
+**The existing `design` key already groups them** — 931 of 3,822 aggregates (24.4%) hold both a
+topper and an integrated variant. **The collapse is lossless:** zero aggregates hold two
+distinct values of `texture`, `build`, `kinds`, `sizeCode`, `rotStep`, `foot` or `name`, so
+there is no new title logic and no facet re-derivation.
+
+Coverage with aggregation plus base fallback — *can the builder hand you a printable
+assembly?*
+
+| Lock | Integrated outright | **With base fallback** |
+| --- | ---: | ---: |
+| openlock | 1,497 (39.2%) | **3,199 (83.7%)** |
+| dragonlock | 359 (9.4%) | **2,928 (76.6%)** |
+| magnetic | 255 (6.7%) | **2,818 (73.7%)** |
+
+**Spread 10.0 points, against §2's 40.2.** The two measure different questions — §2 counts a
+lock-less design as reachable — but aggregation turns the lock choice from a 40-point cliff
+into a 10-point one. 622 aggregates are unreachable under every lock.
+
+**Nothing is deployed, so no share link, saved library or stored scene exists to preserve.**
+That removes the migration constraint the aggregation research worked around: ordinals can be
+renumbered freely, the store's version ladder can be collapsed to a single current version, and
+the aggregation key can be chosen on merit rather than on compatibility. The research's
+conclusion survives that relaxation — `design` was chosen because the collapse is lossless and
+produces exactly the 931 wanted merges, not because it preserved anything.
+
+**The append-only ordinal rule still applies from launch onward**, and getting the scheme right
+before the first published link is the whole point of writing it down now. **Aggregate ordinals
+must never enter the manifest**: an aggregate is a hash of a tag set and can therefore *split*,
+and a splittable grouping has no stable append-only index. An aggregate's URL address is the
+lowest ordinal in its group — stable under append, **not** under retirement (44.6% exposed),
+which is acceptable only because it is a canonical URL and never a share link.
+
+**What aggregation must not claim.** The corpus carries no print time, filament or support data
+at any resolution, and `bytes` is mesh complexity rather than material. The assumed trade is
+also false: the integrated/topper byte ratio has a median of **1.027**, 27.4% of integrated
+variants are *smaller* than their topper, and summed over 873 resolvable pairs topper+base is
+**0.96×** the integrated route. **Integrated saves part count, not filament**, and the card
+should claim only that. 42.2% of multi-file aggregates spread more than 1.25× in bytes, so a
+single figure per card hides real variation — the variants table ships in the same PR, never
+behind a closed accordion.
 
 ### Units and constants — measured from the meshes
 
@@ -601,22 +710,31 @@ magnitude at one end.
 
 ## 14. Scope
 
-**v1 — the catalog is the product.**
-Landing; catalog with real facets, tokenised search and virtualised grid; library; tile
-detail with the sprite viewer and a size-gated 3D view; **top-down plan-view builder** with
-RECT and WALL_SEG footprints (70.9% coverage), assemblies, bill of tiles, client-side zip;
-material tinting in plan view and the detail viewer; the thumbnail derivative pipeline; the
-Cloudflare cache and CORS runbook; the design→(texture, lock) resolution table.
+**v1 — shipped.** Landing; catalog with real facets, tokenised search and a virtualised grid;
+library; tile detail with the sprite viewer and a size-gated 3D view; top-down plan-view builder
+with RECT and WALL_SEG footprints, assemblies, bill of tiles, client-side zip; material tinting;
+the thumbnail pipeline; the deployment surface. 36 PRs, 1,276 tests.
 
-**v1.1 — the builder becomes 3D.**
-The LOD pipeline; instanced 3D builder rendering; ARC footprints (→86.9%); procedural noise
-in the detail viewer; composition accessory slots as inline sprite grids.
+**v2 — the target, and the end of the plan.** One series, no further deferral. Detailed in
+[`v2-pr-series.md`](v2-pr-series.md). Nine workstreams:
 
-**v2 — generation and assemblies.**
-Base generator on its own origin. Guided assemblies over the 40 recipe templates. Real
-per-mesh dimensions via strided range-reads if curved footprints prove to matter.
+1. **Tessellation-aware footprints** — six primitives, 95.1% placeable, curves as annular
+   sectors. Fixes the 165 tiles currently mis-shaped as arcs.
+2. **Tile aggregation** — one item per design, lock resolved per build, variants disclosed.
+   Includes the topless tie-break defect and the positional `conn` correction.
+3. **Greyscale-then-tint previews** — luminance computed in the browser from the blue sprites,
+   tinted per material family. Works before the `/thumbs/` backfill, and makes the grid agree
+   with the builder for the first time.
+4. **The LOD pipeline** — decimated GLB per tile, so the builder can render real geometry.
+5. **3D builder** — instanced rendering over the same placement model the plan view uses.
+6. **Compositions** — `constrain` semantics resolved, accessory slots as inline sprite grids,
+   dead-end greying. 3,036 tiles carry a config and none of it is built.
+7. **Guided assemblies** — the 40 recipe templates as first-class objects.
+8. **The base generator** — OpenSCAD on its own origin, GPL quarantined, catalog-first lookup.
+9. **True mesh dimensions** — strided range-reads where the size tags diverge, which on curves
+   is a median 96 mm.
 
-**Research task, unscheduled and blocking nothing:** pin down `constrain` semantics (§5).
+**No v1.1.** Curved tiles matter, so the work that was deferred behind them comes forward.
 
 ---
 
@@ -639,9 +757,11 @@ declined, so item 2 is the only operational ask.
 
 1. **Import drift.** Three artefacts derive from the pinned fixture snapshot — index, LOD
    store, share-link manifest — and none currently carries a shared version stamp. Add one,
-   regenerate them in the same CI step.
+   regenerate them in the same CI step. *Not urgent while nothing is deployed; it must be in
+   place before the first published share link.*
 2. **md5 churn is the creator's normal workflow.** A re-exported mesh invalidates a LOD,
-   orphans a share link and moves a manifest ordinal, all silently.
+   orphans a share link and moves a manifest ordinal, all silently. *Same timing: this is a
+   launch gate, not a present hazard.*
 3. **`constrain` semantics are unspecified** and the precomputed candidate sets vary by two
    orders of magnitude depending on the answer. §5.
 4. **Three.js is pinned by `postprocessing` to `<0.186.0`.** Upgrading is a coordinated event
@@ -651,3 +771,27 @@ declined, so item 2 is the only operational ask.
    variants. A normalisation layer sits between fixtures and UI.
 6. **Bus factor of one upstream.** `openforge-openscad` has 13 commits, all Devon's, dormant
    10 months; its own upstream is dormant since 2024.
+7. **The base auto-insert picks topless bases.** `assemblyIndex.byCost` sorts candidates
+   bytes-ascending, so the smallest wins every tie — and under openlock **79.1% of
+   auto-inserted bases are `topless`** (magnetic 43.0%, dragonlock 0.1%). A topless base has no
+   top surface: it is a different *product*, not a cheaper print, and it is currently chosen
+   silently and never disclosed. Only 110 of 1,963 bases are ever handed out, and the chosen
+   base changes for 86.3% of toppers between openlock and dragonlock. **This is a live defect**
+   and the tie-break must be fixed before aggregation ships on top of it.
+8. **`size|openlock` is not a footprint key, and the resolver matches on it.** Code `O` carries
+   both 2×2 and 4×4 tiles. Measured today: 5 `O` toppers, **0 `O` bases**, so the
+   footprint-congruence fallback catches them and the mismatch is **latent, not live**. It
+   becomes live the moment a base with code `O` is added. Guard it with a test rather than a
+   comment.
+9. **165 tiles are given `foot.shape: "arc"` and are not arcs.** 84 `xG` pieces measure as
+   straight walls. Radius 3 and angles 60/120/240/270/300 are hex corners and `IL` markers, not
+   curves. The arc path must exclude them.
+10. **`record.conn` flattens connection position away.** **0 of 4,363 toppers carry a bottom
+   lock** — the 1,283 that carry one carry it on the *side*. An aggregate built on `conn` would
+   advertise bottom joinery 1,283 records do not have. Also `connection|bottom`, `|left` and
+   `|right` are missing from `CONNECTION_POSITIONS`, giving 8 records phantom systems.
+11. **`QxG`'s tagged width is wrong.** `size|width` says 4; it measures 3.000 × 0.500
+   (76.20 mm exact) across 28 tiles.
+12. **Blender exports defeat header sniffing.** Several bucket files carry the ASCII string
+   `"Exported from Blender-4.0.1"` in an 80-byte header with a *binary* body. Detect format by
+   `size == 84 + 50·n`, never by sniffing for `solid`.
