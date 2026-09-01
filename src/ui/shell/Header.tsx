@@ -66,7 +66,7 @@ function Wordmark() {
 }
 
 interface NavTabProps {
-  to: '/catalog' | '/library' | '/builder'
+  to: '/catalog' | '/library' | '/builder' | '/settings'
   label: string
   /** Omitted for Catalog, which has no count. */
   count?: { value: number; singular: string; plural: string }
@@ -154,6 +154,9 @@ export function Header() {
           label="Builder"
           count={{ value: placementCount, singular: 'tile placed', plural: 'tiles placed' }}
         />
+        {/* Without this the lock picker is reachable only through the builder's
+            dismissible notice, so a dismissed notice strands the route. */}
+        <NavTab to="/settings" label="Settings" />
       </nav>
       <ArchiveStat />
     </header>
