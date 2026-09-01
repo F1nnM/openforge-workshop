@@ -31,10 +31,10 @@ more additive than expected, and its consumers can be cut by screen.
 
 | id | Blocker | Gates | Owner |
 | --- | --- | --- | --- |
-| **B1** | Cloudflare zone admin — CORS **unconditional first**, then the cache rule. The other order caches responses without CORS headers and the app fails on cached 200s that look fine in `curl`. | V11 upload, V19 verify | project owner |
-| **B2** | R2 write credentials for `/thumbs/` and `/lod/` | V11, V19 | project owner |
+| **B1** | Cloudflare zone admin — CORS **unconditional first**, then the cache rule. The other order caches responses without CORS headers and the app fails on cached 200s that look fine in `curl`. | V11 upload, V26 verify | project owner |
+| **B2** | R2 write credentials for `/thumbs/` and `/lod/` | V11, V12 | project owner |
 | **B3** | Publisher declaration — free, non-monetised community tool | public launch | project owner |
-| **B4** | Legal read on conveying OpenSCAD WASM from a separate origin | V16, V17 | project owner |
+| **B4** | Legal read on bundling a GPL-2 OpenSCAD WASM engine **inside this app** rather than conveying it separately. The separate-origin design answered this cleanly; in-app integration does not, and it is the owner's stated preference. | V19, V20, V21 | project owner |
 
 Rows gated by a blocker can be **written, reviewed and merged**; they cannot be **run against
 production**. Build them, hold the execution.
@@ -105,24 +105,61 @@ build on the code they touch.
 
 ---
 
-## Base generator
+## Base generator — part of this app, not a separate service
+
+The original catalog embedded someone else's generator behind an iframe. This one is ours: no
+second origin, no third-party service, no `postMessage` bridge. The `.scad` sources are copied
+in and maintained here.
+
+**The licences, verified:**
+
+| Component | Licence | What we do |
+| --- | --- | --- |
+| `MasterworkTools/openforge-bases` — the `.scad` geometry | **Apache-2.0** | **Copy it in.** Permissive, and pushed more recently (2026-01-05) than the GPL fork. Retain the licence and notices; vendor with a pinned commit and a documented refresh. |
+| `MasterworkTools/openforge-openscad` — the web GUI fork | GPL-3.0 | **Copy nothing.** Its only real value was ~300 lines of wrapper, and taking it would pull GPL-3 into our bundle for no geometry. |
+| `openscad-wasm` — the engine | **GPL-2.0** | Vendor the binary in its own dynamically-imported chunk. Ship the licence text and a written source offer. |
+
+**Stay in the OpenSCAD format.** A port to `manifold-3d` (Apache-2.0) or JSCAD (MIT) would
+remove the GPL question entirely, but it is not straightforward: 20 files, 201 KB, 62 `hull()`
+calls, 89 `$fn=200`, and the customizer annotations *are* the parameter UI. Rewriting that is a
+project, not a refactor, and it would fork us from upstream's geometry permanently.
+
+> **The licensing consequence, stated plainly.** Putting the engine inside our own app is what
+> was asked for and it is what these rows do — but it moves the copyleft question from *"is this
+> a separately conveyed artifact"* (which a separate origin answered cleanly) to *"is our app a
+> derivative work of a dynamically-loaded GPL-2 WASM engine"*. That is a genuine legal question,
+> not a technical one, and **B4 gates it.** The mitigations that actually help are: keep the
+> engine in its own chunk with no static import path into app code, copy nothing from the GPL-3
+> fork, and ship the licence plus source offer. The mitigation that does *not* help is wishful
+> reasoning about linking.
 
 | # | Title | Goal | Owns | Depends on | Neutral? |
 | --- | --- | --- | --- | --- | --- |
-| **V18** | Generator origin | `scad.openforge.tools` as a separate deployment: OpenSCAD WASM plus the Apache-2.0 `openforge-bases` `.scad` source. Separate origin because GPL obligations attach to a **separately conveyed artifact** — the reasoning is conveyance, not derivation. Schema from `--export-format=param`, not a hand-written parser. No COOP/COEP: every shipped build is single-threaded with unshared memory. | `apps/scad/**` (new), `.github/workflows/deploy-scad.yml` | B4 | **no — new origin** |
-| **V19** | Generator in the builder | Catalog-first lookup: hash the parameters, resolve against the 1,962 catalogued bases (which *are* generator output), fall through to WASM only on a miss. Persist the recipe, never the mesh. v1 excludes textured primary walls — 90 MB of blank STLs and 30–180 s renders. | `src/builder/generator/**` | V18, V8 | **no** |
+| **V18** | Vendor the geometry | Copy `openforge-bases`' `.scad` sources in under `src/generator/scad/`, with its Apache-2.0 licence, a `PROVENANCE.md` pinning the upstream commit, and a refresh script. All 39 include statements resolve to siblings, so a bundled virtual filesystem of 20 files (201 KB, 20.7 KB gzipped) resolves everything — no `OPENSCADPATH`, no library fetch. | `src/generator/scad/**`, `src/generator/PROVENANCE.md`, `scripts/refresh-scad.ts` | — | **yes (inert)** |
+| **V19** | Engine and parameter schema | Vendor `openscad-wasm` in a dynamically-imported chunk — same discipline that keeps three.js at a 1.5 kB eager cost. Parameter schema from OpenSCAD's own `--export-format=param`, **not a hand-written parser**: verified against the real `bases.scad` at 18 parameters, ~350 ms. No COOP/COEP — every shipped build is single-threaded with unshared linear memory, verified from the binary's memory flags. | `src/generator/engine/**`, `vendor/openscad-wasm/**` · *edits* `vite.config.ts` | V18, B4 | **inert until V20** |
+| **V20** | Generator in the builder | A panel in the builder, not a route: pick a base, tune parameters, place the result. **Catalog-first** — hash the parameters and resolve against the 1,962 catalogued bases, which *are* generator output from the same `.scad` run through `bases.py`, so the fixture filenames encode the parameter tuples. Fall through to WASM only on a miss. Persist the recipe, never the mesh. | `src/generator/panel/**` · *edits* `src/screens/builder/BuilderScreen.tsx`, `src/builder/panels/index.ts` | V19, V8 | **no** |
+| **V21** | Generated tiles as placeables | A generated base is a first-class placement: its own footprint (known from the parameters, which is *easier* than the catalog's), its material, its bill line, and its bytes in the download pack alongside fetched files. `client-zip` already accepts a heterogeneous mix of `Response` and `Blob`. | `src/generator/placement/**` · *edits* `src/assembly/resolve.ts`, `src/download/plan.ts` | V20, V3 | **no** |
 
----
+**Excluded from scope, deliberately:** textured primary walls. `bases-wall-primary.scad` needs
+90 MB of blank texture STLs materialised in the WASM filesystem before `import()` runs, and
+renders take 30–180 s. Those stay catalog-only, and the UI must not imply every base is
+parametric — sculpted-texture bases (brick foundations, stairs, aztlan, timber, wood, s-system)
+have no OpenSCAD path at all.
+
+**Render latency is unmeasured.** No machine in this project has had OpenSCAD installed, so the
+companion document's own figures are estimates anchored on triangle counts. **V19 must measure
+it before V20 commits to auto-preview**; if a 4×4 base exceeds ~3 s, the design needs an explicit
+Generate button rather than a live one.
 
 ## Closing out
 
 | # | Title | Goal | Owns | Depends on | Neutral? |
 | --- | --- | --- | --- | --- | --- |
-| **V20** | v1 loose ends | `<Tile3DPanel>` into the drawer; `<Button>` call-site migration across 5 sites, deleting 2 CSS aliases; the SEO block in `index.html` with `og:image` deliberately omitted; delete the three dev preview harnesses. | *edits* `src/screens/detail/TileDrawer.tsx`, `src/screens/landing/Landing.tsx`, `src/screens/library/*.tsx`, `index.html` · *deletes* 3 `preview.*` pairs | V9 | **no** |
-| **V21** | Shared 3D canvas | Browsers cap live WebGL contexts and drop the oldest, so a grid of live previews needs **one** shared canvas, not one per card. Prerequisite for any future 3D grid. | *edits* `src/three/**` | V13 | **yes** |
-| **V22** | Debt sweep | `SurfacePattern` duplicated between `HeroPlan` and `builder/canvas/surfaces.tsx`; `fileSizeLabel`/`humaniseSegment` duplicated in `screens/detail/labels.ts`; `SearchField` unexported so the palette reimplements 30 lines; `TileId` accepts any non-empty string; the `Radio` primitive the lock picker hand-rolled; `pipeline/facets.ts`'s stale "38 roots reachable" docstring (37 reach `record.texture`). | *edits* various, one seam each | V7, V13 | **yes** |
-| **V23** | Version stamp | One stamp shared by index, LOD store, thumbnail set and share manifest, regenerated in a single CI step — **a launch gate**, since md5 churn is the creator's normal workflow and silently invalidates all four. | *edits* `pipeline/version.ts`, `tools/**`, `.github/workflows/ci.yml` | V12, V11 | **yes** |
-| **V24** | Deploy and verify | Cache rules verified by `cf-cache-status: HIT` rather than assumed. Disable the `r2.dev` public URL, which bypasses every cache rule and WAF. Set `content-type` on STL objects. | *edits* `wrangler.jsonc`, `.github/workflows/deploy.yml` | B1, B2, B3 | **no — production** |
+| **V22** | v1 loose ends | `<Tile3DPanel>` into the drawer; `<Button>` call-site migration across 5 sites, deleting 2 CSS aliases; the SEO block in `index.html` with `og:image` deliberately omitted; delete the three dev preview harnesses. | *edits* `src/screens/detail/TileDrawer.tsx`, `src/screens/landing/Landing.tsx`, `src/screens/library/*.tsx`, `index.html` · *deletes* 3 `preview.*` pairs | V9 | **no** |
+| **V23** | Shared 3D canvas | Browsers cap live WebGL contexts and drop the oldest, so a grid of live previews needs **one** shared canvas, not one per card. Prerequisite for any future 3D grid. | *edits* `src/three/**` | V13 | **yes** |
+| **V24** | Debt sweep | `SurfacePattern` duplicated between `HeroPlan` and `builder/canvas/surfaces.tsx`; `fileSizeLabel`/`humaniseSegment` duplicated in `screens/detail/labels.ts`; `SearchField` unexported so the palette reimplements 30 lines; `TileId` accepts any non-empty string; the `Radio` primitive the lock picker hand-rolled; `pipeline/facets.ts`'s stale "38 roots reachable" docstring (37 reach `record.texture`). | *edits* various, one seam each | V7, V13 | **yes** |
+| **V25** | Version stamp | One stamp shared by index, LOD store, thumbnail set and share manifest, regenerated in a single CI step — **a launch gate**, since md5 churn is the creator's normal workflow and silently invalidates all four. | *edits* `pipeline/version.ts`, `tools/**`, `.github/workflows/ci.yml` | V12, V11 | **yes** |
+| **V26** | Deploy and verify | Cache rules verified by `cf-cache-status: HIT` rather than assumed. Disable the `r2.dev` public URL, which bypasses every cache rule and WAF. Set `content-type` on STL objects. | *edits* `wrangler.jsonc`, `.github/workflows/deploy.yml` | B1, B2, B3 | **no — production** |
 
 ---
 

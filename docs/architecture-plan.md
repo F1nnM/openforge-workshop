@@ -249,29 +249,39 @@ that facet needs a first-class "unspecified". **Zero bases carry `build|wall on 
 ## 3. System architecture
 
 ```
-                    ┌──────────────────────────────┐
-   Browser ───────► │ workshop.openforge.tools     │  Cloudflare Worker + Static Assets
-                    │  static SPA + catalog index  │  (SPA fallback routing)
-                    └──────────────┬───────────────┘
+                    ┌──────────────────────────────────────────────┐
+   Browser ───────► │ workshop.openforge.tools                     │  Worker + Static Assets
+                    │  static SPA + catalog index                  │  (SPA fallback routing)
+                    │                                              │
+                    │  ┌────────────────────────────────────────┐  │
+                    │  │ base generator — PART OF THIS APP      │  │  lazy chunk,
+                    │  │ vendored .scad (Apache-2.0)            │  │  no second origin
+                    │  │ + OpenSCAD WASM (GPL-2, own chunk)     │  │
+                    │  └────────────────────────────────────────┘  │
+                    └──────────────┬───────────────────────────────┘
                                    │
-        ┌──────────────────────────┼───────────────────────────┐
-        ▼                          ▼                           ▼
-┌───────────────┐        ┌──────────────────┐        ┌────────────────────┐
-│ objects.      │        │ zip Worker       │        │ scad.openforge.    │
-│ openforge.    │        │ (fallback only:  │        │ tools              │
-│ tools  (R2)   │        │  iOS, >1 GB)     │        │ SEPARATE ORIGIN    │
-│ /models/      │        └──────────────────┘        │ OpenSCAD WASM      │
-│ /sprites/     │                                    │ (GPL isolated)     │
-│ /thumbs/  NEW │                                    └────────────────────┘
+        ┌──────────────────────────┴──────────┐
+        ▼                                     ▼
+┌───────────────┐                    ┌──────────────────┐
+│ objects.      │                    │ zip Worker       │
+│ openforge.    │                    │ (fallback only:  │
+│ tools  (R2)   │                    │  iOS, >1 GB)     │
+│ /models/      │                    └──────────────────┘
+│ /sprites/     │
+│ /thumbs/  NEW │
 │ /lod/     NEW │
 └───────────────┘
 ```
 
-Four deliberate boundaries: the SPA holds no server state; R2 is read-only on its own custom
+Three deliberate boundaries: the SPA holds no server state; R2 is read-only on its own custom
 domain and never proxied through the Worker (egress is free, proxying would burn CPU for
-nothing); the zip Worker is a fallback, not the default; and the OpenSCAD generator lives on
-a **separate origin** so GPL obligations attach to a separately-conveyed artifact rather than
-to the Workshop bundle.
+nothing); and the zip Worker is a fallback, not the default.
+
+**The generator is part of this app**, not a separate service. The original catalog embedded
+someone else's generator behind an iframe; this one is ours — the Apache-2.0 `.scad` geometry is
+copied in and maintained here, and OpenSCAD's own WASM engine sits in a lazily-loaded chunk with
+no static import path into app code. §10 records the licensing consequence honestly rather than
+arguing it away.
 
 ---
 
@@ -592,14 +602,22 @@ the licence requires**. The real obligations are narrower:
 4. **The index is a database of someone else's metadata.** Give it an explicit licence too;
    the plan previously covered only the STLs.
 
-**GPL, stated correctly.** v1 of this plan justified the separate origin by claiming origin
-separation prevents derivation. That reasoning is wrong. The correct reasoning is
-**conveyance**: GPL obligations attach when you distribute the covered work, and a separately
-served, separately built artifact is a separate conveyance carrying its own source offer.
-The `.scad` geometry (`openforge-bases`) is Apache-2.0 and safe to bundle anywhere; the
-OpenSCAD WASM binary is GPL-2 and `openforge-openscad` is GPL-3. Keep both on
-`scad.openforge.tools` with a published source offer. **This is the one item where a lawyer's
-read is genuinely worth buying** before launch.
+**GPL, stated correctly, and the boundary has moved.** Licences verified against the registry:
+the `.scad` geometry (`openforge-bases`) is **Apache-2.0** — and pushed more recently than the
+fork — so it is safe to copy in and modify; the OpenSCAD WASM engine is **GPL-2.0**; the
+`openforge-openscad` web GUI is **GPL-3.0**, and we copy nothing from it.
+
+An earlier draft put the engine on a separate origin, justified by **conveyance**: GPL
+obligations attach when you distribute the covered work, and a separately served, separately
+built artifact is a separate conveyance carrying its own source offer. That reasoning was sound.
+
+**The generator is now in-app by decision**, which removes that boundary. The question becomes
+whether this app is a derivative work of a dynamically-loaded GPL-2 WASM engine — a legal
+question, not a technical one. What actually mitigates it: the engine lives in its own chunk with
+no static import path into app code, nothing is copied from the GPL-3 fork, and the licence text
+plus a written source offer ship with the app. What does *not* mitigate it is confident reasoning
+about linking. **This is the one item where a lawyer's read is genuinely worth buying**, and it
+gates the generator rows rather than the whole series.
 
 ---
 
@@ -730,7 +748,13 @@ the thumbnail pipeline; the deployment surface. 36 PRs, 1,276 tests.
 6. **Compositions** — `constrain` semantics resolved, accessory slots as inline sprite grids,
    dead-end greying. 3,036 tiles carry a config and none of it is built.
 7. **Guided assemblies** — the 40 recipe templates as first-class objects.
-8. **The base generator** — OpenSCAD on its own origin, GPL quarantined, catalog-first lookup.
+8. **The base generator, inside this app** — the Apache-2.0 `.scad` geometry copied in and
+   maintained here, OpenSCAD's own WASM engine in a lazily-loaded chunk, parameters from
+   `--export-format=param`, catalog-first resolution. No second origin and no third-party
+   service: the original catalog embedded someone else's generator behind an iframe; this one is
+   ours. The licensing consequence is real and is recorded as a blocker — bundling a GPL-2 engine
+   in-app moves the copyleft question from *"is this separately conveyed"* to *"is our app a
+   derivative work"*, which needs a legal read rather than a technical argument.
 9. **True mesh dimensions** — strided range-reads where the size tags diverge, which on curves
    is a median 96 mm.
 
