@@ -25,9 +25,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { CatalogFile, CatalogRecord } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, TileId } from '@/catalog'
-import type { Placement } from '@/store'
+import type { LockSystem, Placement } from '@/store'
 
-import { buildAssemblyIndex } from './assemblyIndex'
+import type { PrintOption } from './assemblyIndex'
+import { PRINT_OPTIONS, buildAssemblyIndex, printOption } from './assemblyIndex'
 import { DOWNLOAD_HUGE_BYTES, DOWNLOAD_LARGE_BYTES, buildBillOfTiles, downloadSize } from './bill'
 import { footprintKey, footprintsMatch } from './footprint'
 import { NOTE_SEVERITY, rollUpNotes } from './notes'
@@ -78,13 +79,42 @@ describe('footprint congruence', () => {
 describe('match weights', () => {
   /**
    * The property the powers of two exist for: the sum is a lexicographic order.
-   * If this ever fails, a texture-matched base could outrank a base that locks.
+   * If this ever fails, a texture-matched base could outrank a base that locks —
+   * or, the defect this row fixes, a topless base could outrank a full one.
    */
   it('cannot let lower criteria outvote a higher one', () => {
-    const { lock, shape, kind, texture } = MATCH_WEIGHTS
-    expect(shape + kind + texture).toBeLessThan(lock)
+    const { lock, option, shape, kind, texture } = MATCH_WEIGHTS
+    // `option` is graded: two steps for `plain`, so its widest span is 2 × 8.
+    const optionSpan = option * (PRINT_OPTIONS.length - 1)
+    expect(optionSpan + shape + kind + texture).toBeLessThan(lock)
+    expect(shape + kind + texture).toBeLessThan(option)
     expect(kind + texture).toBeLessThan(shape)
     expect(texture).toBeLessThan(kind)
+  })
+})
+
+describe('print options', () => {
+  it('reads the modifier off the third segment, never the second', () => {
+    expect(printOption(['connection|openlock|topless'])).toBe('topless')
+    expect(printOption(['connection|dragonlock|unsupported'])).toBe('unsupported')
+    expect(printOption(['connection|openlock', 'connection|magnetic|flex'])).toBe('plain')
+    // The `connection|side|openlock` trap: a position in segment one must not
+    // suppress a modifier, and must not be read as one either.
+    expect(printOption(['connection|side|openlock'])).toBe('plain')
+    expect(printOption(['connection|side|openlock|topless'])).toBe('topless')
+    // Nothing outside the connection namespace names a print option.
+    expect(printOption(['shape|base', 'size|openlock|A'])).toBe('plain')
+    expect(printOption([])).toBe('plain')
+  })
+
+  it('takes the worst option a tile names, so a plain sibling tag cannot hide it', () => {
+    expect(printOption(['connection|magnetic|flex', 'connection|openlock|topless'])).toBe('topless')
+    expect(printOption(['connection|openlock|unsupported', 'connection|openlock|topless'])).toBe('topless')
+    expect(printOption(['connection|openlock', 'connection|dragonlock|unsupported'])).toBe('unsupported')
+  })
+
+  it('is ordered best-first, which is what the ranking reads', () => {
+    expect([...PRINT_OPTIONS]).toEqual(['plain', 'unsupported', 'topless'])
   })
 })
 
@@ -251,6 +281,249 @@ describeCorpus(corpusSuite, () => {
     // Only toppers gain a part, and most of them do.
     expect(withBase).toBeGreaterThan(3000)
     expect(withBase).toBeLessThanOrEqual(toppers.length)
+  })
+
+  /* --------------------------------------------------------- the base tie-break */
+
+  /**
+   * The four preferences a bill can be drawn under. `undefined` is not a fourth
+   * lock system, it is "no preference", and it is included because it is the
+   * default the download path uses when the store has not been consulted — the
+   * old ranking handed it a topless base 69.8% of the time.
+   */
+  const preferences: readonly (LockSystem | undefined)[] = ['openlock', 'dragonlock', 'magnetic', undefined]
+
+  /** The candidate set for a topper, by the resolver's own key rule. */
+  function candidatesOf(tile: CatalogRecord): readonly CatalogRecord[] | undefined {
+    if (tile.sizeCode !== undefined) return index.basesBySizeCode.get(tile.sizeCode)
+    const foot = footprintKey(tile.foot)
+    return foot === undefined ? undefined : index.basesByFootprint.get(foot)
+  }
+
+  /**
+   * The ranking as it shipped *before* this row, reproduced in full: candidates
+   * ordered `bytes` ascending then `id`, scored `lock` 8 / `shape` 4 / `kind` 2 /
+   * `texture` 1 with no notion of a print option, first candidate at the best
+   * score wins.
+   *
+   * Written out rather than remembered, because every before-figure below is a
+   * claim about the defect and a remembered number cannot falsify anything. The
+   * re-sort is deliberate even though the index arrives in this order today: it is
+   * what the old code relied on, so stating it here keeps the comparison valid
+   * when the index's order changes.
+   */
+  function legacyBase(tile: CatalogRecord, lock: LockSystem | undefined): CatalogRecord | undefined {
+    const records = candidatesOf(tile)
+    if (records === undefined || records.length === 0) return undefined
+    const ordered = [...records].sort((a, b) => (a.bytes !== b.bytes ? a.bytes - b.bytes : a.id < b.id ? -1 : 1))
+
+    let best: CatalogRecord | undefined
+    let bestScore = -1
+    for (const base of ordered) {
+      let score = 0
+      if (lock === undefined || base.conn.includes(lock)) score += 8
+      if (base.foot.shape === tile.foot.shape) score += 4
+      if (base.kinds.some((kind) => kind !== 'base' && tile.kinds.includes(kind))) score += 2
+      if (base.texture !== undefined && base.texture === tile.texture) score += 1
+      if (score > bestScore) {
+        bestScore = score
+        best = base
+      }
+    }
+    return best
+  }
+
+  /** The base the shipped resolver picks, or `undefined` when it finds none. */
+  function shippedBase(tile: CatalogRecord, lock: LockSystem | undefined): CatalogRecord | undefined {
+    const options = lock === undefined ? {} : { lock }
+    return resolvePlacement(place(tile.id), index, options).parts[1]?.record
+  }
+
+  const optionOf = (base: CatalogRecord): PrintOption => index.basePrintOption.get(base.id) ?? 'plain'
+
+  /** Print-option tally and distinct-base reach for one ranking under one preference. */
+  function survey(
+    rank: (tile: CatalogRecord, lock: LockSystem | undefined) => CatalogRecord | undefined,
+    lock: LockSystem | undefined,
+  ): {
+    matched: number
+    byOption: Record<PrintOption, number>
+    reach: Set<TileId>
+    reachByOption: Record<PrintOption, number>
+  } {
+    const byOption: Record<PrintOption, number> = { plain: 0, unsupported: 0, topless: 0 }
+    const reachByOption: Record<PrintOption, number> = { plain: 0, unsupported: 0, topless: 0 }
+    const reach = new Set<TileId>()
+    let matched = 0
+    for (const topper of toppers) {
+      const base = rank(topper, lock)
+      if (base === undefined) continue
+      matched += 1
+      byOption[optionOf(base)] += 1
+      if (!reach.has(base.id)) reachByOption[optionOf(base)] += 1
+      reach.add(base.id)
+    }
+    return { matched, byOption, reach, reachByOption }
+  }
+
+  it('counts the print-option variants the base range holds', () => {
+    // 584 of 1,963 bases are a print variant rather than the base itself, which
+    // is the pool `bytes`-ascending was drawing most of its answers from.
+    expect(index.stats.basesByPrintOption).toEqual({ plain: 1379, unsupported: 206, topless: 378 })
+    const { plain, unsupported, topless } = index.stats.basesByPrintOption
+    expect(plain + unsupported + topless).toBe(index.stats.bases)
+
+    // Total over bases, and over nothing else.
+    expect(index.basePrintOption.size).toBe(index.stats.bases)
+    for (const base of bases) expect(index.basePrintOption.has(base.id)).toBe(true)
+    for (const topper of toppers) expect(index.basePrintOption.has(topper.id)).toBe(false)
+  })
+
+  it('collapses the topless auto-insert rate under openlock from 79.1% to zero', () => {
+    const before = survey(legacyBase, 'openlock')
+    const after = survey(shippedBase, 'openlock')
+
+    // Same toppers matched either way: the ranking chooses, it never refuses.
+    expect(before.matched).toBe(3769)
+    expect(after.matched).toBe(3769)
+
+    // The defect, measured on this corpus by the old ranking written out above.
+    expect(before.byOption.topless).toBe(2983)
+    expect(before.byOption.topless / before.matched).toBeCloseTo(0.791, 3)
+    expect(before.byOption.unsupported).toBe(164)
+    expect(before.byOption.plain).toBe(622)
+
+    // And after: every auto-inserted openlock base is the full base.
+    expect(after.byOption).toEqual({ plain: 3769, unsupported: 0, topless: 0 })
+  })
+
+  it('collapses it under every lock preference, to the three cases the corpus forces', () => {
+    const measured = preferences.map((lock) => ({
+      lock: lock ?? 'none',
+      before: survey(legacyBase, lock).byOption,
+      after: survey(shippedBase, lock).byOption,
+    }))
+
+    const allPlain: Record<PrintOption, number> = { plain: 3769, unsupported: 0, topless: 0 }
+    const magneticAfter: Record<PrintOption, number> = { plain: 3766, unsupported: 0, topless: 3 }
+    expect(measured).toEqual([
+      { lock: 'openlock', before: { plain: 622, unsupported: 164, topless: 2983 }, after: allPlain },
+      { lock: 'dragonlock', before: { plain: 3610, unsupported: 156, topless: 3 }, after: allPlain },
+      { lock: 'magnetic', before: { plain: 2120, unsupported: 27, topless: 1622 }, after: magneticAfter },
+      { lock: 'none', before: { plain: 819, unsupported: 320, topless: 2630 }, after: allPlain },
+    ])
+  })
+
+  /**
+   * The guarantee, stated as a property rather than a count: a print variant can
+   * only win when no plainer candidate under the same key carries the lock.
+   *
+   * This is what makes the three magnetic cases above defensible instead of
+   * residual noise — they are the corpus, not the ranking.
+   */
+  it('never hands out a print variant while a plainer base carries the same key and the lock', () => {
+    let forced = 0
+    for (const lock of preferences) {
+      for (const topper of toppers) {
+        const base = shippedBase(topper, lock)
+        if (base === undefined) continue
+        const option = optionOf(base)
+        if (option === 'plain') continue
+        forced += 1
+        const plainer = (candidatesOf(topper) ?? []).filter(
+          (candidate) => PRINT_OPTIONS.indexOf(optionOf(candidate)) < PRINT_OPTIONS.indexOf(option),
+        )
+        expect(plainer.every((candidate) => lock !== undefined && !candidate.conn.includes(lock))).toBe(true)
+      }
+    }
+    // Three, all magnetic, all under `size code D+SA`: the goblin-fireplace base.
+    expect(forced).toBe(3)
+  })
+
+  it('widens the set of full bases the resolver can reach', () => {
+    const before = survey(legacyBase, 'openlock')
+    const after = survey(shippedBase, 'openlock')
+
+    // The headline figure of the defect: 110 of 1,963 bases ever handed out, and
+    // 92 of those 110 were print variants rather than bases.
+    expect(before.reach.size).toBe(110)
+    expect(before.reachByOption).toEqual({ plain: 18, unsupported: 12, topless: 80 })
+
+    // After: the count barely moves — one candidate set collapses onto a base
+    // another already reached — but every base it reaches is now a full base, so
+    // the reachable *product* range is six times wider.
+    expect(after.reach.size).toBe(109)
+    expect(after.reachByOption).toEqual({ plain: 109, unsupported: 0, topless: 0 })
+    expect(after.reachByOption.plain).toBeGreaterThan(6 * before.reachByOption.plain)
+
+    // Across the four preferences a user can actually pick, the reachable set
+    // itself grows: 300 → 314 distinct bases, 179 → 313 of them full bases.
+    const union = (rank: (tile: CatalogRecord, lock: LockSystem | undefined) => CatalogRecord | undefined) => {
+      const reach = new Set<TileId>()
+      for (const lock of preferences) for (const id of survey(rank, lock).reach) reach.add(id)
+      return reach
+    }
+    const beforeUnion = union(legacyBase)
+    const afterUnion = union(shippedBase)
+    expect(beforeUnion.size).toBe(300)
+    expect(afterUnion.size).toBe(314)
+    expect(afterUnion.size).toBeGreaterThan(beforeUnion.size)
+
+    const full = (reach: Set<TileId>) =>
+      [...reach].filter((id) => optionOf(index.byId.get(id) as CatalogRecord) === 'plain').length
+    expect(full(beforeUnion)).toBe(179)
+    expect(full(afterUnion)).toBe(313)
+  })
+
+  /* ----------------------------------------------------------- the disclosure */
+
+  it('names the base, the pool it beat and the print option in the auto-insert note', () => {
+    const topper = toppers.find((record) => record.sizeCode === 'A' && record.texture === 'dungeon_stone')
+    expect(topper).toBeDefined()
+
+    const resolved = resolvePlacement(place(topper?.id ?? ''), index, { lock: 'openlock' })
+    const base = resolved.parts[1]?.record
+    const message = resolved.notes.find((entry) => entry.code === 'base-auto-inserted')?.message ?? ''
+
+    // Which base, out of how many, on what key, and why that one.
+    expect(message).toContain(base?.name ?? '\u0000')
+    expect(message).toContain('size code A')
+    expect(message).toContain('bases carrying')
+    expect(message).toContain('offers openlock')
+    expect(message).toContain('a full base')
+
+    // The old message said neither the pool nor the product.
+    expect(message).not.toContain('matched on sizeCode')
+  })
+
+  it('says a base has no top surface, and names the lock that forced it', () => {
+    const forced = toppers
+      .map((topper) => ({ topper, resolved: resolvePlacement(place(topper.id), index, { lock: 'magnetic' }) }))
+      .filter(({ resolved }) => resolved.parts[1]?.match?.option === 'topless')
+
+    expect(forced).toHaveLength(3)
+    for (const { resolved } of forced) {
+      const match = resolved.parts[1]?.match
+      expect(match?.lockAgrees).toBe(true)
+      expect(match?.optionsOffered).toContain('plain')
+
+      const message = resolved.notes.find((entry) => entry.code === 'base-auto-inserted')?.message ?? ''
+      expect(message).toContain('no top surface')
+      expect(message).toContain('every plainer base carrying size code D+SA lacks magnetic')
+    }
+  })
+
+  it('reports the options a candidate set offered, best first', () => {
+    for (const topper of toppers) {
+      const match = resolvePlacement(place(topper.id), index, { lock: 'openlock' }).parts[1]?.match
+      if (match === undefined) continue
+      const offered = match.optionsOffered
+      expect(offered.length).toBeGreaterThan(0)
+      // A projection of PRINT_OPTIONS, so the order is the preference order and
+      // no option is repeated.
+      expect(offered).toEqual(PRINT_OPTIONS.filter((option) => offered.includes(option)))
+      expect(offered).toContain(match.option)
+    }
   })
 
   /* ----------------------------------------------- the build-tag join must fail */

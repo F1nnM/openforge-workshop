@@ -35,7 +35,17 @@ import type { TileId } from '@/catalog'
 export type NoteCode =
   /** The placement names an id that is not in this catalog build. */
   | 'unknown-tile'
-  /** The hard rule fired: a base was added that the user did not place. */
+  /**
+   * The hard rule fired: a base was added that the user did not place.
+   *
+   * **This is the disclosure surface for the whole base choice**, which is why it
+   * is `info` and still carries the longest message in the vocabulary. The user
+   * did not place this part and cannot remove it, so the note names the base, the
+   * key it was found on, how many candidates it beat, and which criteria it won
+   * on — including whether it is the plain base or one of the 584 print variants
+   * (`topless` has no top surface). Before that, it read "matched on sizeCode A"
+   * and 79.1% of auto-inserted openlock bases were topless with nothing said.
+   */
   | 'base-auto-inserted'
   /** An openforge topper with a size code, and **no base in the catalog carries that code**. */
   | 'no-matching-base'

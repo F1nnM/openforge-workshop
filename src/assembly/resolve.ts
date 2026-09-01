@@ -29,7 +29,8 @@
 import type { CatalogRecord } from '@/catalog'
 import type { LockSystem, Placement } from '@/store'
 
-import type { AssemblyIndex } from './assemblyIndex'
+import type { AssemblyIndex, PrintOption } from './assemblyIndex'
+import { PRINT_OPTIONS } from './assemblyIndex'
 import { footprintKey } from './footprint'
 import type { Note } from './notes'
 import { note } from './notes'
@@ -78,6 +79,22 @@ export interface BaseMatch {
   on: string
   /** How many bases satisfied the key. Ranges 3–132 for size codes. */
   candidates: number
+  /**
+   * Which of the three products the chosen base is. `plain` for 3,769 of 3,769
+   * openforge toppers under openlock; the old ranking made it `topless` for
+   * 2,983 of them and said nothing.
+   */
+  option: PrintOption
+  /**
+   * The print options the candidate set offered at all, best first.
+   *
+   * Carried so the disclosure can distinguish the two reasons a non-`plain` base
+   * was chosen — the corpus offers nothing better under this key, or something
+   * better exists and does not carry the lock — which is the difference between a
+   * gap in the archive and a compromise the user could undo by changing the lock
+   * preference. The choice itself never consults it; {@link matchBase} does.
+   */
+  optionsOffered: PrintOption[]
   /** The base's footprint shape equals the topper's. Available for 92.8% of coded toppers. */
   shapeAgrees: boolean
   /** The base shares a non-`base` kind bucket with the topper (`base+wall` under a wall). */
@@ -116,19 +133,28 @@ export interface ResolvedPlacement {
 /* ------------------------------------------------------------------ matching */
 
 /**
- * Ranking weights for base candidates — **strictly decreasing powers of two**,
+ * Ranking weights for base candidates — **powers of two, strictly decreasing**,
  * which is the point of the numbers rather than a coincidence.
  *
- * `4 + 2 + 1 = 7 < 8`, so no combination of lower criteria can outvote a higher
- * one: the sum is a lexicographic order written as arithmetic, cheap to compute
- * and cheap to assert. `assembly.test.ts` checks the property directly rather
- * than trusting the comment.
+ * The sum is a lexicographic order written as arithmetic: no combination of lower
+ * criteria can outvote a higher one, because `2 × 8 + 4 + 2 + 1 = 23 < 32`.
+ * Cheap to compute and cheap to assert; `assembly.test.ts` checks the property
+ * directly rather than trusting the comment.
  *
  * The order comes from what the data can actually deliver:
  *
  *   - **`lock` first** because the base *is* the joinery. A base that does not
  *     offer the chosen system does not lock to its neighbours, which is a
  *     build that falls apart rather than a build that looks wrong.
+ *   - **`option` second**, and it is the one *graded* criterion: `plain` earns
+ *     two steps, `unsupported` one, `topless` none, per {@link PRINT_OPTIONS}.
+ *     Second because these are different products (§5.3) — a base with no top
+ *     surface is not the piece the user asked for — and *below* lock because a
+ *     topless base still clips to its neighbours while a plain one in the wrong
+ *     system does not. Ranking it above the shape and texture criteria is what
+ *     makes the guarantee unconditional: within one candidate set (one size code,
+ *     or one congruent footprint) a `topless` base can only win if **every**
+ *     plainer candidate fails on the lock, and that case is disclosed by name.
  *   - **`shape`** because a shape-agreeing base exists for 1,856 of the 1,999
  *     coded toppers (92.8%) — high enough to insist on when available.
  *   - **`kind`** as the `base+wall`-under-a-wall signal. Weaker than shape
@@ -137,8 +163,28 @@ export interface ResolvedPlacement {
  *     texture roots against the toppers' 23, and only 1,221 of 1,999 coded
  *     toppers (61.1%) can be given a texture-matched base *at all*. Weighting it
  *     higher would trade a base that locks for a base that matches the colour.
+ *
+ * Below the whole scale sits the index's `bytes`-ascending order, reached only
+ * when two candidates score identically. It used to be the *only* thing
+ * separating most candidates, which is how 79.1% of auto-inserted openlock bases
+ * came to be topless: the topless print of a base is its smallest file.
  */
-export const MATCH_WEIGHTS = Object.freeze({ lock: 8, shape: 4, kind: 2, texture: 1 })
+export const MATCH_WEIGHTS = Object.freeze({ lock: 32, option: 8, shape: 4, kind: 2, texture: 1 })
+
+/**
+ * Steps of {@link MATCH_WEIGHTS}.option each print option earns.
+ *
+ * Derived from {@link PRINT_OPTIONS} rather than written out, so the preference
+ * order has exactly one definition: reverse the rank, and the best option scores
+ * highest. Two steps of 8 is the widest the criterion can be without reaching
+ * `lock`, and `4 + 2 + 1 = 7 < 8` keeps one step above everything below it.
+ */
+const OPTION_STEPS: Readonly<Record<PrintOption, number>> = Object.freeze(
+  Object.fromEntries(PRINT_OPTIONS.map((option, rank) => [option, PRINT_OPTIONS.length - 1 - rank])) as Record<
+    PrintOption,
+    number
+  >,
+)
 
 /**
  * The lock systems, as a total map over the type.
@@ -191,12 +237,26 @@ function kindsAgree(tile: CatalogRecord, base: CatalogRecord): boolean {
 }
 
 /**
+ * The print option of a base in this index.
+ *
+ * `basePrintOption` is total over bases and every candidate is a base, so the
+ * fallback is unreachable on an index built by `buildAssemblyIndex`. It is
+ * `plain` rather than a throw because the failure it would report — a base absent
+ * from its own index — is a build-time bug that must not take a room down, and
+ * the note names the option either way.
+ */
+function optionOf(index: AssemblyIndex, base: CatalogRecord): PrintOption {
+  return index.basePrintOption.get(base.id) ?? 'plain'
+}
+
+/**
  * Pick a base, or return `undefined` when the corpus holds none.
  *
- * Candidate arrays arrive pre-sorted by print cost (see `assemblyIndex.ts`), and
- * the scan keeps the first candidate at the best score — so ties break on the
- * smaller file and then on catalog path, and the choice is a pure function of
- * the corpus.
+ * The scan keeps the first candidate at the best score, and candidate arrays
+ * arrive pre-sorted `bytes` then `id` — so an exact tie breaks on the cheaper
+ * print and then on catalog path, and the choice is a pure function of the
+ * corpus. Everything that is *about the topper* is in the score, not in that
+ * order: see {@link MATCH_WEIGHTS}.
  */
 function matchBase(
   tile: CatalogRecord,
@@ -208,9 +268,12 @@ function matchBase(
 
   let best: CatalogRecord | undefined
   let bestScore = -1
+  const offered = new Set<PrintOption>()
 
   for (const base of candidates.records) {
-    let score = 0
+    const option = optionOf(index, base)
+    offered.add(option)
+    let score = OPTION_STEPS[option] * MATCH_WEIGHTS.option
     if (lock === undefined || base.conn.includes(lock)) score += MATCH_WEIGHTS.lock
     if (base.foot.shape === tile.foot.shape) score += MATCH_WEIGHTS.shape
     if (kindsAgree(tile, base)) score += MATCH_WEIGHTS.kind
@@ -228,6 +291,8 @@ function matchBase(
       key: candidates.key,
       on: candidates.on,
       candidates: candidates.records.length,
+      option: optionOf(index, best),
+      optionsOffered: PRINT_OPTIONS.filter((option) => offered.has(option)),
       shapeAgrees: best.foot.shape === tile.foot.shape,
       kindAgrees: kindsAgree(tile, best),
       textureAgrees: best.texture !== undefined && best.texture === tile.texture,
@@ -309,10 +374,7 @@ function appendBase(
   const { base, match } = matched
   parts.push({ role: 'base', record: base, match })
 
-  const added =
-    `${tile.name} delegates its joinery to a base; ` +
-    `${base.name} was added, matched on ${match.key} ${match.on}.`
-  notes.push(note('base-auto-inserted', added, base.id))
+  notes.push(note('base-auto-inserted', autoInsertedMessage(tile, base, match, lock), base.id))
   if (!match.lockAgrees && lock !== undefined) {
     const message = `${base.name} does not offer ${lock}; no ${lock} base carries ${match.on}.`
     notes.push(note('base-lock-mismatch', message, base.id))
@@ -323,6 +385,75 @@ function appendBase(
       `bases cover 15 texture roots against the toppers' 23.`
     notes.push(note('base-texture-mismatch', message, base.id))
   }
+}
+
+/* ---------------------------------------------------------------- disclosure */
+
+/** How each print option reads in a sentence. */
+const OPTION_PROSE: Readonly<Record<PrintOption, string>> = Object.freeze({
+  plain: 'a full base',
+  unsupported: 'geometry reworked to print without supports',
+  topless: 'no top surface',
+})
+
+/** `size code A`, `footprint rect:2x2` — the same words `missingBaseNote` uses. */
+function keyLabel(match: BaseMatch): string {
+  return `${match.key === 'sizeCode' ? 'size code' : 'footprint'} ${match.on}`
+}
+
+/**
+ * The print-option clause, and — when the option is not `plain` — *why*.
+ *
+ * Two causes, and they are the two the user can act on differently. If a plainer
+ * candidate was offered under this key, it lost on the lock and only on the lock,
+ * because `option` is the second-heaviest criterion and nothing but `lock` sits
+ * above it — so changing the lock preference would change the answer. If none was
+ * offered, the archive holds no better print of this base and no preference will
+ * conjure one.
+ */
+function optionClause(match: BaseMatch, lock: LockSystem | undefined): string {
+  const prose = OPTION_PROSE[match.option]
+  if (match.option === 'plain') return prose
+  const plainerOffered = match.optionsOffered.some((offered) => OPTION_STEPS[offered] > OPTION_STEPS[match.option])
+  const cause =
+    plainerOffered && lock !== undefined
+      ? `every plainer base carrying ${keyLabel(match)} lacks ${lock}`
+      : `no plainer base carries ${keyLabel(match)}`
+  // Parenthesised, not dashed: the clause sits inside a comma-separated list of
+  // criteria, and a dash there reads as the end of the list.
+  return `${prose} (${cause})`
+}
+
+/**
+ * The auto-insert note's prose: which base, and why that one.
+ *
+ * §7 auto-inserts a part the user never placed and cannot remove, so the note is
+ * the only place the decision is visible — and it used to read "matched on
+ * sizeCode A", which names the *key* and not one thing about the base. The
+ * criteria are listed in {@link MATCH_WEIGHTS} order, heaviest first, and only
+ * the ones that agreed: a criterion that did not agree has a note of its own
+ * (`base-lock-mismatch`, `base-texture-mismatch`) rather than a second voice
+ * here. The print option is always stated, agreeing or not, because it is the
+ * one criterion whose answer is a different product.
+ */
+function autoInsertedMessage(
+  tile: CatalogRecord,
+  base: CatalogRecord,
+  match: BaseMatch,
+  lock: LockSystem | undefined,
+): string {
+  const reasons: string[] = []
+  if (lock !== undefined && match.lockAgrees) reasons.push(`offers ${lock}`)
+  reasons.push(optionClause(match, lock))
+  if (match.shapeAgrees) reasons.push('footprint agrees')
+  if (match.kindAgrees) reasons.push('kind agrees')
+  if (match.textureAgrees) reasons.push('texture agrees')
+
+  const pool = match.candidates === 1 ? 'the only base' : `the best of ${String(match.candidates)} bases`
+  return (
+    `${tile.name} delegates its joinery to a base; ${base.name} was added — ` +
+    `${pool} carrying ${keyLabel(match)}: ${reasons.join(', ')}.`
+  )
 }
 
 /**
