@@ -1,0 +1,527 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the landing screen.
+
+   Hand-written rather than Tailwind utilities, for the reason set out at the top
+   of `../../ui/shell/shell.css`: this screen is a transcription of specific
+   measurements from the approved mock (`design/OpenForge-Studio.dc.html`,
+   lines 41–85), and the odd numbers — 1.05fr, 17.5px, 52ch, 14.5px, 2.5px
+   letter-spacing — are the mock's, not roundings of it. Written as utilities they
+   would all look equally arbitrary.
+
+   Unlayered, same as the shell: this file arrives through a JS import while
+   Tailwind's Preflight arrives through `src/index.css`, and unlayered CSS beats
+   every layer regardless of source order.
+
+   ── Two things to know before editing ──────────────────────────────────────
+
+   **Nothing here is hidden by default.** Every element the load sequence
+   animates is fully visible in its base rule; the keyframes animate *from*
+   transparent with `animation-fill-mode: both`. So a stylesheet that half-loads,
+   a browser without `@media (prefers-reduced-motion)`, or a `data-motion="off"`
+   root all fail to a plain, complete, readable page. Introducing an
+   `opacity: 0` base rule here would make a blank landing screen one bug away.
+
+   **The whole sequence sits behind two independent gates.** It is inside
+   `@media (prefers-reduced-motion: no-preference)` — so the preference is
+   honoured even if no JavaScript runs — and every selector is under
+   `.of-landing[data-motion='on']`, which `Landing.tsx` sets from the same query.
+   Either gate alone stops it. The attribute exists so the decision is testable;
+   see `useReducedMotion.ts`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-landing {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 64px 40px 48px;
+}
+
+/* ── Hero ────────────────────────────────────────────────────────────────── */
+
+.of-hero {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 56px;
+  align-items: center;
+}
+
+.of-hero-copy {
+  min-width: 0;
+}
+
+/* The mock's eyebrow is a shade larger and wider-tracked than the one above
+   every other section, because it is the first line on the page. Overriding the
+   primitive's two values rather than not using it keeps the device the same
+   device. */
+.of-hero-eyebrow {
+  font-size: 11.5px;
+  letter-spacing: 2.5px;
+  margin-bottom: 18px;
+}
+
+.of-hero-title {
+  margin: 0 0 20px;
+  font-family: var(--face-display);
+  font-weight: 600;
+  /* 54px is the contract's figure and the top of the clamp. The floor is set by
+     the narrowest viewport this has to survive: at 375px the headline is five
+     lines at 34px, which is the most a phone can carry before the lede is
+     pushed off the first screen. */
+  font-size: clamp(34px, 3.9vw, 54px);
+  line-height: 1.08;
+  text-wrap: pretty;
+}
+
+.of-hero-lede {
+  margin: 0 0 30px;
+  /* The contract's measure. Kept as `ch` rather than converted to pixels so it
+     tracks the face, which is what a measure is for. */
+  max-width: 52ch;
+  font-size: 17.5px;
+  line-height: 1.6;
+  color: var(--mut);
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────────── */
+
+.of-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+}
+
+/* Anchors, not buttons — they navigate, and a router `Link` should be a link so
+   that middle-click, cmd-click and "copy link address" all work. The underline
+   `shell.css` gives every anchor on hover is cancelled here; on a filled button
+   it reads as a rendering fault. */
+.of-action {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  font-size: 15px;
+  letter-spacing: 0.4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    filter 120ms ease,
+    background-color 120ms ease;
+}
+
+.of-action:hover {
+  text-decoration: none;
+}
+
+.of-action[data-tone='primary'] {
+  padding: 13px 24px;
+  background: var(--acc);
+  color: var(--accink);
+  border: none;
+  font-weight: 700;
+}
+
+.of-action[data-tone='primary']:hover {
+  filter: brightness(1.12);
+}
+
+.of-action[data-tone='secondary'] {
+  /* One pixel less padding than the primary, so the border does not make the
+     outlined button taller than the filled one. The mock's own trick. */
+  padding: 12px 24px;
+  background: none;
+  color: var(--acc);
+  border: 1px solid var(--acc);
+  font-weight: 600;
+}
+
+.of-action[data-tone='secondary']:hover {
+  /* The accent at a tenth, mixed in the browser rather than pasted as a fourth
+     rgba() literal of the same colour — so retinting `--acc` retints the hover. */
+  background: color-mix(in srgb, var(--acc) 10%, transparent);
+}
+
+/* ── The four figures ────────────────────────────────────────────────────────
+   The mock sets these as one 12px mono line of four items. They are the page's
+   evidence and they are re-derived from the index on every load, so they are set
+   here as a spec block: mono label over a mono value, on a hairline rule. Same
+   typographic rule, more weight.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-hero-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Two rows — labels, then values — so the cells below can adopt them with
+     `subgrid`. Without that, "Catalogued tiles" wraps to two lines while
+     "Texture sets" does not, and the four values sit at three different
+     heights: the block stops reading as a table and starts reading as a bug. */
+  grid-template-rows: auto auto;
+  gap: 22px 26px;
+  margin: 36px 0 0;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.of-figure {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
+  min-width: 0;
+}
+
+.of-figure-label {
+  margin: 0;
+  align-self: start;
+}
+
+.of-figure-value {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin: 0;
+  font-family: var(--face-mono);
+  font-size: 24px;
+  line-height: 1;
+  color: var(--ink);
+  /* Tabular by default in IBM Plex Mono; stated so a face fallback that is not
+     monospaced still lines the four values up. */
+  font-variant-numeric: tabular-nums;
+}
+
+.of-figure-unit {
+  font-size: 13px;
+  color: var(--mut);
+}
+
+/* Four across only once the hero column is wide enough for `108.0 GB` to sit on
+   one line beside a two-word label. Below that, 2 × 2. */
+@media (min-width: 1240px) {
+  .of-hero-figures {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px 18px;
+  }
+
+  .of-figure-value {
+    font-size: 22px;
+  }
+}
+
+/* ── Hero figure: the plan drawing ───────────────────────────────────────── */
+
+.of-hero-figure {
+  margin: 0;
+  min-width: 0;
+}
+
+/* The radial-gradient well the contract puts behind every preview
+   (§1, "recurring devices"). No `min-height`: the drawing carries its own
+   aspect ratio through its viewBox and the well hugs it, which is one fewer
+   number here that can be wrong. */
+.of-hero-well {
+  padding: 10px;
+  background: radial-gradient(ellipse at 50% 35%, var(--bg3), var(--bg2));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.of-plan {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.of-hero-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 13px;
+}
+
+.of-hero-caption-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.of-hero-caption-mm {
+  font-family: var(--face-mono);
+  font-size: 11px;
+  color: var(--mut);
+}
+
+.of-hero-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--face-mono);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: var(--mut);
+}
+
+.of-hero-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Fill and border come from the material registry, inline — see `Landing.tsx`.
+   There is no colour here for the same reason there is none in `HeroPlan.tsx`. */
+.of-hero-swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 1px solid;
+  border-radius: 2px;
+}
+
+.of-hero-note {
+  margin: 1px 0 0;
+  max-width: 48ch;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+
+/* ── The three steps ─────────────────────────────────────────────────────── */
+
+.of-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 72px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-step {
+  padding: 24px 24px 26px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* The mock's numeral is 11px at 2px tracking, marginally tighter than the
+   standard eyebrow; kept, because `III · CONSTRUCT` is the longest label in the
+   set and it has to hold one line in a 215px card. */
+.of-step-numeral {
+  font-size: 11px;
+  letter-spacing: 2px;
+  margin-bottom: 12px;
+}
+
+.of-step-title {
+  margin: 0 0 8px;
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 21px;
+  line-height: 1.2;
+}
+
+.of-step-body {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--mut);
+}
+
+/* ── Footer line ─────────────────────────────────────────────────────────── */
+
+.of-landing-foot {
+  margin: 56px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+
+/* The archive host is a measured fact — the same one the header shows, read from
+   the index rather than written down — so it is mono. */
+.of-landing-host {
+  font-family: var(--face-mono);
+  font-size: 12px;
+  color: var(--acc2);
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────────
+   Three steps down. The hero collapses first, because a 1fr plan drawing beside
+   a 52ch measure stops working long before either does on its own.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* 900px, not 1100: a 1024px laptop is a two-column viewport. Below 900 the left
+   column can no longer hold a 52ch measure beside a drawing wide enough to read,
+   and both are better off with the full width. */
+@media (max-width: 900px) {
+  .of-hero {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+
+  /* Source order already puts the copy first, so the collapse needs no `order`.
+     Both halves are capped: full-bleed at 900px the measure runs long and the
+     figures end up 300px apart, which reads as a layout fault rather than as a
+     wide screen. */
+  .of-hero-figure {
+    max-width: 640px;
+  }
+
+  /* As many figures as fit rather than a fixed two, so a tablet gets the wide
+     screen's single row and a phone gets 2 × 2. */
+  .of-hero-figures {
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+    gap: 18px 22px;
+  }
+}
+
+@media (max-width: 940px) {
+  .of-landing {
+    padding: 44px 28px 40px;
+  }
+
+  .of-steps {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-top: 56px;
+  }
+
+  .of-step {
+    padding: 20px 20px 22px;
+  }
+}
+
+@media (max-width: 560px) {
+  .of-landing {
+    padding: 34px 20px 32px;
+  }
+
+  .of-hero-lede {
+    font-size: 16.5px;
+  }
+
+  .of-hero-figures {
+    gap: 18px 20px;
+  }
+
+  .of-figure-value {
+    font-size: 22px;
+  }
+}
+
+/* Two buttons side by side stop fitting before the text in them does, and a
+   150px button beside a 160px one reads as a mistake. Stacked and full width is
+   the phone idiom. */
+@media (max-width: 460px) {
+  .of-hero-actions {
+    gap: 10px;
+  }
+
+  .of-action {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+
+/* ── The load sequence ───────────────────────────────────────────────────────
+   One reveal, in the order the page is read, and then the plan drawing
+   assembling itself in build order: grid, floors, walls, what stands on them,
+   and finally the registration marks. That last part is the whole reason the
+   sequence exists — it says, in about a second and without a word, that this is
+   a tool for assembling terrain out of parts.
+
+   Everything is opacity and a 10px rise. Nothing moves more than that, nothing
+   scales, nothing bounces, and the whole sequence is over at 1.12s.
+
+   Both gates, as described at the top of this file: the media query and the
+   attribute. Delays are stated on the elements rather than computed, because
+   the order is a design decision and reading it off a list is the point.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@keyframes ofLandingRise {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+}
+
+@keyframes ofLandingFade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .of-landing[data-motion='on'] .of-hero-eyebrow,
+  .of-landing[data-motion='on'] .of-hero-title,
+  .of-landing[data-motion='on'] .of-hero-lede,
+  .of-landing[data-motion='on'] .of-hero-actions,
+  .of-landing[data-motion='on'] .of-hero-figures,
+  .of-landing[data-motion='on'] .of-hero-caption,
+  .of-landing[data-motion='on'] .of-step,
+  .of-landing[data-motion='on'] .of-landing-foot {
+    animation: ofLandingRise 560ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+
+  .of-landing[data-motion='on'] .of-hero-eyebrow {
+    animation-delay: 0ms;
+  }
+  .of-landing[data-motion='on'] .of-hero-title {
+    animation-delay: 70ms;
+  }
+  .of-landing[data-motion='on'] .of-hero-lede {
+    animation-delay: 140ms;
+  }
+  .of-landing[data-motion='on'] .of-hero-actions {
+    animation-delay: 210ms;
+  }
+  .of-landing[data-motion='on'] .of-hero-figures {
+    animation-delay: 280ms;
+  }
+  .of-landing[data-motion='on'] .of-hero-caption {
+    animation-delay: 560ms;
+  }
+  .of-landing[data-motion='on'] .of-step:nth-child(1) {
+    animation-delay: 360ms;
+  }
+  .of-landing[data-motion='on'] .of-step:nth-child(2) {
+    animation-delay: 430ms;
+  }
+  .of-landing[data-motion='on'] .of-step:nth-child(3) {
+    animation-delay: 500ms;
+  }
+  .of-landing[data-motion='on'] .of-landing-foot {
+    animation-delay: 570ms;
+  }
+
+  /* The well's frame arrives first and empty, then fills. */
+  .of-landing[data-motion='on'] .of-hero-well {
+    animation: ofLandingFade 420ms ease-out both;
+    animation-delay: 120ms;
+  }
+
+  .of-landing[data-motion='on'] .of-plan-grid,
+  .of-landing[data-motion='on'] .of-plan-floors,
+  .of-landing[data-motion='on'] .of-plan-walls,
+  .of-landing[data-motion='on'] .of-plan-fixtures,
+  .of-landing[data-motion='on'] .of-plan-marks {
+    animation: ofLandingFade 380ms ease-out both;
+  }
+
+  .of-landing[data-motion='on'] .of-plan-grid {
+    animation-delay: 240ms;
+  }
+  .of-landing[data-motion='on'] .of-plan-floors {
+    animation-delay: 340ms;
+  }
+  .of-landing[data-motion='on'] .of-plan-walls {
+    animation-delay: 470ms;
+  }
+  .of-landing[data-motion='on'] .of-plan-fixtures {
+    animation-delay: 600ms;
+  }
+  .of-landing[data-motion='on'] .of-plan-marks {
+    animation-delay: 740ms;
+  }
+}
