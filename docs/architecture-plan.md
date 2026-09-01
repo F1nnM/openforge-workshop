@@ -40,22 +40,152 @@ Search, faceting and constraint resolution run in the browser.
 Verified figures, with the definition each depends on. Definitions matter: v1 of this plan
 quoted percentages whose definitions were never written down, and they did not reproduce.
 
-### Footprints — three primitives, 86.9% coverage
+### Footprints — 86.9% today, 95.1% the target
 
-| Primitive | Definition | Live tiles | Share |
-| --- | --- | ---: | ---: |
-| `RECT` | numeric `size|width` **and** `size|depth`, no curve/hex/concave marker | 3,051 | 35.1% |
-| `WALL_SEG` | numeric `size|width` only; depth is the measured 12.7 mm constant | 3,116 | 35.8% |
-| `ARC` | carries `size|radius` | 1,391 | 16.0% |
-| `NONE` | no derivable footprint | 1,144 | 13.1% |
+**Two classifiers are in play and they disagree. This section states both, because an earlier
+draft quoted only the second and presented it as measured.**
 
-Cumulative: RECT alone **35.1%**, plus WALL_SEG **70.9%**, plus ARC **86.9%**.
+| Primitive | **Shipped classifier — what our code says today** | Research classifier — the target |
+| --- | ---: | ---: |
+| `RECT` | 3,051 (35.1%) | 42.9% |
+| `WALL_SEG` | 3,116 (35.8%) | 36.5% |
+| `ARC` | 1,391 (16.0%) | 14.1% |
+| `COLUMN` | — (not a primitive yet) | 1.6% |
+| `DIAGONAL` | — (not a primitive yet) | within wall/rect |
+| `NONE` | **1,144 (13.1%)** | 428 (4.9%) |
+| **Coverage** | **86.9%** | **95.1%** |
 
-The `NONE` bucket is larger than v1 of this plan claimed (it said 2.8%) because this
-definition is deliberately strict: a tile marked hex, concave or convex without a radius has
-no primitive that describes it, and placing it as a rectangle would be wrong rather than
-approximate. Those tiles appear in the catalog and in the bill of materials, never in the
-placement palette.
+Run [`verify-catalog-facts.py`](verify-catalog-facts.py) for the left column; it is what the
+1,276 tests assert against.
+
+**Most of the gap is one line of code, and it was unscheduled.** `pipeline/footprint.ts` detects
+curve markers with a **substring scan**, and **742 of the 1,144 `none` tiles carry a curve marker
+but no `size|radius`** — so they are classified unplaceable by a string match rather than by
+lacking a footprint. Making that scan segment-exact is where the bulk of 86.9% → 95.1% comes
+from, and it is now its own row rather than a side effect of the tessellation work.
+
+Two further primitives are genuinely new: **`COLUMN`** (0.5 × 0.5, measured, ~133 tiles) and
+**`DIAGONAL`** — a right triangle for the `O`/`OA` family and a 45° wall run (`2√2 × 0.5`) for
+the `P` family, 121 tiles.
+
+**Curved tiles are placeable, and the primitive is an annular sector, not an arc segment.**
+Centre sits at a bounding-box corner, with `bboxX = rOut − rIn·cos θ` and `bboxY = rOut·sin θ`
+— verified to ±0.002 units. The band width comes from the modifier: `radial` → `[R−2, R]`,
+`convex` → `[R−0.5, R]`, `concave` → `[R, R+0.5]`, `s2w` radial → `[R−1.5, R]`.
+
+**But that rule does not cover a fifth of the tiles it would be applied to.** The evidence base
+is 21 measurements across 4 bands, and **292 of the 1,391 arc-bucket tiles (21.0%) carry no
+`radial` / `concave` / `convex` modifier at all** — their shape tags are `shape|base|inverted`,
+`shape|option|curved_interface`, or bare `shape|curved`, none of which appears anywhere in the
+tessellation research. **So the measurement pass must precede the reshape**, not run beside it.
+
+**165 arc tiles carry no `size|angle`, and the importer fabricates one.**
+`DEFAULT_ARC_SWEEP_DEG = 90` invents a sweep for 84 `xG` plus 81 others. That is the real defect
+in the arc path.
+
+> **A correction to an earlier draft of this plan.** It claimed *"radius 3 and angles
+> 60/120/240/270/300 place 84 tiles as bogus arcs."* Measured, that is wrong twice.
+> `footprintKind` enters the arc path **only** on `size|radius`, and those tiles have none — the
+> 48 tiles at angle 60 all classify as `wall`, and the 82 at 120/240/270/300 all as `none`. Zero
+> are routed through the arc path. The 84 mis-shaped tiles are the `xG` codes, by a different
+> mechanism. Sixteen radius × angle combinations exist, not eleven — and the five *without* an
+> angle are the fabricated-sweep bug.
+
+### The OpenLOCK tessellation codes are footprints, not sizes
+
+Full detail in [`openlock-tessellation.md`](openlock-tessellation.md).
+
+38 codes appear in `size|openlock`, on 4,030 tiles (46.3%). This plan previously treated them
+as a width lookup (A→2, BA→1.5, IA→1, D→3, Q→4). **That is not what they are.** Printable
+Scenery's own developer documentation is explicit: *"Footprint Code: this refers to the
+tessellation footprint for each tile… any A-Tile will have the same footprint as any other
+A-tile."*
+
+They are a **shape taxonomy with per-family size ladders**, plus a second colliding namespace
+for columns. Six families: straight wall runs (IA/BA/A/D/Q = 1/1.5/2/3/4), rect floors, 1×1
+cells distinguished by port topology, 45° diagonal walls, curves, and columns.
+
+**`I` does not mean "inch" or "interior"** — it denotes the **1×1 cell**, and the second
+letter is junction topology on the plumbing-fitting convention: `O` none, `I` two opposite,
+`L` corner, `T` three, `X` four. `IA` is the exception and belongs to the wall ladder.
+`xG` is a modifier meaning "cut to mate with a G curve". The trailing A/B/C is a family
+ladder that is **inconsistent** — sometimes a larger footprint, sometimes only an alternate
+port layout — so it must not be implemented as a rule.
+
+Two constants this plan was missing, both measured and independently cited: **wall thickness
+is 0.5 units (12.70 mm)**, so a wall's footprint is `length × 0.5` rather than a line; and
+**a column is 0.5 × 0.5**.
+
+**`size|openlock` is not a footprint key.** Code `O` carries both 2×2 and 4×4 tiles (43 of
+them). It also merges `U` with `Y`/`YA`/`Z`/`ZA`. The assembly resolver matches bases to
+toppers on this code — see §16 for why that is currently latent rather than live.
+
+Nine codes (≥100 tiles) account for 83.7% of coded tiles; the five wall-run codes alone are
+2,822 tiles, 32% of the whole corpus. Thirteen codes are a sub-20-tile tail.
+
+**The official cheat sheet carries no dimensions at all.** It is purely pictorial — read at 3×
+across four quadrants, its 59 labels give shape identity and port positions only. No complete
+official code-to-dimension table exists; Printable Scenery was asked on its own forum and
+never answered, and `openforge-tutorials` defers to them. Every dimension in our table is
+therefore either measured from a mesh or explicitly marked an inference.
+
+### Tiles aggregate into one catalog item per design
+
+Full detail in [`tile-aggregation.md`](tile-aggregation.md).
+
+A design's base-integrated and base-less variants become **one catalog item**. The builder
+resolves a variant from the build's lock system at download time, falling back to the base
+auto-insertion the assembly resolver already performs.
+
+**Integrated bases are detectable at 100% precision / 99.9% recall** via `layer === 'topper'`
+(equivalently, `connection|openforge`), validated against the filename's connection token — an
+independently authored signal no candidate rule reads. Four false negatives, all corpus
+defects.
+
+The intuitive rule is a trap: **`shape|base` plus another kind is 0% precise on 1,277 tiles.**
+`shape|base|wall` means *a base shaped to receive a wall*, not a wall carrying a base. Polarity
+exactly inverted.
+
+**The existing `design` key already groups them** — 931 of 3,822 aggregates (24.4%) hold both a
+topper and an integrated variant. **The collapse is lossless:** zero aggregates hold two
+distinct values of `texture`, `build`, `kinds`, `sizeCode`, `rotStep`, `foot` or `name`, so
+there is no new title logic and no facet re-derivation.
+
+Coverage with aggregation plus base fallback — *can the builder hand you a printable
+assembly?*
+
+| Lock | Integrated outright | **With base fallback** |
+| --- | ---: | ---: |
+| openlock | 1,497 (39.2%) | **3,199 (83.7%)** |
+| dragonlock | 359 (9.4%) | **2,928 (76.6%)** |
+| magnetic | 255 (6.7%) | **2,818 (73.7%)** |
+
+**Spread 10.0 points, against §2's 40.2.** The two measure different questions — §2 counts a
+lock-less design as reachable — but aggregation turns the lock choice from a 40-point cliff
+into a 10-point one. 622 aggregates are unreachable under every lock.
+
+**Nothing is deployed, so no share link, saved library or stored scene exists to preserve.**
+That removes the migration constraint the aggregation research worked around: ordinals can be
+renumbered freely, the store's version ladder can be collapsed to a single current version, and
+the aggregation key can be chosen on merit rather than on compatibility. The research's
+conclusion survives that relaxation — `design` was chosen because the collapse is lossless and
+produces exactly the 931 wanted merges, not because it preserved anything.
+
+**The append-only ordinal rule still applies from launch onward**, and getting the scheme right
+before the first published link is the whole point of writing it down now. **Aggregate ordinals
+must never enter the manifest**: an aggregate is a hash of a tag set and can therefore *split*,
+and a splittable grouping has no stable append-only index. An aggregate's URL address is the
+lowest ordinal in its group — stable under append, **not** under retirement (44.6% exposed),
+which is acceptable only because it is a canonical URL and never a share link.
+
+**What aggregation must not claim.** The corpus carries no print time, filament or support data
+at any resolution, and `bytes` is mesh complexity rather than material. The assumed trade is
+also false: the integrated/topper byte ratio has a median of **1.027**, 27.4% of integrated
+variants are *smaller* than their topper, and summed over 873 resolvable pairs topper+base is
+**0.96×** the integrated route. **Integrated saves part count, not filament**, and the card
+should claim only that. 42.2% of multi-file aggregates spread more than 1.25× in bytes, so a
+single figure per card hides real variation — the variants table ships in the same PR, never
+behind a closed accordion.
 
 ### Units and constants — measured from the meshes
 
@@ -140,29 +270,39 @@ that facet needs a first-class "unspecified". **Zero bases carry `build|wall on 
 ## 3. System architecture
 
 ```
-                    ┌──────────────────────────────┐
-   Browser ───────► │ workshop.openforge.tools     │  Cloudflare Worker + Static Assets
-                    │  static SPA + catalog index  │  (SPA fallback routing)
-                    └──────────────┬───────────────┘
+                    ┌──────────────────────────────────────────────┐
+   Browser ───────► │ workshop.openforge.tools                     │  Worker + Static Assets
+                    │  static SPA + catalog index                  │  (SPA fallback routing)
+                    │                                              │
+                    │  ┌────────────────────────────────────────┐  │
+                    │  │ base generator — PART OF THIS APP      │  │  lazy chunk,
+                    │  │ vendored .scad (Apache-2.0)            │  │  no second origin
+                    │  │ + OpenSCAD WASM (GPL-2, own chunk)     │  │
+                    │  └────────────────────────────────────────┘  │
+                    └──────────────┬───────────────────────────────┘
                                    │
-        ┌──────────────────────────┼───────────────────────────┐
-        ▼                          ▼                           ▼
-┌───────────────┐        ┌──────────────────┐        ┌────────────────────┐
-│ objects.      │        │ zip Worker       │        │ scad.openforge.    │
-│ openforge.    │        │ (fallback only:  │        │ tools              │
-│ tools  (R2)   │        │  iOS, >1 GB)     │        │ SEPARATE ORIGIN    │
-│ /models/      │        └──────────────────┘        │ OpenSCAD WASM      │
-│ /sprites/     │                                    │ (GPL isolated)     │
-│ /thumbs/  NEW │                                    └────────────────────┘
+        ┌──────────────────────────┴──────────┐
+        ▼                                     ▼
+┌───────────────┐                    ┌──────────────────┐
+│ objects.      │                    │ zip Worker       │
+│ openforge.    │                    │ (fallback only:  │
+│ tools  (R2)   │                    │  iOS, >1 GB)     │
+│ /models/      │                    └──────────────────┘
+│ /sprites/     │
+│ /thumbs/  NEW │
 │ /lod/     NEW │
 └───────────────┘
 ```
 
-Four deliberate boundaries: the SPA holds no server state; R2 is read-only on its own custom
+Three deliberate boundaries: the SPA holds no server state; R2 is read-only on its own custom
 domain and never proxied through the Worker (egress is free, proxying would burn CPU for
-nothing); the zip Worker is a fallback, not the default; and the OpenSCAD generator lives on
-a **separate origin** so GPL obligations attach to a separately-conveyed artifact rather than
-to the Workshop bundle.
+nothing); and the zip Worker is a fallback, not the default.
+
+**The generator is part of this app**, not a separate service. The original catalog embedded
+someone else's generator behind an iframe; this one is ours — the Apache-2.0 `.scad` geometry is
+copied in and maintained here, and OpenSCAD's own WASM engine sits in a lazily-loaded chunk with
+no static import path into app code. §10 records the licensing consequence honestly rather than
+arguing it away.
 
 ---
 
@@ -483,14 +623,22 @@ the licence requires**. The real obligations are narrower:
 4. **The index is a database of someone else's metadata.** Give it an explicit licence too;
    the plan previously covered only the STLs.
 
-**GPL, stated correctly.** v1 of this plan justified the separate origin by claiming origin
-separation prevents derivation. That reasoning is wrong. The correct reasoning is
-**conveyance**: GPL obligations attach when you distribute the covered work, and a separately
-served, separately built artifact is a separate conveyance carrying its own source offer.
-The `.scad` geometry (`openforge-bases`) is Apache-2.0 and safe to bundle anywhere; the
-OpenSCAD WASM binary is GPL-2 and `openforge-openscad` is GPL-3. Keep both on
-`scad.openforge.tools` with a published source offer. **This is the one item where a lawyer's
-read is genuinely worth buying** before launch.
+**GPL, stated correctly, and the boundary has moved.** Licences verified against the registry:
+the `.scad` geometry (`openforge-bases`) is **Apache-2.0** — and pushed more recently than the
+fork — so it is safe to copy in and modify; the OpenSCAD WASM engine is **GPL-2.0**; the
+`openforge-openscad` web GUI is **GPL-3.0**, and we copy nothing from it.
+
+An earlier draft put the engine on a separate origin, justified by **conveyance**: GPL
+obligations attach when you distribute the covered work, and a separately served, separately
+built artifact is a separate conveyance carrying its own source offer. That reasoning was sound.
+
+**The generator is now in-app by decision**, which removes that boundary. The question becomes
+whether this app is a derivative work of a dynamically-loaded GPL-2 WASM engine — a legal
+question, not a technical one. What actually mitigates it: the engine lives in its own chunk with
+no static import path into app code, nothing is copied from the GPL-3 fork, and the licence text
+plus a written source offer ship with the app. What does *not* mitigate it is confident reasoning
+about linking. **This is the one item where a lawyer's read is genuinely worth buying**, and it
+gates the generator rows rather than the whole series.
 
 ---
 
@@ -601,22 +749,37 @@ magnitude at one end.
 
 ## 14. Scope
 
-**v1 — the catalog is the product.**
-Landing; catalog with real facets, tokenised search and virtualised grid; library; tile
-detail with the sprite viewer and a size-gated 3D view; **top-down plan-view builder** with
-RECT and WALL_SEG footprints (70.9% coverage), assemblies, bill of tiles, client-side zip;
-material tinting in plan view and the detail viewer; the thumbnail derivative pipeline; the
-Cloudflare cache and CORS runbook; the design→(texture, lock) resolution table.
+**v1 — shipped.** Landing; catalog with real facets, tokenised search and a virtualised grid;
+library; tile detail with the sprite viewer and a size-gated 3D view; top-down plan-view builder
+with RECT and WALL_SEG footprints, assemblies, bill of tiles, client-side zip; material tinting;
+the thumbnail pipeline; the deployment surface. 34 PRs, 1,276 tests.
 
-**v1.1 — the builder becomes 3D.**
-The LOD pipeline; instanced 3D builder rendering; ARC footprints (→86.9%); procedural noise
-in the detail viewer; composition accessory slots as inline sprite grids.
+**v2 — the target, and the end of the plan.** One series, no further deferral. Detailed in
+[`v2-pr-series.md`](v2-pr-series.md). Nine workstreams:
 
-**v2 — generation and assemblies.**
-Base generator on its own origin. Guided assemblies over the 40 recipe templates. Real
-per-mesh dimensions via strided range-reads if curved footprints prove to matter.
+1. **Tessellation-aware footprints** — six primitives, 95.1% placeable, curves as annular
+   sectors. Fixes the 165 tiles currently mis-shaped as arcs.
+2. **Tile aggregation** — one item per design, lock resolved per build, variants disclosed.
+   Includes the topless tie-break defect and the positional `conn` correction.
+3. **Greyscale-then-tint previews** — luminance computed in the browser from the blue sprites,
+   tinted per material family. Works before the `/thumbs/` backfill, and makes the grid agree
+   with the builder for the first time.
+4. **The LOD pipeline** — decimated GLB per tile, so the builder can render real geometry.
+5. **3D builder** — instanced rendering over the same placement model the plan view uses.
+6. **Compositions** — `constrain` semantics resolved, accessory slots as inline sprite grids,
+   dead-end greying. 3,036 tiles carry a config and none of it is built.
+7. **Guided assemblies** — the 40 recipe templates as first-class objects.
+8. **The base generator, inside this app** — the Apache-2.0 `.scad` geometry copied in and
+   maintained here, OpenSCAD's own WASM engine in a lazily-loaded chunk, parameters from
+   `--export-format=param`, catalog-first resolution. No second origin and no third-party
+   service: the original catalog embedded someone else's generator behind an iframe; this one is
+   ours. The licensing consequence is real and is recorded as a blocker — bundling a GPL-2 engine
+   in-app moves the copyleft question from *"is this separately conveyed"* to *"is our app a
+   derivative work"*, which needs a legal read rather than a technical argument.
+9. **True mesh dimensions** — strided range-reads where the size tags diverge, which on curves
+   is a median 96 mm.
 
-**Research task, unscheduled and blocking nothing:** pin down `constrain` semantics (§5).
+**No v1.1.** Curved tiles matter, so the work that was deferred behind them comes forward.
 
 ---
 
@@ -639,9 +802,11 @@ declined, so item 2 is the only operational ask.
 
 1. **Import drift.** Three artefacts derive from the pinned fixture snapshot — index, LOD
    store, share-link manifest — and none currently carries a shared version stamp. Add one,
-   regenerate them in the same CI step.
+   regenerate them in the same CI step. *Not urgent while nothing is deployed; it must be in
+   place before the first published share link.*
 2. **md5 churn is the creator's normal workflow.** A re-exported mesh invalidates a LOD,
-   orphans a share link and moves a manifest ordinal, all silently.
+   orphans a share link and moves a manifest ordinal, all silently. *Same timing: this is a
+   launch gate, not a present hazard.*
 3. **`constrain` semantics are unspecified** and the precomputed candidate sets vary by two
    orders of magnitude depending on the answer. §5.
 4. **Three.js is pinned by `postprocessing` to `<0.186.0`.** Upgrading is a coordinated event
@@ -651,3 +816,43 @@ declined, so item 2 is the only operational ask.
    variants. A normalisation layer sits between fixtures and UI.
 6. **Bus factor of one upstream.** `openforge-openscad` has 13 commits, all Devon's, dormant
    10 months; its own upstream is dormant since 2024.
+7. **The base auto-insert picks topless bases.** `assemblyIndex.byCost` sorts candidates
+   bytes-ascending, so the smallest wins every tie — and under openlock **79.1% of
+   auto-inserted bases are `topless`** (magnetic 43.0%, dragonlock 0.1%). A topless base has no
+   top surface: it is a different *product*, not a cheaper print, and it is currently chosen
+   silently and never disclosed. Only 110 of 1,963 bases are ever handed out, and the chosen
+   base changes for 86.3% of toppers between openlock and dragonlock. **This is a live defect**
+   and the tie-break must be fixed before aggregation ships on top of it.
+8. **`size|openlock` is not a footprint key, and the resolver matches on it.** Code `O` carries
+   both 2×2 and 4×4 tiles. Measured today: 5 `O` toppers, **0 `O` bases**, so the
+   footprint-congruence fallback catches them and the mismatch is **latent, not live**. It
+   becomes live the moment a base with code `O` is added. Guard it with a test rather than a
+   comment.
+9. **165 arc tiles have no angle, and the importer fabricates one.**
+   `DEFAULT_ARC_SWEEP_DEG = 90` invents a sweep for 84 `xG` pieces (which measure as straight
+   walls) plus 81 others. Separately, **292 of 1,391 arc tiles carry no band modifier**, so the
+   annular-sector rule cannot be applied to them without measurement. *An earlier version of
+   this risk blamed radius 3 and the 60/120/240/270/300 angles; measured, those tiles never enter
+   the arc path at all — see §2.*
+13. **The plan's footprint percentages and the shipped classifier's disagree by 742 tiles**, and
+   the gap is a substring curve-marker scan rather than missing data. §2 states both columns.
+   Reconciling them is scheduled, not incidental.
+14. **`hasCurveMarker` cannot be made segment-exact casually.** `pipeline/footprint.ts:18-21`
+   records that doing so *"would move the NONE bucket and break the plan's numbers"* — which is
+   exactly the reconciliation above, and exactly why it needs its own row with the oracle and the
+   corpus test in the same diff.
+15. **Tag drift is now load-bearing rather than cosmetic.** `texture|towne|stone-stucco` (72) and
+   `texture|towne|stucco-stone` (72) are one material, and `src/materials/mapping.ts` maps them to
+   **two different families** — `cut_stone` and `stucco`. Once previews are tinted from the family,
+   that is a visible wrong colour on 144 tiles, not a taxonomy nit. Collapsing
+   `foundation`/`foundations` also takes the root count 38 → 37, which the material registry
+   asserts.
+10. **`record.conn` flattens connection position away.** **0 of 4,363 toppers carry a bottom
+   lock** — the 1,283 that carry one carry it on the *side*. An aggregate built on `conn` would
+   advertise bottom joinery 1,283 records do not have. Also `connection|bottom`, `|left` and
+   `|right` are missing from `CONNECTION_POSITIONS`, giving 8 records phantom systems.
+11. **`QxG`'s tagged width is wrong.** `size|width` says 4; it measures 3.000 × 0.500
+   (76.20 mm exact) across 28 tiles.
+12. **Blender exports defeat header sniffing.** Several bucket files carry the ASCII string
+   `"Exported from Blender-4.0.1"` in an 80-byte header with a *binary* body. Detect format by
+   `size == 84 + 50·n`, never by sniffing for `solid`.
