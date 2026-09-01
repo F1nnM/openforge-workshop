@@ -40,29 +40,51 @@ Search, faceting and constraint resolution run in the browser.
 Verified figures, with the definition each depends on. Definitions matter: v1 of this plan
 quoted percentages whose definitions were never written down, and they did not reproduce.
 
-### Footprints — 86.9% today, 95.1% the target
+### Footprints — 91.5% today, and the remaining gap is measured
 
-**Two classifiers are in play and they disagree. This section states both, because an earlier
-draft quoted only the second and presented it as measured.**
+**This section has been wrong twice and both corrections are recorded, because the second one
+refuted a fix the plan had already scheduled on the strength of the first.**
 
-| Primitive | **Shipped classifier — what our code says today** | Research classifier — the target |
+| Primitive | Shipped classifier | Research classifier — the old "target" |
 | --- | ---: | ---: |
-| `RECT` | 3,051 (35.1%) | 42.9% |
+| `RECT` | **3,454 (39.7%)** | 42.9% |
 | `WALL_SEG` | 3,116 (35.8%) | 36.5% |
 | `ARC` | 1,391 (16.0%) | 14.1% |
-| `COLUMN` | — (not a primitive yet) | 1.6% |
-| `DIAGONAL` | — (not a primitive yet) | within wall/rect |
-| `NONE` | **1,144 (13.1%)** | 428 (4.9%) |
-| **Coverage** | **86.9%** | **95.1%** |
+| `COLUMN` | — (row W4) | 1.6% |
+| `DIAGONAL` | — (row W4) | within wall/rect |
+| `NONE` | **741 (8.5%)** | 428 (4.9%) |
+| **Coverage** | **91.5%** | 95.1% |
 
 Run [`verify-catalog-facts.py`](verify-catalog-facts.py) for the left column; it is what the
-1,276 tests assert against.
+tests assert against. The right column is kept only so the two are not conflated again.
 
-**Most of the gap is one line of code, and it was unscheduled.** `pipeline/footprint.ts` detects
-curve markers with a **substring scan**, and **742 of the 1,144 `none` tiles carry a curve marker
-but no `size|radius`** — so they are classified unplaceable by a string match rather than by
-lacking a footprint. Making that scan segment-exact is where the bulk of 86.9% → 95.1% comes
-from, and it is now its own row rather than a side effect of the tessellation work.
+**Correction 1.** An earlier draft quoted the research column alone and presented it as measured.
+It was not; our own classifier said 86.9%.
+
+**Correction 2, which matters more.** The plan then blamed the gap on one line: `hasCurveMarker`
+was a **substring scan**, and 742 of the 1,144 `none` tiles carried a curve marker but no
+`size|radius`, so making the scan segment-exact was "where the bulk of 86.9% → 95.1% comes from".
+
+**That is false, and row W3 measured it.** Every one of the five markers occurs in the corpus only
+as a whole `|`-segment. The substring scan hits 2,133 tiles and a segment-exact scan hits 2,077 —
+**the difference is exactly the 56 `hex` tiles and nothing else.** Segment-exactness reclassifies
+**zero** tiles on its own.
+
+The real signal was stated separately in the data all along: **`size|segment|<letter>`, on 319
+tiles** — "this file is one lettered piece of a design whose size token names the whole design".
+About fifty measured bounding boxes settle it. A curve with no segment letter measures its tagged
+pair exactly (`cut-stone#floor+curved.4x4` → 4.000 × 4.000). A segment measures something else,
+**and not by any derivable rule**: `8x8+b` is 4.000 × 4.000 in one design and 2.079 × 1.931 in
+another. So the pair is trustworthy exactly when there is no segment letter, and that test
+replaced the veto.
+
+That moved **403** tiles, not 742, and coverage to **91.5%**, not 95%. The other 339 cannot move
+on tags alone: 283 are fragments whose real extent only measurement supplies, and 56 are hex
+corners carrying no size tag at all. They are still `NONE`, but now for a true reason.
+
+**What remains in `NONE` (741) is a partition, asserted in the oracle:** 283 `size|segment`
+fragments, 161 carrying a tessellation code (row W4 resolves these — it was "223 of 1,144" before
+the 62 `IL+corner` cells left), and 297 with neither.
 
 Two further primitives are genuinely new: **`COLUMN`** (0.5 × 0.5, measured, ~133 tiles) and
 **`DIAGONAL`** — a right triangle for the `O`/`OA` family and a 45° wall run (`2√2 × 0.5`) for
@@ -692,9 +714,9 @@ Full detail in [`base-generator-integration.md`](base-generator-integration.md).
 
 - **Source of truth is `MasterworkTools/openforge-bases` (Apache-2.0)**, not the GPL-3
   `openforge-openscad`, which is a dormant fork of a third-party web GUI.
-- **A working generator already exists in production** at `openscad.openforge.tools`. The
-  cheapest credible v1 is to reuse it behind a `postMessage` bridge and only then decide
-  whether to own the render path.
+- **The generator is part of this app.** No second origin, no third-party service, no
+  `postMessage` bridge — the owner's stated preference, and the design follows it. The earlier
+  plan proposed reusing `openscad.openforge.tools` behind a bridge; that is superseded.
 - **Don't write a customizer parser.** OpenSCAD's WASM build emits the parameter schema via
   `--export-format=param` — verified against the real `bases.scad`, 18 parameters.
 - **Cross-origin isolation is not required.** Every shipped openscad-wasm build is
@@ -706,13 +728,64 @@ Full detail in [`base-generator-integration.md`](base-generator-integration.md).
   WASM only on a miss.
 - **Persist the recipe, never the mesh**, so share links stay small.
 
-> **Render latency is unmeasured.** OpenSCAD was not installed on any machine used for this
-> research, so no render was timed. The companion document's own §3.5 says so explicitly. A
-> v0 spike must measure it before the UX commits to auto-preview; if a 4×4 base exceeds ~3 s,
-> the design needs an explicit Generate button.
+### Render latency — measured, and the cost model was wrong three ways
 
-v1 excludes textured primary walls — they need 90 MB of blank STLs materialised before the
+Row **S2** installed both builds (`2026.01.02.wasm30347` WASM, `.ai30348` native — same day's CI
+builds, so the comparison is controlled) and timed 51 configurations at 21 renders each.
+
+**Verdict: auto-preview, debounced. No Generate button.** A 4×4 base is **437 ms median /
+481 ms p95** against the ~3 s threshold — 7× under. Nothing came within 2.5× of 3 s; the slowest
+shippable configuration is a 4×4 high dragonlock riser at 933 ms / 1.16 s p95. Debounced rather
+than live because 15 of 46 configurations exceed a 250 ms live-interaction budget on geometry
+alone.
+
+**One hard condition: `--backend=manifold` is mandatory.** WASM CGAL is **7.8 s at 2×2 and
+16.0 s at 4×4** — 5× *over* the threshold. Dropping that one flag reverses the verdict. (Current
+builds default to Manifold; the note elsewhere that the CLI help reads `'CGAL' (old/slow)
+[default]` is stale for 2026.01.02, though a pinned older build still defaults to CGAL.)
+
+**`$fn` is not a lever at all.** The plan flagged 89 `$fn=200` as the likely cost driver.
+`-D '$fn=50'`, `200` and `400` produce **byte-identical output**, because every `$fn` in the
+vendored set is a *call-site argument* rather than a top-level assignment. It cannot be tuned
+from outside without editing the vendored files, so "reduce tessellation to go faster" does not
+exist.
+
+**What actually dominates:** backend 19–35×, entry point up to 7×, lock ~1.4×, magnets 1.3–2.6×,
+and **size is nearly flat** — 1×1 to 8×8 is a *53× triangle range for 6× the time*, with
+per-1,000-triangle cost falling from 45 ms to 5 ms. The cost is the fixed CSG tree, not the
+output.
+
+That refutes §3.4's watchdog advice, which offers "drop magnets, or step the size down one" as
+the two levers that move render time. Stepping down barely helps. And **for dragonlock, dropping
+magnets is backwards**: magnets *off* yields more triangles (12,304 vs 10,976) and a slower
 render.
+
+**The triangle extrapolation was half right.** The formula `(bytes − 84)/50` is exact on 48 of 48
+meshes, but every estimate overstates triangles by a consistent **3.46–3.68×**, and the
+triangles-to-seconds mapping was one to two orders out — 8×8 grid+dragonlock was estimated at
+12–40 s and measures **705 ms**. The consistent 3.6× suggests the catalogued STLs those byte
+counts came from were generated by an older CGAL-era OpenSCAD.
+
+**The startup floor is the real split**: 281 ms on WASM against 28 ms native, which is 65–80% of a
+small render. A worker holding a compiled `WebAssembly.Module` pays it once, so the engine must be
+long-lived.
+
+**Two cautions for the panel.** Native and WASM do **not** produce identical meshes (45/48 match; a
+curved 4×4 differs by +26 triangles), so a generated base is not byte-identical to the catalogued
+STL of the same parameters and the UI must not claim it is. And `connectors.scad` at the pinned
+commit emits `Ignoring unknown variable "DUAL"` on **48 of 48** configurations — an ignored
+variable is a branch not taken, so that is part of what the default geometry is.
+
+**Still unmeasured:** a real browser. Everything above is V8 in Node, so the worker boundary and
+**iOS Safari's much lower WASM heap cap** are untested. iOS is the risk — heap growth returns
+`false` rather than throwing.
+
+Textured primary walls are excluded, permanently rather than for v1: `bases-wall-primary.scad`
+needs ~90 MB of blank texture STLs materialised before `import()`, upstream ships 36 of them at
+82.9 MiB, and a customizer enum cannot disable individual values — so shipping it with nine of ten
+options broken would be worse than not shipping it. Sculpted-texture bases have no OpenSCAD path
+at all. **Textured and sculpted bases come from the catalog's pre-generated files or not at all,
+and the UI must not imply every base is parametric.**
 
 ---
 
@@ -765,8 +838,10 @@ the thumbnail pipeline; the deployment surface. 34 PRs, 1,276 tests.
 **v2 — the target, and the end of the plan.** One series, no further deferral. Detailed in
 [`v2-pr-series.md`](v2-pr-series.md). Nine workstreams:
 
-1. **Tessellation-aware footprints** — six primitives, 95.1% placeable, curves as annular
-   sectors. Fixes the 165 tiles currently mis-shaped as arcs.
+1. **Tessellation-aware footprints** — six primitives, curves as annular sectors. Coverage is
+   **91.5% as of row W3**, not the 95.1% this plan once promised; §2 records why. The 165
+   angle-less tiles are not merely mis-swept — row W1 refused all 165 as non-sectors, so the
+   primitive is wrong for every one of them.
 2. **Tile aggregation** — one item per design, lock resolved per build, variants disclosed.
    Includes the topless tie-break defect and the positional `conn` correction.
 3. **Greyscale-then-tint previews** — luminance computed in the browser from the blue sprites,
@@ -797,12 +872,13 @@ the thumbnail pipeline; the deployment surface. 34 PRs, 1,276 tests.
 | --- | --- | --- |
 | 1 | Publisher declaration: the Workshop is a free, non-monetised community tool | Adopt it — it satisfies NC without the over-broad "never commercial" commitment |
 | 2 | Cloudflare zone admin for the cache/CORS runbook | **CORS first, cache second** — enabling edge caching before `access-control-allow-origin` is unconditional arms a cache-poisoning bug |
-| 3 | Lawyer's read on conveying OpenSCAD WASM from `scad.openforge.tools` | Worth buying; it is the one genuine legal question here |
+| 3 | Lawyer's read on bundling GPL-2 OpenSCAD WASM in-app | **Waived by the project owner.** The mechanical obligations are satisfied by construction instead: engine vendored verbatim in `vendor/`, complete unmodified licence text, a written source offer naming the exact release, its own dynamically-imported chunk, nothing relicensed |
 | 4 | Ask Devon for a per-file licence header on `openforge-bases` | Apache-2.0 is declared at repo level; a header removes doubt |
-| 5 | Run the 106 GB bbox pass? | **No.** Nothing in v1 or v1.1 needs it |
+| 5 | Run the bbox pass? | **Run, and done.** v2 needs it: row W1 measured 1,163 meshes exactly, 11.05 GB read in 33 minutes. Not 106 GB, because only the tiles the tags cannot describe were read. R2 charges no egress, so it cost wall-clock rather than money |
 
-Items 2 and 5 are the only ones touching existing OpenForge infrastructure. Item 5 is
-declined, so item 2 is the only operational ask.
+Items 2 and 5 are the only ones touching existing OpenForge infrastructure. Item 5 is done
+(11.05 GB of free-egress reads, ~2,400 Class B operations, no load on the Lambda or the
+database), so item 2 is the only remaining operational ask.
 
 ---
 
@@ -819,12 +895,29 @@ declined, so item 2 is the only operational ask.
    orders of magnitude depending on the answer. §5.
 4. **Three.js is pinned by `postprocessing` to `<0.186.0`.** Upgrading is a coordinated event
    across three packages, and `resolve.dedupe: ['three']` is mandatory.
-5. **Tag drift.** `texture|towne|stone-stucco` and `texture|towne|stucco-stone` are one
-   material tagged twice with the words reversed, and both also exist as four-segment
-   variants. A normalisation layer sits between fixtures and UI.
+5. **Tag drift — and this entry's premise was wrong.** It claimed
+   `texture|towne|stone-stucco` (72) and `texture|towne|stucco-stone` (72) are one material
+   tagged twice with the words reversed. **They are not.** Row D3 measured a perfect 1:1 mirror
+   over 72 shape keys: the two files sit in the same directory with different md5s and
+   different byte sizes. They are 158 separately printable models with the two wall courses
+   swapped, and the same holds for the four-segment pair over 7 shape keys. Collapsing those
+   tags would have erased a real distinction.
+   The defect was real but elsewhere: all four spellings mapped to *two* material families, and
+   a renderer with one colour per tile cannot draw course order, so a per-spelling family
+   encoded a distinction it cannot express and was wrong half the time. Fixed in the mapping.
+   The only genuine drift was `foundation` (51) / `foundations` (2), collapsed on the way in —
+   roots 38 → 37 across all tags, 37 → 36 in first position, and the registry deliberately
+   still maps 38 as the raw-fixture fallback.
 6. **Bus factor of one upstream.** `openforge-openscad` has 13 commits, all Devon's, dormant
    10 months; its own upstream is dormant since 2024.
-7. **The base auto-insert picks topless bases.** `assemblyIndex.byCost` sorts candidates
+7. **Closed by row D1: topless auto-inserts under openlock went 79.1% → 0.** Ranking now keys on
+   suitability, with the print option graded and outranked only by the lock, so a topless base can
+   win only where every plainer candidate lacks the lock — 3 cases corpus-wide, all magnetic, all
+   disclosed in the note. One sub-claim below was wrong: reachable bases do *not* simply rise.
+   The raw count under openlock **falls 110 → 109**, because two candidate sets converged on a
+   base a third already reached; what widens is the product range, full bases 18 → 109. Original
+   entry follows.
+   **The base auto-insert picks topless bases.** `assemblyIndex.byCost` sorts candidates
    bytes-ascending, so the smallest wins every tie — and under openlock **79.1% of
    auto-inserted bases are `topless`** (magnetic 43.0%, dragonlock 0.1%). A topless base has no
    top surface: it is a different *product*, not a cheaper print, and it is currently chosen
@@ -836,31 +929,57 @@ declined, so item 2 is the only operational ask.
    footprint-congruence fallback catches them and the mismatch is **latent, not live**. It
    becomes live the moment a base with code `O` is added. Guard it with a test rather than a
    comment.
-9. **165 arc tiles have no angle, and the importer fabricates one.**
-   `DEFAULT_ARC_SWEEP_DEG = 90` invents a sweep for 84 `xG` pieces (which measure as straight
-   walls) plus 81 others. Separately, **292 of 1,391 arc tiles carry no band modifier**, so the
-   annular-sector rule cannot be applied to them without measurement. *An earlier version of
-   this risk blamed radius 3 and the 60/120/240/270/300 angles; measured, those tiles never enter
-   the arc path at all — see §2.*
-13. **The plan's footprint percentages and the shipped classifier's disagree by 742 tiles**, and
-   the gap is a substring curve-marker scan rather than missing data. §2 states both columns.
-   Reconciling them is scheduled, not incidental.
-14. **`hasCurveMarker` cannot be made segment-exact casually.** `pipeline/footprint.ts:18-21`
-   records that doing so *"would move the NONE bucket and break the plan's numbers"* — which is
-   exactly the reconciliation above, and exactly why it needs its own row with the oracle and the
-   corpus test in the same diff.
-15. **Tag drift is now load-bearing rather than cosmetic.** `texture|towne|stone-stucco` (72) and
-   `texture|towne|stucco-stone` (72) are one material, and `src/materials/mapping.ts` maps them to
-   **two different families** — `cut_stone` and `stucco`. Once previews are tinted from the family,
-   that is a visible wrong colour on 144 tiles, not a taxonomy nit. Collapsing
-   `foundation`/`foundations` also takes the root count 38 → 37, which the material registry
-   asserts.
-10. **`record.conn` flattens connection position away.** **0 of 4,363 toppers carry a bottom
+9. **165 arc tiles have no angle — and row W1 found the primitive is wrong for every one.**
+   All 165 were refused by the annular-sector fitter, so `DEFAULT_ARC_SWEEP_DEG = 90` does not
+   merely invent the wrong *number*: none of these tiles is a sector at all. 84 are the `xG`
+   straight walls; the other 81 are `inverted` complements (40) — a square plate with a curved
+   *cut*, whose tagged pair matches its box exactly — plus `lintel` (6) and
+   `riser+curved+inverted` (20).
+10. **Closed by row D2.** Position is preserved as a parallel projection, with the flat reading
+   derived from it so the two cannot drift; the vocabulary went 10 systems → 7, and the verifier
+   now fails if any system is ever named after a position. Original entry follows.
+   **`record.conn` flattens connection position away.** **0 of 4,363 toppers carry a bottom
    lock** — the 1,283 that carry one carry it on the *side*. An aggregate built on `conn` would
    advertise bottom joinery 1,283 records do not have. Also `connection|bottom`, `|left` and
    `|right` are missing from `CONNECTION_POSITIONS`, giving 8 records phantom systems.
-11. **`QxG`'s tagged width is wrong.** `size|width` says 4; it measures 3.000 × 0.500
-   (76.20 mm exact) across 28 tiles.
-12. **Blender exports defeat header sniffing.** Several bucket files carry the ASCII string
+11. **Confirmed and closed by row W1, across all 84 tiles rather than one sample.** `QxG`'s
+   `size|width` says 4 and it measures **3.000 × 0.500** — wrong by a full unit, and 3.000 is an
+   exact 76.20 mm multiple rather than a texture artefact. `AxG` measures 1.991 × 0.500 and
+   `BAxG` 1.547 × 0.500, both plausibly real interface cuts. **Zero annular sectors among the
+   84**, so de-arcing them is measured rather than assumed.
+12. **Already closed in code, confirmed by row W1.** `detectStlFormat` and the rest of the STL
+   parser were already exported and already size-based, so the edit this risk implied was
+   unnecessary. Original entry follows.
+   **Blender exports defeat header sniffing.** Several bucket files carry the ASCII string
    `"Exported from Blender-4.0.1"` in an 80-byte header with a *binary* body. Detect format by
    `size == 84 + 50·n`, never by sniffing for `solid`.
+13. **Closed, and the diagnosis was wrong.** The plan's footprint percentages did disagree with
+   the shipped classifier, but the gap was **not** the substring curve-marker scan: a
+   segment-exact scan reclassifies **zero** tiles, and the 742 figure was the whole
+   marker-vetoed population rather than a movable one. The real discriminator was
+   `size|segment|<letter>`, and it moved **403** tiles to 91.5% coverage. See §2.
+14. **Closed, and the code comment it quoted was false.** `pipeline/footprint.ts` claimed making
+   `hasCurveMarker` segment-exact *"would move the NONE bucket and break the plan's numbers"*.
+   Measured: the substring scan hits 2,133 tiles and a segment-exact scan 2,077, and **the
+   difference is exactly the 56 `hex` tiles**. Every marker occurs in the corpus only as a whole
+   segment. The comment discouraged a change that costs nothing, and the plan believed it.
+   `hasCurveMarker` is now segment-exact with no production caller, kept as the flag saying a
+   `rect` is an axis-aligned over-approximation of a sector.
+15. **Closed — see item 5, which corrects the premise both entries shared.** The wrong colour on
+   144 tiles was real and is fixed, but not by collapsing the tags: the two spellings name
+   *different meshes*. Roots went 38 → 37 across all tags and 37 → 36 in first position, and the
+   registry still maps 38 on purpose.
+16. **The bucket's ETag is not the md5 for most of the corpus.** Above R2's 8 MiB part size it
+   is the S3 *multipart* digest, which no arithmetic converts to an md5 — and **4,884 of 8,353
+   blobs (58.5%)** are above it. Rows G1 and W1 measured this independently. So integrity checks
+   hash **content**, never the header, and exposing `Access-Control-Expose-Headers: ETag` would
+   let the browser verify only the small objects. Still worth setting; it is not the check this
+   plan assumed.
+17. **Strided range-reads do not save anything on this corpus.** A binary STL facet is 50 bytes,
+   so any stride below about 1,310 coalesces back into a whole-object read at 64 KiB granularity —
+   98.6% of the transfer. The one stride that does save bytes is out by **141.55 mm**. The plan's
+   "~13 GB, sub-0.03 mm" was not jointly achievable, and row W1 read whole objects instead: 11.05
+   GB, exact, 33 minutes, no egress charge.
+18. **Measured bucket throughput is 3.4–11.4 MB/s single-stream**, 7.2–11.0 MB/s aggregate at
+   concurrency 8 — not the 1.2 MB/s an early single-object probe suggested, which had the TLS
+   handshake folded in.
