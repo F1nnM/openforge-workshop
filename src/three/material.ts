@@ -38,6 +38,29 @@
  * error beyond a black mesh), so acquisition is counted and the GPU program is
  * released only when the last holder lets go.
  *
+ * ## `side` is an option, and the default is the one the detail viewer needs
+ *
+ * A single-model viewer can afford both faces: a flipped facet in an exported
+ * STL then reads as a facet rather than as a hole through the tile, and this
+ * corpus has flipped facets. A **room** cannot: every back face is a second
+ * shaded fragment, and there are forty tiles in the frame rather than one.
+ *
+ * There is a correctness half as well, and it is the stronger argument. Under
+ * `flatShading` three takes the `FLAT_SHADED` branch of
+ * `normal_fragment_begin.glsl.js`, which derives the normal as
+ * `normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)))` — and, unlike the
+ * smooth branch next to it, **does not multiply by `faceDirection`**. So a back
+ * face rendered under `DoubleSide` is lit with the front face's normal: the
+ * inside of a wall picks up a highlight where it should be in shadow.
+ * `material.test.ts` asserts that shader fact against the installed three rather
+ * than quoting it here.
+ *
+ * So {@link acquireMaterial} takes a `side`, the cache key carries it, and the
+ * default stays `DoubleSide` — the detail viewer keeps the material it was tuned
+ * with, and a consumer that wants front faces asks for them. **Mutating the
+ * shared material instead would corrupt the detail viewer**, which is why
+ * `BuilderRoom.tsx` reported this rather than doing it.
+ *
  * ## Transmission is approximated, and said so
  *
  * Two of the sixteen families are transmissive — water 0.6 and ice 0.75.
@@ -46,13 +69,25 @@
  * mostly-opaque tile that is a poor trade, so transmission is rendered as
  * partial opacity, which reads correctly at tile scale and costs one blend.
  */
-import { Color, DoubleSide, MeshStandardMaterial } from 'three'
+import type { Side } from 'three'
+import { BackSide, Color, DoubleSide, FrontSide, MeshStandardMaterial } from 'three'
 
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
 
 /** How much of a family's `transmission` becomes transparency. */
 const TRANSMISSION_TO_ALPHA = 0.55
+
+/**
+ * Which faces to shade. Defaults to `DoubleSide` — see the module note.
+ *
+ * An object rather than a bare argument so a second knob can be added without
+ * every call site changing, and so a call reads `{ side: FrontSide }` rather
+ * than a naked `0` at the end of an argument list.
+ */
+export interface MaterialOptions {
+  readonly side?: Side
+}
 
 interface Entry {
   readonly material: MeshStandardMaterial
@@ -62,32 +97,66 @@ interface Entry {
 const cache = new Map<string, Entry>()
 
 /**
+ * The cache key: the registry's variant, then the face mode.
+ *
+ * `Resolution.variantKey` is the registry's stated key and would be the whole
+ * story if there were one material per resolution. There are up to three, and
+ * they are *different GPU programs* — so the face mode is part of the key, or a
+ * room asking for front faces would be handed the drawer's double-sided material
+ * and quietly change what the drawer is showing.
+ *
+ * `\u0000` as the delimiter, written as an escape: it cannot occur in a variant
+ * key, which is what makes it the right delimiter, and
+ * `tools/hygiene/source.test.ts` fails the build on the literal byte.
+ */
+function cacheKey(resolution: Resolution, side: Side): string {
+  return `${resolution.variantKey}\u0000${sideName(side)}`
+}
+
+/** `DoubleSide` → `'double'`. For the key, and for reading it in a debugger. */
+function sideName(side: Side): string {
+  if (side === FrontSide) return 'front'
+  if (side === BackSide) return 'back'
+  if (side === DoubleSide) return 'double'
+  return String(side)
+}
+
+/**
  * The shared material for a resolution, with the caller counted as a holder.
  *
- * Pair every call with {@link releaseMaterial}.
+ * Pair every call with {@link releaseMaterial}, passing it the same options —
+ * they are part of the cache key, so releasing with a different `side` releases
+ * a different material.
  */
-export function acquireMaterial(resolution: Resolution): MeshStandardMaterial {
-  const existing = cache.get(resolution.variantKey)
+export function acquireMaterial(
+  resolution: Resolution,
+  options: MaterialOptions = {},
+): MeshStandardMaterial {
+  const side = options.side ?? DoubleSide
+  const key = cacheKey(resolution, side)
+
+  const existing = cache.get(key)
   if (existing !== undefined) {
     existing.holders += 1
     return existing.material
   }
 
-  const material = buildMaterial(resolution)
-  cache.set(resolution.variantKey, { material, holders: 1 })
+  const material = buildMaterial(resolution, side)
+  cache.set(key, { material, holders: 1 })
   return material
 }
 
 /** Drop one holder; dispose when the last one goes. Returns true if it disposed. */
-export function releaseMaterial(resolution: Resolution): boolean {
-  const entry = cache.get(resolution.variantKey)
+export function releaseMaterial(resolution: Resolution, options: MaterialOptions = {}): boolean {
+  const key = cacheKey(resolution, options.side ?? DoubleSide)
+  const entry = cache.get(key)
   if (entry === undefined) return false
 
   entry.holders -= 1
   if (entry.holders > 0) return false
 
   entry.material.dispose()
-  cache.delete(resolution.variantKey)
+  cache.delete(key)
   return true
 }
 
@@ -112,7 +181,7 @@ export function clearMaterialCache(): void {
   cache.clear()
 }
 
-function buildMaterial(resolution: Resolution): MeshStandardMaterial {
+function buildMaterial(resolution: Resolution, side: Side): MeshStandardMaterial {
   const { family, finish } = resolution
 
   const material = new MeshStandardMaterial({
@@ -126,9 +195,9 @@ function buildMaterial(resolution: Resolution): MeshStandardMaterial {
     // normals (geometry.ts); setting it here as well makes it independent of
     // whoever hands this material a geometry next.
     flatShading: true,
-    // A single-model viewer can afford both faces, and a flipped facet in an
-    // exported STL then reads as a facet rather than as a hole through the tile.
-    side: DoubleSide,
+    // See the module note. `DoubleSide` for one model, `FrontSide` for a room:
+    // half the fragments, and no back face lit by a front face's normal.
+    side,
   })
 
   if (finish.transmission > 0) {

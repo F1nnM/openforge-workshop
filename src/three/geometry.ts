@@ -48,10 +48,16 @@ import { BufferAttribute, BufferGeometry, Box3, Sphere, Vector3 } from 'three'
 
 import { GRID_UNIT_MM } from '@/catalog'
 
+import { VIEW_RADIUS } from './frame'
 import type { ParsedStl } from './stl/parse'
 
-/** Bounding-sphere radius every model is scaled to. The AO radius is tuned against it. */
-export const VIEW_RADIUS = 1
+/*
+   Re-exported rather than declared, because a second surface needs it without a
+   renderer: `subjects.ts` and `SharedPreview.tsx` are on the eager side of the
+   lazy boundary and this module imports three.js. `frame.ts` holds the number;
+   every existing importer of `VIEW_RADIUS` from here keeps working.
+*/
+export { VIEW_RADIUS } from './frame'
 
 export interface ModelGeometry {
   readonly geometry: BufferGeometry
