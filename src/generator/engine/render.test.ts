@@ -15,18 +15,26 @@
  * - the geometry's refusal path emits an `ERROR:` with **no mesh and no non-zero
  *   status**, which is the failure a client has to detect by looking.
  *
+ * A fifth claim is checked here rather than timed: that a per-render boot does
+ * **no compilation at all**. `WebAssembly` is instrumented below so the count is
+ * a fact rather than an inference from a stopwatch — see
+ * {@link compilations}, and the boot test for what the stopwatch version cost.
+ *
  * **No network.** `loadEngine` reads `vendor/openscad-wasm/openscad.wasm` off
  * disk; the worker's `fetchEngine` is the only thing that ever fetches, and it
  * is not used here.
  *
- * It costs about a second and a half. That is the price of the only test in the
+ * It costs about **1.7 s**, of which the boot comparison is **0.6 s** — eight
+ * renders for a best-of-N floor and two boots that compile, which is what buying
+ * a timing claim out of a race costs. That is the price of the only test in the
  * suite that can tell a working engine from a plausible one.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 
+import OpenSCAD from '../../../vendor/openscad-wasm/openscad.js'
 import { OUTPUT_PATH, SCHEMA_PATH, renderArgs, schemaArgs } from './args'
 import { classifyOutput } from './diagnostics'
 import { md5 } from './md5'
@@ -38,8 +46,66 @@ import { ENGINE_BYTES, ENGINE_SHA256, ENGINE_SOURCE_COMMIT, ENGINE_VERSION, veri
 const BINARY = fileURLToPath(new URL('../../../vendor/openscad-wasm/openscad.wasm', import.meta.url))
 const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url))
 
-/** How many times the binary was read. Proves the compile is not repeated. */
+/** How many times the binary was read. */
 let loads = 0
+
+/**
+ * How many times anything in this process turned wasm bytes into code.
+ *
+ * **`loads` alone cannot establish "compiles once", and that gap is not
+ * theoretical.** `loads` counts calls to `loadEngine`, and `createRuntime` makes
+ * exactly one whatever happens afterwards. So if the `instantiateWasm` override
+ * were dropped, Emscripten would obtain the bytes its own way and recompile
+ * 10.5 MB on every boot — and `loads` would still read 1.
+ *
+ * So the four entry points that compile are counted instead. Instantiating a
+ * `WebAssembly.Module` reuses compiled code and is deliberately **not** counted;
+ * instantiating a `BufferSource` compiles it and is. That distinction is the
+ * whole claim.
+ *
+ * Patched at module scope, before the runtime is built, so the runtime's own
+ * compile lands in the count. Vitest isolates each test file, so nothing outside
+ * this file sees the patch; it is restored in `afterAll` regardless.
+ */
+let compilations = 0
+
+const nativeWasm = {
+  compile: WebAssembly.compile,
+  compileStreaming: WebAssembly.compileStreaming,
+  instantiate: WebAssembly.instantiate,
+  instantiateStreaming: WebAssembly.instantiateStreaming,
+}
+
+WebAssembly.compile = (bytes: BufferSource) => {
+  compilations += 1
+  return nativeWasm.compile(bytes)
+}
+
+WebAssembly.compileStreaming = (source: Response | PromiseLike<Response>) => {
+  compilations += 1
+  return nativeWasm.compileStreaming(source)
+}
+
+WebAssembly.instantiate = ((source: WebAssembly.Module | BufferSource, imports?: WebAssembly.Imports) => {
+  if (!(source instanceof WebAssembly.Module)) compilations += 1
+  const call = nativeWasm.instantiate as (
+    source: WebAssembly.Module | BufferSource,
+    imports?: WebAssembly.Imports,
+  ) => Promise<unknown>
+  return call(source, imports)
+}) as typeof WebAssembly.instantiate
+
+WebAssembly.instantiateStreaming = (source: Response | PromiseLike<Response>, imports?: WebAssembly.Imports) => {
+  compilations += 1
+  return nativeWasm.instantiateStreaming(source, imports)
+}
+
+afterAll(() => {
+  WebAssembly.compile = nativeWasm.compile
+  WebAssembly.compileStreaming = nativeWasm.compileStreaming
+  WebAssembly.instantiate = nativeWasm.instantiate
+  WebAssembly.instantiateStreaming = nativeWasm.instantiateStreaming
+})
 
 /** One runtime for the file, which is exactly the arrangement being tested. */
 const engine: Promise<EngineRuntime> = createRuntime({
@@ -49,9 +115,19 @@ const engine: Promise<EngineRuntime> = createRuntime({
   },
 })
 
+/**
+ * Every per-render boot this file has paid, in ms.
+ *
+ * Collected so the boot test can take a **best-of-N** rather than sampling one
+ * render. A boot is a few milliseconds of real work, so under whole-suite load a
+ * single sample is mostly scheduler noise; the floor is not.
+ */
+const boots: number[] = []
+
 const stl = async (parameters: Record<string, number | string>) => {
   const runtime = await engine
   const result = await runtime.run(renderArgs({ entry: 'bases-square.scad', parameters }), [OUTPUT_PATH])
+  boots.push(result.bootMs)
   return { ...result, mesh: result.outputs.get(OUTPUT_PATH), diagnostics: classifyOutput(result.output) }
 }
 
@@ -105,21 +181,90 @@ describe('the vendored engine, run', () => {
     await stl({ x: 1, y: 1 })
     await stl({ x: 1, y: 2 })
     expect(runtime.runs).toBe(before + 2)
-    // S2's 281 ms startup floor is paid by `WebAssembly.compile`. One load, one
-    // compile, many renders — this is the reuse claim as a number.
+    // One load, one compile, many renders — the reuse claim as two numbers.
+    // Both are needed: `loads` catches a second *read* of the binary, and
+    // `compilations` catches a second *compile* of bytes this file never read,
+    // which is what dropping `instantiateWasm` would actually do. See
+    // {@link compilations}.
     expect(loads).toBe(1)
+    expect(compilations).toBe(1)
   }, 60_000)
 
-  it('pays a per-render boot far smaller than a fresh compile', async () => {
+  it('pays a per-render boot far smaller than a boot that has to compile', async () => {
     // A fresh instance is unavoidable — OpenSCAD's `main` is not re-entrant — but
     // it instantiates from the cached module rather than recompiling, so it is
-    // cheap. Asserted as a ratio rather than a wall-clock number, because the
-    // absolute figures belong in the PR body and are machine-dependent.
+    // cheap. This is that claim, measured.
+    //
+    // ── Why it is no longer `bootMs < runtime.compileMs` ─────────────────────
+    //
+    // It was, and it was a race: row C3 measured it failing **1 of 4 whole-suite
+    // runs** while passing 12 of 12 in isolation. Two reasons, and the first is a
+    // wrong premise rather than bad luck.
+    //
+    // `compileMs` is one `WebAssembly.compile` of the 10.5 MB module, which on V8
+    // is **16.5–18.5 ms** — it is *not* S2's 281 ms, which was a whole `openscad`
+    // process floor. So the old assertion set a ~6 ms boot against a ~17 ms
+    // compile: a 2.5× margin, not the order of magnitude its name claimed. And
+    // the first boot of a process is the dearest one (19–22 ms in isolation),
+    // so on a cold file it inverts outright.
+    //
+    // Then both numbers are wall clock in one process. Under whole-suite load
+    // `compileMs` inflates to 43–124 ms but individual boots spike to 44–51 ms,
+    // and **1 of 32 sampled boots exceeded its own run's `compileMs`** — while the
+    // *floor* over the file's boots stayed inside **8.1–11.9 ms** across 21
+    // whole-suite runs. The signal was never in a single sample.
+    //
+    // ── What this asserts instead ───────────────────────────────────────────
+    //
+    // The comparison is against what reuse actually saves: a boot that compiles.
+    // That is not hypothetical — it is precisely what this module does if the
+    // `instantiateWasm` override is dropped — so it is booted here for real,
+    // through Emscripten's own path.
+    //
+    // It behaves far better than a ratio between two unrelated clocks, because
+    // the dear side does *strictly more work in the same process*: the same
+    // instantiation, plus the compile. Contention inflates it at least as much as
+    // it inflates a cached boot, so load makes this test pass more easily rather
+    // than less. The cheap side is the minimum over every boot the file has paid,
+    // so one descheduled render cannot break it. The measured ratio is **6.1×** in
+    // isolation and **7.3–13.8× over 17 whole-suite runs** — it *widens* under
+    // contention, which is the whole point; the assertion demands only 2×.
     const runtime = await engine
-    const result = await stl({ x: 2, y: 2 })
-    expect(result.bootMs).toBeLessThan(runtime.compileMs)
-    expect(result.runMs).toBeGreaterThan(0)
-  }, 60_000)
+    for (let i = 0; i < 8; i += 1) await stl({ x: 2, y: 2 })
+
+    const selfCompiling: number[] = []
+    for (let i = 0; i < 2; i += 1) {
+      const before = compilations
+      const started = performance.now()
+      await OpenSCAD({
+        noInitialRun: true,
+        wasmBinary: new Uint8Array(readFileSync(BINARY)),
+        print: () => undefined,
+        printErr: () => undefined,
+      })
+      selfCompiling.push(performance.now() - started)
+      // **This is what stops the count above being a vacuous guard.** Emscripten's
+      // own boot path reaches `WebAssembly.instantiate(bytes, imports)`, the
+      // instrumentation sees it, and `compilations` moves — so the assertion that
+      // it *stays* at 1 across renders is one that can fail, demonstrated in the
+      // same file rather than asserted about.
+      expect(compilations - before).toBeGreaterThan(0)
+    }
+
+    const cached = Math.min(...boots)
+    const compiling = Math.min(...selfCompiling)
+    // `process.stdout.write`, not `console.log`, so the figures survive the
+    // default reporter and land in every CI log — the convention
+    // `src/search/corpus.test.ts` set.
+    process.stdout.write(
+      `\n[engine] compile ${runtime.compileMs.toFixed(1)} ms · cached boot floor ${cached.toFixed(1)} ms of ` +
+        `${String(boots.length)} · self-compiling boot ${selfCompiling.map((ms) => ms.toFixed(1)).join(' / ')} ms\n`,
+    )
+
+    expect(boots.length).toBeGreaterThanOrEqual(8)
+    expect(cached * 2).toBeLessThan(compiling)
+    expect((await stl({ x: 2, y: 2 })).runMs).toBeGreaterThan(0)
+  }, 120_000)
 
   it('produces a digest that matches an independent md5 of the same bytes', async () => {
     // Ties the browser-side MD5 to the thing the catalog's addresses mean.

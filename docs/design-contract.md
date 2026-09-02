@@ -94,8 +94,20 @@ There is no deny/exclude state and no hierarchy.
 **Grid** — search input (max 520px) + live result count; cards at
 `repeat(auto-fill, minmax(215px, 1fr))`, 16px gap. Each card:
 4:3 thumbnail well, title, a mono size chip, texture set name, mono file size,
-optional tag chips (behind a `showTags` prop, default off), and a full-width
-"+ Add to library" / "✓ In library" toggle button.
+a tag row, and a full-width "+ Add to library" / "✓ In library" toggle button.
+
+**The tag row ships, and it has no `showTags` prop** (row X2). This section specified one,
+defaulting off; it is deliberately not implemented. `TileCard` has exactly one call site,
+which would always pass it, and defaulting it off would ship the indistinguishable cards
+the row exists to fix — with the row on, row A3's last **21** name-collision groups (45
+items) close to **0**, because every discriminator left is a 3- or 4-segment `interface|`
+or `shape|` tag against a 2-segment neighbour. The row draws on **79** labels corpus-wide
+and is **always rendered**, empty on 1,044 of 3,822 items, because `VirtuosoGrid` assumes a
+uniform item height; it carries no `aria-label` when empty. Chips are leaves only, never `size|` or `connection|`, and never a
+label the title, texture line or size chip already says — X2 measured that without that last
+rule the commonest chip in the corpus is `shape|wall` reading "Wall" beside 1,489 titles
+that already contain "Wall". The 1,044, the 21→0 and the 79 labels are asserted in
+`src/screens/catalog/corpus.test.ts`; the 1,489 is X2's measurement, not a live invariant.
 
 Empty state: *"Nothing in the organized archive matches."* with a note that untagged
 tiles exist in storage but are not yet reachable.
@@ -140,10 +152,14 @@ and a caption stating the demo downloads a manifest while production bundles a z
 - A 2×2 spec grid: **Footprint**, **Height**, **Build system**, **File** (STL · MB).
 - **Storage address** in mono, shown in the secondary accent — the design deliberately
   surfaces the raw archive URL.
-- Tag chips. **Still unimplemented** — row X2 owns them, and row A3 measured that a tag chip is
-  the only thing left that separates the final 21 name-collision groups (45 items). Every other
-  field on a card fails: texture and the size chip separate **nothing**, because the display name
-  is synthesised from those very tags.
+- Tag chips. **Implemented — and they always were, here.** The drawer renders *every* tag the
+  catalog resolves for the shown variant, as `.of-detail-tags` chips, and has since row 13.
+  What was unimplemented were §2.2's chips, on the *card*: that is where A3's measurement
+  applied (a tag chip is the only field left that separates the final 21 name-collision
+  groups, 45 items, because texture and the size chip separate **nothing** — the display name
+  is synthesised from those very tags), and row X2 closed it to 0 there. This drawer list is
+  the unfiltered fallback behind the card's three-rule selection: full paths, no width budget,
+  nothing suppressed.
 - ~~"Other sizes in this family" — variant buttons that swap the drawer's subject.~~
   **Superseded, and deliberately not reimplemented.** This was built in v1 as `familyVariants`,
   grouping by `record.family` across 1,130 folders. Row A4 established that the drawer resolves
@@ -229,9 +245,21 @@ must solve the tension that physically-correct stone albedos are all near-identi
 desaturated greys, which would defeat the purpose. Resolved mapping, shading recipe and
 fallback rules live in `texture-materials.md` / `texture-materials.draft.ts`.
 
-Note the knock-on: catalog grid cards are served by pre-rendered **greyscale sprite
-sheets** already in the bucket, while the live 3D views would be coloured. That
-inconsistency needs an explicit decision.
+Note the knock-on: catalog grid cards are served by pre-rendered sprite sheets already in
+the bucket, while the live 3D views are coloured. **Those sheets are not greyscale — they
+are blue.** `stl-thumb` renders in a default blue Phong material (ambient `#002142`,
+diffuse peaking `#3375c8`), and 99.8% of opaque pixels are non-neutral over 2,105,442
+decoded from 69 live sheets.
+
+**The decision this asked for has been taken, and the inconsistency is closed rather than
+accepted.** Row P1 tints the existing sheets in the browser: every opaque pixel is
+`ambient + s·diffuse + k·specular` with a white specular, the two terms un-mix exactly, and
+re-mixing them with the family's own Phong triple composes to one `feColorMatrix` per
+material — the same renderer, re-lit, not a wash over a render. Grid cards and 3D views are
+now drawn from the same sixteen families; every card already goes through a tint matrix,
+and which family it asks for is row P3's remaining wiring. See architecture-plan.md §8 for
+the pipeline half of the answer (a desaturated `/thumbs/` derivative) and
+`src/materials/tint.ts` for the display half.
 
 ---
 

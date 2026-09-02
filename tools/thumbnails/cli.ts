@@ -83,7 +83,7 @@ const USAGE = `Usage: npm run thumbs -- [options]
   --frame N         sheet frame to crop (default the index's defaultFrame)
   --size N          output edge in px (default ${String(THUMB_SIZE)})
   --quality N       WebP quality (default ${String(THUMB_QUALITY)})
-  --tone blue|neutral   keep the renderer's blue, or convert to Rec.709 luma
+  --tone blue|neutral   keep the renderer's blue, or desaturate (default)
   --force           re-encode objects that already exist
   --concurrency N   requests in flight (default 2 — this is a production bucket)
   --no-colour       skip the chroma measurement (one fewer decode per sheet)
