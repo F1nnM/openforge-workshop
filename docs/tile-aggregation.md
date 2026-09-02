@@ -322,9 +322,19 @@ Three tiers, each strictly containing the previous:
 
 | Lock | tier 1: integrated variant offers it | tier 2: + a matched base carries it | tier 3: + *some* base, wrong system | unreachable |
 | --- | ---: | ---: | ---: | ---: |
-| **openlock** | 1,497 (39.2%) | **3,199 (83.7%)** | 3,199 (83.7%) | 623 (16.3%) |
-| **dragonlock** | 359 (9.4%) | **2,928 (76.6%)** | 2,930 (76.7%) | 892 (23.3%) |
-| **magnetic** | 255 (6.7%) | **2,818 (73.7%)** | 2,830 (74.0%) | 992 (26.0%) |
+| **openlock** | 1,497 (39.2%) | **3,375 (88.3%)** | 3,375 (88.3%) | 447 (11.7%) |
+| **dragonlock** | 359 (9.4%) | **3,118 (81.6%)** | 3,118 (81.6%) | 704 (18.4%) |
+| **magnetic** | 255 (6.7%) | **3,008 (78.7%)** | 3,020 (79.0%) | 814 (21.3%) |
+
+> **This table has moved twice since it was written, and the movement is worth more than the
+> numbers.** As researched it read 3,199 / 2,928 / 2,818 (83.7 / 76.6 / 73.7); row A1 measured
+> 3,352 / 3,087 / 2,977; row A7 measures the figures above and confirmed them
+> definition-independent — three separate readings of "buildable" return them exactly.
+>
+> **The fixtures never changed.** It is the same pinned commit throughout. *The pipeline*
+> changed underneath: rows W3 and W4 gave 403 and then 249 more tiles a usable footprint, so
+> more toppers resolve a congruent base, and every one of those gains lands in tier 2. Row W7
+> now guards these figures in the verifier for exactly this reason.
 
 - tier 1 = a self-sufficient variant — `integral` or `base` — carries that lock on its own
   bottom: print one part, done. (Bases are included because a base needs no base; that is why
@@ -332,7 +342,7 @@ Three tiers, each strictly containing the previous:
 - tier 2 = tier 1, or a topper variant whose matched base family contains a base carrying it.
 - tier 3 = tier 2, or a topper that gets a base in *another* system — a defect the bill flags.
 
-**Tier-2 spread is 10.0 percentage points.** Compare §2's per-design figure of 40.2 pp
+**Tier-2 spread is 9.6 percentage points.** Compare §2's per-design figure of 40.2 pp
 (openlock 99.9% / dragonlock 74.7% / magnetic 59.7%), which this script reproduces exactly on
 the same 3,822 groups. The two are different questions and both are correct:
 
@@ -342,10 +352,10 @@ the same 3,822 groups. The two are different questions and both are correct:
   an actual resolution, and which the auto-inserted base satisfies for a design that mentions
   no lock at all.
 
-The direction of travel is the interesting part: **openlock falls (99.9% → 83.7%) because
-tier 2 refuses to count designs it cannot actually resolve, and magnetic rises (59.7% → 73.7%)
+The direction of travel is the interesting part: **openlock falls (99.9% → 88.3%) because
+tier 2 refuses to count designs it cannot actually resolve, and magnetic rises (59.7% → 78.7%)
 because the base fallback supplies magnetic where the tile itself has none.** Aggregation plus
-auto-base is what turns a 40-point penalty for choosing magnetic into a 10-point one. That is
+auto-base is what turns a 40-point penalty for choosing magnetic into a ten-point one. That is
 the argument for building this. (Using bottom-position locks under §2's own definition gives
 100.0 / 70.2 / 67.5, a 32.5 pp spread — so roughly a fifth of the narrowing is the positional
 fix and the rest is the base fallback.)
