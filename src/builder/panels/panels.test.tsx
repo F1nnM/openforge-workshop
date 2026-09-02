@@ -566,7 +566,14 @@ function gapCatalog(): CatalogFile {
         layer: 'topper',
         texture: 'towne',
         tags: [tag('connection|openforge')],
-        foot: { shape: 'rect', w: 2, d: 2 },
+        // 3x3 rather than 2x2: row D4 keys base matching on the resolved
+        // primitive rather than the size code, and the shared fixture already
+        // holds a *plain* 2x2 base. Under a congruence join that plain base
+        // legitimately outscores the topless one, so this case stopped being
+        // "the only base is the topless print" and `base-option-chosen`
+        // correctly did not fire. The fixture was relying on the size code being
+        // the key. 3x3 is a primitive no other fixture base shares.
+        foot: { shape: 'rect', w: 3, d: 3 },
         sizeCode: 'T',
       },
       {
@@ -584,7 +591,8 @@ function gapCatalog(): CatalogFile {
         layer: 'base',
         texture: 'plain',
         tags: [tag('shape|base'), tag('connection|openlock|topless')],
-        foot: { shape: 'rect', w: 2, d: 2 },
+        // Matches the topper above, and nothing else in either fixture set.
+        foot: { shape: 'rect', w: 3, d: 3 },
         sizeCode: 'T',
       },
     ],

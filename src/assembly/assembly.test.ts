@@ -5,12 +5,21 @@
  * The load-bearing block is `the real corpus` at the bottom, and it is
  * deliberately most of the file. Assembly resolution is a set of claims about
  * the *shape of the OpenForge catalog* — that half of it delegates joinery to a
- * separate base, that the `size|openlock` code is the key that finds one, that
- * the `build|` tag is a key that silently finds nothing — and a handcrafted
- * fixture cannot falsify any of them, because the fixture would be written by
- * whoever wrote the resolver. So the fixtures here cover only what is true by
- * construction (the weight ordering, the byte thresholds, the empty scene) and
- * every claim about the data is checked against the emitted index.
+ * separate base, that the resolved footprint primitive is the key that finds
+ * one, that the `size|openlock` code and the `build|` tag are keys that find the
+ * wrong thing and nothing respectively — and a handcrafted fixture cannot
+ * falsify any of them, because the fixture would be written by whoever wrote the
+ * resolver. So the fixtures cover what is true by construction (the weight
+ * ordering, the byte thresholds, the empty scene) and every claim about the data
+ * is checked against the emitted index.
+ *
+ * **One fixture block is load-bearing all the same**, and row D4 added it: `the
+ * join key`. Its cases are the ones the corpus does *not* contain — a base
+ * carrying a size code its shape contradicts, a topper whose code and whose
+ * shape point at different bases — because a corpus test cannot assert what the
+ * archive does not hold yet, and those are precisely the cases the old key got
+ * wrong. The corpus block asserts that they are still absent; the fixture block
+ * asserts what happens on the day they are not.
  *
  * If that index is not on this machine the block is skipped **loudly** — a
  * banner on stderr and the reason in the suite name — because the default
@@ -25,17 +34,17 @@ import { describe, expect, it } from 'vitest'
 
 import type { PrintOption as BarrelPrintOption } from '@/assembly'
 import { PRINT_OPTIONS as BARREL_PRINT_OPTIONS, printOption as barrelPrintOption } from '@/assembly'
-import type { CatalogFile, CatalogRecord } from '@/catalog'
-import { CatalogFile as CatalogFileSchema, TileId, resolveTags } from '@/catalog'
+import type { CatalogFile, CatalogRecord, Footprint } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, CatalogRecord as CatalogRecordSchema, TileId, resolveTags } from '@/catalog'
 import type { LockSystem, Placement } from '@/store'
 
-import type { PrintOption } from './assemblyIndex'
+import type { AssemblyIndex, PrintOption } from './assemblyIndex'
 import { PRINT_OPTIONS, buildAssemblyIndex, printOption } from './assemblyIndex'
 import { DOWNLOAD_HUGE_BYTES, DOWNLOAD_LARGE_BYTES, buildBillOfTiles, downloadSize } from './bill'
 import { footprintKey, footprintsMatch } from './footprint'
 import { NOTE_SEVERITY, rollUpNotes } from './notes'
 import { MATCH_WEIGHTS, resolvePlacement } from './resolve'
-import { SIZE_CODE_WIDTH_UNITS, sizeCodeWidth } from './sizeCode'
+import { AMBIGUOUS_SIZE_CODES, SIZE_CODE_WIDTH_UNITS, sharedPrimitive, sizeCodeWidth } from './sizeCode'
 
 /* -------------------------------------------------------------- test helpers */
 
@@ -45,6 +54,60 @@ const place = (tileId: string, x = 0, z = 0): Placement => ({
   z,
   rotation: 0,
 })
+
+/**
+ * A record carrying only what base matching reads, parsed through the real
+ * schema so the branded ids and the footprint union are the live ones.
+ *
+ * The corpus block below is where every *claim about the data* belongs, and this
+ * helper is deliberately not for that. It exists for the cases the corpus does
+ * **not** contain — a base carrying an ambiguous size code, a topper whose code
+ * and whose shape point at different bases — because those are exactly the cases
+ * the join must already handle correctly on the day the archive grows one.
+ */
+let fixtureSeq = 0
+function fixtureRecord(
+  layer: CatalogRecord['layer'],
+  foot: Footprint,
+  extra: { sizeCode?: string; texture?: string; bytes?: number } = {},
+): CatalogRecord {
+  fixtureSeq += 1
+  const id = `tiles/fixture/${String(fixtureSeq)}.stl`
+  return CatalogRecordSchema.parse({
+    id,
+    ord: fixtureSeq,
+    blob: String(fixtureSeq).padStart(32, '0'),
+    file: `${String(fixtureSeq)}.stl`,
+    bytes: extra.bytes ?? 1_000_000,
+    sprite: true,
+    family: 'tiles/fixture',
+    design: 'd-fixture',
+    name: `fixture ${String(fixtureSeq)}`,
+    kinds: [],
+    conn: layer === 'topper' ? ['openforge'] : ['openlock'],
+    layer,
+    tags: [],
+    foot,
+    ...(extra.sizeCode === undefined ? {} : { sizeCode: extra.sizeCode }),
+    ...(extra.texture === undefined ? {} : { texture: extra.texture }),
+  })
+}
+
+/** An index over hand-built records. `tags: []` makes every base the plain print. */
+function fixtureIndex(records: readonly CatalogRecord[]): AssemblyIndex {
+  return buildAssemblyIndex({ records, tags: [] } as unknown as CatalogFile)
+}
+
+/** The base `resolvePlacement` hands to a topper, and how it says it found it. */
+function baseFor(topper: CatalogRecord, index: AssemblyIndex) {
+  const resolved = resolvePlacement(place(topper.id), index, { lock: 'openlock' })
+  return {
+    base: resolved.parts[1]?.record,
+    match: resolved.parts[1]?.match,
+    codes: resolved.notes.map((entry) => entry.code),
+    messages: resolved.notes.map((entry) => entry.message),
+  }
+}
 
 /* ------------------------------------------------------ construction-only tests */
 
@@ -58,6 +121,22 @@ describe('size code table', () => {
     expect(sizeCodeWidth('Q')).toBe(4)
     expect(sizeCodeWidth('S')).toBeUndefined()
     expect(sizeCodeWidth('AxG')).toBeUndefined()
+    // Row W4's finding, kept off the table on purpose: `QxG` is tagged
+    // `size|width|4` and measures 3.000. An entry here would have to be 3, and
+    // the base match does not need one — `QxG` keys `wall:3` by congruence.
+    expect(sizeCodeWidth('QxG')).toBeUndefined()
+  })
+
+  it('publishes the four ambiguous codes as data, so a fifth cannot arrive quietly', () => {
+    // The corpus block below asserts this table against the live catalog in both
+    // directions. Here it is only the shape of the claim: a code, and the
+    // primitives it is measured to span.
+    expect(Object.keys(AMBIGUOUS_SIZE_CODES).sort()).toEqual(['I', 'O', 'S', 'X'])
+    expect(AMBIGUOUS_SIZE_CODES.O).toEqual(['column', 'tri:2', 'tri:4'])
+    for (const [code, primitives] of Object.entries(AMBIGUOUS_SIZE_CODES)) {
+      expect(primitives.length, code).toBeGreaterThan(1)
+      expect([...primitives].sort(), code).toEqual([...primitives])
+    }
   })
 })
 
@@ -90,6 +169,139 @@ describe('footprint congruence', () => {
   })
 })
 
+describe('the join key', () => {
+  /**
+   * Row D4's whole substance, as a test rather than as the comment it replaces.
+   *
+   * The comment said the size code was the primary key and the footprint the
+   * fallback, "never both", and defended it on the grounds that the code is a
+   * functional determinant of width. It is — and a width is not a footprint.
+   * Four codes in the corpus span more than one primitive, so this fixture is a
+   * legal catalog the old rule gets wrong: one topper, one base that shares its
+   * code and is a different shape, one base that is congruent to it and shares
+   * nothing else.
+   *
+   * A code-first join returns the pillar. Anything that reintroduces one fails
+   * here, on three assertions that do not depend on the corpus at all.
+   */
+  it('prefers the congruent base over the base that merely shares the size code', () => {
+    // `size|openlock|O` is on 34 columns and 9 triangles in the live corpus, and
+    // this is that code with the base the archive does not have yet.
+    const topper = fixtureRecord('topper', { shape: 'tri', leg: 4 }, { sizeCode: 'O', texture: 'dungeon_stone' })
+    const pillar = fixtureRecord('base', { shape: 'column' }, { sizeCode: 'O', texture: 'dungeon_stone' })
+    const triangle = fixtureRecord('base', { shape: 'tri', leg: 4 })
+    const { base, match } = baseFor(topper, fixtureIndex([topper, pillar, triangle]))
+
+    expect(base?.id).toBe(triangle.id)
+    expect(match?.key).toBe('footprint')
+    expect(match?.on).toBe('tri:4')
+    // And the pillar was never even a candidate: keying on the code would have
+    // offered two, one of which is 0.5 x 0.5 under a 4 x 4 triangle.
+    expect(match?.candidates).toBe(1)
+  })
+
+  it('does not fall through to the size code when the primitive has no base', () => {
+    // The no-fall-through rule, kept from the row before and inverted with the
+    // priority. The code has a base; the shape does not; the answer is still no
+    // base, because a code-matched base answers a different question.
+    const topper = fixtureRecord('topper', { shape: 'rect', w: 0.5, d: 2 }, { sizeCode: 'A' })
+    const wallBase = fixtureRecord('base', { shape: 'wall', length: 2 }, { sizeCode: 'A' })
+    const { base, codes } = baseFor(topper, fixtureIndex([topper, wallBase]))
+
+    expect(base).toBeUndefined()
+    expect(codes).toContain('no-congruent-base')
+    expect(codes).not.toContain('no-matching-base')
+  })
+
+  it('joins on the size code only for a topper with no primitive at all', () => {
+    // The one path the code still reaches, and the corpus population it serves:
+    // 14 toppers, every one coded `U`, whose footprint row W4 declined to guess.
+    const topper = fixtureRecord('topper', { shape: 'none' }, { sizeCode: 'U' })
+    const square = fixtureRecord('base', { shape: 'rect', w: 4, d: 4 }, { sizeCode: 'U' })
+    const { base, match } = baseFor(topper, fixtureIndex([topper, square]))
+
+    expect(base?.id).toBe(square.id)
+    expect(match?.key).toBe('sizeCode')
+    expect(match?.on).toBe('U')
+    expect(match?.codeAgrees).toBe(true)
+  })
+
+  it('refuses a size code whose bases disagree about their own shape', () => {
+    // The latency guard. Today no code is ambiguous *on the base side* — see the
+    // corpus block — so this is the archive one base away from where it is now,
+    // and the requirement is that the answer be a named gap and not a guess.
+    const topper = fixtureRecord('topper', { shape: 'none' }, { sizeCode: 'X' })
+    const arc = fixtureRecord('base', { shape: 'arc', rIn: 4, rOut: 4.5, sweep: 90, band: 'concave', bandBasis: 'measured' })
+    const pillar = fixtureRecord('base', { shape: 'column' })
+    const ambiguous = [
+      { ...arc, sizeCode: 'X' } as CatalogRecord,
+      { ...pillar, sizeCode: 'X' } as CatalogRecord,
+    ]
+    const { base, codes, messages } = baseFor(topper, fixtureIndex([topper, ...ambiguous]))
+
+    expect(base).toBeUndefined()
+    expect(codes).toContain('no-matching-base')
+    expect(messages.join(' ')).toContain('are not all the same shape')
+
+    // And with the ambiguity removed, the very same topper matches — so the
+    // refusal is the ambiguity and nothing else about this fixture.
+    const { base: matched } = baseFor(topper, fixtureIndex([topper, ambiguous[0] as CatalogRecord]))
+    expect(matched?.id).toBe(arc.id)
+  })
+
+  it('refuses a size code whose bases have no shape to agree about', () => {
+    // `sharedPrimitive` returns `undefined` for a shapeless member as well as
+    // for a disagreement, and both mean the same thing here: nothing in the
+    // candidate set can be shown to fit.
+    const topper = fixtureRecord('topper', { shape: 'none' }, { sizeCode: 'T' })
+    const shapeless = fixtureRecord('base', { shape: 'none' }, { sizeCode: 'T' })
+    expect(baseFor(topper, fixtureIndex([topper, shapeless])).base).toBeUndefined()
+  })
+
+  it('reports the one primitive a candidate set agrees on, and nothing otherwise', () => {
+    const square = fixtureRecord('base', { shape: 'rect', w: 2, d: 2 })
+    const rotated = fixtureRecord('base', { shape: 'rect', w: 2, d: 2 })
+    const wall = fixtureRecord('base', { shape: 'wall', length: 2 })
+    const shapeless = fixtureRecord('base', { shape: 'none' })
+
+    expect(sharedPrimitive([square, rotated])).toBe('rect:2x2')
+    expect(sharedPrimitive([square])).toBe('rect:2x2')
+    expect(sharedPrimitive([square, wall])).toBeUndefined()
+    expect(sharedPrimitive([square, shapeless])).toBeUndefined()
+    // Empty is `undefined` rather than a vacuous true: an empty candidate set
+    // determines nothing, and a caller must not read it as agreement.
+    expect(sharedPrimitive([])).toBeUndefined()
+  })
+
+  it('keeps the size code as a family tie-break inside the congruent set', () => {
+    // What the code is *for* now. Both candidates fit and both carry the lock, so
+    // the code decides — and it decides above texture, which is the one place the
+    // ladder is visible from outside.
+    const topper = fixtureRecord('topper', { shape: 'wall', length: 2 }, { sizeCode: 'A', texture: 'cave' })
+    const sameFamily = fixtureRecord('base', { shape: 'wall', length: 2 }, { sizeCode: 'A', texture: 'dungeon_stone' })
+    const sameColour = fixtureRecord('base', { shape: 'wall', length: 2 }, { sizeCode: 'AS', texture: 'cave' })
+    const { base, match } = baseFor(topper, fixtureIndex([topper, sameFamily, sameColour]))
+
+    expect(base?.id).toBe(sameFamily.id)
+    expect(match?.codeAgrees).toBe(true)
+    expect(match?.textureAgrees).toBe(false)
+    expect(match?.candidates).toBe(2)
+  })
+
+  it('never scores two uncoded records as one family', () => {
+    // `undefined === undefined` is not a family. If it were, every uncoded base
+    // would outrank a texture-matched one under every uncoded topper.
+    const topper = fixtureRecord('topper', { shape: 'wall', length: 2 }, { texture: 'cave' })
+    const uncoded = fixtureRecord('base', { shape: 'wall', length: 2 }, { bytes: 1 })
+    const coloured = fixtureRecord('base', { shape: 'wall', length: 2 }, { texture: 'cave', bytes: 2 })
+    const { base, match } = baseFor(topper, fixtureIndex([topper, uncoded, coloured]))
+
+    expect(base?.id).toBe(coloured.id)
+    expect(match?.codeAgrees).toBe(false)
+    expect(match?.textureAgrees).toBe(true)
+  })
+})
+
 describe('match weights', () => {
   /**
    * The property the powers of two exist for: the sum is a lexicographic order.
@@ -97,13 +309,25 @@ describe('match weights', () => {
    * or, the defect this row fixes, a topless base could outrank a full one.
    */
   it('cannot let lower criteria outvote a higher one', () => {
-    const { lock, option, shape, kind, texture } = MATCH_WEIGHTS
+    const { lock, option, code, kind, texture } = MATCH_WEIGHTS
     // `option` is graded: two steps for `plain`, so its widest span is 2 × 8.
     const optionSpan = option * (PRINT_OPTIONS.length - 1)
-    expect(optionSpan + shape + kind + texture).toBeLessThan(lock)
-    expect(shape + kind + texture).toBeLessThan(option)
-    expect(kind + texture).toBeLessThan(shape)
+    expect(optionSpan + code + kind + texture).toBeLessThan(lock)
+    expect(code + kind + texture).toBeLessThan(option)
+    expect(kind + texture).toBeLessThan(code)
     expect(texture).toBeLessThan(kind)
+  })
+
+  /**
+   * Row D4 retired `shape` and put `code` in its slot, and the reason is that
+   * congruence became the *key*: every candidate now has the topper's shape, so
+   * a `shape` criterion would score a constant over every candidate set and
+   * decide nothing. A criterion that cannot discriminate is not a tie-break, it
+   * is a comment with a number attached.
+   */
+  it('scores five criteria, and no longer one the key already guarantees', () => {
+    expect(Object.keys(MATCH_WEIGHTS).sort()).toEqual(['code', 'kind', 'lock', 'option', 'texture'])
+    expect(MATCH_WEIGHTS).not.toHaveProperty('shape')
   })
 })
 
@@ -263,14 +487,21 @@ describeCorpus(corpusSuite, () => {
     expect(mismatches).toEqual([])
   })
 
-  it('shows why the code beats the width: 345 coded tiles have no width to join on', () => {
+  it('measures what the code covers that a width does not: 345 coded tiles', () => {
     const codedWithoutFootprint = records.filter(
       (record) => record.sizeCode !== undefined && record.foot.shape !== 'rect' && record.foot.shape !== 'wall',
     )
+    // The figure that made the code the join key, and the reason row D4 could
+    // move the key anyway: it is an argument about *widths*, and the primitive
+    // is not a width. 249 of these 345 have a perfectly good footprint — the
+    // `column`, `diag` and `tri` cases row W4 added — so they key on congruence
+    // and never needed the code at all. Measured against the *primitive*, the
+    // code's whole remaining coverage advantage is 14 toppers, asserted in
+    // 'falls back to the size code for the 14 toppers with no primitive'.
+    //
     // 361 before row W3, 299 after it, 345 after W4 — and the rise is the
-    // argument getting *stronger*, not weaker. W4 gave 249 of these tiles a
-    // measured footprint, and none of the three cases it added carries a `w` or
-    // a `length` a width join could read:
+    // width argument getting *stronger*, not weaker. None of the three cases W4
+    // added carries a `w` or a `length` a width join could read:
     //
     //   column 119   no size tag at all beyond the code letter. The code is
     //                literally the only thing these tiles carry.
@@ -297,12 +528,111 @@ describeCorpus(corpusSuite, () => {
     })
   })
 
+  /* -------------------------------------------------- the code is not a key */
+
+  it('measures the four size codes that span more than one primitive', () => {
+    // Row D4's premise, against the live corpus and in both directions: every
+    // code `AMBIGUOUS_SIZE_CODES` names really does span more than one
+    // primitive, and no code outside it does. The second half is the one that
+    // matters — it is what fails if a corpus rebuild mints a fifth.
+    const spans = new Map<string, Set<string>>()
+    const counts = new Map<string, Map<string, number>>()
+    for (const record of records) {
+      if (record.sizeCode === undefined) continue
+      const key = footprintKey(record.foot)
+      if (key === undefined) continue
+      const set = spans.get(record.sizeCode) ?? new Set<string>()
+      set.add(key)
+      spans.set(record.sizeCode, set)
+      const tally = counts.get(record.sizeCode) ?? new Map<string, number>()
+      tally.set(key, (tally.get(key) ?? 0) + 1)
+      counts.set(record.sizeCode, tally)
+    }
+
+    const measured = Object.fromEntries(
+      [...spans.entries()].filter(([, keys]) => keys.size > 1).map(([code, keys]) => [code, [...keys].sort()]),
+    )
+    expect(measured).toEqual(AMBIGUOUS_SIZE_CODES)
+
+    // And the counts behind the headline case: `size|openlock|O` is on 43
+    // records that resolve to three incompatible primitives. Matching on the
+    // code can put a 0.5 x 0.5 pillar under a 4 x 4 triangle.
+    expect(Object.fromEntries(counts.get('O') ?? [])).toEqual({ column: 34, 'tri:2': 5, 'tri:4': 4 })
+    const o = records.filter((record) => record.sizeCode === 'O')
+    expect(o).toHaveLength(43)
+    expect(o.filter((record) => record.layer === 'integral')).toHaveLength(38)
+    expect(o.filter((record) => record.layer === 'topper')).toHaveLength(5)
+
+    // Row W5's second instance: 18 `arc` records and 11 `column` records under
+    // one code. Under a code join those 29 are one candidate class; under the
+    // primitive they are two, and nothing curved is offered a pillar.
+    expect(Object.fromEntries(counts.get('X') ?? [])).toEqual({ 'arc:4-4.5@90': 18, column: 11 })
+    expect(records.filter((record) => record.sizeCode === 'X')).toHaveLength(29)
+  })
+
+  it('shows the ambiguity was latent for two independent reasons, and asserts both', () => {
+    // Requirement three of this row: assert the latency, not just the fix. The
+    // old key never produced a wrong bill, and it is worth being precise about
+    // why, because neither reason is a rule about codes.
+    //
+    // **One: no base carries an ambiguous code ambiguously.** All 26 codes on
+    // the base side are footprint determinants — the `I` bases are all
+    // `rect:1x1`, the `S` bases all `rect:1x2`, the `X` bases all
+    // `arc:4-4.5@90` — so a code join's candidate set was always one shape.
+    const baseCodes = new Map<string, CatalogRecord[]>()
+    for (const base of bases) {
+      if (base.sizeCode === undefined) continue
+      baseCodes.set(base.sizeCode, [...(baseCodes.get(base.sizeCode) ?? []), base])
+    }
+    expect(baseCodes.size).toBe(26)
+    const heterogeneous = [...baseCodes.entries()].filter(([, group]) => sharedPrimitive(group) === undefined)
+    expect(heterogeneous.map(([code]) => code)).toEqual([])
+
+    // **Two: the one code whose toppers span two primitives has no base at all.**
+    // `O` is on 3 `tri:2` and 2 `tri:4` toppers, and zero bases, so the join it
+    // would have mismatched never ran.
+    expect(index.basesBySizeCode.has('O')).toBe(false)
+    for (const code of Object.keys(AMBIGUOUS_SIZE_CODES)) {
+      const spans = new Set(
+        toppers.filter((record) => record.sizeCode === code).map((record) => footprintKey(record.foot)),
+      )
+      if (spans.size <= 1) continue
+      expect(code).toBe('O')
+      expect(index.basesBySizeCode.get(code)).toBeUndefined()
+    }
+
+    // Which leaves the coincidence in full: for the three ambiguous codes bases
+    // *do* carry, no topper carrying one is a shape those bases are not — `I`
+    // has 50 toppers and all of them are the `rect:1x1` its bases are, `S` has
+    // 96 and all of them are `rect:1x2`, and `X` has none at all. The 24 `I`
+    // columns and the 11 `X` columns are `integral` pieces, which need no base
+    // and are never toppers. That is an accident of what has been published, one
+    // tile away from ending, and the reason the fix is a key change rather than
+    // a patch.
+    const spanned = new Map<string, { basePrimitive: string | undefined; toppers: number; primitives: string[] }>()
+    for (const [code, group] of baseCodes) {
+      if (!Object.hasOwn(AMBIGUOUS_SIZE_CODES, code)) continue
+      const carried = toppers.filter((record) => record.sizeCode === code)
+      const primitives = [...new Set(carried.map((record) => footprintKey(record.foot) ?? '(none)'))].sort()
+      spanned.set(code, { basePrimitive: sharedPrimitive(group), toppers: carried.length, primitives })
+    }
+    expect(Object.fromEntries(spanned)).toEqual({
+      I: { basePrimitive: 'rect:1x1', toppers: 50, primitives: ['rect:1x1'] },
+      S: { basePrimitive: 'rect:1x2', toppers: 96, primitives: ['rect:1x2'] },
+      X: { basePrimitive: 'arc:4-4.5@90', toppers: 0, primitives: [] },
+    })
+    for (const { basePrimitive, primitives } of spanned.values()) {
+      for (const primitive of primitives) expect(primitive).toBe(basePrimitive)
+    }
+  })
+
   /* ------------------------------------------------------------ the hard rule */
 
-  it('auto-inserts a base for an openforge topper', () => {
-    const topper = toppers.find(
-      (record) => record.sizeCode !== undefined && index.basesBySizeCode.has(record.sizeCode),
-    )
+  it('auto-inserts a base for an openforge topper, keyed on the primitive', () => {
+    const topper = toppers.find((record) => {
+      const key = footprintKey(record.foot)
+      return key !== undefined && index.basesByFootprint.has(key)
+    })
     expect(topper).toBeDefined()
 
     const resolved = resolvePlacement(place(topper?.id ?? ''), index, { lock: 'openlock' })
@@ -310,11 +640,32 @@ describeCorpus(corpusSuite, () => {
 
     const base = resolved.parts[1]
     expect(base?.record.layer).toBe('base')
-    expect(base?.match?.key).toBe('sizeCode')
-    expect(base?.match?.on).toBe(topper?.sizeCode)
-    expect(base?.record.sizeCode).toBe(topper?.sizeCode)
+    expect(base?.match?.key).toBe('footprint')
+    expect(base?.match?.on).toBe(footprintKey(topper?.foot ?? { shape: 'none' }))
+    // The physical claim, and the only one that matters about a base: it is the
+    // same shape as the thing standing on it.
+    expect(footprintKey(base?.record.foot ?? { shape: 'none' })).toBe(footprintKey(topper?.foot ?? { shape: 'none' }))
     expect(base?.match?.lockAgrees).toBe(true)
     expect(resolved.notes.map((entry) => entry.code)).toContain('base-auto-inserted')
+  })
+
+  it('falls back to the size code for the 14 toppers with no primitive, and only those', () => {
+    // The whole of the code key's remaining reach. Every one of them is coded
+    // `U` — the code row W4 refused to derive a footprint from, because its 28
+    // shapeless records and its 7 `rect:4x4` bases do not agree.
+    const codeKeyed = toppers.filter(
+      (record) => resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts[1]?.match?.key === 'sizeCode',
+    )
+    expect(codeKeyed).toHaveLength(14)
+    expect(new Set(codeKeyed.map((record) => record.sizeCode))).toEqual(new Set(['U']))
+    expect(codeKeyed.every((record) => footprintKey(record.foot) === undefined)).toBe(true)
+    // 7 candidates, and they agree on `rect:4x4` — which is the gate, not a
+    // coincidence: see 'refuses a size code whose bases disagree' above.
+    for (const record of codeKeyed) {
+      const match = resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts[1]?.match
+      expect(match?.candidates).toBe(7)
+      expect(sharedPrimitive(index.basesBySizeCode.get('U') ?? [])).toBe('rect:4x4')
+    }
   })
 
   it('leaves an integral tile alone — it carries its own joinery', () => {
@@ -353,8 +704,30 @@ describeCorpus(corpusSuite, () => {
    */
   const preferences: readonly (LockSystem | undefined)[] = ['openlock', 'dragonlock', 'magnetic', undefined]
 
-  /** The candidate set for a topper, by the resolver's own key rule. */
+  /**
+   * The candidate set for a topper, by the resolver's own key rule — row D4's:
+   * the resolved primitive, and the size code only where there is no primitive
+   * and the code's bases agree on one.
+   */
   function candidatesOf(tile: CatalogRecord): readonly CatalogRecord[] | undefined {
+    const foot = footprintKey(tile.foot)
+    if (foot !== undefined) return index.basesByFootprint.get(foot)
+    if (tile.sizeCode === undefined) return undefined
+    const records = index.basesBySizeCode.get(tile.sizeCode)
+    return records === undefined || sharedPrimitive(records) === undefined ? undefined : records
+  }
+
+  /**
+   * The key rule as it shipped **before row D4**: the size code first, the
+   * footprint second, never both.
+   *
+   * Frozen deliberately, and it is the reason every D1 figure below is unmoved
+   * by this row. `legacyBase` reproduces the pre-D1 *ranking*; pairing it with
+   * the pre-D1 *key* reproduces the resolver that actually shipped, so D1's gain
+   * stays a claim about the ranking and D4's stays a claim about the key. The
+   * two are surveyed separately rather than tangled into one before-figure.
+   */
+  function legacyCandidatesOf(tile: CatalogRecord): readonly CatalogRecord[] | undefined {
     if (tile.sizeCode !== undefined) return index.basesBySizeCode.get(tile.sizeCode)
     const foot = footprintKey(tile.foot)
     return foot === undefined ? undefined : index.basesByFootprint.get(foot)
@@ -371,9 +744,17 @@ describeCorpus(corpusSuite, () => {
    * re-sort is deliberate even though the index arrives in this order today: it is
    * what the old code relied on, so stating it here keeps the comparison valid
    * when the index's order changes.
+   *
+   * The key rule is a parameter, defaulting to the pre-D4 one, so the same
+   * ranking can be surveyed over either candidate set — which is what separates
+   * "the ranking chose badly" from "the key found a different set".
    */
-  function legacyBase(tile: CatalogRecord, lock: LockSystem | undefined): CatalogRecord | undefined {
-    const records = candidatesOf(tile)
+  function legacyBase(
+    tile: CatalogRecord,
+    lock: LockSystem | undefined,
+    key: (record: CatalogRecord) => readonly CatalogRecord[] | undefined = legacyCandidatesOf,
+  ): CatalogRecord | undefined {
+    const records = key(tile)
     if (records === undefined || records.length === 0) return undefined
     const ordered = [...records].sort((a, b) => (a.bytes !== b.bytes ? a.bytes - b.bytes : a.id < b.id ? -1 : 1))
 
@@ -439,24 +820,26 @@ describeCorpus(corpusSuite, () => {
     for (const topper of toppers) expect(index.basePrintOption.has(topper.id)).toBe(false)
   })
 
-  it('collapses the topless auto-insert rate under openlock from 79.7% to zero', () => {
+  it('collapses the topless auto-insert rate under openlock from 81.6% to zero', () => {
     const before = survey(legacyBase, 'openlock')
     const after = survey(shippedBase, 'openlock')
+    // The pre-D1 ranking over row D4's key: the *ranking* held still and only
+    // the key moved, which is what tells the two rows' figures apart.
+    const beforeReKeyed = survey((tile, lock) => legacyBase(tile, lock, candidatesOf), 'openlock')
 
-    // Same toppers matched either way: the ranking chooses, it never refuses.
-    // 3,769 before row W3 gave 403 tiles a footprint and 3,978 after; row W4
-    // takes 25 back, and both halves of that are false pairs it removed rather
-    // than matches it lost — see 'separates the three ways a base can be
-    // missing' for the two causes. The denominator is the honest one.
+    // **Who gets a base at all is a property of the key, not of the ranking.**
+    // Both rankings match 3,943 toppers under the pre-D4 key and 3,986 under
+    // D4's, so the +43 belongs to the key and the ranking still never refuses.
+    // The 43 are the `II`/`IO`/`IX` toppers — see 'gains the 43 toppers' below.
     //
-    // Row W5 takes 10 more, and they are also a false pair removed: they are the
-    // ten `s2w_radial` toppers, whose band is the radial floor inset by 0.5 to
-    // leave room for a separately printed wall, and whose only candidates were
-    // plain `[R-2, R]` radial bases — 0.5 units too deep at the inside edge,
-    // exactly the room the inset was for. The corpus holds no `s2w` curved base
-    // at all, which row D5 is the one to surface.
+    // 3,769 before row W3 gave 403 tiles a footprint and 3,978 after; row W4
+    // takes 25 back and row W5 10 more, and all of those are false pairs removed
+    // rather than matches lost — see 'separates the three ways a base can be
+    // missing'. The denominator is the honest one.
     expect(before.matched).toBe(3943)
-    expect(after.matched).toBe(3943)
+    expect(beforeReKeyed.matched).toBe(3986)
+    expect(after.matched).toBe(3986)
+    expect(after.matched - before.matched).toBe(43)
 
     // The defect, measured on this corpus by the old ranking written out above.
     // 81.6% of everything it matches, against 79.7% before row W5: the finding is
@@ -469,8 +852,14 @@ describeCorpus(corpusSuite, () => {
     expect(before.byOption.unsupported).toBe(256)
     expect(before.byOption.plain).toBe(471)
 
+    // And the defect is a property of the ranking, not of the key either: give
+    // the old ranking D4's wider candidate sets and it still hands out a topless
+    // base 81.7% of the time. Both rows' findings are independent of each other.
+    expect(beforeReKeyed.byOption.topless).toBe(3258)
+    expect(beforeReKeyed.byOption.topless / beforeReKeyed.matched).toBeCloseTo(0.817, 3)
+
     // And after: every auto-inserted openlock base is the full base.
-    expect(after.byOption).toEqual({ plain: 3943, unsupported: 0, topless: 0 })
+    expect(after.byOption).toEqual({ plain: 3986, unsupported: 0, topless: 0 })
   })
 
   it('collapses it under every lock preference, to the three cases the corpus forces', () => {
@@ -485,6 +874,11 @@ describeCorpus(corpusSuite, () => {
     // the three magnetic cases the corpus forces. The shape of the finding is
     // what is asserted; the totals moved.
     //
+    // Row D4 moves the `after` rows by 43 and leaves the `before` rows alone,
+    // because `legacyBase` is surveyed over the pre-D4 key it shipped with. The
+    // three magnetic cases survive the re-key unchanged: their code `D+SA` and
+    // their primitive `rect:1.5x3` select the same three bases either way.
+    //
     // The `before` rows also shift *within* their total, by up to 151 tiles, and
     // twice for the same reason: row W4 de-arced the 36 xG bases out of the
     // `arc:2.5@90` bucket into `wall:1.991` / `wall:1.547` / `wall:3`, and row W5
@@ -493,8 +887,8 @@ describeCorpus(corpusSuite, () => {
     // over a changed candidate list, reaches a different candidate. That is the
     // pre-D1 ranking being arbitrary, which is the defect this test exists to
     // record, and `after` is unmoved at all-plain.
-    const allPlain: Record<PrintOption, number> = { plain: 3943, unsupported: 0, topless: 0 }
-    const magneticAfter: Record<PrintOption, number> = { plain: 3940, unsupported: 0, topless: 3 }
+    const allPlain: Record<PrintOption, number> = { plain: 3986, unsupported: 0, topless: 0 }
+    const magneticAfter: Record<PrintOption, number> = { plain: 3983, unsupported: 0, topless: 3 }
     expect(measured).toEqual([
       { lock: 'openlock', before: { plain: 471, unsupported: 256, topless: 3216 }, after: allPlain },
       { lock: 'dragonlock', before: { plain: 3880, unsupported: 60, topless: 3 }, after: allPlain },
@@ -596,10 +990,15 @@ describeCorpus(corpusSuite, () => {
 
     // Which base, out of how many, on what key, and why that one.
     expect(message).toContain(base?.name ?? '\u0000')
-    expect(message).toContain('size code A')
-    expect(message).toContain('bases carrying')
+    // Row D4: the key it names is the primitive, not the code. `wall:2` is the
+    // 101-base congruence class the code `A`'s 86 bases live inside.
+    expect(message).toContain('footprint wall:2')
+    expect(message).toContain('the best of 101 bases carrying')
     expect(message).toContain('offers openlock')
     expect(message).toContain('a full base')
+    // And the code is still named — as the tie-break that chose this member of
+    // the class, which is the honest description of what it now does.
+    expect(message).toContain('same size code')
 
     // The old message said neither the pool nor the product.
     expect(message).not.toContain('matched on sizeCode')
@@ -618,7 +1017,7 @@ describeCorpus(corpusSuite, () => {
 
       const message = resolved.notes.find((entry) => entry.code === 'base-auto-inserted')?.message ?? ''
       expect(message).toContain('no top surface')
-      expect(message).toContain('every plainer base carrying size code D+SA lacks magnetic')
+      expect(message).toContain('every plainer base carrying footprint rect:1.5x3 lacks magnetic')
     }
   })
 
@@ -669,18 +1068,180 @@ describeCorpus(corpusSuite, () => {
 
   /* ------------------------------------------------------ the honest size gap */
 
-  it('measures the openforge toppers with no size-matched base, and warns on each', () => {
+  it('measures the openforge toppers whose code no base carries, and what the primitive recovers', () => {
     const coded = toppers.filter((record) => record.sizeCode !== undefined)
-    const unmatched = coded.filter((record) => !index.basesBySizeCode.has(record.sizeCode ?? ''))
+    const codeGap = coded.filter((record) => !index.basesBySizeCode.has(record.sizeCode ?? ''))
 
+    // The code gap itself is a fact about tags and is untouched by row D4: 129
+    // coded toppers name a code no base in the archive carries.
     expect(coded).toHaveLength(1999)
-    expect(unmatched).toHaveLength(129)
+    expect(codeGap).toHaveLength(129)
 
-    for (const record of unmatched) {
+    // What changed is that a missing *code* is no longer a missing *base*. 43 of
+    // the 129 are congruent to a base the archive does have, and under the code
+    // key every one of them was reported as having nothing to sit on.
+    const recovered = codeGap.filter(
+      (record) => resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts.length === 2,
+    )
+    expect(recovered).toHaveLength(43)
+
+    // The remaining 86 have no base under either key, and are warned about by
+    // the code — which is the actionable half, and the index of
+    // `docs/corpus-base-gap.md`.
+    const stillGapped = codeGap.filter((record) => !recovered.includes(record))
+    expect(stillGapped).toHaveLength(86)
+    for (const record of stillGapped) {
       const resolved = resolvePlacement(place(record.id), index, { lock: 'openlock' })
       expect(resolved.parts).toHaveLength(1)
       expect(resolved.notes.map((entry) => entry.code)).toContain('no-matching-base')
+      expect(resolved.notes.find((entry) => entry.code === 'no-matching-base')?.message).toContain(
+        `size code ${record.sizeCode ?? ''}`,
+      )
     }
+  })
+
+  it('gains the 43 toppers whose code the archive lacks but whose shape it covers', () => {
+    // Row D5 predicted this row would shrink its first bucket and named the five
+    // `O` toppers as the beneficiaries, reaching a `rect:2x2` / `rect:4x4` match.
+    // The prediction was written before row W4: those tiles keyed as rectangles
+    // then, and W4 reclassified them to `tri`, which the base range does not
+    // cover at all. So the `O` toppers stay in the gap and three code families
+    // D5 did not name are recovered instead — all of them `rect:1x1`, against 119
+    // congruent bases.
+    const gained = toppers.filter((record) => {
+      const key = footprintKey(record.foot)
+      const codeless = record.sizeCode !== undefined && !index.basesBySizeCode.has(record.sizeCode)
+      return codeless && key !== undefined && index.basesByFootprint.has(key)
+    })
+    const byCode = new Map<string, number>()
+    for (const record of gained) byCode.set(record.sizeCode ?? '', (byCode.get(record.sizeCode ?? '') ?? 0) + 1)
+    expect(Object.fromEntries([...byCode.entries()].sort())).toEqual({ II: 11, IO: 16, IX: 16 })
+    expect(gained).toHaveLength(43)
+    expect(new Set(gained.map((record) => footprintKey(record.foot)))).toEqual(new Set(['rect:1x1']))
+    expect(index.basesByFootprint.get('rect:1x1')).toHaveLength(119)
+
+    // Every one of them now gets a base, and it is a plain, congruent one.
+    for (const record of gained) {
+      const match = resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts[1]?.match
+      expect(match?.key).toBe('footprint')
+      expect(match?.on).toBe('rect:1x1')
+      expect(match?.option).toBe('plain')
+      // And not on the code: no base carries `II`, `IO` or `IX`.
+      expect(match?.codeAgrees).toBe(false)
+    }
+
+    // The five `O` toppers are not among them, and this is why.
+    const o = toppers.filter((record) => record.sizeCode === 'O')
+    expect(o).toHaveLength(5)
+    expect(new Set(o.map((record) => footprintKey(record.foot)))).toEqual(new Set(['tri:2', 'tri:4']))
+    expect(index.basesByFootprint.has('tri:2')).toBe(false)
+    expect(index.basesByFootprint.has('tri:4')).toBe(false)
+  })
+
+  it('hands out the same base as the code key did, wherever the code key found one', () => {
+    // The re-key is **additive on this corpus**, and that is a measurement rather
+    // than a hope: for all 3,943 toppers the code key matched, the primitive key
+    // hands out the identical base, and 43 more toppers gain one. Nothing is
+    // taken away and nothing is swapped.
+    //
+    // The `code` weight is what makes that true. The code key implicitly
+    // preferred a base from the topper's own size family, because that was the
+    // whole candidate set; congruence pools across families, so without the
+    // tie-break 434 toppers would drift to a different base — see 'keeps the
+    // size code as a family tie-break' in the fixture block for the mechanism.
+    const d1UnderOldKey = (tile: CatalogRecord, lock: LockSystem | undefined): CatalogRecord | undefined => {
+      const records = legacyCandidatesOf(tile)
+      if (records === undefined || records.length === 0) return undefined
+      let best: CatalogRecord | undefined
+      let bestScore = -1
+      for (const base of records) {
+        const option = optionOf(base)
+        let score = (PRINT_OPTIONS.length - 1 - PRINT_OPTIONS.indexOf(option)) * MATCH_WEIGHTS.option
+        if (lock === undefined || base.conn.includes(lock)) score += MATCH_WEIGHTS.lock
+        // The criterion row D4 retired, as D1 shipped it.
+        if (base.foot.shape === tile.foot.shape) score += 4
+        if (base.kinds.some((kind) => kind !== 'base' && tile.kinds.includes(kind))) score += MATCH_WEIGHTS.kind
+        if (base.texture !== undefined && base.texture === tile.texture) score += MATCH_WEIGHTS.texture
+        if (score > bestScore) {
+          bestScore = score
+          best = base
+        }
+      }
+      return best
+    }
+
+    for (const lock of preferences) {
+      let same = 0
+      let different = 0
+      let gained = 0
+      let lost = 0
+      for (const topper of toppers) {
+        const before = d1UnderOldKey(topper, lock)
+        const after = shippedBase(topper, lock)
+        if (before === undefined && after === undefined) continue
+        if (before === undefined) gained += 1
+        else if (after === undefined) lost += 1
+        else if (before.id === after.id) same += 1
+        else different += 1
+      }
+      expect({ lock: lock ?? 'none', same, different, gained, lost }).toEqual({
+        lock: lock ?? 'none',
+        same: 3943,
+        different: 0,
+        gained: 43,
+        lost: 0,
+      })
+    }
+  })
+
+  it('widens the candidate pools, because congruence pools across code families', () => {
+    let codePairs = 0
+    let primitivePairs = 0
+    const keysUsed = new Set<string>()
+    let smallest = Number.POSITIVE_INFINITY
+    let largest = 0
+    for (const topper of toppers) {
+      codePairs += legacyCandidatesOf(topper)?.length ?? 0
+      const candidates = candidatesOf(topper)
+      primitivePairs += candidates?.length ?? 0
+      const match = resolvePlacement(place(topper.id), index, { lock: 'openlock' }).parts[1]?.match
+      if (match === undefined) continue
+      keysUsed.add(`${match.key}:${match.on}`)
+      smallest = Math.min(smallest, match.candidates)
+      largest = Math.max(largest, match.candidates)
+    }
+    // The cost of the fix, stated: 383,252 candidate pairs against 334,189, a
+    // 14.7% wider scan for 43 more matched toppers and every match congruent.
+    // Nothing here is per-frame — the scan happens once per placement per bill.
+    expect(codePairs).toBe(334_189)
+    expect(primitivePairs).toBe(383_252)
+    // 43 of the 44 congruence classes the bases cover are reached by a topper,
+    // plus the one size code that still finds a base.
+    expect(keysUsed.size).toBe(43)
+    expect([...keysUsed].filter((key) => key.startsWith('sizeCode:'))).toEqual(['sizeCode:U'])
+    expect(smallest).toBe(2)
+    expect(largest).toBe(150)
+    expect(index.stats.baseFootprints).toBe(44)
+  })
+
+  it('hands every topper with a primitive a base congruent to it, under every preference', () => {
+    // The assertion that replaces the "never both" comment on the corpus side:
+    // not "the key is the footprint" but the consequence — no base is ever put
+    // under a topper of a different shape. 15,888 matches over the four
+    // preferences, and a code join would have to be reintroduced for this to
+    // fail.
+    let checked = 0
+    for (const lock of preferences) {
+      for (const topper of toppers) {
+        const base = shippedBase(topper, lock)
+        if (base === undefined) continue
+        const key = footprintKey(topper.foot)
+        if (key === undefined) continue
+        checked += 1
+        expect(footprintKey(base.foot), `${topper.id} under ${lock ?? 'none'}`).toBe(key)
+      }
+    }
+    expect(checked).toBe(15_888)
   })
 
   it('separates the three ways a base can be missing', () => {
@@ -690,10 +1251,10 @@ describeCorpus(corpusSuite, () => {
         if (entry.code in gaps) gaps[entry.code as keyof typeof gaps] += 1
       }
     }
-    // 129 bases the corpus should have and does not; 34 footprints nothing
-    // supports; 247 toppers with neither a code nor a shape to match on. That
-    // last was 444 before row W3 and 235 after it: giving 403 tiles a footprint
-    // halved the population with nothing to match on.
+    // 86 bases the corpus should have and does not; 31 footprints nothing
+    // supports; 260 toppers with no key at all. The third was 444 before row W3
+    // and 235 after it: giving 403 tiles a footprint halved the population with
+    // nothing to match on.
     //
     // Row W4 moved 25 toppers out of `matched` and into the other two causes,
     // and both moves are corrections rather than losses:
@@ -708,9 +1269,14 @@ describeCorpus(corpusSuite, () => {
     //       toppers. Tagged 7 x 7; W1 measured them at 5 x 2, 1.685 x 1.685 and
     //       2 x 5, so the pair names the design and there is nothing to place.
     //
-    // `no-matching-base` is unchanged at 129, because the code step runs first
-    // and the P-family and column codes were already failing it.
-    expect(gaps).toEqual({ 'no-matching-base': 129, 'no-congruent-base': 31, 'base-unmatchable': 260 })
+    // **Row D4 takes `no-matching-base` from 129 to 86 and touches nothing else.**
+    // The 43 are the `II`/`IO`/`IX` toppers, and they were never an archive gap
+    // at all: 119 congruent `rect:1x1` bases were in the corpus the whole time,
+    // and only a code-first join could report a tile as baseless while holding
+    // a base that fits it. `no-congruent-base` and `base-unmatchable` are
+    // unmoved, because a topper with no primitive and a topper with an
+    // unsupportable one are classified by facts the key change does not touch.
+    expect(gaps).toEqual({ 'no-matching-base': 86, 'no-congruent-base': 31, 'base-unmatchable': 260 })
   })
 
   const GAP_CODES = ['no-matching-base', 'no-congruent-base', 'base-unmatchable']
@@ -732,13 +1298,29 @@ describeCorpus(corpusSuite, () => {
       gapped += 1
       // One cause, never two, and never a bare "no base found".
       expect(gapNotes, record.id).toHaveLength(1)
-      const expected =
+      // The resolver's rule, restated: a code the base range does not answer to
+      // is an archive gap whichever key failed, because naming the code is what
+      // a report upstream can act on. Below that, the primitive decides.
+      const codeUnanswered = record.sizeCode !== undefined && !index.basesBySizeCode.has(record.sizeCode)
+      const expected = codeUnanswered
+        ? 'no-matching-base'
+        : footprintKey(record.foot) !== undefined
+          ? 'no-congruent-base'
+          : record.sizeCode !== undefined
+            ? 'no-matching-base'
+            : 'base-unmatchable'
+      expect(gapNotes[0]?.code, record.id).toBe(expected)
+      // And the pre-D4 formula — "has a code at all" rather than "has a code no
+      // base carries" — agrees on every gapped topper in this corpus, which is
+      // the latency: the two rules only diverge for a topper whose code *is*
+      // carried by bases of a shape it is not, and no such topper exists yet.
+      const preD4 =
         record.sizeCode !== undefined
           ? 'no-matching-base'
           : footprintKey(record.foot) !== undefined
             ? 'no-congruent-base'
             : 'base-unmatchable'
-      expect(gapNotes[0]?.code, record.id).toBe(expected)
+      expect(preD4, record.id).toBe(expected)
       expect(gapNotes[0]?.tileId, record.id).toBe(record.id)
       // Each cause is `warn`: a piece with nothing under it is not a footnote.
       expect(gapNotes[0]?.severity).toBe('warn')
@@ -748,11 +1330,12 @@ describeCorpus(corpusSuite, () => {
 
   it('measures the same gap under every lock preference, and under none', () => {
     // The load-bearing claim of `docs/corpus-base-gap.md`: the gap is a property
-    // of the corpus, not of the ranking. D1 re-ranked base candidates and took
-    // the topless rate under openlock from 79.1% to 0 without moving one tile of
-    // this. If a ranking change *does* move it, that is a bug in the ranking — a
-    // candidate set is either empty or it is not, and which member wins cannot
-    // decide whether one exists.
+    // of the corpus **and of the key**, and never of the ranking. D1 re-ranked
+    // base candidates and took the topless rate under openlock from 79.1% to 0
+    // without moving one tile of this; D4 changed the key and moved 43 tiles out
+    // of it, in every preference identically. If a *ranking* change moves it,
+    // that is a bug in the ranking — a candidate set is either empty or it is
+    // not, and which member wins cannot decide whether one exists.
     //
     // The split itself is pinned by `separates the three ways a base can be
     // missing` above; what this adds is that all four preferences agree, which no
@@ -777,8 +1360,10 @@ describeCorpus(corpusSuite, () => {
 
     for (const gaps of measured) expect(gaps).toEqual(measured[0])
     // The size-code half of the gap is invariant under W3 as well: size codes come
-    // from tags, not from footprints, so no reclassification can close it.
-    expect(measured[0]?.['no-matching-base']).toBe(129)
+    // from tags, not from footprints, so no reclassification can close it. Row D4
+    // does not close it either — it stops *mistaking* 43 of the 129 coded
+    // toppers for baseless ones, which is a different thing and leaves 86.
+    expect(measured[0]?.['no-matching-base']).toBe(86)
     expect(toppers).toHaveLength(4363)
   })
 
@@ -807,9 +1392,21 @@ describeCorpus(corpusSuite, () => {
     expect([...missing.values()].reduce((total, count) => total + count, 0)).toBe(129)
 
     // 26 codes on the base side against 27 on the topper side — the whole of the
-    // gap this key can produce.
+    // gap the *code* can produce. It is no longer the whole of the base gap:
+    // after row D4 three of these nine codes are answered by congruence anyway
+    // (`II`, `IO`, `IX`, all `rect:1x1`) and six are not, and only the six leave
+    // a topper with nothing to sit on.
     expect(index.basesBySizeCode.size).toBe(26)
     expect(new Set(toppers.map((record) => record.sizeCode).filter((code) => code !== undefined)).size).toBe(27)
+
+    const answeredByShape = [...missing.keys()].filter((code) => {
+      const shapes = new Set(
+        toppers.filter((record) => record.sizeCode === code).map((record) => footprintKey(record.foot)),
+      )
+      return [...shapes].every((key) => key !== undefined && index.basesByFootprint.has(key))
+    })
+    expect(answeredByShape.sort()).toEqual(['II', 'IO', 'IX'])
+    expect(['L', 'O', 'P', 'PA', 'PB', 'PC'].map((code) => missing.get(code))).toEqual([20, 5, 12, 6, 20, 23])
   })
 
   it('shows the 31 unsupportable shapes are geometry, not an omission', () => {
@@ -867,6 +1464,12 @@ describeCorpus(corpusSuite, () => {
     const s2w = shapeless.filter((record) => footprintKey(record.foot)?.startsWith('arc:'))
     expect(s2w).toHaveLength(10)
     expect(s2w.every((record) => record.foot.shape === 'arc' && record.foot.band === 's2w_radial')).toBe(true)
+
+    // Every one of the 31 is uncoded, which is what keeps this bucket and the
+    // archive-gap bucket apart after row D4: a topper that publishes a code the
+    // base range does not answer to is reported by its code, because that is the
+    // half somebody can act on.
+    expect(shapeless.every((record) => record.sizeCode === undefined)).toBe(true)
 
     // Why no base can carry the 17: nothing in the base range has an extent
     // below one grid unit.
@@ -950,21 +1553,26 @@ describeCorpus(corpusSuite, () => {
       expect(message).toContain('no top surface')
       // The cause, and it is the actionable half: a plainer base exists and does
       // not carry magnetic, so the lock preference is what to change.
-      expect(message).toContain('every plainer base carrying size code D+SA lacks magnetic')
+      expect(message).toContain('every plainer base carrying footprint rect:1.5x3 lacks magnetic')
     }
   })
 
-  it('reaches 88.1% of the code-less toppers through the footprint fallback', () => {
+  it('reaches 87.7% of the code-less toppers, on what is now the primary key', () => {
     const codeless = toppers.filter((record) => record.sizeCode === undefined)
     const matched = codeless.filter(
       (record) => resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts.length === 2,
     )
-    // 1,899 of 2,364 before row W3 and 2,108 after it: the fallback is
-    // unchanged and 209 more code-less toppers had a footprint to key on. Row W4
-    // takes 25 back — 13 `curved+interface` floors whose base match rested on a
-    // fabricated sweep, and 12 `curved+inverted` riser fragments whose tagged
-    // 7 x 7 the mesh contradicts. Both were false pairs, so 2,083 is a more
-    // honest 88.1% than the 89.2% it replaces.
+    // 1,899 of 2,364 before row W3 and 2,108 after it: 209 more code-less toppers
+    // had a footprint to key on. Row W4 takes 25 back — 13 `curved+interface`
+    // floors whose base match rested on a fabricated sweep, and 12
+    // `curved+inverted` riser fragments whose tagged 7 x 7 the mesh contradicts.
+    // Both were false pairs, so 2,073 is a more honest 87.7% than the 89.2% it
+    // replaces.
+    //
+    // Row D4 leaves this population **exactly** where it was, which is the point
+    // of measuring it here: these toppers have no code, so the primitive was
+    // already the only key they ever had. Everything D4 moved is on the coded
+    // side.
     expect(codeless).toHaveLength(2364)
     expect(matched).toHaveLength(2073)
   })
@@ -1174,10 +1782,7 @@ describeCorpus(corpusSuite, () => {
         if (base.match?.lockAgrees === false) {
           disagreed += 1
           // A mismatch is only permitted when no candidate could have agreed.
-          const candidates =
-            topper.sizeCode !== undefined
-              ? (index.basesBySizeCode.get(topper.sizeCode) ?? [])
-              : (index.basesByFootprint.get(footprintKey(topper.foot) ?? '') ?? [])
+          const candidates = candidatesOf(topper) ?? []
           expect(candidates.some((candidate) => candidate.conn.includes(lock))).toBe(false)
           expect(resolved.notes.map((entry) => entry.code)).toContain('base-lock-mismatch')
         }
