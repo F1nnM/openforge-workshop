@@ -1,0 +1,305 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the guided assemblies screen.
+
+   Row C3. The 40 recipe templates, one part at a time, with each part's
+   candidate set narrowed by the parts already chosen.
+
+   Hand-written CSS rather than Tailwind utilities, following
+   `../../ui/shell/shell.css`, `../catalog/catalog.css` and `../library/
+   library.css`. Unlayered, for the reason set out at the top of that shell file.
+
+   ## Why this file imports the catalog's
+
+   The same reason `../library/library.css` and `../detail/slots/slots.css` do:
+   the step grid renders `TileThumb`, and the sprite-sheet rules it depends on —
+   `.of-thumb`, `.of-thumb-frame`, and the `max-width: none` on `.of-thumb-sheet`
+   without which Tailwind's Preflight squeezes all ten camera angles into the
+   well — live in the catalog's stylesheet with the component that owns them.
+   Restating them here would be two definitions of one class and a race over
+   which `<style>` Vite emits second.
+
+   ## The grid is `auto-fill`, not a fixed column count
+
+   `../detail/slots/slots.css` fixes three columns because it lives inside a
+   442px drawer and its largest grid in the whole corpus is eight cards. This
+   grid is on a full-width screen and its largest is **428** — measured, on
+   `Wall (Any, Modular)`, whose recipe names no component at all. So it fills the
+   width available and `AssembliesScreen.tsx` bounds how many cards mount at
+   once; the CSS does not have a count to pick.
+
+   Light only. There is no dark block, for the same reason there is none in
+   tokens.css: Parchment is the committed direction.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@import '../catalog/catalog.css';
+
+.of-asm {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+}
+
+/* ── Head ───────────────────────────────────────────────────────────────────── */
+
+.of-asm-head {
+  margin: 0 0 22px;
+}
+
+.of-asm-title {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.of-asm-summary {
+  max-width: 62ch;
+  margin: 8px 0 0;
+  color: var(--mut);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.of-asm-note {
+  margin: 4px 0 0;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.of-asm-inline {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--acc);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ── The 40 recipes ─────────────────────────────────────────────────────────── */
+
+.of-asm-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.of-asm-grouphead {
+  margin: 0 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+  color: var(--mut);
+}
+
+.of-asm-list {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-asm-recipe {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.of-asm-recipe:hover {
+  border-color: var(--acc);
+  background: var(--bg3);
+}
+
+.of-asm-recipename {
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* Mono, because these are the fixture's own part names and not prose. */
+.of-asm-recipeparts {
+  color: var(--mut);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+}
+
+/* ── One recipe ─────────────────────────────────────────────────────────────── */
+
+.of-asm-recipeview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.of-asm-back {
+  align-self: flex-start;
+}
+
+.of-asm-openname {
+  margin: 6px 0 0;
+  color: var(--ink);
+}
+
+.of-asm-progress {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* ── One step ───────────────────────────────────────────────────────────────── */
+
+.of-asm-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 11px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg2);
+}
+
+/* The open step is the one the guide is pointing at, so it gets the accent. */
+.of-asm-step[data-open] {
+  border-color: var(--acc);
+  background: var(--bg3);
+}
+
+.of-asm-stephead {
+  margin: 0;
+  color: var(--ink);
+}
+
+.of-asm-nested {
+  width: 100%;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* ── The step's grid ────────────────────────────────────────────────────────── */
+
+.of-asm-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-asm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.of-asm-card:hover {
+  border-color: var(--acc);
+}
+
+.of-asm-card[aria-pressed='true'] {
+  border-color: var(--acc);
+  box-shadow: inset 0 0 0 1px var(--acc);
+}
+
+/*
+  A dead end is greyed and *still focusable* — `aria-disabled`, never
+  `disabled`, so its accessible name survives. `cursor: default` rather than
+  `not-allowed`: the file is perfectly printable, it just closes another part,
+  and `not-allowed` overstates that.
+*/
+.of-asm-card[data-dead] {
+  border-style: dashed;
+  opacity: 0.5;
+  cursor: default;
+}
+
+.of-asm-card[data-dead]:hover {
+  border-color: var(--line);
+}
+
+.of-asm-cardname {
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.of-asm-why {
+  color: var(--mut);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+/* The narrowing is the row's whole subject, so it reads as data, not as an aside. */
+.of-asm-why[data-tone='narrow'] {
+  color: var(--acc);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+}
+
+/* ── The finish ─────────────────────────────────────────────────────────────── */
+
+.of-asm-done {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--acc);
+  border-radius: 5px;
+  background: var(--bg3);
+}
+
+.of-asm-bill {
+  margin: 0;
+  padding: 0;
+  color: var(--mut);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+/* ── Narrow viewports ───────────────────────────────────────────────────────── */
+
+@media (max-width: 520px) {
+  .of-asm {
+    padding: 20px 14px 48px;
+  }
+
+  .of-asm-list {
+    grid-template-columns: 1fr;
+  }
+
+  .of-asm-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+}
