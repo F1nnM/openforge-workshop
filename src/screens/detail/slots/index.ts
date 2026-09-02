@@ -24,7 +24,7 @@
  *     builder, adds the file to the library.
  */
 export type { SlotFillsProps } from './SlotFills'
-export { SlotFills } from './SlotFills'
+export { SlotFills, tileMaterials } from './SlotFills'
 
 export type { SlotOption, SlotSelection, SlotState } from './slotPicker'
 export {

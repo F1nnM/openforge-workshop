@@ -28,7 +28,15 @@
  *     current contents that are input;
  *   - **`version.fixtures`** — a literal, and the real corpus snapshot is
  *     recorded as a separate lock field instead, so a fixture bump is reported
- *     as a corpus change rather than misread as a derivation change.
+ *     as a corpus change rather than misread as a derivation change;
+ *   - **the thumbnail inventory** — row P3's `BuildOptions.thumbs`, left
+ *     unpassed so it is the empty set. It is the one input here that lives
+ *     outside this repository: `pipeline/thumbs/inventory.json` records what
+ *     somebody else's R2 bucket contained the last time it was probed, so
+ *     letting it reach the digest would make the lock move when a backfill runs
+ *     and demand a `SCHEMA_VERSION` bump for an event no derivation took part
+ *     in. `CatalogRecord.thumb` is therefore `false` on every record of the
+ *     locked build, which is what makes the digest a statement about this tree.
  *
  * What is left is the derivation code, `src/catalog/schema.ts` and the corpus.
  *
@@ -110,6 +118,9 @@ export function lockedBuild(rows: readonly FixtureRow[]): CatalogFile {
     manifest: emptyManifest(),
     fixturesRef: LOCK_FIXTURES_REF,
     builtAt: PAYLOAD_TIMESTAMP,
+    // Deliberately not `thumbBlobs(readThumbInventory())`. See the module note:
+    // the bucket's contents are input, and a backfill is not a derivation.
+    thumbs: new Set(),
   }).file
 }
 

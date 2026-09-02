@@ -6,8 +6,8 @@
  * line, the material swatch, and the full-width library toggle. What it keeps,
  * and why:
  *
- *   - **{@link TileThumb}, imported rather than rebuilt.** It is the sprite-sheet
- *     maths — 2×5 sheet, frame offsets, the `max-width: none` that Tailwind's
+ *   - **{@link TileThumb}, imported rather than rebuilt.** It is the two sources
+ *     and their geometry — 2×5 sheet, frame offsets, the `max-width: none` that Tailwind's
  *     Preflight would otherwise use to squeeze all ten camera angles into the
  *     well, explicit intrinsic dimensions so the well does not resize when the
  *     image lands, lazy loading, and the "no render" plate for the one live tile
@@ -58,6 +58,7 @@
 import { Link } from '@tanstack/react-router'
 
 import type { CatalogAssets, SpriteSheet, TileVariant } from '@/catalog'
+import type { MaterialId } from '@/materials'
 import { AvailabilityStrip, fileSizeLabel, sizeLabel, variantTokenLabel } from '@/screens/catalog'
 import { removeFromLibrary } from '@/store'
 import { Chip, VisuallyHidden } from '@/ui/primitives'
@@ -69,16 +70,36 @@ export interface LibraryCardProps {
   entry: LibraryItem
   assets: CatalogAssets
   sheet: SpriteSheet
+  /**
+   * The tint for {@link LibraryItem.preview} — `index.materialOf(entry.preview)`.
+   *
+   * Row P3, and it is the one place the "lighter card" argument at the top of
+   * this file needed a second look. What this card drops relative to the
+   * catalog's is the material **swatch**: an explicit dot and a texture-set name,
+   * which is disclosure the library does not need because the user already chose
+   * these files. The tint is not that. It is the picture of the tile, and the
+   * same mesh appearing stone here and stone there is the point of resolving it
+   * once — a card that showed a grey model beside a catalog card showing a
+   * sandstone one would read as a different tile, not as less information.
+   */
+  material: MaterialId
 }
 
-export function LibraryCard({ entry, assets, sheet }: LibraryCardProps) {
+export function LibraryCard({ entry, assets, sheet, material }: LibraryCardProps) {
   const { item, saved, preview, bytes } = entry
   const several = saved.length > 1
 
   return (
     <article className="of-lib-card">
       <Link className="of-lib-card-open" to="/catalog" search={{ tile: preview.ord }}>
-        <TileThumb blob={preview.blob} sprite={preview.sprite} assets={assets} sheet={sheet} />
+        <TileThumb
+          blob={preview.blob}
+          sprite={preview.sprite}
+          thumb={preview.thumb}
+          assets={assets}
+          sheet={sheet}
+          material={material}
+        />
         <h3 className="of-lib-card-title">{item.name}</h3>
       </Link>
 

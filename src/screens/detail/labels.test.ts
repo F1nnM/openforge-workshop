@@ -37,6 +37,7 @@ function record(overrides: Partial<Record<string, unknown>> = {}): CatalogRecord
     file: 'cave%floor.1x1.stl',
     bytes: 1_335_084,
     sprite: true,
+    thumb: false,
     family: 'tiles/cave/floors/floor',
     design: 'd51024cbbcd6f',
     name: 'Cave Floor 1x1',

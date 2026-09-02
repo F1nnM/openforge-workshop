@@ -27,7 +27,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { BlobId, CatalogFile } from '../../src/catalog'
-import { CatalogFile as CatalogFileSchema, shardedPath } from '../../src/catalog'
+import { CatalogFile as CatalogFileSchema, MEASURED_THUMB, shardedPath } from '../../src/catalog'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -124,7 +124,7 @@ export function spriteUrl(file: CatalogFile, blob: BlobId): string {
 
 /** The thumbnail's public URL, once uploaded. */
 export function thumbUrl(file: CatalogFile, blob: BlobId): string {
-  return `${file.assets.thumbs}/${shardedPath(blob)}.webp`
+  return `${file.assets.thumbs}/${shardedPath(blob)}${MEASURED_THUMB.extension}`
 }
 
 /**
@@ -134,7 +134,7 @@ export function thumbUrl(file: CatalogFile, blob: BlobId): string {
  * key and the URL the app builds cannot drift apart.
  */
 export function thumbKey(file: CatalogFile, blob: BlobId): string {
-  return `${thumbPrefix(file)}/${shardedPath(blob)}.webp`
+  return `${thumbPrefix(file)}/${shardedPath(blob)}${MEASURED_THUMB.extension}`
 }
 
 /** The bucket prefix the thumbnails live under — `thumbs`, from `assets.thumbs`. */

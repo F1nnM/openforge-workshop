@@ -69,8 +69,9 @@
 import { useMemo, useState } from 'react'
 
 import type { CatalogFile, TileId } from '@/catalog'
+import type { MaterialId } from '@/materials'
 import { useCatalogIndex } from '@/screens/catalog'
-import { SlotFills, compositionIndexFor } from '@/screens/detail/slots'
+import { SlotFills, compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
 import { addToLibrary } from '@/store'
 import { Button, Chip, Eyebrow } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
@@ -236,6 +237,12 @@ function Recipe({
     [catalog],
   )
 
+  /* C2's `tileMaterials` rather than a second record join: an `AssemblyOption`'s
+     variant carries no tags, and `resolveMaterial` needs the full de-interned
+     list because the `texture` shortcut is wrong on 691 of 8,702 records. Lazy
+     for the same reason it is there — a recipe nobody opens builds no map. */
+  const materialOf = useMemo(() => (catalog === undefined ? null : tileMaterials(catalog)), [catalog])
+
   /* Only this recipe's part names, so switching recipes cannot carry a pick
      across. The key is `(template, part)`; see `assembly.ts` on why that needs
      nothing private from A1. */
@@ -285,6 +292,7 @@ function Recipe({
             <Step
               catalog={catalog}
               key={step.key}
+              materialOf={materialOf}
               onChoose={(tile) => {
                 onChoose(step.key, tile)
               }}
@@ -307,12 +315,15 @@ function Recipe({
 
 function Step({
   catalog,
+  materialOf,
   onChoose,
   onOpen,
   open,
   step,
 }: {
   catalog: CatalogFile | undefined
+  /** `null` exactly when `catalog` is undefined — see {@link Recipe}. */
+  materialOf: ((id: TileId) => MaterialId) | null
   onChoose: (tile: TileId | undefined) => void
   onOpen: () => void
   open: boolean
@@ -360,6 +371,7 @@ function Step({
                 <OptionCard
                   catalog={catalog}
                   chosen={option.variant.id === step.chosen}
+                  materialOf={materialOf}
                   onChoose={() => {
                     onChoose(option.variant.id === step.chosen ? undefined : option.variant.id)
                   }}
@@ -420,11 +432,13 @@ function Step({
 function OptionCard({
   catalog,
   chosen,
+  materialOf,
   onChoose,
   option,
 }: {
   catalog: CatalogFile | undefined
   chosen: boolean
+  materialOf: ((id: TileId) => MaterialId) | null
   onChoose: () => void
   option: AssemblyOption
 }) {
@@ -444,12 +458,14 @@ function OptionCard({
       }}
       type="button"
     >
-      {catalog === undefined ? null : (
+      {catalog === undefined || materialOf === null ? null : (
         <TileThumb
           assets={catalog.assets}
           blob={option.variant.blob}
+          material={materialOf(option.variant.id)}
           sheet={catalog.sprite}
           sprite={option.variant.sprite}
+          thumb={option.variant.thumb}
         />
       )}
       <span className="of-asm-cardname">{option.aggregate.name}</span>

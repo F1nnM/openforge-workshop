@@ -1,146 +1,192 @@
 /**
- * The tile thumbnail — one frame of a sprite sheet in a 4:3 radial-gradient well.
+ * The tile thumbnail — one image in a 4:3 radial-gradient well, from whichever
+ * of the two sources exists.
  *
- * Extracted from `screens/catalog/TileCard.tsx` by row P0. Four subtrees
- * rendered it then — the catalog card, the library card, the builder's bill of
- * tiles and the builder's palette — and `screens/detail/slots/SlotFills.tsx`
- * has since made five, which is the argument for the seam made twice:
+ * Extracted from `screens/catalog/TileCard.tsx` by row P0 because four subtrees
+ * rendered it; `screens/detail/slots/SlotFills.tsx` has since made five. Row P1
+ * mounted the tint filters here, for the same reason: this is the one module all
+ * five instantiate. Row P3 added the second source.
  *
- *   - **P1** mounts the `feColorMatrix` filters that tint the blue render, from
- *     here, because this is the one module all five subtrees instantiate. The
- *     fifth caller landed after P0 and inherited the tint without knowing it
- *     exists. See `TintFilters.tsx`.
- *   - **P3** switches the image between a 256px thumbnail derivative and this
- *     sheet, and the two need different CSS geometry *and* different filter
- *     chains — `ThumbSource` in `src/materials/tint.ts` measures what happens
- *     when they are crossed.
+ * See {@link TileThumbProps} for the interface, and `thumb.css` for the geometry
+ * of each source.
  *
- * See {@link TileThumbProps} for the interface those rows extend, and the two
- * contract sections at the foot of this comment for what they may assume.
+ * ## Two sources, and the switch is one variable on purpose
  *
- * ## The sheets are 2×5 grids, and they are the catalog screen's real cost
+ * The sheet is **2 rows × 5 columns of 512px frames, averaging 529 KB**, at
+ * `/sprites/{md5[:6]}/{md5}.png`; frame 0 is shown by clipping it, so a
+ * screenful of cards decodes hundreds of megabytes. The derivative is **one
+ * 256px square WebP** at `/thumbs/{md5[:6]}/{md5}.webp`, already cropped to
+ * frame 0 and already greyscale. It is the fix for that decode cost, and
+ * `CatalogRecord.thumb` is what says whether it exists — measured against the
+ * live bucket, not assumed. Today it exists for **0 of 8,352 blobs**, so this
+ * component renders sheets, honestly.
  *
- * There is still no thumbnail derivative in the bucket, so the only image
- * available is the sheet the detail viewer rotates: **2 rows × 5 columns of
- * 512px frames, averaging 529 KB**, at `/sprites/{md5[:6]}/{md5}.png`. Frame 0 is
- * shown by clipping the sheet, and the consequences are dealt with as follows:
+ * The two sources need different CSS geometry *and* different `feColorMatrix`
+ * chains, and **pointing one chain at the other source is not symmetric**
+ * (`ThumbSource` in `src/materials/tint.ts` carries the measurements):
  *
- *   - **`<img>`, not `background-image`.** A background cannot be lazily loaded
- *     and has no intrinsic size, so a screenful of them is a screenful of
- *     immediate requests. This `<img>` carries `width`/`height` (the sheet's real
- *     2560×1024, so the aspect ratio is reserved before it lands),
- *     `loading="lazy"` and `decoding="async"`.
- *   - **The clip is a square box with the sheet scaled to `cols × 100%` by
- *     `rows × 100%`.** The rendered image is therefore 5× the frame's width and
- *     2× its height, which is exactly what makes this expensive: a screenful
- *     decodes hundreds of megabytes. Nothing can be done about it here; the
- *     256px derivative is the fix, and P3 is the row that switches to it.
- *   - **The frame box is square inside the 4:3 well**, so the frame is never
- *     distorted and the well keeps its radial gradient at the sides.
- *   - **The sheets are blue**, not grey — `stl-thumb`'s default Phong material.
- *     v1 accepted a blue grid beside tinted 3D views (architecture-plan.md §8)
- *     and deliberately did **not** CSS-tint it, because a `filter` over a lit
- *     render produces a muddy wash. P1 revisited that and the objection did not
- *     survive measurement: a lit render in a *known* Phong material can be
- *     un-mixed into its shading and specular terms exactly, and re-mixed with
- *     another material's triple. It is not a wash over a render; it is the same
- *     render, re-lit. `src/materials/tint.ts` carries the whole argument and the
- *     numbers, including why a Rec.709 greyscale of these sheets would have
- *     produced the wash after all.
- *   - **One live tile has no sheet at all** — `CatalogRecord.sprite` is `false`
- *     for exactly one of 8,702. It gets a mono "no render" plate rather than a
- *     broken-image glyph.
+ *   - a sheet through the `thumb` matrix is a median **1.38–4.51** ΔE00 — the
+ *     "muddy wash", real and survivable;
+ *   - a thumbnail through the `sprite` matrix is a median **10.52–73.52** ΔE00
+ *     and **collapses towards black** (`necro` lands on `#000000`), because the
+ *     un-mix's shading row sums to zero, so a grey input yields a *negative*
+ *     shading term and the family's diffuse is subtracted rather than added.
  *
- * A note for anyone picking a frame other than 0: the sheet's ten frames are ten
- * distinct renders. An earlier claim that three of them were duplicates was
- * disproved by decoding the pixels (mean absolute difference 12.6–27.0 for the
- * supposedly identical pairs, against 3.5–9.1 for pairs 180° apart). It is the
- * `camera_pos` **metadata** that is wrong, not the images — so index arithmetic
- * here is sound, and only a caller trying to name an angle needs to be careful.
+ * So the dangerous crossing is the one an `onError` swap produces: change the
+ * `src` and not the `filter`, and the grid goes black. That is why the chosen
+ * source is the only state this component has, and why the `src`, the
+ * intrinsic dimensions, the image class, the frame geometry and the filter id
+ * are **all five derived from it** by {@link imageFor} and {@link frameStyle}.
+ * There is no code path that sets one without the others; the crossing is not
+ * avoided by discipline, it is unrepresentable.
  *
- * ## Where the styling lives, which is not here
+ * ## The fallback is a chain, not a boolean
  *
- * `.of-thumb`, `.of-thumb-frame`, `.of-thumb-sheet` and `.of-thumb-missing` are
- * defined in `screens/catalog/catalog.css`, which `screens/library/library.css`
- * and `builder/panels/panels.css` both `@import` for exactly these four rules.
- * P0 moved the component and not the stylesheet, because a copy of those rules in
- * a second file would be two definitions of one class and a race over which
- * `<style>` Vite emits second — and because `.of-thumb-sheet`'s `max-width: none`
- * is load-bearing against Tailwind's Preflight, so a rule that lost the race
- * would squeeze all ten camera angles into the well and still look plausible.
- * **P3 already owns both `catalog.css` and this directory**, and is the row that
- * can move the block to `ui/thumb/thumb.css` while it is changing the geometry
- * anyway.
+ * `thumb`, then `sprite`, then the "no render" plate — and a source that errors
+ * hands over to the next one. Three things fall out of writing it that way
+ * rather than as "if the thumb 404s, use the sheet":
  *
- * ## What P1 landed here: the tint, and where the `<defs>` mount
+ *   - **A stale `thumb: true` degrades instead of breaking.** The index is built
+ *     from a probe, and a probe is a reading of a bucket at a moment; an object
+ *     deleted afterwards would otherwise be a permanently broken image.
+ *   - **The one live tile of 8,702 with no sheet needs no special case.** Its
+ *     chain is empty, and an empty chain *is* the plate.
+ *   - **A 404 on the sheet now reaches the plate too**, where before it reached
+ *     the browser's broken-image glyph. That is a behaviour change and it is
+ *     deliberate; the plate is the honest rendering of "no picture of this tile".
  *
- *   - **The filter is on `.of-thumb-frame`, inline.** P0's contract named
- *     `.of-thumb-sheet` and the constraint behind it still holds — the well's
- *     gradient (`.of-thumb`), the "no render" plate and the library screen's
- *     shimmer skeleton, a bare `<div class="of-thumb of-shimmer">` in
- *     `screens/library/LibraryScreen.tsx`, are token colours that must not
- *     inherit a filter. The frame honours it and is ten times cheaper; see
- *     {@link tintedFrameStyle} for both halves of that.
- *   - **The `<defs>` mount once, from `TintFilters.tsx`, imperatively.**
- *     `filter: url(#id)` is a document-scoped fragment reference, so one mount
- *     anywhere in the page serves every thumb; what this component provides is
- *     *reachability*, being the one module every thumbnail subtree instantiates.
- *     There is no `<defs>` per thumb, because a screenful would repeat one id
- *     dozens of times and `url(#id)` resolves silently to the first. The file
- *     records why the mount is DOM rather than a portal or a second React root.
- *   - **The detail screen is not a consumer.** `screens/detail/SpriteRotator.tsx`
- *     has its own sprite geometry and does not use this component, so it is not
- *     tinted — but the filters are in its document all the same, since the
- *     mount is page-global and every route renders thumbnails somewhere. A row
- *     that wants the rotator tinted needs only `url(#of-tint-sprite-…)`.
- *   - **The `material` prop defaults to `unknown`, not to no tint.** Callers in
- *     `screens/` and `builder/` pass their resolved family; the five that do not
- *     yet render a neutral grey model rather than the renderer's blue, which is
- *     the honest reading of "this component was not told". See
- *     {@link TileThumbProps.material}.
+ * The chain position is keyed on the blob, because `VirtuosoGrid` recycles
+ * component instances as the user scrolls: state remembered against the instance
+ * would take a fallback earned by one tile and apply it to whichever tile landed
+ * in that slot next. Deriving the position from the current `blob` during render
+ * means no effect, no flash, and no stale fallback.
  *
- * ## The contract P3 reads: the geometry is one pure function
+ * ## Where the tint goes, and what P3 re-measured about it
  *
- * {@link sheetFrameStyle} is the whole of the sprite-sheet arithmetic, separated
- * from the markup so the second source can be a second branch with its own test
- * rather than a conditional threaded through JSX. Geometry is read from the
- * index's `sprite` block and never from constants: the schema holds it as data,
- * so a future sheet layout needs no code change here — and a 256px square
- * derivative is a different shape, not a different constant.
+ * P1 put the filter on `.of-thumb-frame` rather than on the `<img>`, for two
+ * reasons. The first still holds for both sources: the well's gradient
+ * (`.of-thumb`), the plate and the library's shimmer skeleton — a bare
+ * `<div class="of-thumb of-shimmer">` in `screens/library/LibraryScreen.tsx` —
+ * are token colours that must not inherit a filter, and the frame exists only
+ * inside the image branch and carries no colour of its own.
+ *
+ * The second was that filtering the frame is **ten times cheaper**, because a
+ * CSS filter rasterises the element's own clipped box and `.of-thumb-sheet`'s
+ * box is `cols × 100%` by `rows × 100%` — all ten camera angles, to show one.
+ * P3 was asked to re-examine that for the new source and it **does not hold**:
+ * a 256px square derivative's `<img>` box *is* the frame box, so the two
+ * attachment points allocate the same surface and the saving is 1×, not 10×.
+ * The filter stays on the frame regardless, and the reason is now the switch
+ * rather than the surface — one attachment point means a source change cannot
+ * leave two filters on two elements, or one on an element the other source does
+ * not render. (What the derivative *does* save is the decode: 256² of WebP
+ * against 2560×1024 of PNG.)
+ *
+ * Inline rather than in `thumb.css`, and that is a WebKit hazard rather than a
+ * preference: `url(#id)` in a bundled external stylesheet has historically been
+ * resolved against the stylesheet's own URL instead of the document's, which
+ * fails in a production bundle while working from a dev server.
+ *
+ * The `<defs>` those ids resolve against mount once per document, imperatively,
+ * from `TintFilters.tsx` — which carries why that is DOM and not JSX, and why
+ * all 32 filters (16 families × 2 sources) are mounted whether or not anything
+ * references them. That is what makes this row's switch one argument.
+ *
+ * ## Two notes for anyone editing this
+ *
+ * **Geometry is read from the index, never from constants.** The sheet's rows,
+ * columns and tile size come from `CatalogFile.sprite`, so a future layout needs
+ * no code change here. The derivative's edge comes from `MEASURED_THUMB`, which
+ * is the same constant `tools/thumbnails/render.ts` renders at — the number is
+ * defined once because a mismatch is an 8,352-way 404 nothing would catch.
+ *
+ * **The sheet's ten frames are ten distinct renders.** An earlier claim that
+ * three were duplicates was disproved by decoding the pixels (mean absolute
+ * difference 12.6–27.0 for the supposedly identical pairs, against 3.5–9.1 for
+ * pairs 180° apart). It is the `camera_pos` *metadata* that is wrong, so frame
+ * arithmetic here is sound and only a caller trying to *name* an angle needs
+ * care. The derivative has one frame and `frame` does not apply to it.
  */
 import type { CSSProperties } from 'react'
+import { useState } from 'react'
 
 import type { BlobId, CatalogAssets, SpriteSheet } from '@/catalog'
-import { shardedPath } from '@/catalog'
-import type { MaterialId } from '@/materials'
-import { DEFAULT_THUMB_MATERIAL, tintFilterId } from '@/materials'
+import { MEASURED_THUMB, shardedPath } from '@/catalog'
+import type { MaterialId, ThumbSource } from '@/materials'
+import { tintFilterId } from '@/materials'
 import { Eyebrow } from '@/ui/primitives'
 
+import './thumb.css'
 import { useTintFilters } from './TintFilters'
 
 export interface TileThumbProps {
   blob: BlobId
-  /** `CatalogRecord.sprite` — whether a sheet exists at all. */
+  /** `CatalogRecord.sprite` — whether a 2×5 sheet exists at all. */
   sprite: boolean
+  /**
+   * `CatalogRecord.thumb` — whether the 256px `/thumbs/` derivative exists.
+   *
+   * Required, like `sprite`, and for the stronger version of the same reason.
+   * Before this existed the component could only render the sheet, because it
+   * had no way to tell "there is no derivative" from "nobody told me about the
+   * derivative" — and guessing wrong in one direction is a 404 on every card.
+   * A caller that has a `CatalogRecord` or a `TileVariant` has this field on it;
+   * a caller that does not have one has no business claiming a thumbnail exists.
+   *
+   * `false` on all 8,702 records today. See `pipeline/thumbs.ts`.
+   */
+  thumb: boolean
   assets: CatalogAssets
   sheet: SpriteSheet
-  /** Which of the 10 camera angles to show. Frame 0 is the default view. */
+  /**
+   * Which of the sheet's 10 camera angles to show. Frame 0 is the default view.
+   *
+   * Applies to the `sprite` source only: the derivative is a crop of the sheet's
+   * `defaultFrame`, so there is no other angle in it. A caller that needs a
+   * specific angle is asking for the sheet, and passing `frame` does **not**
+   * force it — a record with `thumb: true` still shows the derivative, which is
+   * frame 0. No caller passes `frame` today; `screens/detail/SpriteRotator.tsx`
+   * is the subtree that wants other angles and it has its own geometry.
+   */
   frame?: number
   /**
-   * The family to tint the render as — `resolveMaterial(record.tags, record.file)`.
+   * The family to tint the render as — `index.materialOf(record)`, or
+   * `DEFAULT_THUMB_MATERIAL` for a caller that means "no claim".
    *
-   * Optional, and it defaults to {@link DEFAULT_THUMB_MATERIAL} (`unknown`)
-   * rather than to no tint at all, because the blue the renderer produced is not
-   * the neutral choice: it is 31.88 ΔE00 from the palette on average and
-   * 14.82 ΔE00 from `water`, so an un-tinted grid names a material, and names
-   * the wrong one. `unknown` is the palette's "no claim" entry, which is the
-   * claim a caller that did not pass this is entitled to make.
+   * **Required, and row P3 made it so rather than inherit P1's default.** P1
+   * shipped it optional, defaulting to `unknown` on the argument that the
+   * renderer's blue is not the neutral option: it is 31.88 ΔE00 from the
+   * *palette albedos* on average and 14.82 from `water`, so an un-tinted grid
+   * names a material and names the wrong one. The row was asked to test that
+   * rather than inherit it, and re-measuring it in the space that actually
+   * ships — rendering against rendering, at the corpus-mean sprite pixel,
+   * where the palette's own 9.0 confusability floor lives — inverts it:
+   *
+   *   `unknown` renders as `#535352`; nearest family rendering **`rough_stone`
+   *   at 9.64 ΔE00**, mean 23.28. The raw blue renders as `#3173bd`; nearest
+   *   **`water` at 15.94 ΔE00**, mean 31.84.
+   *
+   * So the `unknown` default is *more* confusable with a specific real material
+   * than the blue it replaced — 0.64 ΔE00 above the floor against 6.94 —
+   * and P1's numbers compared palette albedos with a rendered pixel, which are
+   * not the same quantity. Neither default is therefore safe, and the fix is not
+   * to pick the other one: it is that a call site which was never told the
+   * material must not be *renderable*. Required makes an unwired caller a
+   * compile error instead of a plausible grey card, which is the only version of
+   * this that cannot silently look correct. `DEFAULT_THUMB_MATERIAL` is still
+   * the right thing to pass **explicitly** when a caller genuinely has no claim
+   * to make; whether its docblock's argument survives is P1's to decide.
    *
    * Pass the record's **full de-interned tag list** to `resolveMaterial`, never
-   * a reconstructed `` `texture|${record.texture}` ``: on the 80 two-root tiles
-   * that field is deliberately not the material the tint follows.
+   * a reconstructed `` `texture|${record.texture}` ``: measured over all 8,702
+   * records, a `TEXTURE_ROOT_MATERIAL[record.texture]` shortcut disagrees with
+   * `resolveMaterial` on **691** of them (7.9%) — 252 `cave` tiles that are
+   * `sandstone`, 257 `towne` tiles split between `cut_stone` and `wood`, and 85
+   * with no `texture` at all that still resolve through a filename hint or a
+   * part fallback. `CatalogIndex.materialOf` does it correctly, once per record,
+   * memoised, and four of the five callers use it.
    */
-  material?: MaterialId
+  material: MaterialId
   className?: string
 }
 
@@ -150,6 +196,10 @@ export interface TileThumbProps {
  * `left`/`top` percentages resolve against the frame box, so `-100%` is exactly
  * one column or one row — which is why this is four numbers and not a
  * pixel calculation that would have to know the rendered size.
+ *
+ * The `thumb` source has no counterpart to this and deliberately does not get an
+ * empty-object stand-in: {@link frameStyle} branches, so a reader can see that
+ * one source has geometry to compute and the other has none.
  */
 export function sheetFrameStyle(sheet: SpriteSheet, frame?: number): CSSProperties {
   const index = frame ?? sheet.defaultFrame
@@ -165,70 +215,151 @@ export function sheetFrameStyle(sheet: SpriteSheet, frame?: number): CSSProperti
 }
 
 /**
- * Where the tint goes, and why it is on the frame and not on the `<img>`.
+ * The sources this record has, best first.
  *
- * The constraint is that the well's radial gradient (`.of-thumb`), the "no
- * render" plate and the library screen's shimmer skeleton are token colours
- * that are already correct, and must not inherit a filter. `.of-thumb-frame`
- * satisfies that: it exists only in the `sprite` branch, it wraps nothing but
- * the sheet, and `catalog.css` gives it no background, border or colour of its
- * own — so filtering it is pixel-identical to filtering the image inside it.
- *
- * It is also ten times cheaper. A CSS `filter` rasterises the element's own
- * clipped box, and `.of-thumb-sheet` **is** `cols × 100%` by `rows × 100%` —
- * the full 2×5 sheet. Filtering the image allocates a surface for all ten
- * camera angles to show one; filtering the square frame allocates one frame. On
- * a 60-card screen, whose decode cost is already the catalog's real expense,
- * that is not a micro-optimisation.
- *
- * Inline, not in `catalog.css`, and that is the WebKit hazard rather than a
- * preference: `url(#id)` in a bundled external stylesheet has historically been
- * resolved against the stylesheet's own URL instead of the document's, which
- * fails in a production bundle while working from a dev server.
+ * `thumb` before `sprite` because it is a quarter of the pixels and a fraction
+ * of the bytes. Both are checked rather than assuming `thumb` implies `sprite`:
+ * it does today, since the derivative is cropped from the sheet, but the
+ * implication is a property of how the objects happen to be produced and not
+ * something this component should break if it changes.
  */
-function tintedFrameStyle(sheet: SpriteSheet, frame: number | undefined, material: MaterialId): CSSProperties {
+function sourceChain(sprite: boolean, thumb: boolean): ThumbSource[] {
+  const chain: ThumbSource[] = []
+  if (thumb) chain.push('thumb')
+  if (sprite) chain.push('sprite')
+  return chain
+}
+
+/** The frame's inline style: this source's geometry, and this source's filter. */
+function frameStyle(
+  source: ThumbSource,
+  sheet: SpriteSheet,
+  frame: number | undefined,
+  material: MaterialId,
+): CSSProperties {
+  const geometry = source === 'sprite' ? sheetFrameStyle(sheet, frame) : {}
+  return { ...geometry, filter: `url(#${tintFilterId(material, source)})` }
+}
+
+interface ImageSpec {
+  className: string
+  src: string
+  width: number
+  height: number
+}
+
+/**
+ * The `<img>` for one source: its URL, its class and its intrinsic size.
+ *
+ * The dimensions are the object's real ones — the sheet's 2560×1024, the
+ * derivative's 256×256 — so the aspect ratio is reserved before the image
+ * lands. Both paths are content-addressed through {@link shardedPath}, so an
+ * off-by-one in the shard cannot differ between them.
+ */
+function imageFor(source: ThumbSource, blob: BlobId, assets: CatalogAssets, sheet: SpriteSheet): ImageSpec {
+  if (source === 'thumb') {
+    return {
+      className: 'of-thumb-image',
+      src: `${assets.thumbs}/${shardedPath(blob)}${MEASURED_THUMB.extension}`,
+      width: MEASURED_THUMB.size,
+      height: MEASURED_THUMB.size,
+    }
+  }
   return {
-    ...sheetFrameStyle(sheet, frame),
-    // `sprite`, not `thumb`: this component still renders the sheet. P3 owns
-    // the switch, and that argument is the whole of it — see `ThumbSource` for
-    // what pointing the wrong chain at a source costs.
-    filter: `url(#${tintFilterId(material, 'sprite')})`,
+    className: 'of-thumb-sheet',
+    src: `${assets.sprites}/${shardedPath(blob)}.png`,
+    width: sheet.cols * sheet.tile,
+    height: sheet.rows * sheet.tile,
   }
 }
 
-/** One frame of a tile's sprite sheet, in a 4:3 radial-gradient well. */
+/** One tile's thumbnail, from the best source it has, in a 4:3 well. */
 export function TileThumb({
   blob,
   sprite,
+  thumb,
   assets,
   sheet,
   frame,
-  material = DEFAULT_THUMB_MATERIAL,
+  material,
   className,
 }: TileThumbProps) {
   // Mounts the page's single `<defs>`, from the one module every
   // thumbnail-rendering subtree instantiates. See `TintFilters.tsx`.
   useTintFilters()
 
+  // How far down this *blob's* chain we have fallen. Keyed on the blob rather
+  // than held as a bare counter because `VirtuosoGrid` recycles instances: a
+  // counter would carry one tile's 404 onto its replacement. Derived during
+  // render, so there is no effect and no un-filtered first paint.
+  const [fallen, setFallen] = useState<{ blob: BlobId; steps: number } | null>(null)
+  const chain = sourceChain(sprite, thumb)
+  const at = fallen?.blob === blob ? fallen.steps : 0
+  const shownSource = chain[at]
+
   return (
     <div className={['of-thumb', className].filter(Boolean).join(' ')}>
-      {sprite ? (
-        <div className="of-thumb-frame" style={tintedFrameStyle(sheet, frame, material)}>
-          <img
-            className="of-thumb-sheet"
-            src={`${assets.sprites}/${shardedPath(blob)}.png`}
-            width={sheet.cols * sheet.tile}
-            height={sheet.rows * sheet.tile}
-            loading="lazy"
-            decoding="async"
-            // Decorative: the card's title is the tile's name, and a second
-            // reading of it here would make every card announce twice.
-            alt=""
-          />
-        </div>
-      ) : (
+      {shownSource === undefined ? (
         <Eyebrow className="of-thumb-missing">no render</Eyebrow>
+      ) : (
+        <ThumbImage
+          blob={blob}
+          source={shownSource}
+          assets={assets}
+          sheet={sheet}
+          frame={frame}
+          material={material}
+          onFail={() => {
+            setFallen({ blob, steps: at + 1 })
+          }}
+        />
       )}
+    </div>
+  )
+}
+
+/**
+ * The frame and the image for one source.
+ *
+ * Its own component so that the `key` can be the source: swapping sources
+ * replaces the `<img>` rather than mutating the `src` of the one that just
+ * failed, which is what stops a browser reporting a second `error` for the old
+ * URL against the new element and skipping a step of the chain.
+ */
+function ThumbImage({
+  blob,
+  source,
+  assets,
+  sheet,
+  frame,
+  material,
+  onFail,
+}: {
+  blob: BlobId
+  source: ThumbSource
+  assets: CatalogAssets
+  sheet: SpriteSheet
+  frame: number | undefined
+  material: MaterialId
+  onFail: () => void
+}) {
+  const image = imageFor(source, blob, assets, sheet)
+
+  return (
+    <div className="of-thumb-frame" style={frameStyle(source, sheet, frame, material)}>
+      <img
+        key={source}
+        className={image.className}
+        src={image.src}
+        width={image.width}
+        height={image.height}
+        loading="lazy"
+        decoding="async"
+        onError={onFail}
+        // Decorative: the card's title is the tile's name, and a second
+        // reading of it here would make every card announce twice.
+        alt=""
+      />
     </div>
   )
 }

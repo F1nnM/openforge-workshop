@@ -206,7 +206,7 @@ function Builder({ index }: { index: CatalogIndex }) {
           It takes `records` because catalog-first resolution is a join against
           the archive's own base filenames, and the index this screen already
           holds is the only copy of those: `resolve.ts` measures the alternative,
-          a shipped reverse index, at 3,776 B brotli to say what the records
+          a shipped reverse index, at 3,650 B brotli to say what the records
           already say.
 
           `onPlace` is row S5's seam and is deliberately not passed yet. The
@@ -229,6 +229,7 @@ function Builder({ index }: { index: CatalogIndex }) {
           placements={placements}
           assets={index.file.assets}
           sheet={index.file.sprite}
+          materialOf={index.materialOf}
           download={download}
         />
         {/*

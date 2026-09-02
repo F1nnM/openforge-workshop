@@ -3,13 +3,17 @@
  *
  * It lives under `ui/` rather than in either screen because both screens and both
  * builder panels render it, and it knew nothing about a card even when it was
- * declared inside one. Row P0 cut it out for the two rows that follow: P1 mounts
- * tint filters that every thumb-rendering subtree has to reach, and P3 switches
- * the image source. `TileThumb.tsx` carries the contract each of them reads.
+ * declared inside one. Row P0 cut it out for the two rows that followed: P1
+ * mounted the tint filters every thumb-rendering subtree has to reach, and P3
+ * added the second image source. `TileThumb.tsx` carries both contracts.
  *
- * Styling still lives in `screens/catalog/catalog.css`, which the library's and
- * the panels' stylesheets already `@import` for those four rules. `TileThumb.tsx`
- * says why the rules did not move with the component, and which row moves them.
+ * **Styling now lives here too**, in `thumb.css`, which `TileThumb.tsx` imports
+ * itself — so the rules arrive with the component in all five subtrees. P3
+ * moved them out of `screens/catalog/catalog.css` because it gave the well a
+ * second geometry and half a stylesheet each would have been worse than either
+ * whole one. `screens/library/library.css` and `builder/panels/panels.css` still
+ * `@import` the catalog's, for `.of-empty-*` and `.of-search-input` respectively;
+ * `screens/detail/slots/slots.css` needed nothing else and no longer does.
  *
  * `useTintFilters` and `TINT_FILTER_SHEET_ID` are exported for completeness, not
  * because a caller should reach for them: `TileThumb` already calls the hook, so

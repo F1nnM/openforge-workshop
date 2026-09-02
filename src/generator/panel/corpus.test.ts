@@ -132,14 +132,16 @@ describeCorpus(title, () => {
     expect(expressible + unitDimension + toplessLock).toBe(442)
   })
 
-  it('costs 3,776 B brotli to ship, at the payload epoch, so it is derived instead', () => {
+  it('costs 3,650 B brotli to ship, at the payload epoch, so it is derived instead', () => {
     // Measured the way rows C1 and A1 measured theirs: the same file at
     // `PAYLOAD_EPOCH`, once without the field and once with it. Row X4
     // established that the clock alone swings this by 655 B, so a delta
     // measured at the build clock would not be a delta.
     const atEpoch = { ...file, version: { ...file.version, built: PAYLOAD_TIMESTAMP } }
     const baseline = brotli(JSON.stringify(atEpoch))
-    expect(baseline).toBe(365_403)
+    // 365,603 since row P3, which added `CatalogRecord.thumb`: 365,403 + 200 B
+    // for an 8,702-record boolean that is `false` on every one of them.
+    expect(baseline).toBe(365_603)
 
     const map: Record<string, number> = {}
     for (const record of bases) {
@@ -149,7 +151,13 @@ describeCorpus(title, () => {
     }
     expect(Object.keys(map)).toHaveLength(709)
     const withMap = brotli(JSON.stringify({ ...atEpoch, bases: map }))
-    expect(withMap - baseline).toBe(3_776)
+    // 3,650 B since row P3, and the drop from 3,776 is worth a line because it
+    // is not this row's data changing. Nothing about the recipe map moved; the
+    // *baseline* it is measured against gained a boolean per record, and brotli
+    // is not additive — so a field added elsewhere shifted this delta by 126 B,
+    // 3.3% of it. A delta over a 5.8 MB artefact is a fact about one artefact,
+    // which is exactly why this line is asserted and not quoted from a docblock.
+    expect(withMap - baseline).toBe(3_650)
     // The row expected ~12 KB. It is 3.3x smaller than that and still 0 is
     // cheaper, because every input is already in the records.
     expect(withMap - baseline).toBeLessThan(12_288)

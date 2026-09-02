@@ -70,6 +70,14 @@ export {
 export type { OrdinalAssignment } from './ordinals'
 export { buildTagTable, hasTagPrefix, namespaceRoots, numericTagValue, tagValue } from './tags'
 export {
+  THUMB_INVENTORY_PATH,
+  THUMB_INVENTORY_VERSION,
+  ThumbInventory,
+  readThumbInventory,
+  serialiseThumbInventory,
+  thumbBlobs,
+} from './thumbs'
+export {
   ASSET_BASES,
   PAYLOAD_EPOCH,
   PAYLOAD_TIMESTAMP,

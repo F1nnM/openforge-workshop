@@ -104,6 +104,7 @@ function catalogOf(rows: readonly RawRow[]): CatalogFile {
         file: row.id.slice(cut + 1),
         bytes: row.bytes,
         sprite: true,
+        thumb: false,
         family: row.id.slice(0, cut),
         design: `design-${String(index)}`,
         name: row.id.slice(cut + 1),

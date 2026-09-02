@@ -45,6 +45,7 @@ export function catalogOf(drafts: readonly Draft[]): CatalogFile {
     file: draft.id.slice(draft.id.lastIndexOf('/') + 1),
     bytes: 1_000 + i,
     sprite: true,
+    thumb: false,
     family: draft.id.slice(0, draft.id.lastIndexOf('/')),
     design: draft.design,
     name: draft.name ?? 'Test Tile',

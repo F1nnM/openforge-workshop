@@ -95,7 +95,19 @@ describe('buildUploadManifest', () => {
     expect(notes).toMatch(/R2 write credentials.*OPEN/)
     expect(notes).toMatch(/Nothing here has been uploaded/)
     expect(notes).toMatch(/CORS rule.*FIRST/)
-    expect(notes).toMatch(/fall back to the sprite sheet/)
+    expect(notes).toMatch(/falls back to the sprite sheet/)
+  })
+
+  it('names the two commands that make the upload visible, in order', () => {
+    // Row P3. The sync alone changes nothing a user can see: `CatalogRecord.thumb`
+    // comes from a probe of the bucket and the index has to be rebuilt from it.
+    // This note is where a human holding credentials is looking when the sync
+    // finishes, so it is the only place worth putting the next two steps.
+    const notes = manifest().notes.join('\n')
+    const probe = notes.indexOf('npm run thumbs -- --inventory')
+    const build = notes.indexOf('npm run import:catalog')
+    expect(probe).toBeGreaterThan(-1)
+    expect(build).toBeGreaterThan(probe)
   })
 
   it('emits commands that name the staged directory and the prefix', () => {

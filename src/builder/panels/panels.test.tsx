@@ -36,6 +36,7 @@ import { CatalogFile as CatalogFileSchema, resolveTags } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
 import { BlobFetchError, PreviewMeshRefusedError } from '@/download'
 import { createSearchEngine, defaultFacetSearch } from '@/search'
+import { resolveMaterial } from '@/materials'
 import type { CatalogIndex } from '@/screens/catalog'
 import type { LockSystem, Placement } from '@/store'
 import {
@@ -70,7 +71,12 @@ beforeEach(() => {
   clearPersistedWorkshopState()
   file = fixtureCatalogFile()
   const engine = createSearchEngine(file)
-  index = { file, engine, tagsFor: (record) => resolveTags(file, record) }
+  index = {
+    file,
+    engine,
+    tagsFor: (record) => resolveTags(file, record),
+    materialOf: (record) => resolveMaterial(resolveTags(file, record), record.file).material,
+  }
   assembly = buildAssemblyIndex(file)
 })
 
@@ -488,6 +494,7 @@ function BillHarness({ download }: { download?: ArchiveDownload }) {
       placements={placements}
       assets={file.assets}
       sheet={file.sprite}
+      materialOf={index.materialOf}
       download={download ?? inertDownload(bill)}
     />
   )
@@ -708,6 +715,7 @@ function gapCatalog(): CatalogFile {
         file: 'cut-stone#riser+high.2x0.5.openforge.stl',
         bytes: 2_000_000,
         sprite: true,
+        thumb: false,
         family: 'tiles/cut-stone/misc/risers/risers',
         design: 'd-strip',
         name: GAP_NAMES.strip,
@@ -727,6 +735,7 @@ function gapCatalog(): CatalogFile {
         file: 'cavern%volcanic#corner.corner,120°.openforge.stl',
         bytes: 8_000_000,
         sprite: true,
+        thumb: false,
         family: 'tiles/cavern/volcanic/thick_wall/corner',
         design: 'd-shapeless',
         name: GAP_NAMES.shapeless,
@@ -748,6 +757,7 @@ function gapCatalog(): CatalogFile {
         file: 'towne#floor.2x2.T.openforge.stl',
         bytes: 4_000_000,
         sprite: true,
+        thumb: false,
         family: 'tiles/towne/floors/floor/openforge',
         design: 'd-topless-topper',
         name: GAP_NAMES.toplessTopper,
@@ -773,6 +783,7 @@ function gapCatalog(): CatalogFile {
         file: 'plain#base.T.openlock+topless.stl',
         bytes: 300_000,
         sprite: true,
+        thumb: false,
         family: 'tiles/bases/plain/base/openlock',
         design: 'd-topless-base',
         name: GAP_NAMES.toplessBase,
@@ -813,6 +824,7 @@ function GapHarness({ tiles }: { tiles: readonly (keyof typeof ALL_IDS)[] }) {
       placements={placements}
       assets={gapFile.assets}
       sheet={gapFile.sprite}
+      materialOf={(record) => resolveMaterial(resolveTags(gapFile, record), record.file).material}
       download={inertDownload(bill)}
     />
   )
@@ -1293,6 +1305,7 @@ function a6Catalog(): CatalogFile {
     foot: { shape: 'rect', w: 2, d: 2 },
     sizeCode: 'A',
     sprite: true,
+    thumb: false,
   }
   return CatalogFileSchema.parse({
     ...FIXTURE_CATALOG,
@@ -1333,6 +1346,7 @@ function a6Catalog(): CatalogFile {
         file: 'towne#wall.2x.dragonlock.stl',
         bytes: 2_000_000,
         sprite: true,
+        thumb: false,
         family: 'tiles/towne/walls/wall/dragonlock',
         design: 'd-dragon',
         name: A6_NAMES.dragonOnly,
@@ -1351,6 +1365,7 @@ function a6Catalog(): CatalogFile {
         file: 'towne#pillar.1x1.stl',
         bytes: 700_000,
         sprite: true,
+        thumb: false,
         family: 'tiles/towne/props/pillar',
         design: 'd-untagged',
         name: A6_NAMES.untagged,
@@ -1395,6 +1410,7 @@ function A6Harness({
       placements={placements}
       assets={a6File.assets}
       sheet={a6File.sprite}
+      materialOf={(record) => resolveMaterial(resolveTags(a6File, record), record.file).material}
       download={inertDownload(bill)}
     />
   )

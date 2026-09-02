@@ -22,7 +22,9 @@
      - `.of-card-title` is clamped to two lines at a fixed `height`, not
        `max-height` — a one-line title still occupies two.
      - `.of-thumb` has an `aspect-ratio`, so the well is the same size before and
-       after its image lands.
+       after its image lands. That rule lives in `../../ui/thumb/thumb.css` with
+       the component, since row P3, and it is a requirement of *this* screen: a
+       row that relaxes it there breaks the virtualiser here.
      - `.of-card-texture` and `.of-card-meta` are single lines with no wrap.
      - `.of-avail-strip` is a **fixed two-line box** — one aggregate shows one
        chip and another shows four, and both must occupy the same 41px. The
@@ -342,54 +344,6 @@
 
 .of-card-open:hover .of-card-title {
   color: var(--acc);
-}
-
-/* ── Thumbnail well ──────────────────────────────────────────────────────── */
-
-.of-thumb {
-  position: relative;
-  /* Reserved before the sheet lands, which is what keeps every card the same
-     height while images stream in. */
-  aspect-ratio: 4 / 3;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  /* The contract's recurring device: a radial-gradient well behind every
-     thumbnail. */
-  background: radial-gradient(circle at 50% 38%, var(--bg2) 0%, var(--bg3) 66%, #d3c5a6 100%);
-}
-
-/* Square, so the 512px frame is never distorted, and the well's gradient stays
-   visible at the sides of a 4:3 card. */
-.of-thumb-frame {
-  position: relative;
-  height: 100%;
-  aspect-ratio: 1;
-  overflow: hidden;
-}
-
-/* The whole 2×5 sheet, scaled so one frame fills the square above, and offset to
-   the requested frame. Percentages on `left`/`top` resolve against the frame
-   box, so `-100%` is exactly one column or one row.
-
-   `max-width: none` is load-bearing, not defensive. Tailwind's Preflight sets
-   `img { max-width: 100% }`, which silently clamps the 500%-wide sheet back to
-   one frame's width and squeezes all ten camera angles into the well — the
-   thumbnail still renders, still has the right aspect ratio, and is wrong. */
-.of-thumb-sheet {
-  position: absolute;
-  left: var(--of-sheet-x, 0%);
-  top: var(--of-sheet-y, 0%);
-  width: calc(var(--of-sheet-cols, 1) * 100%);
-  height: calc(var(--of-sheet-rows, 1) * 100%);
-  max-width: none;
-  max-height: none;
-}
-
-.of-thumb-missing {
-  opacity: 0.72;
 }
 
 /* ── Card body ───────────────────────────────────────────────────────────── */

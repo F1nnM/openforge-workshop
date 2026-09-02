@@ -70,6 +70,7 @@ function aggregateOf(drafts: readonly Draft[]): TileAggregate {
       file: draft.id.slice(draft.id.lastIndexOf('/') + 1),
       bytes: draft.bytes ?? 1_000_000,
       sprite: true,
+      thumb: false,
       family: draft.id.slice(0, draft.id.lastIndexOf('/')),
       design: 'd-one',
       name: 'Cave Thing',

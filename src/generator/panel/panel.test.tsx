@@ -53,6 +53,7 @@ function archivedRecord(file: string, blob: string, bytes: number): CatalogRecor
     file,
     bytes,
     sprite: true,
+    thumb: false,
     family: 'tiles/bases/plain',
     design: 'd0',
     name: 'Square Base 2x2',

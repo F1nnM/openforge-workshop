@@ -88,6 +88,7 @@ function aRecord(over: Overrides = {}): CatalogRecord {
     file: 'cave%corner.IL.openlock.stl',
     bytes: 12472284,
     sprite: true,
+    thumb: false,
     family: 'tiles/cave/thick_wall/wall/corner/openlock',
     design: 'cave-corner-IL',
     name: 'Cave corner',
@@ -536,6 +537,7 @@ describe('round trip', () => {
         ord: ordinal(2),
         foot: { shape: 'arc', rIn: 1.5, rOut: 2, sweep: 22.5, band: 'convex', bandBasis: 'fallback' },
         sprite: false,
+        thumb: false,
         config: {
           parts: [
             {
@@ -742,6 +744,7 @@ function toRecord(row: FixtureRow, ord: number, intern: (tag: string) => TagId):
     file: basename(meta.full_name),
     bytes: meta.size,
     sprite: (row.images ?? []).length > 0,
+    thumb: false,
     family: dirname(meta.full_name),
     design,
     name: basename(meta.file, '.stl'),

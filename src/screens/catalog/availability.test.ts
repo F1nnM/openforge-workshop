@@ -72,6 +72,7 @@ function record(overrides: Record<string, unknown> = {}): CatalogRecord {
     file: `tile-${suffix}.2x.stl`,
     bytes: 10_000_000,
     sprite: true,
+    thumb: false,
     family: 'tiles/fixture',
     design: `dfix${suffix}`,
     name: `Tile ${suffix}`,

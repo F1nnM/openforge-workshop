@@ -99,8 +99,25 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * index at 71.4% of its 500 KB budget to 79.3% to say something the reader can
  * recompute in one pass. A schema-3 index is therefore fully readable under
  * aggregation, which is exactly what the stamp is supposed to mean.
+ *
+ * **4** — row P3 added {@link CatalogRecord.thumb}, and this is the first
+ * bump where the *shape* moved rather than a field's meaning. It is also the
+ * first one whose failure was already loud without it: `thumb` is required, so a
+ * schema-3 index does not half-read under this shape — it fails
+ * `CatalogFile.parse` on the first record. The bump is not there to make that
+ * loud. It is there because `tools/stamp/lock.ts` asserts a biconditional —
+ * the emitted `{tags, records}` move if and only if `(SCHEMA_VERSION,
+ * PIPELINE_VERSION)` do — and a new key on 8,702 records moves the digest.
+ * Rows A1 and C1 declined to bump because they added a *check*; this row adds a
+ * field, so declining would trip the lock's first direction, "a derivation
+ * changed and nothing announced it".
+ *
+ * `PIPELINE_VERSION` deliberately stays 1. No existing field's derivation moved:
+ * `pipeline/build.ts` reads one new input and writes one new key, and every
+ * other value in the record is byte-identical to schema 3's. The two numbers
+ * answer different questions and only one of them moved.
  */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 /* ---------------------------------------------------------------- identities */
 
@@ -799,6 +816,41 @@ export const CatalogRecord = z.object({
   sprite: z.boolean(),
 
   /**
+   * Whether a 256 px `/thumbs/` derivative exists for this tile's mesh.
+   *
+   * **`false` on all 8,702 today, and that is measured rather than assumed.**
+   * `tools/thumbnails/inventory.ts` HEADs every one of the 8,352 distinct
+   * sprite-carrying md5s through `https://objects.openforge.tools/thumbs` and
+   * `pipeline/thumbs.ts` carries the answer into the build; probed 2026-09-02,
+   * **0 present, 8,352 absent, 0 failed**. The backfill is blocked on R2 write
+   * credentials (`v1-pr-series.md`, non-PR blockers), so there is nothing in the
+   * prefix to find.
+   *
+   * Required, not optional, and that is the whole point of the field. An absent
+   * key would be indistinguishable from a pipeline that never asked, which is
+   * exactly the failure this replaces: before this row `@/ui/thumb` had no way
+   * to tell "no thumbnail exists" from "one exists and I have not been told", so
+   * it could only ever render the sheet. Measured, requiring it costs **121 B
+   * brotli** for 8,702 `false`s against a 512,000 B budget — brotli collapses
+   * the repetition — so the optional form's saving is not worth a flag that
+   * can be silently missing.
+   *
+   * **Existence is a property of the blob, not of the record.** The object is
+   * `thumbs/{md5[:6]}/{md5}.webp`, and 171 md5s are shared by 520 rows, so this
+   * boolean says the same thing 520 times for 171 meshes. It is per record
+   * anyway, to match {@link CatalogRecord.sprite} and to keep the consumer's
+   * read O(1); `pipeline/thumbs/inventory.json` is the blob-shaped original.
+   *
+   * `thumb` implies `sprite` today, because the derivative is cropped from frame
+   * 0 of the sheet — but `@/ui/thumb` does not assume it. Its fallback is a
+   * chain, `thumb` then `sprite` then the "no render" plate, so a record with a
+   * thumbnail and no sheet would render, and a stale `true` degrades to the
+   * sheet instead of to a broken image. The URL is derived — see
+   * {@link CatalogAssets}.
+   */
+  thumb: z.boolean(),
+
+  /**
    * `dirname(full_name)` — 1,130 distinct values. §5.
    *
    * This is the **catalog** family (a Dropbox folder), which drives "other
@@ -980,6 +1032,23 @@ export const SpriteSheet = z.object({
   defaultFrame: z.number().int().nonnegative(),
 })
 export type SpriteSheet = z.infer<typeof SpriteSheet>
+
+/**
+ * The `/thumbs/` derivative's shape, in one place.
+ *
+ * Not a schema field, because it does not vary per index and nothing in the
+ * bucket declares it: `tools/thumbnails/render.ts` decides it and every reader
+ * has to agree with that decision. Before row P3 the two numbers were spelled
+ * in four places — `THUMB_SIZE` in the renderer, `.webp` in `thumbUrl`, again
+ * in `thumbKey`, and "256 px WebP" as prose in {@link CatalogAssets} — and the
+ * app was about to be a fifth. A mismatch on either is an 8,352-way 404 that no
+ * test would catch, since the tool would be asking about the objects it wrote.
+ *
+ * `size` is 256 px: architecture-plan.md §8, 2x the largest size the catalog
+ * grid renders a thumbnail at, and a quarter of the source frame's 512 px, so
+ * every pixel is a downscale.
+ */
+export const MEASURED_THUMB = { size: 256, extension: '.webp' } as const
 
 /** The measured sprite layout, for the importer to stamp and tests to compare against. */
 export const MEASURED_SPRITE_SHEET: SpriteSheet = {

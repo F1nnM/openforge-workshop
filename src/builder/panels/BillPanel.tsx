@@ -56,7 +56,8 @@
 import { useId, useState } from 'react'
 
 import type { BillOfTiles } from '@/assembly'
-import type { CatalogAssets, SpriteSheet } from '@/catalog'
+import type { CatalogAssets, CatalogRecord, SpriteSheet } from '@/catalog'
+import type { MaterialId } from '@/materials'
 import { describeCell, formatUnits } from '@/builder/canvas'
 import { countLabel, fileSizeLabel, sizeLabel } from '@/screens/catalog'
 import type { Placement } from '@/store'
@@ -77,10 +78,19 @@ export interface BillPanelProps {
   readonly placements: Readonly<Record<string, Placement>>
   readonly assets: CatalogAssets
   readonly sheet: SpriteSheet
+  /**
+   * `CatalogIndex.materialOf`, for the row thumbnails. Row P3.
+   *
+   * A function rather than a resolved value per row, because {@link BillRow}s
+   * are derived here by `billInventory` and the screen above does not have them
+   * to map over. It is memoised on the index, so a bill that re-renders on every
+   * placement resolves each mesh once.
+   */
+  readonly materialOf: (record: CatalogRecord) => MaterialId
   readonly download: ArchiveDownload
 }
 
-export function BillPanel({ bill, placements, assets, sheet, download }: BillPanelProps) {
+export function BillPanel({ bill, placements, assets, sheet, materialOf, download }: BillPanelProps) {
   const headingId = useId()
   const { rows, orphans } = billInventory(bill, placements)
   const verdict = verdictCopy(bill.download)
@@ -148,7 +158,13 @@ export function BillPanel({ bill, placements, assets, sheet, download }: BillPan
         ) : (
           <ul className="of-bill-list" role="list">
             {rows.map((row) => (
-              <BillRowView key={row.line.blob} row={row} assets={assets} sheet={sheet} />
+              <BillRowView
+                key={row.line.blob}
+                row={row}
+                assets={assets}
+                sheet={sheet}
+                material={materialOf(row.line.tile)}
+              />
             ))}
           </ul>
         )}
@@ -200,10 +216,12 @@ function BillRowView({
   row,
   assets,
   sheet,
+  material,
 }: {
   row: BillRow
   assets: CatalogAssets
   sheet: SpriteSheet
+  material: MaterialId
 }) {
   const listId = useId()
   const [open, setOpen] = useState(false)
@@ -215,8 +233,10 @@ function BillRowView({
       <TileThumb
         blob={line.tile.blob}
         sprite={line.tile.sprite}
+        thumb={line.tile.thumb}
         assets={assets}
         sheet={sheet}
+        material={material}
         className="of-bill-thumb"
       />
       <span className="of-bill-name">

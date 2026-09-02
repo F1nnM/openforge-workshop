@@ -124,6 +124,40 @@ export const PIPELINE_VERSION = 1
  * budget** (5,739,104 B raw, 478,673 B gzip). Every figure in this docblock
  * above predates the normalisation and carries the old ±328 B; this one does
  * not.
+ *
+ * **Row P3 took it to 365,603 B — still 71.4%** (5,858,260 B raw), by adding
+ * `CatalogRecord.thumb`. Three things about that 200 B are worth recording,
+ * because two of them are about the instrument rather than about the field:
+ *
+ *   1. **The shipped delta is +200 B**, pipeline to pipeline, both normalised
+ *      here. `src/generator/panel/corpus.test.ts` asserts the new baseline.
+ *   2. **Isolating the key alone gives +337 B**, taking the same built file and
+ *      stripping `thumb` back out. The two disagree because `version.schema`
+ *      also went 3 to 4 — one byte, in a different place — and brotli is not
+ *      additive at this granularity. Neither figure is wrong; the first is the
+ *      artefact and the second is the field.
+ *   3. **Normalisation is necessary but not sufficient.** Measured across 32
+ *      clock readings, that key-only delta runs **−125 B to +752 B** (median
+ *      +228). It can be *negative*: 121,828 raw bytes of `"thumb":false,` can
+ *      make the compressed artefact smaller. The spread is 877 B — wider than
+ *      the 655 B the clock alone swings — so "this field costs N bytes" is a
+ *      fact about one artefact at one epoch and never a rate.
+ *
+ * **What actually threatens the budget is the middle of the backfill, not the
+ * end of it.** A uniform boolean compresses away; a half-true one does not.
+ * Measured at this epoch, `thumb: true` on the first N of 8,352 blobs:
+ *
+ *     0 blobs …………… 365,603 B  (71.4%)     4,176 …… 372,979 B  (72.8%)
+ *     56 ……………………… 365,918 B  (71.5%)     6,264 …… 371,299 B  (72.5%)
+ *     1,000 ………………… 368,796 B  (72.0%)     8,352 …… 365,603 B  (71.4%)
+ *     2,088 ………………… 371,266 B  (72.5%)
+ *
+ * So the worst case is **+7,376 B at 50% coverage**, and it is transient: the
+ * backfill is one `aws s3 sync` and the index is only rebuilt after it. 1.4
+ * points of a 500 KB budget for a state that lasts as long as one upload is not
+ * a reason to encode the flag as an exception list, which is the alternative
+ * that was measured (+23 B uniform, but O(33 B) per exception raw and a set
+ * lookup at every consumer).
  */
 export const SIZE_BUDGET_BYTES = 500 * 1024
 

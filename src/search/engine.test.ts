@@ -156,6 +156,7 @@ function synthesise(): CatalogFile {
               bytes: 1_000 + ord,
               // The one sprite-less variant, on the first two-file design.
               sprite: !(design === 1 && variant === 0),
+              thumb: false,
               family: `tiles/synthetic/${String(TEXTURE_SHAPES.indexOf(textures))}`,
               design: `design-${String(design)}` as DesignId,
               name,

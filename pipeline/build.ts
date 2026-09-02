@@ -79,6 +79,24 @@ export interface BuildOptions {
   manifest: OrdinalManifest
   /** `version.fixtures` — the snapshot these rows came from. */
   fixturesRef: string
+  /**
+   * The md5s a `/thumbs/` object exists for — `thumbBlobs(readThumbInventory())`.
+   *
+   * Optional, and absent means **none**, which is the state of the bucket today
+   * and the state every pinned build wants. Three callers deliberately pass
+   * nothing: `tools/stamp/lock.ts`, whose digest has to be a function of the
+   * derivation code, the schema and the corpus and of nothing else, and the two
+   * test builds, which are about derivation rather than about a bucket. Only
+   * `scripts/import-catalog.ts` passes the real set.
+   *
+   * A forgotten caller therefore emits `thumb: false` and renders sprite sheets
+   * — today's behaviour, and never a 404. That is the safe direction, and it is
+   * why this is the one input here allowed to default: getting it wrong loses a
+   * derivative nobody has yet, while the *record* field it feeds is required
+   * precisely so that "no thumbnail" and "nobody asked" cannot be confused
+   * downstream. See `pipeline/thumbs.ts`.
+   */
+  thumbs?: ReadonlySet<string>
   /** `version.built`. Defaults to {@link buildTimestamp}. */
   builtAt?: string
 }
@@ -106,6 +124,17 @@ export interface BuildStats {
    * integrated-only, 94 insert-only, and 0 `mixed`.
    */
   aggregateClasses: Record<AggregateClass, number>
+  /**
+   * Records emitting `thumb: true` — **0 of 8,702 today**.
+   *
+   * Reported rather than asserted, and the two directions read differently. A
+   * drop to 0 after a backfill means the inventory went missing or stale and the
+   * grid has quietly gone back to decoding 529 KB sheets, which is the whole
+   * cost this derivative exists to remove. A rise from 0 before one means an
+   * inventory is claiming objects that are not in the bucket. Neither is a
+   * build error, and both are invisible without a line in the import's report.
+   */
+  withThumb: number
   /**
    * How well `layer === 'topper'` predicts "needs a separately printed base",
    * scored against the filename's connection token. Measured 1.0 / 0.999 with 4
@@ -193,6 +222,11 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       file: basename(id),
       bytes: row.file_metadata.size,
       sprite: (row.images ?? []).some((image) => Boolean(image.image_url)),
+      // Keyed on the md5 and not on the id, because the object is
+      // content-addressed: the 520 rows sharing 171 meshes all read the same
+      // answer, which is the point. `pipeline/thumbs.ts` says why the set comes
+      // from a file rather than from a probe inside the build.
+      thumb: options.thumbs?.has(row.file_metadata.md5) ?? false,
       family: dirname(id),
       design,
       name: displayName(row.tags, foot, row.file_metadata.file),
@@ -251,6 +285,7 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       ),
       layers: tally(records.map((record) => record.layer)),
       withConfig: records.filter((record) => record.config !== undefined).length,
+      withThumb: records.filter((record) => record.thumb).length,
       distinctNames: new Set(records.map((record) => record.name)).size,
       newOrdinals: added.length,
       retiredOrdinals: retired.length,

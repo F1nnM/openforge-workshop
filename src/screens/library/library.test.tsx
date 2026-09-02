@@ -122,6 +122,7 @@ interface FixtureSpec {
   bytes: number
   blob?: string
   sprite?: boolean
+  thumb?: boolean
   design?: string
   layer?: 'base' | 'integral' | 'topper' | 'insert'
   file?: string
@@ -197,6 +198,7 @@ const FIXTURE_CATALOG = {
     file: spec.file ?? `cave%fixture-${String(ord)}.stl`,
     bytes: spec.bytes,
     sprite: spec.sprite ?? true,
+    thumb: spec.thumb ?? false,
     family: 'tiles/cave/fixture',
     design: spec.design ?? `dfix00${String(ord)}`,
     name: NAMES[ord],

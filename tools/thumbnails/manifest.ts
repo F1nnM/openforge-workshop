@@ -14,9 +14,14 @@
  * setting — is visible in the manifest diff instead of being discovered as a
  * cache inconsistency months later.
  *
- * The manifest is also the *inventory*: `entries.length` is the count a human
- * checks against `catalog.json`'s sprite-carrying record count before believing
- * the backfill is complete.
+ * The manifest is also the *inventory of intent*: `entries.length` is the count a
+ * human checks against `catalog.json`'s sprite-carrying record count before
+ * believing the backfill is complete. It is deliberately **not** the input to
+ * `CatalogRecord.thumb`, and row P3 made that distinction load-bearing: this file
+ * lists what was staged on one machine, and staged is not uploaded. Deriving the
+ * index flag from it would point 56 cards at 404s after a `--sample` run.
+ * `inventory.ts` answers the other question by asking the bucket, and
+ * {@link uploadNotes} carries the two commands that close the loop.
  */
 import { createHash } from 'node:crypto'
 
@@ -184,8 +189,14 @@ function uploadNotes(objects: number): string[] {
       'catalog.json before believing the backfill is complete.',
     'Objects are content-addressed on the source mesh md5, so the sync is safe to repeat and ' +
       '--size-only is sufficient; a changed mesh is a new key, never a rewritten one.',
-    'Until the prefix is fully backfilled the app must treat a 404 on /thumbs/ as expected and ' +
-      'fall back to the sprite sheet — see the PR description.',
+    'AFTER the sync: run `npm run thumbs -- --inventory` and then `npm run import:catalog`. The ' +
+      'first HEADs all 8,352 candidate URLs and rewrites pipeline/thumbs/inventory.json; the second ' +
+      'turns that into CatalogRecord.thumb, which is the only thing that makes the app use these ' +
+      'objects. Until both have run the grid keeps decoding 529 KB sprite sheets and this upload ' +
+      'changes nothing a user can see.',
+    'Until the prefix is fully backfilled the app treats a 404 on /thumbs/ as expected and falls ' +
+      'back to the sprite sheet, then to a "no render" plate — src/ui/thumb/TileThumb.tsx. So a ' +
+      'partial sync is safe, and so is a stale inventory.',
   ]
 }
 

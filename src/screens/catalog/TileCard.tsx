@@ -51,12 +51,15 @@
  *
  * ## The thumbnail is a sprite sheet, and it is the screen's real cost
  *
- * There is still no thumbnail derivative in the bucket, so the card's well shows
- * frame 0 of the detail viewer's 2×5 sheet — ~529 KB each, and a screenful
- * decodes hundreds of megabytes. `@/ui/thumb` carries that arithmetic, the
- * reasons behind every attribute on its `<img>`, and the "no render" plate for the
- * one tile of 8,702 with no sheet. What stays this file's decision is only *which
- * file* is shown — {@link TileAggregate.preview}, above.
+ * There is still no thumbnail derivative in the bucket — row P3 probed all
+ * 8,352 candidate URLs and found 0 — so the card's well shows frame 0 of the
+ * detail viewer's 2×5 sheet, ~529 KB each, and a screenful decodes hundreds of
+ * megabytes. `@/ui/thumb` carries that arithmetic, the switch that will pick the
+ * 256px derivative up the moment `CatalogRecord.thumb` says it exists, and the
+ * "no render" plate for the one tile of 8,702 with no sheet. What stays this
+ * file's decision is only *which file* is shown — {@link
+ * TileAggregate.preview}, above — and which material it is tinted as, which is
+ * the same `resolveMaterial` result the swatch reads.
  */
 import { Link } from '@tanstack/react-router'
 
@@ -113,7 +116,19 @@ export function TileCard({ item, preview, tags, assets, sheet }: TileCardProps) 
         link that persisted a derived grouping's identity would rot.
       */}
       <Link className="of-card-open" to="/catalog" search={(prev) => ({ ...prev, tile: preview.ord })}>
-        <TileThumb blob={preview.blob} sprite={preview.sprite} assets={assets} sheet={sheet} />
+        {/*
+          `material.material` is the same resolution the swatch below uses, so
+          the dot and the tint cannot disagree about what this tile is made of —
+          which they would if this passed `item.texture` instead. Row P3.
+        */}
+        <TileThumb
+          blob={preview.blob}
+          sprite={preview.sprite}
+          thumb={preview.thumb}
+          assets={assets}
+          sheet={sheet}
+          material={material.material}
+        />
         <h2 className="of-card-title">{item.name}</h2>
       </Link>
 

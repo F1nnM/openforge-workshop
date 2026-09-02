@@ -36,8 +36,9 @@
  *
  *   - **Brotli eats these sets alive.** The plan feared 9.4 MB; the fat encoding
  *     is indeed **15,107,263 B raw**, but it is **37,542 B** compressed, and the
- *     index this row built measures 365,403 B against a 512,000 B budget, so
- *     there are 146,597 B free and the fattest encoding on the table would fit
+ *     index this row built measures 365,603 B against a 512,000 B budget (P3's
+ *     `thumb` flag took it up 200 B), so there are 146,397 B free and the
+ *     fattest encoding on the table would fit
  *     three times over. **Payload was never the binding constraint here.** Saying
  *     otherwise would have been a number chosen because it argued for the answer.
  *   - **Correctness is.** Every shipped row above except the first bakes in "no

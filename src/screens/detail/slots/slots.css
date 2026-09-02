@@ -6,15 +6,17 @@
    utilities, following `../detail.css` and the note at the top of
    `../../../ui/shell/shell.css`. Unlayered, same as the rest of the app's CSS.
 
-   ## Why this file imports the catalog's
+   ## Why this file no longer imports the catalog's
 
-   The same reason `../../library/library.css` and `../../../builder/panels/
-   panels.css` do: this grid renders `TileThumb`, and the sprite-sheet rules it
-   depends on — `.of-thumb`, `.of-thumb-frame`, and the `max-width: none` on
-   `.of-thumb-sheet` without which Tailwind's Preflight squeezes all ten camera
-   angles into the well — live in the catalog's stylesheet with the component
-   that owns them. Restating them here would be two definitions of one class and
-   a race over which `<style>` Vite emits second.
+   It used to, for the thumbnail's rules — `.of-thumb`, `.of-thumb-frame` and
+   the `max-width: none` on `.of-thumb-sheet` without which Tailwind's Preflight
+   squeezes all ten camera angles into the well. Row P3 moved those to
+   `../../../ui/thumb/thumb.css`, which `TileThumb.tsx` imports itself, so they
+   now arrive with the component. Audited against every class this directory
+   actually references, the thumbnail's three were the *only* ones it took from
+   `catalog.css` — which is why this is the one of the three importers whose
+   `@import` could go. `library.css` and `panels.css` also take
+   `.of-empty-title` and `.of-search-input` respectively, and keep theirs.
 
    ## The grid is three columns, because the largest one in the corpus is eight
 
@@ -25,8 +27,6 @@
 
    Light only. Parchment is the committed direction; see `tokens.css`.
    ──────────────────────────────────────────────────────────────────────────── */
-
-@import '../../catalog/catalog.css';
 
 .of-slotfills {
   display: flex;

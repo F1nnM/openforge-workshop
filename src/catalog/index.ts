@@ -43,6 +43,7 @@ export {
   Layer,
   MAX_SECTOR_SWEEP_DEG,
   MEASURED_SPRITE_SHEET,
+  MEASURED_THUMB,
   ManifestOrdinal,
   PartSlot,
   SCHEMA_VERSION,
