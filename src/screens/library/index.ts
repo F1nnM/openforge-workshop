@@ -13,5 +13,10 @@
  */
 export { LibraryScreen } from './LibraryScreen'
 
-export type { CollectLibraryOptions, LibraryContents, LibraryGroup } from './grouping'
+export type {
+  CollectLibraryOptions,
+  LibraryContents,
+  LibraryGroup,
+  LibraryItem,
+} from './grouping'
 export { KIND_PRECEDENCE, collectLibrary, groupKindOf, roundBytesLabel, totalBytesLabel } from './grouping'

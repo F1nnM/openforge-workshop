@@ -47,7 +47,7 @@ import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
 /* ------------------------------------------------------------------ fixture */
 
 /**
- * Nine records, one per branch this screen has to handle.
+ * Eleven records over ten designs, one per branch this screen has to handle.
  *
  * | ord | kinds          | note |
  * | --- | -------------- | ---- |
@@ -60,6 +60,8 @@ import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
  * | 6   | `stairs`       | a rare kind, for group ordering |
  * | 7   | `wall`         | second wall, so a group holds more than one card |
  * | 8   | `wall`         | 540 MB — see below |
+ * | 9   | `wall`         | **shares ord 7's design** — row A3's merged pair |
+ * | 10  | `wall`         | **shares ord 7's design and its md5** — two saved variants, one mesh |
  *
  * Ord 8 is **larger than any real file** (the corpus maximum is 108.9 MB). It is
  * deliberate: the 512 MB download warning is a real surface with a real
@@ -67,8 +69,31 @@ import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
  * each, which would put a warning on every other test in this file. One
  * oversized record keeps the warning reachable in a single `addToLibrary` and
  * quiet everywhere else.
+ *
+ * Ords 7, 9 and 10 are **one design with three variants**, which is the shape row
+ * A3 created: the screen lists items and the store holds files, so one card can
+ * stand for one saved file or three. They agree on every facet A1 hoists — name,
+ * kinds, texture, build, foot — and differ only in the connection axis and its
+ * consequences, because A1 measured that 0 of 3,822 live aggregates disagree on
+ * any hoisted facet. Ord 10 additionally shares ord 7's md5, so the card's own
+ * byte figure has a dedupe to do: 66 live items hold two variants on one mesh.
+ *
+ * Ord 5 keeps a **different** design from ord 1 on purpose. It is the older
+ * shared-md5 case — one STL filed under two catalog paths — and conflating it
+ * with the merged pair would leave neither tested.
  */
-const FIXTURE_TAGS = ['shape|floor', 'shape|wall', 'shape|base', 'shape|stairs', 'component|door', 'texture|cave']
+const FIXTURE_TAGS = [
+  'shape|floor',
+  'shape|wall',
+  'shape|base',
+  'shape|stairs',
+  'component|door',
+  'texture|cave',
+  // Row A3: the availability chips read the *positional* connection tags, so a
+  // fixture that only set `CatalogRecord.conn` would render no lock chip at all.
+  'connection|openlock',
+  'connection|openforge',
+]
 
 const NAMES = [
   'Cave Floor 2x2',
@@ -80,10 +105,16 @@ const NAMES = [
   'Cave Stairs 2x2',
   'Cave Arrow Slit 2x',
   'Cave Wall Colossal 4x',
+  'Cave Arrow Slit 2x',
+  'Cave Arrow Slit 2x',
 ] as const
 
 /** Ord 1 and ord 5 are the same mesh: the shared-md5 case. */
 const SHARED_BLOB = '0000000000000000000000000000bbb2'
+
+/** Ords 7, 9 and 10 are one design. Ord 10 also shares ord 7's mesh. */
+const PAIR_DESIGN = 'dpair'
+const PAIR_BLOB = '0000000000000000000000000000bbb7'
 
 interface FixtureSpec {
   kinds: string[]
@@ -91,6 +122,11 @@ interface FixtureSpec {
   bytes: number
   blob?: string
   sprite?: boolean
+  design?: string
+  layer?: 'base' | 'integral' | 'topper' | 'insert'
+  file?: string
+  /** Replaces `tags` where a record needs a `connection|` tag of its own. */
+  tagsOverride?: number[]
 }
 
 const SPECS: readonly FixtureSpec[] = [
@@ -102,8 +138,40 @@ const SPECS: readonly FixtureSpec[] = [
   { kinds: [], tags: [4], bytes: 45_284, sprite: false },
   { kinds: ['wall'], tags: [1, 5], bytes: 15_853_634, blob: SHARED_BLOB },
   { kinds: ['stairs'], tags: [3, 5], bytes: 22_110_002 },
-  { kinds: ['wall'], tags: [1, 5], bytes: 6_004_100 },
+  {
+    kinds: ['wall'],
+    tags: [1, 5],
+    bytes: 6_004_100,
+    blob: PAIR_BLOB,
+    design: PAIR_DESIGN,
+    layer: 'integral',
+    file: 'cave%arrow_slit.2x.openlock.stl',
+    tagsOverride: [1, 5, 6],
+  },
   { kinds: ['wall'], tags: [1, 5], bytes: 540_000_000 },
+  // The merged pair's other half: the same design as a topper, so the item is
+  // `Base optional` and its byte range spans the two.
+  {
+    kinds: ['wall'],
+    tags: [1, 5],
+    bytes: 3_002_050,
+    design: PAIR_DESIGN,
+    layer: 'topper',
+    file: 'cave%arrow_slit.2x.openforge.stl',
+    tagsOverride: [1, 5, 7],
+  },
+  // A third variant of the same design, on the same mesh as ord 7 — so saving
+  // both counts one file, not two.
+  {
+    kinds: ['wall'],
+    tags: [1, 5],
+    bytes: 6_004_100,
+    blob: PAIR_BLOB,
+    design: PAIR_DESIGN,
+    layer: 'integral',
+    file: 'cave%arrow_slit.2x.openlock+topless.stl',
+    tagsOverride: [1, 5, 6],
+  },
 ]
 
 const FIXTURE_CATALOG = {
@@ -125,18 +193,18 @@ const FIXTURE_CATALOG = {
   records: SPECS.map((spec, ord) => ({
     id: `tiles/cave/fixture/cave%fixture-${String(ord)}.stl`,
     ord,
-    blob: spec.blob ?? `0000000000000000000000000000bbb${String(ord)}`,
-    file: `cave%fixture-${String(ord)}.stl`,
+    blob: spec.blob ?? `0000000000000000000000000000bb${String(ord).padStart(2, 'b')}`,
+    file: spec.file ?? `cave%fixture-${String(ord)}.stl`,
     bytes: spec.bytes,
     sprite: spec.sprite ?? true,
     family: 'tiles/cave/fixture',
-    design: `dfix00${String(ord)}`,
+    design: spec.design ?? `dfix00${String(ord)}`,
     name: NAMES[ord],
     kinds: spec.kinds,
     conn: ['openlock'],
-    layer: spec.kinds.includes('base') ? 'base' : 'integral',
+    layer: spec.layer ?? (spec.kinds.includes('base') ? 'base' : 'integral'),
     texture: 'cave',
-    tags: spec.tags,
+    tags: spec.tagsOverride ?? spec.tags,
     foot: { shape: 'rect' as const, w: 1, d: 1 },
   })),
 }
@@ -320,12 +388,13 @@ describe('the size summary', () => {
     save(1, 5)
     await renderLibrary()
 
-    // 15.85 MB, not 31.7 MB.
+    // 15.85 MB, not 31.7 MB. Two designs, so two items and no file clause.
     expect(summary()).toBe('2 tiles · 15.9 MB')
-    // Both rows still render — deduping bytes must not dedupe cards.
-    expect(cardsIn(/^walls/i)).toHaveLength(2)
-    expect(screen.getByText(/same model filed under a second catalog path/i)).toBeInTheDocument()
-    expect(screen.getByText(/counts 1 files rather than 2/i)).toBeInTheDocument()
+    // Both cards still render — deduping bytes must not dedupe cards, and these
+    // are two separate designs however many meshes they share.
+    expect(allCards()).toHaveLength(2)
+    expect(screen.getByText(/filed under a second catalog path/i)).toBeInTheDocument()
+    expect(screen.getByText(/counts 1 file rather than 2/i)).toBeInTheDocument()
   })
 
   it('adds the bytes of two different tiles', async () => {
@@ -355,6 +424,136 @@ describe('the size summary', () => {
     })
     expect(summary()).toBe('1 tile · 8.9 MB')
     expect(screen.queryByText(/to download/i)).not.toBeInTheDocument()
+  })
+})
+
+/* --------------------------------------------------------------- aggregation */
+
+describe('the library lists items and holds files', () => {
+  it('collapses two saved variants of one design into one card', async () => {
+    save(7, 9)
+    await renderLibrary()
+
+    // One card, and the group count is an item count so it agrees with it.
+    expect(allCards()).toEqual(['Cave Arrow Slit 2x'])
+    expect(screen.getByRole('heading', { level: 2, name: 'Walls 1' })).toBeInTheDocument()
+  })
+
+  it('says how many files are behind the items, and totals all of them', async () => {
+    save(7, 9)
+    await renderLibrary()
+
+    // 6,004,100 + 3,002,050 = 9,006,150. One card, two files, and both numbers
+    // on the line: the item count alone would under-report a 9 MB download.
+    expect(summary()).toBe('1 tile · 2 files · 9.0 MB')
+  })
+
+  it('drops the file clause when every item is one file', async () => {
+    save(0, 1)
+    await renderLibrary()
+
+    expect(summary()).toBe('2 tiles · 24.8 MB')
+    expect(summary()).not.toContain('files')
+  })
+
+  it('names each saved file on the card, with its own size', async () => {
+    save(7, 9)
+    await renderLibrary()
+
+    // This is where the per-file rows went. Named by the filename's variant
+    // token, which is what tells two files of one design apart.
+    expect(screen.getByText('2 files saved')).toBeInTheDocument()
+    const rows = [...document.querySelectorAll('.of-lib-variant')]
+    expect(rows.map((row) => row.querySelector('.of-lib-variant-token')?.textContent)).toEqual([
+      '2x.openlock',
+      '2x.openforge',
+    ])
+    expect(rows.map((row) => row.querySelector('.of-lib-variant-bytes')?.textContent)).toEqual([
+      '6.0 MB',
+      '3.0 MB',
+    ])
+  })
+
+  it('offers no file list for a card holding one file', async () => {
+    save(0)
+    await renderLibrary()
+
+    expect(screen.queryByText(/files saved/i)).not.toBeInTheDocument()
+    expect(document.querySelectorAll('.of-lib-variant')).toHaveLength(0)
+  })
+
+  it('removes one file without taking the item with it', async () => {
+    save(7, 9)
+    await renderLibrary()
+
+    const one = screen.getByRole('button', { name: /remove 2x\.openforge of cave arrow slit 2x/i })
+    act(() => {
+      one.click()
+    })
+
+    // The other file survives, so the card does — and with one file left it
+    // stops offering a file list.
+    expect(Object.keys(useWorkshopStore.getState().library)).toEqual([fixtureId(7)])
+    await waitFor(() => {
+      expect(summary()).toBe('1 tile · 6.0 MB')
+    })
+    expect(allCards()).toEqual(['Cave Arrow Slit 2x'])
+    expect(screen.queryByText(/files saved/i)).not.toBeInTheDocument()
+  })
+
+  it('says "Remove all" and clears every saved file when there is more than one', async () => {
+    save(7, 9)
+    await renderLibrary()
+
+    // A button that removed two files while saying "Remove" beside a "2 files"
+    // count would be lying about its own blast radius.
+    expect(screen.queryByRole('button', { name: /^remove cave arrow slit 2x$/i })).not.toBeInTheDocument()
+    const all = screen.getByRole('button', { name: /remove all cave arrow slit 2x/i })
+    act(() => {
+      all.click()
+    })
+
+    expect(Object.keys(useWorkshopStore.getState().library)).toEqual([])
+  })
+
+  it('keeps "Remove" for a card holding one file', async () => {
+    save(0)
+    await renderLibrary()
+
+    expect(screen.getByRole('button', { name: /^remove cave floor 2x2$/i })).toBeInTheDocument()
+  })
+
+  it('counts one file when two saved variants share a mesh — 66 live items allow it', async () => {
+    save(7, 10)
+    await renderLibrary()
+
+    // Both files are saved and both rows render, but the mesh is one download.
+    expect(summary()).toBe('1 tile · 2 files · 6.0 MB')
+    expect(document.querySelectorAll('.of-lib-variant')).toHaveLength(2)
+    expect(screen.getByText(/filed under a second catalog path/i)).toBeInTheDocument()
+  })
+
+  it('shows the availability chips the catalog card shows', async () => {
+    save(7, 9)
+    await renderLibrary()
+
+    // The library is where a user decides what to print, so "does this need a
+    // base" belongs here too — and derived once, so the two screens cannot
+    // disagree. Ord 7 is integral and ord 9 a topper, so the item offers both.
+    const strip = screen.getByRole('list', { name: 'Availability' })
+    expect(strip).toHaveTextContent('Base optional')
+    expect(strip).toHaveTextContent('OpenLOCK')
+  })
+
+  it('releases the catalog’s fixed strip height, having no virtualiser to keep honest', async () => {
+    save(7, 9)
+    await renderLibrary()
+
+    // A style assertion, because the constraint is a `VirtuosoGrid` requirement
+    // of the *catalog grid* and not a property of the strip. jsdom does not
+    // apply the stylesheet, so what is checked is that the strip is inside a
+    // library card — which `library.css` targets.
+    expect(document.querySelector('.of-lib-card .of-avail-strip')).not.toBeNull()
   })
 })
 
@@ -569,8 +768,11 @@ describe('a saved id the catalog no longer has', () => {
 
     const note = await screen.findByText(/not in this build of the catalog/i)
     expect(note).toHaveTextContent('1 saved tile is not in this build of the catalog')
-    // The one tile that does resolve is still described.
-    expect(summary()).toBe('2 tiles · 8.9 MB')
+    // The headline counts the one item that resolved, not the two ids in the
+    // store: a summary that counted a tile it cannot describe would put a byte
+    // total beside a count the total does not cover. The unresolved id is
+    // reported in its own note instead, with a way to clear it.
+    expect(summary()).toBe('1 tile · 8.9 MB')
 
     act(() => {
       screen.getByRole('button', { name: /remove it/i }).click()

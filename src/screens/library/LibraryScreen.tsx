@@ -22,13 +22,27 @@
  *   - **The library itself** is `@/store`. This screen holds no state beyond the
  *     import report, which belongs to the control that produced it.
  *
+ * ## It lists items, and says how many files are in them
+ *
+ * Row A3. The cards are aggregates, the same unit the catalog grid shows, while
+ * the store still holds the files a download is made of. Both numbers are on the
+ * summary line and the second is dropped when it would restate the first:
+ * `12 tiles · 15 files · 148.2 MB`. A library where every saved item is a
+ * singleton reads `12 tiles · 148.2 MB`, exactly as it did before.
+ *
+ * Reporting only the item count would under-state a download the whole screen
+ * exists to warn about; reporting only the file count would disagree with the
+ * number of cards. `grouping.ts` carries the rest of the argument.
+ *
  * ## Group counts sum to the summary
  *
  * The one internal consistency the screen must not break: a summary that says
  * "12 tiles" above groups adding to 15 is a bug the user can see, and it is
  * exactly what grouping a multi-kind tile into every bucket it matches would
  * produce (19.5% of the corpus is in two or more). `collectLibrary` puts every
- * saved id in exactly one group or in `missing`, and both numbers are rendered.
+ * saved id in exactly one group or in `missing`, and every group count is an
+ * **item** count, so they sum to the summary's headline rather than to its file
+ * clause.
  *
  * ## Waiting, failing, and ids the catalog no longer has
  *
@@ -52,12 +66,12 @@
 import { Link } from '@tanstack/react-router'
 import { useMemo } from 'react'
 
-import type { CatalogAssets, CatalogRecord, SpriteSheet, TileId } from '@/catalog'
+import type { CatalogAssets, SpriteSheet, TileId } from '@/catalog'
 import { countLabel, kindLabel, useCatalogIndex } from '@/screens/catalog'
 import { removeFromLibrary, useLibrary } from '@/store'
 import { Chip, Eyebrow } from '@/ui/primitives'
 
-import type { LibraryContents } from './grouping'
+import type { LibraryContents, LibraryItem } from './grouping'
 import { collectLibrary, roundBytesLabel, totalBytesLabel } from './grouping'
 import { LibraryCard } from './LibraryCard'
 import { LibraryTransfer } from './LibraryTransfer'
@@ -83,6 +97,10 @@ export function LibraryScreen() {
             // would be ceremony.
             ids: Object.keys(library) as TileId[],
             record: (id) => index.engine.record(id),
+            // The engine's own aggregate layer, not a second `buildAggregateIndex`
+            // over the same file — A2 exposed it precisely so rows A3 to A7 share
+            // one pass over 8,702 records.
+            aggregates: index.engine.aggregates,
             kindOrder: index.engine.vocabulary.kinds,
           }),
     [index, library],
@@ -97,7 +115,25 @@ export function LibraryScreen() {
           Library
         </h1>
         <p className="of-lib-summary">
-          {countLabel(saved)} {saved === 1 ? 'tile' : 'tiles'}
+          {/*
+            Before the index lands the only number available is the count of
+            saved *ids* — the store knows nothing about designs — so the headline
+            is the file count until the aggregate layer can collapse it, and
+            becomes the item count after. Both are labelled "tiles", which is the
+            contract's noun and is true of either: what changes is only whether
+            two files of one design are counted once or twice.
+          */}
+          {countLabel(contents?.items ?? saved)} {(contents?.items ?? saved) === 1 ? 'tile' : 'tiles'}
+          {/*
+            The files behind those items, when they differ. Dropped when they do
+            not — "12 tiles · 12 files" states the same thing twice.
+          */}
+          {contents !== null && contents.tiles > contents.items ? (
+            <span className="of-lib-summary-files">
+              {' · '}
+              {countLabel(contents.tiles)} files
+            </span>
+          ) : null}
           {/*
             The count comes from the store and is known immediately; the size
             needs the index, so it arrives a beat later. An empty library gets no
@@ -143,7 +179,7 @@ export function LibraryScreen() {
             <LibraryGroupBlock
               key={group.kind}
               kind={group.kind}
-              records={group.records}
+              items={group.items}
               assets={index.file.assets}
               sheet={index.file.sprite}
             />
@@ -167,12 +203,12 @@ export function LibraryScreen() {
  */
 function LibraryGroupBlock({
   kind,
-  records,
+  items,
   assets,
   sheet,
 }: {
   kind: string
-  records: readonly CatalogRecord[]
+  items: readonly LibraryItem[]
   assets: CatalogAssets
   sheet: SpriteSheet
 }) {
@@ -189,11 +225,11 @@ function LibraryGroupBlock({
       */}
       <h2 className="of-lib-group-heading" id={headingId}>
         <Eyebrow>{kindLabel(kind)}</Eyebrow>{' '}
-        <Chip tone="count">{countLabel(records.length)}</Chip>
+        <Chip tone="count">{countLabel(items.length)}</Chip>
       </h2>
       <div className="of-lib-grid">
-        {records.map((record) => (
-          <LibraryCard key={record.id} record={record} assets={assets} sheet={sheet} />
+        {items.map((entry) => (
+          <LibraryCard key={entry.item.design} entry={entry} assets={assets} sheet={sheet} />
         ))}
       </div>
     </section>
@@ -230,8 +266,9 @@ function LibraryNotes({ contents }: { contents: LibraryContents }) {
 
       {shared === 0 ? null : (
         <p className="of-lib-note">
-          {countLabel(shared)} of these {shared === 1 ? 'tiles is' : 'tiles are'} the same model filed
-          under a second catalog path, so the total counts {countLabel(contents.files)} files rather
+          {countLabel(shared)} of these saved {shared === 1 ? 'files is' : 'files are'} the same model
+          — filed under a second catalog path, or two variants of one item that share a mesh — so the
+          total counts {countLabel(contents.files)} {contents.files === 1 ? 'file' : 'files'} rather
           than {countLabel(contents.tiles)}.
         </p>
       )}

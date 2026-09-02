@@ -24,6 +24,11 @@
      - `.of-thumb` has an `aspect-ratio`, so the well is the same size before and
        after its image lands.
      - `.of-card-texture` and `.of-card-meta` are single lines with no wrap.
+     - `.of-avail-strip` is a **fixed two-line box** — one aggregate shows one
+       chip and another shows four, and both must occupy the same 41px. The
+       height is `2 × --of-avail-h + --of-avail-gap` rather than a magic number,
+       and `src/screens/catalog/availability.ts#CHIP_BUDGET` carries the width
+       arithmetic proving the measured worst case (4 chips, 60 characters) fits.
 
    Light only. There is no dark block, for the same reason there is none in
    tokens.css: Parchment is the committed direction.
@@ -264,6 +269,37 @@
   color: var(--ink);
 }
 
+/* The files behind the matching items. Dimmer than the item count, because the
+   item count is what the grid shows and this is the footnote to it. */
+.of-result-files {
+  opacity: 0.75;
+}
+
+/* ── Availability legend ─────────────────────────────────────────────────── */
+
+/* What a filled chip means versus an outlined one.
+
+   The strip distinguishes "locks on its own underside" from "joins its
+   neighbours only" by fill, and a fill difference is discoverable to a sighted
+   reader only if something says so once. Every chip also carries the sentence in
+   clipped text, which is what serves a reader who cannot see the fill at all —
+   this line is for the one who can. */
+.of-avail-legend {
+  margin: -6px 0 14px;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+
+.of-avail-legend .of-avail {
+  /* Inline samples of the two states, so the legend shows rather than tells.
+     `inline-flex`, because the strip's chips are flex items and these are not. */
+  display: inline-flex;
+  margin-inline-end: 3px;
+  vertical-align: 1px;
+}
+
 /* ── Card grid ───────────────────────────────────────────────────────────── */
 
 .of-card-grid {
@@ -397,12 +433,120 @@
   justify-content: space-between;
   gap: 8px;
   margin: 0;
+  /* So the token between the size chip and the byte range can ellipsise rather
+     than widening the line past the card. */
+  min-width: 0;
 }
 
 .of-card-bytes {
+  flex: none;
   font-family: var(--face-mono);
   font-size: 11px;
   color: var(--mut);
+}
+
+/* The filename's variant token — what tells two of the 323 same-named cards
+   apart (`format.ts#fileTokenLabel`).
+
+   It is the shrinking element of the three on this line, and deliberately: the
+   token is 3 characters at the median and 5 at p95, so it costs nothing on 95%
+   of cards, and where it is long (14 characters at the maximum) an ellipsised
+   `IL+corner,9…` still distinguishes while a wrapped one would break the card's
+   fixed height. */
+.of-card-token {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  color: var(--mut);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+
+/* ── Availability strip ──────────────────────────────────────────────────── */
+
+/* One chip per claim: the base requirement, then the lock systems, then a
+   verdict where there is no lock to name. `availability.ts` holds every rule
+   about which chips exist; this holds only how they look.
+
+   Two lines, fixed. See the header note — a variable-height strip would make
+   `VirtuosoGrid` wrong. `overflow: hidden` is the backstop and never the plan:
+   the budget test in `availability.test.ts` is what keeps a relabel from
+   silently clipping a chip out of sight. */
+.of-avail-strip {
+  --of-avail-h: 19px;
+  --of-avail-gap: 3px;
+
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: var(--of-avail-gap);
+  height: calc(var(--of-avail-h) * 2 + var(--of-avail-gap));
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.of-avail {
+  display: flex;
+  align-items: center;
+  height: var(--of-avail-h, 19px);
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-family: var(--face-mono);
+  font-size: 9px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  color: var(--mut);
+}
+
+/* A base is required: neutral, because it is a fact about the print rather than
+   a shortcoming. Recessed fill, the same surface as an input. */
+.of-avail[data-kind='base'][data-state='need'] {
+  background: var(--bg3);
+}
+
+/* No base needed — verdigris, §1's "in library" confirmation colour, which is
+   the token this design uses for a thing that is already complete. */
+.of-avail[data-kind='base'][data-state='have'] {
+  border-color: var(--acc2);
+  color: var(--acc2);
+}
+
+/* Both prints exist. The dashed edge is the choice: it reads as "either side of
+   this line", and it is a second, non-colour difference from the two above. */
+.of-avail[data-kind='base'][data-state='choice'] {
+  border-style: dashed;
+  border-color: var(--acc2);
+  color: var(--acc2);
+}
+
+/* A lock on the item's own underside: print one part and it clips into the grid.
+   Filled accent — the strongest claim on the card gets the strongest mark. */
+.of-avail[data-kind='lock'][data-state='underside'] {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--accink);
+}
+
+/* The same system, at the sides only. Outlined: same hue, no fill, so the pair
+   reads as two states of one thing rather than as two unrelated chips. Measured,
+   magnetic never reaches this state — see `availability.ts`. */
+.of-avail[data-kind='lock'][data-state='sides'] {
+  background: transparent;
+  border-color: var(--acc);
+  color: var(--acc);
+}
+
+/* An insert, or joinery the corpus never tagged. Dotted, because both mean "no
+   claim here" and neither is a property of the mesh the user can act on. */
+.of-avail[data-kind='note'] {
+  border-style: dotted;
+  opacity: 0.9;
 }
 
 /* ── Library toggle ──────────────────────────────────────────────────────── */

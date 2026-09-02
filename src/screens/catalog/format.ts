@@ -47,6 +47,158 @@ export function fileSizeLabel(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`
 }
 
+/**
+ * An aggregate's file size — `10.4 MB`, or `4.3–15.9 MB` across its variants.
+ *
+ * A **range and never a single figure**, which is A1's measurement and not a
+ * stylistic choice: across the 1,705 multi-variant aggregates the max/min byte
+ * ratio is 1.13 at the median but **3.46 at p90**, so one number on an item that
+ * holds a 4 MB topper and a 16 MB base-integrated print would be an assertion
+ * the data does not support.
+ *
+ * It collapses to one figure when the two ends round the same way, which is
+ * **2,193 of 3,822 aggregates** — every singleton, plus the multi-variant items
+ * whose spread hides inside one decimal place. So most cards read exactly as
+ * they did before aggregation, and a range appears only where there genuinely is
+ * one.
+ *
+ * The dash is an en dash (`–`), the range dash, rather than a hyphen: the
+ * figures either side are numbers and `4.3-15.9` reads as arithmetic.
+ *
+ * The unit is repeated only once, on the high end, because both ends come from
+ * the same `fileSizeLabel` and a range that crosses a unit boundary keeps both —
+ * `838 KB–1.2 MB` — rather than pretending the low end is megabytes.
+ */
+export function bytesRangeLabel(range: readonly [min: number, max: number]): string {
+  const [min, max] = range
+  const low = fileSizeLabel(min)
+  const high = fileSizeLabel(max)
+  if (low === high) return low
+  // Same unit on both ends: drop the low one, so `4.3–15.9 MB` rather than
+  // `4.3 MB–15.9 MB`. A crossed boundary keeps both units.
+  const lowUnit = low.slice(low.lastIndexOf(' ') + 1)
+  const highUnit = high.slice(high.lastIndexOf(' ') + 1)
+  const lowText = lowUnit === highUnit ? low.slice(0, low.lastIndexOf(' ')) : low
+  return `${lowText}–${high}`
+}
+
+/**
+ * The filename's own variant token — `wood#dormer,window_insert.2x.stl` → `2x`,
+ * `portcullis.very_narrow.stl` → `very_narrow`.
+ *
+ * **This is what makes a card distinguishable, and it is a measured need rather
+ * than decoration.** A1 records 131 display names shared by 323 aggregates, worst
+ * 6, so a title cannot carry identity on its own. Measured over the emitted index
+ * against the strings a card actually renders (`corpus.test.ts` re-derives the
+ * whole cascade): the texture line and the size chip separate **nothing** — two
+ * items sharing a display name share both by construction, because `name` is
+ * synthesised from those very tags — the availability chips take 131 groups to
+ * **91**, the byte range takes it to **38**, and this token takes it to **21
+ * groups over 45 items**, 1.2% of the catalog, worst 3.
+ *
+ * It works because the importer synthesises `name` from *tags*, and the
+ * discriminator between two same-named designs often survives only in the
+ * filename: `window_insert.2x` / `.3x` / `.4x` / `.6x` are four aggregates with
+ * one display name, and `portcullis.narrow` / `.standard` / `.very_narrow` /
+ * `.wide` are four more.
+ *
+ * ## The connection segments are skipped, and that is what makes it an item's
+ * token rather than a file's
+ *
+ * A filename's tail is `{variant}.{connection spec}` — `2x.openforge,side+dragonlock`,
+ * `4x2.openlock+unsupported,magnetic+flex` — and the connection spec is exactly
+ * what an aggregate collapses across. Taking the tail whole would put a variant's
+ * private connection string on an item's card: measured, the raw tail **varies
+ * between the variants of 1,210 of the 3,822 aggregates**, so the card would be
+ * quoting one arbitrary file. Skipping any segment whose `+`/`,`-joined parts are
+ * all connection vocabulary takes that to **22 aggregates**, and the token's
+ * length from a 38-character maximum down to 14 (median 3). A property of the
+ * design, in other words, rather than of the file — which is the test a fact has
+ * to pass to belong on this card at all.
+ *
+ * The 148-value vocabulary it leaves is size and shape variants: `1x1`, `2x2`,
+ * `AS`, `col+L`, `narrow`, `IL+corner,90°`.
+ *
+ * Everything before the *first* `.` is dropped: that is the part `name` is built
+ * from, and repeating it would put the raw `#`/`%`/`+`/`,` filename on the card,
+ * which `catalog.test.tsx` asserts never happens.
+ *
+ * **40 aggregates have no token** — a filename with nothing but a connection
+ * spec after the first dot, or no dot at all — and get an empty string, which the
+ * card renders as nothing rather than as a placeholder. An em dash here would
+ * claim a missing measurement where the truth is that the filename carries no
+ * variant to name.
+ *
+ * 21 groups (45 items) remain identical on every facet a card shows, including
+ * this one. Measured, a tag chip would separate **every one of the 21** — the
+ * causes are visible in the filenames: `magnetic+imperial` against
+ * `magnetic+metric`, `arch+glass` against `arch`, `minimal-full-full` against
+ * `minimal-full-minimal`. The design contract specified tag chips on the card and
+ * v1 left them out; row **X2** owns them, so the last 45 cards are a scheduled row
+ * away from distinct rather than an unsolved problem.
+ */
+export function fileTokenLabel(file: string): string {
+  const base = file.slice(file.lastIndexOf('/') + 1)
+  const stem = base.replace(/\.stl$/i, '')
+  const dot = stem.indexOf('.')
+  if (dot === -1) return ''
+  for (const segment of stem.slice(dot + 1).split('.')) {
+    if (!isConnectionSpec(segment)) return segment
+  }
+  return ''
+}
+
+/**
+ * The **file's** own token — everything after the first `.`, minus the `.stl`.
+ *
+ * `cave%arrow_slit.2x.openlock.stl` → `2x.openlock`. The sibling of
+ * {@link fileTokenLabel} and its exact complement: that one skips the connection
+ * segments to name a *design*, and this one keeps them to name a *file*.
+ *
+ * Both are needed and neither substitutes for the other, which the measurements
+ * make plain. The connection segments vary between the variants of **1,210 of
+ * the 3,822 items**, so:
+ *
+ *   - on an item's card they are noise, and worse than noise — they would print
+ *     one arbitrary variant's string on something that stands for all of them.
+ *   - on a **row naming one saved file** they are the only thing there is. Two
+ *     variants of one design differ in the connection axis and nothing else, so
+ *     `fileTokenLabel` gives both of them `2x` and tells the user nothing about
+ *     which row is which.
+ *
+ * Used by the library card's saved-file rows, where the whole point of the row is
+ * that it is one file out of several. Longer than the design token — 38
+ * characters at the corpus maximum against 14 — and affordable there because the
+ * library is a plain CSS grid with no fixed card height.
+ *
+ * Empty for a filename with no dot before the extension, and then the caller
+ * shows the filename instead: a row that named nothing could not be told from
+ * its neighbour, which is the one thing it exists to do.
+ */
+export function variantTokenLabel(file: string): string {
+  const base = file.slice(file.lastIndexOf('/') + 1)
+  const stem = base.replace(/\.stl$/i, '')
+  const dot = stem.indexOf('.')
+  return dot === -1 ? '' : stem.slice(dot + 1)
+}
+
+/**
+ * Whether a filename segment is nothing but connection vocabulary.
+ *
+ * The vocabulary is {@link CONN_LABELS}' own keys — the systems and positions
+ * this file already had to spell for the sidebar — plus the four print modifiers
+ * `src/catalog/aggregate.ts` measured as the whole set the corpus uses in that
+ * slot. Derived from the label map rather than written out again, so a system
+ * added to the sidebar cannot fall out of this rule.
+ *
+ * `every`, not `some`: `col+L` contains no connection word and is a real variant
+ * token, while `openforge,side+dragonlock` is wholly connection and is not.
+ */
+function isConnectionSpec(segment: string): boolean {
+  const parts = segment.split(/[+,]/).filter((part) => part !== '')
+  return parts.length > 0 && parts.every((part) => CONNECTION_VOCABULARY.has(part))
+}
+
 /* ----------------------------------------------------------------- footprint */
 
 /** `1` not `1.0`, `1.5` not `1.50` — the form the filenames use. */
@@ -166,6 +318,30 @@ const CONN_LABELS: Readonly<Record<string, string>> = {
 export function connLabel(value: string): string {
   return CONN_LABELS[value] ?? humaniseSegment(value)
 }
+
+/**
+ * Every word that can appear in a filename's connection segment.
+ *
+ * {@link CONN_LABELS}' keys carry the systems and the three stray position tags;
+ * `side` is the position the label map has no chip for (it is a face, not a
+ * value) and the last four are the print modifiers `src/catalog/aggregate.ts`
+ * measured as the entire vocabulary the corpus uses in that slot —
+ * `openlock|topless` (384), `openlock|unsupported` (413),
+ * `dragonlock|unsupported` (8), `magnetic|flex` (1,159) and `openforge|split`
+ * (1).
+ *
+ * Read only by {@link fileTokenLabel}. It is a *recogniser*, not a taxonomy: a
+ * word missing from it costs one card a slightly longer token, never a wrong
+ * fact.
+ */
+const CONNECTION_VOCABULARY: ReadonlySet<string> = new Set([
+  ...Object.keys(CONN_LABELS),
+  'side',
+  'topless',
+  'unsupported',
+  'flex',
+  'split',
+])
 
 /**
  * Build system → chip label.

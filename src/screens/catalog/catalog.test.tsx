@@ -3,10 +3,14 @@
  * Catalog screen tests.
  *
  * Rendered through the **real router** over `createMemoryHistory()`, the **real
- * facet engine** over a six-record fixture, and the **real store**. Nothing here
- * is mocked except the network: the whole point of this screen is that the URL
- * drives the engine and the engine drives the sidebar, so a test that stubbed
- * either end would only prove this file agrees with itself.
+ * facet engine** over a seven-file / six-item fixture, and the **real store**.
+ * Nothing here is mocked except the network: the whole point of this screen is
+ * that the URL drives the engine and the engine drives the sidebar, so a test
+ * that stubbed either end would only prove this file agrees with itself.
+ *
+ * The fixture's ord 1 and ord 6 share a design, so every card assertion below is
+ * about an **item** rather than a file — six cards over seven records, the same
+ * 2.28× collapse the live index makes at 3,822 over 8,702.
  *
  * Two pieces of scaffolding are unavoidable and both are narrow:
  *
@@ -40,8 +44,13 @@ import { FIXTURE_CATALOG, FIXTURE_NAMES } from './fixture'
  *
  * `itemWidth` matters as much as the height: the grid divides the viewport width
  * by it to get the row length, and a zero there means zero items per row.
+ *
+ * `itemHeight` is 309 rather than 260 because row A3's availability strip added a
+ * fixed 49px to the card — a 41px two-line box plus the card's 8px gap. It is a
+ * number the virtualiser is told rather than one it measures, so it has to move
+ * with the card.
  */
-const VIEWPORT = { viewportHeight: 1200, viewportWidth: 960, itemHeight: 260, itemWidth: 232 }
+const VIEWPORT = { viewportHeight: 1200, viewportWidth: 960, itemHeight: 309, itemWidth: 232 }
 
 function stubFetch(): void {
   vi.stubGlobal(
@@ -96,6 +105,25 @@ function currentSearch(router: ReturnType<typeof createWorkshopRouter>): Catalog
 
 const cardTitles = () =>
   screen.queryAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)
+
+/**
+ * The availability chips on the one rendered card, in order.
+ *
+ * Read off the DOM rather than off `availabilityOf`, so these assertions fail if
+ * the strip stops rendering rather than only if the derivation changes —
+ * `availability.test.ts` and `corpus.test.ts` cover the derivation.
+ */
+const chipLabels = () =>
+  [...document.querySelectorAll('.of-card .of-avail')].map((chip) =>
+    // The clipped hint rides in the accessible name after the visible label; the
+    // visible text is everything before the em dash it is introduced with.
+    (chip.textContent ?? '').split('—')[0]?.trim(),
+  )
+
+const chipStates = () =>
+  [...document.querySelectorAll('.of-card .of-avail')].map(
+    (chip) => `${chip.getAttribute('data-kind') ?? ''}:${chip.getAttribute('data-state') ?? ''}`,
+  )
 
 const group = (name: string) => screen.getByRole('group', { name })
 
@@ -421,6 +449,176 @@ describe('the card', () => {
 
     const link = screen.getByRole('link', { name: FIXTURE_NAMES[5] })
     expect(link).toHaveAttribute('href', '/catalog?kinds=base&tile=5')
+  })
+
+  it('links by the preview variant’s ordinal, never by the aggregate’s address', async () => {
+    await renderCatalog('/catalog?tex=wood')
+
+    // Row A4 types `?tile=` as a `ManifestOrdinal` and A1 brands
+    // `AggregateAddress` so it cannot be handed to one. The address happens to
+    // equal the group's lowest ordinal, so a card whose preview is *not* the
+    // lowest is the only case that can tell the two apart — this one's preview is
+    // its only variant, and the assertion is that the number is an `ord` at all.
+    const link = screen.getByRole('link', { name: FIXTURE_NAMES[3] })
+    expect(link).toHaveAttribute('href', '/catalog?tex=wood&tile=3')
+  })
+})
+
+/* --------------------------------------------------------------- aggregation */
+
+describe('a card is an item, not a file', () => {
+  it('renders one card for the two files of one design', async () => {
+    await renderCatalog('/catalog?tex=dungeon_stone%7Ceroded')
+
+    // Ord 1 and ord 6 are one design, so they are one card — with one title,
+    // not two.
+    expect(cardTitles()).toEqual([FIXTURE_NAMES[1]])
+    expect(document.querySelectorAll('.of-card')).toHaveLength(1)
+  })
+
+  it('states the byte range across the item’s variants, not one file’s size', async () => {
+    await renderCatalog('/catalog?tex=dungeon_stone%7Ceroded')
+
+    // 4.5 MB (the dragonlock print) to 15.9 MB (the topper). One figure here
+    // would be an assertion the data does not support: A1 measured the max/min
+    // ratio at 3.46 at p90 across multi-variant items.
+    expect(screen.getByText('4.5–15.9 MB')).toBeInTheDocument()
+  })
+
+  it('collapses the range to one figure for a single-variant item', async () => {
+    await renderCatalog('/catalog?kinds=base')
+
+    expect(screen.getByText('838 KB')).toBeInTheDocument()
+    expect(document.querySelector('.of-card-bytes')?.textContent).not.toContain('–')
+  })
+
+  it('counts items in the result line and files beside them', async () => {
+    await renderCatalog()
+
+    // Six cards over seven files. Both numbers, because one of them alone is
+    // either an under-report of the download or a disagreement with the grid.
+    expect(screen.getByRole('status')).toHaveTextContent('6 tiles · 7 files')
+  })
+
+  it('drops the file clause when every match is a single file', async () => {
+    await renderCatalog('/catalog?kinds=base')
+
+    expect(screen.getByRole('status')).toHaveTextContent('1 tile match')
+    expect(screen.getByRole('status').textContent).not.toContain('files')
+  })
+})
+
+/* ------------------------------------------------------- availability chips */
+
+describe('the availability chips', () => {
+  it('says a base is needed, and names the lock the tile carries on its sides', async () => {
+    await renderCatalog('/catalog?tex=wood')
+
+    // A topper with `connection|side|openlock` and no bottom system: two parts to
+    // print, and the openlock is between it and its neighbours rather than
+    // between it and the table. Reading the flattened `conn` would have shown a
+    // plain "OpenLOCK" here and over-claimed on 1,283 live toppers.
+    expect(chipLabels()).toEqual(['Needs a base', 'OpenLOCK sides'])
+    expect(chipStates()).toEqual(['base:need', 'lock:sides'])
+  })
+
+  it('says no base is needed and marks the lock as self-sufficient', async () => {
+    await renderCatalog('/catalog?kinds=base')
+
+    expect(chipLabels()).toEqual(['No base needed', 'OpenLOCK'])
+    expect(chipStates()).toEqual(['base:have', 'lock:underside'])
+  })
+
+  it('says the base is optional for the merged pair — the point of aggregating', async () => {
+    await renderCatalog('/catalog?tex=dungeon_stone%7Ceroded')
+
+    // The topper needs a base, the dragonlock print does not, and the item offers
+    // both. 931 live items read this way.
+    expect(chipLabels()).toEqual(['Base optional', 'DragonLock'])
+    expect(chipStates()).toEqual(['base:choice', 'lock:underside'])
+  })
+
+  it('reports an insert rather than inventing a lock for it', async () => {
+    await renderCatalog('/catalog?kinds=%21other')
+
+    expect(chipLabels()).toEqual(['No base needed', 'Insert'])
+    expect(chipStates()).toEqual(['base:have', 'note:note'])
+  })
+
+  it('reports untagged joinery as unknown, not as incompatible', async () => {
+    await renderCatalog('/catalog?tex=cave')
+
+    // The cave corner wall needs no base and records nothing about what it
+    // connects with. 93 live items are in this state and 33 of them name a lock
+    // in the filename only.
+    expect(chipLabels()).toEqual(['No base needed', 'Joinery untagged'])
+  })
+
+  it('gives every card at least one chip', async () => {
+    await renderCatalog()
+
+    const cards = [...document.querySelectorAll('.of-card')]
+    expect(cards).toHaveLength(6)
+    for (const card of cards) {
+      expect(card.querySelectorAll('.of-avail').length).toBeGreaterThan(0)
+    }
+  })
+
+  it('carries the claim in full in each chip’s accessible name', async () => {
+    await renderCatalog('/catalog?tex=wood')
+
+    // The fill difference between `underside` and `sides` is the only visual
+    // difference, so a reader who cannot see it gets the sentence instead.
+    const strip = screen.getByRole('list', { name: 'Availability' })
+    expect(strip).toHaveTextContent('joins its neighbours with OpenLOCK')
+    expect(strip).toHaveTextContent('needs a separately printed base')
+  })
+
+  it('explains the fill difference once, above the grid', async () => {
+    await renderCatalog()
+
+    const legend = document.querySelector('.of-avail-legend')
+    expect(legend?.textContent).toContain('locks underneath')
+    expect(legend?.textContent).toContain('joins at the sides only')
+    // Hidden from assistive technology: every chip it explains already carries
+    // the same sentence, so reading it too would say everything twice.
+    expect(legend).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  it('offers no legend above the empty state, where it would key nothing', async () => {
+    await renderCatalog('/catalog?q=nothinglikethis')
+
+    expect(document.querySelector('.of-avail-legend')).toBeNull()
+  })
+})
+
+/* --------------------------------------------------------- the filename token */
+
+describe('the filename token', () => {
+  it('distinguishes a card without putting the raw filename on it', async () => {
+    await renderCatalog('/catalog?kinds=base')
+
+    // `dungeon_stone%base+square.1x3.openlock.stl` → `1x3`. 131 live display
+    // names are shared by 323 items, and this is the field that separates them.
+    expect(document.querySelector('.of-card-token')?.textContent).toBe('1x3')
+  })
+
+  it('skips the connection segment, so it names the design and not one variant', async () => {
+    await renderCatalog('/catalog?tex=dungeon_stone%7Ceroded')
+
+    // The preview is the openforge topper, whose filename tail is
+    // `4x#Q,90.openlock` — but the token stops at the first segment that is not
+    // connection vocabulary, so both variants of this item agree on it. Taking
+    // the tail whole would disagree between the variants of 1,210 live items.
+    expect(document.querySelector('.of-card-token')?.textContent).toBe('4x#Q,90')
+  })
+
+  it('still never renders a whole filename', async () => {
+    await renderCatalog()
+
+    for (const record of FIXTURE_CATALOG.records) {
+      expect(screen.queryByText(record.file)).not.toBeInTheDocument()
+    }
   })
 })
 

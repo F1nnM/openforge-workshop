@@ -2,18 +2,31 @@
  * Formatter tests.
  *
  * Node environment — these are pure functions over the catalog contract. What is
- * worth asserting here is not that `toFixed` works but the four decisions the
+ * worth asserting here is not that `toFixed` works but the six decisions the
  * formatters encode: the size chip mirrors the importer's own size token, the
  * `none` footprint has a visible fallback rather than an empty chip, file sizes
- * are decimal, and the sentinel facet values (`!other`, `!none`) get prose
- * labels rather than leaking a `!` into the sidebar.
+ * are decimal, the sentinel facet values (`!other`, `!none`) get prose labels
+ * rather than leaking a `!` into the sidebar, an item's byte figure is a range
+ * only where the data supports one, and the filename token skips the connection
+ * segment so it names a design rather than one of its files.
  */
 import { describe, expect, it } from 'vitest'
 
 import { Footprint } from '@/catalog'
 import { BUILD_UNSPECIFIED, KIND_OTHER } from '@/search'
 
-import { buildLabel, connLabel, countLabel, fileSizeLabel, humaniseSegment, kindLabel, sizeLabel } from './format'
+import {
+  buildLabel,
+  bytesRangeLabel,
+  connLabel,
+  countLabel,
+  fileSizeLabel,
+  fileTokenLabel,
+  humaniseSegment,
+  kindLabel,
+  sizeLabel,
+  variantTokenLabel,
+} from './format'
 
 const foot = (value: unknown): Footprint => Footprint.parse(value)
 
@@ -123,5 +136,96 @@ describe('labels', () => {
     expect(kindLabel('trapdoor')).toBe('Trapdoor')
     expect(connLabel('new_system')).toBe('New system')
     expect(buildLabel('half wall')).toBe('Half wall')
+  })
+})
+
+describe('bytesRangeLabel', () => {
+  it('collapses to one figure when both ends round the same way', () => {
+    // 2,193 of the 3,822 live items read this way — every singleton, plus the
+    // multi-variant ones whose spread hides inside one decimal place.
+    expect(bytesRangeLabel([10_360_000, 10_360_000])).toBe('10.4 MB')
+    expect(bytesRangeLabel([10_360_000, 10_361_000])).toBe('10.4 MB')
+  })
+
+  it('states a range where there is one, with the unit once', () => {
+    // A1 measured the max/min ratio at 1.13 median and 3.46 at p90, so one
+    // number on an item holding a 4 MB topper and a 16 MB integrated print would
+    // be an assertion the data does not support.
+    expect(bytesRangeLabel([4_512_900, 15_853_634])).toBe('4.5–15.9 MB')
+  })
+
+  it('keeps both units when the range crosses a boundary', () => {
+    // `838 KB–1.2 MB`, not `838–1.2 MB`, which would read as 838 megabytes.
+    expect(bytesRangeLabel([838_214, 1_200_000])).toBe('838 KB–1.2 MB')
+  })
+
+  it('uses an en dash, so the figures do not read as arithmetic', () => {
+    expect(bytesRangeLabel([4_512_900, 15_853_634])).toContain('\u2013')
+    expect(bytesRangeLabel([4_512_900, 15_853_634])).not.toContain('-')
+  })
+})
+
+describe('fileTokenLabel', () => {
+  it('takes the variant token after the display-name half of the filename', () => {
+    expect(fileTokenLabel('wood#dormer,window_insert.2x.stl')).toBe('2x')
+    expect(fileTokenLabel('portcullis.very_narrow.stl')).toBe('very_narrow')
+    expect(fileTokenLabel('dungeon_stone%base+square.1x3.openlock.stl')).toBe('1x3')
+  })
+
+  it('skips a segment that is nothing but connection vocabulary', () => {
+    // The whole point: an aggregate collapses across the connection axis, so a
+    // token containing it would be one variant's private string on an item's
+    // card. Measured, taking the tail whole disagrees between the variants of
+    // 1,210 of 3,822 items; skipping these takes it to 22.
+    expect(fileTokenLabel('mine#wall+low.2x.openforge,side+dragonlock.stl')).toBe('2x')
+    expect(fileTokenLabel('base+square.4x2.openlock+unsupported,magnetic+flex.stl')).toBe('4x2')
+    expect(fileTokenLabel('corner+wall.2x.openforge.stl')).toBe('2x')
+  })
+
+  it('keeps a segment that merely contains a connection word', () => {
+    // `every`, not `some`: `col+L` is a real variant token and `magnetic_post` is
+    // not in the vocabulary at all, so neither segment is skipped.
+    expect(fileTokenLabel('aztlan#col.col+L.openforge.stl')).toBe('col+L')
+    expect(fileTokenLabel('mine#wall+b.1x1.openforge,magnetic_post.stl')).toBe('1x1')
+  })
+
+  it('is empty when the filename carries no variant to name', () => {
+    // 40 live items. Rendered as nothing rather than as an em dash: the filename
+    // simply has no variant, which is not a missing measurement.
+    expect(fileTokenLabel('dungeon_stone%2x2#floor.openlock.stl')).toBe('')
+    expect(fileTokenLabel('support_block.stl')).toBe('')
+    expect(fileTokenLabel('tudor%rectangular#door.stl')).toBe('')
+  })
+
+  it('reads the basename, so a folder in the path never reaches the card', () => {
+    expect(fileTokenLabel('tiles/dungeon_stone/floors/floor.2x2.openlock.stl')).toBe('2x2')
+  })
+
+  it('is case-insensitive about the extension', () => {
+    expect(fileTokenLabel('support_block.1x.STL')).toBe('1x')
+  })
+})
+
+describe('variantTokenLabel', () => {
+  it('keeps the connection segments, which is what names a file', () => {
+    // The complement of `fileTokenLabel`: two variants of one design differ in
+    // exactly these segments, so stripping them would label both rows of a
+    // library card `2x` and tell the user nothing about which is which.
+    expect(variantTokenLabel('cave%arrow_slit.2x.openlock.stl')).toBe('2x.openlock')
+    expect(variantTokenLabel('cave%arrow_slit.2x.openforge.stl')).toBe('2x.openforge')
+    expect(fileTokenLabel('cave%arrow_slit.2x.openlock.stl')).toBe(
+      fileTokenLabel('cave%arrow_slit.2x.openforge.stl'),
+    )
+  })
+
+  it('drops the display-name half and the extension, like its sibling', () => {
+    expect(variantTokenLabel('base+square.4x2.openlock+unsupported,magnetic+flex.stl')).toBe(
+      '4x2.openlock+unsupported,magnetic+flex',
+    )
+    expect(variantTokenLabel('tiles/cave/fixture/cave%fixture-0.2x.STL')).toBe('2x')
+  })
+
+  it('is empty when there is no dot to split on', () => {
+    expect(variantTokenLabel('support_block.stl')).toBe('')
   })
 })
