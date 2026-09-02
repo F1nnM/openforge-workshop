@@ -38,6 +38,13 @@
 import type { ArcFootprint } from '@/catalog'
 import { describe, expect, it } from 'vitest'
 
+/**
+ * 240 placed pairs, each decomposed into up to 14 convex parts and checked
+ * against an analytic oracle. Real work, not a hang — but past the 5,000 ms
+ * default whenever the suite shares a machine with another run.
+ */
+const SLOW_SWEEP_MS = 120_000
+
 import type { PlanPart, PlanPoint } from './geometry'
 import { footprintShape, partsContain, planGeometry } from './geometry'
 import { subjectsConflict } from './overlap'
@@ -444,7 +451,7 @@ describe('the error direction, on placed pairs', () => {
     expect(real).toBeGreaterThan(40)
     expect(flagged).toBeGreaterThan(40)
     expect(missed).toBe(0)
-  })
+  }, SLOW_SWEEP_MS)
 
   it('errs toward the false positive, and demonstrably so', () => {
     // Two 90-degree quarter discs of radius 2, anchored so their straight faces

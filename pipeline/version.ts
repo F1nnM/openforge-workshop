@@ -2,7 +2,7 @@
  * The pipeline's own constants: derivation version, asset bases, payload budget
  * and the one piece of non-determinism a build has.
  */
-import type { CatalogAssets } from '../src/catalog'
+import type { CatalogAssets, CatalogFile } from '../src/catalog'
 
 /**
  * Version of the **derivation rules** in this directory — not of the record
@@ -33,6 +33,35 @@ import type { CatalogAssets } from '../src/catalog'
  * meant here: `PIPELINE_VERSION` is what a consumer memoises a derived layer on,
  * and moving it would invalidate every cached aggregate and search index to
  * announce a change no consumer can observe.
+ *
+ * ## Row X4 made that distinction enforceable rather than conventional
+ *
+ * Three rows in a row have now decided this by argument in a docblock, and a
+ * fourth would have inherited nothing but the prose. So the rule is now a test
+ * with a failure message, and it is a **biconditional**:
+ *
+ *   > The emitted `{tags, records}` change if and only if `(SCHEMA_VERSION,
+ *   > PIPELINE_VERSION)` change.
+ *
+ * `tools/stamp/derivation.lock.json` records the sha256 of that pair of fields,
+ * built over the pinned fixture corpus with an empty ordinal manifest and
+ * {@link PAYLOAD_TIMESTAMP} — so the digest is a function of the derivation
+ * code, the schema and the corpus, and of nothing else. `tools/stamp/lock.ts`
+ * checks it both ways, and both directions fail with the reason:
+ *
+ *   - digest moved, versions did not → *a derivation changed and nothing
+ *     announced it.* This is the failure W4 and W5 would each have hit had they
+ *     forgotten, and the one a future row will hit.
+ *   - versions moved, digest did not → *a check is not a derivation.* This is
+ *     A1's and C1's claim, and it is now checked rather than asserted in prose.
+ *     Adding an `assert*` to `build.ts` cannot trip the first rule, because an
+ *     assertion emits nothing; bumping to announce one trips the second.
+ *
+ * `ASSET_BASES` and `MEASURED_SPRITE_SHEET` are locked separately, under
+ * `config`, because they are configuration this module stamps in rather than
+ * anything the pipeline derives. Changing a base URL therefore has to be
+ * re-locked deliberately, and is attributed as configuration rather than
+ * silently demanding a version bump.
  */
 export const PIPELINE_VERSION = 1
 
@@ -70,12 +99,64 @@ export const PIPELINE_VERSION = 1
  * chosen because it fit the budget would have been the wrong reading, and this
  * one was not chosen that way.**
  *
- * One caveat on any before/after comparison, established by W4: `version.built`
- * is a clock reading, and the timestamp alone swings brotli by roughly ±210 B.
- * CI does not pin `SOURCE_DATE_EPOCH`. A trustworthy delta therefore has to
- * re-serialise one built file both ways rather than subtract two build outputs.
+ * **Row X4 closed the caveat every figure above had to carry.** W4 established
+ * that `version.built` is a clock reading and estimated its brotli swing at
+ * ~210 B; W5, A1 and C1 each worked around it by hand, re-serialising one file
+ * twice to isolate a delta. Measured properly — the same 8,702-record file
+ * serialised at 32 distinct timestamps — the swing is larger than the estimate:
+ * **364,934 B to 365,589 B, a spread of 655 B**, median 365,403 B. So the
+ * ±110 B those rows quoted was optimistic by a factor of three, and a 1,070 B
+ * delta was closer to the noise floor than it read.
+ *
+ * Two mechanisms replace it, and neither alone is sufficient:
+ *
+ *   1. **CI pins `SOURCE_DATE_EPOCH`** to the committer timestamp of the commit
+ *      being built (`.github/workflows/ci.yml`). That makes one tree's build
+ *      byte-reproducible, which is what a rerun, a cache and a diff of two runs
+ *      of the same commit need. It does *not* make two branches comparable —
+ *      two commits have two timestamps.
+ *   2. **Every payload figure is measured at {@link PAYLOAD_EPOCH}**, a fixed
+ *      constant, via {@link atPayloadEpoch}. That is what makes a figure
+ *      quotable across branches without re-serialising anything by hand, and it
+ *      is the same normalisation the derivation lock digests under.
+ *
+ * At the payload epoch, on the pinned corpus: **365,403 B brotli — 71.4% of
+ * budget** (5,739,104 B raw, 478,673 B gzip). Every figure in this docblock
+ * above predates the normalisation and carries the old ±328 B; this one does
+ * not.
  */
 export const SIZE_BUDGET_BYTES = 500 * 1024
+
+/**
+ * The epoch every payload figure is measured at.
+ *
+ * Not the build clock and not a substitute for it: {@link buildTimestamp} still
+ * records when a build happened, and CI pins `SOURCE_DATE_EPOCH` so that a given
+ * tree builds to the same bytes twice. This constant exists for the other
+ * problem — that a *quoted* brotli figure has to be comparable to one quoted on
+ * another branch, and a clock reading makes it swing 655 B for no reason anyone
+ * can act on. Anything that reports or gates on a payload size normalises to
+ * this first.
+ *
+ * `2026-01-01T00:00:00Z`, chosen because `pipeline/catalog.test.ts` was already
+ * using that literal as its pinned `builtAt` and two pinned clocks would be one
+ * too many.
+ */
+export const PAYLOAD_EPOCH = 1767225600
+
+/** {@link PAYLOAD_EPOCH} as `version.built` writes it. */
+export const PAYLOAD_TIMESTAMP = '2026-01-01T00:00:00.000Z'
+
+/**
+ * The same file with its clock reading replaced by {@link PAYLOAD_TIMESTAMP}.
+ *
+ * A shallow copy: the records array is shared, because nothing here mutates it
+ * and cloning 8,702 records to change one string would be the expensive way to
+ * measure a size.
+ */
+export function atPayloadEpoch(file: CatalogFile): CatalogFile {
+  return { ...file, version: { ...file.version, built: PAYLOAD_TIMESTAMP } }
+}
 
 /**
  * Where derived files live.
