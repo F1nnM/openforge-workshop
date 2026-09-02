@@ -29,7 +29,10 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import type { TileId } from '@/catalog'
+import type { GeneratedBaseId, GeneratedPlacement } from '@/generator/placement/scene'
+import { GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/placement/scene'
 
+import { clearGeneratedMeshes, retainGeneratedMeshes } from './meshes'
 import type { RecoveredState } from './migrations'
 import { STORE_VERSION, migrateWorkshopState, salvageWorkshopState } from './migrations'
 import type { LockSystem, Placement, PlacementId, WorkshopState } from './schema'
@@ -200,7 +203,96 @@ export function removePlacement(id: PlacementId): void {
 
 /** Clear the builder scene, keeping the library and the lock preference. */
 export function clearPlacements(): void {
-  useWorkshopStore.setState({ placements: {} })
+  useWorkshopStore.setState({ placements: {}, generated: {} })
+  // Every hold is now orphaned. `retainGeneratedMeshes(new Set())` would say the
+  // same thing; this is the one call site where "keep nothing" is the whole
+  // answer, so it says so directly.
+  clearGeneratedMeshes()
+}
+
+/* ----------------------------------------------------------- generated bases */
+
+/**
+ * Put a generated base on the grid and return its key.
+ *
+ * The mirror of {@link placeTile}, and deliberately a *separate* action over a
+ * separate map rather than a widened one: `Placement.tileId` is a `TileId` and
+ * row S5's whole identity argument rests on a generated base not being able to
+ * produce a string in that space. The `PlacementId` space *is* shared, which is
+ * what lets one id name a piece on the plan whichever map holds it.
+ *
+ * Parsed on the way in for {@link placeTile}'s reason — a bad value fails at the
+ * call that produced it, where the stack still names the culprit, rather than at
+ * a hydration months later where it looks like storage corruption. The schema
+ * also folds `-0` on both coordinates and constrains the entry point to the five
+ * the panel offers.
+ *
+ * The **mesh is not passed here**, and cannot be: `meshes.ts` holds it, keyed by
+ * the recipe rather than by the placement, and this store persists everything it
+ * is given. The caller places and holds in the same press — see
+ * `GeneratorDrawer`'s `onPlace`.
+ */
+export function placeGeneratedBase(placement: GeneratedPlacement): PlacementId {
+  const id = newPlacementId()
+  const validated = GeneratedPlacementSchema.parse({
+    ...placement,
+    rotation: normalizeRotation(placement.rotation),
+  })
+  useWorkshopStore.setState((state) => ({ generated: { ...state.generated, [id]: validated } }))
+  return id
+}
+
+/** Move a generated base. No-op if the key is unknown, which a stale drag can be. */
+export function moveGeneratedPlacement(id: PlacementId, x: number, z: number): void {
+  useWorkshopStore.setState((state) => {
+    const current = state.generated[id]
+    if (current === undefined) return state
+    const moved = GeneratedPlacementSchema.parse({ ...current, x, z })
+    return { generated: { ...state.generated, [id]: moved } }
+  })
+}
+
+/**
+ * Rotate a generated base.
+ *
+ * The step is not this function's business — it is `GENERATED_ROTATION_STEP_DEG`,
+ * 90, because every footprint the panel can produce is a rect on the inch grid —
+ * but the *angle* is folded into `[0, 360)` here exactly as
+ * {@link rotatePlacement} does, so two bases at the same visual angle compare
+ * equal and `generatedPlacementKey` stays a set key.
+ */
+export function rotateGeneratedPlacement(id: PlacementId, rotation: number): void {
+  useWorkshopStore.setState((state) => {
+    const current = state.generated[id]
+    if (current === undefined) return state
+    const rotated = { ...current, rotation: normalizeRotation(rotation) }
+    return { generated: { ...state.generated, [id]: rotated } }
+  })
+}
+
+/**
+ * Take a generated base off the grid, releasing its mesh if nothing else wants
+ * it.
+ *
+ * The release is the reason this is not simply `delete`. A hold is 0.5–2.4 MB of
+ * STL keyed by *recipe*, so two copies of one base share it and removing one
+ * copy must not drop the bytes the other still needs — the retain set is
+ * computed from the scene that remains, which is the only formulation that
+ * cannot get that wrong. See `meshes.ts`.
+ */
+export function removeGeneratedPlacement(id: PlacementId): void {
+  useWorkshopStore.setState((state) => {
+    if (state.generated[id] === undefined) return state
+    const generated = { ...state.generated }
+    delete generated[id]
+    return { generated }
+  })
+  retainGeneratedMeshes(placedGeneratedBases(useWorkshopStore.getState()))
+}
+
+/** Every base id the scene still names. The retain set, and the bill's grouping key. */
+function placedGeneratedBases(state: WorkshopState): Set<GeneratedBaseId> {
+  return new Set(Object.values(state.generated).map((placement) => placement.base))
 }
 
 /* --------------------------------------------------------------------- locks */
@@ -249,6 +341,7 @@ export function acknowledgeLockSystem(): void {
  */
 export function resetWorkshop(): void {
   useWorkshopStore.setState(defaultWorkshopState(), true)
+  clearGeneratedMeshes()
 }
 
 /* ----------------------------------------------------------------- selectors */
@@ -280,7 +373,25 @@ export const selectPlacement =
   (state: WorkshopState): Placement | undefined =>
     state.placements[id]
 
-/** How many tiles are on the grid. */
+/**
+ * The generated half of the scene. Changes on every generated placement.
+ *
+ * Kept separate from {@link selectPlacements} rather than concatenated, because
+ * a subscriber that wanted only the catalog pieces would otherwise re-render on
+ * every generated write and vice versa — and the two populations have different
+ * readers: `buildBillOfTiles` takes the first and only the first, and
+ * `buildGeneratedBill` takes the second and only the second.
+ */
+export const selectGeneratedPlacements = (state: WorkshopState): WorkshopState['generated'] => state.generated
+
+/**
+ * How many tiles are on the grid.
+ *
+ * Catalog placements only, and deliberately: this is the header's `{n} tiles
+ * placed` chip and the toolbar's count, both of which are about tiles from the
+ * archive. A generated base is counted in the generated bill's own line, which
+ * says what it is.
+ */
 export const selectPlacementCount = (state: WorkshopState): number => Object.keys(state.placements).length
 
 /** The global lock preference. */
@@ -319,6 +430,11 @@ export function usePlacements(): WorkshopState['placements'] {
 /** @see selectPlacement */
 export function usePlacement(id: PlacementId): Placement | undefined {
   return useWorkshopStore((state) => state.placements[id])
+}
+
+/** @see selectGeneratedPlacements */
+export function useGeneratedPlacements(): WorkshopState['generated'] {
+  return useWorkshopStore(selectGeneratedPlacements)
 }
 
 /** @see selectPlacementCount */

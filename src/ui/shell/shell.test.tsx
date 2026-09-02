@@ -81,13 +81,15 @@ describe('AppFrame', () => {
       'href',
       '/',
     )
-    // Catalog, Library, Builder, Settings. Asserted by name rather than by
-    // count, so adding a tab is a deliberate edit here instead of a bare
-    // number to bump.
+    // Catalog, Library, Builder, Assemblies, Settings — in that order. Asserted
+    // by name rather than by count, so adding a tab is a deliberate edit here
+    // instead of a bare number to bump. Row X9 added Assemblies, because row
+    // C3's screen had no entrance at all until its route was mounted.
     expect(within(sectionNav()).getAllByRole('link').map((link) => link.textContent)).toEqual([
       expect.stringContaining('Catalog'),
       expect.stringContaining('Library'),
       expect.stringContaining('Builder'),
+      expect.stringContaining('Assemblies'),
       expect.stringContaining('Settings'),
     ])
 

@@ -57,10 +57,11 @@ import { useId, useState } from 'react'
 
 import type { BillOfTiles } from '@/assembly'
 import type { CatalogAssets, CatalogRecord, SpriteSheet } from '@/catalog'
+import type { GeneratedBill } from '@/generator/placement/bill'
 import type { MaterialId } from '@/materials'
 import { describeCell, formatUnits } from '@/builder/canvas'
 import { countLabel, fileSizeLabel, sizeLabel } from '@/screens/catalog'
-import type { Placement } from '@/store'
+import type { Placement, WorkshopState } from '@/store'
 import { removePlacement } from '@/store'
 import { Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
@@ -68,6 +69,7 @@ import { TileThumb } from '@/ui/thumb'
 import type { BillPlacement, BillRow } from './billView'
 import { billInventory, noteCopy, resolutionSummary, rowResolutionCopy, verdictCopy } from './billView'
 import { DownloadAction } from './DownloadAction'
+import { GeneratedBillSection } from './GeneratedBillSection'
 import type { ArchiveDownload } from './useArchiveDownload'
 
 import './panels.css'
@@ -88,9 +90,18 @@ export interface BillPanelProps {
    */
   readonly materialOf: (record: CatalogRecord) => MaterialId
   readonly download: ArchiveDownload
+  /**
+   * Row S5's generated bill, and the store map behind it. Absent means none.
+   *
+   * `billView.ts` needs nothing for this and gets nothing: a generated
+   * placement never enters `buildBillOfTiles`, so the two halves are joined by
+   * being rendered next to each other rather than by a merged model. See
+   * `GeneratedBillSection.tsx`.
+   */
+  readonly generated?: { readonly bill: GeneratedBill; readonly placements: WorkshopState['generated'] }
 }
 
-export function BillPanel({ bill, placements, assets, sheet, materialOf, download }: BillPanelProps) {
+export function BillPanel({ bill, placements, assets, sheet, materialOf, download, generated }: BillPanelProps) {
   const headingId = useId()
   const { rows, orphans } = billInventory(bill, placements)
   const verdict = verdictCopy(bill.download)
@@ -169,6 +180,10 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
           </ul>
         )}
 
+        {generated === undefined ? null : (
+          <GeneratedBillSection bill={generated.bill} placements={generated.placements} />
+        )}
+
         {infos.length === 0 ? null : (
           <details className="of-bill-infos">
             <summary>
@@ -195,7 +210,11 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
             {fileSizeLabel(bill.download.bytes)}
           </span>
         </p>
-        <DownloadAction download={download} files={bill.files} />
+        <DownloadAction
+          download={download}
+          files={bill.files}
+          generated={generated?.bill.recipes ?? 0}
+        />
       </footer>
     </aside>
   )

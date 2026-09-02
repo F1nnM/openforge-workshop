@@ -111,7 +111,17 @@ import type { CatalogRecord } from '@/catalog'
 import { GRID_UNIT_MM } from '@/catalog'
 import type { MaterialId } from '@/materials'
 import type { PlacementId } from '@/store'
-import { movePlacement, placeTile, removePlacement, rotatePlacement, usePlacements } from '@/store'
+import {
+  moveGeneratedPlacement,
+  movePlacement,
+  placeTile,
+  removeGeneratedPlacement,
+  removePlacement,
+  rotateGeneratedPlacement,
+  rotatePlacement,
+  useGeneratedPlacements,
+  usePlacements,
+} from '@/store'
 
 import type { PlanCatalog, PlanStyle } from './catalog'
 import { createStyleResolver } from './catalog'
@@ -140,8 +150,8 @@ import {
   previewMove,
 } from './move'
 import { PlanPieces, shapeTransform } from './PlanPieces'
-import { buildPlanScene, navigationOrder, pieceAt } from './scene'
-import type { PlanPiece, PlanScene } from './scene'
+import { buildPlanScene, navigationOrder, pieceAt, pieceName, pieceRotationStep, scenePaintOrder } from './scene'
+import type { PlanScene, ScenePiece } from './scene'
 import { PlanDefs, GRID_PATTERN_ID, REFUSAL_PATTERN_ID, UNMEASURED_PATTERN_ID } from './surfaces'
 import type { PlanTool, PlanTools } from './usePlanTools'
 import type { Viewport } from './viewport'
@@ -242,8 +252,16 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
   const { message, announce } = useAnnouncer()
 
   const placements = usePlacements()
+  // The generated half of the scene, from the store's second map. A separate
+  // subscription rather than one over the whole state, so a catalog placement
+  // does not re-project the generated pieces or the other way round — both maps
+  // have a stable identity until their own contents change.
+  const generated = useGeneratedPlacements()
   const styleOf = useMemo(() => createStyleResolver(catalog), [catalog])
-  const scene = useMemo(() => buildPlanScene(placements, catalog, styleOf), [placements, catalog, styleOf])
+  const scene = useMemo(
+    () => buildPlanScene(placements, catalog, styleOf, generated),
+    [placements, catalog, styleOf, generated],
+  )
 
   const selected = tools.selectedTileId === null ? undefined : catalog.record(tools.selectedTileId)
   const ghost = useMemo(
@@ -340,11 +358,18 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
     [say],
   )
 
-  /** Remove one piece, named. Shared by the erase gesture and the move's `Delete`. */
+  /**
+   * Remove one piece, named. Shared by the erase gesture and the move's `Delete`.
+   *
+   * Two store actions, because the scene is two maps: `removeGeneratedPlacement`
+   * also releases the held mesh when the removal orphans it, which `removePlacement`
+   * has nothing to release. One readout either way — see `scene.ts`'s `pieceName`.
+   */
   const erasePiece = useCallback(
-    (piece: PlanPiece): boolean => {
-      removePlacement(piece.id)
-      say(`Removed ${piece.record.name} from ${describeCell(piece.placement.x, piece.placement.z)}.`)
+    (piece: ScenePiece): boolean => {
+      if (piece.kind === 'generated') removeGeneratedPlacement(piece.id)
+      else removePlacement(piece.id)
+      say(`Removed ${pieceName(piece)} from ${describeCell(piece.placement.x, piece.placement.z)}.`)
       return true
     },
     [say],
@@ -413,7 +438,11 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
       say(describeDrop(preview))
       return false
     }
-    movePlacement(current.id, current.anchor[0], current.anchor[1])
+    if (preview.piece.kind === 'generated') {
+      moveGeneratedPlacement(current.id, current.anchor[0], current.anchor[1])
+    } else {
+      movePlacement(current.id, current.anchor[0], current.anchor[1])
+    }
     say(describeDrop(preview))
     return true
   }, [say, setMove])
@@ -455,13 +484,16 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
       // is still one.
       const held = dragRef.current
       const sticky = held?.id ?? rotationTarget.current
-      const piece = (sticky === null ? undefined : currentScene.pieces.find((it) => it.id === sticky)) ?? under
+      const target =
+        sticky === null ? undefined : scenePaintOrder(currentScene).find((it) => it.id === sticky)
+      const piece = target ?? under
       if (piece !== undefined) {
         rotationTarget.current = piece.id
-        const step = rotationStepFor(piece.record)
+        const step = pieceRotationStep(piece)
         const rotation = nextRotation(piece.placement.rotation, step, direction)
-        rotatePlacement(piece.id, rotation)
-        say(`Turned ${piece.record.name} to ${formatUnits(rotation)} degrees.`)
+        if (piece.kind === 'generated') rotateGeneratedPlacement(piece.id, rotation)
+        else rotatePlacement(piece.id, rotation)
+        say(`Turned ${pieceName(piece)} to ${formatUnits(rotation)} degrees.`)
         return
       }
       if (record === undefined) {
@@ -636,7 +668,7 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
         return
       }
       navIndex.current = (navIndex.current + direction + order.length) % order.length
-      const piece = order[navIndex.current] as PlanPiece
+      const piece = order[navIndex.current] as ScenePiece
       const centre = boxCentre(piece.box)
       setCursor([centre.x, centre.z])
       setView(ensureVisible(latest.current.view, latest.current.size, piece.box, 1.5))
@@ -857,7 +889,7 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
       hint,
       selectedName: selected?.name ?? null,
       refusal: ghost?.refusal?.message ?? null,
-      moving: moving?.piece.record.name ?? null,
+      moving: moving === undefined ? null : pieceName(moving.piece),
       placements: scene.pieces.length,
       conflicts: scene.conflicts.size,
     }),
@@ -932,9 +964,21 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
           vectorEffect="non-scaling-stroke"
         />
 
+        {/* Two `<g>`s in this order, so a generated base is painted *under* the
+            catalog's pieces — see `scene.ts`'s `scenePaintOrder`, which is the
+            same statement in arithmetic and is what `pieceAt` hit-tests by. */}
+        <PlanPieces pieces={scene.generated} movingId={moving?.id ?? null} generated />
         <PlanPieces pieces={scene.pieces} movingId={moving?.id ?? null} />
 
-        {moving === undefined ? null : <MoveShadow preview={moving} style={styleOf(moving.piece.record)} />}
+        {/* A generated base carries its own resolved style — row S5 asks
+            `src/materials` for `texture|plain` — so the shadow reads the piece
+            rather than re-resolving a record it has not got. */}
+        {moving === undefined ? null : (
+          <MoveShadow
+            preview={moving}
+            style={moving.piece.kind === 'catalog' ? styleOf(moving.piece.record) : moving.piece.style}
+          />
+        )}
         {showGhost && ghostStyle !== null ? <Ghost ghost={ghost} style={ghostStyle} /> : null}
         {focused ? <Caret at={cursor} /> : null}
       </svg>
@@ -1145,7 +1189,7 @@ function buildHint(
   tools: PlanTools,
   selected: CatalogRecord | undefined,
   ghost: PlanGhost | null,
-  under: PlanPiece | undefined,
+  under: ScenePiece | undefined,
   moving: MovePreview | undefined,
 ): string {
   // A piece in the air out-ranks every other state, including a refusal about
@@ -1154,10 +1198,12 @@ function buildHint(
   if (tools.tool === 'move') {
     return under === undefined
       ? 'Move: drag a tile to reposition it, or press Enter with the cursor on one. Shift-drag does the same in any mode.'
-      : `Move: drag ${under.record.name}, or press Enter to pick it up.`
+      : `Move: drag ${pieceName(under)}, or press Enter to pick it up.`
   }
   if (tools.tool === 'erase') {
-    return under === undefined ? 'Erase: click a tile to remove it.' : `Erase: click to remove ${under.record.name}.`
+    return under === undefined
+      ? 'Erase: click a tile to remove it.'
+      : `Erase: click to remove ${pieceName(under)}.`
   }
   if (selected === undefined) return 'Choose a tile in the palette, then click the grid to place it.'
   if (ghost !== null && ghost.refusal !== null) return ghost.refusal.message

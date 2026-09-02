@@ -97,7 +97,8 @@ import type { PlanBox, PlanPart, PlanPoint } from './geometry'
 import { describeCell, formatUnits, planGeometry, snapTo } from './geometry'
 import type { OverlapSubject } from './overlap'
 import { subjectsConflict } from './overlap'
-import type { PlanPiece, PlanScene } from './scene'
+import type { PlanScene, ScenePiece } from './scene'
+import { pieceName, scenePaintOrder } from './scene'
 import { sectorCentre } from './sector'
 
 /* ----------------------------------------------------------------- the drag */
@@ -127,8 +128,8 @@ export interface MoveDrag {
   readonly grab: PlanPoint | null
 }
 
-/** Pick a piece up. */
-export function beginMove(piece: PlanPiece, grab: PlanPoint | null): MoveDrag {
+/** Pick a piece up. Either population — see `scene.ts`'s {@link ScenePiece}. */
+export function beginMove(piece: ScenePiece, grab: PlanPoint | null): MoveDrag {
   const origin: PlanPoint = [piece.placement.x, piece.placement.z]
   return { id: piece.id, origin, anchor: origin, grab }
 }
@@ -201,8 +202,16 @@ export interface MoveNote {
  */
 export interface MovePreview {
   readonly id: PlacementId
-  /** The piece as the scene currently holds it — so a mid-move `R` is included. */
-  readonly piece: PlanPiece
+  /**
+   * The piece as the scene currently holds it — so a mid-move `R` is included.
+   *
+   * Either population. Row X9 widened this from `PlanPiece`, and the widening is
+   * what makes a generated base movable *by the same code* rather than by a
+   * second gesture: nothing in this module reads a `CatalogRecord` except the
+   * name in a readout and the footprint the concentric note is about, and both
+   * of those have an answer for a generated base.
+   */
+  readonly piece: ScenePiece
   /** Where it was picked up from. */
   readonly from: PlanPoint
   /** The box it occupied there, for the leader line. */
@@ -216,7 +225,7 @@ export interface MovePreview {
   /** Whether the drawn box is the shape. Read by the corner-junction exemption. */
   readonly axisAligned: boolean
   /** The pieces in this piece's own band that the drop would overlap. */
-  readonly overlaps: readonly PlanPiece[]
+  readonly overlaps: readonly ScenePiece[]
   readonly conflict: boolean
   /** Whether the proposal is where the piece already is. */
   readonly unchanged: boolean
@@ -235,7 +244,11 @@ export interface MovePreview {
  * canvas treats `undefined` as "the move is over".
  */
 export function previewMove(drag: MoveDrag, scene: PlanScene): MovePreview | undefined {
-  const piece = scene.pieces.find((candidate) => candidate.id === drag.id)
+  // Both lists, because the id space is one: row S5 proved a `GeneratedBaseId`
+  // can never be a `TileId`, so a `PlacementId` names at most one piece across
+  // the two maps and searching the union cannot find the wrong one.
+  const order = scenePaintOrder(scene)
+  const piece = order.find((candidate) => candidate.id === drag.id)
   if (piece === undefined) return undefined
 
   const geometry = planGeometry(piece.shape, piece.placement.rotation, drag.anchor[0], drag.anchor[1])
@@ -246,7 +259,7 @@ export function previewMove(drag: MoveDrag, scene: PlanScene): MovePreview | und
     axisAligned: geometry.axisAligned,
   }
   // Every piece but this one: a piece cannot collide with, or duplicate, itself.
-  const others = scene.pieces.filter((candidate) => candidate.id !== drag.id)
+  const others = order.filter((candidate) => candidate.id !== drag.id)
   const overlaps = others.filter((candidate) => subjectsConflict(candidate, subject))
   const unchanged = same(drag.origin, drag.anchor)
   const refusal = duplicateRefusal(piece, others, drag.anchor)
@@ -265,7 +278,12 @@ export function previewMove(drag: MoveDrag, scene: PlanScene): MovePreview | und
     conflict: overlaps.length > 0,
     unchanged,
     refusal,
-    note: concentricNote(piece.record.foot),
+    // Provably `null` for a generated base rather than branched away: its grid
+    // footprint is a `rect`, and `concentricNote` returns `null` for every shape
+    // that is not an `arc`. Passing the footprint of either population is
+    // therefore one expression with one answer, and it stays correct on the day
+    // the generator learns to make a curve.
+    note: concentricNote(piece.kind === 'catalog' ? piece.record.foot : piece.foot.gridFootprint),
     committable: !unchanged && refusal === null,
   }
 }
@@ -294,13 +312,14 @@ export function previewMove(drag: MoveDrag, scene: PlanScene): MovePreview | und
  * lock and knows nothing of coordinates.
  */
 function duplicateRefusal(
-  piece: PlanPiece,
-  others: readonly PlanPiece[],
+  piece: ScenePiece,
+  others: readonly ScenePiece[],
   anchor: PlanPoint,
 ): MoveRefusal | null {
+  const identity = identityOf(piece)
   const twin = others.find(
     (candidate) =>
-      candidate.placement.tileId === piece.placement.tileId &&
+      identityOf(candidate) === identity &&
       candidate.placement.rotation === piece.placement.rotation &&
       same([candidate.placement.x, candidate.placement.z], anchor),
   )
@@ -308,9 +327,27 @@ function duplicateRefusal(
   return {
     code: 'duplicate',
     message:
-      `${piece.record.name} is already placed at ${describeCell(anchor[0], anchor[1])} at the same angle, ` +
-      `so this move would hide one tile under the other and double its line in the bill. Put back.`,
+      `${pieceName(piece)} is already placed at ${describeCell(anchor[0], anchor[1])} at the same angle, ` +
+      `so this move would hide one piece under the other and double its line in the bill. Put back.`,
   }
+}
+
+/**
+ * What makes two pieces the same *thing* — a `TileId` or a `GeneratedBaseId`.
+ *
+ * Compared as bare strings across both populations, and that is safe for exactly
+ * the reason row S5 built the identity the way it did: a `GeneratedBaseId` starts
+ * `gen:` and therefore fails `TileId`'s `^tiles/…` pattern, so the two spaces are
+ * **provably disjoint** and no generated base can be mistaken for a catalogued
+ * tile here. Without that proof this comparison would need a kind check as well,
+ * and a missing one would be a false twin — a refused move with no visible cause.
+ *
+ * A generated base's id *is* its canonical recipe key, so two generated bases are
+ * the same thing iff their recipes are equal, which is the same standard the
+ * catalog arm applies: identical file, identical angle, identical cell.
+ */
+function identityOf(piece: ScenePiece): string {
+  return piece.kind === 'catalog' ? piece.placement.tileId : piece.placement.base
 }
 
 /* ------------------------------------------------------ the concentric limit */
@@ -372,7 +409,7 @@ export function concentricNote(foot: Footprint): MoveNote | null {
 export function describeGrab(preview: MovePreview): string {
   const note = preview.note === null ? '' : ` ${preview.note.message}`
   return (
-    `Picked up ${preview.piece.record.name} from ${describeCell(preview.from[0], preview.from[1])}. ` +
+    `Picked up ${pieceName(preview.piece)} from ${describeCell(preview.from[0], preview.from[1])}. ` +
     `Arrow keys move it, Enter drops it, Escape puts it back.${note}`
   )
 }
@@ -380,9 +417,9 @@ export function describeGrab(preview: MovePreview): string {
 /** What the live region says on each keyboard step. Deliberately short. */
 export function describeNudge(preview: MovePreview): string {
   if (preview.unchanged) {
-    return `${preview.piece.record.name} back at ${describeCell(preview.anchor[0], preview.anchor[1])}, where it started.`
+    return `${pieceName(preview.piece)} back at ${describeCell(preview.anchor[0], preview.anchor[1])}, where it started.`
   }
-  return `${preview.piece.record.name} to ${describeCell(preview.anchor[0], preview.anchor[1])}${overlapTail(preview)}.`
+  return `${pieceName(preview.piece)} to ${describeCell(preview.anchor[0], preview.anchor[1])}${overlapTail(preview)}.`
 }
 
 /**
@@ -393,27 +430,27 @@ export function describeNudge(preview: MovePreview): string {
  */
 export function describeDrop(preview: MovePreview): string {
   if (preview.unchanged) {
-    return `${preview.piece.record.name} left at ${describeCell(preview.from[0], preview.from[1])}. Nothing moved.`
+    return `${pieceName(preview.piece)} left at ${describeCell(preview.from[0], preview.from[1])}. Nothing moved.`
   }
   return (
-    `Moved ${preview.piece.record.name} from ${describeCell(preview.from[0], preview.from[1])} ` +
+    `Moved ${pieceName(preview.piece)} from ${describeCell(preview.from[0], preview.from[1])} ` +
     `to ${describeCell(preview.anchor[0], preview.anchor[1])}${overlapTail(preview)}.`
   )
 }
 
 /** What the live region says when a move is abandoned. */
 export function describeCancel(preview: MovePreview): string {
-  return `Put ${preview.piece.record.name} back at ${describeCell(preview.from[0], preview.from[1])}.`
+  return `Put ${pieceName(preview.piece)} back at ${describeCell(preview.from[0], preview.from[1])}.`
 }
 
 /** The hint plate's line while a move is in the air, §2.4's bottom-left. */
 export function describeMoveHint(preview: MovePreview): string {
   if (preview.refusal !== null) return preview.refusal.message
   if (preview.unchanged) {
-    return `Moving ${preview.piece.record.name}. Drag or use the arrow keys; Escape puts it back.`
+    return `Moving ${pieceName(preview.piece)}. Drag or use the arrow keys; Escape puts it back.`
   }
   return (
-    `Moving ${preview.piece.record.name} to ${describeCell(preview.anchor[0], preview.anchor[1])}` +
+    `Moving ${pieceName(preview.piece)} to ${describeCell(preview.anchor[0], preview.anchor[1])}` +
     `${overlapTail(preview)}. Drop to commit, Escape puts it back.`
   )
 }

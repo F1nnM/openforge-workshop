@@ -11,7 +11,16 @@
  */
 export { createWorkshopRouter } from './router'
 export type { WorkshopRouter, WorkshopRouterOptions } from './router'
-export { builderRoute, catalogRoute, landingRoute, libraryRoute, rootRoute, routeTree } from './routeTree'
+export {
+  assembliesRoute,
+  builderRoute,
+  catalogRoute,
+  landingRoute,
+  libraryRoute,
+  rootRoute,
+  routeTree,
+  settingsRoute,
+} from './routeTree'
 export type { TileSubject, TileTarget } from './tileAddress'
 export { resolveTileTarget, tileOrdinal } from './tileAddress'
 export { closeTileDrawer, openTileDrawer, showTileInDrawer } from './tileDrawer'

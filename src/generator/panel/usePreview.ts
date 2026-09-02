@@ -57,7 +57,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { EngineLicence, GeneratorEngine, Verification } from '../engine'
 import { loadEngineLicence, loadGeneratorEngine, loadVerificationDescriber } from '../engine'
 
+import { triangleCount } from './mesh'
 import type { BaseRecipe, RecipeValue } from './recipe'
+
+/**
+ * Re-exported, not defined here any more.
+ *
+ * `triangleCount` moved to `./mesh` — row S5's third request, and row X9's
+ * `src/store/meshes.ts` is the eager caller that made it necessary rather than
+ * merely tidy: this module value-imports `../engine`, whose dynamic imports emit
+ * the 298 kB worker chunk, so a bill row that wanted a triangle count from here
+ * would have dragged the engine seam into the builder's entry chunk. The name
+ * stays exported from this file because `panel/index.ts` publishes it as S4's
+ * seam and S5's `pack.test.ts` imports it from here.
+ */
+export { triangleCount } from './mesh'
 
 /** Idle before a continuous control dispatches. §3.3, and S2's 250 ms finding. */
 export const IDLE_MS = 350
@@ -66,12 +80,6 @@ export const IDLE_MS = 350
 export const BASIS_REFUSALS: Readonly<Record<string, string>> = {
   dragonlock: 'ERROR: dragonlock is only compatible with inch basis',
   infinitylock: 'ERROR: infinitylock is only compatible with inch basis',
-}
-
-/** Triangle count from a binary STL header. Zero means the geometry refused. */
-export function triangleCount(mesh: Uint8Array): number {
-  if (mesh.byteLength < 84) return 0
-  return new DataView(mesh.buffer, mesh.byteOffset, mesh.byteLength).getUint32(80, true)
 }
 
 /**

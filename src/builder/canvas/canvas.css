@@ -108,6 +108,26 @@
   opacity: 0.75;
 }
 
+/* ── Generated bases (row X9) ────────────────────────────────────────────────
+   A generated base is drawn from the material registry like everything else —
+   row S5 asks it for `texture|plain`, the tag all 1,235 archived plain bases
+   carry, so a generated 2x2 and an archived plain 2x2 come out the same colour
+   on purpose. Nothing here overrides that.
+
+   What is marked is the one thing the outline cannot say: `data-tiles="false"`
+   is a base whose SQUARE_BASIS is not the grid's — 25, 31.75 or 38.1 mm to the
+   square against the grid's 25.4 — so it is drawn at its real size and still
+   will not snap to the lattice. A dashed contour is the drawing convention for
+   "this edge is not where a lattice edge is", and it is the same device the
+   material registry already uses for a `contour: dashed` family, so it needs no
+   new vocabulary. The label says it in words as well, because a dash is
+   invisible to a screen reader.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-plan-pieces[data-generated='true'] g[data-tiles='false'] path:last-of-type {
+  stroke-dasharray: 3 2;
+}
+
 /* ── Corner plates (§2.4) ────────────────────────────────────────────────────
    "Both sit on translucent plates and are pointer-transparent." Pointer
    transparency is not decoration: the plates sit over the drawing, and a hint

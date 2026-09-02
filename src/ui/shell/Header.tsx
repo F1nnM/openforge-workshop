@@ -13,6 +13,13 @@
  * reader user can jump to it, and named because a document with more than one
  * `<nav>` (row 16's footer may add one) needs them distinguishable.
  *
+ * Five tabs now, not three. The mock had three and the contract's §2.0
+ * transcription is otherwise exact; the two additions are both routes that would
+ * otherwise be reachable only by typing a URL — `/settings`, whose only other
+ * entrance is a notice the user can dismiss, and `/assemblies`, which had no
+ * entrance at all until row X9 mounted it. A permanent nav slot is a real cost
+ * and the alternative in both cases was a screen nobody could find.
+ *
  * **Active is programmatic, not just visual.** TanStack Router stamps
  * `data-status="active"` on a matching `Link`, which is what draws the accent
  * inset — but a data attribute is invisible to assistive technology, so
@@ -66,7 +73,7 @@ function Wordmark() {
 }
 
 interface NavTabProps {
-  to: '/catalog' | '/library' | '/builder' | '/settings'
+  to: '/catalog' | '/library' | '/builder' | '/assemblies' | '/settings'
   label: string
   /** Omitted for Catalog, which has no count. */
   count?: { value: number; singular: string; plural: string }
@@ -154,6 +161,13 @@ export function Header() {
           label="Builder"
           count={{ value: placementCount, singular: 'tile placed', plural: 'tiles placed' }}
         />
+        {/* Row C3's screen, mounted by row X9. A route nothing navigates to is
+            reachable only by typing a URL, which is the same gap `/settings`
+            had and closed here — so it is closed the same way rather than
+            invented a second time. It sits after Builder because it is a
+            building tool and before Settings because Settings is the tail. No
+            count chip: there is nothing on that screen to count. */}
+        <NavTab to="/assemblies" label="Assemblies" />
         {/* Without this the lock picker is reachable only through the builder's
             dismissible notice, so a dismissed notice strands the route. */}
         <NavTab to="/settings" label="Settings" />
