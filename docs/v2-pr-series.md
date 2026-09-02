@@ -51,7 +51,7 @@ them.
 | **B2** | R2 write credentials for `/thumbs/` and `/lod/` | X1, G1 | project owner |
 | **B3** | Publisher declaration — free, non-monetised community tool | public launch | project owner |
 | **B4** | Legal read on bundling a **GPL-2** OpenSCAD WASM engine *inside this app* rather than conveying it separately. The separate-origin design answered this cleanly; in-app integration is the owner's stated preference and does not. | S2, S3, S4 | project owner |
-| **B5** | `Access-Control-Expose-Headers: ETag` on `objects.openforge.tools`. **ETag equals the md5**, which is how a fetched STL is verified to be the file a recipe named — without the header that check is impossible. | S3, X6 | project owner (zone admin) |
+| **B5** | `Access-Control-Expose-Headers: ETag` on `objects.openforge.tools`. **The rationale first written here was false and §13's risk 16 refutes it:** the ETag equals the md5 only below R2's 8 MiB part size, and **4,884 of 8,353 blobs (58.5%) are above it**, where it is an S3 multipart digest no arithmetic converts back. G1 and W1 measured that independently. So integrity checks hash **content** and the header verifies only the 41.5% that are small — still worth setting, and **no longer a launch gate.** | S3, X6 | project owner (zone admin) |
 | **B6** | `Cross-Origin-Resource-Policy: cross-origin` on the bucket. Costs nothing now; without it the whole catalog is blocked on day one if anything ever forces cross-origin isolation. | X6 | project owner (zone admin) |
 
 Rows gated by a blocker can be **written, reviewed and merged**; they cannot be **run against
@@ -176,6 +176,12 @@ OpenSCAD path at all, so the UI must not imply every base is parametric.
 | **X4** | Version stamp | One stamp across **five** artefacts — index, LOD store, thumbnail set, share manifest **and W1's sidecar** — regenerated in one CI step. A launch gate: md5 churn is the creator's normal workflow and silently invalidates all five. | *edits* `pipeline/version.ts`, `tools/**`, `.github/workflows/ci.yml` | G1, X1, W1, C1 | **yes** |
 | **X5** | Debt sweep | `SurfacePattern` duplicated between `HeroPlan` and `builder/canvas/surfaces.tsx`; `SearchField` unexported so the palette reimplements 30 lines; `TileId` accepts any non-empty string; `pipeline/facets.ts`'s stale "38 roots" docstring; the library's narrow-viewport departure from the design contract. | *edits* various, one seam each | A3, G2, D2 | **yes** |
 | **X6** | Deploy and verify | Cache rules verified by `cf-cache-status: HIT`, not assumed. Disable the `r2.dev` URL, which bypasses every cache rule and WAF. `content-type` on STL objects. Verify the generator's headers too — `'wasm-unsafe-eval'` and `Content-Type: application/wasm` are *"the single most common way a working WASM build dies on deploy"*. | *edits* `wrangler.jsonc`, `.github/workflows/deploy.yml` | B1, B2, B3, B5, B6, S4 | **no — production** |
+| **X7** | Correct what the rows refuted | Five documented claims later rows disproved but nobody owned: `palette.ts`'s `SpriteMaterial` docblock and `architecture-plan.md` §8 both still say the grid *"stays blue"* after P1 tinted it; a `spriteArgsFor` docblock says *"unused by v1"*; `composition/index.ts` says *"inert until C2"* after C2 and C3 landed; `design-contract.md` §2.2/§2.5 predate X2's tag chips. Plus `render.test.ts`'s wall-clock `bootMs < compileMs`, which C3 measured failing 1 whole-suite run in 4 and passing 12/12 in isolation — a race, not a regression. | *edits* `src/materials/palette.ts`, `src/composition/index.ts`, `src/generator/engine/render.test.ts`, `docs/architecture-plan.md`, `docs/design-contract.md` | P1, X2, C2 | **yes** |
+| **X8** | The 40 recipes into the pipeline | C3 found **20 `*.yaml` fixtures holding exactly 40 blueprint recipes that `pipeline/fixtures.ts` has never read** — deliberately, since globbing would move every count in the plan. They are the only parent in the archive whose tags leave blanks for a pick to fill, so guided assembly is a property of recipes rather than tiles. C3 ships them as generated typed data inside its own screen directory; their durable home is `pipeline/`. Two grammar features live only in these files — `constrain[].siblings` (30 uses) and part-level `fulfills` (20) — and **C1's docblock predicted that Zod would strip them in silence**, which it now would. | *edits* `pipeline/fixtures.ts`, `pipeline/build.ts`, `src/catalog/schema.ts` · *deletes* `src/screens/assemblies/templates.ts` | C3, P3, C1, X9 | **no** |
+| **X9** | Make the built things reachable | **Two rows shipped unreachable.** S5's own words are *"drawing is not wired"* — it built the identity, the collision, the bill line and the pack, and `PlanPiece` requires a `CatalogRecord`, so nothing draws; and **nothing persists**, because `src/store/**` was outside its edit list. C3's screen is unreachable *and unbundled*. This row draws a generated base, bills it, packs it, persists it, and mounts `/assemblies`. Also closes S4's three seams that S5 asked for by name: hand `onPlace` the resolution rather than the recipe, and move `recipeId` and `triangleCount` out of modules that drag 25 KB of pinned schemas and a 298 kB worker chunk into the eager bundle. | *edits* `src/generator/panel/**`, `src/builder/canvas/scene.ts`, `src/builder/panels/{BillPanel,DownloadAction,useArchiveDownload}`, `src/store/**`, `src/download/{index,attribution}.ts`, `src/routes/routeTree.tsx` | S5, S4, C3 | **no** |
+| **X10** | Close the reported list | Seven items every row reported and no row owned. **A share link silently drops generated bases** - `share/scene.ts` reads `placements` only, so a shared room comes back missing pieces with no error, while JSON export carries them. **A hand-placed base under a topper is billed twice**, because the auto-insert rule sees only `placements` and cannot see a generated base at all. **The drawer shows one tile in two colours** - `SpriteRotator` is still untinted blue above a tinted slot picker. Plus the five routes X9 measured at +47,972 B eager and left; the latent `EISDIR` in three boundary walkers, which reads as a broken test rather than a boundary breach; §12's Generate threshold, 1-2 orders out with §3.5's 3.46-3.68x triangle overstatement; and a tag count that disagrees with itself, 916 in prose against 915 everywhere that counts. | *edits* `src/share/**`, `src/assembly/**`, `src/screens/detail/SpriteRotator.tsx`, `src/routes/**`, three `boundary.test.ts`, `docs/architecture-plan.md` §12/§3.5, `docs/design-contract.md` §2.2 | X9, P3, S2 | **no** |
+| **X11** | Classify every digest slot | X8 proved `derivationDigests` cannot see a new top-level key at all - 40 templates entered the emitted index and moved **neither digest by a byte**, so X4's *"a derivation changed and nothing announced it"* would never have fired. **The digest is not widened**, because a total digest cannot be total (`version.built` is a clock) and would classify every future key as a derivation - the wrong default for configuration, since W4's `ASSET_BASES.lod` would then have demanded a bump no consumer could observe. Every key is classified instead and both digests are projected from the classification, so the map cannot claim a coverage the hash does not have. Also adopts X8's widened `PartSlot` in `TemplatePart`, which surfaced an assignability `config.ts` claimed and `candidates.ts` was already casting around. | *edits* `tools/stamp/{lock,lock.test,index}.ts`, `src/composition/{config,candidates}.ts`, `src/screens/assemblies/{assembly,measure,assemblies.test}.ts` | X8, X4 | **yes** |
+| **X12** | 915, not 916 | Four sites said **916** interned tags where the text describes what ships - `TagId`'s docblock, the intern table's own, `emit.ts`'s compressibility measurement and the plan's budget section. The emitted artefact holds **915** and so does the lock; **916 is the pre-normalisation scan vocabulary**, which `TAG_ALIASES` collapses by folding `texture|foundations` onto `texture|foundation`. The three sites that mean the scan are correct and untouched. | *edits* `src/catalog/schema.ts`, `pipeline/{tags,emit}.ts`, `docs/architecture-plan.md` | X10 | **yes** |
 
 **Two draft items deleted, because they did not reproduce.** `fileSizeLabel` and `humaniseSegment`
 are **not** duplicated — one definition each, and `labels.ts` carries a docstring saying it is
@@ -219,3 +225,47 @@ gates the footprint chain, so start it first. After W4:
 - One agent per row, on disjoint `Owns` sets.
 - A PR is ready only when the agent has finished, CI is green, and review comments are addressed.
   Treat a green board as a claim — ask what actually ran.
+
+---
+
+## Where the series ended up
+
+**Fifty-two rows merged** - the 45 planned, plus **X7** (correct what the rows refuted, and de-flake
+two timing tests), **X8** (the 40 YAML recipes into the pipeline), **X9** (make the two rows that
+shipped unreachable reachable), **X10** (close the reported list), **X11** (classify every digest
+slot) and **X12** (915, not 916).
+
+`epic/v1` at `91c4ff3`: **154 test files, 3,369 tests, three consecutive clean whole-suite runs**,
+with `lint`, `typecheck` and `build` all exiting 0.
+
+**Two rows existed only because earlier rows shipped correct work that nothing could reach.** S5
+built a generated base's identity, collision, bill line and pack and drew none of it, because
+`PlanPiece` requires a `CatalogRecord` and `src/store/**` was outside its edit list. C3 built a
+screen no route mounted - unreachable *and* unbundled. Neither was a defect in those rows; both
+declined to edit files they did not own, which is exactly what the series asked of them. **The seam
+is the cost of the discipline, and it needs a row of its own rather than a hope that someone
+notices.**
+
+**Seven guards were found that could not fail**, which is the most transferable result here: a grep
+that matched a docblock instead of an import; a control-byte check that listed only *tracked*
+files; a boundary walker matching substrings rather than import specifiers; a timing assertion
+whose margin was 6%; a markup test that crashed on an unstaged deletion, turning red while saying
+nothing about markup; three of five route-mounting markers that were the header's own nav labels,
+so **4 of 6 mounting cases passed against a tree with every screen blanked**; and a measurement
+suite that had never printed the tables it claimed to print *"on every run"*, because jsdom
+installs its own `console`. **A guard is worth what it costs only once someone has watched it
+fail.**
+
+**The plan was wrong in more places than it was right, and that was the point.** Coverage went
+95.1% -> 91.5% -> 92.0% -> 91.7%, non-monotone by design. The stride that saves nothing. The ETag
+that is the md5 for only 41.5% of blobs. `$fn` not tunable. A 3.46-3.68x triangle overstatement
+that had justified a `Simplify` button which would often have made renders *slower*. Progressive
+narrowing measured at zero over tiles and 8,645 of 11,938 over recipes - the same question, the
+wrong parent. Every one of those came from measuring something the plan asserted, and **no row that
+merely implemented its brief produced anything as valuable.**
+
+**What is left is not code.** `launch-blockers.md` is the runbook for **B1** (the zone rules, CORS
+unconditional *first*), **B2** (R2 write credentials, ~$0.04 of egress), **B3** (the publisher
+declaration) and **B6** (`Cross-Origin-Resource-Policy`). **B5 is no longer a gate** and its
+original rationale was false. Rows **X1** and **X6** are written and cannot run until those are
+open.
