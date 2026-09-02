@@ -21,6 +21,14 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib'
 
+/**
+ * These blocks brotli-compress candidate sets over the whole 8,702-record corpus,
+ * which is seconds of real work rather than a hang. The 5,000 ms default is fine
+ * on an idle machine and times out when the suite runs beside anything else —
+ * which is how it first failed, on a box at load average 25.
+ */
+const SLOW_CORPUS_MS = 120_000
+
 import { describe, expect, it } from 'vitest'
 
 import type { CatalogFile as CatalogFileType, PartSlot, TileId } from '@/catalog'
@@ -181,7 +189,7 @@ describeCorpus(title, () => {
     // Payload was never what made this reading wrong.
     expect(fatSize.raw).toBeGreaterThan(15_000_000)
     expect(fatSize.compressed).toBeLessThan(40_000)
-  })
+  }, SLOW_CORPUS_MS)
 
   it(
     'prices materialising every sibling-selection state',

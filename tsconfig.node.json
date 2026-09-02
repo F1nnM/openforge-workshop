@@ -10,7 +10,12 @@
     "skipLibCheck": true,
     "noEmit": true,
     "composite": true,
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    // The app resolves `@/` and this project did not, so a build-time check
+    // could not import the app module implementing the rule it was checking.
+    // Rows C1 and W7 both hit it; see the `include` notes.
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": [
     "vite.config.ts",
@@ -24,6 +29,34 @@
     // its own file list (TS6307), and the app project cannot be referenced
     // because it is noEmit and so publishes no declarations.
     "src/catalog",
+    // Row X4 took the two boundary requests rows C1 and W7 each filed against
+    // this file, and added one of its own. All three are the same shape: a
+    // build-time check that can only be written where the app already
+    // implements the rule, and whose alternative is a second copy of it.
+    //
+    //   - `src/composition` — C1's request. `pipeline/build.ts` can now run
+    //     `measureComposition`/`assertComposition` beside A1's aggregation
+    //     check. Its only cross-directory import is `@/catalog`, already here.
+    //   - `src/assembly/footprint.ts` and `src/assembly/assemblyIndex.ts` —
+    //     W7's request, so `pipeline/catalog.test.ts` can compare against
+    //     `footprintKey` and `printOption` directly rather than at the coarser
+    //     granularity both sides could spell. Named as files rather than as the
+    //     directory, exactly as `src/three/stl/parse.ts` is: `resolve.ts` and
+    //     `bill.ts` import `@/store`, which pulls zustand and DOM-typed state
+    //     into a project that has neither.
+    //   - `src/share/manifest.ts` — X4's own. The share manifest is one of the
+    //     five artefacts the stamp covers and the only one with no file, so the
+    //     stamp step regenerates it from the index and round-trips all 8,702
+    //     ordinals. `link.ts` is deliberately not here; it needs
+    //     `CompressionStream`.
+    //
+    // `tools/hygiene/project.test.ts` imports across each of these boundaries
+    // and calls what it imports, so removing an entry breaks the typecheck
+    // rather than quietly reverting a capability.
+    "src/composition",
+    "src/assembly/footprint.ts",
+    "src/assembly/assemblyIndex.ts",
+    "src/share/manifest.ts",
     // Named as a single file, not as the directory: `src/three/stl/` also holds
     // the Worker client, which needs DOM lib this project does not have. The
     // measurement and LOD tools both parse STL, and a second copy of the parser
