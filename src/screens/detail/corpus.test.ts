@@ -24,11 +24,11 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { CatalogFile, CatalogRecord } from '@/catalog'
-import { CatalogFile as CatalogFileSchema } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, buildAggregateIndex } from '@/catalog'
 
 import { NO_FOOTPRINT, NO_HEIGHT, footprintLabel, heightLabel, storageAddress } from './labels'
 import { spriteSheetUrl } from './spriteFrames'
-import { familyVariants } from './variants'
+import { joinsOf, slotRows, variantRows } from './variants'
 
 const CATALOG_PATH =
   process.env.OPENFORGE_CATALOG ?? join(process.cwd(), 'public', 'catalog', 'catalog.json')
@@ -190,31 +190,192 @@ describeCorpus('the derived URLs', () => {
   })
 })
 
-describeCorpus('family variants over the live corpus', () => {
-  it('never offers a tile its own size, and stays a short list', () => {
-    const catalog = loaded
-    if (catalog === undefined) throw new Error('unreachable: guarded by describeCorpus')
+describeCorpus('the variants table over the live corpus', () => {
+  const index = loaded === undefined ? undefined : buildAggregateIndex(loaded)
+  const aggregates = index?.aggregates ?? []
 
-    // One record per family is enough to exercise every family exactly once,
-    // and keeps this a 1,130-scan rather than an 8,702-scan of 8,702.
-    const seen = new Set<string>()
+  it('discloses every file of every item, and 55.4% of items have exactly one', () => {
+    expect(aggregates).toHaveLength(3822)
+
+    let disclosed = 0
+    let singletons = 0
     let widest = 0
-    for (const record of catalog.records) {
-      if (seen.has(record.family)) continue
-      seen.add(record.family)
-
-      const own = footprintLabel(record, tagsOf(record)).text
-      const variants = familyVariants(catalog, record)
-      const labels = variants.map((variant) => variant.label)
-
-      expect(labels).not.toContain(own)
-      expect(new Set(labels).size).toBe(labels.length)
-      widest = Math.max(widest, labels.length)
+    for (const aggregate of aggregates) {
+      const rows = variantRows(aggregate)
+      // Nothing filtered, nothing deduplicated, nothing truncated — the row's
+      // whole requirement is that all of them are rendered.
+      expect(rows).toHaveLength(aggregate.variants.length)
+      expect(rows.map((row) => row.variant.id)).toEqual(aggregate.variants.map((variant) => variant.id))
+      disclosed += rows.length
+      if (rows.length === 1) singletons += 1
+      widest = Math.max(widest, rows.length)
     }
 
-    expect(seen.size).toBe(1130)
-    // 24 distinct footprints is the widest family in the corpus (the shingled
-    // roofs); one less than that, since the subject's own size is dropped.
-    expect(widest).toBe(23)
+    expect(disclosed).toBe(8702)
+    expect(singletons).toBe(2117)
+    expect(singletons / aggregates.length).toBeCloseTo(0.554, 3)
+    // The largest group. A scrolling drawer shows 20 rows; nothing hides them.
+    expect(widest).toBe(20)
+  })
+
+  it('gives every row an identity the derived facts cannot supply', () => {
+    // 171 aggregates (4.5%) hold two variants agreeing on part count, layer,
+    // every system this table renders and every option — worst case 18 of them,
+    // among the 20 files of `Plain Wall Base 1x IA`. The figure is 215 (5.6%)
+    // when only the three lock systems are compared, which is what a card does;
+    // this table shows the unfiltered vocabulary and so separates 44 more items.
+    // Either way the derived facts are not an identity, and `label` is.
+    const described = (row: ReturnType<typeof variantRows>[number]): string =>
+      [
+        row.partsLabel,
+        row.variant.layer,
+        row.joins.map((join) => `${join.face}:${join.system}`).join('/'),
+        row.options.join('+'),
+      ].join('|')
+
+    let collided = 0
+    let worst = 0
+    for (const aggregate of aggregates) {
+      const rows = variantRows(aggregate)
+      const counts = new Map<string, number>()
+      for (const row of rows) counts.set(described(row), (counts.get(described(row)) ?? 0) + 1)
+      const duplicated = [...counts.values()].filter((n) => n > 1)
+      if (duplicated.length > 0) {
+        collided += 1
+        worst = Math.max(worst, ...duplicated)
+      }
+      // The identity, however, is always total.
+      expect(new Set(rows.map((row) => row.label)).size).toBe(rows.length)
+      expect(new Set(rows.map((row) => row.variant.id)).size).toBe(rows.length)
+    }
+
+    expect(collided).toBe(171)
+    expect(worst).toBe(18)
+  })
+
+  it('claims a part count and never a material saving', () => {
+    let toppers = 0
+    let single = 0
+    for (const aggregate of aggregates) {
+      for (const row of variantRows(aggregate)) {
+        if (row.minParts === 2) {
+          toppers += 1
+          expect(row.variant.needsBase).toBe(true)
+        } else {
+          single += 1
+          expect(row.variant.needsBase).toBe(false)
+        }
+        // A download size, formatted, and nothing that reads as a comparison:
+        // no percentage, no ratio, no "saves", no "smaller".
+        expect(row.download).toMatch(/^[\d.,]+ (B|KB|MB)$/)
+        expect(row.partsNote).not.toMatch(/filament|material|print time|saving|smaller|lighter/i)
+      }
+    }
+    // The layer split, which is what the part count is derived from.
+    expect(toppers).toBe(4363)
+    expect(single).toBe(4339)
+  })
+
+  it('measures the two byte ratios that were in circulation, and neither is filament', () => {
+    const quantile = (values: readonly number[], q: number): number => {
+      const sorted = [...values].sort((a, b) => a - b)
+      return sorted[Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1)))] ?? 0
+    }
+
+    // A1's figure: the spread *within* an aggregate, over the multi-variant ones.
+    const spread = aggregates
+      .filter((aggregate) => aggregate.variants.length > 1)
+      .map((aggregate) => aggregate.bytesRange[1] / aggregate.bytesRange[0])
+    expect(spread).toHaveLength(1705)
+    expect(quantile(spread, 0.5)).toBeCloseTo(1.13, 2)
+    expect(quantile(spread, 0.9)).toBeCloseTo(3.46, 2)
+    expect(Math.round(quantile(spread, 1))).toBe(39401)
+    expect(spread.filter((ratio) => ratio > 1.25)).toHaveLength(719)
+    expect(spread.filter((ratio) => ratio > 2)).toHaveLength(325)
+
+    // The row's own draft figure: an integrated variant against its topper, over
+    // the 931 aggregates holding both. A different population and a different
+    // statistic — which is why both numbers were right.
+    const paired: number[] = []
+    let smaller = 0
+    for (const aggregate of aggregates) {
+      const integrated = aggregate.variants.filter(
+        (variant) => !variant.needsBase && variant.layer !== 'insert',
+      )
+      const topper = aggregate.variants.filter((variant) => variant.needsBase)
+      if (integrated.length === 0 || topper.length === 0) continue
+      const one = Math.min(...integrated.map((variant) => variant.bytes))
+      const two = Math.min(...topper.map((variant) => variant.bytes))
+      paired.push(one / two)
+      if (one < two) smaller += 1
+    }
+    expect(paired).toHaveLength(931)
+    expect(quantile(paired, 0.5)).toBeCloseTo(1.024, 3)
+    expect(smaller).toBe(254)
+    expect(smaller / paired.length).toBeCloseTo(0.273, 3)
+
+    // And the reason no ratio may be rendered as a saving. Two `integral`
+    // variants of one item, 84 bytes against 3,309,684 — a degenerate mesh, not
+    // a cheaper print.
+    const worst = aggregates.find((aggregate) => aggregate.bytesRange[0] === 84)
+    expect(worst?.name).toBe('Aztlan Wall Column T')
+    expect(worst?.bytesRange[1]).toBe(3_309_684)
+  })
+
+  it('drops `openforge` from the joins at no cost, because it is the base declaration', () => {
+    let toppersUnderOpenforge = 0
+    let selfSufficientUnderOpenforge = 0
+    let joinsMentioningOpenforge = 0
+    for (const aggregate of aggregates) {
+      for (const variant of aggregate.variants) {
+        if (variant.bottomConn.includes('openforge')) {
+          if (variant.needsBase) toppersUnderOpenforge += 1
+          else selfSufficientUnderOpenforge += 1
+        }
+        if (joinsOf(variant).some((join) => join.system === 'openforge')) joinsMentioningOpenforge += 1
+      }
+    }
+    expect(toppersUnderOpenforge).toBe(4363)
+    // Nothing is lost: it is on the underside of every topper and no other file.
+    expect(selfSufficientUnderOpenforge).toBe(0)
+    expect(joinsMentioningOpenforge).toBe(0)
+  })
+
+  it('separates the base slot from the 552 real accessory slots', () => {
+    let slots = 0
+    let baseSlots = 0
+    let accessories = 0
+    let itemsWithAccessories = 0
+    let nonUniversal = 0
+    for (const aggregate of aggregates) {
+      slots += aggregate.slots.length
+      baseSlots += aggregate.slots.filter((slot) => slot.slot.name === 'base').length
+      const rows = slotRows(aggregate)
+      const printLabels = new Set(variantRows(aggregate).map((row) => row.label))
+      accessories += rows.length
+      if (rows.length > 0) itemsWithAccessories += 1
+      for (const row of rows) {
+        // Provenance is total: a universal slot names no print, a non-universal
+        // one names every print that carries it, never all of them, and always
+        // by a label the table's own rows carry — so the cross-reference the
+        // drawer asks the user to make actually resolves.
+        if (row.universal) expect(row.onlyOn).toHaveLength(0)
+        else {
+          nonUniversal += 1
+          expect(row.onlyOn.length).toBeGreaterThan(0)
+          expect(row.onlyOn.length).toBeLessThan(aggregate.variants.length)
+          for (const label of row.onlyOn) expect(printLabels).toContain(label)
+        }
+      }
+      // `base` never survives into a slot row.
+      expect(rows.map((row) => row.name)).not.toContain('base')
+    }
+
+    expect(slots).toBe(2112)
+    // 1,560 of the corpus's slots are the base match, which the part count states.
+    expect(baseSlots).toBe(1560)
+    expect(accessories).toBe(552)
+    expect(itemsWithAccessories).toBe(445)
+    expect(nonUniversal).toBeGreaterThan(0)
   })
 })

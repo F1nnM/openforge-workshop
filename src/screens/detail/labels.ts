@@ -78,6 +78,71 @@ import {
   shardedPath,
 } from '@/catalog'
 
+/* ------------------------------------------------------- what a label needs */
+
+/**
+ * Each label takes the **fields it reads**, not a whole `CatalogRecord`.
+ *
+ * Row A5 is why. After A1 the drawer renders an *aggregate* and one of its
+ * *variants*, and between them they carry everything below — A1 measured
+ * variance within an aggregate at **0** for `name`, `texture`, `build`, `kinds`,
+ * `sizeCode`, `rotStep` and `foot`, so those are properties of the item, while
+ * `bytes`, `blob`, `file` and `family` are per-variant. Neither object is a
+ * `CatalogRecord`, and neither should have to be faked into one.
+ *
+ * Every one of these is a structural subset of `CatalogRecord`, so all three
+ * existing callers — this drawer, the library card (row 14) and the builder's
+ * bill of tiles (row 18) — keep passing a whole record and keep compiling. The
+ * types are exported so a caller can see exactly what a cell depends on.
+ *
+ * Written out rather than derived with `Pick`, for two reasons that both bite
+ * under this project's `tsconfig`:
+ *
+ *   - `CatalogRecord.kinds` is a mutable `string[]` and `TileAggregate.kinds` is
+ *     a `readonly string[]`, so a `Pick` would accept the record and reject the
+ *     aggregate. Declaring the arrays `readonly` accepts both.
+ *   - `exactOptionalPropertyTypes` is on, and the two objects disagree about
+ *     *how* a facet is absent: a record has `sizeCode?: string` while an
+ *     aggregate has `sizeCode: string | undefined`. `?: string | undefined`
+ *     is the one spelling that accepts both an absent key and a present
+ *     `undefined`.
+ */
+export interface FootprintFacts {
+  readonly foot: CatalogRecord['foot']
+  readonly sizeCode?: string | undefined
+}
+/** Just the build tag. Hoisted — 0 variance within an aggregate. */
+export interface BuildFacts {
+  readonly build?: string | undefined
+}
+/** The file's own size and name. Per-variant, never hoisted. */
+export interface FileFacts {
+  readonly bytes: number
+  readonly file: string
+}
+/**
+ * The content address. Per-variant — 1,680 aggregates hold two blobs.
+ *
+ * Keeps the `BlobId` brand rather than widening to `string`: `shardedPath` takes
+ * a branded id precisely so a `family` or a `file` cannot be sharded by mistake,
+ * and a facts type that dropped the brand would hand that check away.
+ */
+export interface BlobFacts {
+  readonly blob: CatalogRecord['blob']
+}
+/** The texture set, for the eyebrow's first half. Hoisted. */
+export interface TextureFacts {
+  readonly texture?: string | undefined
+}
+/** The component buckets, for the eyebrow's second half. Hoisted. */
+export interface KindFacts {
+  readonly kinds: readonly string[]
+}
+/** The Dropbox folder. Per-variant — 1,589 aggregates hold two of them. */
+export interface FamilyFacts {
+  readonly family: string
+}
+
 /* ------------------------------------------------------------------ numbers */
 
 /**
@@ -239,7 +304,7 @@ function shapeWord(tags: readonly string[]): string | undefined {
  * tier 5.
  */
 export function footprintLabel(
-  record: CatalogRecord,
+  record: FootprintFacts,
   tags: readonly string[],
 ): SpecValue<FootprintBasis> {
   const foot = record.foot
@@ -384,7 +449,7 @@ export function heightLabel(tags: readonly string[]): SpecValue<HeightBasis> {
 /* ------------------------------------------------------- the other two cells */
 
 /** Which build system, or the fact that 34.2% of the corpus names none. */
-export function buildLabel(record: CatalogRecord): SpecValue<'tagged' | 'none'> {
+export function buildLabel(record: BuildFacts): SpecValue<'tagged' | 'none'> {
   if (record.build === undefined) {
     return {
       text: 'Not specified',
@@ -400,7 +465,7 @@ export function buildLabel(record: CatalogRecord): SpecValue<'tagged' | 'none'> 
 }
 
 /** `STL · 12.34 MB`. Every live file in the archive is an STL. */
-export function fileLabel(record: CatalogRecord): SpecValue<'stl'> {
+export function fileLabel(record: FileFacts): SpecValue<'stl'> {
   return {
     text: `STL · ${formatFileSize(record.bytes)}`,
     basis: 'stl',
@@ -418,12 +483,12 @@ export function fileLabel(record: CatalogRecord): SpecValue<'stl'> {
  * The drawer shows it because the design deliberately surfaces it — §2.5 — and
  * it is a real, fetchable HTTPS URL, so it is rendered as a link.
  */
-export function storageAddress(assets: CatalogAssets, record: CatalogRecord): string {
+export function storageAddress(assets: CatalogAssets, record: BlobFacts): string {
   return `${assets.models}/${shardedPath(record.blob)}.stl`
 }
 
 /** The eyebrow's first half. 89 tiles (1.0%) carry no texture tag. */
-export function textureSetLabel(record: CatalogRecord): string {
+export function textureSetLabel(record: TextureFacts): string {
   return record.texture === undefined ? 'No texture set' : humanise(record.texture)
 }
 
@@ -434,7 +499,7 @@ export function textureSetLabel(record: CatalogRecord): string {
  * 11.9% are in none. Both cases are shown as they are rather than collapsed to a
  * first element or to a blank.
  */
-export function componentLabel(record: CatalogRecord): string {
+export function componentLabel(record: KindFacts): string {
   if (record.kinds.length === 0) return 'Uncategorised'
   return record.kinds.map((kind) => humanise(kind)).join(' + ')
 }
@@ -447,7 +512,7 @@ export function componentLabel(record: CatalogRecord): string {
  * what drives the variant buttons at the foot of the drawer. It is not the
  * material family; that resolves from the texture tag through the registry.
  */
-export function familyTrail(record: CatalogRecord): string {
+export function familyTrail(record: FamilyFacts): string {
   const segments = record.family.split('/').filter((segment) => segment !== '')
   const withoutRoot = segments[0] === 'tiles' ? segments.slice(1) : segments
   return withoutRoot.length === 0 ? record.family : withoutRoot.join(' / ')

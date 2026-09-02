@@ -294,7 +294,7 @@
   text-decoration: underline;
 }
 
-/* ── Tags and variants ───────────────────────────────────────────────────── */
+/* ── Tags ────────────────────────────────────────────────────────────────── */
 
 .of-detail-tags {
   display: flex;
@@ -303,26 +303,263 @@
   margin-bottom: 22px;
 }
 
-.of-detail-variants {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+/* ── Variants table (row A5) ─────────────────────────────────────────────────
+
+   Every variant is disclosed, so this table has no collapsed state to style and
+   no max-height. The largest aggregate in the corpus holds 20 files and the
+   drawer body scrolls; a `max-height` here would be the accordion the row exists
+   to remove.
+
+   Three columns because the panel is 442px wide with a 24px gutter each side.
+   `table-layout: fixed` so a long filename cannot widen the size column off the
+   panel — the file cell wraps on its own separators instead.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-detail-vartable {
+  width: 100%;
+  margin: 0 0 6px;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-.of-detail-variant {
-  padding: 6px 12px;
+.of-detail-vartable caption {
+  margin-bottom: 10px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.of-detail-vartable thead th {
+  padding: 0 8px 5px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+/* Widths: the file cell takes what is left, the size column is a fixed mono
+   figure, and the middle column carries the systems and option chips. */
+.of-detail-vartable thead th:nth-child(1) {
+  width: 42%;
+}
+
+.of-detail-vartable thead th:nth-child(3) {
+  width: 62px;
+  text-align: right;
+}
+
+.of-detail-vartable tbody th,
+.of-detail-vartable tbody td {
+  padding: 7px 8px 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.of-detail-vartable tbody td:last-child {
+  padding-right: 0;
+}
+
+/* The shown row. An accent rule on the leading edge rather than a fill, so the
+   marker survives at any row count and does not fight the option chips. */
+.of-detail-vartable tbody tr[aria-current] {
   background: var(--bg3);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+}
+
+.of-detail-vartable tbody tr[aria-current] .of-detail-varparts {
+  color: var(--acc);
+}
+
+/* ── A variant row's cells ──────────────────────────────────────────────── */
+
+/* The row's control. A button styled as text, because 20 of them in a 442px
+   panel is a list to read down and not a row of 20 controls to look at. Its
+   accessible name is set in the markup and carries the whole row. */
+.of-detail-varpick {
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.of-detail-varparts {
+  display: block;
   color: var(--ink);
   font-family: var(--face-mono);
   font-size: 12px;
-  cursor: pointer;
-  transition: border-color 120ms ease;
 }
 
-.of-detail-variant:hover {
-  border-color: var(--acc);
+.of-detail-varpick:hover .of-detail-varparts,
+.of-detail-varpick:focus-visible .of-detail-varparts {
+  color: var(--acc);
+  text-decoration: underline;
+}
+
+.of-detail-varfile {
+  display: block;
+  margin-top: 2px;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1.35;
+  /* A corpus filename carries `#`, `%`, `+` and `,` as separators, so wrapping
+     anywhere is what keeps a 60-character name inside a 42% column. */
+  word-break: break-all;
+}
+
+.of-detail-varjoins {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-detail-varjoin {
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* Which face carries the system. The distinction is the point of the cell — an
+   underside system means the print meets the table on its own — so it is a word
+   and not a colour. */
+.of-detail-varface {
+  color: var(--mut);
+  font-size: 10.5px;
+}
+
+.of-detail-varjoin[data-face='underside'] .of-detail-varface {
+  color: var(--acc2);
+}
+
+/* An explicit statement, not a blank cell: 119 integral files and 285 inserts
+   declare no system at all. */
+.of-detail-varnone {
+  color: var(--mut);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.of-detail-varopts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.of-detail-varsize {
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ── The single-variant case ─────────────────────────────────────────────────
+
+   2,117 of 3,822 items (55.4%) have exactly one variant. No table, so nothing
+   here inherits the table's chrome.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-detail-onlyvar {
+  margin-bottom: 20px;
+  padding: 11px 13px;
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.of-detail-onlyvar-head {
+  margin: 0 0 5px;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.of-detail-onlyvar-head strong {
+  font-family: var(--face-mono);
+  font-weight: 500;
+}
+
+.of-detail-onlyvar-note {
+  margin: 0 0 8px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.of-detail-onlyvar .of-detail-varopts {
+  margin-top: 6px;
+}
+
+.of-detail-onlyvar .of-detail-varfile {
+  margin-top: 8px;
+}
+
+/* ── The choice note, and the slot note ──────────────────────────────────── */
+
+.of-detail-varnote {
+  margin: 0 0 12px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* ── Accessory slots ─────────────────────────────────────────────────────── */
+
+.of-detail-slots {
+  margin: 0 0 12px;
+}
+
+.of-detail-slot {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.of-detail-slot dt {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+}
+
+.of-detail-slot dt code {
+  color: var(--ink);
+  font-family: var(--face-mono);
+  font-size: 12px;
+}
+
+.of-detail-slotopt {
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.of-detail-slot dd {
+  margin: 3px 0 0;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* Provenance names files, which are long and mono. */
+.of-detail-slot dd code {
+  color: var(--acc2);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  word-break: break-all;
 }
 
 /* ── States ──────────────────────────────────────────────────────────────── */
@@ -341,8 +578,7 @@
 @media (prefers-reduced-motion: reduce) {
   .of-detail-action,
   .of-detail-pad-key,
-  .of-detail-address,
-  .of-detail-variant {
+  .of-detail-address {
     transition: none;
   }
 }
