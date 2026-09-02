@@ -26,8 +26,28 @@
  * the pill and pressing Space are the same event.
  *
  * The `ToggleGroup` primitive would have given the multi-select groups a roving
- * tabindex too, but it is single-select by construction (see its docblock) and
- * `src/ui/primitives/**` belongs to PR 12.
+ * tabindex too, but it is single-select by construction (see its docblock). The
+ * clause that used to follow — "and `src/ui/primitives/**` belongs to PR 12" —
+ * was an ownership constraint that expired when PR 12 landed; row X5 removed it
+ * so it cannot be read as a standing reason.
+ *
+ * ## No shared `Radio` primitive, and this is the argument
+ *
+ * Row X5 weighed one. There are two hand-rolled radio groups in the app — the
+ * build group below, and `src/ui/lock-picker/LockPicker.tsx` — and what they
+ * actually share is the native element: a `<label>` wrapping an
+ * `<input type="radio">` with `data-selected` on the label. Six lines. Around
+ * those six, everything differs: this one sits in a `role="radiogroup"` div and
+ * takes its accessible name from the label text, that one sits in a `<fieldset>`
+ * and carries an explicit `aria-label` because reading two bars, a chip and a
+ * note in sequence is not a name; this one has a `disabled` empty-bucket state,
+ * that one an `onClick` because a controlled radio already checked fires no
+ * `change` and "I compared the three and the default is right" has to be
+ * recordable; and the pill and the option panel are two unrelated stylesheets
+ * that both style the *label* and hide the input. A primitive covering both
+ * would need a dozen props to save six lines at two call sites, and would be
+ * larger than the duplication it removed. `ToggleGroup` is the right shape when
+ * the design wants a segmented control; neither of these does.
  *
  * ## Counts are live and come from the engine
  *

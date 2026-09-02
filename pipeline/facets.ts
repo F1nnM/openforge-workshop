@@ -244,25 +244,45 @@ export function classifyLayer(tags: readonly string[]): Layer {
 
 /**
  * The texture root — the first segment after `texture|`, from the first texture
- * tag. 38 distinct roots, which is the count the material registry (§9, PR 8) is
- * specified against.
+ * tag.
+ *
+ * ## Three root counts, and this function answers the smallest one
+ *
+ * The docblock this replaces said "38 distinct roots, which is the count the
+ * material registry is specified against", which conflated three figures into
+ * one and then went stale when row D3 moved two of them. Stated apart, over the
+ * **normalised** tag lists this function is called with (`build.ts` collapses
+ * drift first, on the way in):
+ *
+ *   - **37** roots occur on some `texture|` tag;
+ *   - **36** are what this function returns across the corpus, because it takes
+ *     the *first* texture tag and `stucco` is always secondary to an
+ *     alphabetically earlier root, so it never wins first position;
+ *   - **38** are mapped by `src/materials`' `TEXTURE_ROOT_MATERIAL`, which keeps
+ *     the retired `foundations` spelling as a fallback for a caller resolving
+ *     off raw fixtures.
+ *
+ * All three are asserted separately, and deliberately so: `pipeline/catalog.test.ts`
+ * ("resolves 36 of the 37 texture roots onto a record") pins the first two
+ * against each other and names `stucco` as exactly the difference, and
+ * `src/materials/corpus.test.ts` pins the table at 38. A single figure quoted in
+ * three places is what let this comment rot.
  *
  * 80 tiles carry two roots (`aztlan%bamboo#door` is tagged both `texture|aztlan`
  * and `texture|bamboo`); taking the first tag picks the design family rather
  * than the accent material, which is the one the tint should follow.
  *
- * **Two drift cases are deliberately left alone**, and both are reported rather
- * than silently collapsed:
+ * ## The two drift cases went different ways
  *
- *   - `texture|towne|stone-stucco` (72) and `texture|towne|stucco-stone` (72) are
- *     the same material tagged with the words reversed. They never co-occur, and
- *     both have root `towne`, so at root level there is nothing to normalise.
- *     Rewriting the tag strings themselves would desynchronise them from the
- *     `require`/`deny` refs carried through in `config`.
- *   - `texture|foundation` (51) and `texture|foundations` (2) *are* distinct
- *     roots and almost certainly one material. Collapsing them would take the
- *     root count from 38 to 37 and quietly invalidate the figure PR 8 builds
- *     against, so it is a decision for that PR, not a side effect of this one.
+ *   - `texture|towne|stone-stucco` (72) and `texture|towne|stucco-stone` (72)
+ *     are **still not collapsed**. They never co-occur, and both have root
+ *     `towne`, so at root level there is nothing to normalise; rewriting the tag
+ *     strings themselves would desynchronise them from the `require`/`deny`
+ *     refs carried through in `config`. See `normalise.ts#NOT_COLLAPSED`.
+ *   - `texture|foundation` (51) and `texture|foundations` (2) **were** collapsed
+ *     — by row D3, which is what took the all-tags count from 38 to 37 and the
+ *     first-position count from 37 to 36. `normalise.ts#TAG_ALIASES` carries the
+ *     rewrite and the argument for it; `foundation` now reads 53.
  */
 export function textureRoot(tags: readonly string[]): string | undefined {
   return tagValue(tags, 'texture')

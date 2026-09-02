@@ -32,6 +32,7 @@ import { buildShareManifest } from '../../src/share/manifest'
 import type { BuildResult } from '../../pipeline'
 import {
   assertWithinBudget,
+  atPayloadEpoch,
   buildCatalog,
   buildTimestamp,
   compressCatalog,
@@ -42,10 +43,6 @@ import {
   resolveFixturesRef,
   serialiseCatalog,
 } from '../../pipeline'
-// `atPayloadEpoch` is new in row X4 and `pipeline/index.ts` belongs to no live
-// row, so it is imported from the module that declares it. One line in that
-// barrel would close the gap; see the PR body.
-import { atPayloadEpoch } from '../../pipeline/version'
 import { meshTargets } from '../lod/catalog'
 import { measureTargets } from '../measure/catalog'
 import { spriteTargets } from '../thumbnails/catalog'

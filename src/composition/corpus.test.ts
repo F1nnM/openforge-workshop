@@ -14,8 +14,17 @@
  *      measured side by side so the answer is a comparison and not a claim.
  *
  * `catalog.json` is gitignored and rebuilt from the fixtures
- * (`npm run import:catalog`), so it is not present in CI. The whole block then
- * skips **loudly**, naming the path and the command — the precedent
+ * (`npm run import:catalog`). **CI does have it** — the stamp step regenerates it
+ * from the pinned fixtures first — so `assertComposition` below runs on every
+ * pull request. Row X5 corrected this note, which claimed the file was absent in
+ * CI — and that is why the same row declined C1's request to move
+ * `assertComposition` into `pipeline/build.ts`: at a measured 644 ms per index it
+ * would add ~3.2 s to `pipeline/catalog.test.ts` and no coverage at all, because
+ * the assertion below already runs there. `tools/hygiene/project.test.ts` carries
+ * that argument in full.
+ *
+ * Absent — a fresh checkout that has not imported — the whole block skips
+ * **loudly**, naming the path and the command, the precedent
  * `pipeline/catalog.test.ts` and `src/search/corpus.test.ts` both set.
  */
 import { existsSync, readFileSync } from 'node:fs'

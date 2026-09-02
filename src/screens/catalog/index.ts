@@ -23,12 +23,20 @@
  * point of deriving it once — a second implementation would be a second answer to
  * "does this need a base", on the two screens most likely to be compared
  * side by side.
+ *
+ * Row X5 adds `useDraftQuery`. The builder's palette search box and this screen's
+ * are not the same control — 272px with a conditional count against 520px with a
+ * live one — but the draft-and-commit state machine behind them is the same thirty
+ * lines, and the naive version of it silently rewinds a fast typist mid-word. One
+ * implementation, two markups; `useDraftQuery.ts` carries the argument.
  */
 export { CatalogScreen } from './CatalogScreen'
 
 export type { CatalogIndex, CatalogIndexState } from './catalogIndex'
 export { loadCatalogSearchIndex, resetCatalogSearchIndex, useCatalogIndex } from './catalogIndex'
 
+export type { DraftQuery } from './useDraftQuery'
+export { COMMIT_DELAY_MS, useDraftQuery } from './useDraftQuery'
 
 export type { TileCardProps } from './TileCard'
 export { AvailabilityStrip, LibraryToggle, TileCard } from './TileCard'

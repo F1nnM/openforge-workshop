@@ -49,8 +49,7 @@ import { z } from 'zod'
 import type { CatalogFile } from '../../src/catalog'
 import { SCHEMA_VERSION } from '../../src/catalog'
 import type { FixtureRow } from '../../pipeline'
-import { PIPELINE_VERSION, buildCatalog, emptyManifest } from '../../pipeline'
-import { PAYLOAD_TIMESTAMP } from '../../pipeline/version'
+import { PAYLOAD_TIMESTAMP, PIPELINE_VERSION, buildCatalog, emptyManifest } from '../../pipeline'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 

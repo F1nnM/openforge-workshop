@@ -24,8 +24,15 @@
  * If that index is not on this machine the block is skipped **loudly** — a
  * banner on stderr and the reason in the suite name — because the default
  * reporter prints a bare "N skipped" and a silently skipped data test is exactly
- * the failure this file exists to catch. CI does not run `import:catalog`, so
- * the skip is the normal CI path today, not a broken checkout.
+ * the failure this file exists to catch.
+ *
+ * **The skip is a local-checkout path, not the CI path.** This docblock used to
+ * say the opposite, and row X5 corrected it: CI fetches the pinned fixtures and
+ * regenerates the index before it runs the suite — `npm run stamp`, which
+ * replaced `npm run import:catalog` there in row X4 — so every corpus block
+ * below runs on every pull request. A skipped corpus block on a green board is
+ * now a signal that something is wrong with the run, which is the whole reason
+ * the banner is loud.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'

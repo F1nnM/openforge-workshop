@@ -108,10 +108,10 @@ const FIXTURE = catalog([
     tags: ['shape|wall', 'texture|towne', 'size|width|2'],
     parts: [BASE_SLOT],
   },
-  { id: 'bases/stone/a.stl', ord: 3, design: 'base-stone', layer: 'base', tags: ['shape|base', 'texture|dungeon_stone'] },
-  { id: 'bases/stone/b.stl', ord: 4, design: 'base-stone', layer: 'base', tags: ['shape|base', 'texture|dungeon_stone'] },
-  { id: 'bases/stone/deep.stl', ord: 5, design: 'base-deep', layer: 'base', tags: ['shape|base|square', 'texture|dungeon_stone'] },
-  { id: 'bases/cave/a.stl', ord: 6, design: 'base-cave', layer: 'base', tags: ['shape|base', 'texture|cave'] },
+  { id: 'tiles/bases/stone/a.stl', ord: 3, design: 'base-stone', layer: 'base', tags: ['shape|base', 'texture|dungeon_stone'] },
+  { id: 'tiles/bases/stone/b.stl', ord: 4, design: 'base-stone', layer: 'base', tags: ['shape|base', 'texture|dungeon_stone'] },
+  { id: 'tiles/bases/stone/deep.stl', ord: 5, design: 'base-deep', layer: 'base', tags: ['shape|base|square', 'texture|dungeon_stone'] },
+  { id: 'tiles/bases/cave/a.stl', ord: 6, design: 'base-cave', layer: 'base', tags: ['shape|base', 'texture|cave'] },
 ])
 
 describe('createCompositionIndex', () => {
@@ -125,8 +125,8 @@ describe('createCompositionIndex', () => {
 
   it('reads a tile’s slots and tags back', () => {
     expect(index.slotsOf(tile('tiles/stone/wall.stl')).map((slot) => slot.name)).toEqual(['base'])
-    expect(index.slotsOf(tile('bases/cave/a.stl'))).toEqual([])
-    expect(index.tagsOf(tile('bases/cave/a.stl'))).toEqual(['shape|base', 'texture|cave'])
+    expect(index.slotsOf(tile('tiles/bases/cave/a.stl'))).toEqual([])
+    expect(index.tagsOf(tile('tiles/bases/cave/a.stl'))).toEqual(['shape|base', 'texture|cave'])
     // A tile nothing knows about resolves to nothing rather than throwing: the
     // parent of a slot can legitimately be a record a caller has just dropped.
     expect(index.tagsOf(tile('nope.stl'))).toEqual([])
@@ -136,19 +136,19 @@ describe('createCompositionIndex', () => {
 
   it('matches `require` exactly, so a more specific tag is not a candidate', () => {
     const wide = index.candidatesFor({ require: ['shape|base'], deny: [], accept: [] })
-    // `bases/stone/deep.stl` carries `shape|base|square` and NOT `shape|base`.
-    expect(wide.tiles).toEqual(['bases/cave/a.stl', 'bases/stone/a.stl', 'bases/stone/b.stl'])
+    // `tiles/bases/stone/deep.stl` carries `shape|base|square` and NOT `shape|base`.
+    expect(wide.tiles).toEqual(['tiles/bases/cave/a.stl', 'tiles/bases/stone/a.stl', 'tiles/bases/stone/b.stl'])
   })
 
   it('matches `accept` positionally, so a more specific tag is a candidate', () => {
     const accepted = index.candidatesFor({ require: [], deny: [], accept: ['shape|base'] })
-    expect(accepted.tiles).toContain('bases/stone/deep.stl')
+    expect(accepted.tiles).toContain('tiles/bases/stone/deep.stl')
     expect(accepted.tiles).toHaveLength(4)
   })
 
   it('excludes a `deny` exactly, and tolerates one that names no tag', () => {
     const denied = index.candidatesFor({ require: ['shape|base'], deny: ['texture|cave'], accept: [] })
-    expect(denied.tiles).toEqual(['bases/stone/a.stl', 'bases/stone/b.stl'])
+    expect(denied.tiles).toEqual(['tiles/bases/stone/a.stl', 'tiles/bases/stone/b.stl'])
 
     const harmless = index.candidatesFor({ require: ['shape|base'], deny: ['texture|nonesuch'], accept: [] })
     expect(harmless.tiles).toHaveLength(3)
@@ -170,7 +170,7 @@ describe('createCompositionIndex', () => {
     // `texture` inherits `texture|dungeon_stone`; `shape` inherits nothing,
     // because the only `shape|` tag the parent has is filtered.
     expect(resolved.resolved.require).toEqual(['shape|base', 'texture|dungeon_stone'])
-    expect(resolved.tiles).toEqual(['bases/stone/a.stl', 'bases/stone/b.stl'])
+    expect(resolved.tiles).toEqual(['tiles/bases/stone/a.stl', 'tiles/bases/stone/b.stl'])
     expect(resolved.deadEnd).toBe(false)
   })
 
@@ -212,7 +212,7 @@ describe('createCompositionIndex', () => {
     // require, and no tile carries both textures. A precomputed set would have
     // answered "two candidates" here and been wrong.
     const withSibling = index.resolve(slot, parent, [
-      { partName: 'torch', tags: index.tagsOf(tile('bases/cave/a.stl')) },
+      { partName: 'torch', tags: index.tagsOf(tile('tiles/bases/cave/a.stl')) },
     ])
     expect(withSibling.resolved.require).toEqual(['shape|base', 'texture|dungeon_stone', 'texture|cave'])
     expect(withSibling.deadEnd).toBe(true)

@@ -69,4 +69,12 @@ export {
 } from './ordinals'
 export type { OrdinalAssignment } from './ordinals'
 export { buildTagTable, hasTagPrefix, namespaceRoots, numericTagValue, tagValue } from './tags'
-export { ASSET_BASES, PIPELINE_VERSION, SIZE_BUDGET_BYTES, buildTimestamp } from './version'
+export {
+  ASSET_BASES,
+  PAYLOAD_EPOCH,
+  PAYLOAD_TIMESTAMP,
+  PIPELINE_VERSION,
+  SIZE_BUDGET_BYTES,
+  atPayloadEpoch,
+  buildTimestamp,
+} from './version'
