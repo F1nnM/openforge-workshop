@@ -73,13 +73,25 @@
  *
  * ## "Use in builder"
  *
- * The contract's third clause — "pre-selects the tile" — still has no channel:
- * the builder route carries the facet params and nothing else, and the store
- * holds a library and placements but no selection. Row G5 owns that. So the
- * action does what it can honestly do: it adds the **shown variant** to the
- * library, navigates to the builder, and seeds the palette's search with the
- * item's name. Adding the variant and not the address holder is the point — the
- * user is looking at a specific print, and that is the file they meant.
+ * The contract's third clause — "pre-selects the tile" — now has a channel. Row
+ * G5 added `@/store`'s {@link sendTileToBuilder}, an un-persisted one-shot
+ * mailbox the builder's palette claims on mount, so the action does all four of
+ * the things the clause asks for: it adds the **shown variant** to the library,
+ * asks the builder to arm that same file, navigates, and seeds the palette's
+ * search with the item's name.
+ *
+ * The order is load-bearing. The library write comes first because the palette
+ * lists the library, and it refuses to arm a file it holds no placeable row for
+ * — so arming before filing would be a handoff the reader is right to drop. The
+ * navigation comes last because the claim happens when the palette mounts.
+ *
+ * **The variant travels, not the address holder, and not a resolution.** The user
+ * is looking at a specific print and that is the file they meant, so that exact
+ * `TileId` is what goes over. No lock preference is applied on the way: A6's rule
+ * 0 re-picks the variant at bill time and the three locks disagree on the answer
+ * for 37.1% of items, so a channel that pre-resolved would hand the palette a
+ * file the drawer never showed. What the user selected and what the bill prints
+ * are two facts, and only the first one is this action's business.
  */
 import { getRouteApi, useRouter } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
@@ -89,7 +101,7 @@ import type { AggregateIndex, CatalogFile, CatalogRecord, TileAggregate, TileId,
 import { buildAggregateIndex, resolveTags, selectVariant } from '@/catalog'
 import { closeTileDrawer, resolveTileTarget } from '@/routes'
 import { MAX_QUERY_LENGTH } from '@/search'
-import { addToLibrary, toggleLibrary, useIsInLibrary, useLockChosen, useLockSystem } from '@/store'
+import { addToLibrary, sendTileToBuilder, toggleLibrary, useIsInLibrary, useLockChosen, useLockSystem } from '@/store'
 import { Chip, Drawer, Eyebrow } from '@/ui/primitives'
 import { loadCatalogIndex } from '@/ui/shell'
 
@@ -336,6 +348,7 @@ function TileDetail({
           data-variant="ghost"
           onClick={() => {
             addToLibrary(shown.id)
+            sendTileToBuilder(shown.id)
             void router.navigate({
               to: '/builder',
               search: { q: aggregate.name.slice(0, MAX_QUERY_LENGTH) },
