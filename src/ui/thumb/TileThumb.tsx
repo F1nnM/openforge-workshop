@@ -1,16 +1,19 @@
 /**
  * The tile thumbnail — one frame of a sprite sheet in a 4:3 radial-gradient well.
  *
- * Extracted from `screens/catalog/TileCard.tsx` by row P0, unchanged. Four
- * subtrees render it — the catalog card, the library card, the builder's bill of
- * tiles and the builder's palette — and three later rows wanted to edit it, so it
- * gets one owner before any of them start:
+ * Extracted from `screens/catalog/TileCard.tsx` by row P0. Four subtrees
+ * rendered it then — the catalog card, the library card, the builder's bill of
+ * tiles and the builder's palette — and `screens/detail/slots/SlotFills.tsx`
+ * has since made five, which is the argument for the seam made twice:
  *
- *   - **P1** mounts `feColorMatrix` filters that have to be reachable from every
- *     one of those subtrees. Four copies of a `<defs>` block is four ids.
+ *   - **P1** mounts the `feColorMatrix` filters that tint the blue render, from
+ *     here, because this is the one module all five subtrees instantiate. The
+ *     fifth caller landed after P0 and inherited the tint without knowing it
+ *     exists. See `TintFilters.tsx`.
  *   - **P3** switches the image between a 256px thumbnail derivative and this
  *     sheet, and the two need different CSS geometry *and* different filter
- *     chains.
+ *     chains — `ThumbSource` in `src/materials/tint.ts` measures what happens
+ *     when they are crossed.
  *
  * See {@link TileThumbProps} for the interface those rows extend, and the two
  * contract sections at the foot of this comment for what they may assume.
@@ -37,8 +40,13 @@
  *   - **The sheets are blue**, not grey — `stl-thumb`'s default Phong material.
  *     v1 accepted a blue grid beside tinted 3D views (architecture-plan.md §8)
  *     and deliberately did **not** CSS-tint it, because a `filter` over a lit
- *     render produces a muddy wash. P1 is the row that revisits that, by
- *     computing luminance first rather than tinting the lit pixels directly.
+ *     render produces a muddy wash. P1 revisited that and the objection did not
+ *     survive measurement: a lit render in a *known* Phong material can be
+ *     un-mixed into its shading and specular terms exactly, and re-mixed with
+ *     another material's triple. It is not a wash over a render; it is the same
+ *     render, re-lit. `src/materials/tint.ts` carries the whole argument and the
+ *     numbers, including why a Rec.709 greyscale of these sheets would have
+ *     produced the wash after all.
  *   - **One live tile has no sheet at all** — `CatalogRecord.sprite` is `false`
  *     for exactly one of 8,702. It gets a mono "no render" plate rather than a
  *     broken-image glyph.
@@ -64,34 +72,32 @@
  * can move the block to `ui/thumb/thumb.css` while it is changing the geometry
  * anyway.
  *
- * ## The contract P1 reads: where the filter goes, and where the `<defs>` mount
+ * ## What P1 landed here: the tint, and where the `<defs>` mount
  *
- *   - **`.of-thumb-sheet` is the element to filter.** It is the only element in
- *     this component carrying rendered pixels. The well's gradient
- *     (`.of-thumb`), the "no render" plate and the library screen's shimmer
- *     skeleton — a bare `<div class="of-thumb of-shimmer">` in
- *     `screens/library/LibraryScreen.tsx` — are token colours that are already
- *     right, and a filter inherited onto them would be a regression.
- *   - **A filter id has to be resolvable in the same document, not the same
- *     subtree.** `filter: url(#id)` is a document-scoped fragment reference, so
- *     one mount anywhere in the page serves every thumb. What this component
- *     guarantees is *reachability*: it is the one module all four subtrees
- *     instantiate, so mounting `TintFilters` from inside this directory is the
- *     only mount that cannot be forgotten by a fifth caller.
- *   - **Do not render a `<defs>` per thumb.** A catalog screenful is one thumb
- *     per rendered card, so a per-thumb `<svg><defs>` would repeat one id dozens
- *     of times: `url(#id)` silently resolves to the first, which is the right
- *     picture for the wrong reason and duplicate ids besides. Either mount once
- *     at the app shell, or refcount a single document-level mount from here.
- *   - **`filter` in an external stylesheet is the hazard to check.** These rules
- *     ship in a bundled `.css` file, and `url(#id)` in a stylesheet has
- *     historically been resolved against the stylesheet's own URL rather than
- *     the document's in WebKit. P1 should verify a real browser before relying
- *     on a CSS-side reference, and can sidestep it entirely by putting the
- *     `filter` in the inline `style` object this component already builds.
+ *   - **The filter is on `.of-thumb-frame`, inline.** P0's contract named
+ *     `.of-thumb-sheet` and the constraint behind it still holds — the well's
+ *     gradient (`.of-thumb`), the "no render" plate and the library screen's
+ *     shimmer skeleton, a bare `<div class="of-thumb of-shimmer">` in
+ *     `screens/library/LibraryScreen.tsx`, are token colours that must not
+ *     inherit a filter. The frame honours it and is ten times cheaper; see
+ *     {@link tintedFrameStyle} for both halves of that.
+ *   - **The `<defs>` mount once, from `TintFilters.tsx`, imperatively.**
+ *     `filter: url(#id)` is a document-scoped fragment reference, so one mount
+ *     anywhere in the page serves every thumb; what this component provides is
+ *     *reachability*, being the one module every thumbnail subtree instantiates.
+ *     There is no `<defs>` per thumb, because a screenful would repeat one id
+ *     dozens of times and `url(#id)` resolves silently to the first. The file
+ *     records why the mount is DOM rather than a portal or a second React root.
  *   - **The detail screen is not a consumer.** `screens/detail/SpriteRotator.tsx`
- *     has its own sprite geometry and does not use this component, so a mount
- *     inside `TileThumb` does not cover it.
+ *     has its own sprite geometry and does not use this component, so it is not
+ *     tinted — but the filters are in its document all the same, since the
+ *     mount is page-global and every route renders thumbnails somewhere. A row
+ *     that wants the rotator tinted needs only `url(#of-tint-sprite-…)`.
+ *   - **The `material` prop defaults to `unknown`, not to no tint.** Callers in
+ *     `screens/` and `builder/` pass their resolved family; the five that do not
+ *     yet render a neutral grey model rather than the renderer's blue, which is
+ *     the honest reading of "this component was not told". See
+ *     {@link TileThumbProps.material}.
  *
  * ## The contract P3 reads: the geometry is one pure function
  *
@@ -106,7 +112,11 @@ import type { CSSProperties } from 'react'
 
 import type { BlobId, CatalogAssets, SpriteSheet } from '@/catalog'
 import { shardedPath } from '@/catalog'
+import type { MaterialId } from '@/materials'
+import { DEFAULT_THUMB_MATERIAL, tintFilterId } from '@/materials'
 import { Eyebrow } from '@/ui/primitives'
+
+import { useTintFilters } from './TintFilters'
 
 export interface TileThumbProps {
   blob: BlobId
@@ -116,6 +126,21 @@ export interface TileThumbProps {
   sheet: SpriteSheet
   /** Which of the 10 camera angles to show. Frame 0 is the default view. */
   frame?: number
+  /**
+   * The family to tint the render as — `resolveMaterial(record.tags, record.file)`.
+   *
+   * Optional, and it defaults to {@link DEFAULT_THUMB_MATERIAL} (`unknown`)
+   * rather than to no tint at all, because the blue the renderer produced is not
+   * the neutral choice: it is 31.88 ΔE00 from the palette on average and
+   * 14.82 ΔE00 from `water`, so an un-tinted grid names a material, and names
+   * the wrong one. `unknown` is the palette's "no claim" entry, which is the
+   * claim a caller that did not pass this is entitled to make.
+   *
+   * Pass the record's **full de-interned tag list** to `resolveMaterial`, never
+   * a reconstructed `` `texture|${record.texture}` ``: on the 80 two-root tiles
+   * that field is deliberately not the material the tint follows.
+   */
+  material?: MaterialId
   className?: string
 }
 
@@ -139,12 +164,56 @@ export function sheetFrameStyle(sheet: SpriteSheet, frame?: number): CSSProperti
   } as CSSProperties
 }
 
+/**
+ * Where the tint goes, and why it is on the frame and not on the `<img>`.
+ *
+ * The constraint is that the well's radial gradient (`.of-thumb`), the "no
+ * render" plate and the library screen's shimmer skeleton are token colours
+ * that are already correct, and must not inherit a filter. `.of-thumb-frame`
+ * satisfies that: it exists only in the `sprite` branch, it wraps nothing but
+ * the sheet, and `catalog.css` gives it no background, border or colour of its
+ * own — so filtering it is pixel-identical to filtering the image inside it.
+ *
+ * It is also ten times cheaper. A CSS `filter` rasterises the element's own
+ * clipped box, and `.of-thumb-sheet` **is** `cols × 100%` by `rows × 100%` —
+ * the full 2×5 sheet. Filtering the image allocates a surface for all ten
+ * camera angles to show one; filtering the square frame allocates one frame. On
+ * a 60-card screen, whose decode cost is already the catalog's real expense,
+ * that is not a micro-optimisation.
+ *
+ * Inline, not in `catalog.css`, and that is the WebKit hazard rather than a
+ * preference: `url(#id)` in a bundled external stylesheet has historically been
+ * resolved against the stylesheet's own URL instead of the document's, which
+ * fails in a production bundle while working from a dev server.
+ */
+function tintedFrameStyle(sheet: SpriteSheet, frame: number | undefined, material: MaterialId): CSSProperties {
+  return {
+    ...sheetFrameStyle(sheet, frame),
+    // `sprite`, not `thumb`: this component still renders the sheet. P3 owns
+    // the switch, and that argument is the whole of it — see `ThumbSource` for
+    // what pointing the wrong chain at a source costs.
+    filter: `url(#${tintFilterId(material, 'sprite')})`,
+  }
+}
+
 /** One frame of a tile's sprite sheet, in a 4:3 radial-gradient well. */
-export function TileThumb({ blob, sprite, assets, sheet, frame, className }: TileThumbProps) {
+export function TileThumb({
+  blob,
+  sprite,
+  assets,
+  sheet,
+  frame,
+  material = DEFAULT_THUMB_MATERIAL,
+  className,
+}: TileThumbProps) {
+  // Mounts the page's single `<defs>`, from the one module every
+  // thumbnail-rendering subtree instantiates. See `TintFilters.tsx`.
+  useTintFilters()
+
   return (
     <div className={['of-thumb', className].filter(Boolean).join(' ')}>
       {sprite ? (
-        <div className="of-thumb-frame" style={sheetFrameStyle(sheet, frame)}>
+        <div className="of-thumb-frame" style={tintedFrameStyle(sheet, frame, material)}>
           <img
             className="of-thumb-sheet"
             src={`${assets.sprites}/${shardedPath(blob)}.png`}

@@ -47,6 +47,21 @@ export {
   tintFor,
 } from './resolve'
 
+export type { ColorMatrix, ThumbSource, TintFilter } from './tint'
+export {
+  DEFAULT_THUMB_MATERIAL,
+  LUMA_COEFFICIENTS,
+  SHADING_COEFFICIENTS,
+  SHEEN_COEFFICIENTS,
+  SPRITE_CORPUS,
+  SPRITE_LUMA_SHEEN_BIAS,
+  SPRITE_PHONG,
+  THUMB_REGRESSION,
+  TINT_FILTERS,
+  tintFilterId,
+  tintMatrix,
+} from './tint'
+
 export type { Lab, LinearRgb, Rgb, VisionModel } from './color'
 export {
   VISION_MODELS,
