@@ -404,18 +404,52 @@ describe('the documents agree with the bytes', () => {
     // The zero-eager-cost half is proved where it can be proved — by building
     // with `src/generator/` present and with it moved aside and comparing the
     // entry bundle, which `vendor.test.ts` guards at source level.
-    const readers = sources(fileURLToPath(new URL('../', import.meta.url))).filter((path) => {
-      // Tests never ship, and two of the engine's own read the geometry to check
-      // it. The property is about production modules reaching the bundle.
-      if (/\.test\.tsx?$/.test(path)) return false
-      const text = readFileSync(path, 'utf8')
-      return /generator\/scad\//.test(text) || /['"`][^'"`]*\.\.\/scad\/[^'"`]*['"`]/.test(text)
-    })
-    expect(readers.map((path) => path.slice(path.indexOf('src/')))).toEqual([
-      'src/generator/engine/vfs.ts',
+    //
+    // **Row S5 split this in two, and narrowed it.** It matched any *occurrence*
+    // of the text, so a module that merely named the directory in a comment
+    // counted as a reader; and it did not distinguish the geometry from the two
+    // licensing files beside it. S5 imports `LICENSE` and `NOTICE` as `?raw`,
+    // because a generated STL is a derivative of these sources and Apache-2.0
+    // section 4(a) asks that the licence ride with it — which is a different
+    // property from the one this guard is about. Both are now asserted
+    // separately, over import *specifiers* rather than over prose, so neither
+    // can be loosened without a red test.
+    const importers = (pattern: RegExp): string[] =>
+      sources(fileURLToPath(new URL('../', import.meta.url)))
+        .filter((path) => {
+          // Tests never ship, and two of the engine's own read the geometry to
+          // check it. The property is about production modules reaching the
+          // bundle.
+          if (/\.test\.tsx?$/.test(path)) return false
+          return specifiers(readFileSync(path, 'utf8')).some((specifier) => pattern.test(specifier))
+        })
+        .map((path) => path.slice(path.indexOf('src/')))
+
+    // The geometry itself: exactly one reader, and it is the engine's VFS.
+    expect(importers(/(?:\.\.|generator)\/scad\/[^'"`]*\.scad/)).toEqual(['src/generator/engine/vfs.ts'])
+    // The licensing files: exactly one reader, and it is the module the download
+    // pack loads dynamically when it has a generated mesh to licence.
+    expect(importers(/(?:\.\.|generator)\/scad\/(?:LICENSE|NOTICE)/)).toEqual([
+      'src/generator/placement/notice.ts',
     ])
   })
 })
+
+/**
+ * Every `import`/`export … from` specifier in a module, and `import.meta.glob`'s
+ * first argument.
+ *
+ * Row S5 added this so the guard above reads code rather than prose: matching
+ * any occurrence of `generator/scad/` counted a docblock that named the
+ * directory as a module that imports from it.
+ */
+function specifiers(text: string): string[] {
+  const found: string[] = []
+  for (const match of text.matchAll(/(?:^|[^\w$])(?:import|from|import\.meta\.glob\()\s*\(?\s*'([^']+)'/gm)) {
+    if (match[1] !== undefined) found.push(match[1])
+  }
+  return found
+}
 
 function sources(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
