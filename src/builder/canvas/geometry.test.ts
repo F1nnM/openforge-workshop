@@ -12,17 +12,25 @@ import { GRID_UNIT_MM, WALL_THICKNESS_UNITS } from '@/catalog'
 
 import { fixtureCatalogFile } from './fixture'
 import {
+  DIAGONAL_ANGLE_DEG,
   SNAP_STEP,
   anchorFor,
+  anchorForShape,
   boxCentre,
   describeCell,
+  describeFootprint,
   footprintExtent,
+  footprintShape,
   isAxisAligned,
   isPlaceable,
   isQuarterTurn,
   nextRotation,
+  partsContain,
+  placementCaveat,
   placementRefusal,
   planBox,
+  planGeometry,
+  planParts,
   planQuad,
   quadContains,
   rotatedExtent,
@@ -101,11 +109,52 @@ describe('footprints', () => {
     expect(WALL_THICKNESS_UNITS).toBe(0.5)
   })
 
-  it('has no extent for arc or none', () => {
-    expect(
-      footprintExtent({ shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' }),
-    ).toBeUndefined()
+  it('gives a column the measured wall-thickness square, with no dimension in the data', () => {
+    expect(footprintExtent({ shape: 'column' })).toEqual({ w: 0.5, d: 0.5 })
+  })
+
+  it('gives a triangle its tagged leg on both axes and a three-point outline', () => {
+    const shape = footprintShape({ shape: 'tri', leg: 2 })
+    expect(shape?.extent).toEqual({ w: 2, d: 2 })
+    expect(shape?.parts).toEqual([
+      [
+        [0, 0],
+        [2, 0],
+        [0, 2],
+      ],
+    ])
+    expect(shape?.cover).toBe('exact')
+  })
+
+  it('gives a diagonal wall its run by the thickness, and carries the 45 as an intrinsic angle', () => {
+    // Not the axis-aligned box: the piece IS a 2.828 x 0.5 strip, and where it
+    // points is the shape's own business rather than the extent's.
+    const shape = footprintShape({ shape: 'diag', run: 2.828 })
+    expect(shape?.extent).toEqual({ w: 2.828, d: 0.5 })
+    expect(shape?.angle).toBe(DIAGONAL_ANGLE_DEG)
+    expect(DIAGONAL_ANGLE_DEG).toBe(45)
+  })
+
+  it('gives an arc the sector box, and parts that are an outward bound rather than the shape', () => {
+    const shape = footprintShape({ shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' })
+    expect(shape?.extent).toEqual({ w: 2, d: 2 })
+    expect(shape?.cover).toBe('outward')
+    expect(shape?.slack).toBeGreaterThan(0)
+    expect(shape?.parts.length).toBeGreaterThan(1)
+  })
+
+  it('has no extent for none, and that is the only case left', () => {
     expect(footprintExtent({ shape: 'none' })).toBeUndefined()
+    for (const foot of [
+      { shape: 'rect', w: 1, d: 1 },
+      { shape: 'wall', length: 2 },
+      { shape: 'column' },
+      { shape: 'tri', leg: 4 },
+      { shape: 'diag', run: 3.536 },
+      { shape: 'arc', rIn: 4, rOut: 4.5, sweep: 22.5, band: 'concave', bandBasis: 'measured' },
+    ] as const) {
+      expect(footprintExtent(foot)).toBeDefined()
+    }
   })
 
   it('converts to millimetres at the measured grid unit', () => {
@@ -210,26 +259,126 @@ describe('quads', () => {
   })
 })
 
-describe('refusal', () => {
-  it('accepts the two v1 primitives', () => {
-    expect(placementRefusal(record('tiles/dungeon_stone/floor/2x2.openlock.stl'))).toBeUndefined()
-    expect(placementRefusal(record('tiles/cut_stone/wall/2.openlock.stl'))).toBeUndefined()
-    expect(isPlaceable(record('tiles/cut_stone/wall/2.openlock.stl'))).toBe(true)
+describe('placed shapes', () => {
+  it('folds a diagonal wall s intrinsic angle into the box and the parts', () => {
+    const shape = footprintShape({ shape: 'diag', run: 2.828 })
+    if (shape === undefined) throw new Error('a diag has a shape')
+    const placed = planGeometry(shape, 0, 1, 1)
+    expect(placed.rotation).toBe(0)
+    expect(placed.angle).toBe(45)
+    expect(placed.axisAligned).toBe(false)
+    const side = (2.828 + 0.5) / Math.SQRT2
+    expect(placed.box.w).toBeCloseTo(side, 10)
+    // Every corner of the strip is inside the box it reserved.
+    for (const [x, z] of placed.parts[0] ?? []) {
+      expect(x).toBeGreaterThanOrEqual(placed.box.x - 1e-9)
+      expect(x).toBeLessThanOrEqual(placed.box.x + placed.box.w + 1e-9)
+      expect(z).toBeGreaterThanOrEqual(placed.box.z - 1e-9)
+      expect(z).toBeLessThanOrEqual(placed.box.z + placed.box.d + 1e-9)
+    }
   })
 
-  it('refuses an arc with a reason that names the version it arrives in', () => {
-    const refusal = placementRefusal(record('tiles/cave/curve/r2.openlock.stl'))
-    expect(refusal?.code).toBe('arc')
-    expect(refusal?.message).toContain('v1.1')
-    expect(refusal?.message).toContain('Cave curve radius 2')
-    expect(isPlaceable(record('tiles/cave/curve/r2.openlock.stl'))).toBe(false)
+  it('anchors a shape on its drawn angle, not on its placement rotation', () => {
+    const shape = footprintShape({ shape: 'diag', run: 2.828 })
+    if (shape === undefined) throw new Error('a diag has a shape')
+    // `anchorFor` on the raw extent would centre a 2.828 x 0.5 rectangle;
+    // `anchorForShape` centres the 2.354-square box the piece really occupies.
+    expect(anchorForShape(shape, 0, 3, 3, SNAP_STEP.fine)).not.toEqual(
+      anchorFor(shape.extent, 0, 3, 3, SNAP_STEP.fine),
+    )
+    expect(anchorForShape(shape, 0, 3, 3, SNAP_STEP.fine)).toEqual(
+      anchorFor(shape.extent, 45, 3, 3, SNAP_STEP.fine),
+    )
+  })
+
+  it('reduces to planQuad for a straight axis-aligned piece', () => {
+    const shape = footprintShape({ shape: 'rect', w: 2, d: 1 })
+    if (shape === undefined) throw new Error('a rect has a shape')
+    expect(planParts(shape, 0, 1, 1)).toEqual([planQuad({ w: 2, d: 1 }, 0, 1, 1)])
+  })
+
+  it('hit-tests across every part of a curved piece', () => {
+    const shape = footprintShape({ shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' })
+    if (shape === undefined) throw new Error('an arc has a shape')
+    const parts = planParts(shape, 0, 0, 0)
+    // Inside the disc, near the middle of the sweep — a point no single part of
+    // the eight contains on its own account of the whole shape.
+    expect(partsContain(parts, [0.7, 0.7])).toBe(true)
+    // The far corner of the bounding box is outside the disc.
+    expect(partsContain(parts, [1.99, 1.99])).toBe(false)
+  })
+})
+
+describe('refusal', () => {
+  it('accepts all six drawable primitives', () => {
+    for (const id of [
+      'tiles/dungeon_stone/floor/2x2.openlock.stl',
+      'tiles/cut_stone/wall/2.openlock.stl',
+      'tiles/cave/curve/r2.openlock.stl',
+      'tiles/dungeon_stone/column/col+I.openlock.stl',
+      'tiles/wood/angled/tri2.openlock.stl',
+      'tiles/cut_stone/angled/diagPA.openlock.stl',
+    ]) {
+      expect(placementRefusal(record(id))).toBeUndefined()
+      expect(isPlaceable(record(id))).toBe(true)
+    }
   })
 
   it('refuses a shapeless tile with a reason, rather than drawing it as a box', () => {
     const refusal = placementRefusal(record('tiles/cave/hex/hex.stl'))
     expect(refusal?.code).toBe('no-footprint')
     expect(refusal?.message).toContain('no derivable footprint')
+    expect(refusal?.message).toContain('Cave hex platform')
     expect(isPlaceable(record('tiles/cave/hex/hex.stl'))).toBe(false)
+  })
+
+  it('never greys a tile without a reason — the two answers read one gate', () => {
+    // The regression this row closed. `column`, `tri` and `diag` were greyed out
+    // by `isPlaceable` while `placementRefusal` returned undefined for all 249,
+    // so `PalettePanel.tsx`'s `?? ''` rendered an empty explanation. Asserted
+    // over the whole fixture rather than over the three cases, so the next
+    // union member cannot reintroduce it.
+    for (const candidate of catalog.records) {
+      expect(isPlaceable(candidate)).toBe(placementRefusal(candidate) === undefined)
+      if (!isPlaceable(candidate)) expect(placementRefusal(candidate)?.message).not.toBe('')
+    }
+  })
+})
+
+describe('caveats', () => {
+  it('discloses a fallback band rather than refusing it', () => {
+    const fallback = record('tiles/cut_stone/curve/4r45.convex.openlock.stl')
+    expect(isPlaceable(fallback)).toBe(true)
+    const caveat = placementCaveat(fallback)
+    expect(caveat?.code).toBe('unmeasured-band')
+    expect(caveat?.message).toContain('convex')
+    expect(caveat?.message).toContain('half a unit')
+  })
+
+  it('leaves a measured band uncaveated, and every straight footprint too', () => {
+    expect(placementCaveat(record('tiles/cave/curve/r2.openlock.stl'))).toBeUndefined()
+    expect(placementCaveat(record('tiles/cut_stone/wall/2.openlock.stl'))).toBeUndefined()
+    expect(placementCaveat(record('tiles/cave/hex/hex.stl'))).toBeUndefined()
+  })
+})
+
+describe('describing a footprint', () => {
+  it('reads a straight piece out as its extent', () => {
+    expect(describeFootprint({ shape: 'rect', w: 2, d: 1 }, { w: 2, d: 1 })).toBe('2 × 1 units')
+    expect(describeFootprint({ shape: 'column' }, { w: 0.5, d: 0.5 })).toBe('0.5 × 0.5 units')
+  })
+
+  it('reads a curve out as its radii and sweep, never as its box', () => {
+    const foot = { shape: 'arc', rIn: 4, rOut: 4.5, sweep: 22.5, band: 'concave', bandBasis: 'measured' } as const
+    const spoken = describeFootprint(foot, { w: 0.34, d: 1.72 })
+    expect(spoken).toContain('radius 4 to 4.5 units')
+    expect(spoken).toContain('22.5° sweep')
+    expect(spoken).not.toContain('1.72')
+  })
+
+  it('names the two angled cases as what they are', () => {
+    expect(describeFootprint({ shape: 'tri', leg: 4 }, { w: 4, d: 4 })).toContain('right triangle')
+    expect(describeFootprint({ shape: 'diag', run: 2.828 }, { w: 2.354, d: 2.354 })).toContain('diagonal wall run')
   })
 })
 

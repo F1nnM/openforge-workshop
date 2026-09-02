@@ -1,5 +1,5 @@
 /**
- * A seven-record catalog for the canvas's tests.
+ * An eleven-record catalog for the canvas's tests.
  *
  * Small on purpose, and every record is here to exercise one thing the plan view
  * has to get right:
@@ -12,11 +12,22 @@
  *     anchor is the corner and not the centre;
  *   - a **`rect` tile with `rotStep: 45`** — one of the 893 tiles whose angle is
  *     not a multiple of 90 and which would never tile on a 90° step;
- *   - an **`arc`** and a **`none`** — the 29.1% of the corpus the plan view must
- *     refuse *visibly*;
+ *   - a **`none`** — the 8.3% of the corpus the plan view must refuse *visibly*,
+ *     and after this row the only case it refuses at all;
  *   - a **thick wall that arrives as a `rect`** with `kinds: ['wall']`, which is
  *     the case that makes band assignment a two-stage rule rather than a
- *     footprint switch.
+ *     footprint switch;
+ *   - a **quarter-disc `arc`** at `rIn = 0` — the degenerate sector, where the
+ *     inner chord collapses to the arc centre and a collision part becomes a
+ *     triangle;
+ *   - a **`convex` `arc` with `bandBasis: 'fallback'`** — the 462-tile population
+ *     that is drawn and *marked* rather than refused, and the only record here
+ *     that must produce a `placementCaveat`;
+ *   - a **`column`** whose `kinds` say `column` and not `wall`, which is one of
+ *     the 75 tiles the footprint-first band rule moves from `area` to `edge`;
+ *   - a **`tri`** and a **`diag`**, the two cases W4 split precisely because a
+ *     filled triangle and a 45° strip need different collision geometry. Both
+ *     carry `rotStep: 45`, as all 130 do in the corpus.
  *
  * Exported as a plain object rather than a parsed `CatalogFile` so it travels the
  * real path through `CatalogFile.parse`, which is where a fixture that drifted
@@ -35,6 +46,8 @@ const TAGS = [
   'connection|openlock',
   'size|angle|45',
   'build|thick wall',
+  'shape|column',
+  'shape|angled|right',
 ]
 
 const tag = (name: string): number => {
@@ -188,6 +201,87 @@ export const FIXTURE_CATALOG = {
       tags: [tag('shape|wall'), tag('texture|cut_stone'), tag('build|thick wall')],
       foot: { shape: 'rect', w: 2, d: 0.5 },
     },
+    {
+      id: 'tiles/cut_stone/curve/4r45.convex.openlock.stl',
+      ord: 7,
+      blob: blob(8),
+      file: '4r45.convex.openlock.stl',
+      bytes: 1_310_720,
+      sprite: true,
+      family: 'tiles/cut_stone/curve',
+      design: 'd-arc-convex',
+      name: 'Cut stone convex curve 4r45',
+      kinds: ['wall'],
+      conn: ['openlock'],
+      layer: 'topper',
+      texture: 'cut_stone',
+      tags: [tag('shape|wall'), tag('texture|cut_stone'), tag('size|angle|45')],
+      // A curved wall on the inside of the tagged radius: the `convex` band,
+      // `[R - 0.5, R]` at R = 4. W1 attempted 43 convex meshes and refused all
+      // 43, so the band is `fallback` and the schema will not take a `'measured'`
+      // stamp on it. The pair is W2's own research measurement of `4r45`
+      // ([3.500, 3.997]), rounded to the rule the band states.
+      foot: { shape: 'arc', rIn: 3.5, rOut: 4, sweep: 45, band: 'convex', bandBasis: 'fallback' },
+      rotStep: 45,
+    },
+    {
+      id: 'tiles/dungeon_stone/column/col+I.openlock.stl',
+      ord: 8,
+      blob: blob(9),
+      file: 'col+I.openlock.stl',
+      bytes: 262_144,
+      sprite: true,
+      family: 'tiles/dungeon_stone/column',
+      design: 'd-column',
+      name: 'Dungeon stone column I',
+      // `column` and NOT `wall`: one of the 75 tiles whose tags would file a
+      // 12.70 x 12.70 mm pillar as a floor if the band rule went by kinds alone.
+      kinds: ['column'],
+      conn: ['openlock'],
+      layer: 'integral',
+      texture: 'dungeon_stone',
+      tags: [tag('shape|column'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+      foot: { shape: 'column' },
+    },
+    {
+      id: 'tiles/wood/angled/tri2.openlock.stl',
+      ord: 9,
+      blob: blob(10),
+      file: 'tri2.openlock.stl',
+      bytes: 786_432,
+      sprite: true,
+      family: 'tiles/wood/angled',
+      design: 'd-tri',
+      name: 'Wood right triangle 2',
+      kinds: ['angled', 'floor'],
+      conn: ['openlock'],
+      layer: 'integral',
+      texture: 'wood',
+      tags: [tag('shape|angled|right'), tag('texture|wood'), tag('size|angle|45')],
+      // Leg 2 is one of the two the tags state exactly - 5 tiles at 2, 4 at 4.
+      foot: { shape: 'tri', leg: 2 },
+      rotStep: 45,
+    },
+    {
+      id: 'tiles/cut_stone/angled/diagPA.openlock.stl',
+      ord: 10,
+      blob: blob(11),
+      file: 'diagPA.openlock.stl',
+      bytes: 655_360,
+      sprite: true,
+      family: 'tiles/cut_stone/angled',
+      design: 'd-diag',
+      name: 'Cut stone diagonal wall PA',
+      kinds: ['angled', 'wall'],
+      conn: ['openlock'],
+      layer: 'topper',
+      texture: 'cut_stone',
+      tags: [tag('shape|angled|right'), tag('texture|cut_stone'), tag('size|angle|45')],
+      // Code `PA`: 2.828 = 2*sqrt(2), the diagonal of a 2 x 2 cell, against a
+      // tagged `size|width|2`. The 0.5 thickness is the wall constant.
+      foot: { shape: 'diag', run: 2.828 },
+      rotStep: 45,
+    },
   ],
 }
 
@@ -203,6 +297,10 @@ export const FIXTURE_IDS = {
   wall2: 'tiles/cut_stone/wall/2.openlock.stl',
   angled: 'tiles/wood/floor/2x1,45.openlock.stl',
   arc: 'tiles/cave/curve/r2.openlock.stl',
+  arcFallback: 'tiles/cut_stone/curve/4r45.convex.openlock.stl',
+  column: 'tiles/dungeon_stone/column/col+I.openlock.stl',
+  tri: 'tiles/wood/angled/tri2.openlock.stl',
+  diag: 'tiles/cut_stone/angled/diagPA.openlock.stl',
   shapeless: 'tiles/cave/hex/hex.stl',
   thickWall: 'tiles/cut_stone/thick_wall/2x0.5.openlock.stl',
 } as const

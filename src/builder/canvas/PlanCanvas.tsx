@@ -4,7 +4,7 @@
  * A top-down drawing of a room being laid out, in catalog grid units — 1 unit =
  * {@link GRID_UNIT_MM} = 25.4 mm = one inch. architecture-plan.md §7: a room
  * layout **is** a plan, and rendering it as one removes the height problem, the
- * LOD problem and the VRAM problem in a single move. v1.1 swaps the renderer
+ * LOD problem and the VRAM problem in a single move. Row G2 swaps the renderer
  * behind the same placement model, so nothing in this file is throwaway except
  * the drawing itself.
  *
@@ -112,10 +112,10 @@ import {
 import { computeGhost } from './ghost'
 import type { PlanGhost } from './ghost'
 import { useAnnouncer, useCanvasSize } from './hooks'
-import { PlanPieces } from './PlanPieces'
+import { PlanPieces, shapeTransform } from './PlanPieces'
 import { buildPlanScene, navigationOrder, pieceAt } from './scene'
 import type { PlanPiece, PlanScene } from './scene'
-import { PlanDefs, GRID_PATTERN_ID, REFUSAL_PATTERN_ID } from './surfaces'
+import { PlanDefs, GRID_PATTERN_ID, REFUSAL_PATTERN_ID, UNMEASURED_PATTERN_ID } from './surfaces'
 import type { PlanTool, PlanTools } from './usePlanTools'
 import type { Viewport } from './viewport'
 import {
@@ -275,7 +275,14 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
         rotation: candidate.rotation,
       })
       const conflict = candidate.conflict ? ', overlapping a piece already there' : ''
-      say(`Placed ${record.name} at ${describeCell(candidate.anchor[0], candidate.anchor[1])}${conflict}.`)
+      // The caveat is announced on the act, not only carried on the piece: a
+      // drag-paint of twenty curves should say once per placement that the
+      // outline is the band rule's and not a measurement's. 462 of the 1,199
+      // curves are in that population — see `geometry.ts`'s `placementCaveat`.
+      const caveat = candidate.caveat === null ? '' : ` ${candidate.caveat.message}`
+      say(
+        `Placed ${record.name} at ${describeCell(candidate.anchor[0], candidate.anchor[1])}${conflict}.${caveat}`,
+      )
       return true
     },
     [say],
@@ -707,25 +714,26 @@ function release(event: React.PointerEvent<HTMLDivElement>): void {
 
 /* ------------------------------------------------------------------- pieces */
 
-/** The ghost, drawn the same way a placed piece is so the two cannot disagree. */
+/**
+ * The ghost, drawn the same way a placed piece is so the two cannot disagree.
+ *
+ * Same outline and the same transform as `PlanPieces.tsx` — `shapeTransform`
+ * lives there and is imported here rather than restated, because a preview drawn
+ * by a second implementation of the placement arithmetic is how a ghost ends up
+ * half a unit from where the tile lands.
+ */
 function Ghost({ ghost, style }: { ghost: PlanGhost; style: PlanStyle }) {
-  const centre = boxCentre(ghost.box)
-  const rect = {
-    x: centre.x - ghost.extent.w / 2,
-    y: centre.z - ghost.extent.d / 2,
-    width: ghost.extent.w,
-    height: ghost.extent.d,
-  }
-  const turn =
-    ghost.rotation === 0 ? undefined : `rotate(${String(ghost.rotation)} ${String(centre.x)} ${String(centre.z)})`
+  const outline = { d: ghost.shape.outline }
+  const transform = shapeTransform(ghost.shape, ghost.box, ghost.angle)
 
   if (ghost.refusal !== null) {
+    const { w, d } = ghost.extent
     return (
-      <g className="of-plan-ghost" data-refused="true">
-        <rect {...rect} fill={`url(#${REFUSAL_PATTERN_ID})`} />
-        <rect {...rect} fill="none" stroke="var(--mut)" strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+      <g className="of-plan-ghost" data-refused="true" transform={transform}>
+        <path {...outline} fill={`url(#${REFUSAL_PATTERN_ID})`} />
+        <path {...outline} fill="none" stroke="var(--mut)" strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
         <path
-          d={`M ${String(rect.x)} ${String(rect.y)} l ${String(rect.width)} ${String(rect.height)} M ${String(rect.x + rect.width)} ${String(rect.y)} l ${String(-rect.width)} ${String(rect.height)}`}
+          d={`M 0 0 l ${String(w)} ${String(d)} M ${String(w)} 0 l ${String(-w)} ${String(d)}`}
           fill="none"
           stroke="var(--mut)"
           strokeWidth={2}
@@ -737,10 +745,18 @@ function Ghost({ ghost, style }: { ghost: PlanGhost; style: PlanStyle }) {
 
   const blocked = ghost.duplicate || ghost.conflict
   return (
-    <g className="of-plan-ghost" data-blocked={blocked ? 'true' : undefined} transform={turn}>
-      <rect {...rect} fill={style.tint} opacity={0.42} />
-      <rect
-        {...rect}
+    <g
+      className="of-plan-ghost"
+      data-blocked={blocked ? 'true' : undefined}
+      data-basis={ghost.caveat === null ? undefined : 'fallback'}
+      transform={transform}
+    >
+      <path {...outline} fill={style.tint} opacity={0.42} />
+      {/* The unmeasured mark is on the ghost too, not just on the placed piece:
+          the point of disclosing it is that the user knows *before* clicking. */}
+      {ghost.caveat === null ? null : <path {...outline} fill={`url(#${UNMEASURED_PATTERN_ID})`} />}
+      <path
+        {...outline}
         fill="none"
         stroke={blocked ? 'var(--acc)' : style.edge}
         strokeWidth={blocked ? 2.5 : 1.75}
@@ -802,5 +818,9 @@ function buildHint(
   if (ghost !== null && ghost.refusal !== null) return ghost.refusal.message
   if (ghost?.duplicate === true) return `${selected.name} is already here — move the cursor to place another.`
   if (ghost?.conflict === true) return `Overlaps a piece already placed. R turns by ${formatUnits(rotationStepFor(selected))}°.`
+  // Below the two problems and above the plain case: an unmeasured outline is
+  // neither a refusal nor an error, so it must not out-rank one, and it must not
+  // be silent either.
+  if (ghost?.caveat != null) return `${ghost.caveat.message} R turns by ${formatUnits(rotationStepFor(selected))}°.`
   return `Click to place ${selected.name}. R turns by ${formatUnits(rotationStepFor(selected))}°.`
 }

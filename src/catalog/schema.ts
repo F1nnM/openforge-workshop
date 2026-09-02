@@ -488,8 +488,9 @@ export function arcBandIsMeasured(band: ArcBand): boolean {
  * | `tri`    | `shape|angled|right` with a depth — a right isosceles triangle | 9 (0.1%)       |
  * | `none`   | no derivable footprint                                        | 726 (8.3%)     |
  *
- * `rect` + `wall` is **75.0%**; adding `arc` reaches **89.6%**; the three cases
- * row W4 added take it to **91.7%**.
+ * `rect` + `wall` is **75.0%**; adding `arc` reaches **88.8%**; the three cases
+ * row W4 added take it to **91.7%**. (The 89.6% this line used to claim did not
+ * reproduce — the verifier computes (3,449 + 3,079 + 1,199) / 8,702 = 88.79%.)
  *
  * Four things this shape encodes on purpose:
  *
