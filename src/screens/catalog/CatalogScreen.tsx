@@ -16,10 +16,20 @@
  * `@/ui/shell`.
  *
  * **There is no filtering code in this screen.** The single `search()` call
- * returns the matching ids *and* the live facet counts, and the counts already
+ * returns the matching items *and* the live facet counts, and the counts already
  * exclude their own facet's filter — which is the property that keeps the sidebar
  * from becoming a dead end after the first click. Re-deriving either here would
  * be a second implementation of the thing the tests in `src/search/` prove.
+ *
+ * ## A result is an item — 3,822 of them over 8,702 files
+ *
+ * Row A2 made `search()` return {@link TileAggregate}s and kept `ids` as one
+ * preview tile id per item in the same order, so this screen hands the grid both
+ * and derives exactly one further number: the files behind the matching items,
+ * for the count line. That sum is a walk over at most 3,822 items and is
+ * memoised with the search, which is the only reason it is computed here rather
+ * than being asked of the engine — the engine's `files` is the *corpus* total
+ * and does not narrow with a filter.
  *
  * ## It renders a `<section>`, not a `<main>`
  *
@@ -57,6 +67,14 @@ export function CatalogScreen() {
     [state, search],
   )
 
+  // Files behind the matching items. Memoised on the result rather than computed
+  // in the render body, so a store change that re-renders the screen does not
+  // re-walk the whole match set.
+  const files = useMemo(
+    () => result?.items.reduce((total, item) => total + item.variants.length, 0) ?? 0,
+    [result],
+  )
+
   if (state.status === 'error') {
     return (
       <section className="of-catalog" aria-label="Catalog">
@@ -85,6 +103,7 @@ export function CatalogScreen() {
         <SearchField
           query={search.q}
           total={result?.total ?? 0}
+          files={files}
           filtered={filtered}
           onQueryChange={actions.setQuery}
         />
@@ -95,11 +114,49 @@ export function CatalogScreen() {
           result.total === 0 ? (
             <TileGridEmpty onClear={actions.clearAll} />
           ) : (
-            <TileGrid index={state.index} ids={result.ids} />
+            <>
+              <AvailabilityLegend />
+              <TileGrid index={state.index} items={result.items} ids={result.ids} />
+            </>
           )
         ) : null}
       </div>
     </section>
+  )
+}
+
+/* ------------------------------------------------------------------- legend */
+
+/**
+ * What a filled availability chip means, versus an outlined one.
+ *
+ * The strip on each card distinguishes "locks on its own underside" from "joins
+ * its neighbours only" by **fill**, and every chip carries the claim in full as
+ * clipped text — which serves a reader who cannot see the fill, and does nothing
+ * for the one who can. This line is the key for them, stated once above the grid
+ * rather than repeated on 3,822 cards.
+ *
+ * It renders real `.of-avail` chips rather than describing them, so the sample
+ * cannot drift from the thing it explains. `aria-hidden`, because the sentence it
+ * spells out is already on every chip it is explaining — a screen reader that
+ * read this too would hear the legend and then the same words again on the first
+ * card.
+ *
+ * Only above a non-empty grid: it is a key to something on screen, and above the
+ * empty state it would be a key to nothing.
+ */
+function AvailabilityLegend() {
+  return (
+    <p className="of-avail-legend" aria-hidden="true">
+      <span className="of-avail" data-kind="lock" data-state="underside">
+        filled
+      </span>
+      locks underneath ·{' '}
+      <span className="of-avail" data-kind="lock" data-state="sides">
+        outlined
+      </span>
+      joins at the sides only
+    </p>
   )
 }
 

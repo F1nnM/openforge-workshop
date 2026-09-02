@@ -26,6 +26,21 @@
  * so filtering tells a screen-reader user what happened. Polite, not assertive:
  * the number changes on every keystroke and every facet click, and an assertive
  * region would interrupt the user typing into the field that caused it.
+ *
+ * ## It counts items, and says how many files are behind them
+ *
+ * Row A3. A result is an aggregate, so an unfiltered catalog reports **3,822
+ * tiles** where it used to report 8,702. Reporting only the smaller number would
+ * look like four fifths of the archive had gone missing, and reporting only the
+ * larger one would disagree with the number of cards on screen. So both are
+ * shown, and {@link SearchFieldProps.files} is what makes the second honest —
+ * it is the files behind *the matching items*, not the corpus total, so it
+ * narrows with the filter like everything else on the line.
+ *
+ * "tile" stays the noun. design-contract.md §2.2 writes the count that way, and
+ * an aggregate is closer to what a user means by "a tile" than a file is: one
+ * thing you choose, place and print, whichever of its 2.28 files you end up
+ * printing.
  */
 import { useEffect, useId, useRef, useState } from 'react'
 
@@ -47,14 +62,21 @@ export const COMMIT_DELAY_MS = 180
 export interface SearchFieldProps {
   /** `q` from the URL. The source of truth; the draft only leads it briefly. */
   query: string
-  /** Matching tiles, from the engine. */
+  /** Matching items, from the engine — `SearchResult.total`. */
   total: number
+  /**
+   * Files behind those items, summed over their variants.
+   *
+   * Equal to {@link total} when every match is a singleton, and then the clause
+   * is dropped: "6 tiles · 6 files" states the same thing twice.
+   */
+  files: number
   /** Whether any filter or query is active — changes the count's wording. */
   filtered: boolean
   onQueryChange: (text: string) => void
 }
 
-export function SearchField({ query, total, filtered, onQueryChange }: SearchFieldProps) {
+export function SearchField({ query, total, files, filtered, onQueryChange }: SearchFieldProps) {
   const inputId = useId()
   const [draft, setDraft] = useState(query)
   const committed = useRef(query)
@@ -118,6 +140,12 @@ export function SearchField({ query, total, filtered, onQueryChange }: SearchFie
         <span className="of-result-total">{countLabel(total)}</span>{' '}
         {total === 1 ? 'tile' : 'tiles'}
         {filtered ? ' match' : ''}
+        {files > total ? (
+          <span className="of-result-files">
+            {' · '}
+            {countLabel(files)} files
+          </span>
+        ) : null}
       </p>
     </div>
   )

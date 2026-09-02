@@ -18,6 +18,12 @@
  * `useCatalogIndex` and `resetCatalogSearchIndex` are exported together on
  * purpose: a component test for either screen has to stub `fetch` and clear both
  * this module's memo and the shell's (`resetCatalogIndexCache`).
+ *
+ * Row A3 adds `availability.ts` to that surface. The library screen renders the
+ * same chips, and the two screens agreeing about what an item offers is the whole
+ * point of deriving it once — a second implementation would be a second answer to
+ * "does this need a base", on the two screens most likely to be compared
+ * side by side.
  */
 export { CatalogScreen } from './CatalogScreen'
 
@@ -25,14 +31,32 @@ export type { CatalogIndex, CatalogIndexState } from './catalogIndex'
 export { loadCatalogSearchIndex, resetCatalogSearchIndex, useCatalogIndex } from './catalogIndex'
 
 export type { TileCardProps, TileThumbProps } from './TileCard'
-export { LibraryToggle, TileCard, TileThumb } from './TileCard'
+export { AvailabilityStrip, LibraryToggle, TileCard, TileThumb } from './TileCard'
+
+export type { Availability, AvailabilityChip, JoineryNote, LockChip, LockReach } from './availability'
+export {
+  CHIP_BUDGET,
+  LOCK_CHIP_ORDER,
+  availabilityChips,
+  availabilityOf,
+  baseRequirementHint,
+  baseRequirementLabel,
+  chipStripWidth,
+  joineryNoteHint,
+  joineryNoteLabel,
+  lockChipHint,
+  lockChipLabel,
+} from './availability'
 
 export {
   buildLabel,
+  bytesRangeLabel,
   connLabel,
   countLabel,
   fileSizeLabel,
+  fileTokenLabel,
   humaniseSegment,
   kindLabel,
   sizeLabel,
+  variantTokenLabel,
 } from './format'

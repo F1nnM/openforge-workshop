@@ -20,6 +20,20 @@
  *     two a card is rendering. 98% of real filenames contain one of those
  *     characters and the median is 51 characters long.
  *
+ * Row A3 added a **seventh record sharing a sixth design**, so the fixture is
+ * seven files over six items and the collapse the whole row rests on has a
+ * subject. Ord 1 and ord 6 are the merged pair the owner asked for: the same
+ * `dungeon_stone|eroded` wall as a topper and as a base-integrated print, which
+ * is what makes one card read `Base optional` and carry a byte *range*. The pair
+ * agrees on every facet A1 hoists — name, kinds, texture, build, foot, sizeCode —
+ * because A1 measured that 0 of 3,822 real aggregates disagree on any of them,
+ * and a fixture that disagreed would exercise a shape the importer cannot emit.
+ *
+ * Between them the six items cover every availability chip the corpus produces:
+ * `Needs a base` (ord 3), `No base needed` (ords 0, 2, 4, 5), `Base optional`
+ * (the pair), a lock on the underside (ords 0, 5, 6), a lock on the sides only
+ * (ord 3), `Insert` (ord 4) and `Joinery untagged` (ord 2).
+ *
  * Exported as a plain object rather than as a parsed `CatalogFile`: the tests
  * hand it to a stubbed `fetch`, so it travels the same path the app's index does
  * — through `CatalogFile.parse`, which is where a fixture that drifted from the
@@ -38,6 +52,11 @@ export const FIXTURE_TAGS = [
   'shape|base',
   'component|door',
   'texture|wood',
+  // Row A3: a lock on the underside of the merged pair's integrated variant, and
+  // one on a topper's *side* — the positional distinction `CatalogRecord.conn`
+  // throws away and the availability chips exist to restore.
+  'connection|dragonlock',
+  'connection|side|openlock',
 ] as const
 
 /** Display names, by ordinal — the strings a card's heading must show. */
@@ -143,7 +162,10 @@ export const FIXTURE_CATALOG = {
       layer: 'topper',
       build: 'wall on tile',
       texture: 'wood',
-      tags: [0, 1, 9],
+      // `connection|side|openlock` and no bottom system: a topper that clips to
+      // its neighbours and meets the table on a separately printed base. Its card
+      // is the one that reads `Needs a base` beside an outlined `OpenLOCK sides`.
+      tags: [0, 1, 9, 11],
       foot: { shape: 'rect', w: 1, d: 1 },
     },
     {
@@ -181,6 +203,31 @@ export const FIXTURE_CATALOG = {
       texture: 'dungeon_stone',
       tags: [7, 2, 5, 6],
       foot: { shape: 'rect', w: 1, d: 3 },
+    },
+    {
+      // The merged pair's other half — ord 1's design, printed with its own
+      // dragonlock footer instead of needing a base. Differs from ord 1 in
+      // exactly the connection axis and its consequences (`layer`, `conn`,
+      // `blob`, `bytes`, `file`), which is the only axis A1 lets vary.
+      id: 'tiles/dungeon_stone/separate_walls/wall/dragonlock/dungeon_stone%eroded+wall.4x#Q,90.dragonlock.stl',
+      ord: 6,
+      blob: '0000000000000000000000000000aaa7',
+      file: 'dungeon_stone%eroded+wall.4x#Q,90.dragonlock.stl',
+      // 4.5 MB against ord 1's 15.9 MB, so the item's byte range renders as a
+      // range rather than collapsing — 1,629 of the 3,822 live items do.
+      bytes: 4_512_900,
+      sprite: true,
+      family: 'tiles/dungeon_stone/separate_walls/wall/dragonlock',
+      design: 'dfix001',
+      name: FIXTURE_NAMES[1],
+      kinds: ['wall'],
+      conn: ['dragonlock'],
+      layer: 'integral',
+      build: 'separate wall',
+      texture: 'dungeon_stone',
+      tags: [1, 3, 5, 10],
+      foot: { shape: 'wall', length: 4 },
+      sizeCode: 'Q',
     },
   ],
 }

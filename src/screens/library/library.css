@@ -60,14 +60,21 @@
   letter-spacing: -0.2px;
 }
 
-/* The contract's `{n} tiles · {mb} MB`. Mono, because both halves are measured
-   facts — design-contract.md §1. */
+/* The contract's `{n} tiles · {mb} MB`, with row A3's file clause between them.
+   Mono, because every part is a measured fact — design-contract.md §1. */
 .of-lib-summary {
   margin: 0;
   font-family: var(--face-mono);
   font-size: 12.5px;
   letter-spacing: 0.6px;
   color: var(--mut);
+}
+
+/* The files behind the items. Dimmer than the item count and the byte total,
+   which are the two numbers a user acts on; this one explains the gap between
+   them and only appears when there is a gap. */
+.of-lib-summary-files {
+  opacity: 0.75;
 }
 
 /* Size is a warning surface, not a footnote (see `LibraryNotes`). The figure
@@ -242,6 +249,81 @@
   justify-content: space-between;
   gap: 8px;
   margin: 0;
+}
+
+/* The catalog's strip is a fixed two-line box because `VirtuosoGrid` extrapolates
+   one card's height to the whole scrollbar. The library is a plain CSS grid, so
+   that constraint does not apply here and capping the height would only clip a
+   four-chip item for no reason. `../catalog/availability.ts` explains the cap. */
+.of-lib-card .of-avail-strip {
+  height: auto;
+  overflow: visible;
+}
+
+/* ── Saved variant rows ──────────────────────────────────────────────────── */
+
+/* Where the per-file rows went. Only rendered for a card holding two or more
+   saved files, so the common single-file card is unchanged. */
+.of-lib-variants {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.of-lib-variants-label {
+  margin: 0 0 4px;
+  font-family: var(--face-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+  color: var(--mut);
+}
+
+.of-lib-variant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-lib-variant {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  color: var(--mut);
+}
+
+.of-lib-variant-token {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.of-lib-variant-bytes {
+  flex: none;
+}
+
+.of-lib-variant-remove {
+  flex: none;
+  padding: 0 3px;
+  background: none;
+  border: 0;
+  color: var(--mut);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 110ms ease;
+}
+
+.of-lib-variant-remove:hover {
+  color: var(--acc);
 }
 
 .of-lib-card-bytes {

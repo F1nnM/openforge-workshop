@@ -3,12 +3,16 @@
  *
  * ## Why it is virtualised at all
  *
- * An unfiltered query returns all 8,702 ids (`SearchEngine.search` is uncapped by
- * design). Rendering them is not a React problem — it is a **decoded-bitmap**
- * problem: every card holds a 2560×1024 PNG, and 8,702 of those would be tens of
+ * An unfiltered query returns all 3,822 items (`SearchEngine.search` is uncapped
+ * by design). Rendering them is not a React problem — it is a **decoded-bitmap**
+ * problem: every card holds a 2560×1024 PNG, and 3,822 of those would be tens of
  * gigabytes of image memory. Virtualisation is what keeps the mounted set to
  * roughly one and a half screenfuls, so the browser can drop the decodes for
  * everything else.
+ *
+ * Aggregation cut the count 2.28× — 8,702 files became 3,822 items — which
+ * lowers the ceiling but changes nothing about the argument: a hundred mounted
+ * cards is still hundreds of megabytes of decoded sheet.
  *
  * ## VirtuosoGrid's one constraint, and how it is met
  *
@@ -17,7 +21,10 @@
  * Two things guarantee uniformity here and neither is optional:
  *
  *   1. **The card is a fixed height** (`catalog.css`: clamped title, fixed
- *      texture line, an em dash where a size chip would be missing).
+ *      texture line, an em dash where a size chip would be missing, and a
+ *      fixed-height two-line availability strip whatever number of chips it
+ *      holds — see `availability.ts#CHIP_BUDGET` for the width arithmetic that
+ *      keeps four chips inside two lines).
  *   2. **The thumbnail is `aspect-ratio: 4 / 3`**, reserved before the image
  *      loads, so a card does not grow when its sheet arrives.
  *
@@ -43,7 +50,7 @@
  */
 import { VirtuosoGrid } from 'react-virtuoso'
 
-import type { TileId } from '@/catalog'
+import type { TileAggregate, TileId } from '@/catalog'
 import { Eyebrow } from '@/ui/primitives'
 
 import type { CatalogIndex } from './catalogIndex'
@@ -52,38 +59,62 @@ import { TileCard } from './TileCard'
 /**
  * Pixels of cards mounted beyond the viewport, ahead and behind.
  *
- * One card is roughly 250 px tall, so this is about one extra row in the scroll
- * direction. See the module docblock for why it is not larger.
+ * One card is roughly 300 px tall — the availability strip added 49 px of it —
+ * so this is about one extra row in the scroll direction. See the module docblock
+ * for why it is not larger.
  */
 export const OVERSCAN = { main: 300, reverse: 150 } as const
 
 export interface TileGridProps {
   index: CatalogIndex
+  /** The matching items, in display order — `SearchResult.items`. */
+  items: readonly TileAggregate[]
+  /**
+   * One preview tile id per item, in the same order — `SearchResult.ids`.
+   *
+   * Row A2 kept this beside `items` precisely so a grid does not have to reach
+   * into an aggregate to find the file it renders. It is the *key* as well as the
+   * lookup: an item's identity for React's reconciler is the preview id rather
+   * than the aggregate address, because that is the id whose 529 KB sheet the
+   * cell has mounted — re-keying on anything else would drop a decoded sheet the
+   * new cell immediately re-fetches.
+   */
   ids: readonly TileId[]
 }
 
-export function TileGrid({ index, ids }: TileGridProps) {
+export function TileGrid({ index, items, ids }: TileGridProps) {
   const { assets, sprite } = index.file
 
   return (
     <VirtuosoGrid
       useWindowScroll
-      totalCount={ids.length}
+      totalCount={items.length}
       overscan={OVERSCAN}
       listClassName="of-card-grid"
       itemClassName="of-card-cell"
       // `computeItemKey` rather than the index, so adding a filter reuses the
-      // cards for tiles that survived it instead of re-keying every slot and
+      // cards for items that survived it instead of re-keying every slot and
       // re-fetching every sheet.
       computeItemKey={(position) => ids[position] ?? position}
       itemContent={(position) => {
+        const item = items[position]
         const id = ids[position]
-        const record = id === undefined ? undefined : index.engine.record(id)
-        // Unreachable: `ids` comes from the same engine `record` reads. Rendering
-        // a hole rather than throwing keeps a single bad id from taking the grid
-        // down, and the fixed cell height means the layout does not notice.
-        if (record === undefined) return null
-        return <TileCard record={record} tags={index.tagsFor(record)} assets={assets} sheet={sprite} />
+        const preview = id === undefined ? undefined : index.engine.record(id)
+        // Unreachable: `items` and `ids` come from one `search()` call and are
+        // the same length, and every id in it is one of the 8,702 records
+        // `record` resolves. Rendering a hole rather than throwing keeps a single
+        // bad id from taking the grid down, and the fixed cell height means the
+        // layout does not notice.
+        if (item === undefined || preview === undefined) return null
+        return (
+          <TileCard
+            item={item}
+            preview={preview}
+            tags={index.tagsFor(preview)}
+            assets={assets}
+            sheet={sprite}
+          />
+        )
       }}
     />
   )
