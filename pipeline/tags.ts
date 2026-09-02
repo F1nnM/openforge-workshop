@@ -51,7 +51,7 @@ export function hasTagPrefix(tags: readonly string[], prefix: string): boolean {
 /**
  * The tag intern table.
  *
- * 84,023 tag references over 916 distinct strings — 92 repetitions of each
+ * 84,023 tag references over 915 distinct strings — 92 repetitions of each
  * string on average. Ids are assigned **by descending frequency**, so the tags
  * that appear tens of thousands of times get one- and two-digit ids: the
  * reference arrays are the single largest repeated structure in the payload and
