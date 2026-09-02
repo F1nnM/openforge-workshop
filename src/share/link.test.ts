@@ -89,6 +89,7 @@ const SCENE: SharedScene = {
     placement(1, 3.5, -0.5, 11.25),
     placement(63, 0.5, 0.5, 348.75),
   ],
+  generated: [],
 }
 
 async function fragmentOf(scene: SharedScene, manifest: ShareManifest): Promise<string> {
@@ -129,12 +130,13 @@ describe('round trip', () => {
 
   it('round-trips an empty scene', async () => {
     const manifest = manifestOf(64)
-    const scene: SharedScene = { lock: 'openlock', placements: [] }
+    const scene: SharedScene = { lock: 'openlock', placements: [], generated: [] }
     const encoded = await encodeShareFragment(scene, manifest)
     expect(encoded.ok).toBe(true)
     if (!encoded.ok) return
-    // Nine payload bytes; the link is short enough to read out loud.
-    expect(encoded.rawBytes).toBe(9)
+    // Eleven payload bytes — nine of header and columns, plus the two zero counts
+    // that open the generated half. The link is still short enough to read out loud.
+    expect(encoded.rawBytes).toBe(11)
     expect(encoded.fragment.length).toBeLessThan(32)
     const decoded = await decodeShareFragment(encoded.fragment, manifest)
     expect(decoded.ok).toBe(true)
@@ -143,7 +145,7 @@ describe('round trip', () => {
 
   it('is exact for a position off the half-unit grid', async () => {
     const manifest = manifestOf(8)
-    const scene: SharedScene = { lock: 'openlock', placements: [placement(3, 0.25, 1 / 3, 33.7)] }
+    const scene: SharedScene = { lock: 'openlock', placements: [placement(3, 0.25, 1 / 3, 33.7)], generated: [] }
     const decoded = await decodeShareFragment(await fragmentOf(scene, manifest), manifest)
     expect(decoded.ok).toBe(true)
     if (decoded.ok) expect(decoded.scene).toEqual(scene)
@@ -250,6 +252,7 @@ describe('salvage', () => {
         placement(99, 2, 2, 0),
         { tileId: tileId(1), x: Number.NaN, z: 0, rotation: 0 },
       ],
+      generated: [],
     }
     const encoded = await encodeShareFragment(scene, manifest)
     expect(encoded.ok).toBe(true)
@@ -274,6 +277,8 @@ describe('salvage', () => {
       lockIndex: 7,
       digest,
       placements: [{ ordinal: 2, x: 1, z: 1, rotation: 90 }],
+      recipes: [],
+      generated: [],
     })
     const compressed = await deflateRaw(raw)
     expect(compressed).toBeDefined()
@@ -294,6 +299,8 @@ describe('salvage', () => {
       lockIndex: 0,
       digest: 0,
       placements: [{ ordinal: 2, x: 1, z: 1, rotation: 90 }],
+      recipes: [],
+      generated: [],
     })
     const compressed = await deflateRaw(raw)
     expect(compressed).toBeDefined()
@@ -305,10 +312,141 @@ describe('salvage', () => {
 
   it('normalises an out-of-range rotation rather than rejecting the link', async () => {
     const manifest = manifestOf(8)
-    const scene: SharedScene = { lock: 'openlock', placements: [{ tileId: tileId(1), x: 0, z: 0, rotation: 450 }] }
+    const scene: SharedScene = {
+      lock: 'openlock',
+      placements: [{ tileId: tileId(1), x: 0, z: 0, rotation: 450 }],
+      generated: [],
+    }
     const decoded = await decodeShareFragment(await fragmentOf(scene, manifest), manifest)
     expect(decoded.ok).toBe(true)
     if (decoded.ok) expect(decoded.scene.placements[0]?.rotation).toBe(90)
+  })
+})
+
+/**
+ * The generated half's failure paths.
+ *
+ * The round trip itself is asserted in `capacity.test.ts`, beside the
+ * measurement that decided the format carries these at all. What is here is the
+ * part that has to be **total**: a recipe table is a stranger's text out of a
+ * URL, and every way it can be wrong has to become a `dropped` line and an
+ * otherwise-intact room rather than a throw or a silently missing piece.
+ */
+describe('a link carrying a generated base', () => {
+  /** A payload whose recipe table holds exactly the given documents. */
+  async function fragmentWithRecipes(documents: readonly string[], count = documents.length): Promise<string> {
+    const raw = encodePayload({
+      manifestVersion: 1,
+      lockIndex: 0,
+      digest: resolveOrdinals([], manifestOf(8)).digest,
+      placements: [],
+      recipes: documents,
+      generated: Array.from({ length: count }, (_, index) => ({
+        recipe: index % Math.max(1, documents.length),
+        x: index,
+        z: 0,
+        rotation: 0,
+      })),
+    })
+    const compressed = await deflateRaw(raw)
+    if (compressed === undefined) throw new Error('no CompressionStream')
+    return `#s=${toBase64Url(compressed)}`
+  }
+
+  const GOOD =
+    '{"base":"gen:v1 risers_square.scad LOCK=\\"openlock\\" SQUARE_BASIS=\\"inch\\" SUPPORTS=true x=2 y=2 z=4",' +
+    '"recipe":{"v":1,"entry":"risers_square.scad","parameters":{"LOCK":"openlock","SQUARE_BASIS":"inch",' +
+    '"SUPPORTS":true,"x":2,"y":2,"z":4}}}'
+
+  it('opens a hand-built link whose table this build can read', async () => {
+    const manifest = manifestOf(8)
+    const decoded = await decodeShareFragment(await fragmentWithRecipes([GOOD]), manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.dropped).toEqual([])
+    expect(decoded.scene.generated).toHaveLength(1)
+    expect(decoded.scene.generated[0]?.recipe.entry).toBe('risers_square.scad')
+    expect(decoded.scene.generated[0]?.recipe.parameters.z).toBe(4)
+  })
+
+  it.each([
+    ['not JSON at all', 'gen:v1 risers_square.scad'],
+    ['JSON that is not an object', '"gen:whatever"'],
+    ['an id outside the generated space', GOOD.replace('"gen:v1', '"tiles/v1')],
+    [
+      'an entry point this build does not offer',
+      // The `"entry":` occurrence, not the first one — the id carries the entry
+      // name too, and rewriting *that* leaves a document this build still reads.
+      GOOD.replace('"entry":"risers_square.scad"', '"entry":"bases-curved.scad"'),
+    ],
+    ['a parameter value of a type no `-D` takes', GOOD.replace('"z":4', '"z":{"nested":1}')],
+  ])('drops a table entry that is %s, and says how many bases it cost', async (_label, document) => {
+    const manifest = manifestOf(8)
+    // Three placements on the one bad recipe, so the message has to aggregate.
+    const decoded = await decodeShareFragment(await fragmentWithRecipes([document], 3), manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.generated).toEqual([])
+    expect(decoded.dropped).toHaveLength(1)
+    expect(decoded.dropped[0]).toContain('generated recipe 0')
+    expect(decoded.dropped[0]).toContain('dropping 3 bases')
+  })
+
+  it('keeps the readable half of a table and reports only the rest', async () => {
+    const manifest = manifestOf(8)
+    const decoded = await decodeShareFragment(await fragmentWithRecipes([GOOD, 'not json'], 2), manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.generated).toHaveLength(1)
+    expect(decoded.dropped).toHaveLength(1)
+    expect(decoded.dropped[0]).toContain('dropping 1 base')
+  })
+
+  it('says nothing about a table entry no placement names', async () => {
+    const manifest = manifestOf(8)
+    // A payload is free to leave an unreferenced entry, and a discarded one that
+    // cost the user nothing must not appear in a notice beside their room.
+    const decoded = await decodeShareFragment(await fragmentWithRecipes([GOOD, 'not json'], 1), manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.generated).toHaveLength(1)
+    expect(decoded.dropped).toEqual([])
+  })
+
+  it('rejects a payload whose recipe index is off the end of its own table', async () => {
+    const manifest = manifestOf(8)
+    // Not reachable through `encodePayload`, which throws on it, so the bytes are
+    // assembled by hand — an index into a table that is not there is the payload
+    // contradicting itself rather than a datum to salvage.
+    expect(() =>
+      encodePayload({
+        manifestVersion: 1,
+        lockIndex: 0,
+        digest: 0,
+        placements: [],
+        recipes: [],
+        generated: [{ recipe: 0, x: 0, z: 0, rotation: 0 }],
+      }),
+    ).toThrow()
+
+    const raw = encodePayload({
+      manifestVersion: 1,
+      lockIndex: 0,
+      digest: resolveOrdinals([], manifest).digest,
+      placements: [],
+      recipes: [GOOD],
+      generated: [{ recipe: 0, x: 0, z: 0, rotation: 0 }],
+    })
+    // The recipe column is the byte immediately after the table; point it at
+    // entry 1 of a one-entry table.
+    const index = raw.lastIndexOf(0, raw.length - 4)
+    raw[index] = 1
+    const compressed = await deflateRaw(raw)
+    expect(compressed).toBeDefined()
+    if (compressed === undefined) return
+    const decoded = await decodeShareFragment(`#s=${toBase64Url(compressed)}`, manifest)
+    expect(decoded.ok).toBe(false)
+    if (!decoded.ok) expect(decoded.reason).toBe('malformed')
   })
 })
 
@@ -362,7 +500,7 @@ describe('damaged links never throw', () => {
 
   it('reports a payload written in a format version this build does not read', async () => {
     const manifest = manifestOf(8)
-    const raw = encodePayload({ manifestVersion: 1, lockIndex: 0, digest: 0, placements: [] })
+    const raw = encodePayload({ manifestVersion: 1, lockIndex: 0, digest: 0, placements: [], recipes: [], generated: [] })
     raw[0] = 99
     const compressed = await deflateRaw(raw)
     expect(compressed).toBeDefined()

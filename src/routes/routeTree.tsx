@@ -57,6 +57,114 @@
  * (design-contract.md §2.3); it has no facets to filter and no state worth
  * linking. Declaring the facet schema there would put filters in the URL that
  * nothing reads.
+ *
+ * ## Which four routes are lazy, and why `/` and `/catalog` are not
+ *
+ * Row X9 made `/assemblies` lazy, measured it, and left the other five with its
+ * figures as the argument for doing each of them properly. This is that row, and
+ * **two of the five did not survive the measurement.**
+ *
+ * Method is X9's: A/B `vite build`s of one tree at
+ * `SOURCE_DATE_EPOCH=1700000000`, summing **every file `dist/index.html`
+ * preloads**. X9 summed the three JS chunks; the sums below add the preloaded
+ * stylesheet, because a lazy screen takes its CSS out of `index-*.css` as well
+ * and a JS-only sum books that as a saving it has not made. Baseline is
+ * **815,980 raw / 247,766 gz / 213,339 br** over four preloaded files; over X9's
+ * three JS chunks alone it is 739,623, which is 1,466 B above the 738,157 X9
+ * recorded, because the tree moved under both of us. X9's finding about its own
+ * predecessors applies here too: **the deltas are the usable part of this table
+ * and the absolutes are not.** (`gzip -9`; brotli is
+ * `BROTLI_PARAM_QUALITY: 11`, node's `zlib`, because the box has no `brotli`
+ * binary. Brotli is the number that matters — `public/catalog/` ships a
+ * precompressed `.br`.)
+ *
+ * Each route made lazy **on its own**, against that baseline:
+ *
+ * | route | eager raw | gz | br | delta gz | on demand |
+ * | --- | ---: | ---: | ---: | ---: | ---: |
+ * | `/builder` | 698,245 | 213,088 | 185,202 | **-34,678** | 109,129 (+16,265) |
+ * | `/library` | 800,055 | 244,162 | 210,634 | **-3,604** | 23,198 |
+ * | `/settings` | 809,066 | 247,697 | 214,886 | -69 | 8,002 |
+ * | `/` | 801,232 | 245,792 | 213,838 | -1,974 | 15,902 |
+ * | `/catalog` | 816,976 | 248,223 | 213,741 | **+457** | nothing emitted |
+ *
+ * Two of those rows are not what they look like, and both reasons are the same
+ * reason: **a screen is only lazy if nothing eager still imports it.**
+ *
+ *   - **`/catalog` alone emits no chunk at all.** `@/screens/catalog`'s barrel is
+ *     a static dependency of the library screen (`TileCard`, `availability`,
+ *     `format`) and of the builder's palette (`loadCatalogSearchIndex`), so
+ *     `CatalogScreen` is in the eager graph however this route mounts. The lazy
+ *     mount adds the wrapper and the dynamic entry and nothing leaves: **+996 B
+ *     raw.**
+ *   - **`/settings` alone moves 8,002 B and pays for it in brotli** (+1,547 B),
+ *     because splitting `@/ui/primitives` out of `index` to share it costs more
+ *     compression context than the settings screen weighs. But the builder's
+ *     toolbar and `LockNotice` are the other importers of `@/ui/lock-picker`, so
+ *     with `/builder` already lazy the same edit takes the picker with it
+ *     (10,044 + 4,484 CSS) and is worth **-21,818 raw / -3,833 gz / -1,974 br**.
+ *
+ * So the four ship as a set, and cumulatively:
+ *
+ * | tree | eager raw | gz | br |
+ * | --- | ---: | ---: | ---: |
+ * | baseline (X9's tree) | 815,980 | 247,766 | 213,339 |
+ * | + `/builder` lazy | 698,245 | 213,088 | 185,202 |
+ * | + `/library` lazy | 682,289 | 209,541 | 182,200 |
+ * | + `/settings` lazy — **shipped** | **660,471** | **205,708** | **180,226** |
+ *
+ * **-155,509 B raw / -42,058 B gz / -33,113 B br: 17.0% of the gzipped eager
+ * payload and 15.5% of the brotli one, off every page in the app.** The four
+ * on-demand chunks are `builder` 109,361 (32,177 gz) with `download` 16,265
+ * beside it, `library` 23,236 (6,667 gz), `settings` 8,008 (2,773 gz) with the
+ * shared `lock-picker` 14,528, and X9's `assemblies` 48,464 (5,858 gz).
+ *
+ * Every row above was built from **one frozen copy** of the tree, because other
+ * rows were editing this working tree while the A/Bs ran — 26 files moved under
+ * it, none of them this one — and a baseline that moves between builds compares
+ * nothing. Re-run as a single A/B against the
+ * tree as it merged — 817,596 / 248,274 / 213,697 static against 661,350 /
+ * 205,789 / 180,489 lazy — the same edit is worth **-156,246 raw / -42,485 gz /
+ * -33,208 br**, which reproduces the table to within 427 B gzipped.
+ *
+ * ## Why `/` and `/catalog` stay eager, which is a measurement and not a caution
+ *
+ * A lazy route is not a deferral of *some* work on a cold load; it is a
+ * round trip in front of **all** of it. Measured against this app's real
+ * `AppFrame` with a lazy child whose import is a promise held open: **1.4 s into
+ * the pending chunk the document is still empty** — no header, no nav, no
+ * skeleton, and `index.html` ships an empty `#root` — **and the header's
+ * `catalog.json` request has not been issued.** Both happen on the tick the
+ * chunk lands. In-app navigation is the opposite and is why the four above are
+ * free: the screen the user is on **stays painted** for the whole pending
+ * window, so a lazy route reached by a nav press costs a transition and nothing
+ * visible.
+ *
+ * That splits the six by how they are *arrived at*, not by what they weigh:
+ *
+ *   - **`/` is the cold load.** The 15,902 B its chunk defers (5,138 gz) are the
+ *     bytes of the only thing on the screen, so the "saving" is a deferral of
+ *     work that is immediately needed, plus a round trip before the first pixel.
+ *     Alone it is also a brotli **regression** (+499 B) and it fragments the
+ *     preload set from 4 files to 9.
+ *   - **`/catalog` is the cold load users actually get sent.** Every shared
+ *     facet link and every `?tile=` link is a cold `/catalog`. On top of the
+ *     three shipped above the edit is worth a further **-150,677 raw / -44,289
+ *     gz / -37,695 br** — the largest number in this file — because by then
+ *     nothing eager imports the barrel any more. It is still declined: it would
+ *     put a round trip in front of an empty page **and** in front of the
+ *     5,860,932 B (365,640 B brotli) `catalog.json` that the header requests on
+ *     mount and the grid cannot render without.
+ *
+ * That 44,289 B is not lost, it is *conditional on the fetch being started
+ * early*, and nothing that starts it early is in this file. A hand-written
+ * `<link rel="modulepreload">` in `index.html` is not the answer — the chunk
+ * name is content-hashed, so the tag would rot on the next build — but
+ * `router.preloadRoute({ to: '/catalog' })` on boot in `src/App.tsx`, or
+ * `defaultPreload: 'intent'` in `src/routes/router.ts` (which would also hide
+ * the four lazy routes' in-app transition), both start it without blocking the
+ * first paint. Reported rather than done: neither file is this row's, and the
+ * saving is only real once something proves the fetch overlaps the paint.
  */
 import { createRootRoute, createRoute, lazyRouteComponent, stripSearchParams } from '@tanstack/react-router'
 
@@ -66,11 +174,8 @@ import {
   validateCatalogSearch,
   validateFacetSearch,
 } from '@/search/searchSchema'
-import { BuilderScreen } from '@/screens/builder'
 import { CatalogScreen } from '@/screens/catalog'
 import { Landing } from '@/screens/landing'
-import { LibraryScreen } from '@/screens/library'
-import { SettingsScreen } from '@/screens/settings'
 import { AppFrame } from '@/ui/shell'
 
 import { ErrorPlaceholder, NotFoundPlaceholder } from './placeholders'
@@ -112,10 +217,16 @@ export const catalogRoute = createRoute({
   component: CatalogScreen,
 })
 
+/**
+ * The library. Lazy since row X10: **-3,604 B gz off every other page in the
+ * app**, and 23,236 B (6,667 gz) — the screen and its stylesheet, which is the
+ * bigger half — on the nav press. Reached by a press, never cold, which is the
+ * condition the module note measured.
+ */
 export const libraryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library',
-  component: LibraryScreen,
+  component: lazyRouteComponent(() => import('@/screens/library'), 'LibraryScreen'),
 })
 
 /**
@@ -128,13 +239,24 @@ export const libraryRoute = createRoute({
  * is deliberately absent from this schema. PR 10 owns the codec and reads
  * `location.hash`; a compressed room in a query param would be validated,
  * re-encoded and canonicalised by this layer for no benefit.
+ *
+ * **Lazy since row X10, and the largest single win in this file: -34,678 B gz
+ * (-28,137 br) off every other page**, against 109,361 B (32,177 gz) of screen
+ * and stylesheet on the press. The one route where that trade is arguable, and
+ * the argument is written down rather than waved at: a share link is a *cold*
+ * `/builder`, so a recipient now waits a round trip on an empty page. It ships
+ * lazy anyway because the cold builder path is already two lazy chunks deep
+ * before it can draw a room (`BuilderRoom` 82,922 and `material` 1,187,797), so
+ * one more in front of it is a proportional change rather than a new kind of
+ * wait — where on `/` and `/catalog` it would be a new kind of wait, which is
+ * exactly why those two stayed eager.
  */
 export const builderRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/builder',
   validateSearch: validateFacetSearch,
   search: { middlewares: [stripSearchParams(defaultFacetSearch())] },
-  component: BuilderScreen,
+  component: lazyRouteComponent(() => import('@/screens/builder'), 'BuilderScreen'),
 })
 
 /**
@@ -146,19 +268,23 @@ export const builderRoute = createRoute({
  * than in the URL — putting it in a search param would make a shared link
  * silently change the recipient's build settings.
  *
- * Not in the header's nav. The header (`src/ui/shell/Header.tsx`) belongs to
- * PR 12 and lists the three screens a visitor moves between; a fourth tab for a
- * one-line setting would spend a permanent slot in the primary navigation on
- * something almost nobody needs to change. The route is reached from
- * `LockNotice`, which the builder mounts. That leaves a real gap while the
- * notice is dismissed and unmounted, and it is called out in this PR's report:
- * one line in `Header.tsx` or in row 16's footer closes it, and neither file is
- * this PR's to edit.
+ * It argued for a while that it was not in the header's nav, and that gap has
+ * since been closed: `Header.tsx` mounts a `Settings` tab, because a dismissed
+ * `LockNotice` would otherwise strand the route. The consequence lands in
+ * `routes.test.ts`: the nav label is on every page, so `Settings` is not
+ * evidence that this screen rendered and the mounting marker is `Lock system`.
+ *
+ * **Lazy since row X10, and only worth it because `/builder` is:** on its own it
+ * moves 8,002 B and *costs* 1,547 B brotli, because `@/ui/lock-picker` has two
+ * other importers in the builder's toolbar and notice and so stays eager. With
+ * the builder lazy the picker leaves with it, and the pair is worth -21,818 raw
+ * / -3,833 gz / -1,974 br. A future row that makes the builder eager again has
+ * to re-measure this one; the module note has the numbers.
  */
 export const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
-  component: SettingsScreen,
+  component: lazyRouteComponent(() => import('@/screens/settings'), 'SettingsScreen'),
 })
 
 /**
@@ -178,7 +304,7 @@ export const settingsRoute = createRoute({
  * the one durable thing a finished walk produces already has a home: it puts its
  * files in the library, which is persisted.
  *
- * ## It is the tree's first lazy route, and that was measured rather than chosen
+ * ## It was the tree's first lazy route, and that was measured rather than chosen
  *
  * Mounted the way the other five are — a static `import` of the screen and
  * `component: AssembliesScreen` — this route puts C3's whole screen, its
@@ -211,10 +337,10 @@ export const settingsRoute = createRoute({
  * and rendered nothing — which is the failure row C3 was actually in, having
  * verified that `dist/` contained none of its files.
  *
- * **The other five routes would benefit the same way** and are not changed here:
- * that is a five-route edit plus this file's whole test, and it should be one
- * row's deliberate work rather than a side effect of mounting a sixth. The
- * figures above are the argument for it.
+ * X9 left the other five to a row of their own. **Row X10 did them and two of
+ * them lost**: `/library`, `/builder` and `/settings` are lazy for the same
+ * reason this route is, `/` and `/catalog` are not, and the module docblock
+ * carries the six-route table and the cold-load measurement that decided it.
  */
 export const assembliesRoute = createRoute({
   getParentRoute: () => rootRoute,

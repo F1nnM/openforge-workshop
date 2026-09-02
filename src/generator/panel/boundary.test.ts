@@ -25,10 +25,12 @@
  * `GeneratorPanel.tsx`'s docblock as an A/B with both sides emitting a single
  * eager chunk.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
+
+import { staticClosure as walk, staticImports } from '../../../tools/boundary/closure'
 
 const HERE = resolve(process.cwd(), 'src', 'generator', 'panel')
 const SRC_DIR = resolve(process.cwd(), 'src')
@@ -61,64 +63,22 @@ const FORBIDDEN_FILES = [
   'generator/placement/pack',
 ]
 
-/** Static `import`/`export … from` specifiers, excluding type-only ones. */
-function staticImports(source: string): string[] {
-  const found: string[] = []
-  const pattern = /^\s*(?:import|export)\s+(?!type\s)([^;]*?)\s*from\s*'([^']+)'/gm
-
-  for (const match of source.matchAll(pattern)) {
-    const clause = match[1] ?? ''
-    const specifier = match[2] ?? ''
-    const values = clause
-      .replace(/^\{|\}$/g, '')
-      .split(',')
-      .map((part) => part.trim())
-      .filter((part) => part !== '' && !part.startsWith('type '))
-    if (clause.startsWith('{') && values.length === 0) continue
-    found.push(specifier)
+/**
+ * The walk, from `tools/boundary/closure.ts` — one copy for the four boundary tests.
+ *
+ * Row X10 collapsed the four near-identical walkers, one of which was this
+ * file's; that module carries the `EISDIR` fix, the bare-side-effect import the
+ * three copies outside `src/three` could not see, and why an asset specifier is
+ * neither followed nor reported. The adapter below is the shape this file's
+ * assertions already read: the entry dropped, and package names without their
+ * importers.
+ */
+function closureOf(entry: string): { files: string[]; packages: string[] } {
+  const closure = walk(entry)
+  return {
+    files: closure.files.filter((file) => file !== entry),
+    packages: [...closure.packages.keys()],
   }
-  return found
-}
-
-function resolveModule(from: string, specifier: string): string | null {
-  const base = specifier.startsWith('@/')
-    ? join(SRC_DIR, specifier.slice(2))
-    : specifier.startsWith('.')
-      ? resolve(dirname(from), specifier)
-      : null
-  if (base === null) return null
-
-  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')]) {
-    if (existsSync(candidate) && !candidate.endsWith('/')) return candidate
-  }
-  return null
-}
-
-interface Closure {
-  files: string[]
-  packages: string[]
-}
-
-/** Walk the static graph from one entry, following in-repo modules only. */
-function closureOf(entry: string): Closure {
-  const files = new Set<string>()
-  const packages = new Set<string>()
-  const queue = [entry]
-
-  while (queue.length > 0) {
-    const file = queue.pop()
-    if (file === undefined || files.has(file)) continue
-    files.add(file)
-    for (const specifier of staticImports(readFileSync(file, 'utf8'))) {
-      if (specifier.endsWith('.css') || specifier.endsWith('.json')) continue
-      const resolved = resolveModule(file, specifier)
-      if (resolved === null) packages.add(specifier)
-      else queue.push(resolved)
-    }
-  }
-
-  files.delete(entry)
-  return { files: [...files], packages: [...packages] }
 }
 
 const relativeToSrc = (file: string) => file.slice(SRC_DIR.length + 1)

@@ -73,6 +73,40 @@ describe('with an empty plan', () => {
   })
 })
 
+/**
+ * The one structural fact behind row X10's item 8, asserted where a pixel
+ * measurement cannot reach.
+ *
+ * A live Chrome found the right 14 px of the toolbar's `snap 0.5` button
+ * unclickable, with `elementFromPoint` naming `.of-b3d-toggle-note` at those
+ * columns, and the proposed one-line fix was `pointer-events: none` on the note.
+ * **It would not work, and this is why:** the note is a child of the button, so
+ * declining hits on it hands them to `.of-b3d-toggle` — still not to the snap
+ * toggle underneath. And a flex-column child cannot spill outside its parent, so
+ * the note is not overlapping anything; it *sets* the plate's width, being its
+ * longest line.
+ *
+ * jsdom reports every element as 0 x 0 and so can say nothing about the overlap
+ * itself. It can say this, which is the half that refutes the fix, and it fails
+ * the day someone lifts the note out of the button — at which point the
+ * `pointer-events` fix becomes available and this test is the prompt to
+ * reconsider it. `builder3d.css` carries the measurement and the candidate
+ * designs.
+ */
+describe('the closed plate, for row X10 item 8', () => {
+  it('keeps the note inside the button, which is why pointer-events cannot fix the overlap', () => {
+    render(<Builder3DPanel catalog={CATALOG} placements={placements(3)} assets={ASSETS} />)
+
+    const button = screen.getByRole('button', { name: /view in 3d/i })
+    const note = document.querySelector('.of-b3d-toggle-note')
+    expect(note).not.toBeNull()
+    expect(note?.closest('.of-b3d-toggle')).toBe(button)
+    // And the note is the longest line in it, so the plate's width is the note's.
+    expect(note?.textContent).toBe('preview meshes, not yet published')
+    expect(button.textContent).toContain('View in 3D')
+  })
+})
+
 describe('with a room', () => {
   it('says the meshes are not published before the press, not after', () => {
     render(<Builder3DPanel catalog={CATALOG} placements={placements(3)} assets={ASSETS} />)

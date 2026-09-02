@@ -179,12 +179,15 @@ export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
  *     the catalog grid; a grey copy of it here would read as a different tile
  *     rather than as less information.
  *
- * The honest caveat, which this row does **not** fix: `../SpriteRotator.tsx`
- * renders the *parent* tile above this grid and is still untinted blue, because
- * P1 left it out (its geometry is its own and it rotates through all ten frames,
- * so it has no thumbnail source to switch). So the drawer is now internally
- * inconsistent, and the fix is one `url(#of-tint-sprite-…)` in that file plus a
- * material for it. No row owns it.
+ * The caveat this row recorded — `../SpriteRotator.tsx` rendering the *parent*
+ * tile above this grid and still untinted blue, leaving the drawer internally
+ * inconsistent — was closed by row X10, and the "one `url(#of-tint-sprite-…)`
+ * plus a material" this note predicted was not the whole of it. Two things it
+ * did not see: the `<defs>` reach that element only because *this* component
+ * happens to have mounted a `TileThumb`, and this component renders nothing for
+ * the 8,117 files with no accessory slot; and `.of-detail-frame` is the
+ * `role="slider"`, so a filter on it takes the app's accent focus ring through
+ * the colour matrix. `SpriteRotator.tsx` carries both arguments.
  *
  * ## Why the map is built here and lazily
  *

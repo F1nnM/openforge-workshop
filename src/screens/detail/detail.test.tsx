@@ -37,6 +37,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { CatalogFile } from '@/catalog'
 import { openTileDrawer } from '@/routes'
+import { TINT_FILTER_SHEET_ID } from '@/ui/thumb'
 import { parseCompactSearch, stringifyCompactSearch, validateCatalogSearch, validateFacetSearch } from '@/search'
 import {
   claimPendingTile,
@@ -48,6 +49,7 @@ import {
   useWorkshopStore,
 } from '@/store'
 
+import { SpriteRotator } from './SpriteRotator'
 import { TileDrawer } from './TileDrawer'
 
 /* ------------------------------------------------------------------ fixture */
@@ -894,17 +896,44 @@ describe('the gated 3D panel', () => {
 
 describe('the sprite rotator', () => {
   const frame = () => within(drawer()).getByRole('slider')
+  /**
+   * The sheet itself, which is a child of the slider rather than the slider.
+   *
+   * Row X10 split the two: a CSS filter takes the element's box decorations with
+   * it, and the slider carries the app's one accent focus ring. Asserted as a
+   * child of the slider so the split cannot silently become two siblings.
+   */
+  const sheet = () => {
+    const found = frame().querySelector<HTMLElement>('.of-detail-sheet')
+    if (found === null) throw new Error('no .of-detail-sheet inside the slider')
+    return found
+  }
 
   it('shows the default frame of the tile’s sheet', async () => {
     await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
 
     expect(frame()).toHaveAttribute('data-frame', '0')
-    expect(frame().style.backgroundImage).toContain(
+    expect(sheet().style.backgroundImage).toContain(
       'https://objects.openforge.tools/sprites/a1b2c3/a1b2c3d4e5f60718293a4b5c6d7e8f90.png',
     )
     // 5 columns × 2 rows of 288px frames, showing the first.
-    expect(frame().style.backgroundSize).toBe('1440px 576px')
-    expect(frame().style.backgroundPosition).toBe('0px 0px')
+    expect(sheet().style.backgroundSize).toBe('1440px 576px')
+    expect(sheet().style.backgroundPosition).toBe('0px 0px')
+
+    // The tint, through the *sheet's* chain and not the derivative's, and on the
+    // inert child. The id rather than the whole `url()`: row P1 found Chrome and
+    // jsdom serialise the quotes differently, so the id is the stable half.
+    expect(sheet().style.filter).toContain('#of-tint-sprite-cave')
+    expect(sheet().style.filter).not.toContain('of-tint-thumb-')
+    // The slider itself must carry no filter, or the accent focus ring goes
+    // through the matrix with it.
+    expect(frame().style.filter).toBe('')
+
+    // And the filters it references are in the document, mounted by this
+    // component rather than borrowed from whatever else happens to be on screen.
+    const defs = document.getElementById(TINT_FILTER_SHEET_ID)
+    expect(defs).not.toBeNull()
+    expect(defs?.querySelector('#of-tint-sprite-cave')).not.toBeNull()
   })
 
   it('rotates with the arrow keys, around the ring and to the poles', async () => {
@@ -912,7 +941,7 @@ describe('the sprite rotator', () => {
 
     fireEvent.keyDown(frame(), { key: 'ArrowRight' })
     expect(frame()).toHaveAttribute('aria-valuetext', 'front right')
-    expect(frame().style.backgroundPosition).toBe('-288px 0px')
+    expect(sheet().style.backgroundPosition).toBe('-288px 0px')
 
     // Backwards past `front` wraps to the far end of the ring rather than
     // stopping — the eight frames are a closed 360° orbit.
@@ -924,7 +953,7 @@ describe('the sprite rotator', () => {
     fireEvent.keyDown(frame(), { key: 'ArrowUp' })
     expect(frame()).toHaveAttribute('aria-valuetext', 'top')
     expect(frame()).toHaveAttribute('aria-valuenow', '7')
-    expect(frame().style.backgroundPosition).toBe('-864px -288px')
+    expect(sheet().style.backgroundPosition).toBe('-864px -288px')
 
     fireEvent.keyDown(frame(), { key: 'ArrowRight' })
     expect(frame()).toHaveAttribute('aria-valuetext', 'front')
@@ -967,6 +996,31 @@ describe('the sprite rotator', () => {
 
     expect(within(drawer()).getByText(/pre-rendered angles/)).toBeInTheDocument()
     expect(within(drawer()).queryByText(/live render/)).toBeNull()
+  })
+
+  it('mounts the tint filters itself, with no thumbnail anywhere on the page', () => {
+    // The claim in `@/ui/thumb`'s barrel is that a caller like this one needs
+    // only the `url(#…)` because the filters are already in the document. They
+    // are — when a `TileThumb` is mounted, which is the catalog grid's doing and
+    // not this subtree's. So the sheet is removed and the rotator rendered on its
+    // own: this fails if the `useTintFilters()` call in `SpriteRotator` goes.
+    document.getElementById(TINT_FILTER_SHEET_ID)?.remove()
+    expect(document.getElementById(TINT_FILTER_SHEET_ID)).toBeNull()
+
+    render(
+      <SpriteRotator
+        material="necro"
+        name="Aztlan Floor 1x1"
+        sheet={{ cols: 5, rows: 2, tile: 512, frames: 10, defaultFrame: 0 }}
+        sheetUrl="https://objects.openforge.tools/sprites/ab/abcdef.png"
+      />,
+    )
+
+    const defs = document.getElementById(TINT_FILTER_SHEET_ID)
+    expect(defs).not.toBeNull()
+    expect(defs?.querySelector('#of-tint-sprite-necro')).not.toBeNull()
+    const sheetEl = screen.getByRole('slider').querySelector<HTMLElement>('.of-detail-sheet')
+    expect(sheetEl?.style.filter).toContain('#of-tint-sprite-necro')
   })
 
   it('renders the one tile with no sprite sheet, saying which it is', async () => {

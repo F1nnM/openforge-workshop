@@ -15,13 +15,25 @@
  * `@import` the catalog's, for `.of-empty-*` and `.of-search-input` respectively;
  * `screens/detail/slots/slots.css` needed nothing else and no longer does.
  *
- * `useTintFilters` and `TINT_FILTER_SHEET_ID` are exported for completeness, not
- * because a caller should reach for them: `TileThumb` already calls the hook, so
- * a thumbnail is tinted by rendering it and nothing else. The only reason to
- * touch them directly is a subtree that draws sprite pixels *without* this
- * component — `screens/detail/SpriteRotator.tsx` is the one that exists — and
- * even then the filters are already in the document, so what such a caller
- * wants is the `url(#…)` from `tintFilterId`, not this hook.
+ * `useTintFilters` and `TINT_FILTER_SHEET_ID` are exported because a caller that
+ * draws sprite pixels *without* this component needs both: the `url(#…)` from
+ * `tintFilterId`, **and** the hook. `screens/detail/SpriteRotator.tsx` is the one
+ * such caller that exists, and row X10 wired it.
+ *
+ * This note used to say the hook was for completeness, because "the filters are
+ * already in the document" by then. **They are not, reliably.** The document gets
+ * them from `TileThumb`'s layout effect, so what that sentence assumed was that
+ * some *other* subtree had mounted a thumbnail — the catalog grid behind the tile
+ * drawer, normally. The drawer's own subtree reaches a `TileThumb` only through
+ * `screens/detail/slots/SlotFills.tsx`, which renders nothing at all for a file
+ * with no accessory slot: 5,666 files declare no config and a further 2,451
+ * declare only a `base` slot. And a dangling `url(#id)` renders the element
+ * **unfiltered** rather than erroring (Filter Effects 1 §7.1) — raw blue, which
+ * looks like the bug rather than like a missing dependency.
+ *
+ * So the rule is the one P1 set for `TileThumb` and it applies to every caller
+ * equally: **the module that references a filter mounts the filters.** The hook is
+ * idempotent by id, so a subtree that also contains a thumbnail pays nothing.
  */
 export type { TileThumbProps } from './TileThumb'
 export { TileThumb, sheetFrameStyle } from './TileThumb'

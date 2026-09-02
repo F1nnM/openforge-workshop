@@ -1,7 +1,7 @@
 # Tile aggregation — collapsing base-integrated and base-less variants into one catalog item
 
 **Status:** proposed. Written 2026-09-01 against `catalog.json` built from fixtures commit
-`428289679a0c62ade992a51ef949f47cdc2b9aed` (8,702 live records, 916 interned tags).
+`428289679a0c62ade992a51ef949f47cdc2b9aed` (8,702 live records, 915 interned tags).
 
 **Every number below is re-derived from the emitted index**, not inherited. Where a claim is
 an inference rather than a measurement it says so inline. Where a detection rule is imperfect

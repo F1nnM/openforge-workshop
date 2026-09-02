@@ -92,9 +92,73 @@ Facets are **single-select toggles** in the mock (clicking the active one clears
 There is no deny/exclude state and no hierarchy.
 
 **Grid** — search input (max 520px) + live result count; cards at
-`repeat(auto-fill, minmax(215px, 1fr))`, 16px gap. Each card:
-4:3 thumbnail well, title, a mono size chip, texture set name, mono file size,
-a tag row, and a full-width "+ Add to library" / "✓ In library" toggle button.
+`repeat(auto-fill, minmax(215px, 1fr))`, 16px gap. Each card, **top to bottom as
+`TileCard.tsx` renders it**:
+
+1. a 4:3 thumbnail well and the title, both inside one `?tile=` link;
+2. a texture-set line, with a material swatch dot ahead of the set name
+   (`aria-hidden` — the name is beside it, so the colour carries nothing alone);
+3. a mono meta line: the size chip, the filename's variant token (empty on 40
+   aggregates, and then nothing is drawn), and a **file-size range** rather than
+   one size, because a card is one item over 2.28 files;
+4. the **availability strip** — described below, and absent from this section
+   until row X10 wrote it down;
+5. the tag row;
+6. a full-width "+ Add to library" / "✓ In library" toggle button.
+
+**The availability strip** (`.of-avail-strip`, `availability.ts` +
+`TileCard.tsx#AvailabilityStrip`, row A3) is a `<ul>` of at most four mono chips,
+and it answers the two questions a browsing user actually has: *how many parts do
+I print*, and *will this join the build I have chosen*. Every chip is **derived
+from the aggregate**, never printed from a tag — `CatalogRecord.conn` throws the
+position segment away, and 1,283 of 4,363 toppers carry a lock on their side and
+none underneath, so a card reading `conn` advertised joinery 1,283 tiles do not
+have where it matters.
+
+Three sources, always in this order:
+
+| # | chip | values | count |
+| - | ---- | ------ | ----- |
+| 1 | **base requirement** — always present | `Needs a base` · `No base needed` · `Base optional` | exactly 1 |
+| 2 | **lock systems**, in self-sufficiency order (openlock, dragonlock, magnetic — 1,497 / 359 / 255) | `OpenLOCK` · `DragonLock` · `Magnetic`, each either **filled** (locks on its own underside) or **outlined** with ` sides` appended (joins its neighbours, meets the table on something else) | 0 to 3 |
+| 3 | **joinery verdict**, where there is no lock to state | `Insert` · `Joinery untagged` | 0 or 1 |
+
+- **`Base optional` is a third state, not a hedge.** 931 aggregates offer both a
+  one-part print and a topper for a separate base; the chip says the choice
+  exists and the variants table (§2.5) is where it is made.
+- **Magnetic has no `sides` state, and that is the corpus and not the layout.**
+  Zero aggregates carry `connection|side|magnetic` — magnets are glued into a
+  pocket in the base of a piece and nothing here mounts one on a side wall — so a
+  symmetrical two-row grid of six chips would ship a cell that can never light,
+  which reads as "this tile does not do magnetic sides" rather than "no tile
+  does". `underside` wins where a system is on both faces: 555 aggregates for
+  openlock, never for the other two.
+- **The strip is never empty, and the partition is exhaustive rather than lucky.**
+  2,027 aggregates (53.0%) offer no lock chip at all; 1,878 of those are
+  `Needs a base`, and the remaining 149 split exactly 93 insert-only + 56
+  joinery-untagged with nothing left over — which is why the verdict has those two
+  values and no `none`.
+- **`Joinery untagged` means unknown, not incompatible.** 33 of the underlying
+  records name a lock in the filename only, 18 of those a magnet size that is
+  nowhere in the tag vocabulary.
+- **`connection|side|filament` is deliberately not a fourth chip.** It is the side
+  system on 114 records — a printed-in-place hinge, not a lock — and a fourth chip
+  would invent a build option the builder cannot be set to. All 114 are
+  `Needs a base`, so none loses its only chip to the omission.
+- **Fixed two-line box, 41px** (`2 × 19px + 3px`), because `VirtuosoGrid` needs a
+  uniform card height. The measured worst case over all 3,822 aggregates is
+  **4 chips / 60 characters** — `No base needed · OpenLOCK sides · DragonLock
+  sides · Joinery untagged`, 15 aggregates — costing 365px of a 394px box.
+  `availability.ts#CHIP_BUDGET` carries the arithmetic and
+  `availability.test.ts` fails the build when a relabel exceeds it, because
+  overflowing clips a chip out of sight rather than visibly breaking the layout.
+- **Each chip's accessible name is its label plus a clipped sentence** ("Base
+  optional" alone does not say optional between what), and the filled/outlined
+  distinction is not available to a reader who cannot see it.
+- **A legend sits above the grid** — `filled locks underneath · outlined joins at
+  the sides only`, with live chip samples rather than prose. `aria-hidden`,
+  because every word of it is already on the first card, and rendered **only
+  above a non-empty grid**: above the empty state it is a key to nothing.
 
 **The tag row ships, and it has no `showTags` prop** (row X2). This section specified one,
 defaulting off; it is deliberately not implemented. `TileCard` has exactly one call site,

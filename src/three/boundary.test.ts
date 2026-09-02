@@ -15,10 +15,12 @@
  * here from `index.ts` and checked. A convenience import added to the panel's
  * side of the line fails this test, which is the only place it would be noticed.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
+
+import { staticClosure as walk, staticImports } from '../../tools/boundary/closure'
 
 const THREE_DIR = resolve(process.cwd(), 'src', 'three')
 const SRC_DIR = resolve(process.cwd(), 'src')
@@ -41,73 +43,21 @@ const FORBIDDEN_PACKAGES = [
  */
 const FORBIDDEN_FILES = ['download/', 'materials/']
 
-/** Static `import`/`export … from` specifiers, excluding type-only ones. */
-function staticImports(source: string): string[] {
-  const found: string[] = []
-  const pattern = /^\s*(?:import|export)\s+(?!type\s)([^;]*?)\s*from\s*'([^']+)'/gm
-
-  for (const match of source.matchAll(pattern)) {
-    const clause = match[1] ?? ''
-    const specifier = match[2] ?? ''
-    // `import { type A, type B }` is erased too; only a value import counts.
-    const values = clause
-      .replace(/^\{|\}$/g, '')
-      .split(',')
-      .map((part) => part.trim())
-      .filter((part) => part !== '' && !part.startsWith('type '))
-    if (clause.startsWith('{') && values.length === 0) continue
-    found.push(specifier)
+/**
+ * The walk, from `tools/boundary/closure.ts` — one copy for the four boundary tests.
+ *
+ * Row X10 collapsed the four near-identical walkers this file used to hold its
+ * own version of; that module carries what they had each got differently. The
+ * local adapter is here rather than there because this test is the one that
+ * asks "what is in this chunk" and so keeps the entry in `files`, and reports
+ * paths relative to `src`.
+ */
+function staticClosure(entry: string): { files: string[]; packages: ReadonlyMap<string, readonly string[]> } {
+  const closure = walk(entry)
+  return {
+    files: closure.files.map((file) => relative(SRC_DIR, file)),
+    packages: new Map([...closure.packages].map(([name, importers]) => [name, importers.map((f) => relative(SRC_DIR, f))])),
   }
-
-  // Bare side-effect imports: `import './three.css'`.
-  for (const match of source.matchAll(/^\s*import\s+'([^']+)'/gm)) {
-    found.push(match[1] ?? '')
-  }
-
-  return found
-}
-
-function resolveModule(from: string, specifier: string): string | null {
-  if (specifier.endsWith('.css')) return null
-
-  const base = specifier.startsWith('@/')
-    ? join(SRC_DIR, specifier.slice(2))
-    : specifier.startsWith('.')
-      ? resolve(dirname(from), specifier)
-      : null
-
-  if (base === null) return null
-
-  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
-    if (existsSync(candidate)) return candidate
-  }
-  return null
-}
-
-/** Every file statically reachable from `entry`, and the packages they import. */
-function staticClosure(entry: string): { files: string[]; packages: Map<string, string[]> } {
-  const seen = new Set<string>()
-  const packages = new Map<string, string[]>()
-  const queue = [entry]
-
-  while (queue.length > 0) {
-    const file = queue.pop()
-    if (file === undefined || seen.has(file)) continue
-    seen.add(file)
-
-    for (const specifier of staticImports(readFileSync(file, 'utf8'))) {
-      const resolved = resolveModule(file, specifier)
-      if (resolved === null) {
-        if (!specifier.endsWith('.css')) {
-          packages.set(specifier, [...(packages.get(specifier) ?? []), relative(SRC_DIR, file)])
-        }
-        continue
-      }
-      queue.push(resolved)
-    }
-  }
-
-  return { files: [...seen].map((file) => relative(SRC_DIR, file)), packages }
 }
 
 describe('the entry surface', () => {

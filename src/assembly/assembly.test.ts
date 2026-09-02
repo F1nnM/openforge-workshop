@@ -1921,6 +1921,146 @@ describeCorpus(corpusSuite, () => {
       expect(disagreed).toBeGreaterThanOrEqual(0)
     }
   })
+
+  /**
+   * Row X10's item 2: the double base, reproduced and then bounded.
+   *
+   * Row S5 flagged that a hand-placed base under a topper still gets an
+   * auto-inserted base beside it, and row X9 found the same true of a generated
+   * base, structurally — `buildBillOfTiles` never sees the generated map. Both
+   * reproduce here, against the real corpus, and the numbers are the reason the
+   * insert is **disclosed rather than suppressed**; see
+   * `notes.ts#base-already-on-plan`.
+   */
+  describe("a base already on the topper's cell", () => {
+    /** A topper that still receives an auto-inserted base after rule 0. */
+    function topperWithAutoBase(lock: LockSystem): { topper: CatalogRecord; base: CatalogRecord } | undefined {
+      for (const record of toppers) {
+        const resolved = resolvePlacement(place(record.id), index, { lock })
+        const inserted = resolved.parts.find((part) => part.role === 'base')
+        if (inserted !== undefined && resolved.tile !== undefined) {
+          return { topper: resolved.tile, base: inserted.record }
+        }
+      }
+      return undefined
+    }
+
+    it('counts how many placed toppers can reach the state at all', () => {
+      // Rule 0 substitutes a self-sufficient sibling wherever the item has one,
+      // so this is well below the 4,363 toppers in the corpus — and it is the
+      // real population, not the 3,986 that `matchBase` alone would suggest.
+      let withAuto = 0
+      for (const record of toppers) {
+        if (resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts.some((p) => p.role === 'base')) {
+          withAuto += 1
+        }
+      }
+      expect(withAuto).toBe(2250)
+      // And the bases are reachable: the palette does not filter by layer, so a
+      // user can search for one and place it.
+      expect(bases).toHaveLength(1963)
+      expect(index.stats.basesByPrintOption).toEqual({ plain: 1379, unsupported: 206, topless: 378 })
+    })
+
+    it('reproduces the double for a hand-placed catalog base, and prices it', () => {
+      const found = topperWithAutoBase('openlock')
+      expect(found).toBeDefined()
+      if (found === undefined) return
+
+      const alone = buildBillOfTiles([place(found.topper.id)], index, { lock: 'openlock' })
+      const stacked = buildBillOfTiles([place(found.topper.id), place(found.base.id)], index, { lock: 'openlock' })
+
+      // Two placements, three parts: the topper, the base the user placed, and
+      // the base the rule inserted.
+      expect(stacked.placements).toBe(2)
+      expect(stacked.parts).toBe(3)
+      const line = stacked.lines.find((entry) => entry.tile.blob === found.base.blob)
+      expect(line?.quantity).toBe(2)
+      expect(line?.baseQuantity).toBe(1)
+
+      // **The download is unchanged**, which is the half both earlier reports had
+      // wrong: the bill folds by md5, so the second copy is the same file and it
+      // is fetched once. What doubles is the print count.
+      expect(stacked.download.bytes).toBe(alone.download.bytes)
+      expect(stacked.copies).toBe(alone.copies + 1)
+
+      expect(stacked.notes.map((entry) => entry.code)).toContain('base-already-on-plan')
+    })
+
+    it('reproduces it for a generated base, through the anchors the builder passes', () => {
+      const found = topperWithAutoBase('openlock')
+      expect(found).toBeDefined()
+      if (found === undefined) return
+
+      const withGenerated = buildBillOfTiles([place(found.topper.id, 2, 3)], index, {
+        lock: 'openlock',
+        generatedBases: [{ x: 2, z: 3 }],
+      })
+      expect(withGenerated.notes.map((entry) => entry.code)).toContain('base-already-on-plan')
+      // The catalog base is still billed — the note discloses, it does not remove.
+      expect(withGenerated.parts).toBe(2)
+    })
+
+    it.each([
+      ['the base is one unit away', 1, 0],
+      ['the base is half a unit away, the finest snap', 0.5, 0],
+      ['the base is diagonal to it', 1, 1],
+    ])('stays quiet when %s', (_label, dx, dz) => {
+      const found = topperWithAutoBase('openlock')
+      expect(found).toBeDefined()
+      if (found === undefined) return
+      const bill = buildBillOfTiles([place(found.topper.id, 0, 0), place(found.base.id, dx, dz)], index, {
+        lock: 'openlock',
+      })
+      expect(bill.notes.map((entry) => entry.code)).not.toContain('base-already-on-plan')
+      // The double is still there in this case and the note cannot see it. That
+      // is the stated limit of an anchor test rather than a bug in it: a base
+      // offset from its topper needs the overlap geometry, which lives above
+      // this module and imports it.
+      const line = bill.lines.find((entry) => entry.tile.blob === found.base.blob)
+      expect(line?.quantity).toBe(2)
+    })
+
+    it('stays quiet for a bare base, and for two toppers sharing one cell', () => {
+      const found = topperWithAutoBase('openlock')
+      expect(found).toBeDefined()
+      if (found === undefined) return
+
+      // A base placed as a piece in its own right is the normal case and must not
+      // warn: 1,963 bases are placeable and a user may want one bare.
+      const bare = buildBillOfTiles([place(found.base.id)], index, { lock: 'openlock' })
+      expect(bare.notes.map((entry) => entry.code)).not.toContain('base-already-on-plan')
+
+      // Two toppers on one cell each get their own inserted base, and an inserted
+      // base has no anchor, so the note must not fire on the pair.
+      const pair = buildBillOfTiles([place(found.topper.id), place(found.topper.id)], index, { lock: 'openlock' })
+      expect(pair.parts).toBe(4)
+      expect(pair.notes.map((entry) => entry.code)).not.toContain('base-already-on-plan')
+    })
+
+    it('measures the pool a suppression rule would have accepted', () => {
+      // The reason the insert is not suppressed. If the rule accepted whatever
+      // base is under the topper, this is what it would be accepting from.
+      const pools: number[] = []
+      for (const topper of toppers) {
+        if (topper.sizeCode === undefined) continue
+        pools.push(bases.filter((entry) => entry.sizeCode === topper.sizeCode).length)
+      }
+      pools.sort((a, b) => a - b)
+      expect(pools).toHaveLength(1999)
+      expect(pools[Math.floor(pools.length / 2)]).toBe(79)
+      expect(pools[pools.length - 1]).toBe(132)
+      // 584 of those 1,963 are a print variant rather than the base itself, and a
+      // topless base has no top surface. That is a 29.75% chance of silently
+      // accepting a different product — the door row D1 measured at 79.1% and
+      // closed from the ranking side. `assemblyIndex.ts` and D1 both round it to
+      // 29.7%; the unrounded figure is asserted so a change in either count is
+      // caught rather than absorbed by the rounding.
+      const variants = index.stats.basesByPrintOption.topless + index.stats.basesByPrintOption.unsupported
+      expect(variants).toBe(584)
+      expect(variants / index.stats.bases).toBeCloseTo(0.2975, 4)
+    })
+  })
 })
 
 /* -------------------------------------------------- row A6: variant resolution */

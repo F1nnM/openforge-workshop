@@ -50,11 +50,21 @@
   width: 288px;
   height: 288px;
   max-width: 100%;
-  background-repeat: no-repeat;
   cursor: grab;
   /* The drag is a rotation, so the browser must not also read it as a pan. */
   touch-action: none;
   user-select: none;
+}
+
+/* The sheet, and the one filtered element in the well.
+   Separate from `.of-detail-frame` because that element is the `role="slider"`
+   and a CSS filter would take the app's accent focus ring with it — see
+   `SpriteRotator.tsx`. Inert: pointer events belong to the slider, which is its
+   parent, so they reach it by bubbling and need nothing here. */
+.of-detail-sheet {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
 }
 
 .of-detail-frame[data-dragging] {

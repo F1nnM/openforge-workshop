@@ -78,6 +78,29 @@ export interface AssemblyOptions {
    * with it is a real defect in the build rather than a shrug.
    */
   lock?: LockSystem
+
+  /**
+   * Where the scene's **generated** bases sit, so the bill can tell a topper it
+   * already has one underneath.
+   *
+   * Positions only, and that is the whole of what this module can use: a
+   * generated base has no `TileId`, no `CatalogRecord` and no size code (row S5
+   * — it is a third identity), so there is nothing here to rank or match. What
+   * there is, is an anchor, and an anchor is enough to say "you have already put
+   * a base on this cell" — see `notes.ts#base-already-on-plan` for why the bill
+   * says that rather than acting on it.
+   *
+   * Hand-placed *catalog* bases need no option: they are placements, so
+   * {@link buildBillOfTiles} already sees them. Generated bases live in a second
+   * store map that it does not receive, which is exactly the asymmetry X9
+   * reported — so the caller passes them, and `src/screens/builder/BuilderScreen.tsx`
+   * is the one place that does.
+   *
+   * Absent means "this caller has no generated bases to declare", not "there are
+   * none": the download path and the lock picker build bills without one, and
+   * neither shows notes.
+   */
+  generatedBases?: readonly { readonly x: number; readonly z: number }[]
 }
 
 /* --------------------------------------------------------------------- parts */

@@ -29,6 +29,9 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ManifestOrdinal, TileId } from '@/catalog'
+import { fileDefaults, recipeKey } from '@/generator/panel/recipe'
+import type { GeneratedPlacement } from '@/generator/placement/scene'
+import { generatedBaseId } from '@/generator/placement/scene'
 import type { Placement } from '@/store'
 
 import { ByteWriter } from './bytes'
@@ -37,6 +40,23 @@ import type { ShareManifest } from './manifest'
 import { buildShareManifest } from './manifest'
 import type { SharedScene } from './scene'
 import { deflateRaw, toBase64Url } from './transport'
+
+/**
+ * Print a measured table so a run reports it.
+ *
+ * `process.stdout.write` rather than `console.log`, and that is a fix rather
+ * than a style: this file is a jsdom suite, jsdom installs its own `console` on
+ * the window, and **the tables this file has claimed to print "on every run"
+ * have never appeared once.** Verified by running the two `console.log` suites
+ * in the tree side by side — `src/composition/corpus.test.ts` and
+ * `src/generator/engine/render.test.ts` are node-environment and both print;
+ * this one is the only jsdom suite that logs, and it printed nothing at any
+ * verbosity, `--silent=false` included. A measurement nobody can read is the
+ * same shape of defect as a guard that cannot fail.
+ */
+function report(lines: readonly string[]): void {
+  process.stdout.write(`${lines.join('\n')}\n`)
+}
 
 /** The live corpus size, so ordinals in the fixtures are the width they really are. */
 const CORPUS = 8702
@@ -143,7 +163,36 @@ function scattered(count: number): Placement[] {
 type Shape = (count: number) => Placement[]
 
 function sceneOf(shape: Shape, count: number): SharedScene {
-  return { lock: 'openlock', placements: shape(count) }
+  return { lock: 'openlock', placements: shape(count), generated: [] }
+}
+
+/* ---------------------------------------------------------- generated bases */
+
+/**
+ * `distinct` recipes spread over `count` generated bases, at the widest shape.
+ *
+ * `bases-square.scad` at file defaults is a 226-character recipe key, and
+ * `bases-square-internal_corner.scad` is 242 — the two widest of the five — so
+ * varying `HEIGHT` over the square keeps every document near the top of the size
+ * range rather than measuring the 85-character riser.
+ *
+ * The recipes are built through the real `recipeKey`/`generatedBaseId` rather
+ * than from a fixture string, so this measures the documents the app will
+ * actually put on the wire, including the parameter fill `canonicalise` does.
+ */
+function generatedBases(count: number, distinct: number): GeneratedPlacement[] {
+  const entry = 'bases-square.scad'
+  return Array.from({ length: count }, (_, index) => {
+    const parameters = { ...fileDefaults(entry), HEIGHT: 6 + (index % distinct) }
+    const recipe = { v: 1, entry, parameters } as const
+    return {
+      base: generatedBaseId(recipeKey(recipe)),
+      recipe,
+      x: (index % 12) + 0,
+      z: Math.floor(index / 12) + 0,
+      rotation: (index % 4) * 90,
+    }
+  })
 }
 
 /* ------------------------------------------------------------- the controls */
@@ -257,7 +306,7 @@ describe('capacity at the 2,000-character budget', () => {
       })
     }
 
-    console.log(
+    report(
       [
         '',
         `share-link capacity, ${String(SHARE_URL_BUDGET)}-character URL budget (base ${String(BASE_URL.length)} chars)`,
@@ -268,7 +317,7 @@ describe('capacity at the 2,000-character budget', () => {
             `  ${row.label.padEnd(24)} ${String(row.room).padStart(11)} ${String(row.scattered).padStart(13)}`,
         ),
         '',
-      ].join('\n'),
+      ],
     )
 
     const naiveRoom = measured[0]?.room ?? 1
@@ -305,11 +354,114 @@ describe('capacity at the 2,000-character budget', () => {
         ].join(''),
       )
     }
-    console.log([...lines, ''].join('\n'))
+    report([...lines, ''])
 
     // A fifty-tile room — a single chamber, the common case — is a link somebody
     // can paste into chat without it wrapping.
     expect(await urlLength(sceneOf(room, 50))).toBeLessThan(200)
+  })
+})
+
+describe('what a generated base costs in a link', () => {
+  /**
+   * The measurement that decided row X10's first item.
+   *
+   * X9 reported that a share link silently dropped generated bases, and the
+   * honest question was not whether to warn but whether they *fit*: a generated
+   * base has no manifest ordinal, so what identifies it is a recipe, and a
+   * canonical recipe key is 85–242 characters against a 2,000-character URL.
+   *
+   * Printed, not just asserted, because the number is the argument. The bounds
+   * below are loose for the reason the rest of this file's are — zlib's
+   * parameters are not ours — and they are placed to catch the two regressions
+   * that would matter: the dedup silently not working (which would make the
+   * 90-bases-1-recipe row cost ninety documents), and the whole feature growing
+   * past the budget on a scene someone would really build.
+   */
+  it('prints the cost of the generated half against the budget', async () => {
+    const cases: readonly (readonly [label: string, tiles: number, bases: number, distinct: number])[] = [
+      ['90 tiles, no bases', 90, 0, 1],
+      ['90 tiles, 1 base', 90, 1, 1],
+      ['90 tiles, 16 bases, 1 recipe', 90, 16, 1],
+      ['90 tiles, 90 bases, 1 recipe', 90, 90, 1],
+      ['90 tiles, 90 bases, 3 recipes', 90, 90, 3],
+      ['90 tiles, 90 bases, 90 recipes', 90, 90, 90],
+      ['400 tiles, 64 bases, 2 recipes', 400, 64, 2],
+    ]
+    const measured: { label: string; chars: number }[] = []
+    for (const [label, tiles, bases, distinct] of cases) {
+      const scene: SharedScene = {
+        lock: 'openlock',
+        placements: room(tiles),
+        generated: generatedBases(bases, distinct),
+      }
+      measured.push({ label, chars: await urlLength(scene) })
+    }
+
+    const baseline = measured[0]?.chars ?? 0
+    report(
+      [
+        '',
+        `generated bases in a link, ${String(SHARE_URL_BUDGET)}-character budget (base ${String(BASE_URL.length)} chars)`,
+        '',
+        '  scene                            link chars   over no bases   of budget',
+        ...measured.map(
+          (row) =>
+            `  ${row.label.padEnd(32)} ${String(row.chars).padStart(10)} ${String(row.chars - baseline).padStart(15)} ${`${((row.chars / SHARE_URL_BUDGET) * 100).toFixed(1)}%`.padStart(11)}`,
+        ),
+        '',
+      ],
+    )
+
+    const one = measured[1]?.chars ?? 0
+    const sixteen = measured[2]?.chars ?? 0
+    const ninetyOneRecipe = measured[3]?.chars ?? 0
+    const ninetyNinetyRecipes = measured[5]?.chars ?? 0
+
+    // The first base is the whole cost, and it is affordable.
+    expect(one - baseline).toBeGreaterThan(100)
+    expect(one - baseline).toBeLessThan(600)
+
+    // **The dedup is load-bearing and this is the assertion that can fail without
+    // it.** Ninety bases on one recipe must not cost ninety documents: each carries
+    // its own 563 bytes, and deflate recovers much but not all of the repetition.
+    // Verified capable of failing: keying `collectGenerated` on the placement
+    // index rather than on `base` — so every base gets a table entry of its own —
+    // takes this delta from 66 characters to 587, and this line is the only one of
+    // the six that catches it.
+    expect(ninetyOneRecipe - one).toBeLessThan(120)
+    expect(ninetyNinetyRecipes).toBeGreaterThan(ninetyOneRecipe * 1.5)
+
+    // A scene of sixteen generated bases on one recipe under a ninety-tile room —
+    // a whole chamber floored with generated bases — is inside the budget with
+    // room to spare, which is what makes encoding them the right trade.
+    expect(sixteen).toBeLessThan(SHARE_URL_BUDGET / 2)
+    // Even the adversarial shape fits.
+    expect(ninetyNinetyRecipes).toBeLessThan(SHARE_URL_BUDGET)
+  })
+
+  it('round-trips generated bases exactly, including a rotation and an off-grid position', async () => {
+    const scene: SharedScene = {
+      lock: 'magnetic',
+      placements: room(12),
+      generated: [
+        ...generatedBases(3, 2),
+        // The exact-column escape hatch has to cover the generated half too: a
+        // quarter-unit position and a non-quarter-degree rotation force f64 for
+        // those columns, and nothing about the room's own columns changes.
+        { ...(generatedBases(1, 1)[0] as GeneratedPlacement), x: 0.25, z: 1 / 3, rotation: 33.7 },
+      ],
+    }
+    const encoded = await encodeShareFragment(scene, MANIFEST)
+    expect(encoded.ok).toBe(true)
+    if (!encoded.ok) return
+    expect(encoded.dropped).toEqual([])
+
+    const decoded = await decodeShareFragment(encoded.fragment, MANIFEST)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene).toEqual(scene)
+    expect(decoded.dropped).toEqual([])
   })
 })
 

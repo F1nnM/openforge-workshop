@@ -156,7 +156,7 @@ export interface TextMatch {
  * every (document, token, weight) triple to growable `number[]`s, which is
  * roughly 900,000 `push` calls, and `push` dominated the whole build.
  *
- *   1. Tokenise the 916-entry **tag intern table**, once. The corpus holds
+ *   1. Tokenise the 915-entry **tag intern table**, once. The corpus holds
  *      84,023 tag references, so tokenising per reference would be 92× the work
  *      for the same tokens.
  *   2. Tokenise each item's `name` **once** and each of its variants' `file`,
@@ -188,7 +188,7 @@ export function buildTextIndex(docs: readonly SearchDoc[], tagTable: readonly st
     return id
   }
 
-  // The tag vocabulary in CSR too, rather than 916 separate `Int32Array`s. The
+  // The tag vocabulary in CSR too, rather than 915 separate `Int32Array`s. The
   // pass-4 loop reads it 84,023 times, and a `for…of` over a typed array
   // allocates an iterator per visit; a flat buffer with offsets is read with a
   // plain index and measurably halves the build.

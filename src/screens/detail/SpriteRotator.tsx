@@ -34,12 +34,61 @@
  * sheet that is supposed to exist is indistinguishable from it at this layer.
  * Both render the same explicit plate rather than an empty well, so a missing
  * render reads as missing data instead of as a broken drawer.
+ *
+ * ## The tint, and why row P1's "one line" was three
+ *
+ * Rows P1 and P3 both reported this file as the last untinted blue thumbnail in
+ * the app — every other one is tinted per material family — and both recorded
+ * the fix as one `url(#of-tint-sprite-…)` here. Row X10 checked that claim
+ * before believing it, and it is wrong in two ways that matter:
+ *
+ *   1. **The `<defs>` are not guaranteed to be in the document.** `TileThumb`
+ *      mounts them from a layout effect, and `@/ui/thumb`'s barrel says a caller
+ *      like this one therefore needs only the `url(#…)` because "the filters are
+ *      already in the document". That is an assumption about what else happens
+ *      to be on screen, not a guarantee: the drawer's own subtree mounts a
+ *      `TileThumb` only through `slots/SlotFills.tsx`, which renders **nothing**
+ *      for a file with no accessory slot — 5,666 files declare no config at all
+ *      and a further 2,451 declare only a `base` slot. What normally saves it is
+ *      the grid *behind* the drawer, which is a different component's business
+ *      and one an empty result set or a still-loading library removes. A
+ *      dangling `url(#id)` renders the element **unfiltered** (Filter Effects 1
+ *      §7.1) — raw blue, silently, looking exactly like the bug being fixed. So
+ *      this file calls {@link useTintFilters} itself. It is idempotent by id, it
+ *      is 32 inert elements once per document, and a guarantee beats an audit of
+ *      every route that can reach this drawer.
+ *   2. **The filter cannot go on the element that takes focus.** A CSS filter
+ *      rasterises the element's whole painted output, and that includes its box
+ *      decorations — so a `filter` on `.of-detail-frame`, which is
+ *      `role="slider"` with `tabIndex={0}`, would run the app's single accent
+ *      focus ring (`:focus-visible` in `ui/shell/shell.css`, `2px solid
+ *      var(--acc)`) through a matrix built to un-mix a blue diffuse into a stone
+ *      colour. Sixteen materials, sixteen different focus rings, none of them the
+ *      token. `TileThumb`'s frame is not focusable, so P1 never met this. The
+ *      background and the filter therefore move to an inert child, and the
+ *      slider keeps its ring.
+ *
+ * What does *not* apply here is P1's other reason for filtering the frame rather
+ * than the image. `.of-thumb-sheet` is an `<img>` whose box is the whole sheet —
+ * ten camera angles to show one — so filtering it allocated 10× the surface.
+ * This element's box is one 288px frame with the sheet as a **background**,
+ * clipped to it, so there is one frame's worth of surface either way. The split
+ * above is about the focus ring, not about pixels.
+ *
+ * The `sprite` matrix, not the `thumb` one, and that is not interchangeable: P1
+ * measured a sheet through the thumbnail matrix at a median 1.38–4.51 ΔE00 and a
+ * thumbnail through the sheet matrix at a median 10.52–73.52, every family
+ * collapsing towards black. This draws sheet pixels, so it takes the sheet's
+ * chain.
  */
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { SpriteSheet } from '@/catalog'
+import type { MaterialId } from '@/materials'
+import { tintFilterId } from '@/materials'
 import { Eyebrow } from '@/ui/primitives'
+import { useTintFilters } from '@/ui/thumb'
 
 import {
   BOTTOM_FRAME,
@@ -69,12 +118,27 @@ export interface SpriteRotatorProps {
   sheetUrl: string | null
   /** Sheet geometry from the index; never assumed to be 2×5 here. */
   sheet: SpriteSheet
+  /**
+   * The tile's material family, deciding which of the 32 tint filters the sheet
+   * is drawn through.
+   *
+   * Required, exactly as `TileThumb`'s is and for row P3's reason: the default
+   * would be `unknown`, which renders `#535352` and is 9.64 ΔE00 from
+   * `rough_stone` — a *claim*, and one a caller should have to make on purpose.
+   * Leaving it out is how this element stayed blue.
+   */
+  material: MaterialId
 }
 
 /** The pad's layout: the ring in reading order, then the two poles. */
 const PAD_ROWS: readonly (readonly number[])[] = [RING_FRAMES, [TOP_FRAME, BOTTOM_FRAME]]
 
-export function SpriteRotator({ name, sheetUrl, sheet }: SpriteRotatorProps) {
+export function SpriteRotator({ name, sheetUrl, sheet, material }: SpriteRotatorProps) {
+  // The page's single `<defs>`, mounted from here rather than assumed present.
+  // See the module docblock: `TileThumb` is the usual mount point and this
+  // subtree does not always contain one.
+  useTintFilters()
+
   const [frame, setFrame] = useState(sheet.defaultFrame)
   /** The azimuth to return to when leaving a pole. */
   const ringFrame = useRef(isPole(sheet.defaultFrame) ? 0 : sheet.defaultFrame)
@@ -193,12 +257,16 @@ export function SpriteRotator({ name, sheetUrl, sheet }: SpriteRotatorProps) {
     }
   }
 
+  // Geometry *and* filter, on the inert child rather than on the slider — the
+  // second half of the docblock's note. `undefined` for the plate branch, which
+  // renders no sheet pixels and must not be tinted.
   const background =
     status === 'failed' || sheetUrl === null
       ? undefined
       : {
           backgroundImage: `url(${sheetUrl})`,
           ...frameBackground(frame, sheet, PREVIEW_PX),
+          filter: `url(#${tintFilterId(material, 'sprite')})`,
         }
 
   return (
@@ -228,10 +296,18 @@ export function SpriteRotator({ name, sheetUrl, sheet }: SpriteRotatorProps) {
               aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
               data-frame={frame}
               data-dragging={dragging ? '' : undefined}
-              style={background}
               onPointerDown={onPointerDown}
               onKeyDown={onKeyDown}
-            />
+            >
+              {/*
+                Inert, and the only filtered element in the well. It carries the
+                sheet so the slider above it can keep an untinted focus ring; it
+                is `aria-hidden` because the slider already names and values the
+                whole control, and a second node in the tree would be an unnamed
+                child of an adjustable widget.
+              */}
+              <div className="of-detail-sheet" style={background} aria-hidden="true" />
+            </div>
             {status === 'pending' ? <div className="of-detail-pending of-shimmer" aria-hidden="true" /> : null}
           </>
         )}
