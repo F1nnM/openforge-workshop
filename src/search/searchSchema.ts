@@ -330,6 +330,21 @@ function normaliseFacetValues(value: unknown): string[] {
 /**
  * Coerce raw wire input to the manifest ordinal of the tile in the drawer.
  *
+ * **Still an ordinal after aggregation, and that is a decision rather than an
+ * omission.** Row A1 makes the catalog 3,822 items over 8,702 files, so the
+ * drawer's subject is an aggregate while its `?tile=` names a file — row A4
+ * resolves one to the other in `src/routes/tileAddress.ts`, which carries the
+ * full argument. The two lines of it that belong here, next to the type:
+ *
+ *   - An `AggregateAddress` *is* the lowest ordinal in its group, so the two
+ *     number spaces **overlap** and a bare number cannot say which it is. Reading
+ *     an address as an ordinal lands on the item that address names; reading an
+ *     ordinal as an address misses on the 4,880 files that are not their group's
+ *     lowest. Only one of the two readings is total.
+ *   - An aggregate can **split**, which is why A1 branded the address and kept it
+ *     out of the manifest. A file cannot, so an ordinal in a saved URL still names
+ *     the same mesh across any regrouping.
+ *
  * The drawer addresses a tile by {@link ManifestOrdinal}, not by `TileId`. Two
  * reasons, and the first is the practical one: a `TileId` is a `full_name` like
  * `tiles/cave/thick_wall/…/cave%aggregate+2#corner.IL+corner,90.openlock.stl` —
@@ -406,7 +421,13 @@ export type FacetSearch = z.infer<typeof facetSearchSchema>
  * a bad path param would need a not-found boundary to avoid a blank page.
  */
 export const catalogSearchSchema = facetSearchSchema.extend({
-  /** Manifest ordinal of the tile in the detail drawer; `null` is closed. */
+  /**
+   * Manifest ordinal of the tile in the detail drawer; `null` is closed.
+   *
+   * A file's ordinal, never an `AggregateAddress` — see {@link normaliseTile} and
+   * `src/routes/tileAddress.ts`. `resolveTileTarget` turns it into the item plus
+   * the variant it named.
+   */
   tile: tileField,
 })
 

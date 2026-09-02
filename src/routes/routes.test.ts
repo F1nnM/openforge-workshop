@@ -17,9 +17,11 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { buildAggregateIndex } from '@/catalog'
 import { ManifestOrdinal } from '@/catalog/schema'
 import { BUILD_ANY, BUILD_UNSPECIFIED, buildSystemFilter, defaultCatalogSearch } from '@/search/searchSchema'
 
+import { OVERLAP, catalogOf } from './fixture'
 import { createWorkshopRouter } from './router'
 import type { WorkshopRouter } from './router'
 import { closeTileDrawer, openTileDrawer, showTileInDrawer } from './tileDrawer'
@@ -207,6 +209,26 @@ describe('detail drawer, back and forward', () => {
 
     await closeTileDrawer(router)
     expect(href(router)).toBe('/catalog?q=cave')
+  })
+
+  it('takes a whole aggregate as the subject and links it by its lowest ordinal', async () => {
+    // Row A4: the catalog lists items, so a card holds a `TileAggregate` and not
+    // an ordinal. `tileOrdinal` reads the number off `variants[0]`, which is the
+    // group minimum — never off the `AggregateAddress`, which has no way out to a
+    // number at all.
+    const index = buildAggregateIndex(catalogOf(OVERLAP))
+    const item = index.aggregates[0]
+    if (item === undefined) throw new Error('the fixture has no aggregates')
+    const router = routerAt('/catalog?q=cave')
+    await router.load()
+
+    await openTileDrawer(router, item)
+    expect(href(router)).toBe('/catalog?q=cave&tile=4')
+
+    const second = item.variants[1]
+    if (second === undefined) throw new Error('the fixture aggregate has one variant')
+    await showTileInDrawer(router, second)
+    expect(href(router)).toBe('/catalog?q=cave&tile=9')
   })
 
   it('closes a cold-loaded shared link without inventing history', async () => {
