@@ -66,7 +66,7 @@ export function measureCatalog(json: string, budget: number = SIZE_BUDGET_BYTES)
  * dropping every `config` saves **5.4 KB** and dropping every `tags` array saves
  * 19.7 KB — together 24.8 KB, or 7% of the payload. Both are enormous raw (611 KB
  * and 305 KB) and almost free compressed, because the corpus has 104 distinct
- * config refs and 916 distinct tags and brotli collapses the repetition.
+ * config refs and 915 distinct tags and brotli collapses the repetition.
  *
  * The payload is 8,702 catalog paths. `id` alone is most of it, with `file`
  * (23.5 KB) and `family` (11.3 KB) as its basename and dirname. So the real

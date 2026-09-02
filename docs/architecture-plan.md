@@ -461,7 +461,7 @@ openforge-catalog fixtures (pinned commit + recorded SHA)
 The contingency this plan originally named — moving tags and configs to a lazily-fetched
 second asset — turned out to be the wrong lever, and it was worth measuring rather than
 assuming. Dropping every config saves 5.4 KB brotli; every tag array, 19.7 KB; both, 24.8 KB
-(7%). They are enormous raw and nearly free compressed because there are only 916 distinct
+(7%). They are enormous raw and nearly free compressed because there are only 915 distinct
 tags and 104 distinct config refs. **The payload is the 8,702 catalog paths themselves.** At
 41.8 bytes per record the budget is reached at roughly 12,200 records — 40% corpus growth —
 and the fix at that point is shortening ids, not shedding fields.
