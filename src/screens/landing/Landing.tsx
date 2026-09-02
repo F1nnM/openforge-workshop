@@ -77,7 +77,7 @@ import { useEffect, useState } from 'react'
 
 import { GRID_UNIT_MM } from '@/catalog'
 import { MATERIALS } from '@/materials'
-import { Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
+import { Chip, Eyebrow, VisuallyHidden, buttonProps } from '@/ui/primitives'
 import { loadCatalogIndex } from '@/ui/shell'
 
 import { HeroPlan } from './HeroPlan'
@@ -310,10 +310,17 @@ export function Landing() {
           <h1 className="of-hero-title">{HEADLINE}</h1>
           <p className="of-hero-lede">{LEDE}</p>
           <div className="of-hero-actions">
-            <Link to="/catalog" className="of-action" data-tone="primary">
+            {/*
+              `buttonProps` rather than `<Button>`: these navigate, so they are
+              router `Link`s and not `<button>`s — see `Button.tsx` for why the
+              styling is published separately from the element. `size: 'lg'` is
+              the hero's size, now asked for by name; until row X2 it arrived
+              implicitly through the `.of-action` alias.
+            */}
+            <Link to="/catalog" {...buttonProps({ tone: 'primary', size: 'lg' })}>
               Browse the catalog
             </Link>
-            <Link to="/builder" className="of-action" data-tone="secondary">
+            <Link to="/builder" {...buttonProps({ tone: 'secondary', size: 'lg' })}>
               Open the builder
             </Link>
           </div>

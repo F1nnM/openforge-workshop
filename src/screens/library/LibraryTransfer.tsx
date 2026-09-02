@@ -38,7 +38,7 @@ import type { ChangeEvent } from 'react'
 import { useId, useState } from 'react'
 
 import { exportWorkshop, importWorkshop, useWorkshopStore } from '@/store'
-import { Eyebrow } from '@/ui/primitives'
+import { Button, Eyebrow, buttonProps } from '@/ui/primitives'
 
 /** What the last import did. `null` until the user runs one. */
 type ImportReport =
@@ -106,9 +106,9 @@ export function LibraryTransfer() {
       </p>
 
       <div className="of-lib-transfer-actions">
-        <button type="button" className="of-lib-action" data-tone="secondary" onClick={onExport}>
+        <Button tone="secondary" onClick={onExport}>
           Export JSON
-        </button>
+        </Button>
 
         {/*
           A real file input inside its label, not a button that clicks a hidden
@@ -119,7 +119,7 @@ export function LibraryTransfer() {
           nested, so the CSS can put the focus ring on the label the user can
           actually see.
         */}
-        <label className="of-lib-action" data-tone="secondary">
+        <label {...buttonProps({ tone: 'secondary' })}>
           <span>Import JSON</span>
           <input
             className="of-sr-only"

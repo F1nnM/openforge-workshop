@@ -8,6 +8,29 @@
       name="description"
       content="Browse the OpenForge catalog of 3D-printable dungeon terrain, keep a library of the tiles you print with, and lay out a room."
     />
+
+    <!--
+      The share block. `og:image`, `og:url` and `rel="canonical"` are
+      DELIBERATELY ABSENT, and the reasoning is written out and enforced in
+      tools/hygiene/markup.test.ts rather than here: an HTML comment is shipped
+      to every visitor on the critical path, and a source comment is not.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="OpenForge Workshop" />
+    <meta property="og:title" content="OpenForge Workshop" />
+    <meta
+      property="og:description"
+      content="Browse the OpenForge catalog of 3D-printable dungeon terrain, keep a library of the tiles you print with, and lay out a room."
+    />
+    <meta name="twitter:card" content="summary" />
+
+    <!--
+      Painted before any stylesheet arrives, so a cold load starts on parchment
+      rather than white. Both values are src/tokens/tokens.css's own.
+    -->
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#e7dcc4" />
+
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Alegreya:wght@500;600;700&family=Alegreya+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"

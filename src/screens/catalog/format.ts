@@ -199,6 +199,210 @@ function isConnectionSpec(segment: string): boolean {
   return parts.length > 0 && parts.every((part) => CONNECTION_VOCABULARY.has(part))
 }
 
+/* ----------------------------------------------------------------- tag chips */
+
+/**
+ * What a tag chip costs, and what the card's one line can hold.
+ *
+ * The row is a **fixed single line**, for the reason `TileGrid`'s docblock gives:
+ * `VirtuosoGrid` measures one card and extrapolates, so a row that was two lines
+ * on one card and one on its neighbour would drift the scroll position. A card
+ * whose chips would not fit shows the ones that do — see {@link cardTagChips}.
+ *
+ * Every number here is derived rather than chosen:
+ *
+ *   - `widthPx` is **195** — the narrowest card's content box.
+ *     `.of-card-grid` is `minmax(215px, 1fr)` and `.of-card` takes 9px of
+ *     padding and a 1px border each side, so 215 − 2×9 − 2×1 = 195.
+ *   - `characterPx` is **5.7** — IBM Plex Mono advances 0.6em and
+ *     `.of-chip[data-tone='tag']` is 9.5px, so 9.5 × 0.6 = 5.7. (The
+ *     availability strip's 5.4 is the same arithmetic at its 9px.)
+ *   - `chipPaddingPx` is **12** — `padding: 2px 6px`, both sides.
+ *   - `gapPx` is **3** — `.of-card-tags`' gap, matching the availability strip's.
+ *
+ * `corpus.test.ts` measures the widest row the live corpus produces against
+ * `widthPx`, so a relabel that would clip a chip out of sight fails the build.
+ */
+export const TAG_CHIP_BUDGET = Object.freeze({
+  /** Rendered width the one-line row provides, in px, at the narrowest card. */
+  widthPx: 195,
+  /** Per-character advance at the tag chip's type size, in px. */
+  characterPx: 5.7,
+  /** Horizontal padding one chip adds, in px. */
+  chipPaddingPx: 12,
+  /** Gap between two chips, in px. */
+  gapPx: 3,
+})
+
+/** The width one row of tag chips costs, under {@link TAG_CHIP_BUDGET}'s metrics. */
+export function tagChipRowWidth(labels: readonly string[]): number {
+  if (labels.length === 0) return 0
+  const characters = labels.reduce((total, label) => total + label.length, 0)
+  return (
+    characters * TAG_CHIP_BUDGET.characterPx +
+    labels.length * TAG_CHIP_BUDGET.chipPaddingPx +
+    (labels.length - 1) * TAG_CHIP_BUDGET.gapPx
+  )
+}
+
+/** One chip on the card's tag row. */
+export interface CardTagChip {
+  /** The tag it came from, so a key and a hint can both be derived from it. */
+  readonly tag: string
+  /** What is printed — the tag's last segment. */
+  readonly label: string
+  /**
+   * The segments above the label, for the chip's clipped hint.
+   *
+   * `''` for a single-segment tag, and then nothing is announced beyond the
+   * label. `Imperial` on its own does not say imperial *what*, and the answer is
+   * the path it hangs off: `interface · secret door · magnetic`.
+   */
+  readonly hint: string
+}
+
+/**
+ * The two roots the card already renders as their own dedicated control.
+ *
+ * `size|` is the size chip's axis and `connection|` is the availability strip's.
+ * Both are deliberate: the size chip states the *resolved footprint* rather than
+ * the tags it came from, and `availability.ts` chose what a connection fact
+ * should say ("will this join my build") in preference to printing the tag —
+ * measured, because `conn` throws the position segment away and advertised
+ * dragonlock on 1,283 tiles that do not offer it underneath. A tag chip
+ * re-printing either axis would put a second, worse answer beside the good one:
+ * `connection|openforge` alone would appear on about 3,000 cards, and it is
+ * precisely the declaration that the joinery lives on a separately printed base,
+ * which the base chip already says.
+ *
+ * Every other root — `shape|`, `component|`, `texture|`, `build|`, `interface|`,
+ * `part|`, `decoration|`, `scatter|`, `set|` — is eligible, and is then filtered
+ * by whether the card has already said it. That is the second rule and it does
+ * most of the work: `name` is synthesised from tags, so most of a tile's tags are
+ * already in its title.
+ */
+const CARD_CONTROLLED_ROOTS: ReadonlySet<string> = new Set(['size', 'connection'])
+
+/** `interface|secret_door|magnetic|imperial` → ` interface secret door magnetic imperial `. */
+function spoken(text: string): string {
+  return ` ${text.toLowerCase().replaceAll(/[^a-z0-9]+/g, ' ').trim()} `
+}
+
+/**
+ * The card's tag chips — **the last thing that makes a card distinguishable.**
+ *
+ * design-contract.md §2.2 has asked for tag chips on the card since v1 and v1
+ * left them out. Row A3 then measured what the omission costs, over the real
+ * corpus and against the strings the card actually renders:
+ *
+ * | card grows | collide groups | items | worst |
+ * | --- | ---: | ---: | ---: |
+ * | name alone | 131 | 323 | 6 |
+ * | + texture + size chip | **131** | **323** | 6 |
+ * | + availability chips | 91 | 233 | 5 |
+ * | + byte range | 38 | 79 | 3 |
+ * | + filename variant token | 21 | 45 | 3 |
+ * | **+ these chips** | **0** | **0** | **0** |
+ *
+ * So this closes distinguishability, and nothing else on the card could: texture
+ * and the size chip separate **nothing**, because `name` is synthesised from
+ * those very tags. Re-derived in `corpus.test.ts`, step by step, including the
+ * last row.
+ *
+ * ## Three rules, in this order
+ *
+ *   1. **Not a tag another tag hangs off.** `shape|wall` beside
+ *      `shape|wall|low` prints the parent twice; only the leaf is rendered.
+ *   2. **Not an axis the card already controls** — see
+ *      {@link CARD_CONTROLLED_ROOTS}.
+ *   3. **Not something the card has already said.** The label is matched, whole
+ *      and on word boundaries, against the title, the texture line and the size
+ *      chip. This is the rule that turns a noisy row into a quiet one: measured,
+ *      `shape|wall` → `Wall` would otherwise be the commonest chip in the corpus
+ *      at 1,489 cards, every one of them beside a title with "Wall" in it.
+ *      Word boundaries and not a substring, so `Top` is suppressed by
+ *      "Dart Holes Top Trap" and **not** by "Topless".
+ *
+ * What survives is 79 labels over the whole corpus, and the row is empty on
+ * **1,044 of 3,822 items** — a card whose tags the title already covers shows
+ * nothing rather than a placeholder, exactly as {@link fileTokenLabel} does.
+ * Measured: 1 chip at the median, 2 at p95, 4 at the most.
+ *
+ * ## The order is specific-first, and that is what the width budget rests on
+ *
+ * Chips are sorted by **depth descending**, then alphabetically. Depth is
+ * specificity — `interface|secret_door|magnetic|imperial` is a narrower claim
+ * than `shape|square` — and it is also, measured, where the discriminating tag
+ * always is: every one of A3's 21 remaining groups is separated by a three- or
+ * four-segment `interface|` or `shape|` tag, against a two-segment neighbour they
+ * share. So when the row runs out of width the chip that is dropped is the one
+ * the card least needed, and the closure above survives the budget: it is
+ * measured **after** truncation, and truncation touches **53 of 3,822 cards**.
+ * The drawer lists every tag in full and is one click away.
+ *
+ * ## It is a property of the item, not of the file
+ *
+ * Passed the *preview* variant's tags, which is what the card already holds for
+ * its material swatch — and that is sound rather than convenient: measured over
+ * the corpus, the number of aggregates whose chip row would differ depending on
+ * which variant supplied it is **0**. That is the test A3 set for
+ * `fileTokenLabel` (the raw filename tail failed it on 1,210 items) and this
+ * passes it outright, because the axis an aggregate collapses across is
+ * `connection|`, which rule 2 removes.
+ *
+ * @param tags     The preview record's de-interned tags — `index.tagsFor(record)`.
+ * @param saidText Strings the card already prints: the title, the texture line
+ *                 and the size chip.
+ * @param budgetPx Overrides {@link TAG_CHIP_BUDGET.widthPx}. The card does not;
+ *                 `corpus.test.ts` passes `Infinity` to count what the budget
+ *                 costs, which is the only honest way to state that figure —
+ *                 the same arrangement `stlGate`'s `limit` has with the 3D
+ *                 panel's dev harness.
+ */
+export function cardTagChips(
+  tags: readonly string[],
+  saidText: readonly string[],
+  budgetPx: number = TAG_CHIP_BUDGET.widthPx,
+): readonly CardTagChip[] {
+  const unique = [...new Set(tags)]
+  const leaves = unique.filter((tag) => {
+    const bar = tag.indexOf('|')
+    if (CARD_CONTROLLED_ROOTS.has(bar === -1 ? tag : tag.slice(0, bar))) return false
+    return !unique.some((other) => other !== tag && other.startsWith(`${tag}|`))
+  })
+
+  // Depth descending, then alphabetical — a total order, so a card always reads
+  // the same way. See the docblock for why specificity leads.
+  leaves.sort(
+    (left, right) =>
+      right.split('|').length - left.split('|').length || (left < right ? -1 : left > right ? 1 : 0),
+  )
+
+  const already = spoken(saidText.join(' '))
+  const chips: CardTagChip[] = []
+  const seen = new Set<string>()
+
+  for (const tag of leaves) {
+    const cut = tag.lastIndexOf('|')
+    // `buildLabel` rather than `humaniseSegment`: the only irregular spellings in
+    // the tag vocabulary are the build system's — `S2W`, `S-system` — and that
+    // map already holds them. It falls through to `humaniseSegment` for the other
+    // 77 labels, so this is one spelling of each word in the app, not two.
+    const label = buildLabel(tag.slice(cut + 1))
+    const phrase = spoken(label)
+    if (already.includes(phrase) || seen.has(phrase)) continue
+    if (tagChipRowWidth([...chips.map((chip) => chip.label), label]) > budgetPx) continue
+    seen.add(phrase)
+    chips.push({
+      tag,
+      label,
+      hint: cut === -1 ? '' : tag.slice(0, cut).replaceAll('|', ' · ').replaceAll('_', ' '),
+    })
+  }
+
+  return chips
+}
+
 /* ----------------------------------------------------------------- footprint */
 
 /** `1` not `1.0`, `1.5` not `1.50` — the form the filenames use. */

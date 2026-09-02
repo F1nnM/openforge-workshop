@@ -56,9 +56,12 @@ export {
   lockChipLabel,
 } from './availability'
 
+export type { CardTagChip } from './format'
 export {
+  TAG_CHIP_BUDGET,
   buildLabel,
   bytesRangeLabel,
+  cardTagChips,
   connLabel,
   countLabel,
   fileSizeLabel,
@@ -66,5 +69,6 @@ export {
   humaniseSegment,
   kindLabel,
   sizeLabel,
+  tagChipRowWidth,
   variantTokenLabel,
 } from './format'

@@ -19,7 +19,11 @@
  *   4. **A card is distinguishable.** 131 display names are shared by 323 items,
  *      so the cascade from "name alone" to "everything the card shows" is
  *      re-derived here step by step. It is the only way to tell whether the
- *      facets a card carries are doing the work claimed for them.
+ *      facets a card carries are doing the work claimed for them — and row X2
+ *      added its last step, the tag chips, which take the remainder to **0**.
+ *   5. **The tag row fits its fixed single line.** The same shape as (2), against
+ *      `format.ts#TAG_CHIP_BUDGET`: the widest row the corpus produces is
+ *      measured, so a relabel that would clip a chip fails the build.
  *
  * The corpus is the emitted `public/catalog/catalog.json` (`npm run
  * import:catalog`), matching the convention in `../detail/corpus.test.ts`. When
@@ -34,7 +38,15 @@ import type { CatalogFile, CatalogRecord, TileAggregate } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, buildAggregateIndex } from '@/catalog'
 
 import { CHIP_BUDGET, availabilityChips, availabilityOf, chipStripWidth } from './availability'
-import { bytesRangeLabel, fileTokenLabel, humaniseSegment, sizeLabel } from './format'
+import {
+  TAG_CHIP_BUDGET,
+  bytesRangeLabel,
+  cardTagChips,
+  fileTokenLabel,
+  humaniseSegment,
+  sizeLabel,
+  tagChipRowWidth,
+} from './format'
 
 const CATALOG_PATH =
   process.env.OPENFORGE_CATALOG ?? join(process.cwd(), 'public', 'catalog', 'catalog.json')
@@ -70,6 +82,33 @@ const byId = new Map(records.map((record) => [record.id as string, record]))
 
 const previewOf = (item: TileAggregate): CatalogRecord | undefined => byId.get(item.preview)
 const chipsOf = (item: TileAggregate) => availabilityChips(availabilityOf(item))
+
+/** A record's tags as strings — what `CatalogIndex.tagsFor` hands the card. */
+const tagsOf = (record: CatalogRecord): readonly string[] =>
+  record.tags.map((at) => loaded?.tags[at] ?? '')
+
+/** The three strings the card prints above the tag row, for the suppression rule. */
+const saidOf = (item: TileAggregate): readonly string[] => [
+  item.name,
+  item.texture === undefined ? 'Untextured' : humaniseSegment(item.texture),
+  sizeLabel(item.foot, item.sizeCode),
+]
+
+/**
+ * The tag row exactly as the card renders it.
+ *
+ * `budgetPx` is the shipped budget by default; the truncation test lifts it, and
+ * that is the only way to state what one line costs without writing the rule out
+ * a second time.
+ */
+const tagRowOf = (item: TileAggregate, budgetPx?: number): readonly string[] => {
+  const preview = previewOf(item)
+  return cardTagChips(
+    preview === undefined ? [] : tagsOf(preview),
+    saidOf(item),
+    budgetPx ?? TAG_CHIP_BUDGET.widthPx,
+  ).map((chip) => chip.label)
+}
 
 function tally(values: readonly string[]): Record<string, number> {
   const counts: Record<string, number> = {}
@@ -228,6 +267,34 @@ describeCorpus('the strip fits its fixed two-line box', () => {
   })
 })
 
+/* ------------------------------------------------------------- the tag row */
+
+describeCorpus('the tag row fits its fixed single line', () => {
+  it('never exceeds the 195px line, with 2.7px to spare at the worst card', () => {
+    const widest = Math.max(...items.map((item) => tagChipRowWidth(tagRowOf(item))))
+    expect(widest).toBeCloseTo(192.3, 1)
+    expect(widest).toBeLessThanOrEqual(TAG_CHIP_BUDGET.widthPx)
+  })
+
+  it('costs 53 of 3,822 cards a chip, which is the price of one line over two', () => {
+    // The budget lifted, so the figure is the rule's own and not a second copy
+    // of it. Two lines would drop nothing — and would reserve 23 more pixels on
+    // every card, including the 1,044 that have no chips at all. One line and a
+    // 1.4% truncation is the trade, and the drawer lists every tag in full.
+    const truncated = items.filter(
+      (item) => tagRowOf(item).length < tagRowOf(item, Number.POSITIVE_INFINITY).length,
+    )
+    expect(truncated).toHaveLength(53)
+
+    // And what an untruncated row would have cost: still 4 chips at the most,
+    // but 256.5px of them — 61.5px past the line, so a second line is the only
+    // place they could have gone.
+    const unbounded = items.map((item) => tagRowOf(item, Number.POSITIVE_INFINITY))
+    expect(Math.max(...unbounded.map((row) => row.length))).toBe(4)
+    expect(Math.max(...unbounded.map(tagChipRowWidth))).toBeCloseTo(256.5, 1)
+  })
+})
+
 /* --------------------------------------------------------- distinguishability */
 
 describeCorpus('a card can be told from its neighbour', () => {
@@ -294,6 +361,59 @@ describeCorpus('a card can be told from its neighbour', () => {
         return [part.name, part.texture, part.size, part.chips, part.bytes, part.token]
       }),
     ).toEqual({ groups: 21, items: 45, worst: 3 })
+  })
+
+  it('closes the remainder with the tag chips — 21 groups and 45 items to 0', () => {
+    // Row X2's whole content, and the last row of the cascade above. Measured as
+    // the card renders it: the preview record's tags, the suppression rule
+    // against the three strings the card prints, and the width budget already
+    // applied — so this is the shipped row, not an upper bound on one.
+    const keyed = collisions(
+      items.map((item) => {
+        const part = parts(item)
+        return [part.name, part.texture, part.size, part.chips, part.bytes, part.token]
+          .concat(tagRowOf(item))
+          .join('|')
+      }),
+    )
+    expect(keyed).toEqual({ groups: 0, items: 0, worst: 0 })
+  })
+
+  it('costs one chip at the median, and nothing at all on 1,044 items', () => {
+    // What the row is, as a shape. A card whose tags its own title already covers
+    // shows nothing rather than a placeholder — the same choice `fileTokenLabel`
+    // makes on its 40 tokenless items — and the line is reserved anyway, because
+    // `VirtuosoGrid` assumes a uniform item height.
+    const rows = items.map((item) => tagRowOf(item))
+    const lengths = rows.map((row) => row.length).sort((left, right) => left - right)
+
+    expect(rows.filter((row) => row.length === 0)).toHaveLength(1044)
+    expect(lengths[Math.floor(lengths.length / 2)]).toBe(1)
+    expect(lengths[lengths.length - 1]).toBe(4)
+    // 79 labels over 3,822 cards, which is what makes the row readable rather
+    // than a dump of the 915-value tag vocabulary.
+    expect(new Set(rows.flat()).size).toBe(79)
+  })
+
+  it('reads the tag row off the design, so the preview variant does not decide it', () => {
+    // The test A3 set for `fileTokenLabel`, and the reason `connection|` is the
+    // one root dropped by rule rather than by suppression: the axis an aggregate
+    // collapses across is exactly that one, so nothing left in the row can differ
+    // between an item's variants. The raw filename tail failed this on 1,210
+    // items. This is 0 of 3,822.
+    const varying = items.filter((item) => {
+      const said = saidOf(item)
+      const rows = new Set(
+        item.variants.map((variant) => {
+          const record = byId.get(variant.id)
+          return cardTagChips(record === undefined ? [] : tagsOf(record), said)
+            .map((chip) => chip.label)
+            .join(',')
+        }),
+      )
+      return rows.size > 1
+    })
+    expect(varying).toHaveLength(0)
   })
 
   it('leaves a remainder that tag chips would close — every one of the 21', () => {

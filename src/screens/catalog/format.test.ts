@@ -16,8 +16,10 @@ import { Footprint } from '@/catalog'
 import { BUILD_UNSPECIFIED, KIND_OTHER } from '@/search'
 
 import {
+  TAG_CHIP_BUDGET,
   buildLabel,
   bytesRangeLabel,
+  cardTagChips,
   connLabel,
   countLabel,
   fileSizeLabel,
@@ -25,6 +27,7 @@ import {
   humaniseSegment,
   kindLabel,
   sizeLabel,
+  tagChipRowWidth,
   variantTokenLabel,
 } from './format'
 
@@ -227,5 +230,133 @@ describe('variantTokenLabel', () => {
 
   it('is empty when there is no dot to split on', () => {
     expect(variantTokenLabel('support_block.stl')).toBe('')
+  })
+})
+
+describe('cardTagChips', () => {
+  /** The strings a card renders above the tag row, for the suppression rule. */
+  const said = (name: string, texture = 'Dungeon stone', size = '2×2') => [name, texture, size]
+  const labels = (tags: readonly string[], from: readonly string[]) =>
+    cardTagChips(tags, from).map((chip) => chip.label)
+
+  it('renders only the leaf of a tag another tag hangs off', () => {
+    // `shape|wall` beside `shape|wall|low` would print the parent twice.
+    expect(labels(['shape|wall', 'shape|wall|low'], said('Cave Arrow Slit 2x'))).toEqual(['Low'])
+  })
+
+  it('drops the two axes the card already controls', () => {
+    // The size chip owns `size|` and the availability strip owns `connection|`.
+    // `connection|openforge` is the declaration that the joinery is on a
+    // separately printed base, which the base chip already says.
+    expect(
+      labels(
+        ['size|width|2', 'size|openlock|A', 'connection|openforge', 'connection|side|dragonlock'],
+        said('Cave Arrow Slit 2x'),
+      ),
+    ).toEqual([])
+  })
+
+  it('drops a label the title, the texture line or the size chip already says', () => {
+    expect(labels(['shape|wall'], said('Cave Arrow Slit Wall 2x'))).toEqual([])
+    expect(labels(['texture|dungeon_stone'], said('Cave Arrow Slit 2x'))).toEqual([])
+    expect(labels(['shape|square'], said('Cave Arrow Slit 2x', 'Dungeon stone', '2×2 square'))).toEqual([])
+    // And keeps it when nothing above has said it.
+    expect(labels(['shape|square'], said('Cave Arrow Slit 2x'))).toEqual(['Square'])
+  })
+
+  it('matches whole words, so `Top` survives `Topless`', () => {
+    // A substring test would suppress the chip on any card whose title happens to
+    // contain the letters — which is most of the reason the rule is a phrase
+    // match on word boundaries rather than `String.includes` on the raw text.
+    expect(labels(['interface|secret_door|top'], said('Cut Stone Topless Wall 2x'))).toEqual(['Top'])
+    expect(labels(['interface|secret_door|top'], said('Cut Stone Top Trap Wall 2x'))).toEqual([])
+  })
+
+  it('separates the imperial and metric magnet cases, which is why the row exists', () => {
+    // Two of A3's 21 remaining groups, verbatim: same name, same texture, same
+    // footprint, same availability chips, same byte range, same filename token.
+    const name = 'Cut Stone Secret Door Low Wall 2x A'
+    expect(labels(['interface|secret_door|magnetic|imperial'], said(name))).toEqual(['Imperial'])
+    expect(labels(['interface|secret_door|magnetic|metric'], said(name))).toEqual(['Metric'])
+    expect(labels(['interface|secret_door|mechanical'], said(name))).toEqual(['Mechanical'])
+  })
+
+  it('carries the segments above the label as the chip’s hint', () => {
+    // `Imperial` alone does not say imperial what.
+    expect(cardTagChips(['interface|secret_door|magnetic|imperial'], said('X'))).toEqual([
+      {
+        tag: 'interface|secret_door|magnetic|imperial',
+        label: 'Imperial',
+        hint: 'interface · secret door · magnetic',
+      },
+    ])
+    // A single-segment tag has no path, so it announces nothing extra.
+    expect(cardTagChips(['scatter'], said('X'))[0]?.hint).toBe('')
+  })
+
+  it('spells the build system’s two irregular labels the way the sidebar does', () => {
+    // `humaniseSegment` would give `S2w`. `buildLabel` already holds the app's
+    // one spelling of each, and falls through for every other label.
+    expect(labels(['build|s2w'], said('Cave Wall 2x'))).toEqual(['S2W'])
+    expect(labels(['build|s-system'], said('Cave Wall 2x'))).toEqual(['S-system'])
+  })
+
+  it('de-duplicates by label, not by tag', () => {
+    // `shape|corner|wall` and `shape|floor|wall` are two tags and one word; two
+    // identical chips side by side would read as a rendering fault.
+    expect(labels(['shape|corner|wall', 'shape|floor|wall'], said('Cave Corner 2x'))).toEqual(['Wall'])
+  })
+
+  it('orders specific-first, then alphabetically', () => {
+    // Depth is specificity, and measured it is also where the discriminating tag
+    // always is — so when the width budget bites, the chip dropped is the one the
+    // card least needed.
+    expect(
+      labels(
+        ['shape|square', 'interface|secret_door|magnetic|imperial', 'part|door'],
+        said('Cave Secret Door 2x'),
+      ),
+    ).toEqual(['Imperial', 'Square'])
+  })
+
+  it('drops what will not fit rather than wrapping to a second line', () => {
+    // Three 14-character labels: two fit the 195px budget (186.6px) and the third
+    // does not (239.4px).
+    const wide = [
+      'interface|a|aaaaaaaaaaaaaa',
+      'interface|b|bbbbbbbbbbbbbb',
+      'interface|c|cccccccccccccc',
+    ]
+    const kept = labels(wide, said('X'))
+    expect(kept).toEqual(['Aaaaaaaaaaaaaa', 'Bbbbbbbbbbbbbb'])
+    expect(tagChipRowWidth(kept)).toBeLessThanOrEqual(TAG_CHIP_BUDGET.widthPx)
+  })
+
+  it('keeps packing past a chip that did not fit', () => {
+    // A skip and not a stop: the row is a subsequence of the specific-first
+    // order, so a short chip behind a long one still reaches the card. Stopping
+    // at the first miss would throw away information for nothing.
+    const kept = labels(
+      ['interface|a|aaaaaaaaaaaaaa', 'interface|b|bbbbbbbbbbbbbbbbbbbbbbbb', 'interface|c|low'],
+      said('X'),
+    )
+    expect(kept).toEqual(['Aaaaaaaaaaaaaa', 'Low'])
+  })
+})
+
+describe('tagChipRowWidth', () => {
+  it('is zero for an empty row, and gaps only between chips', () => {
+    expect(tagChipRowWidth([])).toBe(0)
+    // One chip: characters × 5.7 + one chip's 12px of padding, no gap.
+    expect(tagChipRowWidth(['Low'])).toBeCloseTo(3 * 5.7 + 12, 5)
+    // Two: two paddings and one gap.
+    expect(tagChipRowWidth(['Low', 'Top'])).toBeCloseTo(6 * 5.7 + 24 + 3, 5)
+  })
+
+  it('is measured against the narrowest card’s content box', () => {
+    // 215px grid minimum − 2 × 9px card padding − 2 × 1px border.
+    expect(TAG_CHIP_BUDGET.widthPx).toBe(215 - 2 * 9 - 2 * 1)
+    // IBM Plex Mono advances 0.6em, and the tag chip is 9.5px.
+    expect(TAG_CHIP_BUDGET.characterPx).toBeCloseTo(9.5 * 0.6, 5)
   })
 })

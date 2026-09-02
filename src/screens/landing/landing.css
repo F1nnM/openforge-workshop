@@ -93,14 +93,13 @@
 /* Anchors, not buttons — they navigate, and a router `Link` should be a link so
    that middle-click, cmd-click and "copy link address" all work.
 
-   The whole look is the shared button primitive's. `.of-action` is one of the
-   two legacy class names `../../ui/primitives/primitives.css` still answers to —
-   the tones, the hover, the hero's `lg` size and the outlined tone's one-pixel
-   padding trick all live there now, in one block instead of the two this file and
-   `../library/library.css` had each grown. The size is declared beside the
-   primitive's other sizes rather than here so it cannot depend on which of the two
-   stylesheets the bundler emits first. New call sites use `<Button size="lg">`;
-   this alias goes when row 16's markup is next opened. */
+   The whole look is the shared button primitive's, spelled through
+   `buttonProps({ tone, size: 'lg' })` — see `Landing.tsx`. The `.of-action` alias
+   that used to carry it in `../../ui/primitives/primitives.css` is gone: row X2
+   swapped these two call sites, so the hero's `lg` size is now asked for by name
+   rather than inferred from a class the primitive had to keep answering to.
+   The rule below is the one thing that is genuinely this screen's — where a
+   button sits in this layout at a phone width, not what it looks like. */
 
 /* ── The four figures ────────────────────────────────────────────────────────
    The mock sets these as one 12px mono line of four items. They are the page's
@@ -381,7 +380,7 @@
     gap: 10px;
   }
 
-  .of-action {
+  .of-hero-actions .of-button {
     flex: 1 1 100%;
   }
 }

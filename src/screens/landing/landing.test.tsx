@@ -314,6 +314,25 @@ describe('Landing', () => {
     )
   })
 
+  it('styles both hero actions through the button primitive, at the hero’s size', async () => {
+    // Row X2's swap. Until it, these two carried `.of-action`, a class name
+    // `primitives.css` answered to *and* used to infer the `lg` size from — so
+    // the size was a property of the class rather than something the call site
+    // asked for. Both are `Link`s and not `<button>`s, because they navigate, so
+    // the styling arrives through `buttonProps` rather than through `<Button>`.
+    await renderLanding()
+
+    const primary = screen.getByRole('link', { name: 'Browse the catalog' })
+    const secondary = screen.getByRole('link', { name: 'Open the builder' })
+
+    for (const action of [primary, secondary]) {
+      expect(action).toHaveClass('of-button')
+      expect(action).toHaveAttribute('data-size', 'lg')
+    }
+    expect(primary).toHaveAttribute('data-tone', 'primary')
+    expect(secondary).toHaveAttribute('data-tone', 'secondary')
+  })
+
   it('renders the three steps as an ordered list, with their numerals in sequence', async () => {
     const { container } = await renderLanding()
 
