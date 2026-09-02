@@ -379,7 +379,7 @@ function TileDetail({
         {address}
       </a>
 
-      <VariantsTable aggregate={aggregate} shown={shown} choice={choice} />
+      <VariantsTable aggregate={aggregate} catalog={catalog} shown={shown} choice={choice} />
 
       <Eyebrow as="span" className="of-detail-section">
         Tags

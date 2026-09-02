@@ -62,6 +62,7 @@ import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { PlanCanvas, describeCell, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
 import type { PlanStatus } from '@/builder/canvas'
 import { BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
+import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
@@ -191,6 +192,7 @@ function Builder({ index }: { index: CatalogIndex }) {
           every time somebody glanced at the room.
         */}
         <Builder3DPanel catalog={planCatalog} placements={placements} assets={index.file.assets} />
+
       </div>
 
       <div className="of-builder-bill">
@@ -208,6 +210,14 @@ function Builder({ index }: { index: CatalogIndex }) {
           sheet={index.file.sprite}
           download={download}
         />
+        {/*
+          Row C2, and the third child of a two-row grid on purpose: the bill
+          keeps the `1fr` and this lands in the implicit `auto` row beneath it.
+          It is the half of the inventory the bill cannot hold — a composition
+          slot is not a placement, so `buildBillOfTiles` neither counts a torch
+          in a wall's `torch` slot nor can.
+        */}
+        <SlotsPanel catalog={index.file} placements={placements} />
       </div>
     </section>
   )
