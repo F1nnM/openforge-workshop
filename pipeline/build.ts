@@ -17,6 +17,14 @@
  * — come from `pipeline/tessellation.ts` rather than from a constant here. The
  * pipeline stays a pure function of the tag list plus that table.
  *
+ * Row A1 added one step after the parse rather than inside it. Aggregation emits
+ * nothing — one catalog item per `design` is derived in the browser by
+ * `src/catalog/aggregate.ts` — so the build's job is to check the properties six
+ * downstream rows read the grouping for, and to report what it measured.
+ * `pipeline/aggregate.ts` owns both, and {@link buildCatalog} fails on a broken
+ * invariant rather than shipping an index whose cards would hoist a field that
+ * is not constant.
+ *
  * Two properties are deliberate and tested:
  *
  *   - **Records are sorted by `id`, not by ordinal.** Catalog paths share long
@@ -31,9 +39,11 @@
  */
 import { basename, dirname } from 'node:path'
 
+import type { AggregateClass } from '../src/catalog/aggregate'
 import type { Footprint } from '../src/catalog'
 import { CatalogFile, MEASURED_SPRITE_SHEET, SCHEMA_VERSION } from '../src/catalog'
 
+import { assertAggregation, measureAggregation } from './aggregate'
 import { buildDesignIndex } from './design'
 import {
   buildSystem,
@@ -79,6 +89,31 @@ export interface BuildStats {
   distinctNames: number
   newOrdinals: number
   retiredOrdinals: number
+  /**
+   * The catalog after the collapse — one item per `design`, by shape.
+   *
+   * `designs` above counts the groups; this says what is *in* them, which is the
+   * figure the aggregation rows are scoped against: 2,137 topper-only, 931
+   * `both` — the pair the owner asked to merge — 340 base-only, 320
+   * integrated-only, 94 insert-only, and 0 `mixed`.
+   */
+  aggregateClasses: Record<AggregateClass, number>
+  /**
+   * How well `layer === 'topper'` predicts "needs a separately printed base",
+   * scored against the filename's connection token. Measured 1.0 / 0.999 with 4
+   * misses, all four corpus defects. `pipeline/aggregate.ts` holds precision at
+   * exactly 1 and recall above 99%.
+   */
+  baseDetection: { precision: number; recall: number; missed: number }
+  /**
+   * Aggregates holding two distinct composition-slot sets — **828 (21.7%)**.
+   *
+   * The one field the collapse is not lossless on, which is why the aggregate's
+   * slots are the union with provenance rather than a pick. Tracked here because
+   * a drop to 0 would mean the union machinery had quietly stopped doing
+   * anything.
+   */
+  aggregatesWithVaryingConfig: number
 }
 
 export interface BuildResult {
@@ -161,6 +196,9 @@ export function buildCatalog(options: BuildOptions): BuildResult {
     records,
   })
 
+  const aggregation = measureAggregation(file)
+  assertAggregation(aggregation)
+
   return {
     file,
     manifest,
@@ -183,6 +221,13 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       distinctNames: new Set(records.map((record) => record.name)).size,
       newOrdinals: added.length,
       retiredOrdinals: retired.length,
+      aggregateClasses: aggregation.stats.classes,
+      baseDetection: {
+        precision: aggregation.detection.precision,
+        recall: aggregation.detection.recall,
+        missed: aggregation.detection.falseNegatives,
+      },
+      aggregatesWithVaryingConfig: aggregation.stats.varies.config ?? 0,
     },
   }
 }

@@ -5,10 +5,29 @@
  * split later without touching five other workstreams. Everything here is a Zod
  * schema, a type inferred from one, a measured constant, or a helper over them —
  * no data and no I/O.
+ *
+ * Row A1 added the second module behind this barrel: `./aggregate` derives one
+ * catalog item per `design` from a parsed `CatalogFile`. It is still no data and
+ * no I/O — a pure function of the artefact, memoisable on its version stamp, the
+ * same contract `buildAssemblyIndex` offers.
  */
+export type {
+  AggregateClass,
+  AggregateIndex,
+  AggregateSlot,
+  AggregateStats,
+  BaseRequirement,
+  TileAggregate,
+  TileVariant,
+  VariantPreference,
+  VariantSelection,
+  VariantVerdict,
+} from './aggregate'
+export { aggregateAddress, buildAggregateIndex, selectVariant, variantsByPreference } from './aggregate'
 export type { ArcBandEvidence, ArcFootprint } from './schema'
 export {
   ARC_BAND_EVIDENCE,
+  AggregateAddress,
   ArcBand,
   ArcBandBasis,
   BlobId,
