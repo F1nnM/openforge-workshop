@@ -23,6 +23,9 @@ import {
   textureRoot,
 } from './facets'
 import {
+  CURVED_INTERFACE_TAG,
+  DEFAULT_ARC_BAND,
+  arcBandOf,
   formatUnit,
   footprintKind,
   hasCurveMarker,
@@ -101,7 +104,20 @@ describe('footprint', () => {
       'size|radius|4',
       'size|angle|90',
     ]
-    expect(resolveFootprint(tags)).toEqual({ shape: 'arc', radius: 4, angle: 90 })
+    // Row W5: the footprint is the band, not the radius. This tile names no
+    // band, so it takes the written default — `radial`, `[R-2, R]` — and is
+    // stamped `fallback` because the *assignment* is a default even though the
+    // rule itself is one W1 confirmed 17 times.
+    expect(resolveFootprint(tags)).toEqual({
+      shape: 'arc',
+      rIn: 2,
+      rOut: 4,
+      sweep: 90,
+      band: 'radial',
+      bandBasis: 'fallback',
+    })
+    // The token still says `4r90`: 4 is the tagged interface radius, recovered
+    // from `rOut` because `radial` lies inside it.
     expect(sizeToken(resolveFootprint(tags))).toBe('4r90')
   })
 
@@ -265,9 +281,99 @@ describe('footprint', () => {
   it('takes the arc sweep from size|angle when there is one', () => {
     expect(resolveFootprint(['size|radius|2', 'size|angle|22.5'])).toEqual({
       shape: 'arc',
-      radius: 2,
-      angle: 22.5,
+      rIn: 0,
+      rOut: 2,
+      sweep: 22.5,
+      band: 'radial',
+      bandBasis: 'fallback',
     })
+  })
+
+  it('refuses a sweep the sector box formula cannot describe', () => {
+    // `arcSectorExtent` is `rOut - rIn*cos(theta)` by `rOut*sin(theta)`, correct
+    // only while the extreme point sits on a bounding radius — theta <= 90. No
+    // live tile is excluded: a `size|radius` co-occurs with 11.25, 22.5, 45 and
+    // 90 and with nothing else. 270 is one of the two `IL` corner markers and
+    // 60/120/240/300 are hex-corner angles, all on tiles with no radius at all.
+    for (const sweep of [11.25, 22.5, 45, 90]) {
+      expect(footprintKind(['shape|curved', 'size|radius|4', `size|angle|${String(sweep)}`])).toBe('arc')
+    }
+    for (const sweep of [120, 240, 270, 300]) {
+      expect(footprintKind(['shape|curved', 'size|radius|4', `size|angle|${String(sweep)}`])).toBe('none')
+    }
+  })
+
+  it('resolves the band from a modifier, then a code, then the default', () => {
+    const curve = (...extra: string[]) => resolveFootprint(['shape|curved', 'size|radius|4', 'size|angle|90', ...extra])
+
+    // The modifier route, 1,090 of the 1,199 arc tiles. `concave` is the only
+    // band whose material lies outside the tagged radius, so its pair straddles
+    // 4 upwards where every other band's ends there.
+    expect(curve('shape|wall|concave')).toMatchObject({ rIn: 4, rOut: 4.5, band: 'concave', bandBasis: 'measured' })
+    expect(curve('shape|wall|convex')).toMatchObject({ rIn: 3.5, rOut: 4, band: 'convex', bandBasis: 'fallback' })
+    expect(curve('shape|floor|radial')).toMatchObject({ rIn: 2, rOut: 4, band: 'radial', bandBasis: 'measured' })
+
+    // `s2w` plus `radial` outranks `concave`, and 6 of the 10 s2w tiles carry
+    // both. W2's research measured `[R-1.5, R]` on exactly those rows; reading
+    // them as `concave` would put the material on the wrong side of the radius
+    // and 1.5 units out.
+    expect(curve('shape|floor|radial', 'shape|floor|s2w', 'shape|floor|concave')).toMatchObject({
+      rIn: 2.5,
+      rOut: 4,
+      band: 's2w_radial',
+      bandBasis: 'fallback',
+    })
+
+    // The code route, 54 tiles, and the only route that can name a `disc`: `V`
+    // and `VxE` carry identical tags and are a quarter disc and an annular band.
+    expect(curve('size|openlock|V')).toMatchObject({ rIn: 0, rOut: 4, band: 'disc', bandBasis: 'measured' })
+    expect(curve('size|openlock|VxE')).toMatchObject({ rIn: 2, rOut: 4, band: 'radial', bandBasis: 'measured' })
+    expect(curve('size|openlock|X')).toMatchObject({ rIn: 4, rOut: 4.5, band: 'concave', bandBasis: 'measured' })
+
+    // A modifier outranks a code, because the modifier is on the tile and the
+    // code is on the family.
+    expect(curve('size|openlock|V', 'shape|wall|concave')).toMatchObject({ band: 'concave' })
+
+    // W2 marks `G` unmeasured and `GA` inferred. Both hold a `concave` band no
+    // mesh has confirmed, so the band survives and the stamp does not.
+    expect(curve('size|openlock|G')).toMatchObject({ band: 'concave', bandBasis: 'fallback' })
+    expect(curve('size|openlock|GA')).toMatchObject({ band: 'concave', bandBasis: 'fallback' })
+
+    // `U` is ambiguous and its table row is a 4 x 4 rect, so it names no band
+    // and the default applies. `arcBandOf` gates on `size.kind === 'arc'` rather
+    // than on `ambiguous`, because `X`'s ambiguity is column-versus-curve and a
+    // column cannot reach this case at all.
+    expect(curve('size|openlock|U')).toMatchObject({ band: 'radial', bandBasis: 'fallback' })
+    expect(arcBandOf(['size|openlock|U'])).toEqual({ band: DEFAULT_ARC_BAND, basis: 'fallback' })
+  })
+
+  it('de-arcs a curved interface, and only gives it a wall where the run is measured', () => {
+    // Row W5's 27 tiles. `shape|option|curved_interface` sits on 111 tiles and
+    // W1 refused a sector fit on every one: the radius is the curve the piece
+    // *mates with*, cut into one face, so the tagged pair over-states the
+    // outline. The 84 walls have a measured run in W2's table; the 27 floors have
+    // nothing, and their code is not in `size|openlock` at all.
+    const floor = [
+      'shape|curved',
+      'shape|curved|interface',
+      'shape|floor',
+      CURVED_INTERFACE_TAG,
+      'size|angle|90',
+      'size|depth|2',
+      'size|radius|2.5',
+      'size|width|2',
+    ]
+    expect(radiusIsFeature(floor)).toBe(true)
+    // Measured 1.700 x 2.000 against the tagged 2 x 2 — 0.300 units of overlap
+    // with the neighbour, which is why `rect` is not the answer either.
+    expect(footprintKind(floor)).toBe('none')
+    expect(resolveFootprint(floor)).toEqual({ shape: 'none' })
+
+    // The 84 walls keep their footprint, from the table rather than the tag:
+    // `QxG` is tagged `size|width|4` and measures 3.000.
+    const wall = ['shape|wall', CURVED_INTERFACE_TAG, 'size|openlock|QxG', 'size|radius|2.5', 'size|width|4']
+    expect(footprintKind(wall)).toBe('wall')
+    expect(resolveFootprint(wall)).toEqual({ shape: 'wall', length: 3 })
   })
 
   it('gives a curved tile with a trusted pair the pair as its footprint', () => {

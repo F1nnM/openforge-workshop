@@ -173,14 +173,21 @@ export interface NoteCopy {
  *     in the archive; nothing joins it to this tile.
  *
  * **Three figures below move with the footprint classifier, and each row that
- * moves them updates the copy here.** The 247 in `base-unmatchable` and the 699
+ * moves them updates the copy here.** The 260 in `base-unmatchable` and the 726
  * in `no-footprint` are the same `foot.shape === 'none'` population: W3
- * reclassified 403 tiles out of it (444 → 235, 1,144 → 741) and W4 moved 25
- * back in (235 → 247, 741 → 699) after W1 measured them and their footprint
- * turned out to be wrong. The 34 in `no-congruent-base` was 21 until W4 de-arced
- * the 36 `xG` bases, which had shared the `arc:2.5@90` congruence key with 13
- * `curved+interface` floors only because a sweep was being fabricated for them.
- * Nothing else in this function depends on the footprint classifier.
+ * reclassified 403 tiles out of it (444 → 235, 1,144 → 741), W4 moved 25 back in
+ * (235 → 247, 741 → 699) after W1 measured them and their footprint turned out to
+ * be wrong, and W5 moved the 27 `curved+interface` floors in on the same grounds
+ * (247 → 260, 699 → 726) — 13 of the 27 are openforge toppers, which is the whole
+ * of the `base-unmatchable` movement.
+ *
+ * The 31 in `no-congruent-base` was 21 until W4 de-arced the 36 `xG` bases, which
+ * had shared the `arc:2.5@90` congruence key with those 13 floors only because a
+ * sweep was being fabricated for them, and W5 rewrote the set twice over: the 13
+ * left for `base-unmatchable` (they publish no key at all now) and 10
+ * `s2w_radial` toppers arrived, whose `[R−1.5, R]` band stopped matching a
+ * `[R−2, R]` base once congruence keyed on the band rather than on the tagged
+ * radius. Nothing else in this function depends on the footprint classifier.
  */
 export function noteCopy(note: BillNote): NoteCopy {
   const n = countLabel(note.count)
@@ -287,7 +294,7 @@ export function noteCopy(note: BillNote): NoteCopy {
         headline: `${n} ${pieces} cannot be drawn in plan view`,
         detail:
           'The tile is in the bill and will be downloaded. It has no footprint the plan view can derive, so it ' +
-          'has no shape on the grid — 699 corpus tiles are in this state.',
+          'has no shape on the grid — 726 corpus tiles are in this state.',
       }
 
     case 'insert-on-grid':

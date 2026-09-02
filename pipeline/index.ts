@@ -41,8 +41,10 @@ export {
 export type { FixtureConfig, FixtureRow } from './fixtures'
 export {
   COLUMN_SHAPE_TAG,
+  CURVED_INTERFACE_TAG,
+  DEFAULT_ARC_BAND,
   DIAGONAL_TAG,
-  XG_INTERFACE_CODES,
+  arcBandOf,
   footprintKind,
   hasCurveMarker,
   isDesignFragment,

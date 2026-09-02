@@ -102,7 +102,9 @@ describe('footprints', () => {
   })
 
   it('has no extent for arc or none', () => {
-    expect(footprintExtent({ shape: 'arc', radius: 2, angle: 90 })).toBeUndefined()
+    expect(
+      footprintExtent({ shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' }),
+    ).toBeUndefined()
     expect(footprintExtent({ shape: 'none' })).toBeUndefined()
   })
 

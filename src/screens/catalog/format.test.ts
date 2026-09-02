@@ -31,8 +31,17 @@ describe('sizeLabel', () => {
     expect(sizeLabel(foot({ shape: 'wall', length: 1.5 }))).toBe('1.5×')
   })
 
-  it('renders an arc as radius and sweep', () => {
-    expect(sizeLabel(foot({ shape: 'arc', radius: 4, angle: 22.5 }))).toBe('4r22.5')
+  it('renders an arc as its tagged interface radius and sweep, not its band pair', () => {
+    // Deliberately the tagged radius even after row W5 turned the footprint into
+    // a band: `4r22.5` is the token the filenames use, so it is the one a user
+    // types, and §6 is explicit that matching what a user types is why the
+    // synthesised token exists at all. A `concave` band recovers its 4 from `rIn`
+    // and a `convex` one from `rOut`, so both chips read `4r22.5` — which is
+    // correct, because the corpus gives both tiles the same radius tag.
+    const concave = { shape: 'arc', rIn: 4, rOut: 4.5, sweep: 22.5, band: 'concave', bandBasis: 'measured' }
+    const convex = { shape: 'arc', rIn: 3.5, rOut: 4, sweep: 22.5, band: 'convex', bandBasis: 'fallback' }
+    expect(sizeLabel(foot(concave))).toBe('4r22.5')
+    expect(sizeLabel(foot(convex))).toBe('4r22.5')
   })
 
   it('marks the two 45-degree cases so neither reads as an axis-aligned one', () => {
@@ -61,7 +70,9 @@ describe('sizeLabel', () => {
 
   it('drops trailing zeros the way the filenames do', () => {
     expect(sizeLabel(foot({ shape: 'rect', w: 1, d: 1 }))).toBe('1×1')
-    expect(sizeLabel(foot({ shape: 'arc', radius: 2, angle: 90 }))).toBe('2r90')
+    expect(
+      sizeLabel(foot({ shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' })),
+    ).toBe('2r90')
   })
 })
 

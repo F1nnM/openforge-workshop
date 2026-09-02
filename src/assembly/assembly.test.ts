@@ -26,7 +26,7 @@ import { describe, expect, it } from 'vitest'
 import type { PrintOption as BarrelPrintOption } from '@/assembly'
 import { PRINT_OPTIONS as BARREL_PRINT_OPTIONS, printOption as barrelPrintOption } from '@/assembly'
 import type { CatalogFile, CatalogRecord } from '@/catalog'
-import { CatalogFile as CatalogFileSchema, TileId } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, TileId, resolveTags } from '@/catalog'
 import type { LockSystem, Placement } from '@/store'
 
 import type { PrintOption } from './assemblyIndex'
@@ -67,9 +67,21 @@ describe('footprint congruence', () => {
     expect(footprintsMatch({ shape: 'rect', w: 1, d: 2 }, { shape: 'rect', w: 1, d: 3 })).toBe(false)
   })
 
-  it('keys an arc on radius and sweep, not radius alone', () => {
-    expect(footprintsMatch({ shape: 'arc', radius: 2, angle: 90 }, { shape: 'arc', radius: 2, angle: 270 })).toBe(false)
-    expect(footprintsMatch({ shape: 'arc', radius: 2, angle: 90 }, { shape: 'arc', radius: 2, angle: 90 })).toBe(true)
+  it('keys an arc on its band pair and sweep, not on the tagged radius', () => {
+    const concave = { shape: 'arc', rIn: 2, rOut: 2.5, sweep: 90, band: 'concave', bandBasis: 'measured' } as const
+    const convex = { shape: 'arc', rIn: 1.5, rOut: 2, sweep: 45, band: 'convex', bandBasis: 'fallback' } as const
+    expect(footprintsMatch(concave, { ...concave })).toBe(true)
+    expect(footprintsMatch(concave, { ...concave, sweep: 45 })).toBe(false)
+
+    // Row W5's reason for the key. Both of these carry `size|radius|2`, and
+    // under the pre-W5 `arc:2@90` key they were the same piece — a wall curving
+    // outwards and a wall curving inwards.
+    expect(footprintsMatch({ ...concave, sweep: 45 }, convex)).toBe(false)
+
+    // Congruence is about the outline, so the band *name* is not in the key: a
+    // `radial` band at R = 2 degenerates to exactly the quarter disc `F` is.
+    const radial = { shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' } as const
+    expect(footprintsMatch(radial, { ...radial, band: 'disc' })).toBe(true)
   })
 
   it('gives `none` no key at all, so shapeless tiles never match each other', () => {
@@ -436,19 +448,29 @@ describeCorpus(corpusSuite, () => {
     // takes 25 back, and both halves of that are false pairs it removed rather
     // than matches it lost — see 'separates the three ways a base can be
     // missing' for the two causes. The denominator is the honest one.
-    expect(before.matched).toBe(3953)
-    expect(after.matched).toBe(3953)
+    //
+    // Row W5 takes 10 more, and they are also a false pair removed: they are the
+    // ten `s2w_radial` toppers, whose band is the radial floor inset by 0.5 to
+    // leave room for a separately printed wall, and whose only candidates were
+    // plain `[R-2, R]` radial bases — 0.5 units too deep at the inside edge,
+    // exactly the room the inset was for. The corpus holds no `s2w` curved base
+    // at all, which row D5 is the one to surface.
+    expect(before.matched).toBe(3943)
+    expect(after.matched).toBe(3943)
 
     // The defect, measured on this corpus by the old ranking written out above.
-    // Still 79.7% of everything it matches, so the finding is untouched: the 25
-    // came out of a population that was 80% wrong either way.
-    expect(before.byOption.topless).toBe(3150)
-    expect(before.byOption.topless / before.matched).toBeCloseTo(0.797, 3)
-    expect(before.byOption.unsupported).toBe(181)
-    expect(before.byOption.plain).toBe(622)
+    // 81.6% of everything it matches, against 79.7% before row W5: the finding is
+    // untouched and got slightly worse to look at, because sector congruence
+    // split the ten arc buckets into twenty and `byCost` — bytes-ascending —
+    // reaches a *different* cheapest candidate inside each of them. That is the
+    // pre-D1 ranking being arbitrary, which is the whole point of this survey.
+    expect(before.byOption.topless).toBe(3216)
+    expect(before.byOption.topless / before.matched).toBeCloseTo(0.816, 3)
+    expect(before.byOption.unsupported).toBe(256)
+    expect(before.byOption.plain).toBe(471)
 
     // And after: every auto-inserted openlock base is the full base.
-    expect(after.byOption).toEqual({ plain: 3953, unsupported: 0, topless: 0 })
+    expect(after.byOption).toEqual({ plain: 3943, unsupported: 0, topless: 0 })
   })
 
   it('collapses it under every lock preference, to the three cases the corpus forces', () => {
@@ -463,19 +485,21 @@ describeCorpus(corpusSuite, () => {
     // the three magnetic cases the corpus forces. The shape of the finding is
     // what is asserted; the totals moved.
     //
-    // The `before` rows also shift *within* their total, by up to 29 tiles,
-    // because de-arcing the 36 xG bases moved them out of the `arc:2.5@90`
-    // congruence bucket and into `wall:1.991`, `wall:1.547` and `wall:3` — where
-    // `byCost`, ranking bytes-ascending, reaches a different candidate. That is
-    // the pre-D1 ranking being arbitrary, which is the defect this test exists
-    // to record, and `after` is unmoved at all-plain.
-    const allPlain: Record<PrintOption, number> = { plain: 3953, unsupported: 0, topless: 0 }
-    const magneticAfter: Record<PrintOption, number> = { plain: 3950, unsupported: 0, topless: 3 }
+    // The `before` rows also shift *within* their total, by up to 151 tiles, and
+    // twice for the same reason: row W4 de-arced the 36 xG bases out of the
+    // `arc:2.5@90` bucket into `wall:1.991` / `wall:1.547` / `wall:3`, and row W5
+    // split the ten remaining arc buckets into twenty by keying on the band pair
+    // instead of the tagged radius. Either way `byCost`, ranking bytes-ascending
+    // over a changed candidate list, reaches a different candidate. That is the
+    // pre-D1 ranking being arbitrary, which is the defect this test exists to
+    // record, and `after` is unmoved at all-plain.
+    const allPlain: Record<PrintOption, number> = { plain: 3943, unsupported: 0, topless: 0 }
+    const magneticAfter: Record<PrintOption, number> = { plain: 3940, unsupported: 0, topless: 3 }
     expect(measured).toEqual([
-      { lock: 'openlock', before: { plain: 622, unsupported: 181, topless: 3150 }, after: allPlain },
-      { lock: 'dragonlock', before: { plain: 3798, unsupported: 152, topless: 3 }, after: allPlain },
-      { lock: 'magnetic', before: { plain: 2243, unsupported: 35, topless: 1675 }, after: magneticAfter },
-      { lock: 'none', before: { plain: 811, unsupported: 333, topless: 2809 }, after: allPlain },
+      { lock: 'openlock', before: { plain: 471, unsupported: 256, topless: 3216 }, after: allPlain },
+      { lock: 'dragonlock', before: { plain: 3880, unsupported: 60, topless: 3 }, after: allPlain },
+      { lock: 'magnetic', before: { plain: 2209, unsupported: 35, topless: 1699 }, after: magneticAfter },
+      { lock: 'none', before: { plain: 794, unsupported: 316, topless: 2833 }, after: allPlain },
     ])
   })
 
@@ -509,32 +533,39 @@ describeCorpus(corpusSuite, () => {
     const before = survey(legacyBase, 'openlock')
     const after = survey(shippedBase, 'openlock')
 
-    // The headline figure of the defect: 111 of 1,963 bases ever handed out, and
-    // 92 of those 111 were print variants rather than bases.
+    // The headline figure of the defect: 117 of 1,963 bases ever handed out by the
+    // old ranking, and 97 of those 117 were print variants rather than bases.
     //
-    // 110 before row W4. De-arcing the 36 xG bases moved them out of the
-    // `arc:2.5@90` congruence bucket into `wall:1.991`, `wall:1.547` and
-    // `wall:3`, and `byCost` — ranking bytes-ascending over a changed candidate
-    // list — reaches one more distinct base, a plain one. That is the pre-D1
-    // ranking being arbitrary, which is the whole point of the `before` survey.
-    expect(before.reach.size).toBe(111)
-    expect(before.reachByOption).toEqual({ plain: 19, unsupported: 13, topless: 79 })
+    // 110 before row W4, 111 after it, 117 after row W5, and every one of those
+    // steps is the same mechanism: a congruence key that changed. W4 de-arced the
+    // 36 xG bases out of `arc:2.5@90` into `wall:1.991` / `wall:1.547` /
+    // `wall:3`, and W5 split the ten remaining arc buckets into twenty by keying
+    // on the band pair, so `byCost` — bytes-ascending over a changed candidate
+    // list — reaches six more distinct bases. That is the pre-D1 ranking being
+    // arbitrary, which is the whole point of the `before` survey: the *number* of
+    // bases it reaches is a function of how the buckets happen to fall.
+    expect(before.reach.size).toBe(117)
+    expect(before.reachByOption).toEqual({ plain: 20, unsupported: 17, topless: 80 })
 
-    // After: the count does not move at all now — but every base it reaches is
-    // a full base, so the reachable *product* range is 5.8 times wider. It was
-    // 6.1 times before row W4, and the ratio moved because the denominator did:
-    // `byCost` reaches 19 plain bases instead of 18, not because D1's ranking
-    // reaches fewer.
-    expect(after.reach.size).toBe(111)
-    expect(after.reachByOption).toEqual({ plain: 111, unsupported: 0, topless: 0 })
-    expect(after.reachByOption.plain / before.reachByOption.plain).toBeCloseTo(5.842, 3)
+    // After: D1's ranking reaches 116 distinct bases and every one of them is a
+    // full base, so the reachable *product* range is 5.8 times wider. It reached
+    // 111 before row W5, and the five it gains are the other half of the sector
+    // key: a topper whose band now has its own bucket draws its base from that
+    // bucket instead of from a pooled `arc:R@sweep` one. Both surveys move, and
+    // only `before` moves for an arbitrary reason.
+    expect(after.reach.size).toBe(116)
+    expect(after.reachByOption).toEqual({ plain: 116, unsupported: 0, topless: 0 })
+    expect(after.reachByOption.plain / before.reachByOption.plain).toBeCloseTo(5.8, 2)
     expect(after.reachByOption.plain).toBeGreaterThan(5 * before.reachByOption.plain)
 
     // Across the four preferences a user can actually pick, the reachable set
-    // itself grows. Row W3's 403 new footprints widened both unions by 3 and row
-    // W4's de-arced bases widen the `before` union by 3 more, so the gain the
-    // ranking is responsible for is asserted as the difference rather than as
-    // two absolute counts — it is the only part of this figure D1 owns.
+    // itself grows. Row W3's 403 new footprints widened both unions by 3, row W4's
+    // de-arced bases widened the `before` union by 3 more, and row W5's sector key
+    // widens both again — so the gain the ranking is responsible for is asserted
+    // as the difference rather than as two absolute counts. It is the only part of
+    // this figure D1 owns — and it comes through row W5 unmoved at 14 while both
+    // absolute counts rise by 16, which is exactly what asserting the difference
+    // was for.
     const union = (rank: (tile: CatalogRecord, lock: LockSystem | undefined) => CatalogRecord | undefined) => {
       const reach = new Set<TileId>()
       for (const lock of preferences) for (const id of survey(rank, lock).reach) reach.add(id)
@@ -542,15 +573,15 @@ describeCorpus(corpusSuite, () => {
     }
     const beforeUnion = union(legacyBase)
     const afterUnion = union(shippedBase)
-    expect(beforeUnion.size).toBe(306)
-    expect(afterUnion.size).toBe(320)
+    expect(beforeUnion.size).toBe(322)
+    expect(afterUnion.size).toBe(336)
     expect(afterUnion.size - beforeUnion.size).toBe(14)
 
     const full = (reach: Set<TileId>) =>
       [...reach].filter((id) => optionOf(index.byId.get(id) as CatalogRecord) === 'plain').length
-    expect(full(beforeUnion)).toBe(184)
-    expect(full(afterUnion)).toBe(319)
-    expect(full(afterUnion) - full(beforeUnion)).toBe(135)
+    expect(full(beforeUnion)).toBe(191)
+    expect(full(afterUnion)).toBe(335)
+    expect(full(afterUnion) - full(beforeUnion)).toBe(144)
   })
 
   /* ----------------------------------------------------------- the disclosure */
@@ -679,7 +710,7 @@ describeCorpus(corpusSuite, () => {
     //
     // `no-matching-base` is unchanged at 129, because the code step runs first
     // and the P-family and column codes were already failing it.
-    expect(gaps).toEqual({ 'no-matching-base': 129, 'no-congruent-base': 34, 'base-unmatchable': 247 })
+    expect(gaps).toEqual({ 'no-matching-base': 129, 'no-congruent-base': 31, 'base-unmatchable': 260 })
   })
 
   const GAP_CODES = ['no-matching-base', 'no-congruent-base', 'base-unmatchable']
@@ -781,14 +812,14 @@ describeCorpus(corpusSuite, () => {
     expect(new Set(toppers.map((record) => record.sizeCode).filter((code) => code !== undefined)).size).toBe(27)
   })
 
-  it('shows the 34 unsupportable shapes are geometry, not an omission', () => {
+  it('shows the 31 unsupportable shapes are geometry, not an omission', () => {
     // The classification's second cause. The distinction matters for the copy:
     // 17 of these are half a unit wide and the base range starts at a full unit,
     // so no base can carry them and telling somebody to go and find one would
     // send them after an object that does not exist. Four are a real hole in an
-    // otherwise complete range. The 13 W4 added are the third kind: a shape the
-    // corpus has bases *for*, whose bases stopped being congruent once the
-    // fabricated sweep that made them congruent was removed.
+    // otherwise complete range. The remaining 10 are row W5's third kind: a band
+    // the corpus holds no base for at all, which only became visible once
+    // congruence keyed on the band pair instead of the tagged radius.
     const shapeless = toppers.filter((record) => {
       const resolved = resolvePlacement(place(record.id), index, { lock: 'openlock' })
       return resolved.notes.some((entry) => entry.code === 'no-congruent-base')
@@ -799,18 +830,43 @@ describeCorpus(corpusSuite, () => {
       keys.set(key, (keys.get(key) ?? 0) + 1)
     }
     expect(Object.fromEntries([...keys.entries()].sort())).toEqual({
-      'arc:2.5@90': 13,
+      'arc:0.5-2@90': 1,
+      'arc:2.5-4@22.5': 2,
+      'arc:2.5-4@45': 2,
+      'arc:2.5-4@90': 2,
+      'arc:4.5-6@11.25': 1,
+      'arc:4.5-6@22.5': 1,
+      'arc:4.5-6@45': 1,
       'rect:0.5x1': 3,
       'rect:0.5x2': 14,
       'rect:2x6': 4,
     })
 
-    // The 13 are the `curved+interface` floors, and there is now no base at
-    // that key at all — where before row W4 there were 36, every one of them an
-    // `AxG`/`BAxG`/`QxG` wall base that only shared the key because
-    // `DEFAULT_ARC_SWEEP_DEG` invented its 90 degrees.
-    expect(index.basesByFootprint.has('arc:2.5@90')).toBe(false)
-    expect(shapeless.filter((record) => footprintKey(record.foot) === 'arc:2.5@90')).toHaveLength(13)
+    // Row W5 changed both arc rows here, and the two changes pull opposite ways.
+    //
+    // The 13 `curved+interface` floors have LEFT this bucket, because they no
+    // longer have a footprint to be incongruent about: W1 refused a sector fit on
+    // all 27 of them and their tagged width over-states the mesh by 0.300 or
+    // 1.513 units, so they are NONE and fall into `base-unmatchable` below. They
+    // were never a shape the corpus had bases for — the 36 bases that used to
+    // share their key were `AxG`/`BAxG`/`QxG` walls that only matched because
+    // `DEFAULT_ARC_SWEEP_DEG` invented a 90-degree sweep for both sides.
+    expect(
+      shapeless.filter((record) => resolveTags(file, record).includes('shape|option|curved_interface')),
+    ).toEqual([])
+    expect(index.basesByFootprint.has('arc:2.5-4@90')).toBe(false)
+    // They are in `base-unmatchable` instead, which is why it reads 260 above and
+    // not 247: 13 toppers moved from "a shape with no congruent base" to "nothing
+    // to match on", and the second is the truth about them.
+
+    // And 10 `s2w_radial` toppers have ARRIVED, which is the fourth kind: a shape
+    // the corpus has no base for at all, distinguishable only once congruence
+    // keys on the band. `[R-1.5, R]` is the radial floor inset by 0.5 for a
+    // separately printed wall, and matching it to a `[R-2, R]` base put a base
+    // 0.5 units too deep under every one of them.
+    const s2w = shapeless.filter((record) => footprintKey(record.foot)?.startsWith('arc:'))
+    expect(s2w).toHaveLength(10)
+    expect(s2w.every((record) => record.foot.shape === 'arc' && record.foot.band === 's2w_radial')).toBe(true)
 
     // Why no base can carry the 17: nothing in the base range has an extent
     // below one grid unit.
@@ -910,7 +966,7 @@ describeCorpus(corpusSuite, () => {
     // 7 x 7 the mesh contradicts. Both were false pairs, so 2,083 is a more
     // honest 88.1% than the 89.2% it replaces.
     expect(codeless).toHaveLength(2364)
-    expect(matched).toHaveLength(2083)
+    expect(matched).toHaveLength(2073)
   })
 
   /* --------------------------------------------------------------- md5 dedupe */
