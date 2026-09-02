@@ -435,6 +435,64 @@ describe('CompositionConfig', () => {
     expect(slot).not.toHaveProperty('candidates')
   })
 
+  /**
+   * Row C1's prediction, now a fixture the schema has to keep.
+   *
+   * *"If a fixture ever writes one, `src/catalog/schema.ts` has to widen
+   * `ConstrainRef` or Zod will strip it and the source control will be lost in
+   * silence."* A fixture already did: the 20 `*.yaml` recipe templates carry 30
+   * `siblings` lists and 20 part-level `fulfills`, and before row X8 both parsed
+   * **successfully** with the keys gone from the output. The input below is one
+   * of the 30, verbatim.
+   *
+   * Reverting either field fails this test, `pipeline/templates.test.ts`'s
+   * byte-for-byte round-trip over all 20 files, and the emitted
+   * `RECIPE_TEMPLATES`. This is the cheapest of the three to read.
+   */
+  it('keeps the two fields only the recipe templates write', () => {
+    const config = CompositionConfig.parse({
+      parts: [
+        {
+          name: 'right wall',
+          tags: {
+            require: [{ tag: 'build|s2w' }],
+            constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
+          },
+          fulfills: [{ part: 'base' }],
+        },
+      ],
+    })
+    const slot = config.parts?.[0]
+
+    expect(slot?.tags.constrain).toEqual([{ tag: 'connection|side', siblings: ['column', 'left wall'] }])
+    expect(slot?.fulfills).toEqual([{ part: 'base' }])
+  })
+
+  it('still strips the two the grammar permits and no fixture writes', () => {
+    // `parent` on a `constrain` entry and `accept` on a slot: 0 occurrences over
+    // both halves of the fixtures — 9,406 constrain entries and 3,831 parts.
+    // `src/composition/config.ts` implements both because the spec has them;
+    // modelling them here would be a field with no measured fact behind it,
+    // which is the one thing this module does not carry. So the strip is
+    // deliberate, and asserting it is what makes a future row justify undoing it.
+    const config = CompositionConfig.parse({
+      parts: [
+        {
+          name: 'base',
+          tags: {
+            require: [{ tag: 'shape|base' }],
+            accept: [{ tag: 'shape|base|square' }],
+            constrain: [{ tag: 'size|width', parent: false }],
+          },
+        },
+      ],
+    })
+    const slot = config.parts?.[0]
+
+    expect(slot?.tags).not.toHaveProperty('accept')
+    expect(slot?.tags.constrain).toEqual([{ tag: 'size|width' }])
+  })
+
   it('treats an absent optional flag as required', () => {
     // 1,050 of 3,695 slots omit it; 2,645 (71.6%) are optional.
     const config = CompositionConfig.parse({

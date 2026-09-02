@@ -26,7 +26,19 @@
  *
  * It lives in `tools/hygiene/` beside the control-byte guard because it is the
  * same kind of thing: a property of the repository rather than of a feature.
+ *
+ * **Row X8 added the other side of the same boundary.** The three entries above
+ * are the build-time project reaching *into* the app; the last block here is the
+ * app not reaching *out*, which is the direction that ships to a browser. It
+ * arrived from `src/screens/assemblies/corpus.test.ts`, where row C3 had to
+ * write it because it needed one `node:fs` reader under `src/` to read the
+ * recipe fixtures at test time. That reader is now `pipeline/templates.ts`, so
+ * the assertion is no longer "one exception, named" but "none", and its subject
+ * is the repository rather than that screen.
  */
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { printOption } from '../../src/assembly/assemblyIndex'
@@ -107,5 +119,38 @@ describe('src/share/manifest.ts, for row X4', () => {
 describe('src/catalog, the entry this file inherited', () => {
   it('is still reachable, so a widened include cannot have narrowed it', () => {
     expect(MEASURED_SPRITE_SHEET.cols).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * The app's side: nothing under `src/` may reach for the filesystem.
+ *
+ * A `node:` import in a module the bundle can reach builds fine in the dev
+ * server's Node context and fails in production, which is exactly the class of
+ * mistake worth a test rather than a convention. `src/` importing `pipeline/` is
+ * already impossible — the app project is composite, so it is TS6307 — but a
+ * bare `import { readFileSync } from 'node:fs'` inside a `src/` module is not,
+ * and that is what this covers.
+ *
+ * A directory walk rather than `git ls-files`, so an **untracked** new file
+ * counts. `tools/hygiene/source.test.ts` records paying for that lesson: a guard
+ * that lists only tracked files passes locally on the commit that breaks it.
+ */
+describe('src/, the app project’s own boundary', () => {
+  it('has no module outside its tests reaching for the filesystem', () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) return walk(path)
+        return /\.tsx?$/.test(entry.name) && !entry.name.includes('.test.') ? [path] : []
+      })
+
+    const importers = walk('src').filter((path) => /from 'node:/.test(readFileSync(path, 'utf8')))
+
+    expect(
+      importers,
+      'A `node:` import under src/ builds in the dev server and fails in the bundle. ' +
+        'Build-time file reading belongs in pipeline/ or tools/.',
+    ).toEqual([])
   })
 })

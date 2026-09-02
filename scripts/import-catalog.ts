@@ -14,12 +14,21 @@
  * The dependency is free: `tsx` is already in the tree as a dependency of Vite 8
  * and npm dedupes it to the same version.
  *
- * The import writes two files it is not the only writer of, and both matter:
+ * The import writes three files it is not the only writer of, and all three matter:
  *
  *   - `public/catalog/catalog.json` (+ `.br`) — gitignored, rebuilt in CI.
  *   - `pipeline/ordinals/manifest.json` — **checked in**. It is the append-only
- *     record of which integer every share link means. `--dry-run` skips both, so
- *     a size check on a branch cannot append ordinals as a side effect.
+ *     record of which integer every share link means.
+ *   - `src/screens/assemblies/templates.ts` — **checked in, and generated**. The
+ *     40 recipe templates, read out of the 20 `*.yaml` fixtures the index
+ *     deliberately skips. They are not records — none carries `file_metadata` —
+ *     and they are not in `catalog.json`; `pipeline/templates.ts` carries the
+ *     +1,260 B measurement behind that and the reason. This step is the only
+ *     thing that should write that module, and `pipeline/templates.test.ts`
+ *     fails when its committed bytes are not what the emitter produces.
+ *
+ * `--dry-run` skips all three, so a size check on a branch cannot append
+ * ordinals or rewrite a source file as a side effect.
  *
  * It reads a third, `pipeline/thumbs/inventory.json`, and never writes it. That
  * file says which blobs have a `/thumbs/` object and is what `CatalogRecord.thumb`
@@ -34,6 +43,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
+  TEMPLATES_MODULE_PATH,
   assertWithinBudget,
   buildCatalog,
   compressCatalog,
@@ -41,7 +51,9 @@ import {
   formatBytes,
   loadFixtureRows,
   loadManifest,
+  loadTemplateFixtures,
   measureCatalog,
+  printTemplateModule,
   readThumbInventory,
   resolveFixturesRef,
   serialiseCatalog,
@@ -57,6 +69,7 @@ function main(): number {
   const dir = fixturesDir(args.find((arg) => !arg.startsWith('-')))
 
   const rows = loadFixtureRows(dir)
+  const templates = loadTemplateFixtures(dir)
   const inventory = readThumbInventory()
   const result = buildCatalog({
     rows,
@@ -67,13 +80,15 @@ function main(): number {
 
   const json = serialiseCatalog(result.file)
   const size = measureCatalog(json)
-  report(dir, result, size, dryRun, inventory)
+  const module = printTemplateModule(templates)
+  report(dir, result, size, dryRun, inventory, templates, module)
 
   if (!dryRun) {
     mkdirSync(OUT_DIR, { recursive: true })
     writeFileSync(join(OUT_DIR, 'catalog.json'), json)
     writeFileSync(join(OUT_DIR, 'catalog.json.br'), compressCatalog(json))
     writeManifest(result.manifest)
+    writeFileSync(join(process.cwd(), TEMPLATES_MODULE_PATH), module)
   }
 
   // Last, so the numbers are printed even when the build fails on them.
@@ -87,6 +102,8 @@ function report(
   size: ReturnType<typeof measureCatalog>,
   dryRun: boolean,
   inventory: ReturnType<typeof readThumbInventory>,
+  templates: ReturnType<typeof loadTemplateFixtures>,
+  module: string,
 ): void {
   const { stats, file } = result
   const lines = [
@@ -109,7 +126,12 @@ function report(
     `names         ${String(stats.distinctNames)} distinct over ${String(stats.records)} records`,
     `ordinals      ${String(result.manifest.ids.length)} issued · ${String(stats.newOrdinals)} new · ${String(stats.retiredOrdinals)} retired`,
     `size          raw ${formatBytes(size.raw)} · gzip ${formatBytes(size.gzip)} · brotli ${formatBytes(size.brotli)} of ${formatBytes(size.budget)} budget`,
-    dryRun ? 'output        (dry run — nothing written)' : `output        ${OUT_DIR}/catalog.json`,
+    `templates     ${String(templates.length)} recipes over ${String(new Set(templates.map((entry) => entry.source)).size)} yaml fixtures · ` +
+      `${String(templates.reduce((total, entry) => total + entry.parts.length, 0))} parts · ` +
+      `${formatBytes(Buffer.byteLength(module, 'utf8'))} raw of generated module, 0 B of the index`,
+    dryRun
+      ? 'output        (dry run — nothing written)'
+      : `output        ${OUT_DIR}/catalog.json · ${TEMPLATES_MODULE_PATH}`,
   ]
   process.stdout.write(`${lines.join('\n')}\n`)
 }
