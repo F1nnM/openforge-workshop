@@ -38,7 +38,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { CatalogFile } from '@/catalog'
 import { openTileDrawer } from '@/routes'
 import { parseCompactSearch, stringifyCompactSearch, validateCatalogSearch, validateFacetSearch } from '@/search'
-import { clearPersistedWorkshopState, resetWorkshop, setLockSystem, useLibraryCount } from '@/store'
+import {
+  claimPendingTile,
+  clearPendingTile,
+  clearPersistedWorkshopState,
+  resetWorkshop,
+  setLockSystem,
+  useLibraryCount,
+  useWorkshopStore,
+} from '@/store'
 
 import { TileDrawer } from './TileDrawer'
 
@@ -345,11 +353,15 @@ const titleOf = (name: string) => within(drawer()).getByText(name, { selector: '
 beforeEach(() => {
   resetWorkshop()
   clearPersistedWorkshopState()
+  // Row G5's channel is not part of `WorkshopState`, so `resetWorkshop` does not
+  // reach it and a handoff left in the box would leak between tests.
+  clearPendingTile()
 })
 
 afterEach(() => {
   resetWorkshop()
   clearPersistedWorkshopState()
+  clearPendingTile()
 })
 
 /* ----------------------------------------------------------------- the URL */
@@ -770,6 +782,52 @@ describe('the actions', () => {
     expect(router.state.location.pathname).toBe('/builder')
     expect((router.state.location.search as unknown as { q: string }).q).toBe('Cave Floor 1x1')
     expect(screen.getByText('Builder screen')).toBeInTheDocument()
+    // Row G5. Before the channel existed this action could file a tile, navigate
+    // and seed a query, and then had nowhere to say "and arm this one" — which is
+    // PR #23's defect. It now posts the file, and the builder's palette claims it.
+    expect(claimPendingTile()).toBe('tiles/cave/floors/floor/cave%floor.1x1.stl')
+  })
+
+  it('sends the file the drawer is showing, which is not the file the link named', async () => {
+    // `?tile=30` is canonical, and with no lock chosen A1's rank shows the plain
+    // openlock integral rather than the address holder — the case the tests above
+    // assert. So the pre-selection has to be that file: the user is looking at a
+    // specific print, and a channel that sent `variants[0]` would arm a row the
+    // drawer never showed.
+    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    expect(
+      within(drawer())
+        .getAllByRole('row')
+        .filter((row) => row.getAttribute('aria-current') === 'true')[0],
+    ).toHaveTextContent('cave%arch.2x.openlock.stl')
+
+    await act(async () => {
+      fireEvent.click(within(drawer()).getByRole('button', { name: /Use in builder/ }))
+      await Promise.resolve()
+    })
+
+    const shown = 'tiles/cave/arches/arch/openlock/cave%arch.2x.openlock.stl'
+    expect(claimPendingTile()).toBe(shown)
+    // And the same file is filed, so the palette has a row to arm.
+    expect(Object.keys(useWorkshopStore.getState().library)).toEqual([shown])
+  })
+
+  it('sends the file a non-canonical link named, with no preference applied', async () => {
+    // `?tile=32` asked for this print. A dragonlock preference would rank it last
+    // and the drawer still shows it, so the handoff must carry it too — otherwise
+    // following a link to a specific file and pressing the action would put a
+    // different file in the builder.
+    act(() => {
+      setLockSystem('dragonlock')
+    })
+    await renderAt(`/catalog?tile=${String(ORD.archTopless)}`)
+
+    await act(async () => {
+      fireEvent.click(within(drawer()).getByRole('button', { name: /Use in builder/ }))
+      await Promise.resolve()
+    })
+
+    expect(claimPendingTile()).toBe('tiles/cave/arches/arch/openlock/cave%arch.2x.openlock.topless.stl')
   })
 })
 

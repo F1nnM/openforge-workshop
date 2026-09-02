@@ -22,6 +22,33 @@
  * They keep their "+ add" action, though. Saving one to the library is a
  * perfectly good thing to do — it just cannot be laid out in plan view yet.
  *
+ * ## The handoff from "Use in builder"
+ *
+ * Row G5. The catalog drawer's third action posts a file into `@/store`'s
+ * un-persisted selection channel and navigates here; this panel **claims** it
+ * once, on mount, and arms it. That is the whole of the row's reader side, and it
+ * is here rather than in the builder screen because this panel is already the one
+ * component that writes the selection — a second writer would be two palettes.
+ *
+ * The claim is guarded, and the guard is the same doctrine as the paragraph above:
+ * **an armed tile the canvas will refuse is worse than no armed tile.** So the
+ * handoff arms a file only when this palette holds a *placeable* row for it, and
+ * the two ways it can fail both resolve correctly without a word of new UI:
+ *
+ *   - **The file is not in the current catalog build.** There is no row, nothing
+ *     is armed, and the library screen is the surface that reports a retired id.
+ *   - **The file has the `none` footprint** — 726 of 8,702 records, 8.3%. Nothing
+ *     is armed, and the note under the library block is already on screen saying
+ *     why, because the drawer put the tile in the library on its way here. A
+ *     variant swap cannot rescue this case and must not be attempted: **no design
+ *     in the corpus mixes placeable and unplaceable files**, so if the file the
+ *     user chose has no plan shape, neither does any sibling.
+ *
+ * What arrives is a file and never a resolution. A6's rule 0 re-picks the variant
+ * when the bill is built, and the three locks disagree for 37.1% of items, so the
+ * armed row is "the print the user was looking at" while the bill's line may be a
+ * sibling — marked as substituted there, by the module that made the choice.
+ *
  * ## Where the search comes from
  *
  * The whole `FacetSearch` from `/builder`, not just the text. `routeTree.tsx`
@@ -47,7 +74,7 @@ import type { FacetSearch } from '@/search'
 import { MAX_QUERY_LENGTH } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
 import { countLabel, sizeLabel } from '@/screens/catalog'
-import { addToLibrary, useLibrary } from '@/store'
+import { addToLibrary, claimPendingTile, useLibrary, usePendingTile } from '@/store'
 import { Button, Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
@@ -89,6 +116,21 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
       ),
     [result, index, library],
   )
+
+  // Row G5's one call site. Claiming is read-and-clear, so this is a one-shot
+  // handoff and not a piece of state two screens have to keep in step: a second
+  // run of this effect — a re-mount, or React's development double-invoke —
+  // claims `null` and does nothing, and a tile the user has since disarmed is not
+  // re-armed behind their back. See the module note for the guard.
+  const pending = usePendingTile()
+  useEffect(() => {
+    if (pending === null) return
+    const claimed = claimPendingTile()
+    if (claimed === null) return
+    if (!rows.some((row) => row.record.id === claimed && row.placeable)) return
+    tools.setSelectedTileId(claimed)
+    tools.setTool('place')
+  }, [pending, rows, tools])
 
   const searching = search.q.trim() !== ''
   const unplaceable = rows.filter((row) => !row.placeable).length

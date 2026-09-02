@@ -38,10 +38,13 @@ import { createSearchEngine, defaultFacetSearch } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
 import type { LockSystem, Placement } from '@/store'
 import {
+  clearPendingTile,
   clearPersistedWorkshopState,
   placeTile,
   resetWorkshop,
+  sendTileToBuilder,
   usePlacements,
+  useSelectionStore,
   useWorkshopStore,
 } from '@/store'
 
@@ -218,6 +221,149 @@ describe('the palette', () => {
       expect(record?.layer).not.toBe('base')
       expect(record?.foot.shape === 'rect' || record?.foot.shape === 'wall').toBe(true)
     }
+  })
+})
+
+/* ----------------------------------------------- the "use in builder" handoff */
+
+/**
+ * Row G5's reader side.
+ *
+ * The channel is cleared around every test in this block rather than in the
+ * file's shared `beforeEach`: it is not part of `WorkshopState`, so
+ * `resetWorkshop()` does not touch it, and a value left in the box would arm a
+ * palette in an unrelated test.
+ */
+describe('the pre-selection handoff', () => {
+  beforeEach(() => {
+    clearPendingTile()
+  })
+
+  afterEach(() => {
+    clearPendingTile()
+  })
+
+  function fileTile(key: keyof typeof FIXTURE_IDS): void {
+    act(() => {
+      useWorkshopStore.setState((state) => ({ library: { ...state.library, [id(key)]: true } }))
+    })
+  }
+
+  /**
+   * Mount the palette inside an `act` of our own.
+   *
+   * `render` has one, but the claim happens in an effect and wakes a
+   * `useSyncExternalStore` subscriber after that act has closed — so the outer
+   * one is what flushes the re-render instead of leaving React to warn about it.
+   */
+  function mountPalette(): ReturnType<typeof render> {
+    let view: ReturnType<typeof render> | undefined
+    act(() => {
+      view = render(<PaletteHarness />)
+    })
+    if (view === undefined) throw new Error('the palette did not mount')
+    return view
+  }
+
+  it('arms the file the catalog drawer sent, and forces place mode', () => {
+    // Exactly what `TileDrawer`'s action does, in its order: file it, then post
+    // it, then navigate — the navigation being this render.
+    fileTile('floor1')
+    act(() => {
+      sendTileToBuilder(id('floor1'))
+    })
+
+    mountPalette()
+
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor1)
+    // The harness opens in `erase`; arming forces `place`, as a click does.
+    expect(screen.getByTestId('tool')).toHaveTextContent('place')
+    expect(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
+  it('claims the handoff once, so a re-mount does not re-arm a tile the user disarmed', () => {
+    fileTile('floor1')
+    act(() => {
+      sendTileToBuilder(id('floor1'))
+    })
+
+    const first = mountPalette()
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor1)
+    expect(useSelectionStore.getState().pending).toBeNull()
+
+    first.unmount()
+    mountPalette()
+    expect(screen.getByTestId('armed')).toHaveTextContent('none')
+    expect(screen.getByTestId('tool')).toHaveTextContent('erase')
+  })
+
+  it('takes the second press when two arrive with no claim between them', () => {
+    fileTile('floor1')
+    fileTile('floor2')
+    act(() => {
+      sendTileToBuilder(id('floor1'))
+      sendTileToBuilder(id('floor2'))
+    })
+
+    mountPalette()
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor2)
+  })
+
+  it('arms nothing for a file the plan view cannot place, and the library note says why', () => {
+    // The `none` footprint: 726 of 8,702 records. Arming it would give the user
+    // an armed tile every click of which the canvas correctly refuses, which is
+    // the failure the greyed rows exist to avoid.
+    fileTile('slab')
+    act(() => {
+      sendTileToBuilder(id('slab'))
+    })
+
+    mountPalette()
+
+    expect(screen.getByTestId('armed')).toHaveTextContent('none')
+    expect(screen.getByTestId('tool')).toHaveTextContent('erase')
+    // The explanation is already on screen, because the drawer filed the tile on
+    // its way here — so the refusal costs no new copy.
+    expect(screen.getByText(/cannot be laid out in plan view/)).toBeInTheDocument()
+    // Claimed all the same: a handoff this palette will not act on must not sit
+    // in the box waiting to arm the next mount.
+    expect(useSelectionStore.getState().pending).toBeNull()
+  })
+
+  it('arms nothing for a file this catalog build does not hold', () => {
+    act(() => {
+      sendTileToBuilder('tiles/gone/retired.stl' as TileId)
+    })
+
+    mountPalette()
+    expect(screen.getByTestId('armed')).toHaveTextContent('none')
+    expect(useSelectionStore.getState().pending).toBeNull()
+  })
+
+  it('carries the file the user chose, not the file the bill will print', () => {
+    // The channel is a selection, never a resolution. `floor2` is a
+    // `connection|openforge` topper, so the bill it produces is two parts and
+    // the resolver owns that decision; what the palette arms is the one file the
+    // drawer was showing.
+    fileTile('floor2')
+    act(() => {
+      sendTileToBuilder(id('floor2'))
+    })
+
+    mountPalette()
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor2)
+
+    const bill = buildBillOfTiles([{ tileId: id('floor2'), x: 0, z: 0, rotation: 0 }], assembly, {
+      lock: 'openlock',
+    })
+    expect(bill.placements).toBe(1)
+    expect(bill.parts).toBe(2)
+    expect([...bill.lines.map((line) => line.tile.id)].sort()).toEqual(
+      [FIXTURE_IDS.base2, FIXTURE_IDS.floor2].sort(),
+    )
   })
 })
 
