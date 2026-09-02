@@ -57,6 +57,24 @@ function Harness({ initial }: { initial?: string }) {
   )
 }
 
+/**
+ * The same screen, reading `PlanStatus.moving` instead of the hint.
+ *
+ * A separate harness rather than a second field on the first one: `Harness` is
+ * what every other test in this file renders, and widening it would make the
+ * move's plumbing a dependency of the whole file.
+ */
+function MovingHarness() {
+  const tools = usePlanTools({ selectedTileId: FIXTURE_IDS.floor2 as TileId })
+  const [moving, setMoving] = useState<string | null>(null)
+  return (
+    <div>
+      <PlanCanvas catalog={catalog} tools={tools} onStatus={(next) => setMoving(next.moving)} />
+      <p data-testid="moving">{moving ?? 'none'}</p>
+    </div>
+  )
+}
+
 function plan(): HTMLElement {
   return screen.getByRole('application')
 }
@@ -375,6 +393,311 @@ describe('pointer', () => {
     expect(placements()).toEqual([])
     // 44 px at the default scale is one grid unit of pan.
     expect(screen.getByRole('img').getAttribute('viewBox')).toContain('-3 -2')
+  })
+})
+
+/**
+ * The move, through the component.
+ *
+ * **What these prove:** that the two gestures reach the same drag — `Shift` with
+ * the primary button in any mode, and the primary button in Move mode — that a
+ * carry writes nothing until it is dropped, that a drop is exactly one
+ * `movePlacement` write against the **real store**, that a cancel writes nothing
+ * at all, and that every step is announced. `move.test.ts` proves the
+ * arithmetic; these prove the wiring.
+ *
+ * **What they cannot prove:** that it feels right. jsdom reports every element as
+ * 0 × 0 and lays out no SVG, so the pointer arithmetic here is the documented
+ * `FALLBACK_SIZE` mapping and never a measurement — a client point of (200, 200)
+ * is grid (2.545, 2.545) and nothing in this file asserts a pixel. `cursor:
+ * grabbing` and the dimmed origin are assertions about the attribute the CSS
+ * hangs off, not about what is painted.
+ */
+describe('moving a placement', () => {
+  /** Place `floor2` at the origin, then leave the cursor on it. */
+  function placed() {
+    render(<Harness initial={FIXTURE_IDS.floor2} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(placements()).toHaveLength(1)
+  }
+
+  it('picks a piece up with Shift and Enter, in place mode, writing nothing', () => {
+    placed()
+    const before = placements()[0]
+
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    expect(live()).toContain('Picked up Dungeon stone floor 2×2')
+    expect(live()).toContain('Escape puts it back')
+    // The mode never changed: Shift is the modeless path.
+    expect(plan().dataset.tool).toBe('place')
+    expect(plan().dataset.moving).toBe('true')
+    // And the store is untouched — the drag is component state.
+    expect(placements()[0]).toEqual(before)
+  })
+
+  it('carries the piece on the arrow keys, announcing each step, still writing nothing', () => {
+    placed()
+    const before = placements()[0]
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+
+    // A 2 × 2 floor placed with the cursor at the origin anchors at (-1, -1),
+    // because the cursor is the point the piece is *centred* on.
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    expect(live()).toContain('Dungeon stone floor 2×2 to x -0.5, z -1')
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    expect(live()).toContain('to x 0, z -1')
+    fireEvent.keyDown(plan(), { key: 'ArrowDown' })
+    expect(live()).toContain('to x 0, z -0.5')
+
+    expect(placements()[0]).toEqual(before)
+  })
+
+  it('commits one store write on the drop, keeping the rotation', () => {
+    render(<Harness initial={FIXTURE_IDS.angled} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    // A tile whose own step is 45, turned once, so the move has a non-quarter
+    // angle to preserve.
+    fireEvent.keyDown(plan(), { key: 'r' })
+    expect(placements()[0]?.rotation).toBe(45)
+    const { tileId, rotation } = placements()[0] ?? {}
+
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+
+    expect(placements()).toHaveLength(1)
+    expect(placements()[0]?.tileId).toBe(tileId)
+    expect(placements()[0]?.rotation).toBe(rotation)
+    expect(live()).toContain('Moved Wood angled floor 2×1 from')
+    expect(plan().dataset.moving).toBeUndefined()
+  })
+
+  it('puts the piece back on Escape, with no store write at all', () => {
+    placed()
+    const before = placements()[0]
+
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    fireEvent.keyDown(plan(), { key: 'ArrowDown' })
+    fireEvent.keyDown(plan(), { key: 'Escape' })
+
+    expect(placements()[0]).toEqual(before)
+    expect(live()).toContain('Put Dungeon stone floor 2×2 back at')
+    expect(plan().dataset.moving).toBeUndefined()
+  })
+
+  it('is a mode as well, reached by M and by the toolbar’s toggle', () => {
+    placed()
+    fireEvent.keyDown(plan(), { key: 'm' })
+    expect(plan().dataset.tool).toBe('move')
+    expect(live()).toContain('Move mode')
+
+    // Plain Enter picks up in move mode — no modifier needed.
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(live()).toContain('Picked up')
+    expect(placements()).toHaveLength(1)
+  })
+
+  it('says so when there is nothing under the cursor to pick up', () => {
+    render(<Harness initial={FIXTURE_IDS.floor1} />)
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    expect(live()).toContain('Nothing to move at')
+    expect(placements()).toEqual([])
+    expect(plan().dataset.moving).toBeUndefined()
+  })
+
+  it('drags with Shift and the primary button, committing on release', () => {
+    render(<Harness initial={FIXTURE_IDS.floor1} />)
+    fireEvent.pointerMove(plan(), { clientX: 200, clientY: 200 })
+    fireEvent.pointerDown(plan(), { clientX: 200, clientY: 200, button: 0, pointerId: 1 })
+    fireEvent.pointerUp(plan(), { clientX: 200, clientY: 200, button: 0, pointerId: 1 })
+    expect(placements()).toEqual([{ tileId: FIXTURE_IDS.floor1, x: 2, z: 2, rotation: 0 }])
+
+    // 44 px is one grid unit at the default scale, so this is a one-unit drag.
+    fireEvent.pointerDown(plan(), { clientX: 200, clientY: 200, button: 0, pointerId: 2, shiftKey: true })
+    expect(plan().dataset.moving).toBe('true')
+    fireEvent.pointerMove(plan(), { clientX: 244, clientY: 200, button: 0, pointerId: 2, shiftKey: true })
+    // Nothing has been written yet, halfway through the drag.
+    expect(placements()[0]?.x).toBe(2)
+    fireEvent.pointerUp(plan(), { clientX: 244, clientY: 200, button: 0, pointerId: 2, shiftKey: true })
+
+    expect(placements()).toEqual([{ tileId: FIXTURE_IDS.floor1, x: 3, z: 2, rotation: 0 }])
+    expect(live()).toContain('Moved Dungeon stone floor 1×1 from x 2, z 2 to x 3, z 2')
+  })
+
+  it('keeps the piece under the point it was grabbed at, not centred on the pointer', () => {
+    // Grab near the tile's right edge rather than its middle: a 2 × 2 floor
+    // anchored at 2 whose centre lands on the pointer would jump, and the jump
+    // is the annoyance this row exists to remove.
+    render(<Harness initial={FIXTURE_IDS.floor2} />)
+    fireEvent.pointerDown(plan(), { clientX: 200, clientY: 200, button: 0, pointerId: 1 })
+    fireEvent.pointerUp(plan(), { clientX: 200, clientY: 200, button: 0, pointerId: 1 })
+    const anchor = placements()[0]?.x
+    expect(anchor).toBe(1.5)
+
+    // Grab at 230 px (grid 3.227, right of the tile's 2.5 centre) and release at
+    // 263 px (grid 3.977). The travel is 0.75 of a unit, so the anchor goes to
+    // snapTo(1.5 + 0.75) = 2.5. A centring implementation would instead put the
+    // anchor at snapTo(3.977 − 1) = 3, half a unit further on, because it would
+    // have thrown the grab offset away.
+    fireEvent.pointerDown(plan(), { clientX: 230, clientY: 200, button: 0, pointerId: 2, shiftKey: true })
+    fireEvent.pointerMove(plan(), { clientX: 263, clientY: 200, button: 0, pointerId: 2, shiftKey: true })
+    fireEvent.pointerUp(plan(), { clientX: 263, clientY: 200, button: 0, pointerId: 2, shiftKey: true })
+    expect(placements()[0]?.x).toBe(2.5)
+  })
+
+  it('never paints while a piece is being dragged', () => {
+    // The ambiguity PR #29 named: in place mode a primary drag paints. With
+    // Shift held it must move exactly one piece and place nothing.
+    render(<Harness initial={FIXTURE_IDS.floor1} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(placements()).toHaveLength(1)
+
+    fireEvent.pointerDown(plan(), { clientX: 78, clientY: 78, button: 0, pointerId: 1, shiftKey: true })
+    for (const x of [90, 120, 160, 200]) {
+      fireEvent.pointerMove(plan(), { clientX: x, clientY: 78, button: 0, pointerId: 1, shiftKey: true })
+    }
+    fireEvent.pointerUp(plan(), { clientX: 200, clientY: 78, button: 0, pointerId: 1, shiftKey: true })
+    expect(placements()).toHaveLength(1)
+  })
+
+  it('pans rather than moving when Alt and Shift are both held', () => {
+    placed()
+    const before = placements()[0]
+    fireEvent.pointerDown(plan(), {
+      clientX: 200,
+      clientY: 200,
+      button: 0,
+      pointerId: 1,
+      altKey: true,
+      shiftKey: true,
+    })
+    fireEvent.pointerMove(plan(), {
+      clientX: 244,
+      clientY: 200,
+      button: 0,
+      pointerId: 1,
+      altKey: true,
+      shiftKey: true,
+    })
+    fireEvent.pointerUp(plan(), { clientX: 244, clientY: 200, button: 0, pointerId: 1, altKey: true, shiftKey: true })
+
+    expect(placements()[0]).toEqual(before)
+    expect(screen.getByRole('img').getAttribute('viewBox')).toContain('-3 -2')
+  })
+
+  it('refuses a drop onto an identical twin and puts the piece back', () => {
+    render(<Harness initial={FIXTURE_IDS.floor1} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(placements()).toHaveLength(2)
+    const before = placements().map((placement) => ({ ...placement }))
+
+    // Carry the second one back onto the first.
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(plan(), { key: 'ArrowLeft' })
+    fireEvent.keyDown(plan(), { key: 'ArrowLeft' })
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+
+    expect(placements()).toEqual(before)
+    expect(live()).toContain('double its line in the bill')
+    expect(plan().dataset.moving).toBeUndefined()
+  })
+
+  it('commits an overlapping move and marks it, rather than refusing it', () => {
+    // `overlap.ts` informs and never prevents, and a move must not be the one
+    // place that changes its mind: the drop lands and the conflict hatch appears.
+    render(<Harness initial={FIXTURE_IDS.floor2} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    for (let i = 0; i < 6; i += 1) fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(placements()).toHaveLength(2)
+    expect(document.querySelectorAll('[data-conflict="true"]')).toHaveLength(0)
+
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    for (let i = 0; i < 5; i += 1) fireEvent.keyDown(plan(), { key: 'ArrowLeft' })
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+
+    expect(placements()).toHaveLength(2)
+    expect(live()).toContain('overlapping 1 piece already there')
+    expect(document.querySelectorAll('[data-conflict="true"]')).toHaveLength(2)
+  })
+
+  it('dims the piece at its origin and draws the proposal where it would land', () => {
+    placed()
+    fireEvent.focus(plan())
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+
+    // The origin marker is the real piece, marked — not a second outline.
+    expect(document.querySelector('.of-plan-pieces g[data-moving="true"]')).not.toBeNull()
+    const preview = document.querySelector('.of-plan-move')
+    expect(preview).not.toBeNull()
+    // The leader line only exists once the piece has actually travelled.
+    expect(preview?.querySelector('.of-plan-move-lead')).not.toBeNull()
+    // The place-ghost is suppressed: one dashed outline on the pointer, not two.
+    expect(document.querySelector('.of-plan-ghost')).toBeNull()
+  })
+
+  it('turns the piece it is holding, and the proposal follows', () => {
+    render(<Harness initial={FIXTURE_IDS.wall2} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    fireEvent.keyDown(plan(), { key: 'r' })
+
+    // The rotation is its own store write; the move is still one, and it has not
+    // happened yet.
+    expect(placements()[0]?.rotation).toBe(90)
+    expect(placements()[0]?.x).toBe(-1)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(placements()[0]?.rotation).toBe(90)
+    expect(placements()[0]?.x).toBe(-0.5)
+  })
+
+  it('removes what it is holding on Delete, ending the move', () => {
+    placed()
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    fireEvent.keyDown(plan(), { key: 'Delete' })
+
+    expect(placements()).toEqual([])
+    expect(live()).toContain('Removed Dungeon stone floor 2×2')
+    expect(plan().dataset.moving).toBeUndefined()
+  })
+
+  it('carries the unmeasured-band disclosure with the piece', () => {
+    // 462 of the 1,199 curves are drawn from a band rule with no mesh fit behind
+    // it. A move must not be the operation that quietly drops the mark.
+    render(<Harness initial={FIXTURE_IDS.arcFallback} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    expect(live()).toContain('cannot line it up concentrically')
+
+    fireEvent.keyDown(plan(), { key: 'ArrowRight' })
+    expect(document.querySelector('.of-plan-move[data-basis="fallback"]')).not.toBeNull()
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(document.querySelector('.of-plan-pieces g[data-basis="fallback"]')).not.toBeNull()
+  })
+
+  it('reports the piece in the air to row 18, which has no mode to read', () => {
+    render(<MovingHarness />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(screen.getByTestId('moving').textContent).toBe('none')
+    fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
+    expect(screen.getByTestId('moving').textContent).toBe('Dungeon stone floor 2×2')
+    fireEvent.keyDown(plan(), { key: 'Escape' })
+    expect(screen.getByTestId('moving').textContent).toBe('none')
+  })
+
+  it('names the move in the key map, which is the canvas’s own documentation', () => {
+    render(<Harness initial={FIXTURE_IDS.floor1} />)
+    const help = document.getElementById(plan().getAttribute('aria-describedby') ?? '')
+    expect(help?.textContent).toContain('pick the tile under the cursor up to move it')
+    expect(help?.textContent).toContain('Escape puts it back')
   })
 })
 

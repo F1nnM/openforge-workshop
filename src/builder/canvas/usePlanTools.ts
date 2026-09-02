@@ -29,8 +29,19 @@ import type { TileId } from '@/catalog'
 import type { SnapMode } from './geometry'
 import { SNAP_STEP, nextRotation } from './geometry'
 
-/** The two modes of design-contract.md §2.4's toolbar toggle. */
-export type PlanTool = 'place' | 'erase'
+/**
+ * The modes of design-contract.md §2.4's toolbar toggle.
+ *
+ * The contract names two, `place` and `erase`. `move` is the third and it is
+ * additive rather than a reinterpretation: PR #29 refused a move because
+ * *"a drag-to-move gesture is ambiguous against drag-to-paint on the one mouse
+ * button the contract's two-mode toolbar leaves free"*, and a mode is the answer
+ * that removes the ambiguity instead of arbitrating it. The canvas also accepts
+ * `Shift` with the primary button as a move in *any* mode, so the mode is the
+ * discoverable path and not the only one — the same shape `Alt` + primary
+ * already has for panning, which likewise has no mode of its own.
+ */
+export type PlanTool = 'place' | 'erase' | 'move'
 
 export interface PlanTools {
   readonly tool: PlanTool
@@ -42,6 +53,11 @@ export interface PlanTools {
   /** The palette's current selection, or `null` when nothing is armed. */
   readonly selectedTileId: TileId | null
   setTool: (tool: PlanTool) => void
+  /**
+   * Swap between `place` and `erase`, the two modes that are each other's
+   * opposite. From `move` it returns to `place`, because `move` is not the
+   * negation of anything — it is reached by name, from the toolbar or from `M`.
+   */
   toggleTool: () => void
   setSnap: (snap: SnapMode) => void
   toggleSnap: () => void
