@@ -7,17 +7,24 @@
  * the network, for the same reason the landing and library suites stub it: the
  * index is a 5.6 MB build artefact.
  *
- * The fixture's reachability figures are deliberately nothing like the real
- * archive's — **4 designs**, giving 75.0% / 50.0% / 25.0% — so if `3,822`,
- * `99.9%`, `74.7%` or `59.7%` ever appears on screen during these tests,
- * something has hard-coded a number that is supposed to be measured. That is the
- * failure this file exists to catch: the plan's first draft put the cost of this
- * choice at 0.1 points and was wrong by two orders of magnitude, and a constant
- * in the UI is exactly how a stale figure survives a rescan.
+ * The fixture's figures are deliberately nothing like the real archive's — **5
+ * designs** — so if `3,822`, `99.9%`, `74.7%`, `59.7%` or `88.3%` ever appears on
+ * screen during these tests, something has hard-coded a number that is supposed
+ * to be measured. That is the failure this file exists to catch: the plan's first
+ * draft put the cost of this choice at 0.1 points and was wrong by two orders of
+ * magnitude, and a constant in the UI is exactly how a stale figure survives a
+ * rescan.
  *
- * Every share is distinct on purpose: a tie would make "which option reaches
- * furthest" depend on the name tie-break, and the assertions below would then be
- * testing the tie-break rather than the screen.
+ * **The screen states two figures per option and they are different questions.**
+ * *Buildable* is what the app can resolve into a complete printable assembly;
+ * *in the archive* is what the tags say. On the real corpus they disagree by up
+ * to 19 points and in opposite directions per system, so a screen that printed
+ * one where the other belongs would look entirely plausible. The fixture is built
+ * so that they differ on every row and the assertions name which is which.
+ *
+ * Every share is distinct within a reading on purpose: a tie would make "which
+ * option builds furthest" depend on the name tie-break, and the assertions below
+ * would then be testing the tie-break rather than the screen.
  *
  * What else is asserted, and why each is here rather than left to a manual pass:
  *
@@ -55,7 +62,7 @@ import {
   setLockSystem,
   useWorkshopStore,
 } from '@/store'
-import { LockNotice, resetLockReach } from '@/ui/lock-picker'
+import { LockNotice, resetLockBuild } from '@/ui/lock-picker'
 import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
 
 /* ------------------------------------------------------------------ fixture */
@@ -63,18 +70,32 @@ import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
 const TILE_A = 'tiles/cave/floors/floor/openlock/cave#floor.2x2.openlock.stl'
 
 /**
- * Four designs across five records:
+ * Five designs across six records, carrying **both** connection forms.
  *
- * | design    | locks                        | reachable under |
- * | --------- | ---------------------------- | --------------- |
- * | `d-open`  | openlock, twice — one of them |
- * |           | tagged `side\|openlock`      | openlock only |
- * | `d-open2` | openlock                     | openlock only |
- * | `d-mag`   | magnetic, and it is a base   | magnetic only |
- * | `d-free`  | *(openforge)* — no lock      | all three |
+ * Each record's `conn` is the flattened field `@/ui/lock-picker/reach.ts` reads
+ * and its `tags` carry the raw `connection|…` tags the aggregate's positional
+ * projection reads. Both, from one source, because the buildability derivation
+ * needs the second: a fixture with a populated `conn` and no connection tags —
+ * which this was, and which nothing noticed while only reachability was on
+ * screen — reports every design as unbuildable in every system.
  *
- * openlock 3/4, magnetic 2/4, dragonlock 1/4 — so `3 / 4 designs` and `50.0 pp`
- * are strings only this fixture can produce.
+ * | design       | what it is                              | reachable under | buildable under |
+ * | ------------ | --------------------------------------- | --------------- | --------------- |
+ * | `d-open`     | two openlock integrals, one of them tagged `side\|openlock` | openlock | openlock |
+ * | `d-open2`    | an openlock integral                    | openlock | openlock |
+ * | `d-mag`      | a magnetic base, `rect:2x2`             | magnetic | magnetic |
+ * | `d-free`     | a `wall:2` topper with no lock at all   | all three | openlock, via `d-basewall` |
+ * | `d-basewall` | an openlock base, `wall:2`              | openlock | openlock |
+ *
+ * So reachability is openlock 4/5, magnetic 2/5, dragonlock 1/5 and buildability
+ * is openlock 4/5, magnetic 1/5, dragonlock 0/5 — `2 of 5`, `1 of 5`, `80.0 pp`
+ * and `60.0 pp` are strings only this fixture can produce, and every value is
+ * distinct within its own reading so no assertion below rests on a name
+ * tie-break.
+ *
+ * The magnetic and dragonlock rows are where the two readings separate: magnetic
+ * reaches 2 and builds 1, dragonlock reaches 1 and builds 0. A screen that
+ * printed one figure where the other belongs fails on those two rows.
  */
 const RAW_INDEX = {
   version: {
@@ -91,7 +112,16 @@ const RAW_INDEX = {
     lod: 'https://objects.example.test/lod',
   },
   sprite: { rows: 2, cols: 5, tile: 512, frames: 10, defaultFrame: 0 },
-  tags: ['texture|cave', 'shape|floor', 'shape|base'],
+  tags: [
+    'texture|cave',
+    'shape|floor',
+    'shape|base',
+    'connection|openlock',
+    'connection|side|openlock',
+    'connection|magnetic',
+    'connection|openforge',
+    'shape|wall',
+  ],
   records: [
     {
       id: TILE_A,
@@ -107,7 +137,7 @@ const RAW_INDEX = {
       conn: ['openlock'],
       layer: 'integral',
       texture: 'cave',
-      tags: [0, 1],
+      tags: [0, 1, 3],
       foot: { shape: 'rect', w: 2, d: 2 },
       rotStep: 90,
     },
@@ -129,7 +159,7 @@ const RAW_INDEX = {
       conn: ['side|openlock'],
       layer: 'integral',
       texture: 'cave',
-      tags: [0, 1],
+      tags: [0, 1, 4],
       foot: { shape: 'rect', w: 2, d: 2 },
       rotStep: 90,
     },
@@ -147,7 +177,7 @@ const RAW_INDEX = {
       conn: ['openlock'],
       layer: 'integral',
       texture: 'cave',
-      tags: [0, 1],
+      tags: [0, 1, 3],
       foot: { shape: 'rect', w: 1, d: 1 },
       rotStep: 90,
     },
@@ -165,7 +195,7 @@ const RAW_INDEX = {
       conn: ['magnetic'],
       layer: 'base',
       texture: 'cave',
-      tags: [0, 2],
+      tags: [0, 2, 5],
       foot: { shape: 'rect', w: 2, d: 2 },
       rotStep: 90,
     },
@@ -183,7 +213,29 @@ const RAW_INDEX = {
       conn: ['openforge'],
       layer: 'topper',
       texture: 'cave',
-      tags: [0],
+      tags: [0, 7, 6],
+      foot: { shape: 'wall', length: 2 },
+      rotStep: 90,
+    },
+    {
+      // The base that makes `d-free` buildable, and the only reason the two
+      // spreads on this screen differ from each other: without it every system
+      // loses exactly one design to buildability and the two figures coincide,
+      // which would let a bug that printed one where the other belongs pass.
+      id: 'tiles/cave/bases/base/openlock/cave#base+wall.2.openlock.stl',
+      ord: 5,
+      blob: 'f'.repeat(32),
+      file: 'cave#base+wall.2.openlock.stl',
+      bytes: 1_000_000,
+      sprite: true,
+      family: 'tiles/cave/bases/base/openlock',
+      design: 'd-basewall',
+      name: 'Cave Wall Base 2',
+      kinds: ['base'],
+      conn: ['openlock'],
+      layer: 'base',
+      texture: 'cave',
+      tags: [0, 2, 3],
       foot: { shape: 'wall', length: 2 },
       rotStep: 90,
     },
@@ -208,7 +260,7 @@ beforeEach(() => {
   clearPersistedWorkshopState()
   resetWorkshop()
   resetCatalogIndexCache()
-  resetLockReach()
+  resetLockBuild()
   vi.stubGlobal(
     'fetch',
     vi.fn(() => Promise.resolve(new Response(JSON.stringify(RAW_INDEX), { status: 200 }))),
@@ -218,7 +270,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   resetCatalogIndexCache()
-  resetLockReach()
+  resetLockBuild()
   resetWorkshop()
 })
 
@@ -229,49 +281,100 @@ function optionRow(name: string): HTMLElement {
 
 /* ------------------------------------------------------------------- figures */
 
-describe('the reachable-design figures', () => {
+describe('the two figures', () => {
   it('come from the index, not from a constant', async () => {
     renderAt('/settings')
 
-    // Four designs in the fixture; the real archive has 3,822. If the screen
+    // Five designs in the fixture; the real archive has 3,822. If the screen
     // ever shows the latter, it is reading the plan rather than the index.
     await waitFor(() => {
-      expect(screen.getByText('3 / 4 designs')).toBeInTheDocument()
+      expect(within(optionRow('OpenLOCK')).getByText('4 of 5')).toBeInTheDocument()
     })
-    expect(screen.getByText('2 / 4 designs')).toBeInTheDocument()
-    expect(screen.getByText('1 / 4 designs')).toBeInTheDocument()
     expect(document.body.textContent).not.toContain('3,822')
     expect(document.body.textContent).not.toContain('99.9%')
     expect(document.body.textContent).not.toContain('74.7%')
+    expect(document.body.textContent).not.toContain('88.3%')
+  })
+
+  it('states buildability and reachability as different numbers, per option', async () => {
+    renderAt('/settings')
+    await waitFor(() => {
+      expect(within(optionRow('Magnetic')).getByText('buildable')).toBeInTheDocument()
+    })
+
+    // Magnetic reaches two designs and can build one; DragonLock reaches one and
+    // can build none. Both rows would look plausible with the two figures
+    // swapped, which is why they are asserted as a pair rather than singly.
+    const magnetic = within(optionRow('Magnetic'))
+    expect(magnetic.getByText('1 of 5')).toBeInTheDocument()
+    expect(magnetic.getByText('2 of 5 · 40.0%')).toBeInTheDocument()
+
+    const dragonlock = within(optionRow('DragonLock'))
+    expect(dragonlock.getByText('0 of 5')).toBeInTheDocument()
+    expect(dragonlock.getByText('1 of 5 · 20.0%')).toBeInTheDocument()
+  })
+
+  it('orders the options by what they can build', async () => {
+    renderAt('/settings')
+    await waitFor(() => {
+      expect(screen.getAllByRole('radio')).toHaveLength(3)
+    })
+    // Buildable 4 / 1 / 0. Reachability would order them 4 / 2 / 1 — the same
+    // order in this fixture, but read off the other field.
+    expect(screen.getAllByRole('radio').map((radio) => (radio as HTMLInputElement).value)).toEqual([
+      'openlock',
+      'magnetic',
+      'dragonlock',
+    ])
+  })
+
+  it('says how many of the buildable designs need no separate base', async () => {
+    renderAt('/settings')
+    // Three of openlock's four are one-part prints: two integrals and the base.
+    // Magnetic's single buildable design is its own base, so one.
+    await waitFor(() => {
+      expect(within(optionRow('OpenLOCK')).getByText('3 need no base')).toBeInTheDocument()
+    })
+    expect(within(optionRow('Magnetic')).getByText('1 need no base')).toBeInTheDocument()
+    expect(within(optionRow('DragonLock')).getByText('0 need no base')).toBeInTheDocument()
   })
 
   it('reads a position segment as a position', async () => {
     // Both openlock designs must be counted, one of which is reached only
-    // through `side|openlock`.
+    // through `side|openlock`. Reachability is the reading that shows it: the
+    // aggregate counts a side lock as neighbour joinery, never as a base.
     renderAt('/settings')
     await waitFor(() => {
-      expect(within(optionRow('OpenLOCK')).getByText('3 / 4 designs')).toBeInTheDocument()
+      expect(within(optionRow('OpenLOCK')).getByText('4 of 5 · 80.0%')).toBeInTheDocument()
     })
   })
 
   it('states the cost of every option that is not the best', async () => {
     renderAt('/settings')
     await waitFor(() => {
-      expect(within(optionRow('DragonLock')).getByText(/hides 3/)).toBeInTheDocument()
+      expect(within(optionRow('DragonLock')).getByText(/^5 out of reach/)).toBeInTheDocument()
     })
-    expect(within(optionRow('Magnetic')).getByText(/hides 2/)).toBeInTheDocument()
-    // The best option still hides one design here (the magnetic-only base), and
-    // says so — but without a "0.0 pp behind itself" clause, which would be
-    // gibberish. This is the case the real corpus also hits: openlock hides 5.
-    expect(within(optionRow('OpenLOCK')).getByText('hides 1 · the fewest of the three')).toBeInTheDocument()
+    expect(within(optionRow('DragonLock')).getByText(/80\.0 pp behind OpenLOCK/)).toBeInTheDocument()
+    expect(within(optionRow('Magnetic')).getByText(/60\.0 pp behind OpenLOCK/)).toBeInTheDocument()
+    // The best option still leaves one design out here, and says so — but
+    // without a "0.0 pp behind itself" clause, which would be gibberish. This is
+    // the case the real corpus also hits: openlock cannot build 447.
+    expect(within(optionRow('OpenLOCK')).getByText('1 out of reach · the fewest of the three')).toBeInTheDocument()
   })
 
-  it('measures the spread over this catalog', async () => {
+  it('measures both spreads, and does not print one for the other', async () => {
     renderAt('/settings')
-    // 3/4 - 1/4 = 50.0 points, which only this fixture produces.
+    // Buildable 4/5 − 0/5 = 80.0 points; in the archive 4/5 − 1/5 = 60.0. Only
+    // this fixture produces that pair, and only a screen reading the right field
+    // for each produces both. Asserted on the sentence rather than on the two
+    // figures alone, because "60.0 pp" is also what the second-best option costs
+    // here and the point is which figure sits where.
     await waitFor(() => {
-      expect(screen.getByText('50.0 pp')).toBeInTheDocument()
+      expect(screen.getByText('80.0 pp')).toBeInTheDocument()
     })
+    expect(document.body.textContent).toContain('80.0 pp between the best and worst option, over 5 designs')
+    expect(document.body.textContent).toContain('against 60.0 pp if you go by the archive’s tags alone')
+    expect(document.body.textContent).toContain('costs 60.0 pp of what you can build, not the 40.0 pp')
   })
 
   it('names every base’s lock system, and that none lacks one', async () => {
@@ -279,8 +382,31 @@ describe('the reachable-design figures', () => {
     await waitFor(() => {
       expect(screen.getByText(/every one/i)).toBeInTheDocument()
     })
-    // One base in the fixture, magnetic. Not 1,963 and not 1,141.
-    expect(screen.getByText(/Magnetic 1/)).toBeInTheDocument()
+    // Two bases in the fixture, one each, and the zero rendered as a zero.
+    // Not 1,963 and not 1,141. The list is one span per system, so this reads
+    // the assembled text rather than a single node.
+    expect(document.body.textContent).toContain('(OpenLOCK 1 · Magnetic 1 · DragonLock 0)')
+  })
+
+  it('states the side-connector asymmetry rather than showing a dead chip', async () => {
+    renderAt('/settings')
+    // One design carries `connection|side|openlock`; neither of the others
+    // carries a side connector at all. In the real archive magnetic is the
+    // permanent zero — the reason this is one sentence and not three badges.
+    await waitFor(() => {
+      expect(screen.getByText(/Not one design carries edge-to-edge joinery in Magnetic or DragonLock/)).toBeInTheDocument()
+    })
+    expect(document.body.textContent).toContain('(OpenLOCK 1 · Magnetic 0 · DragonLock 0)')
+  })
+
+  it('says nothing about a floor when every design is buildable somewhere', async () => {
+    renderAt('/settings')
+    await waitFor(() => {
+      expect(within(optionRow('OpenLOCK')).getByText('4 of 5')).toBeInTheDocument()
+    })
+    // All five fixture designs build under something, so the "no option reaches
+    // these" paragraph is absent rather than reading "0 of 5".
+    expect(screen.queryByText(/cannot be completed under/)).toBeNull()
   })
 
   it('still offers the choice when the index cannot be read', async () => {
@@ -333,13 +459,15 @@ describe('picking a system', () => {
     expect(screen.queryByText(/you have not changed it/i)).toBeNull()
   })
 
-  it('shows the reach of what is in effect, and follows a change', async () => {
+  it('shows what is in effect can build, and follows a change', async () => {
     renderAt('/settings')
     await waitFor(() => {
-      expect(screen.getByText(/OpenLOCK · 3 of 4 designs reachable/)).toBeInTheDocument()
+      expect(screen.getByText(/OpenLOCK · 4 of 5 designs buildable · 4 named in the archive/)).toBeInTheDocument()
     })
     fireEvent.click(screen.getByRole('radio', { name: /DragonLock/i }))
-    expect(screen.getByText(/DragonLock · 1 of 4 designs reachable/)).toBeInTheDocument()
+    // Both readings follow, and they part company here: nothing builds in
+    // DragonLock in this fixture while one design still names it.
+    expect(screen.getByText(/DragonLock · 0 of 5 designs buildable · 1 named in the archive/)).toBeInTheDocument()
   })
 })
 
@@ -414,10 +542,12 @@ describe('the one-time notice', () => {
     return render(<RouterProvider router={router as unknown as WorkshopRouter} />)
   }
 
-  it('states the reach of the current preference, measured', async () => {
+  it('states what the current preference can build, measured', async () => {
     renderNotice()
+    // The same figure the picker one click away leads with. It used to quote
+    // reachability, which meant the number dropped when you followed the link.
     await waitFor(() => {
-      expect(screen.getByText(/reaches 3 of 4 designs \(75\.0%\)/)).toBeInTheDocument()
+      expect(screen.getByText(/can build 4 of 5 designs \(80\.0%\)/)).toBeInTheDocument()
     })
   })
 
