@@ -7,13 +7,17 @@
  * A canvas that computed the preview in the renderer and the placement in the
  * click handler is how a ghost ends up half a unit from where the tile lands.
  *
- * It reports four things beyond the geometry, and each of them is a thing the
+ * It reports five things beyond the geometry, and each of them is a thing the
  * user should know *before* clicking:
  *
- *   - **`refusal`** — an `arc` or `none` footprint. There is nothing to draw, so
- *     the ghost becomes a hatched one-unit marker with a cross rather than
+ *   - **`refusal`** — a `none` footprint, the one case of seven with nothing to
+ *     draw. The ghost becomes a hatched one-unit marker with a cross rather than
  *     disappearing: a palette selection that produces no ghost and no message is
  *     indistinguishable from a broken canvas.
+ *   - **`caveat`** — the piece *can* be drawn but its outline rests on a band
+ *     rule with no mesh fit behind it (462 of the 1,199 curves). Shown and
+ *     placeable; `geometry.ts`'s `placementCaveat` sets out why disclosing beats
+ *     refusing.
  *   - **`conflict`** — the placement would land on another piece in the same
  *     band. Shown, not blocked; see `overlap.ts`.
  *   - **`duplicate`** — the identical placement is already there. This one *is*
@@ -26,26 +30,62 @@
  */
 import type { CatalogRecord } from '@/catalog'
 
-import type { Extent, PlanBox, PlanPoint, Refusal } from './geometry'
-import { anchorFor, footprintExtent, isAxisAligned, placementRefusal, planBox, planQuad, snapTo } from './geometry'
+import type { Extent, PlanBox, PlanCaveat, PlanPart, PlanPoint, PlanShape, Refusal } from './geometry'
+import {
+  anchorForShape,
+  footprintShape,
+  placementCaveat,
+  placementRefusal,
+  planGeometry,
+  snapTo,
+} from './geometry'
 import type { OverlapSubject, PlanBand } from './overlap'
 import { planBand, subjectsConflict } from './overlap'
 import type { PlanPiece, PlanScene } from './scene'
 
-/** The footprint of the refusal marker, in grid units. One cell, so it reads as a tile. */
-const REFUSAL_EXTENT: Extent = { w: 1, d: 1 }
+/**
+ * The shape of the refusal marker: one cell, so it reads as a tile.
+ *
+ * A `PlanShape` rather than a bare extent, because the marker then goes through
+ * exactly the same `planGeometry` call the real pieces do and the branch below
+ * has no second geometry path to drift from.
+ */
+const REFUSAL_SHAPE: PlanShape = {
+  shape: 'none',
+  extent: { w: 1, d: 1 },
+  angle: 0,
+  parts: [
+    [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+    ],
+  ],
+  cover: 'exact',
+  slack: 0,
+  outline: 'M 0 0 H 1 V 1 H 0 Z',
+}
 
 export interface PlanGhost {
   readonly record: CatalogRecord
+  /** The tile's resolved shape, or the marker's when refused. */
+  readonly shape: PlanShape
   /** The tile's own extent, or the marker's extent when refused. */
   readonly extent: Extent
   readonly rotation: number
+  /** `rotation + shape.angle` — the angle drawn. Differs only for `diag`. */
+  readonly angle: number
   /** Minimum corner, snapped. This is what `placeTile` receives. */
   readonly anchor: PlanPoint
   readonly box: PlanBox
-  readonly quad: readonly PlanPoint[]
+  readonly parts: readonly PlanPart[]
+  /** Whether the drawn box is the shape. Read by the corner-junction exemption. */
+  readonly axisAligned: boolean
   readonly band: PlanBand
   readonly refusal: Refusal | null
+  /** Set when the outline rests on an unmeasured band rule. Does not block placement. */
+  readonly caveat: PlanCaveat | null
   readonly conflict: boolean
   readonly duplicate: boolean
   /** Whether committing this ghost would change the scene. */
@@ -69,8 +109,8 @@ function isDuplicate(scene: PlanScene, record: CatalogRecord, anchor: PlanPoint,
  * The ghost as an overlap subject, so the prediction runs through exactly the
  * predicate the scene's conflict pass runs through — corner exemption included.
  */
-function subjectOf(ghost: Pick<PlanGhost, 'band' | 'box' | 'quad' | 'rotation'>): OverlapSubject {
-  return { band: ghost.band, box: ghost.box, quad: ghost.quad, axisAligned: isAxisAligned(ghost.rotation) }
+function subjectOf(ghost: Pick<PlanGhost, 'band' | 'box' | 'parts' | 'axisAligned'>): OverlapSubject {
+  return { band: ghost.band, box: ghost.box, parts: ghost.parts, axisAligned: ghost.axisAligned }
 }
 
 /**
@@ -88,44 +128,57 @@ export function computeGhost(
   scene: PlanScene,
 ): PlanGhost {
   const refusal = placementRefusal(record) ?? null
-  const extent = footprintExtent(record.foot) ?? REFUSAL_EXTENT
+  const resolved = footprintShape(record.foot)
 
-  if (refusal !== null) {
+  if (refusal !== null || resolved === undefined) {
     // No real extent, so the marker is placed on the lattice directly rather
-    // than through `anchorFor` — there is no piece to centre on the cursor.
+    // than through `anchorForShape` — there is no piece to centre on the cursor.
     const anchor: PlanPoint = [snapTo(cursor[0] - 0.5, step), snapTo(cursor[1] - 0.5, step)]
-    const box = planBox(extent, 0, anchor[0], anchor[1])
+    const geometry = planGeometry(REFUSAL_SHAPE, 0, anchor[0], anchor[1])
     return {
       record,
-      extent,
+      shape: REFUSAL_SHAPE,
+      extent: REFUSAL_SHAPE.extent,
       rotation: 0,
+      angle: 0,
       anchor,
-      box,
-      quad: planQuad(extent, 0, anchor[0], anchor[1]),
+      box: geometry.box,
+      parts: geometry.parts,
+      axisAligned: true,
       band: 'area',
       refusal,
+      caveat: null,
       conflict: false,
       duplicate: false,
       placeable: false,
     }
   }
 
-  const anchor = anchorFor(extent, rotation, cursor[0], cursor[1], step)
-  const box = planBox(extent, rotation, anchor[0], anchor[1])
-  const quad = planQuad(extent, rotation, anchor[0], anchor[1])
+  const anchor = anchorForShape(resolved, rotation, cursor[0], cursor[1], step)
+  const geometry = planGeometry(resolved, rotation, anchor[0], anchor[1])
   const band = planBand(record)
   const duplicate = isDuplicate(scene, record, anchor, rotation)
+  const subject: OverlapSubject = {
+    band,
+    box: geometry.box,
+    parts: geometry.parts,
+    axisAligned: geometry.axisAligned,
+  }
 
   return {
     record,
-    extent,
+    shape: resolved,
+    extent: resolved.extent,
     rotation,
+    angle: geometry.angle,
     anchor,
-    box,
-    quad,
+    box: geometry.box,
+    parts: geometry.parts,
+    axisAligned: geometry.axisAligned,
     band,
     refusal: null,
-    conflict: scene.pieces.some((piece) => subjectsConflict(piece, subjectOf({ band, box, quad, rotation }))),
+    caveat: placementCaveat(record) ?? null,
+    conflict: scene.pieces.some((piece) => subjectsConflict(piece, subject)),
     duplicate,
     placeable: !duplicate,
   }

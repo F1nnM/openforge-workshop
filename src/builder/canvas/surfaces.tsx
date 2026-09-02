@@ -39,6 +39,19 @@ export const HALF_GRID_PATTERN_ID = 'of-plan-grid-half'
 export const CONFLICT_PATTERN_ID = 'of-plan-conflict'
 /** Cross-hatch marking a tile the plan view cannot draw. */
 export const REFUSAL_PATTERN_ID = 'of-plan-refused'
+/**
+ * Sparse stipple marking a curve whose outline rests on an unmeasured band rule.
+ *
+ * 462 of the 1,199 `arc` tiles are `bandBasis: 'fallback'` and they are drawn,
+ * not refused (`geometry.ts`, `placementCaveat`) — so the drawing has to say so.
+ * Deliberately unlike {@link CONFLICT_PATTERN_ID}: dots rather than lines, the
+ * muted ink rather than the accent, and at a quarter of the conflict hatch's
+ * density, because this is a provenance note about a legal placement and not a
+ * problem to fix. It is a *second* channel, never the only one — the same fact
+ * is named in the piece's accessible label, since a stipple is invisible to a
+ * screen reader.
+ */
+export const UNMEASURED_PATTERN_ID = 'of-plan-unmeasured'
 
 export const surfacePatternId = (material: MaterialId): string => `of-plan-surface-${material}`
 
@@ -155,6 +168,15 @@ export function PlanDefs({ materials, halfGrid }: PlanDefsProps) {
         patternTransform="rotate(45)"
       >
         <path d="M 0 0 V 0.34" fill="none" stroke="var(--acc)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      </pattern>
+      <pattern
+        id={UNMEASURED_PATTERN_ID}
+        width={0.34}
+        height={0.34}
+        patternUnits="userSpaceOnUse"
+        patternTransform="rotate(45)"
+      >
+        <circle cx={0.17} cy={0.17} r={0.035} fill="var(--mut)" opacity={0.55} />
       </pattern>
       <pattern id={REFUSAL_PATTERN_ID} width={0.25} height={0.25} patternUnits="userSpaceOnUse">
         <path

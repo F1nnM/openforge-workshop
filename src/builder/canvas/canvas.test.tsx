@@ -168,9 +168,11 @@ describe('place, rotate, and the store', () => {
 
     fireEvent.keyDown(plan(), { key: 'r' })
     expect(placements()[0]?.rotation).toBe(90)
-    // The drawn piece is the turned rectangle: 0.5 wide, 2 deep.
-    const piece = document.querySelector('[data-band="edge"] rect')
-    expect(piece?.getAttribute('width')).toBe('2')
+    // The drawn piece is the un-turned 2 x 0.5 rectangle in its own local
+    // frame, placed by the group's transform. jsdom does not lay the path out,
+    // so this asserts the geometry the renderer emitted and not its appearance.
+    const piece = document.querySelector('[data-band="edge"] path')
+    expect(piece?.getAttribute('d')).toBe('M 0 0 H 2 V 0.5 H 0 Z')
     const group = document.querySelector('[data-band="edge"]')
     expect(group?.getAttribute('transform')).toContain('rotate(90')
   })
@@ -199,25 +201,53 @@ describe('place, rotate, and the store', () => {
 })
 
 describe('refusal', () => {
-  it('refuses an arc footprint with a reason and places nothing', () => {
-    render(<Harness initial={FIXTURE_IDS.arc} />)
-    fireEvent.keyDown(plan(), { key: 'Enter' })
-
-    expect(placements()).toEqual([])
-    expect(live()).toContain('v1.1')
-    expect(screen.getByTestId('status').textContent).toContain('v1.1')
-  })
-
-  it('refuses a shapeless footprint with a reason', () => {
+  it('refuses a shapeless footprint with a reason and places nothing', () => {
     render(<Harness initial={FIXTURE_IDS.shapeless} />)
     fireEvent.keyDown(plan(), { key: 'Enter' })
 
     expect(placements()).toEqual([])
     expect(live()).toContain('no derivable footprint')
+    expect(screen.getByTestId('status').textContent).toContain('no derivable footprint')
+  })
+
+  it('places an arc rather than refusing it, and draws it as a curve', () => {
+    render(<Harness initial={FIXTURE_IDS.arc} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+
+    expect(placements()).toHaveLength(1)
+    // The drawn outline is the arc itself. jsdom measures nothing, so this
+    // asserts the `d` the renderer emitted and NOT what it looks like: an `A`
+    // command is present and no `<rect>` stands in for the sector.
+    const piece = document.querySelector('.of-plan-pieces g path')
+    expect(piece?.getAttribute('d')).toMatch(/^M 2 0 A 2 2 /)
+    expect(document.querySelector('.of-plan-pieces rect')).toBeNull()
+  })
+
+  it('marks a curve whose band nobody measured, without refusing it', () => {
+    render(<Harness initial={FIXTURE_IDS.arcFallback} />)
+    fireEvent.focus(plan())
+    // The ghost is offered, and carries the provenance mark.
+    expect(document.querySelector('.of-plan-ghost[data-refused="true"]')).toBeNull()
+    expect(document.querySelector('.of-plan-ghost[data-basis="fallback"]')).not.toBeNull()
+    // The mark is a second channel and never the only one: the hint says it in
+    // words, before the click, and the announcement repeats it after.
+    expect(screen.getByTestId('status').textContent).toContain('no accepted mesh fit')
+
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(placements()).toHaveLength(1)
+    expect(document.querySelector('.of-plan-pieces g[data-basis="fallback"]')).not.toBeNull()
+    expect(live()).toContain('Placed Cut stone convex curve 4r45')
+    expect(live()).toContain('no accepted mesh fit')
+  })
+
+  it('leaves a measured curve unmarked, so the mark means something', () => {
+    render(<Harness initial={FIXTURE_IDS.arc} />)
+    fireEvent.keyDown(plan(), { key: 'Enter' })
+    expect(document.querySelector('.of-plan-pieces g[data-basis]')).toBeNull()
   })
 
   it('draws a refused tile as a visible marker rather than nothing', () => {
-    render(<Harness initial={FIXTURE_IDS.arc} />)
+    render(<Harness initial={FIXTURE_IDS.shapeless} />)
     fireEvent.focus(plan())
     expect(document.querySelector('.of-plan-ghost[data-refused="true"]')).not.toBeNull()
   })

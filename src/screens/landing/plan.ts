@@ -9,15 +9,18 @@
  *
  * ## Why the room is drawn from `rect` and `wall` only
  *
- * Those are exactly the two footprint cases v1's builder can place — 3,449
- * `rect` plus 3,079 `wall` tiles, **75.0%** of the live corpus
- * (`src/catalog/schema.ts`, `Footprint`). `arc` (13.8%) lands in v1.1, and so do
- * the three cases row W4 added: `diag` (1.4%), `column` (1.4%) and `tri` (0.1%),
- * which is 249 tiles the builder can now describe and still not draw — row W6 is
- * where they arrive on the canvas. `none` (8.3%) is never placeable. So a hero
- * drawn from rectangles and wall segments is not a simplification of the
- * product: it is a picture of what the product does, and it cannot promise a
- * shape the builder would refuse.
+ * Not because those are all the builder can place — that stopped being true when
+ * row W6 landed. `arc` (13.8%), `diag` (1.4%), `column` (1.4%) and `tri` (0.1%)
+ * are all placeable now, so **91.7%** of the corpus draws and collides, and only
+ * `none` (8.3%) is refused.
+ *
+ * The reason is narrower and still holds: a hero is a *still* picture, and these
+ * two cases are the ones whose outline is fully determined by their tags. A
+ * sector's band side is a fallback on 462 of the 1,199 arcs, and `tri` and `diag`
+ * both take a canonical orientation the tags do not state, so drawing one here
+ * would put a shape on the landing page that the builder might rotate differently
+ * the moment someone places it. 3,449 `rect` plus 3,079 `wall` tiles — **75.0%**
+ * of the live corpus — promise nothing the product cannot keep.
  *
  * Every wall segment is {@link WALL_THICKNESS_UNITS} (0.5 units, the measured
  * 12.7 mm) on its short axis, and every coordinate here is a multiple of 0.25

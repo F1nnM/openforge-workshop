@@ -16,9 +16,10 @@ import { createStyleResolver, planCatalogFromFile } from './catalog'
 import { FIXTURE_IDS, fixtureCatalogFile } from './fixture'
 import { computeGhost, ghostOverlaps } from './ghost'
 import { SNAP_STEP, planBox, planQuad } from './geometry'
-import { findConflicts, planBand, quadsOverlap } from './overlap'
+import { findConflicts, partsOverlap, planBand, quadsOverlap } from './overlap'
 import type { OverlapCandidate } from './overlap'
 import { buildPlanScene, navigationOrder, pieceAt } from './scene'
+import { sectorSlack } from './sector'
 
 const file = fixtureCatalogFile()
 const catalog = planCatalogFromFile(file)
@@ -43,9 +44,10 @@ const candidate = (id: string, band: 'area' | 'edge', x: number, z: number, w: n
   id: id as PlacementId,
   band,
   box: { x, z, w, d },
-  quad: planQuad({ w, d }, 0, x, z),
+  parts: [planQuad({ w, d }, 0, x, z)],
   axisAligned: true,
 })
+
 
 describe('bands', () => {
   it('files a wall footprint as an edge piece', () => {
@@ -64,6 +66,34 @@ describe('bands', () => {
   it('files an unbucketed tile as an area piece — the conservative answer', () => {
     expect(record(FIXTURE_IDS.shapeless).kinds).toEqual([])
     expect(planBand(record(FIXTURE_IDS.shapeless))).toBe('area')
+  })
+
+  it('files a column as an edge piece on its footprint, not on its kinds', () => {
+    // One of the 75 tiles this changed: `kinds` is ['column'] with no 'wall', so
+    // the kind heuristic alone would call a 12.70 x 12.70 mm pillar a floor and
+    // then flag it against the floor it stands on.
+    expect(record(FIXTURE_IDS.column).kinds).toEqual(['column'])
+    expect(planBand(record(FIXTURE_IDS.column))).toBe('edge')
+  })
+
+  it('files a diagonal wall run as an edge piece', () => {
+    expect(planBand(record(FIXTURE_IDS.diag))).toBe('edge')
+  })
+
+  it('files a curve whose band is one wall thickness wide as an edge piece', () => {
+    // `convex` is [R-0.5, R] — a curved *wall*, whatever its kinds say. 248 of
+    // the corpus's curved walls carry base/floor/stairs kinds because the curve
+    // belongs to a floor family.
+    expect(planBand(record(FIXTURE_IDS.arcFallback))).toBe('edge')
+  })
+
+  it('files a wide curve on its kinds, since its band is a floor and not a wall', () => {
+    // The fixture's quarter disc is [0, 2] — two units of band, a floor.
+    expect(planBand(record(FIXTURE_IDS.arc))).toBe('area')
+  })
+
+  it('files a filled right triangle as an area piece', () => {
+    expect(planBand(record(FIXTURE_IDS.tri))).toBe('area')
   })
 })
 
@@ -116,6 +146,15 @@ describe('overlap', () => {
     expect(quadsOverlap(a, apart)).toBe(false)
     const across = planQuad({ w: 2, d: 2 }, 45, 1, 0)
     expect(quadsOverlap(a, across)).toBe(true)
+  })
+
+  it('composes over convex parts, so any part touching any part is a hit', () => {
+    // The union of convex sets is not convex, so SAT cannot be handed the union;
+    // `partsOverlap` is the pairwise composition a sector needs.
+    const left = [planQuad({ w: 1, d: 1 }, 0, 0, 0), planQuad({ w: 1, d: 1 }, 0, 4, 0)]
+    const right = [planQuad({ w: 1, d: 1 }, 0, 4.5, 0)]
+    expect(quadsOverlap(left[0] ?? [], right[0] ?? [])).toBe(false)
+    expect(partsOverlap(left, right)).toBe(true)
   })
 
   it('exempts two perpendicular walls meeting at a corner', () => {
@@ -195,10 +234,92 @@ describe('scene', () => {
   })
 
   it('reports a placement the plan view cannot draw instead of dropping it', () => {
-    const scene = buildPlanScene(sceneOf([['p1', FIXTURE_IDS.arc, 0, 0, 0]]), catalog, styleOf)
+    // `none` is the only case left: 726 tiles, and after this row the only
+    // footprint with nothing to draw.
+    const scene = buildPlanScene(sceneOf([['p1', FIXTURE_IDS.shapeless, 0, 0, 0]]), catalog, styleOf)
     expect(scene.pieces).toEqual([])
     expect(scene.undrawable).toHaveLength(1)
-    expect(scene.undrawable[0]?.reason).toContain('arc')
+    expect(scene.undrawable[0]?.reason).toContain('none')
+  })
+
+  it('draws a sector at its own box, with its curve and not its bounding rectangle', () => {
+    const scene = buildPlanScene(sceneOf([['p1', FIXTURE_IDS.arc, 0, 0, 0]]), catalog, styleOf)
+    const piece = scene.pieces[0]
+    expect(scene.undrawable).toEqual([])
+    // A quarter disc of radius 2: the box degenerates to rOut x rOut at 90.
+    expect(piece?.box).toEqual({ x: 0, z: 0, w: 2, d: 2 })
+    // Two `A` commands would be an annulus; a disc has one, closed through the
+    // centre.
+    expect(piece?.shape.outline.match(/A /g)).toHaveLength(1)
+    expect(piece?.shape.cover).toBe('outward')
+    expect(piece?.parts.length).toBeGreaterThan(1)
+    // The box corner opposite the arc centre is outside the disc, which is the
+    // whole reason the box is not the shape.
+    expect(pieceAt(scene, [1.95, 1.95])).toBeUndefined()
+    expect(pieceAt(scene, [0.4, 0.4])?.id).toBe('p1')
+  })
+
+  it('carries a diagonal wall at its intrinsic 45 degrees, and says so', () => {
+    const scene = buildPlanScene(sceneOf([['p1', FIXTURE_IDS.diag, 0, 0, 0]]), catalog, styleOf)
+    const piece = scene.pieces[0]
+    expect(piece?.placement.rotation).toBe(0)
+    // The drawn angle is not the placement's rotation for this one case.
+    expect(piece?.angle).toBe(45)
+    expect(piece?.axisAligned).toBe(false)
+    // 2.828 x 0.5 turned 45 degrees: a square box of (run + 0.5)/sqrt(2).
+    expect(piece?.box.w).toBeCloseTo((2.828 + 0.5) / Math.SQRT2, 10)
+    expect(piece?.box.d).toBeCloseTo((2.828 + 0.5) / Math.SQRT2, 10)
+  })
+
+  it('marks a fallback band as unmeasured, and leaves a measured one unmarked', () => {
+    const scene = buildPlanScene(
+      sceneOf([
+        ['fallback', FIXTURE_IDS.arcFallback, 0, 0, 0],
+        ['measured', FIXTURE_IDS.arc, 8, 8, 0],
+      ]),
+      catalog,
+      styleOf,
+    )
+    const fallback = scene.pieces.find((piece) => piece.id === 'fallback')
+    const measured = scene.pieces.find((piece) => piece.id === 'measured')
+    expect(fallback?.caveat?.code).toBe('unmeasured-band')
+    expect(fallback?.caveat?.message).toContain('convex')
+    expect(fallback?.label).toContain('unmeasured outline')
+    expect(measured?.caveat).toBeNull()
+    expect(measured?.label).not.toContain('unmeasured')
+  })
+
+  it('describes a curve by its radii and sweep, never by its bounding box', () => {
+    const scene = buildPlanScene(sceneOf([['p1', FIXTURE_IDS.arcFallback, 0, 0, 0]]), catalog, styleOf)
+    const label = scene.pieces[0]?.label ?? ''
+    expect(label).toContain('radius 3.5 to 4 units')
+    expect(label).toContain('45° sweep')
+  })
+
+  it('does not flag a column standing on the floor it stands on', () => {
+    // The 75-tile band move, end to end: before it, this pair was two `area`
+    // pieces in the same square and the canvas hatched both.
+    const scene = buildPlanScene(
+      sceneOf([
+        ['floor', FIXTURE_IDS.floor2, 0, 0, 0],
+        ['column', FIXTURE_IDS.column, 0.5, 0.5, 0],
+      ]),
+      catalog,
+      styleOf,
+    )
+    expect(scene.conflicts.size).toBe(0)
+  })
+
+  it('still flags two columns in the same square', () => {
+    const scene = buildPlanScene(
+      sceneOf([
+        ['a', FIXTURE_IDS.column, 0, 0, 0],
+        ['b', FIXTURE_IDS.column, 0.25, 0, 0],
+      ]),
+      catalog,
+      styleOf,
+    )
+    expect(scene.conflicts.size).toBe(2)
   })
 
   it('describes a piece with its material, size, angle and position', () => {
@@ -257,12 +378,69 @@ describe('ghost', () => {
     expect(Number.isInteger(ghost.anchor[1] * 2)).toBe(true)
   })
 
-  it('marks an arc as refused and unplaceable, with the reason', () => {
-    const ghost = computeGhost(record(FIXTURE_IDS.arc), 0, [1, 1], SNAP_STEP.fine, empty)
+  it('marks a shapeless tile as refused and unplaceable, with the reason', () => {
+    const ghost = computeGhost(record(FIXTURE_IDS.shapeless), 0, [1, 1], SNAP_STEP.fine, empty)
     expect(ghost.placeable).toBe(false)
-    expect(ghost.refusal?.code).toBe('arc')
+    expect(ghost.refusal?.code).toBe('no-footprint')
     // Still has a box, so the canvas can draw a marker rather than nothing.
     expect(ghost.box.w).toBe(1)
+  })
+
+  it('offers an arc, snapped and centred like any other piece', () => {
+    const ghost = computeGhost(record(FIXTURE_IDS.arc), 0, [3.3, 2.1], SNAP_STEP.fine, empty)
+    expect(ghost.refusal).toBeNull()
+    expect(ghost.placeable).toBe(true)
+    expect(ghost.anchor).toEqual([2.5, 1])
+    expect(ghost.box).toEqual({ x: 2.5, z: 1, w: 2, d: 2 })
+    expect(ghost.parts.length).toBeGreaterThan(1)
+  })
+
+  it('carries the unmeasured caveat on the ghost, so it is known before the click', () => {
+    const ghost = computeGhost(record(FIXTURE_IDS.arcFallback), 0, [1, 1], SNAP_STEP.fine, empty)
+    expect(ghost.placeable).toBe(true)
+    expect(ghost.caveat?.code).toBe('unmeasured-band')
+  })
+
+  it('turns a sector by its own sweep, which is what makes a curved run close', () => {
+    // rotStep equals sweep on all 1,199 arc tiles. Four 45-degree turns of the
+    // fixture s 45-degree curve is a half turn, and the box comes back square.
+    const record45 = record(FIXTURE_IDS.arcFallback)
+    expect(record45.rotStep).toBe(45)
+    const straightOn = computeGhost(record45, 0, [4, 4], SNAP_STEP.fine, empty)
+    const turned = computeGhost(record45, 45, [4, 4], SNAP_STEP.fine, empty)
+    // A 45-degree sector is not square, so a 45-degree turn changes the box —
+    // which a 90-degree-only step could never have produced.
+    expect(straightOn.box.w).not.toBeCloseTo(straightOn.box.d, 6)
+    expect(turned.box.w).toBeCloseTo(turned.box.d, 6)
+  })
+
+  it('turns a diagonal wall off its intrinsic 45 and onto the axes', () => {
+    const diag = record(FIXTURE_IDS.diag)
+    expect(diag.rotStep).toBe(45)
+    const asPlaced = computeGhost(diag, 0, [4, 4], SNAP_STEP.fine, empty)
+    const oneStep = computeGhost(diag, 45, [4, 4], SNAP_STEP.fine, empty)
+    expect(asPlaced.angle).toBe(45)
+    expect(asPlaced.axisAligned).toBe(false)
+    // One step lands the run on an axis: 2.828 x 0.5, exactly.
+    expect(oneStep.angle).toBe(90)
+    expect(oneStep.axisAligned).toBe(true)
+    expect(oneStep.box.w).toBeCloseTo(0.5, 10)
+    expect(oneStep.box.d).toBeCloseTo(2.828, 10)
+  })
+
+  it('agrees with the scene about a sector conflict, because both call one predicate', () => {
+    const scene = buildPlanScene(sceneOf([['p1', FIXTURE_IDS.arc, 0, 0, 0]]), catalog, styleOf)
+    // Centred on the disc s solid quadrant, so the overlap is unambiguous and
+    // far larger than the decomposition s slack.
+    const ghost = computeGhost(record(FIXTURE_IDS.arc), 0, [0.6, 0.6], SNAP_STEP.fine, scene)
+    expect(ghost.conflict).toBe(true)
+    expect(ghostOverlaps(scene, ghost).map((piece) => piece.id)).toEqual(['p1'])
+    // And the same ghost seven units away does not fire — the decomposition's
+    // slack is under 0.01 units, three orders of magnitude below the gap, so
+    // there is no question of the envelope reaching.
+    const clear = computeGhost(record(FIXTURE_IDS.arc), 0, [9, 9], SNAP_STEP.fine, scene)
+    expect(clear.conflict).toBe(false)
+    expect(sectorSlack(2, 90)).toBeLessThanOrEqual(0.01)
   })
 
   it('predicts a conflict without blocking it', () => {

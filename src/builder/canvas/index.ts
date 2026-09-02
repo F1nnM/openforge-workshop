@@ -23,12 +23,22 @@
  *     hint and the armed tile's name, so the floating toolbar can show them.
  *     Pass `chrome={false}` if row 18 renders its own corner plates instead of
  *     the canvas's.
- *   - **`isPlaceable(record)`** is what the palette should grey out on: `arc`
- *     and `none` footprints are 29.1% of the corpus and the canvas refuses them
- *     visibly rather than silently. Offering them without a mark would make the
- *     refusal look like a bug.
+ *   - **`isPlaceable(record)`** is what the palette should grey out on. Six of
+ *     the seven footprint cases now draw, so this is the `none` case alone —
+ *     **8.3% of the corpus, down from 29.1%** — and `placementRefusal(record)`
+ *     always returns a reason when it is false. The two read the same gate, which
+ *     they did not before: `column`, `tri` and `diag` spent one row greyed out
+ *     with no message at all because two switches over the same union disagreed
+ *     about which cases existed.
+ *   - **`placementCaveat(record)`** is the other half of that answer, and a
+ *     palette or a bill that reports on provenance wants it: 462 of the 1,199
+ *     curves are drawn from a band rule with no accepted mesh fit behind it. They
+ *     *are* placeable; the caveat is what says the outline may sit up to half a
+ *     unit in or out.
  *   - **`rotationStepFor(record)`** is the ⟳ Rotate button's step. Do not
- *     hardcode 90: 893 tiles carry an angle that is not a multiple of it.
+ *     hardcode 90: 893 tiles carry an angle that is not a multiple of it, 823 of
+ *     them now placeable, and on all 1,199 curves the step *equals the sweep* —
+ *     which is what makes one press land a curve beside its predecessor.
  *   - **`SNAP_STEP`** is the only place the snap values are written down.
  *
  * Row 18 owns the bill of tiles and does **not** get it from here: it comes from
@@ -47,20 +57,29 @@ export { createStyleResolver, planCatalogFromFile } from './catalog'
 export type { PlanCatalog, PlanStyle } from './catalog'
 
 export {
+  DIAGONAL_ANGLE_DEG,
   SNAP_MODES,
   SNAP_STEP,
   anchorFor,
+  anchorForShape,
   boxCentre,
   describeCell,
   describeExtent,
+  describeFootprint,
   footprintExtent,
+  footprintRefusal,
+  footprintShape,
   formatUnits,
   isAxisAligned,
   isPlaceable,
   isQuarterTurn,
   nextRotation,
+  partsContain,
+  placementCaveat,
   placementRefusal,
   planBox,
+  planGeometry,
+  planParts,
   planQuad,
   quadContains,
   rotatedExtent,
@@ -68,10 +87,33 @@ export {
   snapTo,
   unitsToMm,
 } from './geometry'
-export type { Extent, PlanBox, PlanPoint, Refusal, RefusalCode, SnapMode } from './geometry'
+export type {
+  CaveatCode,
+  Extent,
+  PlanBox,
+  PlanCaveat,
+  PlanCover,
+  PlanGeometry,
+  PlanPart,
+  PlanPoint,
+  PlanShape,
+  Refusal,
+  RefusalCode,
+  SnapMode,
+} from './geometry'
 
-export { findConflicts, planBand, quadsOverlap } from './overlap'
-export type { OverlapCandidate, PlanBand } from './overlap'
+export {
+  SECTOR_TOLERANCE_UNITS,
+  arcSectorExtent,
+  sectorCentre,
+  sectorParts,
+  sectorPath,
+  sectorSlack,
+  sectorSubdivisions,
+} from './sector'
+
+export { findConflicts, partsOverlap, planBand, quadsOverlap } from './overlap'
+export type { OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
 
 export { buildPlanScene, navigationOrder, pieceAt } from './scene'
 export type { PlanOmission, PlanPiece, PlanScene } from './scene'

@@ -15,11 +15,13 @@
  *     leaves the corpus, so a scene saved last month or a share link can name
  *     one. `src/assembly/resolve.ts` treats this the same way: a note and an
  *     empty part list, never a throw. One dead tile must not take a room down.
- *   - **`undrawable`** — the tile is in the catalog but its footprint is `arc` or
- *     `none`. Unreachable through this canvas, which refuses those, and reachable
- *     through a v1.1 share link opened in a v1 build. It is listed rather than
- *     dropped so the count can be surfaced instead of the room silently losing
- *     pieces.
+ *   - **`undrawable`** — the tile is in the catalog but its footprint is `none`,
+ *     the one case of seven with nothing to draw. Unreachable through this
+ *     canvas, which refuses it, and reachable through a share link written by a
+ *     build whose classifier resolved a footprint this one does not: 742 tiles
+ *     left `none` in row W3 and 249 more became placeable in W4, so the
+ *     population is a moving target by design. It is listed rather than dropped
+ *     so the count can be surfaced instead of the room silently losing pieces.
  *   - **`conflicts`** — see `overlap.ts`.
  *
  * ## Paint order
@@ -33,16 +35,15 @@ import type { CatalogRecord, TileId } from '@/catalog'
 import type { Placement, PlacementId, WorkshopState } from '@/store'
 
 import type { PlanCatalog, PlanStyle } from './catalog'
-import type { Extent, PlanBox, PlanPoint } from './geometry'
+import type { Extent, PlanBox, PlanCaveat, PlanPart, PlanPoint, PlanShape } from './geometry'
 import {
   boxCentre,
   describeCell,
-  describeExtent,
-  footprintExtent,
-  isAxisAligned,
-  planBox,
-  planQuad,
-  quadContains,
+  describeFootprint,
+  footprintShape,
+  partsContain,
+  placementCaveat,
+  planGeometry,
 } from './geometry'
 import type { PlanBand } from './overlap'
 import { findConflicts, planBand } from './overlap'
@@ -52,18 +53,27 @@ export interface PlanPiece {
   readonly id: PlacementId
   readonly placement: Placement
   readonly record: CatalogRecord
+  /** The footprint resolved: extent, intrinsic angle, convex parts and the outline path. */
+  readonly shape: PlanShape
   /** The un-rotated footprint extent — what the piece *is*, before it was turned. */
   readonly extent: Extent
   /** The axis-aligned box it occupies, anchored at `placement.x`/`placement.z`. */
   readonly box: PlanBox
-  /** The turned rectangle itself. Equal to the box for the 90° cases. */
-  readonly quad: readonly PlanPoint[]
+  /**
+   * The angle actually drawn: `placement.rotation + shape.angle`. Differs from
+   * the placement's rotation on the 121 `diag` tiles and nowhere else.
+   */
+  readonly angle: number
+  /** The piece as convex polygons. Equal to the box's corners for an axis-aligned rect. */
+  readonly parts: readonly PlanPart[]
   readonly band: PlanBand
-  /** Whether the box is the shape. Read by the corner-junction exemption. */
+  /** Whether the drawn box is the shape. Read by the corner-junction exemption. */
   readonly axisAligned: boolean
   readonly style: PlanStyle
   readonly conflict: boolean
-  /** The accessible name — material, name, size, angle, position. */
+  /** Set when the outline rests on an unmeasured band rule. See `placementCaveat`. */
+  readonly caveat: PlanCaveat | null
+  /** The accessible name — material, name, size, angle, position, and any caveat. */
   readonly label: string
 }
 
@@ -84,10 +94,26 @@ export interface PlanScene {
   readonly bounds: PlanBox | null
 }
 
-/** The accessible name of one piece. Read out when the cursor lands on it. */
-function describePiece(record: CatalogRecord, extent: Extent, placement: Placement, style: PlanStyle): string {
+/**
+ * The accessible name of one piece. Read out when the cursor lands on it.
+ *
+ * The shape is described per footprint case rather than as its bounding box, and
+ * an unmeasured band is *named* here rather than left to the drawing: a hatch
+ * over a curve is invisible to a screen reader, and the whole point of carrying
+ * `bandBasis` through to the builder is that the user can tell a measured
+ * outline from a defaulted one.
+ */
+function describePiece(
+  record: CatalogRecord,
+  extent: Extent,
+  placement: Placement,
+  style: PlanStyle,
+  caveat: PlanCaveat | null,
+): string {
   const angle = placement.rotation === 0 ? '' : `, turned ${String(Math.round(placement.rotation * 100) / 100)} degrees`
-  return `${record.name}, ${style.label}, ${describeExtent(extent)}${angle}, at ${describeCell(placement.x, placement.z)}`
+  const shape = describeFootprint(record.foot, extent)
+  const note = caveat === null ? '' : ', unmeasured outline'
+  return `${record.name}, ${style.label}, ${shape}${angle}, at ${describeCell(placement.x, placement.z)}${note}`
 }
 
 const BAND_ORDER: Readonly<Record<PlanBand, number>> = { area: 0, edge: 1 }
@@ -118,8 +144,8 @@ export function buildPlanScene(
       })
       continue
     }
-    const extent = footprintExtent(record.foot)
-    if (extent === undefined) {
+    const shape = footprintShape(record.foot)
+    if (shape === undefined) {
       undrawable.push({
         id,
         tileId: placement.tileId,
@@ -128,18 +154,23 @@ export function buildPlanScene(
       continue
     }
     const resolved = style(record)
+    const caveat = placementCaveat(record) ?? null
+    const geometry = planGeometry(shape, placement.rotation, placement.x, placement.z)
     drawable.push({
       id,
       placement,
       record,
-      extent,
-      box: planBox(extent, placement.rotation, placement.x, placement.z),
-      quad: planQuad(extent, placement.rotation, placement.x, placement.z),
+      shape,
+      extent: shape.extent,
+      box: geometry.box,
+      angle: geometry.angle,
+      parts: geometry.parts,
       band: planBand(record),
-      axisAligned: isAxisAligned(placement.rotation),
+      axisAligned: geometry.axisAligned,
       style: resolved,
       conflict: false,
-      label: describePiece(record, extent, placement, resolved),
+      caveat,
+      label: describePiece(record, shape.extent, placement, resolved, caveat),
     })
   }
 
@@ -175,7 +206,7 @@ function sceneBounds(pieces: readonly PlanPiece[]): PlanBox | null {
 export function pieceAt(scene: PlanScene, point: PlanPoint): PlanPiece | undefined {
   for (let i = scene.pieces.length - 1; i >= 0; i -= 1) {
     const piece = scene.pieces[i] as PlanPiece
-    if (quadContains(piece.quad, point)) return piece
+    if (partsContain(piece.parts, point)) return piece
   }
   return undefined
 }

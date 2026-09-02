@@ -7,7 +7,7 @@
  *
  * ## The unplaceable tiles are marked, and they are not buttons
  *
- * `isPlaceable` is false for `arc` and `none` footprints — 29.1% of the corpus —
+ * `isPlaceable` is false for the `none` footprint — 8.3% of the corpus —
  * and the plan view refuses them visibly rather than silently. Offering a row
  * that arms a tile the canvas will then refuse would make a correct refusal look
  * like a broken palette, so those rows render as static text with the reason
@@ -16,7 +16,7 @@
  * reach and cannot read the reason from. Static text is read by every screen
  * reader and skipped by Tab, which is exactly the intent.
  *
- * They keep their "+ add" action, though. Saving an arc to the library is a
+ * They keep their "+ add" action, though. Saving one to the library is a
  * perfectly good thing to do — it just cannot be laid out in plan view yet.
  *
  * ## Where the search comes from
@@ -39,7 +39,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { placementRefusal } from '@/builder/canvas'
 import type { PlanTools } from '@/builder/canvas'
-import type { CatalogAssets, CatalogRecord, SpriteSheet, TileId } from '@/catalog'
+import type { CatalogAssets, SpriteSheet, TileId } from '@/catalog'
 import type { FacetSearch } from '@/search'
 import { MAX_QUERY_LENGTH } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
@@ -206,7 +206,7 @@ function PaletteRowView({
       />
       <span className="of-pal-name">{record.name}</span>
       <span className="of-pal-size">
-        {placeable ? sizeLabel(record.foot, record.sizeCode) : refusalLabel(record)}
+        {placeable ? sizeLabel(record.foot, record.sizeCode) : REFUSAL_LABEL}
       </span>
     </>
   )
@@ -251,10 +251,13 @@ function PaletteRowView({
   )
 }
 
-/** The two footprints the plan view cannot draw, in four characters or so. */
-function refusalLabel(record: CatalogRecord): string {
-  return record.foot.shape === 'arc' ? 'arc · v1.1' : 'no plan shape'
-}
+/**
+ * The one footprint the plan view cannot draw, in a dozen characters.
+ *
+ * Was a two-case function while `arc` was refused; row W6 made all six drawable
+ * cases placeable, so `none` is the whole of it.
+ */
+const REFUSAL_LABEL = 'no plan shape'
 
 /* ------------------------------------------------------------------- search */
 

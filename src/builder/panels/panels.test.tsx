@@ -118,13 +118,14 @@ describe('the palette', () => {
     }
     render(<PaletteHarness />)
 
-    // The placeable one is a button; the arc and the footprint-less column are
-    // not controls at all — see `PalettePanel.tsx` on why not a disabled button.
+    // The floor and the curve are buttons; the footprint-less column is not a
+    // control at all — see `PalettePanel.tsx` on why not a disabled button.
+    // Row W6 made the sector placeable, so `none` is the only case left greyed.
     const rows = screen.getAllByRole('listitem')
     expect(rows).toHaveLength(3)
 
     const placeable = rows.filter((row) => row.hasAttribute('data-placeable'))
-    expect(placeable).toHaveLength(1)
+    expect(placeable).toHaveLength(2)
     expect(within(placeable[0] as HTMLElement).getByRole('button', { pressed: false })).toHaveTextContent(
       FIXTURE_NAMES.floor1,
     )
@@ -132,16 +133,15 @@ describe('the palette', () => {
     for (const row of rows.filter((candidate) => !candidate.hasAttribute('data-placeable'))) {
       expect(within(row).queryAllByRole('button')).toHaveLength(0)
     }
-    expect(screen.getByText('arc · v1.1')).toBeInTheDocument()
     expect(screen.getByText('no plan shape')).toBeInTheDocument()
     // The canvas's own refusal sentence, so the two cannot disagree about why.
-    expect(screen.getByText(/arc footprints arrive in v1\.1/)).toBeInTheDocument()
+    expect(screen.getByText(/no derivable footprint/)).toBeInTheDocument()
   })
 
   it('sinks the unplaceable tiles to the end of the list rather than interleaving them', () => {
     act(() => {
       useWorkshopStore.setState({
-        library: { [id('arc')]: true, [id('floor2')]: true, [id('floor1')]: true },
+        library: { [id('slab')]: true, [id('floor2')]: true, [id('floor1')]: true },
       })
     })
     render(<PaletteHarness />)
