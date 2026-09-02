@@ -3,13 +3,14 @@
  *
  * This suite runs everywhere, including in CI where the `openforge-catalog`
  * fixtures are not available and `public/catalog/catalog.json` therefore does not
- * exist. `corpus.test.ts` re-runs the same comparison over the real 8,702-tile
- * corpus when it does.
+ * exist. `corpus.test.ts` re-runs the same comparison over the real corpus when
+ * it does.
  *
  * The fixture is a full cross product — 9 texture shapes × 6 kind shapes × 4
- * build states × 5 connection shapes = 1,080 tiles — because the property under
- * test is about *combinations* of filters. Every corner the real corpus has that
- * a naive facet implementation gets wrong is represented deliberately:
+ * build states × 4 **variant groups** = 864 aggregates over 1,080 files —
+ * because the property under test is about *combinations* of filters. Every
+ * corner the real corpus has that a naive facet implementation gets wrong is
+ * represented deliberately:
  *
  *   - a tile in **two** kind buckets, and a tile in **none**;
  *   - a texture tag **nested two deep** (`texture|cave|sandstone`), so prefix
@@ -18,10 +19,31 @@
  *     prefix** (`stone` / `stone_brick`, `cave` / `cavern`);
  *   - a tile carrying **two** texture roots where the second is alphabetically
  *     later (`towne` + `stucco`) — the shape that makes `record.texture` a
- *     37-value field over a 38-root vocabulary;
+ *     36-value field over a 37-root vocabulary;
  *   - tiles with **no** build tag, and tiles with **no** connection tag;
  *   - a `wall` token that appears only in a **tag** (`build|separate wall`) on
  *     tiles that are floors, which is the ranking trap.
+ *
+ * ## What row A2 added to it
+ *
+ * The fixture used to give every record its own `design`, so aggregating it was
+ * a no-op and the whole suite passed over a per-file index. It now groups, and
+ * the group is the corners aggregation has of its own:
+ *
+ *   - **216 designs hold two files** whose *only* difference is connection —
+ *     `connection|openlock` on an `integral` and `connection|openforge` on a
+ *     `topper`. That is A1's `both` class, 24.4% of the real corpus, and it is
+ *     what makes `conn` a union rather than a value: those items are in the
+ *     `openlock` bucket *and* the `openforge` bucket though no file is in both.
+ *   - **`topless` appears in one variant's filename only**, so a token reachable
+ *     through a single member has to reach the item.
+ *   - **One aggregate's first variant carries no sprite**, so `preview` — and
+ *     therefore `SearchResult.ids` — is not the address's variant. The real
+ *     corpus has exactly one such aggregate; a rule with one witness is one a
+ *     refactor drops silently.
+ *   - **Display names repeat across designs** — 432 names over 864 items, each
+ *     shared by exactly two — which is the 131-names-over-323-aggregates shape.
+ *     Aggregation groups by design, never by name, and those stay separate.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -31,7 +53,7 @@ import { CatalogFile as CatalogFileSchema, MEASURED_SPRITE_SHEET } from '@/catal
 import { createSearchEngine } from './engine'
 import { FACET_KEYS, KIND_OTHER } from './facets'
 import type { FacetKey } from './facets'
-import { buildOracle, oracleCount, oracleIds } from './oracle'
+import { buildOracle, oracleAddresses, oracleCount, oracleIds } from './oracle'
 import { BUILD_UNSPECIFIED, buildSystemFilter, defaultFacetSearch } from './searchSchema'
 import type { FacetSearch } from './searchSchema'
 
@@ -53,12 +75,20 @@ const KIND_SHAPES: readonly (readonly string[])[] = [[], ['floor'], ['wall'], ['
 
 const BUILD_SHAPES: readonly (string | undefined)[] = [undefined, 'separate wall', 'wall on tile', 's2w']
 
-const CONNECTION_SHAPES: readonly (readonly string[])[] = [
-  [],
-  ['openlock'],
-  ['openforge'],
-  ['openlock', 'magnetic'],
-  ['dragonlock'],
+/**
+ * The variant groups. **Each group is one design**, and its entries are the
+ * files that design is printable as.
+ *
+ * The second group is the whole point: two files of one thing, differing only in
+ * connection, which is the pair A1's aggregation exists to merge. The other
+ * three are singletons, so the fixture also covers the 55.4% of the real corpus
+ * that aggregates to one file.
+ */
+const VARIANT_GROUPS: readonly (readonly (readonly string[])[])[] = [
+  [[]],
+  [['openlock'], ['openforge']],
+  [['openlock', 'magnetic']],
+  [['dragonlock']],
 ]
 
 /** Title-case a tag segment the way `pipeline/naming.ts` does. */
@@ -79,47 +109,70 @@ function synthesise(): CatalogFile {
 
   const records: CatalogRecord[] = []
   let ord = 0
+  let design = 0
 
   for (const textures of TEXTURE_SHAPES) {
     for (const kinds of KIND_SHAPES) {
       for (const build of BUILD_SHAPES) {
-        for (const conn of CONNECTION_SHAPES) {
-          const w = 1 + (ord % 4)
-          const d = 1 + (Math.floor(ord / 4) % 4)
-          const tags = [
-            ...textures,
-            ...kinds.map((kind) => `shape|${kind}`),
-            ...conn.map((system) => `connection|${system}`),
-            ...(build === undefined ? [] : [`build|${build}`]),
-            `size|width|${String(w)}`,
-            `size|depth|${String(d)}`,
-          ]
+        for (const group of VARIANT_GROUPS) {
+          // Per *design*, not per file: `foot` and `name` are two of the seven
+          // fields A1 hoists onto the item, so a fixture where they varied
+          // inside a group would be a fixture the pipeline's own assertion
+          // rejects.
+          //
+          // Only eight (width, depth) pairs across 864 designs, so the 54
+          // texture/kind prefixes yield 432 distinct display names — each shared
+          // by exactly two designs. That is deliberate: the real corpus shares
+          // 131 names across 323 aggregates, and a fixture where every name was
+          // unique could not tell "grouped by design" from "grouped by name".
+          const w = 1 + (design % 4)
+          const d = 1 + (Math.floor(design / 4) % 2)
           const name = [
             ...(textures[0]?.split('|').slice(1).flatMap(words) ?? []),
             ...kinds.flatMap(words),
             `${String(w)}x${String(d)}`,
           ].join(' ')
-          const file = `${name.toLowerCase().replaceAll(' ', '_')}.${String(ord)}.stl`
+          const slug = name.toLowerCase().replaceAll(' ', '_')
 
-          records.push({
-            id: `tiles/synthetic/${String(ord)}/${file}` as TileId,
-            ord: ord as ManifestOrdinal,
-            blob: ord.toString(16).padStart(32, '0') as BlobId,
-            file,
-            bytes: 1_000 + ord,
-            sprite: true,
-            family: `tiles/synthetic/${String(TEXTURE_SHAPES.indexOf(textures))}`,
-            design: `design-${String(ord)}` as DesignId,
-            name: name === '' ? file : name,
-            kinds: [...kinds],
-            conn: [...conn],
-            ...(build === undefined ? {} : { build }),
-            layer: kinds.includes('base') ? 'base' : conn.includes('openforge') ? 'topper' : 'integral',
-            ...(textures[0] === undefined ? {} : { texture: textures[0].split('|')[1] }),
-            tags: tags.map(tagId),
-            foot: { shape: 'rect', w, d },
+          group.forEach((conn, variant) => {
+            // One token that exists on a single member of the group.
+            const options = variant === 0 ? [] : ['topless']
+            const token = [...conn, ...options].join('+')
+            const file = `${slug}.${String(ord)}.${token === '' ? 'plain' : token}.stl`
+            const tags = [
+              ...textures,
+              ...kinds.map((kind) => `shape|${kind}`),
+              ...conn.map((system) => `connection|${system}`),
+              ...(build === undefined ? [] : [`build|${build}`]),
+              `size|width|${String(w)}`,
+              `size|depth|${String(d)}`,
+            ]
+
+            records.push({
+              id: `tiles/synthetic/${String(ord)}/${file}` as TileId,
+              ord: ord as ManifestOrdinal,
+              blob: ord.toString(16).padStart(32, '0') as BlobId,
+              file,
+              bytes: 1_000 + ord,
+              // The one sprite-less variant, on the first two-file design.
+              sprite: !(design === 1 && variant === 0),
+              family: `tiles/synthetic/${String(TEXTURE_SHAPES.indexOf(textures))}`,
+              design: `design-${String(design)}` as DesignId,
+              name,
+              kinds: [...kinds],
+              conn: [...conn],
+              ...(build === undefined ? {} : { build }),
+              // Connection decides the layer and `shape|base` deliberately does
+              // not: a `base` file in the same group as a `topper` would be A1's
+              // `mixed` class, which the real corpus measures at zero.
+              layer: conn.includes('openforge') ? 'topper' : 'integral',
+              ...(textures[0] === undefined ? {} : { texture: textures[0].split('|')[1] }),
+              tags: tags.map(tagId),
+              foot: { shape: 'rect', w, d },
+            })
+            ord++
           })
-          ord++
+          design++
         }
       }
     }
@@ -149,6 +202,9 @@ const file = synthesise()
 const engine = createSearchEngine(file)
 const oracle = buildOracle(file)
 
+/** Distinct designs — the number of items every count in this suite is in. */
+const ITEMS = new Set(file.records.map((record) => record.design)).size
+
 function search(overrides: Partial<FacetSearch> = {}): FacetSearch {
   return { ...defaultFacetSearch(), ...overrides }
 }
@@ -168,21 +224,54 @@ describe('the fixture covers the corners it claims to', () => {
     expect(twoRoots.length).toBeGreaterThan(0)
     expect(twoRoots.every((record) => record.texture === 'towne')).toBe(true)
   })
+
+  it('groups two files under one design, differing only in connection', () => {
+    expect(file.records).toHaveLength(1_080)
+    expect(ITEMS).toBe(864)
+
+    const pairs = engine.aggregates.aggregates.filter((item) => item.variants.length === 2)
+    expect(pairs).toHaveLength(216)
+    for (const item of pairs) {
+      const [first, second] = item.variants
+      expect(first.layer).toBe('integral')
+      expect(second?.layer).toBe('topper')
+      expect(item.needsBase).toBe('either')
+      expect(item.variantClass).toBe('both')
+    }
+  })
+
+  it('repeats a display name across designs, and keeps them separate items', () => {
+    const byName = new Map<string, number>()
+    for (const item of engine.aggregates.aggregates) byName.set(item.name, (byName.get(item.name) ?? 0) + 1)
+    const shared = [...byName.values()].filter((count) => count > 1)
+    expect(byName.size).toBe(432)
+    expect(shared).toHaveLength(432)
+    // Grouping is by design; a shared name never merges two items.
+    expect([...byName.values()].reduce((sum, count) => sum + count, 0)).toBe(ITEMS)
+  })
+
+  it('has one aggregate whose preview is not its address variant', () => {
+    const odd = engine.aggregates.aggregates.filter((item) => item.preview !== item.variants[0].id)
+    expect(odd).toHaveLength(1)
+    expect(odd[0]?.variants[0].sprite).toBe(false)
+  })
 })
 
 /* ---------------------------------------------------------- results and order */
 
 describe('results', () => {
-  it('returns everything for an empty search', () => {
+  it('returns one item per design for an empty search', () => {
     const result = engine.search(search())
-    expect(result.total).toBe(file.records.length)
-    expect(result.ids).toHaveLength(file.records.length)
+    expect(result.total).toBe(ITEMS)
+    expect(result.items).toHaveLength(ITEMS)
+    expect(result.ids).toHaveLength(ITEMS)
+    // The whole point of the row: fewer items than files.
+    expect(result.total).toBeLessThan(file.records.length)
   })
 
-  it('orders an unfiltered search by manifest ordinal', () => {
-    const result = engine.search(search())
-    const ords = result.ids.map((id) => engine.record(id)?.ord ?? -1)
-    expect(ords).toEqual([...ords].sort((a, b) => a - b))
+  it('orders an unfiltered search by aggregate address', () => {
+    const addresses = engine.search(search()).items.map((item) => Number(item.address))
+    expect(addresses).toEqual([...addresses].sort((a, b) => a - b))
   })
 
   it('is deterministic: the same search twice gives the same order', () => {
@@ -196,13 +285,23 @@ describe('results', () => {
     expect(other.search(search({ q: 'cave 2x2' })).ids).toEqual(engine.search(search({ q: 'cave 2x2' })).ids)
   })
 
-  it('resolves every returned id back to a record', () => {
-    for (const id of engine.search(search({ kinds: ['stairs'] })).ids) {
-      expect(engine.record(id)).toBeDefined()
-    }
+  it('returns the preview variant as the id, and resolves it back to a record', () => {
+    const result = engine.search(search({ kinds: ['stairs'] }))
+    expect(result.ids).toHaveLength(result.total)
+    result.items.forEach((item, at) => {
+      expect(result.ids[at]).toBe(item.preview)
+      expect(engine.record(item.preview)).toBeDefined()
+    })
   })
 
-  it('matches the oracle on ids and order', () => {
+  it('still resolves every file, not only the previews it returned', () => {
+    const previews = new Set(engine.search(search()).ids)
+    const other = file.records.filter((record) => !previews.has(record.id))
+    expect(other.length).toBeGreaterThan(0)
+    for (const record of other) expect(engine.record(record.id)).toBe(record)
+  })
+
+  it('matches the oracle on items, previews and order', () => {
     for (const state of [
       search(),
       search({ q: 'wall' }),
@@ -211,7 +310,9 @@ describe('results', () => {
       search({ kinds: ['floor', 'wall'], build: buildSystemFilter('s2w') }),
       search({ tex: ['cave'], conn: ['openlock', 'magnetic'] }),
     ]) {
-      expect(engine.search(state).ids).toEqual(oracleIds(oracle, state))
+      const result = engine.search(state)
+      expect(result.items.map((item) => Number(item.address))).toEqual(oracleAddresses(oracle, state))
+      expect(result.ids).toEqual(oracleIds(oracle, state))
     }
   })
 })
@@ -237,11 +338,13 @@ const COMBINATIONS: readonly FacetSearch[] = [
   search({ build: BUILD_UNSPECIFIED }),
   search({ build: buildSystemFilter('separate wall') }),
   search({ conn: ['openlock'] }),
+  search({ conn: ['openforge'] }),
   search({ conn: ['openlock', 'dragonlock'] }),
   search({ kinds: ['wall'], tex: ['cave'] }),
   search({ kinds: ['floor'], tex: ['dungeon_stone'], conn: ['openforge'] }),
   search({ kinds: ['base'], tex: ['towne'], build: BUILD_UNSPECIFIED, conn: ['magnetic'] }),
   search({ q: 'wall', kinds: ['floor'], tex: ['cave'] }),
+  search({ q: 'topless', conn: ['openforge'] }),
   search({ q: '2x2', build: buildSystemFilter('s2w'), conn: ['openlock'] }),
 ]
 
@@ -257,6 +360,19 @@ describe('disjunctive facet counts', () => {
         }
       }
     }
+  })
+
+  it('counts items, not files', () => {
+    // The bucket a two-file design lands in counts it once. `openforge` is on
+    // 216 files and 216 items; `openlock` is on 432 files (one per pair plus the
+    // magnetic group) and 432 items — and the two buckets overlap by 216 items
+    // and by zero files.
+    const buckets = engine.search(search()).facets.conn
+    const count = (value: string): number => buckets.find((bucket) => bucket.value === value)?.count ?? -1
+    expect(count('openforge')).toBe(216)
+    expect(count('openlock')).toBe(432)
+    expect(engine.search(search({ conn: ['openforge'] })).total).toBe(216)
+    expect(engine.search(search({ conn: ['openlock'] })).total).toBe(432)
   })
 
   it('keeps the other values of a facet reachable once one is selected', () => {
@@ -315,19 +431,24 @@ describe('kinds — multi-select OR with an explicit other bucket', () => {
     expect(both).toBeGreaterThan(Math.max(floors, walls))
   })
 
-  it('reaches the tiles that are in no bucket, and only those', () => {
+  it('reaches the items that are in no bucket, and only those', () => {
     const result = engine.search(search({ kinds: [KIND_OTHER] }))
     expect(result.total).toBeGreaterThan(0)
-    for (const id of result.ids) expect(engine.record(id)?.kinds).toEqual([])
+    for (const item of result.items) expect(item.kinds).toEqual([])
   })
 
-  it('counts every tile exactly once across the buckets plus other', () => {
+  it('counts every item exactly once across the buckets plus other', () => {
     const buckets = engine.search(search()).facets.kinds
-    const multi = file.records.filter((record) => record.kinds.length >= 2).length
     const total = buckets.reduce((sum, bucket) => sum + bucket.count, 0)
-    // Over-count is exactly the tiles in two buckets, which is the fact that
-    // makes `kinds` an array rather than a value.
-    expect(total).toBe(file.records.length + multi)
+    // Over-count is exactly the memberships past the first, which is the fact
+    // that makes `kinds` an array rather than a value. Hoisted, so the item's
+    // own list is the whole answer.
+    const memberships = engine.aggregates.aggregates.reduce(
+      (sum, item) => sum + Math.max(item.kinds.length, 1),
+      0,
+    )
+    expect(total).toBe(memberships)
+    expect(total).toBeGreaterThan(ITEMS)
   })
 })
 
@@ -344,10 +465,10 @@ describe('tex — prefix matching over texture roots', () => {
     // `stone`. Prefixes are matched on namespace segments, which is the facet-side
     // spelling of the substring trap the tokeniser fixes for queries.
     const cave = engine.search(search({ tex: ['cave'] }))
-    for (const id of cave.ids) expect(engine.record(id)?.texture).not.toBe('cavern')
+    for (const item of cave.items) expect(item.texture).not.toBe('cavern')
 
     const stone = engine.search(search({ tex: ['stone'] }))
-    for (const id of stone.ids) expect(engine.record(id)?.texture).not.toBe('stone_brick')
+    for (const item of stone.items) expect(item.texture).not.toBe('stone_brick')
   })
 
   it('filters at a deeper path too', () => {
@@ -358,13 +479,13 @@ describe('tex — prefix matching over texture roots', () => {
   })
 
   it('offers every root in the tag table, including one no record reports', () => {
-    // The 37-versus-38 fact in miniature: `stucco` is always the alphabetically
+    // The 37-versus-36 fact in miniature: `stucco` is always the alphabetically
     // later of two roots, so it never wins `record.texture` — but it is a real
     // root that a real user will click, and matching on tags gives it a count.
     expect(engine.vocabulary.tex).toContain('stucco')
     const result = engine.search(search({ tex: ['stucco'] }))
     expect(result.total).toBeGreaterThan(0)
-    for (const id of result.ids) expect(engine.record(id)?.texture).toBe('towne')
+    for (const item of result.items) expect(item.texture).toBe('towne')
   })
 
   it('does not offer the nested paths as top-level values', () => {
@@ -374,15 +495,15 @@ describe('tex — prefix matching over texture roots', () => {
 })
 
 describe('build — single-select with a first-class unspecified', () => {
-  it('filters for the tiles that carry no build tag', () => {
+  it('filters for the items that carry no build tag', () => {
     const result = engine.search(search({ build: BUILD_UNSPECIFIED }))
     expect(result.total).toBeGreaterThan(0)
-    for (const id of result.ids) expect(engine.record(id)?.build).toBeUndefined()
+    for (const item of result.items) expect(item.build).toBeUndefined()
   })
 
   it('offers unspecified as a value with a count', () => {
     const bucket = engine.search(search()).facets.build.find((entry) => entry.value === BUILD_UNSPECIFIED)
-    expect(bucket?.count).toBe(file.records.filter((record) => record.build === undefined).length)
+    expect(bucket?.count).toBe(engine.aggregates.aggregates.filter((item) => item.build === undefined).length)
   })
 
   it('distinguishes unspecified from no filter', () => {
@@ -394,23 +515,45 @@ describe('build — single-select with a first-class unspecified', () => {
   it('filters for one system', () => {
     const result = engine.search(search({ build: buildSystemFilter('s2w') }))
     expect(result.total).toBeGreaterThan(0)
-    for (const id of result.ids) expect(engine.record(id)?.build).toBe('s2w')
+    for (const item of result.items) expect(item.build).toBe('s2w')
   })
 
-  it('partitions the corpus — the counts sum to every tile', () => {
+  it('partitions the corpus — the counts sum to every item', () => {
+    // Still a partition after aggregating, because `build` is one of the seven
+    // fields A1 measured not to vary inside a group. `conn` is the facet where
+    // the union makes the buckets over-count.
     const total = engine.search(search()).facets.build.reduce((sum, bucket) => sum + bucket.count, 0)
-    expect(total).toBe(file.records.length)
+    expect(total).toBe(ITEMS)
   })
 })
 
-describe('conn — multi-select OR', () => {
-  it('unions the selected systems and reaches the multi-system tiles from either', () => {
+describe('conn — multi-select OR over the union of a group', () => {
+  it('unions the selected systems and reaches the multi-system items from either', () => {
     const openlock = engine.search(search({ conn: ['openlock'] }))
     const magnetic = engine.search(search({ conn: ['magnetic'] }))
     const both = engine.search(search({ conn: ['openlock', 'magnetic'] }))
 
-    expect(both.total).toBe(openlock.total) // every magnetic tile here is also openlock
+    expect(both.total).toBe(openlock.total) // every magnetic item here is also openlock
     for (const id of magnetic.ids) expect(openlock.ids).toContain(id)
+  })
+
+  it('matches an item on a system only one of its variants carries', () => {
+    // The aggregation fact stated as a filter. No *file* is both openlock and
+    // openforge — the tags are mutually exclusive by construction — yet every
+    // openforge item is an openlock item, because the group holds one of each.
+    const openforge = engine.search(search({ conn: ['openforge'] }))
+    const openlock = new Set(engine.search(search({ conn: ['openlock'] })).ids)
+
+    expect(openforge.total).toBeGreaterThan(0)
+    expect(file.records.some((record) => record.conn.includes('openforge') && record.conn.includes('openlock'))).toBe(
+      false,
+    )
+    for (const item of openforge.items) {
+      expect(openlock.has(item.preview)).toBe(true)
+      const systems = item.variants.flatMap((variant) => [...variant.bottomConn, ...variant.sideConn])
+      expect(systems).toContain('openforge')
+      expect(systems).toContain('openlock')
+    }
   })
 })
 
@@ -421,24 +564,20 @@ describe('ranking', () => {
     // `wall` sits in `build|separate wall` and `build|wall on tile`, on floors as
     // well as walls. Unweighted, a search for walls opens on floors.
     const result = engine.search(search({ q: 'wall' }))
-    const first = engine.record(result.ids[0] ?? ('' as TileId))
-    expect(first?.name.toLowerCase()).toContain('wall')
+    expect(result.items[0]?.name.toLowerCase()).toContain('wall')
 
-    const tagOnly = result.ids.findIndex((id) => !(engine.record(id)?.name.toLowerCase().includes('wall') ?? true))
-    const nameLast = result.ids.reduce(
-      (last, id, index) => (engine.record(id)?.name.toLowerCase().includes('wall') ? index : last),
-      -1,
-    )
+    const named = (at: number): boolean => result.items[at]?.name.toLowerCase().includes('wall') ?? false
+    const tagOnly = result.items.findIndex((_, at) => !named(at))
+    const nameLast = result.items.reduce((last, _, at) => (named(at) ? at : last), -1)
     expect(tagOnly).toBeGreaterThan(-1)
-    expect(tagOnly).toBeGreaterThan(nameLast - result.ids.length) // sanity: both groups present
     expect(nameLast).toBeLessThan(tagOnly)
   })
 
-  it('breaks score ties by manifest ordinal', () => {
+  it('breaks score ties by aggregate address', () => {
     const result = engine.search(search({ q: 'stairs' }))
-    const ords = result.ids.map((id) => engine.record(id)?.ord ?? -1)
-    // Every hit scores identically here, so the whole list must be ordinal-ordered.
-    expect(ords).toEqual([...ords].sort((a, b) => a - b))
+    const addresses = result.items.map((item) => Number(item.address))
+    // Every hit scores identically here, so the whole list must be address-ordered.
+    expect(addresses).toEqual([...addresses].sort((a, b) => a - b))
   })
 })
 
@@ -448,31 +587,44 @@ describe('text queries', () => {
   it('answers a multi-word query with the intersection', () => {
     const both = engine.search(search({ q: 'cave wall' }))
     expect(both.total).toBeGreaterThan(0)
-    for (const id of both.ids) {
-      const record = engine.record(id)
-      const searchable = [record?.name ?? '', record?.file ?? '', ...(record?.tags.map((tag) => file.tags[tag]) ?? [])]
+    for (const item of both.items) {
+      const searchable = [
+        item.name,
+        ...item.variants.map((variant) => variant.file),
+        ...item.variants.flatMap((variant) => engine.record(variant.id)?.tags.map((tag) => file.tags[tag]) ?? []),
+      ]
         .join(' ')
         .toLowerCase()
-      // Both tokens, in any field — which is what an intersection means when the
-      // fields are a name, a filename and a tag list.
+      // Both tokens, in any field of any variant — which is what an intersection
+      // means when a document is a group of files.
       expect(searchable).toContain('wall')
       expect(searchable).toContain('cave')
     }
     expect(both.total).toBeLessThan(engine.search(search({ q: 'wall' })).total)
   })
 
+  it('finds a token only one variant carries', () => {
+    // `topless` is in the filename of the second file of a pair and nowhere
+    // else. The item is findable by it, and the id returned is still the
+    // preview — the token reaching the document does not change which variant
+    // the card shows.
+    const result = engine.search(search({ q: 'topless' }))
+    expect(result.total).toBe(216)
+    for (const item of result.items) {
+      expect(item.variants.filter((variant) => variant.file.includes('topless'))).toHaveLength(1)
+      expect(item.name.toLowerCase()).not.toContain('topless')
+    }
+  })
+
   it('finds the synthesised size token', () => {
     const result = engine.search(search({ q: '2x2' }))
     expect(result.total).toBeGreaterThan(0)
-    for (const id of result.ids) expect(engine.record(id)?.name).toContain('2x2')
+    for (const item of result.items) expect(item.name).toContain('2x2')
   })
 
   it('does not match `cave` against `concave`-style neighbours', () => {
     const cave = engine.search(search({ q: 'cave' }))
-    for (const id of cave.ids) {
-      const record = engine.record(id)
-      expect(record?.texture).not.toBe('cavern')
-    }
+    for (const item of cave.items) expect(item.texture).not.toBe('cavern')
   })
 
   it('prefix-matches a token the corpus does not know', () => {
@@ -533,8 +685,11 @@ describe('rotted links', () => {
 })
 
 describe('the exported surface', () => {
-  it('reports its size and vocabulary', () => {
-    expect(engine.size).toBe(file.records.length)
+  it('reports items, files and vocabulary', () => {
+    expect(engine.size).toBe(ITEMS)
+    expect(engine.files).toBe(file.records.length)
+    expect(engine.aggregates.aggregates).toHaveLength(ITEMS)
+    expect(engine.aggregates.stats.files).toBe(file.records.length)
     expect(engine.vocabulary.kinds).toContain(KIND_OTHER)
     expect(engine.vocabulary.build).toContain(BUILD_UNSPECIFIED)
     expect(engine.vocabulary.conn).toContain('openlock')
@@ -551,7 +706,9 @@ describe('the exported surface', () => {
     // arithmetic is most likely to go wrong.
     const empty = createSearchEngine({ ...file, tags: [], records: [] })
     expect(empty.size).toBe(0)
+    expect(empty.files).toBe(0)
     expect(empty.search(search()).total).toBe(0)
+    expect(empty.search(search()).items).toEqual([])
     expect(empty.search(search({ q: 'cave', tex: ['cave'] })).total).toBe(0)
     for (const key of FACET_KEYS) expect(empty.search(search()).facets[key]).toEqual([])
   })

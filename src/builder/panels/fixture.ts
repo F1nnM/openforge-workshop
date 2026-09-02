@@ -218,7 +218,14 @@ export const FIXTURE_CATALOG = {
       bytes: 1_000_000,
       sprite: true,
       family: 'tiles/dungeon_stone/starter/floor/openlock',
-      design: 'd-floor-1',
+      // Its **own** design, though it shares `floor1`'s md5. Row A2 searches
+      // aggregates, and a shared design would merge the two into one item — so
+      // the twin would stop being a searchable row of its own, which is the
+      // thing this record exists to be. It would also break A1's hoisting
+      // invariant, which `pipeline/aggregate.ts` fails the build on: the two
+      // carry *different display names*, and 0 of the 3,822 live aggregates
+      // hold two.
+      design: 'd-floor-twin',
       name: FIXTURE_NAMES.twin,
       kinds: ['floor'],
       conn: ['openlock'],

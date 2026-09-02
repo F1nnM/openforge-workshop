@@ -1,37 +1,56 @@
 /**
- * The search engine: a `CatalogSearch` in, matching ids and live facet counts out.
+ * The search engine: a `CatalogSearch` in, matching items and live facet counts out.
  *
  * ## The interface is the deliverable
  *
  * `search(FacetSearch) → SearchResult` and nothing else. The URL state goes in
  * verbatim — the same value the router validated, the same value a share link
- * carries — and what comes back is ids plus facet buckets. No callers learn that
- * there is a bitset behind it, which is what lets the whole implementation be
- * replaced (by MiniSearch, by a WASM index, by a server) without touching the
+ * carries — and what comes back is items plus facet buckets. No callers learn
+ * that there is a bitset behind it, which is what lets the whole implementation
+ * be replaced (by MiniSearch, by a WASM index, by a server) without touching the
  * catalog screen or the builder palette, the two consumers PR 6 identified.
  *
  * `FacetSearch` rather than `CatalogSearch`: `tile` names which drawer is open,
  * which is not a filter. A `CatalogSearch` satisfies the parameter structurally,
  * so the catalog screen passes its search object straight through.
  *
- * ## Documents are numbered by manifest ordinal
+ * ## A result is an aggregate — 3,822 items over 8,702 files
  *
- * Internally a tile is a document index, and documents are ordered by
- * `CatalogRecord.ord` ascending rather than by position in `catalog.json`. Two
- * things fall out of that, both of which the tests depend on:
+ * Row A2's whole content. The engine derives row A1's aggregate layer, indexes
+ * *that*, and returns {@link TileAggregate}s. The consequences the rest of this
+ * directory documents in detail:
+ *
+ *   - `facets.ts` counts items, and an item matches a facet value when any of
+ *     its variants does — which takes "carries two or more connection systems"
+ *     from 28.6% of files to 42.0% of items.
+ *   - `textIndex.ts` indexes the union of a group's tokens, losing none of the
+ *     449 and dropping 55.0% of the postings.
+ *   - `documents.ts` explains why the bitset position is the *dense* document
+ *     index and never the aggregate address.
+ *
+ * ## Documents are numbered by ascending aggregate address
+ *
+ * Internally an item is a document index, and `AggregateIndex.aggregates` is
+ * ordered by ascending {@link TileAggregate.address} — which is the group's
+ * lowest `CatalogRecord.ord`. Two things fall out of that, both of which the
+ * tests depend on:
  *
  *   - **The unfiltered result needs no sort.** Ascending bitset iteration *is*
- *     the display order, so an empty query walks 272 words and emits 8,702 ids.
+ *     the display order, so an empty query walks 120 words and emits 3,822
+ *     items.
  *   - **Ordering is deterministic across imports.** Ordinals are append-only by
  *     construction (`src/catalog/schema.ts#ManifestOrdinal`), so a share link and
  *     a test assertion both see the same order after a re-import that added
- *     tiles in the middle of the alphabet.
+ *     tiles in the middle of the alphabet. An aggregate's *address* is not itself
+ *     append-only — a group can split, which is why A1 brands it — but it is
+ *     always one of its own members' ordinals, so the order it induces is as
+ *     stable as the group.
  *
  * ## Ranking
  *
  * With a query: score descending, then document ascending. The score comes from
  * `textIndex.ts` and weights a name match above a tag match — without that,
- * `wall` returns floors first, because `build|separate wall` sits on 3,351 tiles
+ * `wall` returns floors first, because `build|separate wall` sits on 826 items
  * regardless of shape.
  *
  * The sort is a **counting sort** over the score, not `Array.prototype.sort`.
@@ -42,9 +61,12 @@
  * explicit tiebreak to promise the same thing, and V8's sort stability is a
  * property of the engine rather than of this code.
  */
-import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
+import type { AggregateIndex, CatalogFile, CatalogRecord, TileAggregate, TileId } from '@/catalog'
+import { buildAggregateIndex } from '@/catalog'
 
 import { andInto, collectBits, fullBitset, getBit } from './bitset'
+import type { SearchDoc } from './documents'
+import { buildSearchDocs } from './documents'
 import type { FacetCounts, FacetIndex, FacetKey, FacetVocabulary } from './facets'
 import { FACET_KEYS, buildFacetIndex, countFacets, facetFilter } from './facets'
 import type { FacetSearch } from './searchSchema'
@@ -54,12 +76,28 @@ import { TextSearcher, buildTextIndex } from './textIndex'
 /** What one query returns. */
 export interface SearchResult {
   /**
-   * Matching tiles, in display order. The whole set, uncapped: 8,702 ids is
-   * 70 KB of pointers and the grid is virtualised, so paging here would only
-   * move the problem into the caller.
+   * Matching items, in display order. The whole set, uncapped: 3,822 aggregates
+   * is a few tens of KB of pointers and the grid is virtualised, so paging here
+   * would only move the problem into the caller.
+   */
+  readonly items: readonly TileAggregate[]
+  /**
+   * One tile id per item, in the same order — {@link TileAggregate.preview},
+   * the variant a card should show.
+   *
+   * The seam row A3 consumes. A grid renders a *file*: it needs a sprite sheet,
+   * a byte count and a material, and `preview` is A1's answer to which variant
+   * supplies them (the first with a sprite, which matters for exactly one
+   * aggregate corpus-wide). Every id here resolves through {@link
+   * SearchEngine.record}.
+   *
+   * It is **not** an addressing scheme. A drawer link is row A4's, and A4 types
+   * `?tile=` as a `ManifestOrdinal` resolved through `AggregateIndex.byOrdinal`
+   * — a preview id is a rendering choice that may change with the corpus, and
+   * nothing should persist it.
    */
   readonly ids: readonly TileId[]
-  /** `ids.length`, named so a caller can show a count without holding the array. */
+  /** `items.length`, named so a caller can show a count without holding the array. */
   readonly total: number
   /** Live counts for all four facets, each computed with its own filter excluded. */
   readonly facets: FacetCounts
@@ -67,13 +105,32 @@ export interface SearchResult {
 
 /** The narrow surface the catalog screen and the builder palette consume. */
 export interface SearchEngine {
-  /** Documents indexed — 8,702 for the live corpus. */
+  /** Documents indexed — 3,822 items for the live corpus. */
   readonly size: number
+  /** Files behind those items — 8,702 for the live corpus. */
+  readonly files: number
+  /**
+   * The aggregate layer this engine indexes.
+   *
+   * Exposed rather than rebuilt by each consumer: `buildAggregateIndex` is a
+   * pure function of the file and costs one pass over 8,702 records plus 84,023
+   * tag references, and rows A3 to A7 all need the same lookups (`byDesign`,
+   * `byOrdinal`, `byTile`, `stats`). One instance per session, reached through
+   * whoever already holds the engine.
+   */
+  readonly aggregates: AggregateIndex
   /** Every value each facet offers, in a query-independent display order. */
   readonly vocabulary: FacetVocabulary
   /** Run one query. Never throws: a garbage query is an empty result. */
   search(search: FacetSearch): SearchResult
-  /** The record behind an id, for rendering a result row. */
+  /**
+   * The record behind an id, for rendering a result row.
+   *
+   * Still every one of the 8,702 files, not only the 3,822 previews: a builder
+   * placement, a library entry and a drawer all name a concrete file, and an
+   * engine that could only resolve the ids it just returned would push a second
+   * record map into every one of those callers.
+   */
   record(id: TileId): CatalogRecord | undefined
 }
 
@@ -83,6 +140,10 @@ export interface SearchEngine {
  * Takes the parsed {@link CatalogFile} rather than a URL or a string: fetching
  * and validating the payload is the loader's job (PR 13), and keeping I/O out of
  * here is what makes the whole engine testable in a node environment.
+ *
+ * The aggregate layer is derived here rather than accepted as a parameter, so an
+ * engine cannot be built over an index derived from a *different* file — which
+ * would silently drop every item whose design the index had not heard of.
  */
 export function createSearchEngine(file: CatalogFile): SearchEngine {
   return new BitsetSearchEngine(file)
@@ -90,10 +151,12 @@ export function createSearchEngine(file: CatalogFile): SearchEngine {
 
 class BitsetSearchEngine implements SearchEngine {
   readonly size: number
+  readonly files: number
+  readonly aggregates: AggregateIndex
   readonly vocabulary: FacetVocabulary
 
-  /** Tile ids in document order — see the module docblock. */
-  private readonly ids: readonly TileId[]
+  /** The documents, ascending aggregate address — see the module docblock. */
+  private readonly docs: readonly SearchDoc[]
   private readonly byId: ReadonlyMap<string, CatalogRecord>
   private readonly facets: FacetIndex
   private readonly text: TextSearcher
@@ -102,13 +165,14 @@ class BitsetSearchEngine implements SearchEngine {
   private readonly scratch: Uint32Array
 
   constructor(file: CatalogFile) {
-    const records = [...file.records].sort((a, b) => a.ord - b.ord)
-    this.size = records.length
-    this.ids = records.map((record) => record.id)
-    this.byId = new Map(records.map((record) => [record.id as string, record]))
-    this.facets = buildFacetIndex(records, file.tags)
+    this.aggregates = buildAggregateIndex(file)
+    this.docs = buildSearchDocs(file, this.aggregates)
+    this.size = this.docs.length
+    this.files = file.records.length
+    this.byId = new Map(file.records.map((record) => [record.id as string, record]))
+    this.facets = buildFacetIndex(this.docs, file.tags)
     this.vocabulary = this.facets.vocabulary
-    const index: TextIndex = buildTextIndex(records, file.tags)
+    const index: TextIndex = buildTextIndex(this.docs, file.tags)
     this.text = new TextSearcher(index)
     this.unfiltered = fullBitset(this.size)
     this.scratch = fullBitset(this.size)
@@ -124,15 +188,15 @@ class BitsetSearchEngine implements SearchEngine {
     for (const key of FACET_KEYS) filters[key] = facetFilter(this.facets, key, search)
 
     const facets = countFacets(this.facets, search, filters, text?.bits ?? null)
-    const ids = this.rank(text, filters)
-    return { ids, total: ids.length, facets }
+    const items = this.rank(text, filters)
+    return { items, ids: items.map((item) => item.preview), total: items.length, facets }
   }
 
-  /** Matching documents in display order, mapped to ids. */
+  /** Matching documents in display order, mapped to their aggregates. */
   private rank(
     text: { readonly docs: readonly number[]; readonly score: Int32Array } | null,
     filters: Record<FacetKey, Uint32Array | null>,
-  ): readonly TileId[] {
+  ): readonly TileAggregate[] {
     const mask = this.scratch
     mask.set(this.unfiltered)
     for (const key of FACET_KEYS) {
@@ -143,19 +207,16 @@ class BitsetSearchEngine implements SearchEngine {
     if (text === null) {
       // No query: ascending document order already is the display order.
       const docs = collectBits(mask, [])
-      return docs.map((doc) => this.ids[doc] ?? UNKNOWN_ID)
+      return docs.flatMap((doc) => this.aggregates.aggregates[doc] ?? [])
     }
 
     const kept: number[] = []
     for (const doc of text.docs) {
       if (getBit(mask, doc)) kept.push(doc)
     }
-    return byScoreThenDocument(kept, text.score).map((doc) => this.ids[doc] ?? UNKNOWN_ID)
+    return byScoreThenDocument(kept, text.score).flatMap((doc) => this.aggregates.aggregates[doc] ?? [])
   }
 }
-
-/** Unreachable: `ids` is built from the same records the bitsets are. */
-const UNKNOWN_ID = '' as TileId
 
 /**
  * Counting sort by score descending, document ascending within a score.

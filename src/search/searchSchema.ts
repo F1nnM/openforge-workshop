@@ -21,12 +21,16 @@
  * Every one of them is a measured fact from architecture-plan.md §6 and
  * `src/catalog/schema.ts`:
  *
+ * The percentages are over the **3,822 aggregates** the engine indexes, since
+ * row A2 — a filter selects items, not files. Where a file-level figure is the
+ * more familiar one it is given beside it.
+ *
  * | facet      | shape                       | why it cannot be simpler                     |
  * | ---------- | --------------------------- | -------------------------------------------- |
- * | kind       | multi-select                | 19.6% of tiles land in 2+ buckets, 11.6% in none — a single value cannot express either |
+ * | kind       | multi-select                | 13.7% of items land in 2+ buckets, 16.0% in none — a single value cannot express either |
  * | texture    | multi-select **prefixes**   | 37 roots, matched by prefix; not a 6-value enum |
- * | build      | single-select + unspecified | 2,978 tiles (34.2%) carry no `build\|` tag, so absence is a filter state |
- * | connection | multi-select                | 3,091 tiles (35.5%) carry 2–3 systems         |
+ * | build      | single-select + unspecified | 1,511 items (39.5%) carry no `build\|` tag, so absence is a filter state |
+ * | connection | multi-select                | 1,605 items (42.0%) carry 2+ systems, against 2,493 files (28.6%) — an item offers the union of its variants' |
  *
  * **Two hard rules, and both exist because URLs get hand-edited and links rot:**
  *
@@ -56,8 +60,9 @@ import { ManifestOrdinal } from '@/catalog/schema'
 /**
  * Longest free-text query kept. Longer input degrades to the empty query.
  *
- * The bound is a denial-of-service guard, not a UX one: the query reaches
- * MiniSearch, and a megabyte pasted into `?q=` should cost nothing.
+ * The bound is a denial-of-service guard, not a UX one: the query reaches the
+ * text index in `textIndex.ts` — MiniSearch was measured and rejected — and a
+ * megabyte pasted into `?q=` should cost nothing.
  */
 export const MAX_QUERY_LENGTH = 128
 

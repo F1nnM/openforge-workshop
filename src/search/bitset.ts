@@ -4,16 +4,21 @@
  * architecture-plan.md §6 specifies "a `Uint32Array` bitset index with correct
  * disjunctive counts", and this is the layer that makes the second half cheap.
  * A disjunctive count has to re-evaluate every value of a facet with *that*
- * facet's own filter lifted (see `facets.ts`), which is 62 set intersections per
- * keystroke over the 8,702-tile corpus. As `Set`
- * intersections that is 62 walks over up to 8,702 boxed integers; as bitsets it
- * is 62 walks over 272 machine words, and the popcount never materialises the
- * members at all.
+ * facet's own filter lifted (see `facets.ts`), which is 103 set intersections
+ * per keystroke over the corpus's 3,822 aggregates. As `Set` intersections that
+ * is 103 walks over up to 3,822 boxed integers; as bitsets it is 103 walks over
+ * 120 machine words, and the popcount never materialises the members at all.
+ *
+ * Row A2 halved the second figure by moving the population from files to items:
+ * 103 facet values over 272 words was 112,064 B of postings, and over 120 words
+ * it is 49,440 B. That saving is only available because the position is row A1's
+ * dense `docOf` and not the sparse aggregate address, which would have spent all
+ * 272 words again — see `documents.ts`.
  *
  * Everything here is deliberately allocation-free at query time: the engine owns
  * a small pool of scratch bitsets and these functions write into them. That is
  * also why the mutating operations are `…Into` rather than returning a new
- * bitset — a faceted search runs on every keystroke, and 62 fresh
+ * bitset — a faceted search runs on every keystroke, and 103 fresh
  * `Uint32Array`s per keystroke is garbage the collector does not need.
  *
  * Every function assumes its arguments were sized for the same population, and
@@ -41,7 +46,8 @@ export function createBitset(size: number): Uint32Array {
  * The tail is masked, so `popcount(fullBitset(n)) === n` for every `n`, not just
  * multiples of 32. An unmasked tail is the classic bitset bug: the population
  * reads correctly until the corpus size stops being a multiple of the word size,
- * and 8,702 is not (8,702 = 271×32 + 30, so two phantom members).
+ * and neither population is (3,822 = 119×32 + 14, so 18 phantom items; 8,702 =
+ * 271×32 + 30, so two phantom files).
  */
 export function fullBitset(size: number): Uint32Array {
   const bits = createBitset(size)
@@ -95,7 +101,7 @@ export function popcount(bits: Uint32Array): number {
  * `popcount(a & b)` without materialising the intersection.
  *
  * This is the hot loop of the whole engine: one call per facet value per query,
- * so 62 calls per keystroke on the real vocabulary. Fusing the `&` into the
+ * so 103 calls per keystroke on the real vocabulary. Fusing the `&` into the
  * count is what keeps a disjunctive facet pass allocation-free.
  */
 export function popcountAnd(a: Uint32Array, b: Uint32Array): number {
@@ -122,12 +128,13 @@ function popcountWord(x: number): number {
  * Members set, in **ascending order**, appended to `out`.
  *
  * Ascending order is load-bearing rather than incidental: the engine numbers
- * documents in manifest-ordinal order, so "ascending member index" *is* the
+ * documents in ascending aggregate address, so "ascending member index" *is* the
  * app's canonical result order, and the unfiltered query needs no sort at all.
  *
  * `w & -w` isolates the lowest set bit and `Math.clz32` turns it into its index,
  * so the loop runs once per set bit rather than 32 times per word — the
- * difference between 8,702 iterations and 278,528 on an unfiltered query.
+ * difference between 3,822 iterations and 3,840 on an unfiltered query, and
+ * between one and 32 on a query that matched a single item.
  */
 export function collectBits(bits: Uint32Array, out: number[]): number[] {
   for (let i = 0; i < bits.length; i++) {

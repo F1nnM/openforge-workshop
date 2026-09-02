@@ -8,7 +8,7 @@
  * are specific to this corpus rather than general:
  *
  *   1. **The facet layer already owns a bitset.** Disjunctive counts need the
- *      text result as a `Uint32Array` mask to AND against 62 facet bitsets. A
+ *      text result as a `Uint32Array` mask to AND against 103 facet bitsets. A
  *      library returning scored objects would be converted to a bitset on every
  *      keystroke, so the bitset is the native currency either way.
  *   2. **Fuzzy matching is a liability on this vocabulary, not a feature.** The
@@ -18,10 +18,36 @@
  *      a size search that silently returns the wrong size is worse than one that
  *      returns nothing.
  *   3. **Prefix matching is nine lines** over a sorted token array, and the
- *      corpus has ~2,000 distinct tokens.
+ *      corpus has 449 distinct tokens.
  *
  * It also keeps a dependency out of a bundle whose whole architecture rests on
  * the index fitting in 355.7 KB brotli.
+ *
+ * ## A document is an aggregate: the union of its variants' tokens
+ *
+ * Row A2 indexes row A1's 3,822 items rather than 8,702 files, and a document's
+ * tokens are the **union over its variants** — every file's name, every file's
+ * filename, every file's tags. That is the only reading that keeps the merge
+ * honest: an item whose dragonlock variant is `…dragonlock.stl` and whose
+ * openlock variant is `…openlock+topless.stl` must be findable by typing either
+ * word, because both are ways of printing the one thing the card offers.
+ *
+ * Measured over the live corpus, the union is **lossless and much cheaper**:
+ *
+ *   - **449 distinct tokens, before and after.** Not one token in the corpus is
+ *     reachable at file level and unreachable at item level, which is the
+ *     property that makes this a re-indexing rather than a narrowing.
+ *   - **157,573 postings become 70,930** — a 55.0% drop, from 788 KB of CSR
+ *     posting arrays to 355 KB.
+ *
+ * The saving is duplication, not information. `name` is one of A1's seven
+ * hoisted fields, so an aggregate has exactly one display name and it is
+ * tokenised **once per item instead of once per file**: 3,822 tokenisations
+ * against 8,702, because 1,677 display names were shared by 6,749 files. What
+ * survives the collapse is the genuine ambiguity — **131 names shared by 323
+ * aggregates**, worst case 6 — and those stay separate documents with separate
+ * addresses. Aggregation is not deduplication by name, and row A5's variants
+ * table is what covers the remainder.
  *
  * ## Field weighting, and the query it exists for
  *
@@ -33,12 +59,17 @@
  * the *maximum* field weight per token (not the sum) is what makes the ordering
  * mean "matched in the name" rather than "mentioned a lot".
  *
+ * The maximum is taken across the whole union, so a token that is a *name* token
+ * on one variant and only a filename token on another scores as a name match for
+ * the item. Anything else would let the weakest way of printing a thing decide
+ * how findable the thing is.
+ *
  * ## Prefix expansion only when the token is unknown
  *
  * A query token that exists in the index is matched exactly; only an unknown
  * token expands as a prefix. This is not a shortcut — it is what preserves the
  * word-boundary guarantee while still typing ahead. `cave` is a real token, so
- * it stays exact and does **not** reach the 39 `cavern` tiles; `cav` is not, so
+ * it stays exact and does **not** reach the 29 `cavern` items; `cav` is not, so
  * it expands and reaches both. Expanding unconditionally would reintroduce a
  * milder version of the substring trap §6 warns about, on the same word.
  *
@@ -50,10 +81,30 @@
  * footprint is `none`, and the 121 whose `diag` run is a measurement the corpus
  * never writes down, the name carries the *tagged* size instead, and that
  * fallback is the importer's to own.
+ *
+ * **Row D4 left A2 the question of a size token from the `size|openlock` code,
+ * and the answer is no.** `SIZE_CODE_WIDTH_UNITS` omits `QxG` because the tag
+ * says `size|width|4` and W1 measured 3.000, and D4 called adding it "A2's
+ * search surface". Measured before deciding: all **28 `QxG` records already
+ * carry `3x` as a name token**, from the `wall:3` footprint `sizeToken` resolves
+ * — and `qxg` itself besides, because `naming.ts` appends the code whenever the
+ * footprint gives fewer than two dimensions. A synthetic `3x` would be a no-op
+ * on every one of them. The same holds for the four codes with a published
+ * width: `A`, `IA`, `D` and `Q` are at 100% coverage of a `2x…`/`1x…`/`3x…`/`4x…`
+ * name token already (1,095, 363, 364 and 481 records). The single gap is `BA`
+ * at 1.5 units, 0 of 519 — and a `1.5x` token could not be *queried* if it
+ * existed, because `text.ts` splits on the `.` and `1.5` tokenises to `1` and
+ * `5`. So the code contributes no token here, and what would be gained by
+ * pretending otherwise is one no-op and one unreachable string.
+ *
+ * What the corpus does leave is a real defect this row is not the owner of: the
+ * `size|width|4` tag puts the token `4` on those 28 records, so a query for `4`
+ * reaches tiles that measure 3.000. Suppressing a tag's own token here would be
+ * the search layer overruling the tag table on a fact the tag table is wrong
+ * about; the fix belongs where the tag is normalised. Reported to W7.
  */
-import type { CatalogRecord } from '@/catalog'
-
 import { collectBits, createBitset, setBit } from './bitset'
+import type { SearchDoc } from './documents'
 import { stripExtension, tokenise, tokeniseQuery } from './text'
 
 /** Per-field score contribution. See the module docblock for why `name` wins. */
@@ -61,6 +112,7 @@ export const FIELD_WEIGHT = { name: 4, file: 2, tag: 1 } as const
 
 /** Frozen postings, in compressed-sparse-row layout. */
 export interface TextIndex {
+  /** Documents indexed — 3,822 aggregates for the live corpus. */
   readonly size: number
   /** Token id → token. */
   readonly tokenText: readonly string[]
@@ -81,7 +133,7 @@ export interface TextIndex {
  *
  * `score` is indexed by document and is **owned by the searcher**: it is scratch
  * that the next call overwrites. Callers read it before searching again, which
- * the engine does synchronously. Returning a copy would allocate 34 KB per
+ * the engine does synchronously. Returning a copy would allocate 15 KB per
  * keystroke to defend against a caller that does not exist.
  */
 export interface TextMatch {
@@ -96,7 +148,7 @@ export interface TextMatch {
 /* ------------------------------------------------------------------- building */
 
 /**
- * Build the inverted index over `records` (in document order).
+ * Build the inverted index over `docs` (aggregates, in document order).
  *
  * Four passes, arranged so that the only string work happens once and everything
  * after it is integer work on typed arrays. That arrangement is the difference
@@ -107,18 +159,23 @@ export interface TextMatch {
  *   1. Tokenise the 916-entry **tag intern table**, once. The corpus holds
  *      84,023 tag references, so tokenising per reference would be 92× the work
  *      for the same tokens.
- *   2. Tokenise each `name` and `file`, interning as it goes. After this the
- *      token vocabulary is closed, which is what lets pass 4 use flat scratch
- *      indexed by token id instead of a `Map`.
+ *   2. Tokenise each item's `name` **once** and each of its variants' `file`,
+ *      interning as it goes. After this the token vocabulary is closed, which is
+ *      what lets pass 4 use flat scratch indexed by token id instead of a `Map`.
  *   3. Sum the exact number of (document, token) visits, so the pair buffers are
  *      allocated once at their upper bound rather than grown.
  *   4. Deduplicate per document keeping the **maximum** field weight, then
  *      counting-sort into CSR. Documents are visited in ascending order, so each
  *      token's postings come out ascending by document — which is what lets the
  *      query path merge without sorting.
+ *
+ * Passes 2 and 4 are where the union over variants happens: both walk every
+ * record of a document while `doc` stays fixed, so the per-document dedup that
+ * already collapsed a repeated tag now also collapses a token two variants
+ * share.
  */
-export function buildTextIndex(records: readonly CatalogRecord[], tagTable: readonly string[]): TextIndex {
-  const size = records.length
+export function buildTextIndex(docs: readonly SearchDoc[], tagTable: readonly string[]): TextIndex {
+  const size = docs.length
   const tokenIds = new Map<string, number>()
   const tokenText: string[] = []
 
@@ -147,19 +204,26 @@ export function buildTextIndex(records: readonly CatalogRecord[], tagTable: read
   // indexes both arrays. ~95,000 entries, versus the ~305,000 the tag fields
   // contribute — which is why only these are collected and the tag references
   // are re-walked in pass 4 rather than materialised here.
+  //
+  // One name per document and one filename per *variant*: the name is hoisted
+  // (A1 measures 0 aggregates holding two) so tokenising it per variant would be
+  // the same tokens 8,702 times instead of 3,822, while the filenames genuinely
+  // differ — that is where the lock system and the print option are written.
   const fieldToken: number[] = []
   const fieldWeight: number[] = []
   const docStart = new Int32Array(size + 1)
 
   for (let doc = 0; doc < size; doc++) {
     docStart[doc] = fieldToken.length
-    const record = records[doc]
-    if (record === undefined) continue
-    for (const token of tokenise(stripExtension(record.file))) {
-      fieldToken.push(intern(token))
-      fieldWeight.push(FIELD_WEIGHT.file)
+    const entry = docs[doc]
+    if (entry === undefined) continue
+    for (const record of entry.records) {
+      for (const token of tokenise(stripExtension(record.file))) {
+        fieldToken.push(intern(token))
+        fieldWeight.push(FIELD_WEIGHT.file)
+      }
     }
-    for (const token of tokenise(record.name)) {
+    for (const token of tokenise(entry.aggregate.name)) {
       fieldToken.push(intern(token))
       fieldWeight.push(FIELD_WEIGHT.name)
     }
@@ -167,8 +231,10 @@ export function buildTextIndex(records: readonly CatalogRecord[], tagTable: read
   docStart[size] = fieldToken.length
 
   let capacity = fieldToken.length
-  for (const record of records) {
-    for (const tag of record.tags) capacity += (tagStart[tag + 1] ?? 0) - (tagStart[tag] ?? 0)
+  for (const entry of docs) {
+    for (const record of entry.records) {
+      for (const tag of record.tags) capacity += (tagStart[tag + 1] ?? 0) - (tagStart[tag] ?? 0)
+    }
   }
 
   const tokenCount = tokenText.length
@@ -183,19 +249,25 @@ export function buildTextIndex(records: readonly CatalogRecord[], tagTable: read
   let pairs = 0
 
   for (let doc = 0; doc < size; doc++) {
-    const record = records[doc]
-    if (record === undefined) continue
+    const entry = docs[doc]
+    if (entry === undefined) continue
 
-    const tags = record.tags
-    for (let t = 0; t < tags.length; t++) {
-      const tag = tags[t] ?? 0
-      const tagTo = tagStart[tag + 1] ?? 0
-      for (let i = tagStart[tag] ?? 0; i < tagTo; i++) {
-        const token = tagToken[i] ?? 0
-        if (mark[token] === doc) continue
-        mark[token] = doc
-        best[token] = FIELD_WEIGHT.tag
-        touched.push(token)
+    // Every variant's tags, under one document. All three field weights are
+    // fixed constants and `tag` is the lowest, so the order of the two loops
+    // below cannot change a weight: a token already marked keeps whatever it has
+    // and the field pass only ever raises it.
+    for (const record of entry.records) {
+      const tags = record.tags
+      for (let t = 0; t < tags.length; t++) {
+        const tag = tags[t] ?? 0
+        const tagTo = tagStart[tag + 1] ?? 0
+        for (let i = tagStart[tag] ?? 0; i < tagTo; i++) {
+          const token = tagToken[i] ?? 0
+          if (mark[token] === doc) continue
+          mark[token] = doc
+          best[token] = FIELD_WEIGHT.tag
+          touched.push(token)
+        }
       }
     }
 
