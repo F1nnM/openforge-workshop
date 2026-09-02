@@ -531,7 +531,7 @@ function slotKey(slot: PartSlot): string {
     refs(slot.tags.require),
     refs(slot.tags.deny),
     refs(slot.tags.constrain),
-  ].join(' ')
+  ].join('\u0000')
 }
 
 /** Deep equality over the discriminated union, so key order cannot fake a difference. */
@@ -567,7 +567,7 @@ const HOISTED: readonly {
   readonly same: (a: CatalogRecord, b: CatalogRecord) => boolean
 }[] = Object.freeze([
   { field: 'name', same: (a, b) => a.name === b.name },
-  { field: 'kinds', same: (a, b) => a.kinds.join(' ') === b.kinds.join(' ') },
+  { field: 'kinds', same: (a, b) => a.kinds.join('\u0000') === b.kinds.join('\u0000') },
   { field: 'texture', same: (a, b) => a.texture === b.texture },
   { field: 'build', same: (a, b) => a.build === b.build },
   { field: 'sizeCode', same: (a, b) => a.sizeCode === b.sizeCode },
@@ -579,7 +579,7 @@ const HOISTED: readonly {
 const VARYING: readonly { readonly field: string; readonly of: (record: CatalogRecord) => string }[] =
   Object.freeze([
     { field: 'layer', of: (record) => record.layer },
-    { field: 'conn', of: (record) => record.conn.join(' ') },
+    { field: 'conn', of: (record) => record.conn.join('\u0000') },
     { field: 'family', of: (record) => record.family },
     { field: 'bytes', of: (record) => String(record.bytes) },
     { field: 'blob', of: (record) => record.blob },
@@ -988,7 +988,7 @@ export function selectVariant(aggregate: TileAggregate, preference: VariantPrefe
       (other) =>
         other.id !== winner.id &&
         compareRanks(rankOf(other, preference), winnerRank) === 0 &&
-        other.options.join(' ') !== winner.options.join(' '),
+        other.options.join('\u0000') !== winner.options.join('\u0000'),
     )
     return { variant: winner, verdict, optionTie }
   }
