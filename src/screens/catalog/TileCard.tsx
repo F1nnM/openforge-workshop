@@ -1,10 +1,11 @@
 /**
- * One catalog card, and the sprite-sheet thumbnail inside it.
+ * One catalog card.
  *
  * design-contract.md §2.2: a 4:3 thumbnail well, the title, a mono size chip,
- * the texture set name, the mono file size, and a full-width library toggle. Both
- * components here are exported for row 14, which renders "a lighter variant of
- * the catalog card" and should not reinvent the sprite maths.
+ * the texture set name, the mono file size, and a full-width library toggle. The
+ * well itself is `@/ui/thumb`, which row 14's lighter card, the builder's bill and
+ * the builder's palette all render too; row P0 moved it out of this file so the
+ * four of them, and P1's tint filters, have one owner.
  *
  * ## A card is one aggregate, not one file — 3,822 cards over 8,702 files
  *
@@ -40,98 +41,28 @@
  * box holding a variable one to four chips**. `catalog.css` holds the numbers and
  * `availability.ts`'s `CHIP_BUDGET` holds the arithmetic behind the strip's height.
  *
- * ## The thumbnails are 2×5 sprite sheets, and they are the screen's real cost
+ * ## The thumbnail is a sprite sheet, and it is the screen's real cost
  *
- * There is no thumbnail derivative yet — PR 20 owns that — so the only image in
- * the bucket is the sheet the detail viewer uses: **2 rows × 5 columns of 512 px
- * frames, ~529 KB each**, at `/sprites/{md5[:6]}/{md5}.png`. Frame 0 is shown by
- * clipping the sheet, and the consequences are dealt with as follows:
- *
- *   - **`<img>`, not `background-image`.** A background cannot be lazily loaded
- *     and has no intrinsic size, so a screenful of them is a screenful of
- *     immediate requests. This `<img>` carries `width`/`height` (the sheet's real
- *     2560×1024, so the aspect ratio is reserved before it lands),
- *     `loading="lazy"` and `decoding="async"`.
- *   - **The clip is a square box with the sheet scaled to `cols × 100%` by
- *     `rows × 100%`.** The rendered image is therefore 5× the frame's width and
- *     2× its height — which is exactly what makes this expensive, and is measured
- *     in the PR notes. Nothing can be done about it inside this PR; the WebP
- *     derivative is the fix.
- *   - **The frame box is square inside the 4:3 well**, so the frame is never
- *     distorted and the well keeps its radial gradient at the sides.
- *   - **The sheets are blue**, not grey — `stl-thumb`'s default Phong material.
- *     v1 accepts a blue grid beside tinted 3D views (architecture-plan.md §8).
- *     They are deliberately **not** CSS-tinted: a `filter` over a lit render
- *     produces a muddy wash, and it would also be a lie about a colour the
- *     material registry has a real answer for.
- *   - **One live tile has no sheet at all** (`CatalogRecord.sprite` is `false` for
- *     exactly one of 8,702). It gets a mono "no render" plate rather than a
- *     broken-image glyph.
+ * There is still no thumbnail derivative in the bucket, so the card's well shows
+ * frame 0 of the detail viewer's 2×5 sheet — ~529 KB each, and a screenful
+ * decodes hundreds of megabytes. `@/ui/thumb` carries that arithmetic, the
+ * reasons behind every attribute on its `<img>`, and the "no render" plate for the
+ * one tile of 8,702 with no sheet. What stays this file's decision is only *which
+ * file* is shown — {@link TileAggregate.preview}, above.
  */
 import { Link } from '@tanstack/react-router'
-import type { CSSProperties } from 'react'
 
 import { PRINT_OPTIONS } from '@/assembly'
-import type { BlobId, CatalogAssets, CatalogRecord, SpriteSheet, TileAggregate } from '@/catalog'
-import { selectVariant, shardedPath } from '@/catalog'
+import type { CatalogAssets, CatalogRecord, SpriteSheet, TileAggregate } from '@/catalog'
+import { selectVariant } from '@/catalog'
 import { MATERIALS, resolveMaterial } from '@/materials'
 import { addToLibrary, removeFromLibrary, useLockSystem, useWorkshopStore } from '@/store'
-import { Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
+import { Chip, VisuallyHidden } from '@/ui/primitives'
+import { TileThumb } from '@/ui/thumb'
 
 import type { AvailabilityChip } from './availability'
 import { availabilityChips, availabilityOf } from './availability'
 import { bytesRangeLabel, fileTokenLabel, humaniseSegment, sizeLabel } from './format'
-
-/* ----------------------------------------------------------------- thumbnail */
-
-export interface TileThumbProps {
-  blob: BlobId
-  /** `CatalogRecord.sprite` — whether a sheet exists at all. */
-  sprite: boolean
-  assets: CatalogAssets
-  sheet: SpriteSheet
-  /** Which of the 10 camera angles to show. Frame 0 is the default view. */
-  frame?: number
-  className?: string
-}
-
-/** One frame of a tile's sprite sheet, in a 4:3 radial-gradient well. */
-export function TileThumb({ blob, sprite, assets, sheet, frame, className }: TileThumbProps) {
-  const index = frame ?? sheet.defaultFrame
-  const column = index % sheet.cols
-  const row = Math.floor(index / sheet.cols)
-
-  // Geometry comes from the index's own `sprite` block, not from constants: the
-  // schema holds it as data so a future sheet layout needs no code change here.
-  const style = {
-    '--of-sheet-cols': String(sheet.cols),
-    '--of-sheet-rows': String(sheet.rows),
-    '--of-sheet-x': `${String(column * -100)}%`,
-    '--of-sheet-y': `${String(row * -100)}%`,
-  } as CSSProperties
-
-  return (
-    <div className={['of-thumb', className].filter(Boolean).join(' ')}>
-      {sprite ? (
-        <div className="of-thumb-frame" style={style}>
-          <img
-            className="of-thumb-sheet"
-            src={`${assets.sprites}/${shardedPath(blob)}.png`}
-            width={sheet.cols * sheet.tile}
-            height={sheet.rows * sheet.tile}
-            loading="lazy"
-            decoding="async"
-            // Decorative: the card's title is the tile's name, and a second
-            // reading of it here would make every card announce twice.
-            alt=""
-          />
-        </div>
-      ) : (
-        <Eyebrow className="of-thumb-missing">no render</Eyebrow>
-      )}
-    </div>
-  )
-}
 
 /* ---------------------------------------------------------------------- card */
 

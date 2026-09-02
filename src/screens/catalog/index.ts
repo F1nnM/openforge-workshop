@@ -6,12 +6,11 @@
  * two rows that come next:
  *
  *   - **Row 14 (library)** renders "a lighter variant of the catalog card"
- *     (design-contract.md §2.3). `TileThumb` is the sprite-sheet maths — the frame
- *     offsets, the explicit dimensions, the lazy loading, the missing-sheet
- *     fallback — and re-deriving it would mean re-deriving the one part of this
- *     screen that has a measured performance problem. `LibraryToggle` is the same
- *     button in reverse. The `format` helpers are what keep a size chip and a file
- *     size reading identically on both screens.
+ *     (design-contract.md §2.3). The thumbnail well it shares is **no longer here**
+ *     — row P0 moved it to `@/ui/thumb`, because the builder's bill and palette
+ *     render it too and a component four subtrees mount is not a catalog export.
+ *     `LibraryToggle` is the same button in reverse. The `format` helpers are what
+ *     keep a size chip and a file size reading identically on both screens.
  *   - **Row 18 (builder palette)** searches the whole catalog, so it wants
  *     `loadCatalogSearchIndex()` rather than a second engine over the same file.
  *
@@ -30,8 +29,9 @@ export { CatalogScreen } from './CatalogScreen'
 export type { CatalogIndex, CatalogIndexState } from './catalogIndex'
 export { loadCatalogSearchIndex, resetCatalogSearchIndex, useCatalogIndex } from './catalogIndex'
 
-export type { TileCardProps, TileThumbProps } from './TileCard'
-export { AvailabilityStrip, LibraryToggle, TileCard, TileThumb } from './TileCard'
+
+export type { TileCardProps } from './TileCard'
+export { AvailabilityStrip, LibraryToggle, TileCard } from './TileCard'
 
 export type { Availability, AvailabilityChip, JoineryNote, LockChip, LockReach } from './availability'
 export {
