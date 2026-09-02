@@ -144,7 +144,13 @@ describe('renderThumbnail', () => {
     // architecture-plan.md §8's "99.8% of opaque pixels are non-neutral", re-derived.
     expect(blue.share).toBeGreaterThan(0.95)
     expect(blue.mean.b).toBeGreaterThan(blue.mean.r)
-    // Rec.709 luma leaves nothing to tint against.
+    // The desaturated variant carries no chroma of its own. Not "nothing to tint
+    // against", as this said: row P1 tints it too, through `tint.ts`'s `thumb`
+    // chain. What the collapse to one channel costs is separability — the sheet's
+    // two Phong terms can only be regressed back out (R² 0.4993 / 0.6128) where
+    // the three-channel `sprite` chain un-mixes them exactly. And what this call
+    // produces is Rec.709 luminance taken in *linear* light, not gamma-space
+    // Rec.709 luma; see `Tone` in `render.ts` for the 0.375-vs-7.053 measurement.
     expect(neutral.share).toBeLessThan(0.01)
     expect(neutral.meanChroma).toBeLessThan(1)
   })

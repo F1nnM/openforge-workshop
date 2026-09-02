@@ -115,12 +115,36 @@ export interface MortarSpec {
  * (`tint − 0.525 × diffuse`) so the two still sum back to the albedo even where
  * the diffuse term clipped. `palette.test.ts` re-derives all sixteen.
  *
- * Carried here, unused by v1. §5 records that every sheet in the bucket today
- * is rendered in `stl-thumb`'s default **blue** Phong material (ambient
- * `#002142`, diffuse peaking `#3375c8`; 99.8% of opaque pixels are
- * non-neutral), which is what kills any plan to CSS-tint the existing PNGs.
- * v1 accepts the split — grid thumbnails stay blue, 3D views are tinted — and
- * these triples are what a coloured re-render in v1.1 would use.
+ * **These triples are live, not deferred.** Every sheet in the bucket is
+ * rendered in `stl-thumb`'s default **blue** Phong material (ambient `#002142`,
+ * diffuse peaking `#3375c8`; 99.8% of opaque pixels are non-neutral), and row
+ * P1 tints that away in the browser rather than accepting it: `materials/tint.ts`
+ * un-mixes the blue render's two terms and re-mixes them with the triple below,
+ * which composes to one `feColorMatrix` per family. Applied to the blue pixel at
+ * `s = 0.525` that matrix returns each family's own `tint` hex to within 0.475 of
+ * one 8-bit level — so a retuned palette retints the grid as well as the sprites,
+ * and `tint.test.ts` asserts it for all sixteen.
+ *
+ * So the blue does not kill CSS-tinting. It kills *greyscaling and then*
+ * tinting, which is a different claim. Every opaque sheet pixel is
+ * `ambient + s·diffuse + k·specular` with a **white** specular: fitting that
+ * two-term model over 2,105,442 decoded pixels leaves a mean absolute residual of
+ * 1.417/255, against 10.531/255 for the one-term model of blue times a scalar,
+ * because 95.8% of pixels carry `k > 0.02`. Any single greyscale is therefore a
+ * fixed mixture of the two terms — Rec.709 luma weights the achromatic sheen
+ * 2.3403× the form — so one scalar cannot separate them and two, un-mixed
+ * exactly, can.
+ *
+ * And leaving the blue was never the neutral option. The sixteen albedos sit a
+ * mean **31.88** ΔE00 from the corpus-median sprite pixel against **18.34** from
+ * a luminance-matched neutral, with `water` the nearest family at **14.82** while
+ * `dungeon_stone` is **16.41** away — 1.59 apart, far inside the 9.0 the palette
+ * needs to tell two families apart at all. A dungeon-stone tile drawn in sheet
+ * blue reads as the pool.
+ *
+ * An offline coloured re-render — `resolve.ts`'s `spriteArgsFor` — would use
+ * these same triples, and is now an optimisation rather than the only route to
+ * a coloured grid.
  */
 export interface SpriteMaterial {
   readonly ambient: string

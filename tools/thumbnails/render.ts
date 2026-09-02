@@ -54,16 +54,28 @@ export const THUMB_QUALITY = 80
 /**
  * Colour treatment.
  *
- * `blue` keeps the source render untouched, which is architecture-plan.md §8's
- * stated v1 position: `stl-thumb` renders in a default blue Phong material, the
- * grid inherits it, and the inconsistency with the tinted plan view is accepted
- * rather than hidden. `neutral` converts to Rec.709 luma, which throws away a
- * colour that was never a design decision and leaves a derivative that can be
- * tinted per material in CSS later.
+ * `blue` keeps the source render untouched — `stl-thumb` renders in a default
+ * blue Phong material and the sheet is emitted as it came. `neutral`
+ * desaturates, which is architecture-plan.md §8's position and what the CLI
+ * defaults to.
  *
- * Both are implemented and both are measured, because the choice is a product
- * decision recorded in the plan and not this tool's to make quietly. See the
- * PR description for the recommendation and the numbers behind it.
+ * **Two things this docblock used to say are no longer true, both corrected by
+ * measurement.**
+ *
+ * It said the blue grid's disagreement with the tinted plan view is *"accepted
+ * rather than hidden"*. It is neither: row P1 tints the sheets in the browser,
+ * off these same PNGs, so the disagreement is closed. `blue` is therefore no
+ * longer a product position — it is the raw render, for anyone who wants it.
+ *
+ * And it said `neutral` *"converts to Rec.709 luma"*. It does not. Row P1
+ * measured this exact `sharp().greyscale()` call against **393,157 real pixels**:
+ * it is Rec.709 **luminance computed in *linear* light** and re-encoded to sRGB
+ * (MAD **0.375 / 255**), against **7.053 / 255** for the gamma-space luma reading
+ * — a factor of 19. That is not a nicety. `src/materials/tint.ts`'s `thumb` chain
+ * is calibrated against what this call actually does, and because a
+ * linear-light luminance is not even an affine function of the sheet's two Phong
+ * terms, the chain has to *regress* them (R² 0.4993 / 0.6128) where the `sprite`
+ * chain un-mixes them exactly. **Changing this line changes that calibration.**
  */
 export type Tone = 'blue' | 'neutral'
 

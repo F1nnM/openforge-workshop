@@ -26,9 +26,19 @@
  * byte length, with no error. A parameter change would appear to have no effect.
  *
  * Two consequences, both enforced below. Every run gets a fresh instance — which
- * costs 5–8 ms, against 281 ms for a fresh compile. And {@link EngineRuntime.run}
- * unlinks every output path *before* running, so a stale read is not merely
- * unlikely but impossible.
+ * costs **5–8 ms** on a quiet machine and 9–11 ms with twelve test workers
+ * competing, against **28–38 ms** for a boot that has to compile its own module.
+ * And {@link EngineRuntime.run} unlinks every output path *before* running, so a
+ * stale read is not merely unlikely but impossible.
+ *
+ * **S2's 281 ms is a *process* floor, not a compile, and conflating the two cost
+ * two rows.** `WebAssembly.compile` of this 10.5 MB module is only **16.5–18.5 ms**
+ * of it on V8; the rest is the process, the instantiation and OpenSCAD's own
+ * start-up. An earlier version of this docblock read "281 ms for a fresh
+ * compile", and `render.test.ts` asserted `bootMs < compileMs` on the strength of
+ * it — believing it had an order of magnitude of margin when it had 2.5×, which
+ * made it a race that failed 1 of 4 whole-suite runs. The corrected numbers are
+ * above and the assertion is now against a boot that actually compiles.
  *
  * ## What is shared, and what a shared thing has to be
  *
@@ -81,7 +91,14 @@ export interface RunResult {
 }
 
 export interface EngineRuntime {
-  /** How long `WebAssembly.compile` took. Paid once, for the worker's lifetime. */
+  /**
+   * How long `WebAssembly.compile` took. Paid once, for the worker's lifetime.
+   *
+   * **16.5–18.5 ms** for this module on V8 — a small part of S2's 281 ms process
+   * floor rather than the whole of it. Diagnostic only: it is not a budget for
+   * what reuse saves, and reading it as one is the mistake the docblock above
+   * records.
+   */
   readonly compileMs: number
   /** How many renders this runtime has served. The reuse claim, as a number. */
   readonly runs: number

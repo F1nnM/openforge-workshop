@@ -400,9 +400,22 @@ export function contourFor(
  *
  *   stl-thumb model.stl out.png -s 512 -c 0 -4 2 -m 1b1c20 99a3b7 6b6357
  *
- * Unused by v1 — §5 accepts that the existing sheets stay blue and only the 3D
- * views are tinted — and carried because a coloured re-render in v1.1 needs the
- * same table this module already holds.
+ * **No caller in the app, and the reason is no longer the one this docblock used
+ * to give.** It said §5 accepts that the sheets stay blue and only the 3D views
+ * are tinted. That is not what ships: row P1 tints the blue sheets in the
+ * browser, from these very triples, by un-mixing the render's two terms and
+ * re-mixing them into one `feColorMatrix` per family — see `tint.ts`.
+ *
+ * So an offline re-render is now an **optimisation**, not the only route to a
+ * coloured grid, and the trade is explicit. Re-rendering bakes the colour in and
+ * costs nothing per frame, but it means re-running `stl-thumb` over the whole
+ * bucket and it fixes each sheet to one family for ever; the matrix costs one
+ * filter per painted frame and re-tints for free when the palette is retuned.
+ * The browser route is what ships, which is why nothing calls this yet.
+ *
+ * It stays exported and tested because it is the *definition* of what these
+ * triples mean to `stl-thumb`, and `tint.ts` is calibrated against exactly that
+ * command line.
  */
 export function spriteArgsFor(material: MaterialId): readonly string[] {
   const sprite = MATERIALS[material].sprite

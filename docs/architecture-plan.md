@@ -650,11 +650,28 @@ overturned it on three independent grounds:
 - **It halves the grid/builder disagreement even untinted.** Against the 16 material family
   tints the plan view fills with, sprite blue sits at a mean **31.6 ΔE00**; a neutral grey at
   **17.7**. The nearest family to sprite blue is `water` at 15.0 — so with blue thumbnails
-  *every stone tile in the grid reads closer to water than to its own material.*
-- **It is the only variant that can be tinted later.** A luma-preserving greyscale with alpha
-  can be tinted per material through `feColorMatrix`, keeping both alpha and shading. Blue
-  cannot. So this is the enabling step for the grid ever agreeing with the builder, and it
-  needs no re-render when the LOD pipeline lands.
+  *every stone tile in the grid reads closer to water than to its own material.* Row P1
+  reproduced all three over 69 sheets rather than seven — **31.88 / 18.34 / `water` at
+  14.82**, with `dungeon_stone` 16.41 away, so the two are 1.59 apart against the 9.0 the
+  palette needs to separate any pair.
+- **It is cheaper to tint, but it is not the only variant that can be tinted — and that
+  correction is row P1's.** This bullet claimed a luma-preserving greyscale can be tinted per
+  material through `feColorMatrix` while *"blue cannot"*. **The opposite is true, and by a
+  wide margin.** A sheet pixel is `ambient + s·diffuse + k·specular` with a white specular
+  (mean absolute residual **1.417/255** over 2,105,442 opaque pixels, against 10.531/255 for
+  blue times one scalar), so the blue carries **two** recoverable terms and they un-mix
+  *exactly* — the shading row sums to zero and the sheen row is orthogonal to the diffuse
+  direction. A greyscale has thrown one of them away: the derivative can only be regressed
+  back, at **R² 0.4993** for the shading term and 0.6128 for the sheen. So it is the
+  *greyscale* that cannot be un-mixed, and blue that can.
+
+  The derivative still earns its place on the two grounds above — 14.7% smaller, and half the
+  disagreement before any tinting at all — and both chains ship (`ThumbSource`), so the
+  backfill needs no re-render. But it was never the enabling step for a coloured grid. Every
+  frame the grid draws already goes through a tint matrix built off the **blue sheet** —
+  `TileThumb` applies `tintFilterId(material, 'sprite')` unconditionally — because 8,701 of
+  8,702 tiles have no derivative to point at. Which family each card asks for is row P3's
+  remaining wiring, not a re-render.
 
 Blue remains available (`--tone blue`) for anyone who wants the raw render.
 
