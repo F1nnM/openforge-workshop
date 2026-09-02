@@ -28,8 +28,10 @@
  * swapping its last path segment — which is exactly the relationship the
  * architecture plan §8 states (`/lod/{md5[:6]}/{md5}.glb` beside `/models/`) —
  * and {@link LOD_PREFIX} is the one place the word `lod` appears. Row X4 should
- * add `lod` to `CatalogAssets` and `ASSET_BASES`; when it does, `lodBase` gets
- * one line shorter and nothing else moves.
+ * add `lod` to `CatalogAssets` and `ASSET_BASES`. It has, so `lodBase` now reads
+ * the field instead of inferring it by swapping the last segment of
+ * `assets.models` — which is the same value, derived rather than declared. The
+ * inference could not tell a deliberate move of the store from a typo.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -186,14 +188,26 @@ export function modelUrl(file: CatalogFile, blob: BlobId): string {
  * on a different host from the meshes it is derived from.
  */
 export function lodBase(file: CatalogFile): string {
-  const url = new URL(file.assets.models)
-  const segments = url.pathname.replace(/^\/+|\/+$/g, '').split('/')
-  if (segments.length === 0 || segments[segments.length - 1] === '') {
-    throw new Error(`assets.models (${file.assets.models}) has no path segment to swap for \`${LOD_PREFIX}\``)
+  const declared = new URL(file.assets.lod)
+  const models = new URL(file.assets.models)
+
+  // The field is authoritative — but the inference this replaced carried a real
+  // invariant for free, which reading a field does not: the store must sit beside
+  // the meshes it is derived from, same origin and same parent path, differing
+  // only in the final segment. Losing that would let a typo in one field send
+  // every mesh URL to a host nobody uploaded to, and the symptom would be 8,353
+  // absences reported as "the store has not been built yet".
+  const parent = (url: URL): string => url.pathname.replace(/\/+$/, '').split('/').slice(0, -1).join('/')
+  if (declared.origin !== models.origin || parent(declared) !== parent(models)) {
+    throw new Error(
+      `assets.lod (${file.assets.lod}) is not beside assets.models (${file.assets.models}): ` +
+        'the LOD store must share the origin and parent path of the meshes it is derived from',
+    )
   }
-  segments[segments.length - 1] = LOD_PREFIX
-  url.pathname = `/${segments.join('/')}`
-  return url.toString().replace(/\/+$/, '')
+  if (declared.pathname.replace(/^\/+|\/+$/g, '') === '') {
+    throw new Error(`assets.lod (${file.assets.lod}) has no path segment`)
+  }
+  return file.assets.lod.replace(/\/+$/, '')
 }
 
 /** The LOD object's public URL, once uploaded. */

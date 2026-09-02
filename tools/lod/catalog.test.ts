@@ -89,19 +89,50 @@ describe('paths', () => {
   })
 
   it('keeps a nested prefix, so a bucket layout change does not silently flatten', () => {
+    // `lodBase` reads `assets.lod` now that the schema carries it, rather than
+    // inferring it by swapping the last segment of `assets.models`. A declared
+    // field beats a derived one — but the fixture has to declare both, because
+    // the invariant below is what the inference used to give for free.
     const nested = testCatalog({
       records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
       models: 'https://objects.example.test/assets/v2/models',
+      lod: 'https://objects.example.test/assets/v2/lod',
     })
     expect(lodBase(nested)).toBe('https://objects.example.test/assets/v2/lod')
     expect(lodPrefix(nested)).toBe('assets/v2/lod')
     expect(lodKey(nested, A)).toBe(`assets/v2/lod/aaaaaa/${A}.glb`)
   })
 
-  it('refuses a base with no path segment to swap', () => {
+  it('refuses a store that is not beside the meshes, which a declared field can be', () => {
+    // The failure this catches is quiet and expensive: every mesh URL points at a
+    // host nobody uploaded to, and the symptom is 8,353 absences reported as
+    // "the store has not been built yet".
+    expect(() =>
+      lodBase(
+        testCatalog({
+          records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
+          models: 'https://objects.example.test/assets/v2/models',
+          lod: 'https://cdn.other.test/assets/v2/lod',
+        }),
+      ),
+    ).toThrow(/must share the origin/)
+
+    expect(() =>
+      lodBase(
+        testCatalog({
+          records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
+          models: 'https://objects.example.test/assets/v2/models',
+          lod: 'https://objects.example.test/elsewhere/lod',
+        }),
+      ),
+    ).toThrow(/must share the origin/)
+  })
+
+  it('refuses a base with no path segment at all', () => {
     const rootless = testCatalog({
       records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
       models: 'https://objects.example.test/',
+      lod: 'https://objects.example.test/',
     })
     expect(() => lodBase(rootless)).toThrow(/no path segment/)
   })

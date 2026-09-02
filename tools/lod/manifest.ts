@@ -145,6 +145,20 @@ export interface LodFormat {
   nodeTransform: 'quantized' | 'identity'
   decoder: { import: string; export: string; three: string; setter: string }
   units: string
+  /**
+   * The axis the mesh's own coordinates call up.
+   *
+   * `'z'`, always, because the bytes are the source STL's axes unchanged — and
+   * glTF's *container* convention is Y-up, so the two disagree. A consumer that
+   * trusts the container lays every tile on its back.
+   *
+   * Row G2 found this the hard way and asked for the field: the format block
+   * recorded the node transform and the units but not this, which made it the
+   * second-most expensive thing to get wrong here and the only one not written
+   * down. The correction is a rotation about X, not the axis swap that looks
+   * equivalent — a swap is a reflection and inverts every triangle's winding.
+   */
+  upAxis: 'z'
   tool: string
   copyright: string
   versions: Record<string, string>
@@ -262,6 +276,7 @@ export function lodFormat(inputs: Pick<ManifestInputs, 'meshopt' | 'minTriangles
       setter: 'new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)',
     },
     units: 'millimetres, the source STL’s own units, unchanged',
+    upAxis: 'z',
     tool: TOOL,
     copyright: COPYRIGHT,
     versions: {
