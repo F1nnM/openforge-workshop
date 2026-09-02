@@ -137,6 +137,7 @@ function synthesise(): CatalogFile {
       models: 'https://objects.example/models/',
       sprites: 'https://objects.example/sprites/',
       thumbs: 'https://objects.example/thumbs/',
+      lod: 'https://objects.example/lod/',
     },
     sprite: MEASURED_SPRITE_SHEET,
     tags: tagTable,

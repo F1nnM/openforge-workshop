@@ -11,6 +11,12 @@
  * the facet vocabulary and the search tokens. One seam, so no consumer has to
  * know a second spelling ever existed. See `pipeline/normalise.ts`.
  *
+ * Row W4 widened one step of it without changing its shape: `resolveFootprint`
+ * now returns one of **seven** cases rather than four, and the two it reads
+ * beyond the tag list — a column's measured square and a diagonal's measured run
+ * — come from `pipeline/tessellation.ts` rather than from a constant here. The
+ * pipeline stays a pure function of the tag list plus that table.
+ *
  * Two properties are deliberate and tested:
  *
  *   - **Records are sorted by `id`, not by ordinal.** Catalog paths share long
@@ -25,6 +31,7 @@
  */
 import { basename, dirname } from 'node:path'
 
+import type { Footprint } from '../src/catalog'
 import { CatalogFile, MEASURED_SPRITE_SHEET, SCHEMA_VERSION } from '../src/catalog'
 
 import { buildDesignIndex } from './design'
@@ -167,7 +174,10 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       tagReferences: records.reduce((total, record) => total + record.tags.length, 0),
       designs,
       families: new Set(records.map((record) => record.family)).size,
-      footprints: tally(records.map((record) => record.foot.shape)),
+      footprints: tally(
+        records.map((record) => record.foot.shape),
+        FOOTPRINT_ORDER,
+      ),
       layers: tally(records.map((record) => record.layer)),
       withConfig: records.filter((record) => record.config !== undefined).length,
       distinctNames: new Set(records.map((record) => record.name)).size,
@@ -177,8 +187,40 @@ export function buildCatalog(options: BuildOptions): BuildResult {
   }
 }
 
-function tally(values: readonly string[]): Record<string, number> {
+/**
+ * The seven {@link Footprint} cases, enumerated so the tally is a fixed shape.
+ *
+ * Two things this buys, and neither is cosmetic. **A case that empties out reads
+ * as `0` instead of vanishing** — without the seed, `stats.footprints.column`
+ * would be `undefined` both when the classifier stops producing columns and when
+ * nobody ever modelled them, and every consumer would paper over the difference
+ * with `?? 0`. And **the closed set is written down on the pipeline side**, so a
+ * `footprintKind` result the schema has no union member for shows up as an
+ * eighth key in the stats rather than only later, as a `CatalogFile.parse`
+ * failure after the tally has already been taken.
+ * `catalog.test.ts` asserts the key set is exactly these seven.
+ */
+const FOOTPRINT_ORDER: readonly Footprint['shape'][] = [
+  'rect',
+  'wall',
+  'arc',
+  'diag',
+  'column',
+  'tri',
+  'none',
+]
+
+/**
+ * Count occurrences, seeding the keys from `order` where one is given.
+ *
+ * A seeded key with no occurrences stays `0` rather than being absent, so a case
+ * that empties out reads as empty instead of as unmodelled. A value outside
+ * `order` is still counted, at the end — losing it silently would be worse than
+ * reporting it out of place.
+ */
+function tally(values: readonly string[], order: readonly string[] = []): Record<string, number> {
   const counts: Record<string, number> = {}
+  for (const key of order) counts[key] = 0
   for (const value of values) counts[value] = (counts[value] ?? 0) + 1
   return counts
 }

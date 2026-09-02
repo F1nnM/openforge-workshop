@@ -27,6 +27,8 @@ import {
   footprintKind,
   hasCurveMarker,
   isDesignFragment,
+  isLetteredCurvePart,
+  radiusIsFeature,
   resolveFootprint,
   sizeToken,
 } from './footprint'
@@ -91,9 +93,173 @@ describe('footprint', () => {
   it('lets a radius win over a tagged width and depth', () => {
     // The size tags are design-family labels; on a curve they name the family
     // the fragment came from and diverge from the mesh by a median 96 mm.
-    const tags = ['shape|base', 'shape|curved', 'size|width|5', 'size|depth|5', 'size|radius|4']
+    const tags = [
+      'shape|base',
+      'shape|curved',
+      'size|width|5',
+      'size|depth|5',
+      'size|radius|4',
+      'size|angle|90',
+    ]
     expect(resolveFootprint(tags)).toEqual({ shape: 'arc', radius: 4, angle: 90 })
     expect(sizeToken(resolveFootprint(tags))).toBe('4r90')
+  })
+
+  it('refuses a sector with no sweep rather than inventing one', () => {
+    // W4 deleted `DEFAULT_ARC_SWEEP_DEG`. It fabricated 90 degrees for 165 arc
+    // tiles, and W1 fitted an annular sector to every one of those 165 and
+    // refused all 165 — so the sweep was not the only thing wrong with them.
+    // `radiusIsFeature` takes all 165 out of ARC, which leaves this branch
+    // unreachable on the live corpus (`ARC with no size|angle` is 0), and the
+    // rule is written down anyway so nothing re-invents a sweep later.
+    const noSweep = ['shape|base', 'shape|curved', 'size|width|5', 'size|depth|5', 'size|radius|4']
+    expect(footprintKind(noSweep)).toBe('none')
+    expect(resolveFootprint(noSweep)).toEqual({ shape: 'none' })
+  })
+
+  it('reads a column as one wall-thickness square, with no dimension of its own', () => {
+    // 119 tiles. `size|column_shape` is the gate, not `shape|column`: that tag
+    // sits on 135 tiles and the two extra are a 1 x 1 cell and a 2 x 2 right
+    // triangle, which a 0.5 x 0.5 pillar would shrink fourfold.
+    const tags = ['shape|column', 'size|column_shape|L', 'size|openlock|L']
+    expect(footprintKind(tags)).toBe('column')
+    const foot = resolveFootprint(tags)
+    expect(foot).toEqual({ shape: 'column' })
+    expect(foot).not.toHaveProperty('w')
+    expect(sizeToken(foot)).toBe('0.5x0.5')
+  })
+
+  it('refuses the one column letter nobody measured', () => {
+    // `col+T`, 14 tiles. W2 marks the row `unmeasured` because the only col+T
+    // STL in the bucket is an 84-byte binary header declaring zero triangles.
+    // The other 13 are real meshes that were never in a work list, so this is a
+    // refusal to place an unmeasured row and not a claim about the files.
+    expect(footprintKind(['shape|column', 'size|column_shape|T', 'size|openlock|T'])).toBe('none')
+    // And an invented letter is not a column at all.
+    expect(footprintKind(['shape|column', 'size|column_shape|Q'])).toBe('none')
+  })
+
+  it('reads the O pair as a right triangle, sized from the tags and not the code', () => {
+    // 9 tiles, 5 of them 2 x 2 and 4 of them 4 x 4, all carrying the same
+    // `size|openlock|O`. W2's row for O can hold only one size and holds 4 x 4,
+    // so the leg comes from the tags — which is also why `O` is one of the four
+    // codes W2 flags `ambiguous` and why row D4 must not key a join on it.
+    const small = ['shape|angled', 'shape|angled|right', 'size|angle|45', 'size|width|2', 'size|depth|2', 'size|openlock|O']
+    expect(footprintKind(small)).toBe('tri')
+    expect(resolveFootprint(small)).toEqual({ shape: 'tri', leg: 2 })
+    expect(sizeToken(resolveFootprint(small))).toBe('2x2')
+    const large = small.map((tag) => tag.replace('|2', '|4'))
+    expect(resolveFootprint(large)).toEqual({ shape: 'tri', leg: 4 })
+  })
+
+  it('reads the P family as a 45-degree run measured from W2 table, not from the tag', () => {
+    // 121 tiles, every one tagged `size|width|2`, and not one of them 2 units
+    // long: the tag names the cell the piece cuts across. `PA` is 2 sqrt 2.
+    const tags = ['shape|angled', 'shape|angled|right', 'shape|wall', 'size|angle|45', 'size|width|2', 'size|openlock|PA']
+    expect(footprintKind(tags)).toBe('diag')
+    expect(resolveFootprint(tags)).toEqual({ shape: 'diag', run: 2.828 })
+    // No token of its own: `naming.ts` falls back to the tagged `2x`, because
+    // the corpus never writes 2.828 and the code letter is what tells P from PC.
+    expect(sizeToken(resolveFootprint(tags))).toBeUndefined()
+    // An angled-right tile whose code has no measured run is not a diagonal.
+    expect(footprintKind(['shape|angled|right', 'size|angle|45', 'size|width|2'])).toBe('wall')
+  })
+
+  it('de-arcs an xG interface wall and takes its length from the measurement', () => {
+    // The radius is the curved *interface* where a straight run meets a curve,
+    // not the outline. `QxG` is tagged `size|width|4` and measures 3.000 —
+    // wrong by a full unit, and an exact 76.20 mm multiple.
+    const tags = [
+      'shape|base',
+      'shape|base|curved',
+      'shape|curved',
+      'shape|option|curved_interface',
+      'shape|wall',
+      'size|openlock|QxG',
+      'size|radius|2.5',
+      'size|width|4',
+    ]
+    expect(radiusIsFeature(tags)).toBe(true)
+    expect(footprintKind(tags)).toBe('wall')
+    expect(resolveFootprint(tags)).toEqual({ shape: 'wall', length: 3 })
+    expect(resolveFootprint([...tags.slice(0, 5), 'size|openlock|AxG', 'size|radius|2.5', 'size|width|2'])).toEqual({
+      shape: 'wall',
+      length: 1.991,
+    })
+  })
+
+  it('leaves the measured wall ladder alone, which is what makes that rule safe', () => {
+    // The table's length wins for every measured `wall_run` row, not for the
+    // three xG codes alone. On the other six the table and the tag are two
+    // independent statements of the same dimension and they agree exactly, so
+    // the rule is a no-op on 2,822 tiles and a correction on 84.
+    for (const [code, length] of [
+      ['A', 2],
+      ['AS', 2],
+      ['BA', 1.5],
+      ['D', 3],
+      ['IA', 1],
+      ['Q', 4],
+    ] as const) {
+      expect(resolveFootprint(['shape|wall', `size|openlock|${code}`, `size|width|${String(length)}`])).toEqual({
+        shape: 'wall',
+        length,
+      })
+    }
+    // A code with no `wall_run` row leaves the tagged width in place: 6 of the
+    // 182 `S` tiles carry a width and no depth, and `S` is a rect code.
+    expect(resolveFootprint(['shape|wall', 'size|openlock|S', 'size|width|2'])).toEqual({
+      shape: 'wall',
+      length: 2,
+    })
+  })
+
+  it('reads an inverted plate as the square it is, and its lettered parts as nothing', () => {
+    // An `inverted` tile is a square plate with a curved *cut* — the complement
+    // of a sector — so the radius parameterises the cut and the outline is the
+    // box. Measured: `plain#base+curved+inverted.3x3+2r` is 3.000 x 3.000 exactly.
+    const plate = ['shape|base', 'shape|base|curved', 'shape|base|inverted', 'shape|curved', 'size|depth|3', 'size|radius|2', 'size|width|3']
+    expect(radiusIsFeature(plate)).toBe(true)
+    expect(footprintKind(plate)).toBe('rect')
+    expect(resolveFootprint(plate)).toEqual({ shape: 'rect', w: 3, d: 3 })
+    // The 36 lettered ones are a different matter: tagged 7 x 7, measured
+    // 5.000 x 2.000. The fragment veto now reaches them, because the radius no
+    // longer outranks it.
+    const part = [...plate, 'size|segment|a']
+    expect(footprintKind(part)).toBe('none')
+  })
+
+  it('reads a lintel as an arch it fits, and so as nothing to place', () => {
+    // 21 inserts. The radius is the arch's, measured 1.31 x 0.48-0.63 against a
+    // tagged 2r whose sector box would be 2 units. Their only `size|width` is
+    // the non-numeric build marker, so de-arcing lands them in NONE unaided.
+    const tags = ['part|lintel', 'shape|curved', 'shape|curved|concave', 'size|radius|2', 'size|width|sw']
+    expect(radiusIsFeature(tags)).toBe(true)
+    expect(footprintKind(tags)).toBe('none')
+  })
+
+  it('vetoes a lettered component part of a curve, and only where it is measured', () => {
+    // 20 tiles, all `shingles#roof,corner`, all measured and all wrong: tagged
+    // 3.5 x 3.5, measured 0.596 x 4.980. `component|` is the corpus's *part*
+    // namespace and its minimum error over the 402 curve-marked RECT md5 is
+    // 0.904 u — twice the maximum of any other letter namespace.
+    const board = ['component|a', 'shape|curved', 'shape|curved|convex', 'shape|roof', 'size|width|3.5', 'size|depth|3.5']
+    expect(isLetteredCurvePart(board)).toBe(true)
+    expect(footprintKind(board)).toBe('none')
+
+    // Not the letter — the namespace. `shape|curved|<letter>` measures 0.436 u
+    // off, identical to its *unlettered* siblings in the same family, so W3 was
+    // right that a single-letter suffix is not a fragment signal.
+    const sibling = ['shape|curved', 'shape|curved|a', 'size|width|2', 'size|depth|2']
+    expect(isLetteredCurvePart(sibling)).toBe(false)
+    expect(footprintKind(sibling)).toBe('rect')
+
+    // And not without the curve: 160 tiles carry `component|<letter>` with no
+    // curve marker and not one has been measured, so vetoing them would be the
+    // unevidenced move W3 refused.
+    const uncurved = ['component|b', 'shape|floor', 'size|width|2', 'size|depth|2']
+    expect(isLetteredCurvePart(uncurved)).toBe(false)
+    expect(footprintKind(uncurved)).toBe('rect')
   })
 
   it('takes the arc sweep from size|angle when there is one', () => {
@@ -123,7 +289,7 @@ describe('footprint', () => {
   })
 
   it('refuses a design fragment, whose pair names the design and not the piece', () => {
-    // 283 tiles. `dungeon_stone%block#floor+curved+concave.8x8+b` is tagged 8 × 8
+    // 319 tiles. `dungeon_stone%block#floor+curved+concave.8x8+b` is tagged 8 × 8
     // and measures 4.000 × 4.000; the same `+b` on another design measures
     // 2.079 × 1.931, so there is no rule to derive and the pair must not be
     // believed. W1 measures them.
@@ -131,8 +297,10 @@ describe('footprint', () => {
     expect(isDesignFragment(fragment)).toBe(true)
     expect(footprintKind(fragment)).toBe('none')
     expect(resolveFootprint(fragment)).toEqual({ shape: 'none' })
-    // A radius still wins: it is the piece's own parameter, not the family's.
-    expect(footprintKind([...fragment, 'size|radius|4'])).toBe('arc')
+    // A radius still wins where it is the piece's own parameter — which now
+    // means a *sector* radius, with a sweep, and not one of the 165 W4 found
+    // parameterising a feature. All 319 fragments that lacked one are NONE.
+    expect(footprintKind([...fragment, 'size|radius|4', 'size|angle|45'])).toBe('arc')
   })
 
   it('matches curve markers on whole segments, and does not count hex as a curve', () => {

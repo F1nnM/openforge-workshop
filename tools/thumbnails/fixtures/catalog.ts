@@ -36,6 +36,7 @@ export function testCatalog(options: TestCatalogOptions): CatalogFile {
       models: 'https://objects.example.test/models',
       sprites: 'https://objects.example.test/sprites',
       thumbs: options.thumbs ?? 'https://objects.example.test/thumbs',
+      lod: 'https://objects.example.test/lod',
     },
     sprite: options.sprite ?? MEASURED_SPRITE_SHEET,
     tags: ['texture|test'],

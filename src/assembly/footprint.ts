@@ -21,10 +21,20 @@
  * Nothing else is normalised. `arc` keys on radius *and* sweep because §2
  * records that the size tags diverge from the mesh on curves (median error
  * 96 mm) — so radius alone would match a 90° elbow to a 270° sweep. `none`
- * collapses to a single key, which is correct rather than convenient: the 741
+ * collapses to a single key, which is correct rather than convenient: the 699
  * tiles with no derivable footprint are not congruent to each other, so the
  * `none` key is treated as **no key at all** by {@link footprintKey}'s callers
  * and never used to match.
+ *
+ * Row W4's three cases all key, and two of them had to. Its 121 `diag` tiles
+ * were `wall:2` before it and its 9 `tri` tiles were `rect:2x2` / `rect:4x4`, so
+ * leaving them off this switch would have silently withdrawn a congruence key
+ * from 130 toppers — a regression wearing the shape of a schema addition.
+ * `column` is the one genuinely new key: **every column in the corpus is the same
+ * 0.5 × 0.5 square**, so the key carries no dimension and all 119 are congruent
+ * to each other, which is the physical fact. A `diag` keys on its measured run,
+ * because `P` (3.536) and `PA` (2.828) are not interchangeable pieces even though
+ * both are tagged `size|width|2` — the tag is exactly what this key must not use.
  */
 import type { Footprint } from '@/catalog'
 
@@ -49,6 +59,12 @@ export function footprintKey(foot: Footprint): string | undefined {
       return `wall:${String(foot.length)}`
     case 'arc':
       return `arc:${String(foot.radius)}@${String(foot.angle)}`
+    case 'diag':
+      return `diag:${String(foot.run)}`
+    case 'tri':
+      return `tri:${String(foot.leg)}`
+    case 'column':
+      return 'column'
     case 'none':
       return undefined
   }

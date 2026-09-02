@@ -91,6 +91,7 @@ function catalogOf(rows: readonly RawRow[]): CatalogFile {
       models: MODELS,
       sprites: 'https://objects.openforge.tools/sprites',
       thumbs: 'https://objects.openforge.tools/thumbs',
+      lod: 'https://objects.openforge.tools/lod',
     },
     sprite: MEASURED_SPRITE_SHEET,
     tags: ['shape|wall'],

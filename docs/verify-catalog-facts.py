@@ -60,6 +60,84 @@ NON_CURVE_SEGMENTS = ("hex",)
 # so it is not a fragment signal; only `size|segment` is.
 FRAGMENT_PREFIX = "size|segment|"
 
+# The corpus's OTHER fragment marker, and the one row W3 declined. A single-letter
+# LAST segment is an ordinary variant suffix in 25 tag families, so W3 was right
+# not to treat it as a fragment signal. W1's measurements say the NAMESPACE is the
+# signal, not the letter. Over the 402 curve-marked RECT md5, error against the
+# tagged pair, in catalog units:
+#
+#   letter's namespace         md5   min    median   max
+#   (no letter)                372   0.000  0.003    2.507
+#   component|<letter>          20   0.904  1.903    2.905
+#   shape|curved|<letter>        9   0.436  0.436    0.436
+#   shape|floor|<letter>         2   0.026  0.026    0.026
+#
+# `component|` is the part namespace, and its MINIMUM error is twice any other
+# row's maximum. The nine `shape|curved|<letter>` tiles sit at 0.436 -- identical
+# to their unlettered siblings in `rough_stone+ruined#curved+floor` (0.437) -- so
+# there the letter carries nothing. Hence the conjunction below: a `component|`
+# letter AND a curve marker, which is exactly the 20 `shingles#roof,corner` tiles,
+# all 20 measured and all 20 wrong (tagged 1.5x1.5..3.5x3.5, measured
+# 0.596x2.185..0.596x5.041 -- 0.6-unit barge-boards of a hip-roof corner).
+#
+# 135 further RECT tiles carry `component|<letter>` with no curve marker and NONE
+# of them has been measured, so they keep their footprint. Mirrors
+# `isLetteredCurvePart` in pipeline/footprint.ts.
+COMPONENT_PREFIX = "component|"
+
+# The column gate. `size|openlock` cannot be it -- its letters collide with the
+# `col+` namespace on I L O T X -- and `shape|column` cannot be it either: that
+# tag is on 135 tiles, and the two extra are `rough_stone#column+low.I` (a 1x1
+# cell) and `.O` (a 2x2 right triangle), both column-shaped SUBJECTS on a tile
+# footprint. Calling either a 0.5x0.5 pillar shrinks it fourfold.
+#
+# This tag is exact: 133 tiles, letter equal to the tile's `size|openlock` code on
+# all 133 (L 50, O 34, I 24, T 14, X 11), and not one of the 133 carries any other
+# size tag. Mirrors COLUMN_SHAPE_TAG in pipeline/tessellation.ts's consumer.
+COLUMN_SHAPE_PREFIX = "size|column_shape"
+
+# The four column letters W2 measured at 12.70 x 12.70 mm. `T` is absent
+# deliberately: W2 marks `col+T` `unmeasured` because the only col+T STL in the
+# bucket is an 84-byte binary header declaring zero triangles, and `isMeasured`
+# returns False for it. Its 14 tiles are refused and stay in NONE. The other 13 of
+# those 14 are real meshes (3-22 MB) that were never in a measurement work list,
+# so the refusal is "nobody measured this row", not "this file is empty".
+MEASURED_COLUMN_LETTERS = ("I", "L", "O", "X")
+
+# The 45-degree marker: 130 tiles, and exactly the two families row W4 added.
+# `shape|angled` alone is 260 tiles, including 79 `plain#base+angled` with no angle
+# tag and 48 hex pieces at 60 degrees. `shape|angled|right` is on all 130
+# P/PA/PB/PC/O tiles and on nothing else; all 130 carry `size|angle|45` and none
+# carries a radius. The split inside it is total: all 121 P-family tiles have a
+# width and no depth, all 9 O tiles have both, with width equal to depth.
+DIAGONAL_TAG = "shape|angled|right"
+
+# The three codes whose `size|radius` is a curved INTERFACE on a straight wall
+# run, not an outline. Measured by W1: AxG 1.991 x 0.500, BAxG 1.547 x 0.500,
+# QxG 3.000 x 0.500 -- the last against a tagged `size|width|4`, wrong by a full
+# unit and an exact 76.20 mm multiple. Zero annular sectors among the 84.
+#
+# Named rather than detected from `shape|option|curved_interface`, which is on 111
+# tiles: the other 27 are the ExG/RxG/SxG/UxG/UxG2 floors, which carry a
+# `size|angle|90` and belong to row W5's 292-tile band question.
+XG_INTERFACE_CODES = ("AxG", "BAxG", "QxG")
+
+# The four codes W2 gives `shape: "diagonal_wall"`, with their measured runs. All
+# four are tagged `size|width|2` without exception and none is 2 units long:
+# P 3.536 (= 2.5*sqrt2), PA 2.828 (= 2*sqrt2), PB 2.835, PC 3.334. The tag names
+# the cell the piece cuts across; the table names the piece. This script mirrors
+# the code list only -- the runs live in `pipeline/tessellation.ts`, which is the
+# artefact W2 owns, and duplicating four measurements here would give them two
+# homes. Gating on the code list rather than on "has a width" is what keeps the
+# two classifiers identical: neither can mint a `diag` it has no run for.
+DIAGONAL_WALL_CODES = ("P", "PA", "PB", "PC")
+
+# `part|lintel`: 21 inserts whose radius is the arch they fit, not their outline.
+# Measured 1.31 x 0.48-0.63 against a tagged 2r/3r/4r whose sector box would be
+# 2-4 units. Their only `size|width` is the non-numeric build marker `sw` or `wot`,
+# so de-arcing them lands them in NONE with no special case.
+LINTEL_TAG = "part|lintel"
+
 LOCK_SYSTEMS = ("openlock", "dragonlock", "magnetic")
 
 # `connection|side|openlock` puts a POSITION in the second segment, not a system.
@@ -204,31 +282,132 @@ def has_substring_curve_marker(row: dict) -> bool:
 
 
 def is_design_fragment(row: dict) -> bool:
-    """Whether the width/depth pair names a larger design this file is part of."""
+    """Whether the width/depth pair names a larger design this file is part of.
+
+    319 live tiles, and after row W4 all 319 are NONE. W3 reached only 283 of
+    them, because a radius won ahead of this test on the 36 `curved+inverted`
+    fragments; W4 stopped reading those radii as outlines (`radius_is_feature`),
+    so the rule now applies to them too -- and W1's measurements say it should:
+    `7x7+6r+a` is tagged 7x7 and measures 5.000 x 2.000.
+    """
     return any(tag.startswith(FRAGMENT_PREFIX) for tag in tags_of(row))
+
+
+def is_lettered_curve_part(row: dict) -> bool:
+    """Whether a single-letter `component|` tag marks this as one part of a curve.
+
+    The same fact `size|segment` states, spelled in the part namespace. 20 tiles,
+    all `shingles#roof,corner+{concave,convex},{a,b}`. See COMPONENT_PREFIX for
+    the measured error table that makes the namespace -- not the letter -- the
+    discriminator, and for why the curve marker is a conjunct.
+    """
+    if not has_curve_marker(row):
+        return False
+    for tag in tags_of(row):
+        if not tag.startswith(COMPONENT_PREFIX):
+            continue
+        last = tag.split("|")[-1]
+        if len(last) == 1 and last.isalpha():
+            return True
+    return False
+
+
+def radius_is_feature(row: dict) -> bool:
+    """Whether a `size|radius` parameterises a FEATURE rather than the outline.
+
+    `arc` asserts that the outline is an annular sector. W1 fitted a sector to all
+    165 arc tiles carrying no `size|angle` and REFUSED every one of them
+    (fit: rejected, 165/165), so the fabricated 90-degree sweep was not the
+    defect -- the primitive was. The corpus says so in tags, three ways, and this
+    is those three ways. They cover the 165 exactly:
+
+      84  AxG/BAxG/QxG        the radius is the curved INTERFACE on a straight run
+      60  `inverted`          a square plate with a curved CUT -- the complement
+      21  part|lintel         the radius of the arch the lintel drops into
+
+    None of the three is a per-file exception list. After it, every remaining arc
+    tile carries a `size|angle`, which the table below asserts is 0 exceptions.
+    """
+    if tag_value(row, "size|openlock") in XG_INTERFACE_CODES:
+        return True
+    if LINTEL_TAG in tags_of(row):
+        return True
+    return "inverted" in segments_of(row)
+
+
+def column_kind(row: dict) -> str | None:
+    """`"column"`, `"none"` for an unmeasured letter, or None for a non-column."""
+    letter = tag_value(row, COLUMN_SHAPE_PREFIX)
+    if letter is None:
+        return None
+    return "column" if letter in MEASURED_COLUMN_LETTERS else "none"
+
+
+def triangle_leg(row: dict) -> float | None:
+    """The leg of a right isosceles triangle, from the tags.
+
+    From the tags and NOT from a code lookup, because `size|openlock|O` covers
+    both sizes and W2's table can hold only one: its row says 4x4 (the `OA`
+    variant it was measured on) while five of the nine tiles are 2x2. Requiring
+    width to equal depth makes "isosceles" a checked claim; an unequal pair falls
+    through to RECT, and today none does.
+    """
+    width = numeric(row, "size|width")
+    depth = numeric(row, "size|depth")
+    if width is None or depth is None:
+        return None
+    return width if width == depth else None
 
 
 def footprint_kind(row: dict) -> str:
     """The single primitive the Builder would use to place this tile.
 
-    Order matters, and the two vetoes are the order. A tile with width+depth that
-    also carries a radius is an arc, because on a curve the pair names the design
-    family and the radius names this fragment. A tile with width+depth that also
-    carries `size|segment` has no derivable footprint at all, because the pair
-    names a design this file is only one lettered piece of.
+    Order matters, and it is the contract `pipeline/footprint.ts` ports.
 
-    A curve marker is neither. It says the outline is a sector, not that the pair
-    is wrong -- and where a curve has no radius and no segment letter, the mesh
+    Columns first, because a column carries no other size tag at all and its own
+    tag is the only unambiguous spelling of the `col+` namespace. Diagonals next,
+    because `shape|angled|right` is a statement about the OUTLINE that the
+    width/depth pair below cannot make: a right triangle is half of its box and a
+    45-degree run is longer than the cell it crosses.
+
+    Then the vetoes, in order. A tile with width+depth that also carries a radius
+    is an arc -- unless a tag reassigns that radius to a feature, which is row
+    W4's correction and 165 tiles. A tile with width+depth that also carries a
+    part letter, in either the `size|segment` or the `component|` spelling, has no
+    derivable footprint at all, because the pair names a design this file is only
+    one piece of.
+
+    A curve marker is none of those. It says the outline is a sector, not that the
+    pair is wrong -- and where a curve has no radius and no part letter, the mesh
     measures the tagged pair to three decimal places. Vetoing on it stranded 403
-    placeable tiles in NONE.
+    placeable tiles in NONE, which is what W3 undid.
     """
+    column = column_kind(row)
+    if column is not None:
+        return column
+
+    if DIAGONAL_TAG in tags_of(row):
+        # The `P` family carries a width and no depth; the `O` pair carries both.
+        # Both readings need their own evidence -- a checked isosceles pair, or a
+        # code with a measured run -- so a bare `shape|angled|right` falls through
+        # rather than becoming a diagonal with no dimension.
+        if triangle_leg(row) is not None:
+            return "tri"
+        if tag_value(row, "size|openlock") in DIAGONAL_WALL_CODES:
+            return "diag"
+
     width = numeric(row, "size|width")
     depth = numeric(row, "size|depth")
     radius = numeric(row, "size|radius")
 
-    if radius is not None:
-        return "arc"
+    # A sector needs a sweep, and row W4 stopped inventing one. Zero live tiles
+    # reach the "none" here -- every arc surviving `radius_is_feature` carries a
+    # `size|angle`, and the ARC-with-no-angle row below asserts that is 0.
+    if radius is not None and not radius_is_feature(row):
+        return "arc" if numeric(row, "size|angle") is not None else "none"
     if is_design_fragment(row):
+        return "none"
+    if is_lettered_curve_part(row):
         return "none"
     if width is not None and depth is not None:
         return "rect"
@@ -272,16 +451,29 @@ def main() -> int:
     kind_of = {id(r): footprint_kind(r) for r in live}
     kinds = Counter(kind_of.values())
     rect, wall, arc, none = kinds["rect"], kinds["wall"], kinds["arc"], kinds["none"]
-    if rect + wall + arc + none != n:
+    column, tri, diag = kinds["column"], kinds["tri"], kinds["diag"]
+    if rect + wall + arc + column + tri + diag + none != n:
         failures.append("footprint kinds do not partition the live set")
+    if set(kinds) - {"rect", "wall", "arc", "column", "tri", "diag", "none"}:
+        failures.append(f"footprint_kind produced a case the schema has no union member for: {sorted(kinds)}")
 
-    out.append(("footprint RECT", f"{rect} ({pct(rect, n)})", "numeric size|width AND size|depth, no radius and no size|segment"))
+    out.append(("footprint RECT", f"{rect} ({pct(rect, n)})", "numeric size|width AND size|depth, no radius and no part letter"))
     out.append(("footprint WALL_SEG", f"{wall} ({pct(wall, n)})", "numeric size|width only; depth is the 12.7 mm constant"))
-    out.append(("footprint ARC", f"{arc} ({pct(arc, n)})", "has size|radius"))
-    out.append(("footprint NONE", f"{none} ({pct(none, n)})", "no derivable footprint (no size tags, or a fragment whose pair names its design) — never in the palette"))
+    out.append(("footprint ARC", f"{arc} ({pct(arc, n)})", "has size|radius, and no tag reassigns it to a feature"))
+    out.append(("footprint DIAG", f"{diag} ({pct(diag, n)})", "shape|angled|right with a diagonal_wall code — a 45-degree wall run, length from W2's table"))
+    out.append(("footprint COLUMN", f"{column} ({pct(column, n)})", "size|column_shape with a measured letter — one 0.5 x 0.5 wall-thickness square"))
+    out.append(("footprint TRI", f"{tri} ({pct(tri, n)})", "shape|angled|right with an equal width/depth pair — a right isosceles triangle"))
+    out.append(("footprint NONE", f"{none} ({pct(none, n)})", "no derivable footprint (no size tags, a part letter whose pair names its design, or a code this build refuses) — never in the palette"))
     out.append(("coverage RECT only", pct(rect, n), "v1 lower bound"))
     out.append(("coverage RECT+WALL", pct(rect + wall, n), "v1 scope"))
-    out.append(("coverage RECT+WALL+ARC", pct(rect + wall + arc, n), "v1.1 scope"))
+    out.append(("coverage RECT+WALL+ARC", pct(rect + wall + arc, n), "the four cases W3 left"))
+    out.append(
+        (
+            "coverage all seven cases",
+            pct(n - none, n),
+            "everything but NONE — the figure row W4 is accountable for, computed and not targeted",
+        )
+    )
 
     # --------------------------------------------------- W3: the classifier itself
     # The four counts above moved for one reason, and these rows are that reason
@@ -305,12 +497,20 @@ def main() -> int:
             f"a non-hex substring-only curve marker appeared: {substring_only} flagged, {hex_tiles} hex"
         )
 
-    curved_rects = sum(1 for r in live if kind_of[id(r)] == "rect" and has_curve_marker(r))
+    curved_rects = [r for r in live if kind_of[id(r)] == "rect" and has_curve_marker(r)]
+    curved_inverted = sum(1 for r in curved_rects if "inverted" in segments_of(r))
     out.append(
         (
             "RECT that is really a sector",
-            f"{curved_rects} ({pct(curved_rects, rect)} of RECT)",
+            f"{len(curved_rects)} ({pct(len(curved_rects), rect)} of RECT)",
             "curve-marked with a trusted width/depth pair -- the axis-aligned box is an over-approximation, W5 reshapes it",
+        )
+    )
+    out.append(
+        (
+            "RECT curve-marked but NOT a sector",
+            str(curved_inverted),
+            "`inverted` plates: a square with a curved cut, so the box IS the outline. Measured exactly (3.000 x 3.000, 5.000 x 5.000) -- W5 must not reshape these",
         )
     )
 
@@ -318,39 +518,178 @@ def main() -> int:
     frag_arc = sum(1 for r in fragments if kind_of[id(r)] == "arc")
     frag_none = sum(1 for r in fragments if kind_of[id(r)] == "none")
     out.append(("size|segment fragments", str(len(fragments)), "one lettered piece of a larger design"))
-    out.append(("fragments · radius wins", str(frag_arc), "carry size|radius, which is the piece's own parameter"))
+    out.append(
+        (
+            "fragments · radius wins",
+            str(frag_arc),
+            "MUST be 0 -- W3 left 36 here because a radius outranked the fragment veto; all 36 are `curved+inverted`, whose radius W4 reads as a cut and not an outline",
+        )
+    )
     out.append(
         (
             "fragments · vetoed to NONE",
             str(frag_none),
-            "the width/depth pair names the whole design, so there is nothing to place -- W1 measures them",
+            "the width/depth pair names the whole design, so there is nothing to place. `7x7+6r+a` is tagged 7x7 and measures 5.000 x 2.000",
         )
     )
     if frag_arc + frag_none != len(fragments):
         failures.append("size|segment fragments are neither arc nor none")
-    if frag_none != none - sum(1 for r in live if kind_of[id(r)] == "none" and not is_design_fragment(r)):
-        failures.append("the fragment veto and the NONE bucket disagree")
+    if frag_arc != 0:
+        failures.append(f"{frag_arc} size|segment fragments are still arcs -- radius_is_feature missed them")
 
-    # What is left in NONE, and whose row can move it. 161 carry a tessellation code
-    # W4 can resolve; 283 are fragments only W1 can measure; the rest have no tagged
-    # dimension at all.
+    def has_component_letter(row: dict) -> bool:
+        for tag in tags_of(row):
+            last = tag.split("|")[-1]
+            if tag.startswith(COMPONENT_PREFIX) and len(last) == 1 and last.isalpha():
+                return True
+        return False
+
+    lettered = [r for r in live if is_lettered_curve_part(r)]
+    lettered_only = [
+        r for r in lettered if not is_design_fragment(r) and numeric(r, "size|radius") is None
+    ]
+    out.append(
+        (
+            "component|<letter> curve parts",
+            f"{len(lettered)}: " + ", ".join(f"{v} {k}" for k, v in sorted(Counter(kind_of[id(r)] for r in lettered).items())),
+            "a part letter in the component namespace on a curved design. 56 also carry size|segment and 78 also carry a radius -- and a radius still outranks a part letter, which is W3's order and unchanged",
+        )
+    )
+    out.append(
+        (
+            "vetoed by the component letter alone",
+            str(len(lettered_only)),
+            "MUST be 20, all `shingles#roof,corner` and all RECT without this veto -- W1 measured all 20 md5 and the tagged pair is wrong on all 20 (min error 0.904 u, max 2.905)",
+        )
+    )
+    if any(kind_of[id(r)] != "none" for r in lettered_only):
+        failures.append("a tile the component letter is the only veto on kept a footprint")
+    if len(lettered_only) != 20:
+        failures.append(f"the component-letter veto reaches {len(lettered_only)} tiles, not the 20 W1 measured")
+
+    lettered_elsewhere = Counter(
+        kind_of[id(r)] for r in live if not has_curve_marker(r) and has_component_letter(r)
+    )
+    out.append(
+        (
+            "component|<letter>, no curve marker",
+            f"{sum(lettered_elsewhere.values())}: "
+            + ", ".join(f"{v} {k}" for k, v in sorted(lettered_elsewhere.items())),
+            "keep their footprint: not one has been measured, so vetoing them would be the unevidenced move W3 refused",
+        )
+    )
+
+    de_arced = [r for r in live if numeric(r, "size|radius") is not None and radius_is_feature(r)]
+    out.append(
+        (
+            "radius reassigned to a feature",
+            str(len(de_arced)),
+            "MUST equal the 165 arc tiles W1 refused a sector fit on: 84 xG interfaces, 60 inverted cuts, 21 lintel arches",
+        )
+    )
+    for label, rows_in in (
+        ("xG interface walls", [r for r in de_arced if tag_value(r, "size|openlock") in XG_INTERFACE_CODES]),
+        ("inverted plates", [r for r in de_arced if "inverted" in segments_of(r)]),
+        ("lintel inserts", [r for r in de_arced if LINTEL_TAG in tags_of(r)]),
+    ):
+        landed = Counter(kind_of[id(r)] for r in rows_in)
+        out.append(
+            (
+                f"de-arced · {label}",
+                f"{len(rows_in)}: " + ", ".join(f"{v} {k}" for k, v in sorted(landed.items())),
+                "where the 165 went once the radius stopped being read as an outline",
+            )
+        )
+    if len(de_arced) != 165:
+        failures.append(f"radius_is_feature covers {len(de_arced)} tiles, not W1's measured 165")
+    if any(kind_of[id(r)] == "arc" for r in de_arced):
+        failures.append("a tile whose radius is a feature is still an arc")
+
+    # What is left in NONE, and why each part of it is there. Row W3 left 741, of
+    # which 161 carried a code -- 133 columns and 28 `U`. W4 places 119 of the
+    # columns and refuses the rest, so the coded remainder is 42 and every one of
+    # them is a deliberate refusal rather than an unread tag.
     none_rows = [r for r in live if kind_of[id(r)] == "none"]
-    none_coded = sum(1 for r in none_rows if tag_value(r, "size|openlock") is not None)
+    none_coded = [r for r in none_rows if tag_value(r, "size|openlock") is not None]
     none_sizeless = sum(
         1
         for r in none_rows
         if not is_design_fragment(r) and tag_value(r, "size|openlock") is None
     )
-    out.append(("NONE · carries a tessellation code", str(none_coded), "W4 resolves the footprint from the code"))
-    out.append(("NONE · a fragment", str(frag_none), "W1 measures the piece"))
-    out.append(("NONE · no code, no fragment letter", str(none_sizeless), "nothing in the tags to resolve from"))
-    if none_coded + frag_none + none_sizeless != none:
+    out.append(
+        (
+            "NONE · a refused tessellation code",
+            f"{len(none_coded)}: "
+            + ", ".join(f"{v}x {k}" for k, v in sorted(Counter(tag_value(r, 'size|openlock') for r in none_coded).items())),
+            "U is ambiguous -- 4x4 floor OR the Y/YA/Z/ZA octagon segments, and these 28 are the segments; T is the one column letter nobody measured",
+        )
+    )
+    out.append(("NONE · a fragment", str(frag_none), "the pair names the whole design; W1 measured 36 of them and the tag was wrong on all 36"))
+    out.append(("NONE · no code, no part letter", str(none_sizeless), "nothing in the tags to resolve from -- 56 hex corners, 21 lintel inserts, 20 barge-boards"))
+    if len(none_coded) + frag_none + none_sizeless != none:
         failures.append("the NONE breakdown does not sum to the NONE bucket")
 
-    # DEFAULT_ARC_SWEEP_DEG's reach: arcs with no tagged sweep, for which 90 is
-    # fabricated. W3 moves nothing into or out of ARC, so this must not have moved.
+    # The columns, and the refusal. `col+T` is W2's one unmeasured column letter.
+    columns = [r for r in live if tag_value(r, COLUMN_SHAPE_PREFIX) is not None]
+    col_placed = Counter(tag_value(r, COLUMN_SHAPE_PREFIX) for r in columns if kind_of[id(r)] == "column")
+    col_refused = Counter(tag_value(r, COLUMN_SHAPE_PREFIX) for r in columns if kind_of[id(r)] != "column")
+    out.append(
+        (
+            "size|column_shape tiles",
+            f"{len(columns)}: " + ", ".join(f"{v}x {k}" for k, v in sorted(Counter(tag_value(r, COLUMN_SHAPE_PREFIX) for r in columns).items())),
+            "the unambiguous column gate; its letter equals the tile's size|openlock code on all of them",
+        )
+    )
+    out.append(("columns placed", f"{sum(col_placed.values())}: " + ", ".join(f"{v}x {k}" for k, v in sorted(col_placed.items())), "measured at 12.70 x 12.70 mm"))
+    out.append(("columns refused as unmeasured", f"{sum(col_refused.values())}: " + ", ".join(f"{v}x {k}" for k, v in sorted(col_refused.items())), "MUST be col+T only -- W2 marks that row unmeasured"))
+    if set(col_refused) - {"T"}:
+        failures.append(f"a measured column letter was refused: {sorted(col_refused)}")
+    shape_columns = [r for r in live if "shape|column" in tags_of(r)]
+    out.append(
+        (
+            "shape|column but no column_shape",
+            str(len(shape_columns) - len(columns)),
+            "MUST be 2 -- rough_stone#column+low.I (a 1x1 cell) and .O (a 2x2 right triangle): column-shaped subjects on a tile footprint, which is why shape|column is the wrong gate",
+        )
+    )
+
+    # The diagonals. `shape|angled|right` is exactly the two families, and the split
+    # inside it is total.
+    diagonals = [r for r in live if DIAGONAL_TAG in tags_of(r)]
+    out.append(
+        (
+            "shape|angled|right tiles",
+            f"{len(diagonals)}: " + ", ".join(f"{v} {k}" for k, v in sorted(Counter(kind_of[id(r)] for r in diagonals).items())),
+            "the 45-degree marker. MUST split cleanly into TRI and DIAG with nothing left over",
+        )
+    )
+    out.append(
+        (
+            "TRI legs",
+            ", ".join(f"{v}x leg {k}" for k, v in sorted(Counter(triangle_leg(r) for r in live if kind_of[id(r)] == "tri").items())),
+            "from the tags, because size|openlock|O covers both sizes and W2's row can hold only one (it says 4x4)",
+        )
+    )
+    out.append(
+        (
+            "DIAG codes",
+            ", ".join(f"{v}x {k}" for k, v in sorted(Counter(tag_value(r, "size|openlock") for r in live if kind_of[id(r)] == "diag").items())),
+            "runs from W2's table: P 3.536, PA 2.828, PB 2.835, PC 3.334, against a tagged size|width|2 on all 121",
+        )
+    )
+    if set(kind_of[id(r)] for r in diagonals) - {"tri", "diag"}:
+        failures.append("a shape|angled|right tile is neither TRI nor DIAG")
+    if any(numeric(r, "size|angle") != 45 for r in diagonals):
+        failures.append("a shape|angled|right tile is not tagged 45 degrees")
+
+    # There is no longer any arc with a fabricated sweep. W3 had 165 of them and
+    # `DEFAULT_ARC_SWEEP_DEG` invented 90 for every one; W1 refused a sector fit on
+    # all 165 and W4 took them out of ARC entirely, so the constant is deleted
+    # rather than left as a no-op. This row is what stops it coming back.
     arc_no_angle = sum(1 for r in live if kind_of[id(r)] == "arc" and numeric(r, "size|angle") is None)
-    out.append(("ARC with no size|angle", str(arc_no_angle), "DEFAULT_ARC_SWEEP_DEG fabricates 90 for these"))
+    out.append(("ARC with no size|angle", str(arc_no_angle), "MUST be 0 -- no sweep is fabricated anywhere; W3's 165 all left ARC"))
+    if arc_no_angle != 0:
+        failures.append(f"{arc_no_angle} arc tiles carry no size|angle, so a sweep is being fabricated")
 
     # ---------------------------------------------------------------- joinery
     no_conn = sum(1 for r in live if not any(t.startswith("connection|") for t in tags_of(r)))

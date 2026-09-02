@@ -42,9 +42,9 @@ export const GRID_UNIT_MM = 25.4
  * Wall thickness in millimetres.
  *
  * **Measured from the meshes, not assumed.** §2. This is the load-bearing
- * constant behind the `wall` footprint: 3,116 tiles (35.8%) carry a numeric
- * `size|width` and no `size|depth` at all, so their depth is not in the data —
- * it is this number.
+ * constant behind three footprint cases: 3,079 tiles (35.4%) are a `wall`, 121
+ * (1.4%) a `diag` and 119 (1.4%) a `column`, and not one of them carries a
+ * numeric `size|depth`. Their depth is not in the data — it is this number.
  */
 export const WALL_THICKNESS_MM = 12.7
 
@@ -76,8 +76,14 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * Bump it in the same commit that changes a field's meaning, so a `catalog.json`
  * built against an older shape is rejected rather than silently half-read.
  * The importer stamps it from here rather than choosing its own number.
+ *
+ * **2** — row W4 added `column`, `tri` and `diag` to {@link Footprint} and
+ * changed what `arc` asserts. A schema-1 index is not half-readable under this
+ * shape: it classifies the same 249 tiles as `none`, `rect` and `wall`, and 165
+ * of its `arc` records claim a sector outline the meshes do not have. Both
+ * failures are silent, which is what the stamp exists to prevent.
  */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 /* ---------------------------------------------------------------- identities */
 
@@ -181,35 +187,63 @@ const degrees = z.number().finite()
 /**
  * The single primitive the builder places a tile with.
  *
- * Four cases, and the shares are the reason the builder is scoped the way it is
+ * Seven cases, and the shares are the reason the builder is scoped the way it is
  * (definitions are `verify-catalog-facts.py`'s, which is why they reproduce):
  *
- * | case   | definition                                              | live tiles     |
- * | ------ | ------------------------------------------------------- | -------------- |
- * | `rect` | numeric `size|width` **and** `size|depth`, no curve mark | 3,051 (35.1%)  |
- * | `wall` | numeric `size|width` only — depth is `WALL_THICKNESS_MM` | 3,116 (35.8%)  |
- * | `arc`  | carries `size|radius`                                    | 1,391 (16.0%)  |
- * | `none` | no derivable footprint                                   | 1,144 (13.1%)  |
+ * | case     | definition                                                    | live tiles     |
+ * | -------- | ------------------------------------------------------------- | -------------- |
+ * | `rect`   | numeric `size|width` **and** `size|depth`                      | 3,449 (39.6%)  |
+ * | `wall`   | numeric `size|width` only — depth is `WALL_THICKNESS_MM`       | 3,079 (35.4%)  |
+ * | `arc`    | `size|radius`, and no tag reassigns it to a feature            | 1,226 (14.1%)  |
+ * | `diag`   | `shape|angled|right` with no depth — a 45° wall run            | 121 (1.4%)     |
+ * | `column` | `size|column_shape` — one wall-thickness square                | 119 (1.4%)     |
+ * | `tri`    | `shape|angled|right` with a depth — a right isosceles triangle | 9 (0.1%)       |
+ * | `none`   | no derivable footprint                                        | 699 (8.0%)     |
  *
- * `rect` + `wall` is **70.9%** and is v1's builder scope; adding `arc` reaches
- * **86.9%** in v1.1.
+ * `rect` + `wall` is **75.0%**; adding `arc` reaches **89.1%**; the three cases
+ * row W4 added take it to **92.0%**.
  *
- * Two things this shape encodes on purpose:
+ * Four things this shape encodes on purpose:
  *
- *   - **`wall` has no depth field.** The depth is not in the data for any of
- *     those 3,116 tiles; it is the measured 12.7 mm constant. Giving the case a
- *     `d` field would invite an importer to write a guess into it.
+ *   - **`wall` has no depth field, and neither do `column` and `diag`.** The
+ *     depth is not in the data for any of those 3,079 `wall` tiles; it is the
+ *     measured 12.7 mm constant. Giving the case a `d` field would invite an
+ *     importer to write a guess into it. A column is
+ *     {@link WALL_THICKNESS_UNITS} square — measured at 12.70 × 12.70 mm on
+ *     `col+I`, `col+O`, `col+L` and `col+X`, and stated independently by
+ *     Printable Scenery ("all columns are based on .5″ × .5″ pillars") — so it
+ *     carries no dimension at all. A `diag` is a wall bent to 45°, same 0.5.
  *   - **`arc` is parameterised on radius and angle, not on the tagged width and
  *     depth.** The size tags are design-family labels, not measurements: they
  *     agree exactly for 81% of plain rectangles but diverge badly on curves,
  *     where the tag names the curve family while the mesh is a fragment of it
  *     (median error 96 mm, max 163 mm).
+ *   - **`arc` means the outline is a sector, and 165 tiles carrying a radius did
+ *     not mean that.** W1 fitted an annular sector to every one of them and
+ *     refused all 165, so W4 stopped reading their radius as an outline: on 84
+ *     `AxG`/`BAxG`/`QxG` walls the radius is the *interface* where a straight run
+ *     meets a curve, on 60 `inverted` tiles it is a curved *cut* out of a square
+ *     plate, and on 21 `part|lintel` inserts it is the radius of the arch the
+ *     lintel drops into. Every remaining `arc` tile carries a `size|angle`, so no
+ *     sweep is fabricated anywhere.
+ *   - **`tri` and `diag` are separate cases, not one `DIAGONAL` with a flag.** A
+ *     right triangle is a filled area and a diagonal wall is a strip: they need
+ *     different collision geometry (`overlap.ts` is SAT over convex quads and a
+ *     triangle is a degenerate one), and the parameter differs — a triangle's leg
+ *     is the tagged cell (2 or 4, exactly), while a diagonal wall's run is a
+ *     measured constant per code (`P` 3.536, `PA` 2.828, `PB` 2.835, `PC` 3.334)
+ *     against a tagged `size|width|2` on all 121.
  *
- * `none` is a first-class case, not a null. 1,144 tiles are hex, concave or
- * convex without a radius: no primitive describes them, and placing one as a
- * rectangle would be *wrong* rather than approximate. They appear in the
- * catalog and in the bill of materials, never in the placement palette — a
- * distinction the union makes checkable.
+ * `none` is a first-class case, not a null. 699 tiles have nothing to place from:
+ * 319 are `size|segment` fragments whose width/depth pair names the whole design
+ * rather than this piece, 338 carry no numeric size tag at all (56 of them hex
+ * corners, 21 lintel inserts), and 42 carry a tessellation code this build
+ * refuses to place — 28 `U`, which is simultaneously a 4 × 4 floor and the
+ * `Y`/`YA`/`Z`/`ZA` octagon segments, and 14 `col+T`, the one column letter
+ * nobody has measured. Placing any of them as a rectangle would be *wrong*
+ * rather than approximate. They appear in the catalog and in the bill of
+ * materials, never in the placement palette — a distinction the union makes
+ * checkable.
  *
  * The search layer's synthesised size token (`"4x4"`, `"2r90"` — §6) is
  * derivable from this union, so it is not duplicated as a record field.
@@ -218,6 +252,12 @@ export const Footprint = z.discriminatedUnion('shape', [
   z.object({ shape: z.literal('rect'), w: unitLength, d: unitLength }),
   z.object({ shape: z.literal('wall'), length: unitLength }),
   z.object({ shape: z.literal('arc'), radius: unitLength, angle: degrees }),
+  /** One wall-thickness square. Carries no dimension — see the note above. */
+  z.object({ shape: z.literal('column') }),
+  /** A right isosceles triangle: two legs of `leg` on the axes, hypotenuse across. */
+  z.object({ shape: z.literal('tri'), leg: unitLength }),
+  /** A wall run at 45°: `run` along the diagonal, `WALL_THICKNESS_UNITS` thick. */
+  z.object({ shape: z.literal('diag'), run: unitLength }),
   z.object({ shape: z.literal('none') }),
 ])
 export type Footprint = z.infer<typeof Footprint>
@@ -406,7 +446,7 @@ export const CatalogRecord = z.object({
   /**
    * Connection systems, normalised — also multi-valued.
    *
-   * 2,499 tiles (28.7%) carry 2+ distinct systems, 4,363 (50.1%) carry
+   * 2,493 tiles (28.6%) carry 2+ distinct systems, 4,363 (50.1%) carry
    * `connection|openforge`, 5,271 (60.6%) carry a lock system, and 349 (4.0%)
    * carry no `connection|` tag at all.
    *
@@ -496,11 +536,18 @@ export type CatalogRecord = z.infer<typeof CatalogRecord>
  * per record would add roughly 600 KB of raw JSON to an index budgeted at 500 KB
  * brotli, to say the same thing 8,702 times. Bases live here, paths come from
  * {@link shardedPath}, and `thumbs` is the new 256 px WebP derivative (§8).
+ *
+ * `lod` is the GLB store row **G1** writes (`/lod/{md5[:6]}/{md5}.glb`). It is
+ * declared here rather than derived by its consumer because `z.object` **strips**
+ * unknown keys: a base that is not in this schema cannot reach a reader at all,
+ * which is why `tools/lod/catalog.ts` had to reconstruct it by swapping a path
+ * segment of `models`. One field here replaces that inference.
  */
 export const CatalogAssets = z.object({
   models: z.url(),
   sprites: z.url(),
   thumbs: z.url(),
+  lod: z.url(),
 })
 export type CatalogAssets = z.infer<typeof CatalogAssets>
 

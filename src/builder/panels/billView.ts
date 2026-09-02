@@ -172,10 +172,15 @@ export interface NoteCopy {
  *   - `base-unmatchable` — **the tile publishes no key.** The base may well be
  *     in the archive; nothing joins it to this tile.
  *
- * **Two figures below moved together, and W3 updated both:** the 235 here and
- * the 741 in `no-footprint` are the same `foot.shape === 'none'` population, and
- * row W3 reclassified 403 tiles out of it — 444 → 235 and 1,144 → 741. Nothing
- * else in this function depends on the footprint classifier.
+ * **Three figures below move with the footprint classifier, and each row that
+ * moves them updates the copy here.** The 247 in `base-unmatchable` and the 699
+ * in `no-footprint` are the same `foot.shape === 'none'` population: W3
+ * reclassified 403 tiles out of it (444 → 235, 1,144 → 741) and W4 moved 25
+ * back in (235 → 247, 741 → 699) after W1 measured them and their footprint
+ * turned out to be wrong. The 34 in `no-congruent-base` was 21 until W4 de-arced
+ * the 36 `xG` bases, which had shared the `arc:2.5@90` congruence key with 13
+ * `curved+interface` floors only because a sweep was being fabricated for them.
+ * Nothing else in this function depends on the footprint classifier.
  */
 export function noteCopy(note: BillNote): NoteCopy {
   const n = countLabel(note.count)
@@ -211,10 +216,11 @@ export function noteCopy(note: BillNote): NoteCopy {
         ...base,
         headline: `${n} ${pieces} ${has} a shape no base is built to carry`,
         detail:
-          'A base was looked for by shape and none is congruent — this is geometry, not an omission. 17 of the 21 ' +
+          'A base was looked for by shape and none is congruent — this is geometry, not an omission. 17 of the 34 ' +
           'corpus tiles in this state are half-unit strips, risers and stairs, and the narrowest base in the ' +
-          'archive is a full unit wide; the other four are 2×6 slabs in a range that holds 2×4 and 2×8. Nothing ' +
-          'can sit under one, so print them standalone and expect no joint along that edge.',
+          'archive is a full unit wide; four are 2×6 slabs in a range that holds 2×4 and 2×8; and 13 are curved ' +
+          'floors whose interface radius no base actually shares. Nothing can sit under one, so print them ' +
+          'standalone and expect no joint along that edge.',
       }
 
     case 'base-unmatchable':
@@ -222,7 +228,7 @@ export function noteCopy(note: BillNote): NoteCopy {
         ...base,
         headline: `${n} ${pieces} ${give} nothing to match a base on`,
         detail:
-          'Neither a size code nor a derivable footprint, so there is no key to search bases by — 235 corpus ' +
+          'Neither a size code nor a derivable footprint, so there is no key to search bases by — 247 corpus ' +
           'tiles are in this position, and it is the same missing shape that keeps them off the plan view. A ' +
           'base for these probably does exist; the tile does not say which. Expect to choose it yourself.',
       }
@@ -281,7 +287,7 @@ export function noteCopy(note: BillNote): NoteCopy {
         headline: `${n} ${pieces} cannot be drawn in plan view`,
         detail:
           'The tile is in the bill and will be downloaded. It has no footprint the plan view can derive, so it ' +
-          'has no shape on the grid — 741 corpus tiles are in this state.',
+          'has no shape on the grid — 699 corpus tiles are in this state.',
       }
 
     case 'insert-on-grid':

@@ -46,8 +46,9 @@
  *
  * The literal `4x4` appears in **zero tags**. The importer synthesises it into
  * `CatalogRecord.name` (`pipeline/footprint.ts#sizeToken`), which is why `name`
- * is indexed and why nothing here re-derives a size: for the 741 tiles whose
- * footprint is `none` the name carries the *tagged* size instead, and that
+ * is indexed and why nothing here re-derives a size: for the 699 tiles whose
+ * footprint is `none`, and the 121 whose `diag` run is a measurement the corpus
+ * never writes down, the name carries the *tagged* size instead, and that
  * fallback is the importer's to own.
  */
 import type { CatalogRecord } from '@/catalog'

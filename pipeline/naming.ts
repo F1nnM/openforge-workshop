@@ -113,27 +113,40 @@ function sizeWords(tags: readonly string[], foot: Footprint): string[] {
   const segment = tagValue(tags, 'size|segment')
   if (segment !== undefined) words.push(...prettify(segment))
 
+  // `column` and `diag` are on this list because the code is the only thing that
+  // separates two pieces of the same size: `col+L` and `col+X` are one measured
+  // 0.5 x 0.5 square with different ports, and `P` / `PA` / `PB` / `PC` are four
+  // 45-degree runs that all carry `size|width|2`. Both were on it before row W4
+  // too, as `none` and `wall` respectively; naming them keeps 240 names intact.
   const code = tagValue(tags, 'size|openlock')
-  if (code !== undefined && (foot.shape === 'wall' || foot.shape === 'none')) words.push(code)
+  const wantsCode =
+    foot.shape === 'wall' || foot.shape === 'none' || foot.shape === 'column' || foot.shape === 'diag'
+  if (code !== undefined && wantsCode) words.push(code)
 
   return words
 }
 
 /**
- * The size a tile is *labelled* with, for the 741 tiles whose footprint is
- * `none`.
+ * The size a tile is *labelled* with, for the 699 tiles whose footprint is
+ * `none` and the 121 whose footprint is a measured `diag` run.
  *
  * §2 is explicit that the size tags are design-family labels rather than mesh
  * measurements, which is exactly why they must not reach `Footprint` — and
  * exactly why they belong in a *name*, which is a label.
  *
- * Row W3 shrank what this serves without changing why it exists. A curve with a
- * trusted width/depth pair now gets that pair as its footprint, so `sizeToken`
- * supplies its token and this is never reached; what is left is the 283
- * `size|segment` fragments, whose pair names the *whole* design and so is a label
- * in the strongest sense. Without it, the 40 `plain#base+curved.6x6+a/b/c` files
- * read "Plain Curved Base A" and the 6x6 family is indistinguishable from the
- * 8x8; with it they read "Plain Curved Base 6x6 A".
+ * Rows W3 and W4 both changed what this serves without changing why it exists.
+ * A curve with a trusted width/depth pair gets that pair as its footprint, so
+ * `sizeToken` supplies its token and this is never reached; what is left is the
+ * 319 `size|segment` fragments, whose pair names the *whole* design and so is a
+ * label in the strongest sense. Without it, the 40 `plain#base+curved.6x6+a/b/c`
+ * files read "Plain Curved Base A" and the 6x6 family is indistinguishable from
+ * the 8x8; with it they read "Plain Curved Base 6x6 A".
+ *
+ * W4 added the 121 `diag` tiles to what it serves, for the opposite reason: their
+ * footprint run is *measured* (3.536 for `P`, 2.828 for `PA`) and the corpus
+ * writes `size|width|2` for all of them, so the label is the tagged 2 and the
+ * footprint is the measurement. `sizeToken` returns `undefined` for `diag` to
+ * hand the naming job here.
  *
  * `120°` is the last resort for the hex corners, whose only tagged dimension is
  * a sweep. The degree sign matches the corpus's own filenames and the search

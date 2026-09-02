@@ -65,6 +65,7 @@ const assets = CatalogAssets.parse({
   models: 'https://objects.openforge.tools/models/',
   sprites: 'https://objects.openforge.tools/sprites/',
   thumbs: 'https://objects.openforge.tools/thumbs/',
+  lod: 'https://objects.openforge.tools/lod/',
 })
 
 /**
@@ -148,7 +149,7 @@ describe('measured constants', () => {
 /* ------------------------------------------------------------------ footprint */
 
 describe('Footprint', () => {
-  it('accepts all four primitives', () => {
+  it('accepts all seven primitives', () => {
     expect(Footprint.parse({ shape: 'rect', w: 2, d: 1 })).toEqual({ shape: 'rect', w: 2, d: 1 })
     expect(Footprint.parse({ shape: 'wall', length: 4 })).toEqual({ shape: 'wall', length: 4 })
     expect(Footprint.parse({ shape: 'arc', radius: 2, angle: 90 })).toEqual({
@@ -156,6 +157,9 @@ describe('Footprint', () => {
       radius: 2,
       angle: 90,
     })
+    expect(Footprint.parse({ shape: 'diag', run: 2.828 })).toEqual({ shape: 'diag', run: 2.828 })
+    expect(Footprint.parse({ shape: 'column' })).toEqual({ shape: 'column' })
+    expect(Footprint.parse({ shape: 'tri', leg: 4 })).toEqual({ shape: 'tri', leg: 4 })
     expect(Footprint.parse({ shape: 'none' })).toEqual({ shape: 'none' })
   })
 
@@ -163,6 +167,28 @@ describe('Footprint', () => {
     const wall = Footprint.parse({ shape: 'wall', length: 2, d: 99 })
     expect(wall).toEqual({ shape: 'wall', length: 2 })
     expect(wall).not.toHaveProperty('d')
+  })
+
+  it('gives a diagonal and a column no depth either, for the same reason', () => {
+    // Row W4. A `diag` is a wall bent to 45 degrees and a `column` is one
+    // wall-thickness square, so both read WALL_THICKNESS_UNITS rather than
+    // carrying it. A column carries no dimension at all: all 119 in the corpus
+    // are the same measured 12.70 mm square, so there is nothing to vary.
+    const diag = Footprint.parse({ shape: 'diag', run: 2.828, d: 99 })
+    expect(diag).toEqual({ shape: 'diag', run: 2.828 })
+    const column = Footprint.parse({ shape: 'column', w: 99, d: 99, leg: 99 })
+    expect(column).toEqual({ shape: 'column' })
+    expect(Object.keys(column)).toEqual(['shape'])
+  })
+
+  it('holds a triangle to one leg, because the corpus only has isosceles ones', () => {
+    // All 9 are `size|width` equal to `size|depth`, 2 x 2 five times and 4 x 4
+    // four times. A second leg would be a field for a number nothing measures.
+    const tri = Footprint.parse({ shape: 'tri', leg: 2, leg2: 3 })
+    expect(tri).toEqual({ shape: 'tri', leg: 2 })
+    expect(Footprint.safeParse({ shape: 'tri' }).success).toBe(false)
+    expect(Footprint.safeParse({ shape: 'tri', leg: 0 }).success).toBe(false)
+    expect(Footprint.safeParse({ shape: 'diag', run: -1 }).success).toBe(false)
   })
 
   it('keeps arcs off width and depth, which are design labels rather than measurements', () => {
