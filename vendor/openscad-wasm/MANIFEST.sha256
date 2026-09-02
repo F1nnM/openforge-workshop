@@ -1,0 +1,6 @@
+# Vendored verbatim from upstream. `sha256sum -c MANIFEST.sha256` from this
+# directory. Only files copied from somebody else are listed: PROVENANCE.md,
+# WRITTEN-OFFER.md, openscad.d.ts, .gitattributes and this file are ours.
+fd887f516ff5accb2060d78bf1127cb357f52346e708f0f5970dc151d517d508  openscad.wasm
+92d8730b548b721fff4203825eb932ea29bc78d5c0eeffdc93aa36a560d80868  openscad.js
+1805a29c3bccbc0428ce0048a1dfdeb9b1867677410e99c89c3c30932ae8c7d5  COPYING

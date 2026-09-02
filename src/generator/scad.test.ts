@@ -390,15 +390,30 @@ describe('the documents agree with the bytes', () => {
     expect([...listed.matchAll(/'([^']+)'/g)].map((match) => match[1])).toEqual(CRLF_UPSTREAM)
   })
 
-  it('leaves the geometry inert — nothing in src/ imports it yet', () => {
-    // S3 wires the engine and S4 the panel. Until then the 197 KB must not reach
-    // the bundle, and `npm run build` producing an identical bundle is the check
-    // this assertion makes cheap to keep true.
-    const importers = sources(fileURLToPath(new URL('../', import.meta.url))).filter((path) => {
-      if (path.endsWith('scad.test.ts')) return false
-      return /generator\/scad\//.test(readFileSync(path, 'utf8'))
+  it('reaches the bundle only through the engine, and only lazily', () => {
+    // This assertion used to read "nothing in src/ imports it yet", matched by
+    // grepping for the literal `generator/scad/`. S3 then wired the geometry in
+    // with the natural relative glob — `import.meta.glob('../scad/*.scad')` —
+    // which does not contain that literal, so the guard kept passing while the
+    // property it named had deliberately stopped being true. A guard that cannot
+    // fail is worse than no guard, so it now asserts the property that actually
+    // matters: exactly one module reads the geometry, and it is the engine's
+    // virtual filesystem, which the entry bundle reaches only through a dynamic
+    // import.
+    //
+    // The zero-eager-cost half is proved where it can be proved — by building
+    // with `src/generator/` present and with it moved aside and comparing the
+    // entry bundle, which `vendor.test.ts` guards at source level.
+    const readers = sources(fileURLToPath(new URL('../', import.meta.url))).filter((path) => {
+      // Tests never ship, and two of the engine's own read the geometry to check
+      // it. The property is about production modules reaching the bundle.
+      if (/\.test\.tsx?$/.test(path)) return false
+      const text = readFileSync(path, 'utf8')
+      return /generator\/scad\//.test(text) || /['"`][^'"`]*\.\.\/scad\/[^'"`]*['"`]/.test(text)
     })
-    expect(importers).toEqual([])
+    expect(readers.map((path) => path.slice(path.indexOf('src/')))).toEqual([
+      'src/generator/engine/vfs.ts',
+    ])
   })
 })
 
