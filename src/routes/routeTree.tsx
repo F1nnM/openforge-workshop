@@ -1,10 +1,11 @@
 /**
  * OpenForge Workshop — the route tree.
  *
- * Five routes: landing, catalog, library and builder — architecture-plan.md
+ * Six routes: landing, catalog, library and builder — architecture-plan.md
  * §14's v1 scope and design-contract.md §2's screen inventory — plus `/settings`,
- * which the contract does not list because the lock preference had no home in it.
- * §2's 40.2-point lock spread gave it one.
+ * which the contract does not list because the lock preference had no home in it
+ * (§2's 40.2-point lock spread gave it one), and `/assemblies`, which row C3
+ * built and could not mount because this file was not its to edit.
  * The mock made all four client-side *state*, which is why nothing in it was
  * linkable — no filtered view, no open tile, no shared build. This module is the
  * fix, and the point of it is that the URL is the app's state.
@@ -57,7 +58,7 @@
  * linking. Declaring the facet schema there would put filters in the URL that
  * nothing reads.
  */
-import { createRootRoute, createRoute, stripSearchParams } from '@tanstack/react-router'
+import { createRootRoute, createRoute, lazyRouteComponent, stripSearchParams } from '@tanstack/react-router'
 
 import {
   defaultCatalogSearch,
@@ -160,10 +161,72 @@ export const settingsRoute = createRoute({
   component: SettingsScreen,
 })
 
+/**
+ * `/assemblies` — row C3's guided walk through the 40 recipe templates.
+ *
+ * **No search params, and the selected recipe is deliberately not one.** C3's own
+ * reasoning, checked against `searchSchema.test.ts` and against how `/settings`
+ * shipped: this route's argument that a link must not freeze a preference applies
+ * exactly, and a half-finished pick set is a preference of the worst kind. The
+ * choice C3's screen holds is a `Record<stepKey, TileId>` mid-walk — putting it in
+ * a URL would mean a shared link that drops the recipient into somebody else's
+ * unfinished decisions, and `search: { strict: true }` on the router means it
+ * would then ride along into the next link they copied.
+ *
+ * There is also nothing to *link*. `/library` has no params for the same reason —
+ * "there is nothing on this screen worth linking to but the screen itself" — and
+ * the one durable thing a finished walk produces already has a home: it puts its
+ * files in the library, which is persisted.
+ *
+ * ## It is the tree's first lazy route, and that was measured rather than chosen
+ *
+ * Mounted the way the other five are — a static `import` of the screen and
+ * `component: AssembliesScreen` — this route puts C3's whole screen, its
+ * `assembly.ts`, its `measure.ts` and its 40-template data table into the
+ * **eager chunk**, because every screen in this tree is a static import and the
+ * app therefore emits one eager bundle holding all of them. Row C3 expected its
+ * templates to arrive in a chunk of their own; nothing in this file would have
+ * given them one.
+ *
+ * Three A/B builds of the same tree at a fixed `SOURCE_DATE_EPOCH`, summing the
+ * three chunks `index.html` actually preloads (`index`, `catalog`, `vanilla`):
+ *
+ * | tree | eager raw | eager gz | eager br |
+ * | --- | ---: | ---: | ---: |
+ * | route not mounted | 737,133 | 232,590 | 200,057 |
+ * | mounted with a static import | **785,105** | 238,423 | 203,834 |
+ * | mounted with `lazyRouteComponent` | 738,157 | 232,992 | 200,530 |
+ *
+ * A static mount costs **+47,972 B raw / +5,833 B gzipped** in the bundle every
+ * visitor to every page downloads, for a screen reached from one nav tab. The
+ * lazy mount costs **+1,024 B raw / +402 B gzipped** — this declaration and the
+ * `import()` — and puts the screen in a 48,269 B chunk (4,982 B brotli) that
+ * arrives on the press. That is the same trade `Builder3DPanel` and
+ * `GeneratorPanel` already make one level down, applied at the route for the
+ * first time.
+ *
+ * `routes.test.ts`'s mounting block still proves the screen renders: TanStack
+ * resolves a lazy component during `router.load()`, so the assertion is
+ * unchanged and it is still the assertion that would fail if this route resolved
+ * and rendered nothing — which is the failure row C3 was actually in, having
+ * verified that `dist/` contained none of its files.
+ *
+ * **The other five routes would benefit the same way** and are not changed here:
+ * that is a five-route edit plus this file's whole test, and it should be one
+ * row's deliberate work rather than a side effect of mounting a sixth. The
+ * figures above are the argument for it.
+ */
+export const assembliesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/assemblies',
+  component: lazyRouteComponent(() => import('@/screens/assemblies'), 'AssembliesScreen'),
+})
+
 export const routeTree = rootRoute.addChildren([
   landingRoute,
   catalogRoute,
   libraryRoute,
   builderRoute,
+  assembliesRoute,
   settingsRoute,
 ])

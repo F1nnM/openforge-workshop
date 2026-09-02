@@ -143,6 +143,21 @@ export interface LicenceContext {
  *      the licence runs from the creator, and a reader chasing permissions needs
  *      to know where to go.
  *
+ * One sentence more since row X9, and it is a correction rather than an
+ * addition: the line about `ATTRIBUTION.csv` used to say it *"names every model
+ * in the archive"*, and row S5 made that literally untrue — a pack can now hold
+ * meshes generated in the browser, which are Apache-2.0 derivatives and cannot
+ * be filed under this file's `CC BY-NC-SA 4.0` `licence` column. Filing them
+ * under the wrong licence would be worse than filing them nowhere, so the CSV
+ * covers the published files and `GENERATED.txt` covers the rest.
+ *
+ * The disclosure is **unconditional**, which is a deliberate trade. It could be
+ * emitted only when a pack actually holds a generated mesh, and that needs the
+ * count threaded through `plan.ts`'s call to this function; the sentence as
+ * written is true of every archive either way, and it tells the reader of a
+ * catalog-only pack the scope of the table they are holding. If the count is
+ * ever threaded through, this is one `if` away from being conditional.
+ *
  * Deliberately not in here: any statement about the licence of the catalog
  * *index*. §10, obligation 4 wants one, and it is a real gap — but the index is
  * not in this archive, and inventing a licence for something the archive does not
@@ -168,8 +183,14 @@ export function licenceText(context: LicenceContext): string {
     '',
     `    "${work}" by ${creator}, ${home} — licensed ${CORPUS_LICENCE.id}`,
     '',
-    `ATTRIBUTION.csv beside this file names every model in the archive: its md5,`,
-    'the catalog path it was filed under, and the URL it was downloaded from.',
+    `ATTRIBUTION.csv beside this file names every published model in the archive:`,
+    'its md5, the catalog path it was filed under, and the URL it was downloaded from.',
+    '',
+    'It covers the published files and nothing else, and it cannot cover more: every',
+    `row of it carries ${CORPUS_LICENCE.id}, which is the licence of this archive. A mesh`,
+    'generated in your browser is a derivative of Apache-2.0 OpenSCAD geometry rather',
+    'than one of these files, so when an archive holds any they are under generated/',
+    'and GENERATED.txt is their provenance and licence table.',
     '',
     'NONCOMMERCIAL',
     '',

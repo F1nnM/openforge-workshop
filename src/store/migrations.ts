@@ -27,6 +27,7 @@
  * can say so out loud instead of silently losing a tile.
  */
 import { TileId } from '@/catalog'
+import { GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/placement/scene'
 
 import type { LockSystem, Placement, WorkshopState } from './schema'
 import {
@@ -50,7 +51,7 @@ import {
  * (N+1)-shaped one, and add an N entry to the fixture table in
  * `migrations.test.ts`. The suite fails if any of the three is missing.
  */
-export const STORE_VERSION = 2
+export const STORE_VERSION = 3
 
 /**
  * One rung of the migration ladder: given a blob in version `N-1`'s shape,
@@ -74,8 +75,8 @@ export type MigrationStep = (input: unknown) => unknown
 /**
  * The ladder, keyed by the version each rung produces.
  *
- * One rung so far. It is keyed by the version it *produces*, so the step under
- * `2` reads a version 1 blob and returns a version 2 one.
+ * Two rungs. Each is keyed by the version it *produces*, so the step under `2`
+ * reads a version 1 blob and returns a version 2 one.
  */
 export const MIGRATION_STEPS: Readonly<Record<number, MigrationStep>> = {
   /**
@@ -111,6 +112,39 @@ export const MIGRATION_STEPS: Readonly<Record<number, MigrationStep>> = {
     if (typeof source.lockChosen === 'boolean') return source
     const chosen = LockSystemSchema.safeParse(source.lock)
     return { ...source, lockChosen: chosen.success && chosen.data !== DEFAULT_LOCK_SYSTEM }
+  },
+
+  /**
+   * 2 → 3: add `generated`.
+   *
+   * Version 3 holds generated bases beside the placements — the recipe and the
+   * position, never the mesh (see `schema.ts`). A version 2 blob has no such
+   * key, and there is nothing to infer: absence is an empty map, because a build
+   * written before the generator could place anything had no generated bases in
+   * it. So this rung is a *shape* claim rather than a conversion, and it is
+   * written out anyway for two reasons.
+   *
+   * The first is that {@link salvageWorkshopState} would already produce `{}`
+   * from an absent key, and a rung that only relied on that would leave the
+   * version stamp unexplained — the harness in `migrations.test.ts` exists so a
+   * future breaking change can see what every shipped shape was, and "version 3
+   * is version 2 plus this key" is the fact it needs.
+   *
+   * The second is the preview-build case the `lockChosen` rung already had to
+   * handle: a build on the same origin can have written a version 3 shape under
+   * a version 2 stamp, so a blob that already carries a plain-object `generated`
+   * is passed through untouched rather than overwritten with an empty map. That
+   * is the difference between "read best-effort" and "silently empty somebody's
+   * bases", and it is the same asymmetry the rung above resolves the same way.
+   *
+   * Spread rather than assignment, for the `__proto__` reason the rung above
+   * gives.
+   */
+  3: (input) => {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) return input
+    const source = input as Record<string, unknown>
+    if (asRecord(source.generated) !== undefined) return source
+    return { ...source, generated: {} }
   },
 }
 
@@ -261,6 +295,51 @@ function salvagePlacements(input: unknown, dropped: string[]): WorkshopState['pl
 }
 
 /**
+ * Recover the generated bases.
+ *
+ * Delegated to row S5's own schema rather than field-checked here, and the
+ * asymmetry with {@link salvagePlacement} is deliberate. A `Placement` is four
+ * scalars, so this module can salvage it *partially* — a bad rotation falls back
+ * to 0 and keeps the tile where it is. A {@link GeneratedPlacement} carries a
+ * whole parameter set, and there is no partial reading of one: a recipe missing
+ * a `-D` is a different base, and a recipe naming an entry point this panel does
+ * not offer has no footprint rule and nothing to draw. Filling either from a
+ * default would put a base on the grid that nobody asked for and then print it.
+ *
+ * So each entry is all-or-nothing, and every drop is named — which is the same
+ * contract, applied at the granularity the datum actually has. `safeParse`
+ * rather than `parse` keeps the function total; the schema itself normalises
+ * `-0` and folds nothing else.
+ */
+function salvageGenerated(input: unknown, dropped: string[]): WorkshopState['generated'] {
+  const out: WorkshopState['generated'] = {}
+  if (input === undefined) return out
+  const source = asRecord(input)
+  if (source === undefined) {
+    dropped.push(`generated: expected an object, found ${describeValue(input)}`)
+    return out
+  }
+  for (const [key, value] of Object.entries(source)) {
+    if (UNSAFE_KEYS.has(key)) {
+      dropped.push(`generated.${key}: unsafe key`)
+      continue
+    }
+    const placementId = PlacementId.safeParse(key)
+    if (!placementId.success) {
+      dropped.push(`generated.${key}: not a placement id`)
+      continue
+    }
+    const placement = GeneratedPlacementSchema.safeParse(value)
+    if (!placement.success) {
+      dropped.push(`generated.${key}: not a generated base (${placement.error.issues[0]?.message ?? 'invalid'})`)
+      continue
+    }
+    out[placementId.data] = placement.data
+  }
+  return out
+}
+
+/**
  * Recover the "has chosen" flag.
  *
  * Absent means `false`, which is the safe direction: a user who has in fact
@@ -307,6 +386,7 @@ export function salvageWorkshopState(input: unknown): RecoveredState {
     state: {
       library: salvageLibrary(source.library, dropped),
       placements: salvagePlacements(source.placements, dropped),
+      generated: salvageGenerated(source.generated, dropped),
       lock: salvageLock(source.lock, dropped),
       lockChosen: salvageLockChosen(source.lockChosen, dropped),
     },

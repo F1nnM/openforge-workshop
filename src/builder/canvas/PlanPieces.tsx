@@ -43,7 +43,7 @@ import type { PlacementId } from '@/store'
 
 import type { PlanBox, PlanShape } from './geometry'
 import { boxCentre } from './geometry'
-import type { PlanPiece } from './scene'
+import type { ScenePiece } from './scene'
 import { CONFLICT_PATTERN_ID, UNMEASURED_PATTERN_ID, hasSurfacePattern, surfacePatternId } from './surfaces'
 
 /** Contour weight in CSS pixels, held constant across zoom by `vector-effect`. */
@@ -88,7 +88,7 @@ export function shapeTransform(shape: PlanShape, box: PlanBox, angle: number): s
  * bounding box is up to 41% larger than the tile, and drawing it would show the
  * user a piece that does not exist.
  */
-function Piece({ piece, moving }: { piece: PlanPiece; moving: boolean }) {
+function Piece({ piece, moving }: { piece: ScenePiece; moving: boolean }) {
   const { box, shape, style } = piece
   const family = MATERIALS[style.material]
   const outline = { d: shape.outline }
@@ -99,6 +99,8 @@ function Piece({ piece, moving }: { piece: PlanPiece; moving: boolean }) {
       data-band={piece.band}
       data-conflict={piece.conflict ? 'true' : undefined}
       data-basis={piece.caveat === null ? undefined : 'fallback'}
+      data-generated={piece.kind === 'generated' ? 'true' : undefined}
+      data-tiles={offGrid(piece) ? 'false' : undefined}
       data-moving={moving ? 'true' : undefined}
       transform={shapeTransform(shape, box, piece.angle)}
     >
@@ -122,14 +124,29 @@ function Piece({ piece, moving }: { piece: PlanPiece; moving: boolean }) {
   )
 }
 
+/**
+ * Whether a piece's basis is not the builder grid's, so it will not tile.
+ *
+ * True only for a generated base at `SQUARE_BASIS` 25, 31.75 or 38.1 mm — no
+ * catalog tile can be off-grid, all 1,963 archived bases being the inch grid. The
+ * *outline* needs no help: row S5 converts the footprint to grid units, so a
+ * `wyloch` 2×2 is drawn at the 2.5 squares it really occupies rather than the 2
+ * its parameters say, and the collision test agrees. What this attribute adds is
+ * that the piece will not snap to the lattice, which the drawing cannot show and
+ * the label already says in words.
+ */
+function offGrid(piece: ScenePiece): boolean {
+  return piece.kind === 'generated' && !piece.tiles
+}
+
 /** The contour weight for one piece: heavier for walls, heavier again in conflict. */
-function contourWidth(piece: PlanPiece): number {
+function contourWidth(piece: ScenePiece): number {
   const base = piece.band === 'edge' ? CONTOUR_WIDTH * EDGE_CONTOUR_SCALE : CONTOUR_WIDTH
   return piece.conflict ? base * 1.6 : base
 }
 
 export interface PlanPiecesProps {
-  readonly pieces: readonly PlanPiece[]
+  readonly pieces: readonly ScenePiece[]
   /**
    * The placement being carried by a move, or `null`.
    *
@@ -140,11 +157,30 @@ export interface PlanPiecesProps {
    * preview that follows the pointer lives in `PlanCanvas` outside this subtree.
    */
   readonly movingId?: PlacementId | null
+  /**
+   * Marks the group as the generated one, for the stylesheet and for a test.
+   *
+   * The *pieces* are already distinguishable — every one carries
+   * `data-generated` — so this is not how a reader tells them apart. It is on
+   * the group because `PlanCanvas` renders two of these and the DOM order is
+   * load-bearing: the generated group is first, so a generated base is painted
+   * under the catalog's pieces, which is what `scene.ts`'s `scenePaintOrder`
+   * says in arithmetic and what `pieceAt` hit-tests by. A test that asserted
+   * paint order off two anonymous `<g>`s would be asserting nothing.
+   */
+  readonly generated?: boolean
 }
 
-export const PlanPieces = memo(function PlanPieces({ pieces, movingId = null }: PlanPiecesProps) {
+export const PlanPieces = memo(function PlanPieces({
+  pieces,
+  movingId = null,
+  generated = false,
+}: PlanPiecesProps) {
+  // Nothing at all rather than an empty group: the generated group is empty for
+  // every room that has no generated base in it, which is most of them.
+  if (pieces.length === 0) return null
   return (
-    <g className="of-plan-pieces">
+    <g className="of-plan-pieces" data-generated={generated ? 'true' : undefined}>
       {pieces.map((piece) => (
         <Piece key={piece.id} piece={piece} moving={piece.id === movingId} />
       ))}

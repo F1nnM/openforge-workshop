@@ -340,7 +340,13 @@ describe('persistence', () => {
     setLockSystem('dragonlock')
 
     resetWorkshop()
-    expect(state()).toEqual({ library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false })
+    expect(state()).toEqual({
+      library: {},
+      placements: {},
+      generated: {},
+      lock: DEFAULT_LOCK_SYSTEM,
+      lockChosen: false,
+    })
     expect(storedPayload()?.state).toEqual(state())
   })
 
@@ -409,7 +415,13 @@ describe('rehydrating', () => {
     localStorage.setItem(STORAGE_KEY, '{"state":{"library"')
     await useWorkshopStore.persist.rehydrate()
 
-    expect(state()).toEqual({ library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false })
+    expect(state()).toEqual({
+      library: {},
+      placements: {},
+      generated: {},
+      lock: DEFAULT_LOCK_SYSTEM,
+      lockChosen: false,
+    })
     // Removed, so the next load starts clean instead of reproducing this
     // forever — which is the difference between a bad session and a dead app.
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()

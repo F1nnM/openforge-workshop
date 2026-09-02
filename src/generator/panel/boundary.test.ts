@@ -51,6 +51,14 @@ const FORBIDDEN_FILES = [
   'generator/panel/usePreview',
   'generator/panel/controls',
   'generator/panel/GeneratorDrawer',
+  // Row X9. `placement/placement.ts` reaches `panel/recipe.ts` for `recipeKey`
+  // and therefore the 25 KB of pinned schemas, and `placement/pack.ts` reaches
+  // the md5 implementation and the STL parser. Both are named in this file's
+  // `onPlace` seam and both are imported `type`-only there, which `staticImports`
+  // is written to ignore — so this entry is what makes the day someone needs one
+  // of them as a *value* fail here instead of in a bundle nobody measured.
+  'generator/placement/placement',
+  'generator/placement/pack',
 ]
 
 /** Static `import`/`export … from` specifiers, excluding type-only ones. */

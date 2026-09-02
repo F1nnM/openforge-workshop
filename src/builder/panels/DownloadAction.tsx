@@ -30,13 +30,27 @@ import type { ArchiveDownload } from './useArchiveDownload'
 
 export interface DownloadActionProps {
   readonly download: ArchiveDownload
-  /** Distinct files in the bill. Zero means there is nothing to download. */
+  /** Distinct files in the bill. */
   readonly files: number
+  /**
+   * Distinct generated recipes on the plan. Defaults to none.
+   *
+   * The button's disabled test is `files + generated === 0`, not `files === 0`,
+   * and the difference is a real room: a plan built entirely out of generated
+   * bases has no catalog files at all and is still a download. Row S5 made
+   * `buildArchivePlan` accept exactly that — *"a room built entirely out of
+   * generated bases is a real room, and refusing it would be this function
+   * reporting 'nothing to download' about something"* — and a button that stayed
+   * greyed out would have made that unreachable from the UI, which is the shape
+   * of regression this row exists to close.
+   */
+  readonly generated?: number
 }
 
-export function DownloadAction({ download, files }: DownloadActionProps) {
+export function DownloadAction({ download, files, generated = 0 }: DownloadActionProps) {
   const { state } = download
   const busy = state.status === 'preparing' || state.status === 'running'
+  const nothing = files + generated === 0
 
   return (
     <div className="of-bill-download">
@@ -60,6 +74,18 @@ export function DownloadAction({ download, files }: DownloadActionProps) {
               Dismiss
             </Button>
           </span>
+          {/*
+            §11's URL list is the honest answer for a room too large to stream,
+            and it has nothing to say about a mesh that was never published —
+            there is no URL, because the bytes were made in this browser. Row
+            S5's `urlListShortfall` is that sentence and it is rendered *beside
+            the offer*, not after it is taken: a download manager handed a list
+            that silently omits four of the files is the degradation path failing
+            quietly, which is worse than the size limit it was working around.
+          */}
+          {state.failure.urlListShortfall === undefined ? null : (
+            <span className="of-bill-fail-note">{state.failure.urlListShortfall}</span>
+          )}
         </div>
       ) : null}
 
@@ -97,13 +123,13 @@ export function DownloadAction({ download, files }: DownloadActionProps) {
       <Button
         tone="primary"
         full
-        disabled={files === 0 || busy}
+        disabled={nothing || busy}
         onClick={download.start}
         aria-busy={busy || undefined}
       >
         <span aria-hidden="true">⬇</span>
         <span>{busy ? 'Downloading…' : 'Download tile pack'}</span>
-        {files === 0 ? <VisuallyHidden>— nothing is placed yet</VisuallyHidden> : null}
+        {nothing ? <VisuallyHidden>— nothing is placed yet</VisuallyHidden> : null}
       </Button>
 
       {busy ? (
@@ -116,6 +142,14 @@ export function DownloadAction({ download, files }: DownloadActionProps) {
         One zip: every distinct STL once — a file placed twice is downloaded once — plus{' '}
         <code>LICENSE.txt</code> and <code>ATTRIBUTION.csv</code>. Only original models, never a
         decimated preview.
+        {generated === 0 ? null : (
+          <>
+            {' '}
+            Generated bases ride under <code>generated/</code> with{' '}
+            <code>GENERATED.txt</code>: they are derivatives of Apache-2.0 OpenSCAD geometry, so{' '}
+            <code>ATTRIBUTION.csv</code> does not and cannot cover them.
+          </>
+        )}
       </p>
     </div>
   )

@@ -1,9 +1,10 @@
 /**
  * OpenForge Workshop — the shape of the persisted client state.
  *
- * Four things survive a reload: the **library** (tiles the user kept), the
- * **placements** (the builder scene), the **lock preference** and whether the
- * user has ever chosen that preference. Nothing else.
+ * Five things survive a reload: the **library** (tiles the user kept), the
+ * **placements** (the builder scene), the **generated bases** on that scene as
+ * recipes rather than meshes, the **lock preference** and whether the user has
+ * ever chosen that preference. Nothing else.
  * Anything derivable from the catalog — the assembly a placement resolves to,
  * the bill of tiles, the base auto-inserted for a `connection|openforge` piece —
  * is deliberately absent, because a derived value written to `localStorage` goes
@@ -22,6 +23,7 @@
 import { z } from 'zod'
 
 import { TileId } from '@/catalog'
+import { GeneratedPlacement } from '@/generator/placement/scene'
 
 /* --------------------------------------------------------------- lock system */
 
@@ -168,6 +170,44 @@ export function normalizeRotation(deg: number): number {
 export const WorkshopState = z.object({
   library: z.record(TileId, z.literal(true)),
   placements: z.record(PlacementId, Placement),
+  /**
+   * Generated bases on the grid — a **second map beside {@link placements}**, in
+   * the same {@link PlacementId} space.
+   *
+   * Row S5 minted the record and argued the shape; this is the field it said the
+   * store row would add. Not a widening of `Placement.tileId`, because that
+   * field is a `TileId` and every reader of the other map — the share codec,
+   * `migrations.ts`'s `TileId.safeParse` per entry, `billView.ts`'s
+   * `placementKey`, `buildBillOfTiles` — is entitled to keep assuming so. A
+   * union in that slot would make all of them conditional for a population that
+   * is not in any of their questions.
+   *
+   * Sharing the id space is what makes one namespace over the whole scene, and
+   * S5 proved it is safe: a `GeneratedBaseId` starts `gen:` and therefore fails
+   * `TileId`'s `^tiles/…` pattern, so `generatedPlacementKey` and
+   * `placementKey` are disjoint by construction rather than by convention, and
+   * row G4's identical-twin refusal is unaffected.
+   *
+   * ## What persists, and what cannot
+   *
+   * **The recipe and the position. Never the mesh.** S4's rule — ~200 bytes of
+   * JSON against 0.5–2.4 MB of STL, and it survives an engine upgrade as a cache
+   * miss rather than a broken reference — and S5's schema has nowhere to put
+   * bytes, a digest or a byte count, asserted by round-tripping a record
+   * carrying one. The bytes live in `meshes.ts`, which is **not** persisted.
+   *
+   * So a reload brings back every generated base as an *unrendered* one: the
+   * outline is still exactly right, because the footprint is arithmetic over the
+   * recipe, and S5 already has the state for the rest — a `warn` bill row saying
+   * the piece is on the plan and not in the download, and a download that
+   * refuses rather than shipping a pack one file short. Re-opening the generator
+   * on that recipe renders it again.
+   *
+   * A `GeneratedRecipe` naming an entry point the panel does not offer is a
+   * parse failure rather than a piece that silently vanishes — see S5's
+   * `scene.ts`. `migrations.ts` drops such an entry and names it.
+   */
+  generated: z.record(PlacementId, GeneratedPlacement),
   lock: LockSystem,
   /**
    * Whether the user has ever decided the lock system for themselves.
@@ -201,5 +241,5 @@ export type WorkshopState = z.infer<typeof WorkshopState>
  * migration's fallback alias the store's live state.
  */
 export function defaultWorkshopState(): WorkshopState {
-  return { library: {}, placements: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false }
+  return { library: {}, placements: {}, generated: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false }
 }

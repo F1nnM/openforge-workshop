@@ -29,6 +29,32 @@
  *     download path at a decimated preview. §10, obligation 3.
  *   - **A stream, never a `Blob`**, on the path that can stream — and an exact
  *     byte count that turns a truncated download into an error.
+ *
+ * ## Row S5's generated meshes, re-exported here
+ *
+ * `plan.ts` grew a fifth kind of thing an archive can hold: a mesh generated in
+ * the browser, which was never on R2 and has no URL. The five names it added are
+ * re-exported below so a caller still writes one import — and the shape of them
+ * is the point rather than the names:
+ *
+ *   - A generated entry is **structurally a file entry**, so `stream.ts` needs no
+ *     branch: it asks the injected {@link BlobSource} for everything non-text by
+ *     content address, and the caller composes a source that answers for these
+ *     digests out of memory. The exact-length guard, the ZIP64 accounting and
+ *     §10's no-URL-argument refusal therefore all cover them unchanged.
+ *   - {@link GeneratedDigestCollisionError} and the notice requirement are
+ *     **refusals**, checked before a byte is fetched, because each of the
+ *     failures they prevent produces an archive that opens cleanly and holds the
+ *     wrong bytes.
+ *   - Generated entries are deliberately **not** in `plan.files`, which is what
+ *     `urlList.ts` maps over. A URL list that carried a line for a mesh that was
+ *     never published would be a 404 that looks like every other line.
+ *     `urlListShortfall` in `@/generator/placement/pack` is the sentence a caller
+ *     offering that path has to render.
+ *
+ * The bytes and the notice text belong to `@/generator/placement/pack`, which
+ * knows what the geometry is and where it is pinned. This module only enforces
+ * that they are there.
  */
 export type { AttributionRow, LicenceContext } from './attribution'
 export { ATTRIBUTION_COLUMNS, CORPUS_ATTRIBUTION, CORPUS_LICENCE, TOOL_HOME, TOOL_NAME, attributionCsv, licenceText } from './attribution'
@@ -47,8 +73,17 @@ export {
   sanitizePath,
 } from './entries'
 
-export type { ArchiveEntry, ArchiveFileEntry, ArchivePlan, ArchivePlanOptions, ArchiveTextEntry } from './plan'
-export { EmptyArchiveError, buildArchivePlan } from './plan'
+export type {
+  ArchiveEntry,
+  ArchiveFileEntry,
+  ArchiveGeneratedEntry,
+  ArchivePlan,
+  ArchivePlanOptions,
+  ArchiveTextEntry,
+  GeneratedArchiveMesh,
+  GeneratedArchiveSection,
+} from './plan'
+export { EmptyArchiveError, GENERATED_PREFIX, GeneratedDigestCollisionError, buildArchivePlan } from './plan'
 
 export type { SaveEnvironment, SaveFileHandle, SaveFilePickerOptions, SaveResult, SaveVia, ShowSaveFilePicker } from './save'
 export {

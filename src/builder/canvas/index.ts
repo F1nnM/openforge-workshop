@@ -47,6 +47,21 @@
  *     toolbar's third mode is `PlanTool`'s `'move'`; `PlanStatus.moving` names
  *     the piece in the air, because a `Shift`-drag move shows no mode.
  *
+ * ## Row X9: the second population
+ *
+ * `buildPlanScene` takes an optional fourth argument — the store's `generated`
+ * map — and puts the resulting {@link GeneratedPlanPiece}s in
+ * `scene.generated`, a list of its own beside `scene.pieces`. It is a second
+ * list rather than a widened one because a `PlanPiece` carries a
+ * `CatalogRecord` and a generated base has none; `scene.ts` sets out the three
+ * things the two populations nevertheless share (one conflict sweep, one bounds
+ * box, one `PlacementId` space). Everything that does not need a record —
+ * `pieceAt`, `navigationOrder`, the whole of `move.ts` — takes
+ * {@link ScenePiece} and works on either, with `pieceName` and
+ * `pieceRotationStep` as the two accessors that differ.
+ *
+ * Callers with no generated map pass nothing and get an empty second list.
+ *
  * Row 18 owns the bill of tiles and does **not** get it from here: it comes from
  * `buildBillOfTiles(Object.values(placements), assemblyIndex, { lock })` in
  * `@/assembly`, over the same store map this canvas writes. The two never
@@ -121,8 +136,10 @@ export {
 export { findConflicts, partsOverlap, planBand, quadsOverlap } from './overlap'
 export type { OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
 
-export { buildPlanScene, navigationOrder, pieceAt } from './scene'
-export type { PlanOmission, PlanPiece, PlanScene } from './scene'
+export { buildPlanScene, navigationOrder, pieceAt, pieceName, pieceRotationStep, scenePaintOrder } from './scene'
+export type { GeneratedPlanPiece, PlanOmission, PlanPiece, PlanScene, ScenePiece } from './scene'
+
+export { VACANCY_SEARCH_UNITS, VACANCY_STEP, freeCellFor } from './vacancy'
 
 export { computeGhost, ghostOverlaps } from './ghost'
 export type { PlanGhost } from './ghost'

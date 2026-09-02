@@ -47,8 +47,12 @@ import type { CatalogAssets, CatalogRecord } from '@/catalog'
 import { shardedPath } from '@/catalog'
 import { Button, Chip, Eyebrow, buttonProps } from '@/ui/primitives'
 
+import { placeRecipe } from '../placement/placement'
+
 import { ParameterControl } from './controls'
+import type { BaseFootprint } from './footprint'
 import { baseFootprint } from './footprint'
+import type { GeneratorPlaceAt, GeneratorPlaceHandler } from './GeneratorPanel'
 import type { BaseRecipe, RecipeValue } from './recipe'
 import { canonicalise, fileDefaults, isFileDefaults, recipeId, recipeKey } from './recipe'
 import type { Resolution } from './resolve'
@@ -94,16 +98,30 @@ export interface GeneratorDrawerProps {
   readonly assets: Pick<CatalogAssets, 'models'>
   readonly onClose: () => void
   /**
-   * Row S5's seam. Absent until it lands, and the action is not rendered
-   * without it — a disabled primary button advertising a feature that does not
-   * exist is worse than no button.
+   * Row S5's seam, wired by row X9. The action is not rendered without it — a
+   * disabled primary button advertising a feature that does not exist is worse
+   * than no button.
+   *
+   * See {@link GeneratorPlaceHandler}: this drawer calls `placeRecipe` itself and
+   * hands over the resolved placement, because the resolution is already on
+   * screen here and rebuilding a resolver on the screen's side of the boundary
+   * would put the pinned schemas in the entry chunk.
    */
-  readonly onPlace?: ((recipe: BaseRecipe) => void) | undefined
+  readonly onPlace?: GeneratorPlaceHandler | undefined
+  /** Where the base goes. See {@link GeneratorPanelProps.placeAt}. */
+  readonly placeAt?: ((foot: BaseFootprint) => GeneratorPlaceAt) | undefined
   /** Injected by tests so no engine is loaded and no request leaves the process. */
   readonly preview?: Pick<PreviewOptions, 'load' | 'loadLicence' | 'loadDescriber'> | undefined
 }
 
-export default function GeneratorDrawer({ records, assets, onClose, onPlace, preview }: GeneratorDrawerProps) {
+export default function GeneratorDrawer({
+  records,
+  assets,
+  onClose,
+  onPlace,
+  placeAt,
+  preview,
+}: GeneratorDrawerProps) {
   const [entry, setEntry] = useState<PanelEntry>('bases-square.scad')
   const [values, setValues] = useState<Readonly<Record<string, RecipeValue>>>(OPENING_STATE['bases-square.scad'])
 
@@ -132,6 +150,32 @@ export default function GeneratorDrawer({ records, assets, onClose, onPlace, pre
 
   const foot = baseFootprint(entry, recipe.parameters)
   const id = recipeId(recipeKey(recipe))
+  const state = previewState.state
+
+  /**
+   * Place the base the form currently describes.
+   *
+   * Three facts meet here and nowhere else, which is the whole argument for
+   * calling `placeRecipe` on this side of the boundary: the **recipe** the
+   * controls hold, the **resolution** the strip is showing, and the **bytes**
+   * `usePreview` has if it has finished. A screen given only the recipe would
+   * have to re-derive the second and could never see the third.
+   *
+   * The mesh is `null` for an archived resolution, because an archived placement
+   * is the archive's published file and nothing was rendered; and `null` for a
+   * generated one the engine has not finished, which is a real state rather than
+   * an error — the footprint is arithmetic, so the outline was always truthful,
+   * and row S5 already makes such a base a `warn` bill row and a refused
+   * download rather than a silently short pack.
+   */
+  const place = () => {
+    if (onPlace === undefined) return
+    const at = placeAt?.(foot) ?? { x: 0, z: 0 }
+    const placed = placeRecipe(recipe, resolution, at)
+    const mesh =
+      placed.kind === 'generated' && state.status === 'ready' ? { md5: state.md5, bytes: state.mesh } : null
+    onPlace(placed, mesh)
+  }
 
   return (
     <aside className="of-gen" aria-label="Generate a base">
@@ -218,13 +262,7 @@ export default function GeneratorDrawer({ records, assets, onClose, onPlace, pre
             </a>
           )}
           {onPlace === undefined ? null : (
-            <Button
-              tone="secondary"
-              size="sm"
-              onClick={() => {
-                onPlace(recipe)
-              }}
-            >
+            <Button tone="secondary" size="sm" onClick={place}>
               Place in build
             </Button>
           )}

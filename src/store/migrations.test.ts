@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest'
 
 import { TileId } from '@/catalog'
 
+import { aGeneratedBase } from './fixture'
 import type { MigrationStep } from './migrations'
 import { MIGRATION_STEPS, STORE_VERSION, migrateWorkshopState, salvageWorkshopState } from './migrations'
 import type { WorkshopState } from './schema'
@@ -39,6 +40,7 @@ const TILE_A = TileId.parse('tiles/dungeon_stone/floor/2x2/openlock/dungeon_ston
 const TILE_B = TileId.parse('tiles/cave/thick_wall/wall/corner/openlock/cave%aggregate+2#corner.IL.openlock.stl')
 const PLACEMENT_A = PlacementId.parse('9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f')
 const PLACEMENT_B = PlacementId.parse('b2c3d4e5-6f70-4812-9a3b-4c5d6e7f8091')
+const PLACEMENT_C = PlacementId.parse('c3d4e5f6-7081-4923-ab4c-5d6e7f809123')
 
 /**
  * One shipped version's persisted payload, and what it must become.
@@ -66,20 +68,40 @@ const SCENE = {
   },
 } as const
 
+/** One generated base, through `placeRecipe`. See `fixture.ts`. */
+const GENERATED_BASE = aGeneratedBase({ x: 4, z: 0, rotation: 90 })
+
 const VERSION_FIXTURES: Readonly<Record<number, VersionFixture>> = {
   1: {
-    // No `lockChosen`: version 1 had no such field. `lock: 'dragonlock'` is not
-    // the default, so version 1 can only have written it through
-    // `setLockSystem` — a deliberate change — and the rung infers `true`.
+    // No `lockChosen` and no `generated`: version 1 had neither field.
+    // `lock: 'dragonlock'` is not the default, so version 1 can only have
+    // written it through `setLockSystem` — a deliberate change — and the rung
+    // infers `true`. The absent `generated` becomes an empty map, because a
+    // build that could not place a generated base had none.
     blob: { ...SCENE, lock: 'dragonlock' },
-    expected: WorkshopStateSchema.parse({ ...SCENE, lock: 'dragonlock', lockChosen: true }),
+    expected: WorkshopStateSchema.parse({ ...SCENE, generated: {}, lock: 'dragonlock', lockChosen: true }),
   },
   2: {
     // As version 2 writes it: the flag is explicit, and `false` beside a
     // non-default lock is a shape only version 2 can produce (an import of
     // someone else's exported scene). It must survive, not be re-inferred.
     blob: { ...SCENE, lock: 'magnetic', lockChosen: false },
-    expected: WorkshopStateSchema.parse({ ...SCENE, lock: 'magnetic', lockChosen: false }),
+    expected: WorkshopStateSchema.parse({ ...SCENE, generated: {}, lock: 'magnetic', lockChosen: false }),
+  },
+  3: {
+    // As version 3 writes it: a generated base beside the placements, in the
+    // same `PlacementId` space, holding the recipe and the position and no
+    // mesh. It must survive the rung rather than be replaced by an empty map —
+    // which is the case a rung that only relied on salvaging absence would get
+    // wrong for a preview build that wrote a version 3 shape under an older
+    // stamp.
+    blob: { ...SCENE, generated: { [PLACEMENT_C]: GENERATED_BASE }, lock: 'magnetic', lockChosen: false },
+    expected: WorkshopStateSchema.parse({
+      ...SCENE,
+      generated: { [PLACEMENT_C]: GENERATED_BASE },
+      lock: 'magnetic',
+      lockChosen: false,
+    }),
   },
 }
 

@@ -124,9 +124,13 @@ describe('what it is not', () => {
     sendTileToBuilder(TILE_A)
     // Two stores, and the persisted one is untouched — which is why
     // `STORE_VERSION` did not move for this row.
+    // `generated` is row X9's, and it *is* part of `WorkshopState` — it moved
+    // `STORE_VERSION` to 3 for exactly the reason this test states. Listed here
+    // rather than counted so adding a field stays a deliberate edit.
     expect(Object.keys(useWorkshopStore.getState())).toEqual([
       'library',
       'placements',
+      'generated',
       'lock',
       'lockChosen',
     ])

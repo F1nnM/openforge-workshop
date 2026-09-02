@@ -42,9 +42,29 @@
  *     `archive` bill line on it, not a generated one: the file downloaded is
  *     Devon's published STL. When it returns `null`, the placement carries the
  *     recipe and the bill line waits for a mesh.
- *   - `triangleCount` (`./usePreview`) — a generated mesh with zero triangles is a failure
+ *   - `triangleCount` (`./mesh`) — a generated mesh with zero triangles is a failure
  *     whatever OpenSCAD's exit status said, and S5 must not put one in a
- *     download pack.
+ *     download pack. **It moved out of `./usePreview` in row X9** — S5's third
+ *     request, and the builder's mesh store is the eager caller that forced it:
+ *     `usePreview.ts` value-imports `../engine`, so reading a triangle count
+ *     from there put the 298 kB worker chunk in the bill panel's path.
+ *     `./usePreview` still re-exports the name, so this seam and S5's
+ *     `pack.test.ts` are unchanged. `./mesh` has no imports at all.
+ *
+ * ## What row X9 added, and where the placement seam is
+ *
+ * `onPlace` now hands over row S5's `RecipePlacement` — the *resolved* placement,
+ * archived or generated — plus the bytes when there are any, rather than the
+ * recipe alone. {@link GeneratorPlaceHandler} carries the argument; the short
+ * version is that `buildBaseResolver` is on the drawer's side of the lazy
+ * boundary and the answer is already on screen there, so a screen given only the
+ * recipe would have had to build a resolver in the eager chunk to re-derive it.
+ * `placeAt` is the other half: the screen says *where*, because that is a
+ * question about the plan, and the drawer says *what*.
+ *
+ * Both are exported as **types only** below, which is what keeps this barrel's
+ * eager closure to React and a stylesheet. `boundary.test.ts` now also forbids
+ * `placement/placement` and `placement/pack` as value imports for that reason.
  *
  * And one thing S5 must not do: **do not describe a generated base as the
  * archive's file.** `resolve.ts` carries the measurement — the archived bases
@@ -54,7 +74,7 @@
  * the same parameters name.
  */
 export { GeneratorPanel } from './GeneratorPanel'
-export type { GeneratorPanelProps } from './GeneratorPanel'
+export type { GeneratorPanelProps, GeneratorPlaceAt, GeneratorPlaceHandler } from './GeneratorPanel'
 
 // Types only below this line. A type export is erased, so none of these reach
 // the entry chunk — which is the whole point of the note above.

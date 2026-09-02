@@ -32,22 +32,87 @@ import { Suspense, lazy, useState } from 'react'
 
 import type { CatalogAssets, CatalogRecord } from '@/catalog'
 
-import type { BaseRecipe } from './recipe'
+import type { GeneratedMeshHold } from '../placement/pack'
+import type { PlaceAt, RecipePlacement } from '../placement/placement'
+
+import type { BaseFootprint } from './footprint'
 
 import './panel.css'
 
 /** The lazy boundary. Every schema, table and engine import is past this line. */
 const LazyDrawer = lazy(() => import('./GeneratorDrawer'))
 
+/** Where a generated base goes. Row S5's `PlaceAt`, re-named for the seam. */
+export type GeneratorPlaceAt = PlaceAt
+
+/**
+ * What the drawer hands over when the user presses "Place in build".
+ *
+ * Row S5 asked for two changes to this seam and this is both of them. The first
+ * draft handed over a `BaseRecipe` alone, which is the *question* rather than the
+ * answer: the screen would then have to build a `buildBaseResolver` of its own to
+ * find out whether the archive publishes that base, and that resolver is 31 ms
+ * over 8,702 records and lives behind this lazy boundary — so the screen would
+ * have paid for the pinned schemas to re-derive something already on screen in
+ * the drawer's resolution strip.
+ *
+ * So the drawer calls `placeRecipe` itself and hands over the
+ * {@link RecipePlacement}, which is S5's union of the two outcomes:
+ *
+ *   - **`archived`** — an ordinary `Placement` addressed by the archived
+ *     record's own `TileId`. It rides the store, the canvas, `resolvePlacement`,
+ *     the bill and the pack that already exist. 682 of the archive's 709
+ *     resolvable keys land here and need no new machinery at all.
+ *   - **`generated`** — S5's `GeneratedPlacement`, for the second map.
+ *
+ * `mesh` is the bytes, and it is `null` for every archived placement and for a
+ * generated one the engine has not finished. It is handed over *with* the
+ * placement because this press is the only moment the identity and the bytes are
+ * both in hand: the store persists the recipe and `src/store/meshes.ts` holds the
+ * mesh, and they must not be written from two different presses.
+ */
+export type GeneratorPlaceHandler = (placed: RecipePlacement, mesh: GeneratedMeshHold | null) => void
+
 export interface GeneratorPanelProps {
   readonly records: readonly CatalogRecord[]
   readonly assets: Pick<CatalogAssets, 'models'>
-  /** Row S5's seam, forwarded untouched. */
-  readonly onPlace?: ((recipe: BaseRecipe) => void) | undefined
+  /**
+   * Row S5's seam, forwarded untouched — and now carrying the answer rather
+   * than the question.
+   *
+   * **Every type in this signature is imported `type`-only**, here and in
+   * `GeneratorDrawer.tsx`'s props, which is what keeps this file's eager cost the
+   * 845 B its docblock measured. A type import is erased, so naming
+   * `RecipePlacement` costs nothing even though the module that produces one
+   * value-imports 25 KB of pinned schemas. If any of these ever has to be a
+   * value here, that is the moment to check the entry chunk again.
+   */
+  readonly onPlace?: GeneratorPlaceHandler | undefined
+  /**
+   * Where on the grid the base should go, given its footprint.
+   *
+   * The screen answers this, not the drawer, because "is that cell free" is a
+   * question about the whole plan and the drawer holds no scene. The drawer
+   * answers the other half — which recipe, and which of S4's three resolutions
+   * it got — and then calls `placeRecipe` itself, so the two halves meet once.
+   *
+   * Absent means the origin, which is a real answer rather than a stub: a
+   * generated base at `0, 0` on a plan with nothing at the origin is placed
+   * correctly, and on a plan with something there it is drawn hatched as a
+   * conflict like any other overlap. What it is not is a *good* answer, which is
+   * why the builder supplies one.
+   */
+  readonly placeAt?: ((foot: BaseFootprint) => GeneratorPlaceAt) | undefined
   readonly onOpenChange?: ((open: boolean) => void) | undefined
 }
 
-export function GeneratorPanel({ records, assets, onPlace, onOpenChange }: GeneratorPanelProps) {
+export function GeneratorPanel({
+  records,
+  assets,
+  onPlace,
+  placeAt,
+  onOpenChange,
+}: GeneratorPanelProps) {
   const [open, setOpen] = useState(false)
 
   const toggle = (next: boolean) => {
@@ -79,6 +144,7 @@ export function GeneratorPanel({ records, assets, onPlace, onOpenChange }: Gener
           records={records}
           assets={assets}
           onPlace={onPlace}
+          placeAt={placeAt}
           onClose={() => {
             toggle(false)
           }}

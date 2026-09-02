@@ -8,7 +8,7 @@
  * and nothing else. Every panel, the canvas, the bill and the download are
  * already-landed modules that are *called* here rather than reimplemented.
  *
- * ## The four things this screen actually decides
+ * ## The five things this screen actually decides
  *
  *   1. **`usePlanTools()` is called once.** Mode, snap, pending rotation and the
  *      palette selection are one object shared by the palette, the toolbar and
@@ -26,6 +26,14 @@
  *      this screen draws them, because the contract puts the `snap {value}`
  *      readout in the floating toolbar and the canvas's own plate carries it too —
  *      one of the two has to go, and the toolbar is the one the contract names.
+ *   5. **Where a generated base lands, and nothing else about one.** Row S4's
+ *      drawer decides *what* — it holds the recipe and the resolution the strip is
+ *      showing — and calls row S5's `placeRecipe` itself; this screen answers
+ *      *where*, because that is a question about the whole plan. See
+ *      `placeGenerated` and `freeCellFor`. There is now a **second bill** beside
+ *      the first for the same reason there are two store maps: a catalog line is
+ *      one per md5 and names a `CatalogRecord`, a generated line is one per recipe
+ *      and names no published file at all.
  *
  * ## Why the bill is rebuilt on every placement rather than diffed
  *
@@ -56,18 +64,30 @@
  * line of height it cannot spare.
  */
 import { getRouteApi } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
-import { PlanCanvas, describeCell, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
+import { PlanCanvas, buildPlanScene, createStyleResolver, describeCell, freeCellFor, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
 import type { PlanStatus } from '@/builder/canvas'
 import { BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 import { GeneratorPanel } from '@/generator/panel'
+import type { GeneratorPlaceHandler } from '@/generator/panel'
+import { buildGeneratedBill } from '@/generator/placement/bill'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
-import { clearPlacements, useLockSystem, usePlacements } from '@/store'
+import {
+  clearPlacements,
+  holdGeneratedMesh,
+  placeGeneratedBase,
+  placeTile,
+  useGeneratedHoldings,
+  useGeneratedMeshes,
+  useGeneratedPlacements,
+  useLockSystem,
+  usePlacements,
+} from '@/store'
 import { LockNotice } from '@/ui/lock-picker'
 import { Button, Eyebrow } from '@/ui/primitives'
 
@@ -120,6 +140,9 @@ function Builder({ index }: { index: CatalogIndex }) {
   const navigate = builderApi.useNavigate()
 
   const placements = usePlacements()
+  const generatedPlacements = useGeneratedPlacements()
+  const generatedMeshes = useGeneratedMeshes()
+  const generatedHoldings = useGeneratedHoldings()
   const lock = useLockSystem()
   const [status, setStatus] = useState<PlanStatus | null>(null)
 
@@ -133,7 +156,87 @@ function Builder({ index }: { index: CatalogIndex }) {
     [placements, assembly, lock],
   )
 
-  const download = useArchiveDownload({ bill, assets: index.file.assets })
+  /**
+   * Row S5's generated bill — the fifth derivation, and the second bill.
+   *
+   * Not folded into `buildBillOfTiles`, because the two answer different
+   * questions with different keys: a catalog line is one per **md5** and names a
+   * `CatalogRecord`, a generated line is one per **recipe** and names no
+   * published file at all. S5 was explicit that `billView.ts` needs nothing for
+   * this, because a generated placement never enters it.
+   *
+   * `ambiguous` is deliberately not passed. It is a fact about the current
+   * catalog build — 27 of the archive's 709 resolvable keys are claimed by two
+   * different blobs — and answering it needs `buildBaseResolver`, which is 31 ms
+   * over 8,702 records and lives behind the generator drawer's lazy boundary.
+   * Building one here would put the pinned parameter schemas in this screen's
+   * chunk to add one sentence to a bill row, and the row without it still says
+   * the true thing: that no published file names these parameters, which is also
+   * true of an ambiguous recipe, since neither of the two candidates was taken.
+   */
+  const generatedBill = useMemo(
+    () => buildGeneratedBill(generatedPlacements, { meshes: generatedMeshes }),
+    [generatedPlacements, generatedMeshes],
+  )
+
+  const download = useArchiveDownload({
+    bill,
+    assets: index.file.assets,
+    generated: { bill: generatedBill, holdings: generatedHoldings },
+  })
+
+  /**
+   * Where a generated base goes, and the one thing this screen has to decide
+   * about it.
+   *
+   * The drawer decides *what* — it holds the recipe and the resolution — and this
+   * decides *where*, because "is that cell free" is a question about the whole
+   * plan and the drawer holds no scene. `freeCellFor` uses the scene's own
+   * collision predicate, so a base it places is never one `buildPlanScene` then
+   * marks in conflict.
+   *
+   * The scene is rebuilt here rather than shared with `PlanCanvas`, which holds
+   * its own: the canvas subscribes to the store directly and publishes no scene,
+   * and a scene lifted into this screen to be passed down would make the canvas's
+   * viewport and this screen's render cycle the same thing. Both projections are
+   * pure functions of the same two store maps, so they cannot disagree — which is
+   * the property the module docblock's point 2 is about. It is memoised on those
+   * maps, so it costs one projection per placement rather than one per render.
+   */
+  const vacancyScene = useMemo(
+    () => buildPlanScene(placements, planCatalog, createStyleResolver(planCatalog), generatedPlacements),
+    [placements, planCatalog, generatedPlacements],
+  )
+
+  /**
+   * Take what the drawer resolved and write it to the store.
+   *
+   * Three writes across two stores, and the split is row S5's identity argument
+   * made concrete:
+   *
+   *   - an **archived** resolution is an ordinary `Placement` addressed by the
+   *     archived record's own `TileId`, so it goes through `placeTile` and rides
+   *     the canvas, `resolvePlacement`, the bill and the pack that already exist.
+   *     682 of the archive's 709 resolvable keys land here and cost nothing new.
+   *   - a **generated** one goes to the second map, which persists the recipe;
+   *   - and its **mesh**, when the engine has produced one, goes to the
+   *     un-persisted holdings store. Two writes rather than one because the
+   *     recipe is durable and the bytes are not, and this is the only press where
+   *     both are in hand.
+   *
+   * A generated base with no mesh is placed anyway. The footprint is arithmetic,
+   * so the outline is truthful before the engine has been asked anything — it
+   * becomes a `warn` bill row and a refused download rather than a silent
+   * omission.
+   */
+  const placeGenerated = useCallback<GeneratorPlaceHandler>((placed, mesh) => {
+    if (placed.kind === 'archived') {
+      placeTile(placed.placement)
+      return
+    }
+    placeGeneratedBase(placed.placement)
+    if (mesh !== null) holdGeneratedMesh(placed.placement.base, mesh)
+  }, [])
 
   const armed = tools.selectedTileId === null ? undefined : index.engine.record(tools.selectedTileId)
 
@@ -209,11 +312,21 @@ function Builder({ index }: { index: CatalogIndex }) {
           a shipped reverse index, at 3,650 B brotli to say what the records
           already say.
 
-          `onPlace` is row S5's seam and is deliberately not passed yet. The
-          drawer renders no placement action without it rather than a disabled
-          one, so nothing here advertises a feature that has not landed.
+          `onPlace` is row S5's seam, wired by row X9. The drawer resolves the
+          recipe and hands over a `RecipePlacement` plus the bytes when the
+          engine has produced any; `placeGenerated` above writes them. `placeAt`
+          is the other half — the drawer has no scene, so it cannot know which
+          cell is free.
         */}
-        <GeneratorPanel records={index.file.records} assets={index.file.assets} />
+        <GeneratorPanel
+          records={index.file.records}
+          assets={index.file.assets}
+          onPlace={placeGenerated}
+          placeAt={(foot) => {
+            const [x, z] = freeCellFor(vacancyScene, foot.footprint)
+            return { x, z }
+          }}
+        />
       </div>
 
       <div className="of-builder-bill">
@@ -231,6 +344,7 @@ function Builder({ index }: { index: CatalogIndex }) {
           sheet={index.file.sprite}
           materialOf={index.materialOf}
           download={download}
+          generated={{ bill: generatedBill, placements: generatedPlacements }}
         />
         {/*
           Row C2, and the third child of a two-row grid on purpose: the bill

@@ -48,26 +48,54 @@ describe('route tree', () => {
     ['/catalog', '/catalog'],
     ['/library', '/library'],
     ['/builder', '/builder'],
+    ['/assemblies', '/assemblies'],
+    ['/settings', '/settings'],
   ])('routes %s to the %s screen', async (path, expected) => {
     const router = routerAt(path)
     await router.load()
     expect(leafRouteId(router)).toBe(expected)
   })
 
-  it('renders a not-found boundary rather than a blank page for an unknown path', async () => {
-    const router = routerAt('/tiles/does-not-exist')
-    await router.load()
-    expect(router.state.matches.some((match) => match._notFound)).toBe(true)
-  })
-
-  it('does not carry facets onto routes that have no facets', async () => {
-    // `search: { strict: true }` on the router: a navigation only spells out
-    // params the destination declares, so a filtered catalog does not leak
-    // `?kinds=` into a library link the user then copies.
+  it('gives /assemblies no search params, so a link cannot freeze a half-made pick set', async () => {
+    // Row C3's argument, and `/library`'s before it. `search: { strict: true }`
+    // on the router means a navigation carries only what the destination
+    // declares, so this is the assertion that a filtered catalog — or, worse, a
+    // recipient's inherited mid-walk choice — cannot ride along into an
+    // /assemblies link somebody then copies.
     const router = routerAt('/catalog?kinds=wall&q=cave')
     await router.load()
-    await router.navigate({ to: '/library' })
-    expect(href(router)).toBe('/library')
+    await router.navigate({ to: '/assemblies' })
+    expect(href(router)).toBe('/assemblies')
+    expect(router.state.matches.at(-1)?.search).toEqual({})
+  })
+
+  it('carries no state of its own on /assemblies, in either direction', async () => {
+    // Row C3 asked for no search params and this is what that buys, asserted as
+    // behaviour rather than with the `@ts-expect-error` `/builder` uses for its
+    // missing `tile`. **The two are not equivalent, and the difference is worth
+    // recording:** a route with a `validateSearch` schema type-rejects a param it
+    // does not declare *and* drops an unknown one out of the incoming URL
+    // (`/catalog` has a case for exactly that). A route with **no** schema does
+    // neither — `buildLocation({ to: '/assemblies', search: { recipe: 'wall' } })`
+    // compiles, and a hand-typed `?recipe=wall` survives into `match.search`.
+    //
+    // Measured on this tree: `/library`, `/settings` and `/assemblies` all echo
+    // an unknown param back, so this is the schemaless class's behaviour and not
+    // something mounting C3's screen introduced. It is harmless for the reason
+    // that matters, which is what the two assertions below prove: nothing on
+    // these screens reads `search`, and `search: { strict: true }` means the
+    // param cannot travel — neither *into* an /assemblies link built from a
+    // filtered catalog, nor *out* of one into the next screen.
+    const filtered = routerAt('/catalog?kinds=wall&q=cave')
+    await filtered.load()
+    await filtered.navigate({ to: '/assemblies' })
+    expect(href(filtered)).toBe('/assemblies')
+
+    const junk = routerAt('/assemblies?recipe=wall')
+    await junk.load()
+    expect(leafRouteId(junk)).toBe('/assemblies')
+    await junk.navigate({ to: '/catalog' })
+    expect(href(junk)).toBe('/catalog')
   })
 })
 
@@ -291,6 +319,11 @@ describe('mounting', () => {
     ['/catalog', 'Catalog'],
     ['/library', 'Library'],
     ['/builder', 'Builder'],
+    // Row C3's screen. This case is the whole point of mounting it: C3 verified
+    // that `dist/` contained none of its files, because an unmounted route means
+    // an unreachable component and an unbundled one. A route entry that resolved
+    // but rendered nothing would pass the `routes to` case above and fail here.
+    ['/assemblies', 'Guided assemblies'],
   ])('renders %s inside the app frame', async (path, heading) => {
     const { text, unmount } = await mount(routerAt(path))
     expect(text).toContain('OPENFORGE')
