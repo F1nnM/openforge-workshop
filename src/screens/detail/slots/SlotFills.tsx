@@ -198,8 +198,13 @@ export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
  * config and 2,451 declare only a `base` slot — and building an 8,702-entry
  * map on every drawer open to then return `null` would be the expensive way to
  * do nothing. The closure builds it on the first lookup and memoises per id.
+ *
+ * Exported because C3's `AssembliesScreen` is in the identical position — a
+ * bare `CatalogFile` and a {@link TileVariant} with no tags, no index above it
+ * — and a second copy of this join would be a second place for the 691-record
+ * `texture` shortcut to creep back in.
  */
-function tileMaterials(catalog: CatalogFile): (id: TileId) => MaterialId {
+export function tileMaterials(catalog: CatalogFile): (id: TileId) => MaterialId {
   let byId: Map<string, CatalogRecord> | undefined
   const resolved = new Map<string, MaterialId>()
 
