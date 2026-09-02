@@ -12,14 +12,13 @@
 
    ## Why this file imports the catalog's
 
-   The same reason `../../screens/library/library.css` does: both panels render
-   `TileThumb`, and the sprite-sheet rules it depends on — `.of-thumb`,
-   `.of-thumb-frame`, and the `max-width: none` on `.of-thumb-sheet` without which
-   Tailwind's Preflight squeezes all ten camera angles into the well — live in the
-   catalog's stylesheet with the component that owns them. Restating them would
-   mean two definitions of one class and a race over which `<style>` Vite emits
-   second. The import also brings `.of-search-input`, which is the same field as
-   the catalog's with a narrower cap.
+   The same reason `../../screens/library/library.css` does, and it is no longer
+   the thumbnail: row P3 moved `.of-thumb`, `.of-thumb-frame` and the image rules
+   to `../../ui/thumb/thumb.css`, which `TileThumb.tsx` imports itself, so both
+   panels get them with the component. What is left is `.of-search-input`, which
+   is the same field as the catalog's with a narrower cap — and restating that
+   would mean two definitions of one class and a race over which `<style>` Vite
+   emits second.
 
    Light only. Parchment is the committed direction; see `tokens.css`.
    ──────────────────────────────────────────────────────────────────────────── */

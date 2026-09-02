@@ -238,6 +238,8 @@ describe('runThumbnails', () => {
     expect(report.frame).toBe(FIXTURE_SHEET.defaultFrame)
     expect(report.size).toBe(64)
     expect(report.quality).toBe(80)
-    expect(report.tone).toBe('blue')
+    // `neutral` since row P3: the app's `thumb` tint chain is calibrated against
+    // the greyscale derivative, so that is what an unqualified run stages.
+    expect(report.tone).toBe('neutral')
   })
 })

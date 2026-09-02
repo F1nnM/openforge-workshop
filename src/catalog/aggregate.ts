@@ -141,6 +141,16 @@ export interface TileVariant {
   readonly layer: Layer
   readonly sprite: boolean
   /**
+   * `CatalogRecord.thumb` — whether a `/thumbs/` object exists for this file's
+   * mesh. Row P3.
+   *
+   * Carried on the variant and not left to a record lookup because
+   * `screens/detail/slots/SlotFills.tsx` renders `@/ui/thumb` from a
+   * {@link TileVariant} and nothing else, and the component needs it to pick a
+   * source. `sprite` is here for exactly the same reason.
+   */
+  readonly thumb: boolean
+  /**
    * `true` when a base must be printed alongside this file — exactly
    * `layer === 'topper'`.
    *
@@ -713,6 +723,7 @@ export function buildAggregateIndex(file: CatalogFile): AggregateIndex {
         family: record.family,
         layer: record.layer,
         sprite: record.sprite,
+        thumb: record.thumb,
         needsBase: record.layer === 'topper',
         bottomConn: bottom,
         sideConn: side,

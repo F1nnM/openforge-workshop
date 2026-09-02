@@ -103,6 +103,7 @@ function tile(overrides: Record<string, unknown> & { design: string }): Record<s
     blob: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
     bytes: 1_335_084,
     sprite: true,
+    thumb: false,
     kinds: ['floor'],
     conn: ['openlock'],
     layer: 'topper',
@@ -211,6 +212,7 @@ const CATALOG = CatalogFile.parse({
       name: 'Aztlan Column T',
       // The one live tile in the archive with no sprite sheet.
       sprite: false,
+      thumb: false,
       kinds: [],
       texture: undefined,
       foot: { shape: 'none' },

@@ -12,11 +12,11 @@
  *
  * Row S4 was written expecting a build-time reverse index, *"~12 KB brotli
  * riding in the index"*. Measured at `PAYLOAD_EPOCH` the way rows C1 and A1
- * measured theirs, it is **3,776 B** — the plan's estimate is 3.3x high — and it
+ * measured theirs, it is **3,650 B** — the plan's estimate is 3.4x high — and it
  * is not shipped at all, because the index already contains every input: each
  * base record carries its `file`, and the filename *is* the parameter tuple. The
  * 709 keys are 132,954 B raw and 3,639 B brotli on their own; adding them takes
- * the index from 365,403 B to 369,179 B, 72.1% of the 500 KB budget, to say
+ * the index from 365,603 B to 369,253 B, 72.1% of the 500 KB budget, to say
  * something a reader recomputes in **31 ms** over all 8,702 records, once,
  * memoised on the index file. That is the shape rows A1 and C1 settled on for
  * the aggregate and for `constrain`, for the same reason and on the same kind of

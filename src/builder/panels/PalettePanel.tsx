@@ -70,6 +70,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { placementRefusal } from '@/builder/canvas'
 import type { PlanTools } from '@/builder/canvas'
 import type { CatalogAssets, SpriteSheet, TileId } from '@/catalog'
+import type { MaterialId } from '@/materials'
 import type { FacetSearch } from '@/search'
 import { MAX_QUERY_LENGTH } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
@@ -207,6 +208,7 @@ function PaletteList({
           row={row}
           assets={index.file.assets}
           sheet={index.file.sprite}
+          material={index.materialOf(row.record)}
           selected={tools.selectedTileId === row.record.id}
           onSelect={() => {
             // Re-selecting the armed row disarms it, which is what `aria-pressed`
@@ -230,12 +232,22 @@ function PaletteRowView({
   row,
   assets,
   sheet,
+  material,
   selected,
   onSelect,
 }: {
   row: PaletteRow
   assets: CatalogAssets
   sheet: SpriteSheet
+  /**
+   * The tint, from `CatalogIndex.materialOf`. Row P3.
+   *
+   * A palette row is a tile the user is about to place, and the material is what
+   * distinguishes two rows whose names and sizes are identical — this panel is
+   * 272px wide, so the name is usually truncated and the 40px well is often the
+   * only thing telling two candidates apart.
+   */
+  material: MaterialId
   selected: boolean
   onSelect: () => void
 }) {
@@ -246,8 +258,10 @@ function PaletteRowView({
       <TileThumb
         blob={record.blob}
         sprite={record.sprite}
+        thumb={record.thumb}
         assets={assets}
         sheet={sheet}
+        material={material}
         className="of-pal-thumb"
       />
       <span className="of-pal-name">{record.name}</span>

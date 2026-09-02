@@ -96,6 +96,7 @@ function tile(overrides: Record<string, unknown> & { design: string }): Record<s
     blob: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
     bytes: 1_200_000,
     sprite: true,
+    thumb: false,
     kinds: ['wall'],
     conn: ['openforge'],
     layer: 'topper',

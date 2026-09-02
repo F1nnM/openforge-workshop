@@ -51,7 +51,10 @@
  */
 import { useMemo, useState } from 'react'
 
-import type { CatalogFile, TileId } from '@/catalog'
+import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
+import { resolveTags } from '@/catalog'
+import type { MaterialId } from '@/materials'
+import { DEFAULT_THUMB_MATERIAL, resolveMaterial } from '@/materials'
 import { Eyebrow } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
@@ -109,6 +112,7 @@ export interface SlotFillsProps {
  */
 export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
   const index = useMemo(() => (catalog === undefined ? undefined : compositionIndexFor(catalog)), [catalog])
+  const materialOf = useMemo(() => (catalog === undefined ? null : tileMaterials(catalog)), [catalog])
   const [selection, setSelection] = useState<SlotSelection>({})
   const [open, setOpen] = useState<string | null>(null)
 
@@ -119,7 +123,9 @@ export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
     () => (index === undefined ? [] : slotStates(index, parent, selection)),
     [index, parent, selection],
   )
-  if (catalog === undefined || states.length === 0) return null
+  // `materialOf` is null exactly when `catalog` is undefined, so this narrows
+  // both at once rather than leaving a fallback resolver that cannot be reached.
+  if (catalog === undefined || materialOf === null || states.length === 0) return null
 
   const first = states[0]?.name ?? null
   const shown = open ?? first
@@ -130,6 +136,7 @@ export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
         <SlotFill
           catalog={catalog}
           key={state.key}
+          materialOf={materialOf}
           onOpen={() => {
             setOpen(state.name)
           }}
@@ -153,16 +160,78 @@ export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
   )
 }
 
+/* ------------------------------------------------------------------- material */
+
+/**
+ * A candidate's material family, by catalog id.
+ *
+ * ## Why this picker tints at all, which was a judgement call
+ *
+ * Row P3 wired five `@/ui/thumb` callers and this is the only one that does not
+ * render a tile the user chose — these are *candidates* for an accessory slot,
+ * and one could argue the choice is about shape and fit rather than substance.
+ * It tints for two reasons that outweigh that:
+ *
+ *   - **A torch bracket's material is part of the fit.** Composition is the one
+ *     place a user is putting two meshes together, and "does this go with the
+ *     wall" is exactly the question the tint answers.
+ *   - **One mesh must not be two colours.** The same file is a tinted card in
+ *     the catalog grid; a grey copy of it here would read as a different tile
+ *     rather than as less information.
+ *
+ * The honest caveat, which this row does **not** fix: `../SpriteRotator.tsx`
+ * renders the *parent* tile above this grid and is still untinted blue, because
+ * P1 left it out (its geometry is its own and it rotates through all ten frames,
+ * so it has no thumbnail source to switch). So the drawer is now internally
+ * inconsistent, and the fix is one `url(#of-tint-sprite-…)` in that file plus a
+ * material for it. No row owns it.
+ *
+ * ## Why the map is built here and lazily
+ *
+ * A {@link TileVariant} carries no tags — it is the aggregate layer's summary
+ * of a record — and `resolveMaterial` needs the full de-interned list, because
+ * the `texture` shortcut is wrong on 691 of 8,702 records. So this joins back to
+ * `catalog.records`. It is **not** `CatalogIndex.materialOf`: this component
+ * takes a `CatalogFile`, and the drawer above it has no index.
+ *
+ * Lazy, because `SlotFills` renders nothing for most files — 5,666 declare no
+ * config and 2,451 declare only a `base` slot — and building an 8,702-entry
+ * map on every drawer open to then return `null` would be the expensive way to
+ * do nothing. The closure builds it on the first lookup and memoises per id.
+ */
+function tileMaterials(catalog: CatalogFile): (id: TileId) => MaterialId {
+  let byId: Map<string, CatalogRecord> | undefined
+  const resolved = new Map<string, MaterialId>()
+
+  return (id) => {
+    const held = resolved.get(id)
+    if (held !== undefined) return held
+    byId ??= new Map(catalog.records.map((record) => [record.id as string, record]))
+    const record = byId.get(id)
+    // Every option's variant comes from this index, so a miss is not reachable
+    // today. `unknown` rather than a throw if it ever is: a picker that renders
+    // one card as "no claim" is better than a drawer that does not open.
+    const material =
+      record === undefined
+        ? DEFAULT_THUMB_MATERIAL
+        : resolveMaterial(resolveTags(catalog, record), record.file).material
+    resolved.set(id, material)
+    return material
+  }
+}
+
 /* -------------------------------------------------------------------- one slot */
 
 function SlotFill({
   catalog,
+  materialOf,
   onOpen,
   onPick,
   open,
   state,
 }: {
   catalog: CatalogFile
+  materialOf: (id: TileId) => MaterialId
   onOpen: () => void
   onPick: (tile: TileId | undefined) => void
   open: boolean
@@ -214,6 +283,7 @@ function SlotFill({
               <li key={String(option.address)}>
                 <OptionCard
                   catalog={catalog}
+                  material={materialOf(option.variant.id)}
                   chosen={option.variant.id === state.chosen}
                   onPick={() => {
                     onPick(option.variant.id)
@@ -259,11 +329,13 @@ function SlotFill({
  */
 function OptionCard({
   catalog,
+  material,
   chosen,
   onPick,
   option,
 }: {
   catalog: CatalogFile
+  material: MaterialId
   chosen: boolean
   onPick: () => void
   option: SlotOption
@@ -286,8 +358,10 @@ function OptionCard({
       <TileThumb
         assets={catalog.assets}
         blob={option.variant.blob}
+        material={material}
         sheet={catalog.sprite}
         sprite={option.variant.sprite}
+        thumb={option.variant.thumb}
       />
       <span className="of-slotfill-cardname">{option.aggregate.name}</span>
       {option.deadEnd ? <span className="of-slotfill-why">{reason}</span> : null}

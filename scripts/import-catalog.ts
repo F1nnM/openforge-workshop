@@ -20,6 +20,15 @@
  *   - `pipeline/ordinals/manifest.json` — **checked in**. It is the append-only
  *     record of which integer every share link means. `--dry-run` skips both, so
  *     a size check on a branch cannot append ordinals as a side effect.
+ *
+ * It reads a third, `pipeline/thumbs/inventory.json`, and never writes it. That
+ * file says which blobs have a `/thumbs/` object and is what `CatalogRecord.thumb`
+ * comes from; `npm run thumbs -- --inventory` is the only thing that produces it,
+ * because answering the question means asking the bucket and this build has to
+ * stay a pure function of the fixtures. An absent inventory is not an error — a
+ * fresh clone has none — and it means every record emits `thumb: false`, which
+ * is the truth today. The report below prints the count either way, so a stale
+ * inventory after a backfill reads as `0 of 8,352` rather than as nothing.
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -33,8 +42,10 @@ import {
   loadFixtureRows,
   loadManifest,
   measureCatalog,
+  readThumbInventory,
   resolveFixturesRef,
   serialiseCatalog,
+  thumbBlobs,
   writeManifest,
 } from '../pipeline'
 
@@ -46,15 +57,17 @@ function main(): number {
   const dir = fixturesDir(args.find((arg) => !arg.startsWith('-')))
 
   const rows = loadFixtureRows(dir)
+  const inventory = readThumbInventory()
   const result = buildCatalog({
     rows,
     manifest: loadManifest(),
     fixturesRef: resolveFixturesRef(dir),
+    thumbs: thumbBlobs(inventory),
   })
 
   const json = serialiseCatalog(result.file)
   const size = measureCatalog(json)
-  report(dir, result, size, dryRun)
+  report(dir, result, size, dryRun, inventory)
 
   if (!dryRun) {
     mkdirSync(OUT_DIR, { recursive: true })
@@ -73,6 +86,7 @@ function report(
   result: ReturnType<typeof buildCatalog>,
   size: ReturnType<typeof measureCatalog>,
   dryRun: boolean,
+  inventory: ReturnType<typeof readThumbInventory>,
 ): void {
   const { stats, file } = result
   const lines = [
@@ -86,6 +100,12 @@ function report(
     `designs       ${String(stats.designs)} (${(stats.records / stats.designs).toFixed(2)} files each)`,
     `families      ${String(stats.families)}`,
     `configs       ${String(stats.withConfig)} tiles carry one, unresolved`,
+    `thumbs        ${String(stats.withThumb)} of ${String(stats.records)} records have a /thumbs/ ` +
+      `object — ${
+        inventory === undefined
+          ? 'no inventory on disk; run `npm run thumbs -- --inventory`'
+          : `${String(inventory.counted.present)} of ${String(inventory.counted.probed)} blobs, probed ${inventory.probed}`
+      }`,
     `names         ${String(stats.distinctNames)} distinct over ${String(stats.records)} records`,
     `ordinals      ${String(result.manifest.ids.length)} issued · ${String(stats.newOrdinals)} new · ${String(stats.retiredOrdinals)} retired`,
     `size          raw ${formatBytes(size.raw)} · gzip ${formatBytes(size.gzip)} · brotli ${formatBytes(size.brotli)} of ${formatBytes(size.budget)} budget`,

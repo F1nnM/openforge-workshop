@@ -36,6 +36,7 @@
 import sharp from 'sharp'
 
 import type { SpriteSheet } from '../../src/catalog'
+import { MEASURED_THUMB } from '../../src/catalog'
 
 import { assertSheetExtent, frameRect } from './geometry'
 
@@ -46,7 +47,7 @@ import { assertSheetExtent, frameRect } from './geometry'
  * card renders a thumbnail at, so it stays sharp on a 2× display and is a
  * quarter of the source frame's 512 px — a downscale, never an upscale.
  */
-export const THUMB_SIZE = 256
+export const THUMB_SIZE = MEASURED_THUMB.size
 
 /** WebP quality. §8's "q80"; measured output at this setting is in `measure.ts`. */
 export const THUMB_QUALITY = 80
@@ -76,6 +77,14 @@ export const THUMB_QUALITY = 80
  * linear-light luminance is not even an affine function of the sheet's two Phong
  * terms, the chain has to *regress* them (R² 0.4993 / 0.6128) where the `sprite`
  * chain un-mixes them exactly. **Changing this line changes that calibration.**
+ *
+ * **Row P3 moved the defaults to match.** `cli.ts` already passed `neutral`
+ * explicitly; {@link renderThumbnail} and `runThumbnails` still defaulted to
+ * `blue`, so a caller using the library rather than the CLI staged objects the
+ * app would then tint through the wrong chain — the crossing `ThumbSource`
+ * measures at 1.38 to 4.51 median ΔE00. They agree now. `blue` stays
+ * reachable, because the measurement that chose between them has to stay
+ * reproducible.
  */
 export type Tone = 'blue' | 'neutral'
 
@@ -88,7 +97,7 @@ export interface RenderOptions {
   size?: number
   /** WebP quality. Defaults to {@link THUMB_QUALITY}. */
   quality?: number
-  /** Defaults to `'blue'` — see {@link Tone}. */
+  /** Defaults to `'neutral'` — see {@link Tone}. */
   tone?: Tone
   /** For error messages: the md5 or URL these bytes came from. */
   label?: string

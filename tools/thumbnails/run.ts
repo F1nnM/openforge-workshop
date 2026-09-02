@@ -118,7 +118,12 @@ export async function runThumbnails(options: RunOptions): Promise<RunReport> {
   const frame = options.frame ?? options.catalog.sprite.defaultFrame
   const size = options.size ?? THUMB_SIZE
   const quality = options.quality ?? THUMB_QUALITY
-  const tone = options.tone ?? 'blue'
+  // `neutral`, not `blue`, and row P3 changed it. The app's `thumb` filter chain
+  // is regressed against the grey byte `sharp().greyscale()` produces, so a blue
+  // derivative is the wrong input to it — see `Tone` in `render.ts`. This is
+  // also the value `cli.ts` has always passed, so no run's output changes; what
+  // changes is that a library caller no longer stages objects the app mis-tints.
+  const tone = options.tone ?? 'neutral'
   const total = options.picks.length
 
   const outcomes = await mapLimit(

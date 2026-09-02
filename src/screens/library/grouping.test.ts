@@ -62,6 +62,7 @@ function tile(index: number, overrides: Record<string, unknown> = {}): CatalogRe
     file: `tile-${suffix}.stl`,
     bytes: 10_000_000,
     sprite: true,
+    thumb: false,
     family: 'tiles/fixture',
     design: `dfix0${suffix}`,
     name: `Tile ${suffix}`,

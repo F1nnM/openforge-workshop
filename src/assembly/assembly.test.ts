@@ -93,6 +93,7 @@ function fixtureRecord(
     file: `${String(fixtureSeq)}.stl`,
     bytes: extra.bytes ?? 1_000_000,
     sprite: true,
+    thumb: false,
     family: 'tiles/fixture',
     // **Its own design, and that is not cosmetic.** `design` is row A1's
     // aggregation key, so a shared one would collapse every hand-built record

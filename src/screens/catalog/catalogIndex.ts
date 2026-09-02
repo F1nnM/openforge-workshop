@@ -10,7 +10,9 @@
  *     and Zod-validate, measured over the emitted index);
  *   - a {@link SearchEngine} over it (**45 ms** to build the bitset facet index
  *     and the CSR text index);
- *   - de-interned tag lists, for the material a card's swatch reads from.
+ *   - de-interned tag lists, for the material a card's swatch reads from, and
+ *     since row P3 the resolved material itself — four of the five subtrees
+ *     that render `@/ui/thumb` need it and only one of them wanted the tags.
  *
  * All three are pure functions of a build artefact with a version stamp, so they
  * cannot change under a running session. Memoising them at module scope is
@@ -35,6 +37,8 @@ import { useEffect, useState } from 'react'
 
 import type { CatalogFile, CatalogRecord } from '@/catalog'
 import { resolveTags } from '@/catalog'
+import type { MaterialId } from '@/materials'
+import { resolveMaterial } from '@/materials'
 import type { SearchEngine } from '@/search'
 import { createSearchEngine } from '@/search'
 import { loadCatalogIndex, resetCatalogIndexCache } from '@/ui/shell'
@@ -51,12 +55,37 @@ export interface CatalogIndex {
    * strings is the worst case and only reached by scrolling the whole catalog.
    */
   tagsFor(record: CatalogRecord): readonly string[]
+  /**
+   * The material family a record's thumbnail and 3D view are tinted as.
+   *
+   * `resolveMaterial(tagsFor(record), record.file).material`, memoised on the
+   * same map, so the four subtrees that render `@/ui/thumb` from an index — the
+   * catalog grid, the library, the builder's palette and its bill — all agree
+   * and none of them pays twice. Row P3 added it because `TileThumb.material` is
+   * required and those callers had a `CatalogRecord` in hand and no tags.
+   *
+   * **Not `TEXTURE_ROOT_MATERIAL[record.texture]`, which is the shortcut every
+   * one of those callers already had.** Measured over all 8,702 records the two
+   * disagree on **691** (7.9%): `texture` is the root of a tile's *first*
+   * texture tag, so 252 `cave` tiles are really `sandstone`, 257 `towne` tiles
+   * split between `cut_stone` and `wood`, and 85 tiles with no `texture` at all
+   * still resolve through a filename hint or a part fallback. The full tag list
+   * is the input, and this is the one place that has to know it.
+   *
+   * Declared as a **property** and not a method, deliberately: three screens
+   * pass it down as a value (`materialOf={index.materialOf}`), and a method
+   * shorthand there is `@typescript-eslint/unbound-method` — correctly, since a
+   * detached method would lose `this`. It closes over the index instead, so
+   * detaching it is safe and the type says so.
+   */
+  readonly materialOf: (record: CatalogRecord) => MaterialId
 }
 
 function buildIndex(file: CatalogFile): CatalogIndex {
   const engine = createSearchEngine(file)
   const tags = new Map<string, readonly string[]>()
-  return {
+  const materials = new Map<string, MaterialId>()
+  const index: CatalogIndex = {
     file,
     engine,
     tagsFor(record) {
@@ -67,7 +96,16 @@ function buildIndex(file: CatalogFile): CatalogIndex {
       }
       return resolved
     },
+    materialOf: (record) => {
+      let resolved = materials.get(record.id)
+      if (resolved === undefined) {
+        resolved = resolveMaterial(index.tagsFor(record), record.file).material
+        materials.set(record.id, resolved)
+      }
+      return resolved
+    },
   }
+  return index
 }
 
 let pending: Promise<CatalogIndex> | null = null

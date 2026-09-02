@@ -70,6 +70,7 @@ import { Link } from '@tanstack/react-router'
 import { useMemo } from 'react'
 
 import type { CatalogAssets, SpriteSheet, TileId } from '@/catalog'
+import type { CatalogIndex } from '@/screens/catalog'
 import { countLabel, kindLabel, useCatalogIndex } from '@/screens/catalog'
 import { removeFromLibrary, useLibrary } from '@/store'
 import { Button, Chip, Eyebrow, buttonProps } from '@/ui/primitives'
@@ -185,6 +186,7 @@ export function LibraryScreen() {
               items={group.items}
               assets={index.file.assets}
               sheet={index.file.sprite}
+              materialOf={index.materialOf}
             />
           ))}
 
@@ -209,11 +211,15 @@ function LibraryGroupBlock({
   items,
   assets,
   sheet,
+  materialOf,
 }: {
   kind: string
   items: readonly LibraryItem[]
   assets: CatalogAssets
   sheet: SpriteSheet
+  /** `CatalogIndex.materialOf`, threaded rather than resolved per card — it is
+      memoised on the index and this screen re-renders on every add and remove. */
+  materialOf: CatalogIndex['materialOf']
 }) {
   // `!other` is a sentinel, not a word: kept out of the id so the attribute
   // stays a plain slug.
@@ -232,7 +238,13 @@ function LibraryGroupBlock({
       </h2>
       <div className="of-lib-grid">
         {items.map((entry) => (
-          <LibraryCard key={entry.item.design} entry={entry} assets={assets} sheet={sheet} />
+          <LibraryCard
+            key={entry.item.design}
+            entry={entry}
+            assets={assets}
+            sheet={sheet}
+            material={materialOf(entry.preview)}
+          />
         ))}
       </div>
     </section>

@@ -37,6 +37,15 @@ export type { FetchOptions, SheetBytes } from './fetch'
 export { assertSheetExtent, frameRect, sheetExtent } from './geometry'
 export type { FrameRect } from './geometry'
 export {
+  DEFAULT_PROBE_CONCURRENCY,
+  DEFAULT_PROBE_INTERVAL_MS,
+  DEFAULT_PROBE_RETRIES,
+  THUMB_EXTENSION,
+  probeThumbs,
+  thumbCandidates,
+} from './inventory'
+export type { ProbeEvent, ProbeOptions, ProbeOutcome, ProbeReport } from './inventory'
+export {
   MANIFEST_VERSION,
   THUMB_CACHE_CONTROL,
   buildUploadManifest,

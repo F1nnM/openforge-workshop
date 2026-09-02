@@ -1,0 +1,108 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the tile thumbnail's four-and-a-half rules.
+
+   Moved here from `screens/catalog/catalog.css` by row P3, which is the row that
+   gave the well a *second* image geometry and so had a choice between one
+   stylesheet with both and two stylesheets with one each. `TileThumb.tsx`
+   imports this file, so the rules arrive with the component in all five
+   subtrees that render it and no screen has to know they exist.
+
+   `catalog.css` kept them until now because a copy in a second file would be two
+   definitions of one class and a race over which `<style>` Vite emits second.
+   That is still true, and it is why this is a move and not a copy.
+
+   ## What did *not* follow the move, and why the `@import`s are still there
+
+   `library.css` and `panels.css` say they `@import '…/catalog.css'` "for exactly
+   these four rules". Measured against what they actually reference, that is not
+   true of either: the library also takes `.of-empty-title`, `.of-empty-note`,
+   `.of-pending-line`, `.of-pending-short`, `.of-avail` and `.of-avail-strip`,
+   and the panels also take `.of-search-input`. Both imports stay. Only
+   `screens/detail/slots/slots.css` referenced nothing but the thumbnail's rules,
+   and that is the one `@import` this move deletes.
+
+   ## Two sources, two image rules, one frame
+
+   `.of-thumb-frame` is the source-independent half: a square box, and the
+   element the material tint is applied to. The `<img>` inside it is either the
+   2×5 sprite sheet clipped to one frame (`.of-thumb-sheet`) or a 256px square
+   derivative that simply fills it (`.of-thumb-image`). `TileThumb.tsx` chooses
+   one, never both, and carries the whole argument for why crossing them has to
+   be impossible rather than merely avoided.
+
+   Light only. Parchment is the committed direction; see `tokens.css`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* The 4:3 well. `aspect-ratio` and not a height, because `VirtuosoGrid`
+   extrapolates one card's height to the whole scrollbar and a well that resized
+   when its image landed would make the grid jump — see the note at the top of
+   `screens/catalog/catalog.css`. Reserved before either source lands. */
+.of-thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  /* The contract's recurring device: a radial-gradient well behind every
+     thumbnail. */
+  background: radial-gradient(circle at 50% 38%, var(--bg2) 0%, var(--bg3) 66%, #d3c5a6 100%);
+}
+
+/* Square, so neither the sheet's 512px frame nor the 256px derivative is
+   distorted, and the well's gradient stays visible at the sides of a 4:3 card.
+
+   This is also the element `TileThumb` puts the tint `filter` on, and it has no
+   background, border or colour of its own so that filtering it is pixel-identical
+   to filtering the image inside it. For the sheet that is a tenfold saving,
+   because a CSS filter rasterises the element's own box and the sheet's box is
+   ten frames. For the 256px derivative it saves nothing — the image's box *is*
+   this box — and the attachment point stays here anyway, so that the source is
+   the only thing the switch changes. See `TileThumb.tsx`. */
+.of-thumb-frame {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+}
+
+/* The whole 2×5 sheet, scaled so one frame fills the square above, and offset to
+   the requested frame. Percentages on `left`/`top` resolve against the frame
+   box, so `-100%` is exactly one column or one row.
+
+   `max-width: none` is load-bearing, not defensive. Tailwind's Preflight sets
+   `img { max-width: 100% }`, which silently clamps the 500%-wide sheet back to
+   one frame's width and squeezes all ten camera angles into the well — the
+   thumbnail still renders, still has the right aspect ratio, and is wrong. */
+.of-thumb-sheet {
+  position: absolute;
+  left: var(--of-sheet-x, 0%);
+  top: var(--of-sheet-y, 0%);
+  width: calc(var(--of-sheet-cols, 1) * 100%);
+  height: calc(var(--of-sheet-rows, 1) * 100%);
+  max-width: none;
+  max-height: none;
+}
+
+/* The `/thumbs/` derivative: one 256px square, already cropped to frame 0, so
+   there is nothing to clip and no custom property to read. It fills the square
+   frame exactly.
+
+   `object-fit: contain` rather than `cover`, and it is not defensive either: a
+   `cover` on a square in a square is a no-op today, but the derivative's edge is
+   a single number in one place (`MEASURED_THUMB.size`) and a future non-square
+   one would be *cropped* under `cover` and letterboxed under `contain`. Silently
+   cropping a tile's silhouette is the failure mode worth ruling out. */
+.of-thumb-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* The "no render" plate. One live tile of 8,702 has no sheet, and a stale
+   `thumb: true` whose object 404s falls back through the sheet to here. */
+.of-thumb-missing {
+  opacity: 0.72;
+}

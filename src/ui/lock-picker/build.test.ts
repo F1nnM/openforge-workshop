@@ -83,6 +83,7 @@ function catalog(drafts: readonly Draft[]): CatalogFile {
     file: `${draft.design}.${draft.layer}.stl`,
     bytes: 1000 + i,
     sprite: true,
+    thumb: false,
     family: `tiles/x/${draft.design}`,
     design: draft.design,
     name: draft.design,

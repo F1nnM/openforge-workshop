@@ -13,6 +13,7 @@ export interface TestRecord {
   ord: number
   blob: string
   sprite?: boolean
+  thumb?: boolean
   texture?: string
   bytes?: number
 }
@@ -47,6 +48,7 @@ export function testCatalog(options: TestCatalogOptions): CatalogFile {
       file: record.id.slice(record.id.lastIndexOf('/') + 1),
       bytes: record.bytes ?? 1_000_000,
       sprite: record.sprite ?? true,
+      thumb: record.thumb ?? false,
       family: record.id.slice(0, record.id.lastIndexOf('/')),
       design: 'design-1',
       name: 'Test Tile',

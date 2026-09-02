@@ -28,6 +28,7 @@ interface Draft {
   readonly layer: 'base' | 'topper' | 'integral' | 'insert'
   readonly bytes?: number
   readonly sprite?: boolean
+  readonly thumb?: boolean
   readonly name?: string
   readonly foot?: Footprint
   readonly parts?: readonly PartSlot[]
@@ -57,6 +58,7 @@ function catalog(drafts: readonly Draft[]): CatalogFile {
     file: draft.id.slice(draft.id.lastIndexOf('/') + 1),
     bytes: draft.bytes ?? 1000,
     sprite: draft.sprite ?? true,
+    thumb: draft.thumb ?? false,
     family: draft.id.slice(0, draft.id.lastIndexOf('/')),
     design: draft.design,
     name: draft.name ?? 'Test Tile',

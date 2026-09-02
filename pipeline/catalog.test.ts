@@ -1183,6 +1183,73 @@ describeCorpus(title, () => {
     expect(ids).toEqual([...ids].sort())
   })
 
+  /* --------------------------------------------------------- the thumb flag */
+
+  describe('the /thumbs/ flag', () => {
+    it('is false on every record when no inventory says otherwise', () => {
+      // The state of the world: `tools/thumbnails/inventory.ts` HEADed all 8,352
+      // candidate URLs on 2026-09-02 and found nothing, because the backfill is
+      // blocked on R2 write credentials. This build passes no `thumbs` set at
+      // all, which is the same answer arrived at the cheap way.
+      expect(result.file.records.every((record) => !record.thumb)).toBe(true)
+      expect(result.stats.withThumb).toBe(0)
+    })
+
+    it('flips the records whose md5 the inventory names, and only those', () => {
+      const first = result.file.records[0]
+      if (first === undefined) throw new Error('no records')
+      const rebuilt = buildCatalog({
+        rows,
+        manifest: emptyManifest(),
+        fixturesRef: 'test',
+        builtAt: BUILT_AT,
+        thumbs: new Set([first.blob]),
+      })
+      const flipped = rebuilt.file.records.filter((record) => record.thumb)
+      expect(flipped.length).toBeGreaterThan(0)
+      expect(flipped.every((record) => record.blob === first.blob)).toBe(true)
+      expect(rebuilt.stats.withThumb).toBe(flipped.length)
+    }, SLOW_MS)
+
+    it('is keyed on the md5, so every row sharing a mesh agrees', () => {
+      // 171 md5s are shared by 520 rows and the object is content-addressed, so
+      // "does a thumbnail exist" is a property of the blob. A flag keyed on the
+      // id would let two rows of one mesh disagree, and one of them would be
+      // wrong. This is the case that would catch that.
+      const shared = new Map<string, string[]>()
+      for (const record of result.file.records) {
+        const held = shared.get(record.blob) ?? []
+        held.push(record.id)
+        shared.set(record.blob, held)
+      }
+      const multi = [...shared.entries()].filter(([, ids]) => ids.length > 1)
+      expect(multi.length).toBeGreaterThan(100)
+
+      const pick = multi[0]?.[0]
+      if (pick === undefined) throw new Error('no shared blob')
+      const rebuilt = buildCatalog({
+        rows,
+        manifest: emptyManifest(),
+        fixturesRef: 'test',
+        builtAt: BUILT_AT,
+        thumbs: new Set([pick]),
+      })
+      const rows_ = rebuilt.file.records.filter((record) => record.blob === pick)
+      expect(rows_.length).toBeGreaterThan(1)
+      expect(rows_.every((record) => record.thumb)).toBe(true)
+    }, SLOW_MS)
+
+    it('never claims a thumbnail for a tile with no sheet, because the crop comes from one', () => {
+      // Not enforced by the schema — `@/ui/thumb` deliberately handles the
+      // combination — but it is a property of the data today, and a build that
+      // started producing it would mean the inventory had been probed against a
+      // different corpus.
+      const spriteless = result.file.records.filter((record) => !record.sprite)
+      expect(spriteless).toHaveLength(1)
+      expect(spriteless.every((record) => !record.thumb)).toBe(true)
+    })
+  })
+
   /* ------------------------------------------------------------ size budget */
 
   it('fits the 500 KB brotli budget, and reports what it actually costs', () => {

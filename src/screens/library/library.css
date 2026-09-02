@@ -11,15 +11,13 @@
 
    ## Why this file imports the catalog's
 
-   The library reuses `TileThumb` (see `LibraryCard.tsx`), and the sprite-sheet
-   rules that component depends on — `.of-thumb`, `.of-thumb-frame`, and the
-   `max-width: none` on `.of-thumb-sheet` without which Tailwind's Preflight
-   squeezes all ten camera angles into the well — live in `../catalog/
-   catalog.css`. Restating them here would mean two definitions of one class, and
-   whichever `<style>` Vite emitted second would win. Importing is what keeps the
-   thumbnail's styling in the same file as the component that owns it. The same
-   import brings `.of-empty-title` / `.of-empty-note` and the pending lines, which
-   are shared for the same reason.
+   Not for the thumbnail, since row P3: `.of-thumb`, `.of-thumb-frame` and the
+   image rules moved to `../../ui/thumb/thumb.css`, which `TileThumb.tsx` imports
+   itself. The import stays for what this screen genuinely borrows from the
+   catalog's stylesheet — `.of-empty-title` / `.of-empty-note`, the pending
+   lines, and `.of-avail` / `.of-avail-strip`, since both screens render the same
+   `AvailabilityStrip`. Restating any of those here would mean two definitions of
+   one class and a race over which `<style>` Vite emits second.
 
    Light only. There is no dark block, for the same reason there is none in
    tokens.css: Parchment is the committed direction.

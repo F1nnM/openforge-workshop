@@ -1,0 +1,14 @@
+{
+  "note": "Row P3. Which blobs have a /thumbs/ object, measured by HEAD against the public hostname. Re-probe with `npm run thumbs -- --inventory`, then rebuild the index with `npm run import:catalog`. See pipeline/thumbs.ts.",
+  "version": 1,
+  "probed": "2026-09-02T15:44:33.290Z",
+  "base": "https://objects.openforge.tools/thumbs",
+  "extension": ".webp",
+  "counted": {
+    "probed": 8352,
+    "present": 0,
+    "absent": 8352,
+    "failed": 0
+  },
+  "present": []
+}

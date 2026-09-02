@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { TileAggregate } from '../src/catalog/aggregate'
 import { buildAggregateIndex, selectVariant } from '../src/catalog/aggregate'
+import { SCHEMA_VERSION } from '../src/catalog/schema'
 
 import { assertAggregation, measureAggregation } from './aggregate'
 import { buildCatalog } from './build'
@@ -30,6 +31,7 @@ import { LOCK_SYSTEMS } from './facets'
 import type { FixtureRow } from './fixtures'
 import { fixturesDir, loadFixtureRows } from './fixtures'
 import { emptyManifest } from './ordinals'
+import { PIPELINE_VERSION } from './version'
 
 const FIXTURES_DIR = fixturesDir()
 const hasFixtures = existsSync(FIXTURES_DIR) && readdirSync(FIXTURES_DIR).some((name) => name.endsWith('.json'))
@@ -255,10 +257,16 @@ describeCorpus(title, () => {
   })
 
   it('leaves the manifest and the version stamp alone', () => {
-    // Aggregation adds no field and no key, so a schema-3 index is fully readable
-    // under it — which is what the stamp is supposed to mean.
-    expect(result.file.version.schema).toBe(3)
-    expect(result.file.version.pipeline).toBe(1)
+    // Aggregation adds no field and no key, so an index is fully readable under
+    // it — which is what the stamp is supposed to mean. Pinned against
+    // `SCHEMA_VERSION` rather than against the literal `3` this row inherited:
+    // row P3 took the schema to 4 by adding `CatalogRecord.thumb`, which is a
+    // field and *is* announced, and a literal here read as though aggregation
+    // had announced it. What A1's claim needs is that this build's stamp is the
+    // module's, unmodified, and `pipeline/version.ts` is where the two numbers
+    // are argued about.
+    expect(result.file.version.schema).toBe(SCHEMA_VERSION)
+    expect(result.file.version.pipeline).toBe(PIPELINE_VERSION)
     expect(result.file.records).toHaveLength(8702)
     // Every record still carries its own ordinal; nothing was renumbered.
     expect(new Set(result.file.records.map((record) => record.ord)).size).toBe(8702)
