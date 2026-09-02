@@ -3,9 +3,20 @@
  *
  * This module exists because the first draft of the plan put the cost of the
  * lock choice at **0.1 percentage points** and was wrong by two orders of
- * magnitude. The real spread is 40.2 points. A picker that presented three
- * options without those numbers would be presenting a 40-point decision as a
- * matter of taste.
+ * magnitude. The spread in *reachability* is 40.2 points. A picker that presented
+ * three options without those numbers would be presenting a 40-point decision as
+ * a matter of taste.
+ *
+ * ## This is one of the two questions, and no longer the headline
+ *
+ * Reachability is a property of the archive's tags. What a user experiences is
+ * **buildability** — whether the app can resolve a complete printable assembly,
+ * which a topper plus an auto-inserted base satisfies in systems the tile itself
+ * never mentions. `build.ts` measures that, calls this module for the archive
+ * reading and hangs it on `LockBuild.reach`; the picker draws buildability and
+ * prints reachability beside it. Nothing here changed for that, and nothing here
+ * should: the definitions below are the ones `docs/verify-catalog-facts.py`
+ * implements, and their whole value is being the same definitions.
  *
  * ## Nothing here is a constant
  *
@@ -136,7 +147,7 @@ function locksOf(conn: readonly string[]): Set<LockSystem> {
  *
  * One pass over the records, so it is cheap enough to run on the real index
  * (8,702 records) without ceremony — but it is a pure function of a build
- * artefact, so `useLockReach` memoises it anyway.
+ * artefact, so `useLockBuild` memoises the pair anyway.
  *
  * An **empty catalog** returns zero designs and zero shares rather than dividing
  * by zero. That is not a hypothetical: it is what a component test renders
