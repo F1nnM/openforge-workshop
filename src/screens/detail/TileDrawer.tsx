@@ -1,52 +1,95 @@
 /**
- * The tile inspector — design-contract.md §2.5.
+ * The tile inspector — design-contract.md §2.5, over aggregates.
  *
  * A 442px right-hand drawer over the scrim, opened by `?tile={ordinal}` on
  * `/catalog` and containing, in the mock's order: a mono accent eyebrow, the
  * 288px preview well, a serif title with its family subtitle, the two actions,
- * the 2×2 spec grid, the storage address, the tag chips, and the family variant
- * buttons.
+ * the 2x2 spec grid, the storage address, the tag chips, and — row A5 — the
+ * variants table.
  *
- * ## The drawer is search state, and its history rules are not this file's
+ * ## The drawer shows an item, and the URL names a file
  *
- * `src/routes/tileDrawer.ts` owns them, and this component calls it rather than
- * navigating by hand — the whole reason that module exists is that a plain
- * `navigate({ tile: null })` pushes a third entry and makes Back re-open the
- * drawer the user just dismissed. So: opening pushed (the catalog card's
- * `<Link>`), a variant swap **replaces** via `showTileInDrawer`, and every close
- * path — `Escape`, the backdrop, the ✕ — goes through `closeTileDrawer`.
+ * Row A1 made the catalog **3,822 aggregates over 8,702 files**, so those are two
+ * different objects and `src/routes/tileAddress.ts` is the join. This component
+ * does not re-derive it: it calls {@link resolveTileTarget} and switches on the
+ * three states that function publishes.
  *
- * ## Where the record comes from
+ *   - `closed` — no `tile` param. The drawer is shut.
+ *   - `unknown` — a well-formed ordinal in no index this session loaded. A rotted
+ *     or forward-dated link, and a **first-class state**: ordinals are
+ *     append-only and never reissued, so a shared link can outlive its tile.
+ *     Rendering it as "closed" would leave `?tile=` in the address bar with an
+ *     empty screen behind it. Before A4 this case was a miss on a local map;
+ *     it now arrives typed, and the panel it renders is the same one.
+ *   - `open` — the aggregate, the variant the URL named, and `canonical`.
+ *
+ * ## What `canonical` decides
+ *
+ * A4's flag is `true` when the URL named `variants[0]`, the address holder — and
+ * a link to the address holder cannot be told apart from a link to the item. So:
+ *
+ *   - **`canonical: true`** — the link asked for the item. The build's lock
+ *     preference may apply, and it does: {@link selectVariant} picks the file to
+ *     show. This matters on **1,612 aggregates (42.2%)** under an `openlock`
+ *     preference, where the pick is not `variants[0]`.
+ *   - **`canonical: false`** — the link asked for this print. `target.variant` is
+ *     shown exactly, no preference applied, because a link that silently showed
+ *     a different file than the one it addressed would make its number
+ *     decorative.
+ *
+ * The URL is **never rewritten** to the preferred variant. Doing so would consume
+ * the `canonical` signal — the next render could no longer tell an item link from
+ * a file link — and would freeze a preference into a URL the user may share. The
+ * variants table states which of the two happened instead.
+ *
+ * `bottom` is passed only once the user has actually chosen a lock
+ * (`useLockChosen`). The default is `openlock` and applying an unchosen default
+ * would reorder the corpus for a preference nobody expressed; with `bottom`
+ * absent, A1's rank still prefers one part over two, which is preference-free and
+ * is what aggregation is for.
+ *
+ * ## Where the record comes from, and the map that is gone
  *
  * `catalog` is a prop, and the catalog screen passes the index it has already
  * loaded. Without it the drawer loads its own copy through the shell's memoised
  * `loadCatalogIndex()`, and only once a tile is actually open — the index is
  * 5.6 MB, and a mounted-but-closed drawer has no business fetching it.
  *
- * A `?tile=` that names no record is a first-class state, not an error: ordinals
- * are append-only but retired ordinals are never reissued, so a shared link can
- * outlive its tile. That renders an explicit panel rather than an empty drawer or
- * a thrown boundary.
+ * This file used to build a `Map<number, CatalogRecord>` over all 8,702 records
+ * on **every open**. It is gone. Resolution takes A1's derived index, whose
+ * `byOrdinal` and `byDesign` maps are built once per catalog rather than once per
+ * open — and `aggregates` is an accepted prop precisely so a caller holding a
+ * `SearchEngine` can pass `engine.aggregates` and pay for the derivation zero
+ * extra times (it measures 86.8ms over the real corpus, which is not a cost to
+ * pay twice).
  *
- * ## "Use in builder →"
+ * The one thing still read off a `CatalogRecord` is **`tags`**. Everything else
+ * the drawer renders is on the aggregate or the variant: A1 measured variance
+ * within an aggregate at **0** for `name`, `texture`, `build`, `kinds`,
+ * `sizeCode`, `rotStep` and `foot`, and `bytes`, `blob`, `file` and `family` are
+ * per-variant fields. So the lookup is a single scan for a single record on a
+ * variant swap, retaining nothing — see {@link recordOf} for why that is not a
+ * map.
  *
- * The contract's third clause — "pre-selects the tile" — has no channel in v1
- * that this PR owns: the builder route carries the facet params and nothing else
- * (`src/routes/routeTree.tsx`), and the store holds a library and placements but
- * no selection (`src/store/schema.ts`). Both belong to other rows. So the action
- * does what it can honestly do: it adds the tile to the library, navigates to the
- * builder, and seeds the palette's search with the tile's own name, which puts it
- * at the top of the palette PR 18 builds. When a selection channel lands, this is
- * the one call site to change.
+ * ## "Use in builder"
+ *
+ * The contract's third clause — "pre-selects the tile" — still has no channel:
+ * the builder route carries the facet params and nothing else, and the store
+ * holds a library and placements but no selection. Row G5 owns that. So the
+ * action does what it can honestly do: it adds the **shown variant** to the
+ * library, navigates to the builder, and seeds the palette's search with the
+ * item's name. Adding the variant and not the address holder is the point — the
+ * user is looking at a specific print, and that is the file they meant.
  */
 import { getRouteApi, useRouter } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 
-import type { CatalogFile, CatalogRecord } from '@/catalog'
-import { resolveTags } from '@/catalog'
-import { closeTileDrawer, showTileInDrawer } from '@/routes'
+import { PRINT_OPTIONS } from '@/assembly'
+import type { AggregateIndex, CatalogFile, CatalogRecord, TileAggregate, TileId, TileVariant } from '@/catalog'
+import { buildAggregateIndex, resolveTags, selectVariant } from '@/catalog'
+import { closeTileDrawer, resolveTileTarget } from '@/routes'
 import { MAX_QUERY_LENGTH } from '@/search'
-import { addToLibrary, toggleLibrary, useIsInLibrary } from '@/store'
+import { addToLibrary, toggleLibrary, useIsInLibrary, useLockChosen, useLockSystem } from '@/store'
 import { Chip, Drawer, Eyebrow } from '@/ui/primitives'
 import { loadCatalogIndex } from '@/ui/shell'
 
@@ -63,7 +106,8 @@ import {
 } from './labels'
 import { SpriteRotator } from './SpriteRotator'
 import { spriteSheetUrl } from './spriteFrames'
-import { familyVariants } from './variants'
+import type { VariantChoice } from './VariantsTable'
+import { VariantsTable } from './VariantsTable'
 
 import './detail.css'
 
@@ -77,6 +121,16 @@ export interface TileDrawerProps {
    * it and the drawer loads its own — see the docblock.
    */
   catalog?: CatalogFile
+  /**
+   * A1's derived aggregate layer, when the caller already has one.
+   *
+   * Optional and preferred. `buildAggregateIndex` is a pure function of the
+   * catalog and measures 86.8ms over the real corpus, so a caller holding a
+   * `SearchEngine` should pass `engine.aggregates` rather than let the drawer
+   * derive a second copy. Omitted, the drawer derives its own, memoised on the
+   * file.
+   */
+  aggregates?: AggregateIndex
 }
 
 /* ------------------------------------------------------------------ the index */
@@ -106,25 +160,50 @@ function useIndex(provided: CatalogFile | undefined, wanted: boolean): CatalogFi
   return provided ?? loaded
 }
 
+/**
+ * The record behind a variant — a scan, and deliberately not a map.
+ *
+ * Read for exactly one field, `tags`, and for exactly one variant at a time: the
+ * drawer's other facts are all on the aggregate or the variant. A
+ * `Map<TileId, CatalogRecord>` would retain 8,702 entries to answer one question
+ * per variant swap, which is the shape of the map row A4 asked this file to
+ * retire. `ord === index in records` holds on all 8,702 records today but the
+ * schema forbids relying on it — ordinals retire and are never reissued, so
+ * density is a coincidence of the current corpus and not a contract.
+ */
+function recordOf(catalog: CatalogFile, id: TileId): CatalogRecord | undefined {
+  return catalog.records.find((record) => record.id === id)
+}
+
 /* -------------------------------------------------------------------- drawer */
 
-export function TileDrawer({ catalog }: TileDrawerProps) {
+export function TileDrawer({ catalog, aggregates }: TileDrawerProps) {
   const { tile } = catalogApi.useSearch()
   const router = useRouter()
   const index = useIndex(catalog, tile !== null)
 
-  const byOrdinal = useMemo(() => {
-    const map = new Map<number, CatalogRecord>()
-    for (const record of index?.records ?? []) map.set(record.ord, record)
-    return map
-  }, [index])
+  // Memoised on the file, so a drawer that opens twenty times derives once — and
+  // skipped entirely when the caller handed us an index it had already built.
+  const derived = useMemo(
+    () => (aggregates ?? (index === undefined ? undefined : buildAggregateIndex(index))),
+    [aggregates, index],
+  )
 
-  const record = tile === null ? undefined : byOrdinal.get(tile)
+  const target = useMemo(
+    () => (derived === undefined ? undefined : resolveTileTarget(derived, tile)),
+    [derived, tile],
+  )
 
+  const open = target?.state === 'open' ? target : undefined
+  // Off the **aggregate**, not off a record: A1 measured `texture` and `kinds`
+  // variance within an aggregate at 0, so both are properties of the item and
+  // reading them from a variant's record would be a scan for an answer that
+  // cannot differ — and would describe the URL's variant while the body
+  // describes the shown one.
   const eyebrow =
-    record === undefined
+    open === undefined
       ? 'Tile detail'
-      : `${textureSetLabel(record)} · ${componentLabel(record)}`
+      : `${textureSetLabel(open.aggregate)} · ${componentLabel(open.aggregate)}`
 
   return (
     <Drawer
@@ -133,16 +212,21 @@ export function TileDrawer({ catalog }: TileDrawerProps) {
       onOpenChange={(next) => {
         if (!next) void closeTileDrawer(router)
       }}
-      title={record?.name ?? 'Tile detail'}
+      title={open?.aggregate.name ?? 'Tile detail'}
       titleHidden
       description={<Eyebrow tone="accent">{eyebrow}</Eyebrow>}
       closeLabel="Close tile detail"
     >
-      {record !== undefined && index !== undefined ? (
-        <TileDetail catalog={index} record={record} />
+      {open !== undefined && index !== undefined ? (
+        <TileDetail
+          catalog={index}
+          aggregate={open.aggregate}
+          urlVariant={open.variant}
+          canonical={open.canonical}
+        />
       ) : (
         <div className="of-detail-state">
-          {index === undefined ? (
+          {index === undefined || target === undefined ? (
             <p className="of-shimmer">Loading the catalog index…</p>
           ) : (
             <p>
@@ -159,27 +243,68 @@ export function TileDrawer({ catalog }: TileDrawerProps) {
 /* -------------------------------------------------------------------- content */
 
 /**
- * The drawer's body, split out so the record-dependent hooks —
- * `useIsInLibrary`, and the memos over the index — are only called when there is
- * a record to call them about.
+ * Which variant to show, and how that was decided.
+ *
+ * The whole of `canonical`'s consequence, in one hook so the rule is stated once.
+ * `preference.bottom` is set only when the user has chosen a lock — see the
+ * module docblock.
  */
-function TileDetail({ catalog, record }: { catalog: CatalogFile; record: CatalogRecord }) {
+function useShownVariant(
+  aggregate: TileAggregate,
+  urlVariant: TileVariant,
+  canonical: boolean,
+): { readonly shown: TileVariant; readonly choice: VariantChoice } {
+  const lock = useLockSystem()
+  const chosen = useLockChosen()
+
+  return useMemo(() => {
+    if (!canonical) return { shown: urlVariant, choice: { by: 'url' } as const }
+
+    const selection = selectVariant(aggregate, {
+      ...(chosen ? { bottom: lock } : {}),
+      options: PRINT_OPTIONS,
+    })
+    return {
+      shown: selection.variant,
+      choice: { by: 'preference', lock, chosen, optionTie: selection.optionTie } as const,
+    }
+  }, [aggregate, urlVariant, canonical, lock, chosen])
+}
+
+/**
+ * The drawer's body, split out so the item-dependent hooks are only called when
+ * there is an item to call them about.
+ */
+function TileDetail({
+  catalog,
+  aggregate,
+  urlVariant,
+  canonical,
+}: {
+  catalog: CatalogFile
+  aggregate: TileAggregate
+  urlVariant: TileVariant
+  canonical: boolean
+}) {
   const router = useRouter()
-  const inLibrary = useIsInLibrary(record.id)
+  const { shown, choice } = useShownVariant(aggregate, urlVariant, canonical)
+  const inLibrary = useIsInLibrary(shown.id)
 
-  const tags = useMemo(() => resolveTags(catalog, record), [catalog, record])
-  const variants = useMemo(() => familyVariants(catalog, record), [catalog, record])
+  const record = useMemo(() => recordOf(catalog, shown.id), [catalog, shown.id])
+  const tags = useMemo(() => (record === undefined ? [] : resolveTags(catalog, record)), [catalog, record])
 
-  const footprint = footprintLabel(record, tags)
+  // Every one of these is hoisted or per-variant — see the docblock. `foot` and
+  // `sizeCode` come off the aggregate because A1 measured their variance at 0.
+  const footprint = footprintLabel({ foot: aggregate.foot, sizeCode: aggregate.sizeCode }, tags)
   const height = heightLabel(tags)
-  const address = storageAddress(catalog.assets, record)
+  const address = storageAddress(catalog.assets, shown)
 
   return (
     <>
       <SpriteRotator
-        name={record.name}
+        name={aggregate.name}
         sheet={catalog.sprite}
-        sheetUrl={record.sprite ? spriteSheetUrl(catalog.assets, record.blob) : null}
+        sheetUrl={shown.sprite ? spriteSheetUrl(catalog.assets, shown.blob) : null}
       />
 
       {/*
@@ -189,9 +314,9 @@ function TileDetail({ catalog, record }: { catalog: CatalogFile; record: Catalog
         heading in the accessibility tree. A second heading with the same text
         would put the tile's name in the rotor twice and announce it twice.
       */}
-      <p className="of-detail-title">{record.name}</p>
+      <p className="of-detail-title">{aggregate.name}</p>
       <p className="of-detail-family">
-        <code>{familyTrail(record)}</code> family
+        <code>{familyTrail(shown)}</code> family
       </p>
 
       <div className="of-detail-actions">
@@ -200,7 +325,7 @@ function TileDetail({ catalog, record }: { catalog: CatalogFile; record: Catalog
           className="of-detail-action"
           aria-pressed={inLibrary}
           onClick={() => {
-            toggleLibrary(record.id)
+            toggleLibrary(shown.id)
           }}
         >
           {inLibrary ? '✓ In library' : '+ Add to library'}
@@ -210,10 +335,10 @@ function TileDetail({ catalog, record }: { catalog: CatalogFile; record: Catalog
           className="of-detail-action"
           data-variant="ghost"
           onClick={() => {
-            addToLibrary(record.id)
+            addToLibrary(shown.id)
             void router.navigate({
               to: '/builder',
-              search: { q: record.name.slice(0, MAX_QUERY_LENGTH) },
+              search: { q: aggregate.name.slice(0, MAX_QUERY_LENGTH) },
             })
           }}
         >
@@ -224,8 +349,8 @@ function TileDetail({ catalog, record }: { catalog: CatalogFile; record: Catalog
       <dl className="of-detail-specs">
         <Spec label="Footprint" value={footprint} unit={unitFor(footprint.basis)} />
         <Spec label="Height" value={height} />
-        <Spec label="Build system" value={buildLabel(record)} />
-        <Spec label="File" value={fileLabel(record)} />
+        <Spec label="Build system" value={buildLabel(aggregate)} />
+        <Spec label="File" value={fileLabel(shown)} />
       </dl>
 
       <Eyebrow as="span" className="of-detail-section">
@@ -241,6 +366,8 @@ function TileDetail({ catalog, record }: { catalog: CatalogFile; record: Catalog
         {address}
       </a>
 
+      <VariantsTable aggregate={aggregate} shown={shown} choice={choice} />
+
       <Eyebrow as="span" className="of-detail-section">
         Tags
       </Eyebrow>
@@ -251,31 +378,6 @@ function TileDetail({ catalog, record }: { catalog: CatalogFile; record: Catalog
           </Chip>
         ))}
       </div>
-
-      {variants.length === 0 ? null : (
-        <>
-          <Eyebrow as="span" className="of-detail-section">
-            Other sizes in this family
-          </Eyebrow>
-          <div className="of-detail-variants">
-            {variants.map((variant) => (
-              <button
-                key={variant.ord}
-                type="button"
-                className="of-detail-variant"
-                title={variant.name}
-                onClick={() => {
-                  // Replaces, so Back still closes the drawer rather than
-                  // walking back through every variant looked at.
-                  void showTileInDrawer(router, variant.ord)
-                }}
-              >
-                {variant.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
     </>
   )
 }

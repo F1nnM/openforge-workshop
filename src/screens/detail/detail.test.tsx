@@ -32,13 +32,13 @@ import {
   createRoute,
   createRouter,
 } from '@tanstack/react-router'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { CatalogFile } from '@/catalog'
 import { openTileDrawer } from '@/routes'
 import { parseCompactSearch, stringifyCompactSearch, validateCatalogSearch, validateFacetSearch } from '@/search'
-import { clearPersistedWorkshopState, resetWorkshop, useLibraryCount } from '@/store'
+import { clearPersistedWorkshopState, resetWorkshop, setLockSystem, useLibraryCount } from '@/store'
 
 import { TileDrawer } from './TileDrawer'
 
@@ -54,6 +54,16 @@ const ORD = {
   coded: 22,
   shapeless: 23,
   noSprite: 24,
+  /**
+   * The three files of one item — row A5's whole subject.
+   *
+   * `archTopper` is the group's lowest ordinal, so it is the address holder and
+   * a `?tile=30` link is `canonical`. The other two are not, so a link to either
+   * of them must show that file and apply no preference.
+   */
+  archTopper: 30,
+  archIntegral: 31,
+  archTopless: 32,
 } as const
 
 const TAGS = [
@@ -64,14 +74,27 @@ const TAGS = [
   'size|width|1',
   'component|door',
   'connection|openlock',
+  // Row A5's vocabulary. `openforge` underneath is the base declaration and is
+  // deliberately not rendered as a join; `side|dragonlock` is neighbour joinery
+  // on a file that still needs a base; `openlock|topless` is a print option on a
+  // variant that needs none.
+  'connection|openforge',
+  'connection|side|dragonlock',
+  'connection|openlock|topless',
+  'shape|arch',
 ]
 
-function tile(overrides: Record<string, unknown>): Record<string, unknown> {
+/**
+ * One record. `design` is required rather than defaulted, because after A1 the
+ * design key **is** the item and a fixture that let eight records share one by
+ * accident would collapse to a single eight-variant aggregate whose name,
+ * footprint and texture all varied — which A1's own pipeline check forbids.
+ */
+function tile(overrides: Record<string, unknown> & { design: string }): Record<string, unknown> {
   return {
     blob: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
     bytes: 1_335_084,
     sprite: true,
-    design: 'd51024cbbcd6f',
     kinds: ['floor'],
     conn: ['openlock'],
     layer: 'topper',
@@ -102,6 +125,7 @@ const CATALOG = CatalogFile.parse({
     tile({
       id: 'tiles/cave/floors/floor/cave%floor.1x1.stl',
       ord: ORD.floor1x1,
+      design: 'd-floor-1x1',
       file: 'cave%floor.1x1.stl',
       family: 'tiles/cave/floors/floor',
       name: 'Cave Floor 1x1',
@@ -111,6 +135,7 @@ const CATALOG = CatalogFile.parse({
     tile({
       id: 'tiles/cave/floors/floor/cave%floor.2x2.stl',
       ord: ORD.floor2x2,
+      design: 'd-floor-2x2',
       file: 'cave%floor.2x2.stl',
       family: 'tiles/cave/floors/floor',
       name: 'Cave Floor 2x2',
@@ -119,6 +144,7 @@ const CATALOG = CatalogFile.parse({
     tile({
       id: 'tiles/cave/floors/floor/cave%floor.1x2.stl',
       ord: ORD.floor1x2,
+      design: 'd-floor-1x2',
       file: 'cave%floor.1x2.stl',
       family: 'tiles/cave/floors/floor',
       name: 'Cave Floor 1x2',
@@ -127,6 +153,7 @@ const CATALOG = CatalogFile.parse({
     tile({
       id: 'tiles/cave/walls/wall/cave%wall.2x.stl',
       ord: ORD.wall,
+      design: 'd-wall',
       file: 'cave%wall.2x.stl',
       family: 'tiles/cave/walls/wall',
       name: 'Cave Wall 2x Low',
@@ -134,10 +161,14 @@ const CATALOG = CatalogFile.parse({
       // `shape|wall|low` — the height lookup's single-qualifier branch.
       tags: [1, 3],
       foot: { shape: 'wall', length: 2 },
+      // A one-file item that still declares an accessory slot, so the slot
+      // section's singular wording is exercised rather than assumed.
+      config: { parts: [{ name: 'torch', tags: { require: [{ tag: 'component|torch' }] } }] },
     }),
     tile({
       id: 'tiles/cave/walls/curve/cave%curve.2r90.stl',
       ord: ORD.arc,
+      design: 'd-arc',
       file: 'cave%curve.2r90.stl',
       family: 'tiles/cave/walls/curve',
       name: 'Cave Curve 2r90',
@@ -146,6 +177,7 @@ const CATALOG = CatalogFile.parse({
     tile({
       id: 'tiles/cave/misc/coded/cave%coded.stl',
       ord: ORD.coded,
+      design: 'd-coded',
       file: 'cave%coded.stl',
       family: 'tiles/cave/misc/coded',
       name: 'Cave Coded Piece',
@@ -155,6 +187,7 @@ const CATALOG = CatalogFile.parse({
     tile({
       id: 'tiles/cave/misc/curved/cave%curved.stl',
       ord: ORD.shapeless,
+      design: 'd-shapeless',
       file: 'cave%curved.stl',
       family: 'tiles/cave/misc/curved',
       name: 'Cave Curved Insert',
@@ -164,6 +197,7 @@ const CATALOG = CatalogFile.parse({
     tile({
       id: 'tiles/aztlan/separate_walls/column/aztlan%column.stl',
       ord: ORD.noSprite,
+      design: 'd-column',
       file: 'aztlan%column.stl',
       family: 'tiles/aztlan/separate_walls/column',
       name: 'Aztlan Column T',
@@ -173,6 +207,61 @@ const CATALOG = CatalogFile.parse({
       texture: undefined,
       foot: { shape: 'none' },
       tags: [5],
+    }),
+
+    /* ------------------------------------------------- one item, three files */
+
+    tile({
+      id: 'tiles/cave/arches/arch/openforge/cave%arch.2x.openforge.stl',
+      ord: ORD.archTopper,
+      design: 'd-arch',
+      file: 'cave%arch.2x.openforge.stl',
+      family: 'tiles/cave/arches/arch/openforge',
+      name: 'Cave Arch 2x',
+      kinds: ['wall'],
+      layer: 'topper',
+      bytes: 2_100_000,
+      // `openforge` underneath plus `side|dragonlock`: needs a base, and joins
+      // its neighbours in dragonlock.
+      tags: [3, 7, 8, 10],
+      foot: { shape: 'wall', length: 2 },
+      // A `base` slot, which is the base match and must NOT be listed as an
+      // accessory, and a `torch` slot, which must be — and which only this file
+      // declares, so its provenance is the interesting case.
+      config: {
+        parts: [
+          { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
+          { name: 'torch', optional: true, tags: { require: [{ tag: 'component|torch' }] } },
+        ],
+      },
+    }),
+    tile({
+      id: 'tiles/cave/arches/arch/openlock/cave%arch.2x.openlock.stl',
+      ord: ORD.archIntegral,
+      design: 'd-arch',
+      file: 'cave%arch.2x.openlock.stl',
+      family: 'tiles/cave/arches/arch/openlock',
+      name: 'Cave Arch 2x',
+      kinds: ['wall'],
+      layer: 'integral',
+      bytes: 2_400_000,
+      tags: [3, 6, 10],
+      foot: { shape: 'wall', length: 2 },
+    }),
+    tile({
+      id: 'tiles/cave/arches/arch/openlock/cave%arch.2x.openlock.topless.stl',
+      ord: ORD.archTopless,
+      design: 'd-arch',
+      file: 'cave%arch.2x.openlock.topless.stl',
+      family: 'tiles/cave/arches/arch/openlock',
+      name: 'Cave Arch 2x',
+      kinds: ['wall'],
+      layer: 'integral',
+      // The smallest of the three, which is exactly why a byte tie-break must
+      // not be allowed to read as a recommendation: `topless` has no top surface.
+      bytes: 900_000,
+      tags: [3, 9, 10],
+      foot: { shape: 'wall', length: 2 },
     }),
   ],
 })
@@ -336,28 +425,86 @@ describe('opening and closing', () => {
 
 /* -------------------------------------------------------------- the variants */
 
-describe('family variants', () => {
-  it('lists the other distinct sizes in the family, and not the tile itself', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+describe('the variants table', () => {
+  const table = () => within(drawer()).getByRole('table')
+  const bodyRows = () => within(table()).getAllByRole('row').slice(1)
 
-    const variants = within(drawer()).getByRole('button', { name: '2 × 2' })
-    expect(variants).toBeInTheDocument()
-    expect(within(drawer()).getByRole('button', { name: '1 × 2' })).toBeInTheDocument()
-    expect(within(drawer()).queryByRole('button', { name: '1 × 1' })).toBeNull()
+  it('discloses every file of the item, with nothing behind a control', async () => {
+    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+
+    expect(within(drawer()).getByText(/How to print this/)).toBeInTheDocument()
+    // Three files, three rows. No accordion, no summary, no "show more".
+    expect(bodyRows()).toHaveLength(3)
+    expect(drawer().querySelector('details')).toBeNull()
+    expect(within(drawer()).queryByRole('button', { name: /show (more|all)|expand/i })).toBeNull()
+
+    // Each row names its own file — the identity, since two of the three agree
+    // on layer and system.
+    for (const file of [
+      'cave%arch.2x.openforge.stl',
+      'cave%arch.2x.openlock.stl',
+      'cave%arch.2x.openlock.topless.stl',
+    ]) {
+      expect(within(table()).getByText(file)).toBeInTheDocument()
+    }
   })
 
-  it('swapping the subject replaces, so Back still closes the drawer', async () => {
-    const router = await renderAt('/catalog')
-    await open(router, ORD.floor1x1)
+  it('claims a part count and states that size is a download, not filament', async () => {
+    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
 
-    for (const label of ['2 × 2', '1 × 2']) {
-      await act(async () => {
-        fireEvent.click(within(drawer()).getByRole('button', { name: label }))
-        await Promise.resolve()
-      })
-    }
-    expect(openTile(router)).toBe(ORD.floor1x2)
-    expect(titleOf('Cave Floor 1x2')).toBeInTheDocument()
+    // The topper is two parts; both integrals are one.
+    expect(within(table()).getByText('2 parts')).toBeInTheDocument()
+    expect(within(table()).getAllByText('1 part')).toHaveLength(2)
+
+    // The caption says what the bytes are, in as many words.
+    const caption = table().querySelector('caption')?.textContent ?? ''
+    expect(caption).toMatch(/not filament/i)
+    expect(caption).toMatch(/no print time/i)
+
+    // And nowhere does the table compare two sizes or claim a saving — the
+    // whole point of the row. The topless file is the smallest of the three.
+    const text = table().textContent ?? ''
+    expect(text).toContain('2.1 MB')
+    expect(text).toContain('900 KB')
+    expect(text).not.toMatch(/saves?|smaller|less filament|%\s*(less|smaller)/i)
+  })
+
+  it('names the connection systems by face, and never openforge underneath', async () => {
+    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+
+    // The topper's real joinery is dragonlock on its sides.
+    expect(within(table()).getByText('DragonLock')).toBeInTheDocument()
+    expect(within(table()).getAllByText('sides').length).toBeGreaterThan(0)
+    // Its underside declares `openforge`, which is the base declaration and is
+    // carried by "2 parts" rather than advertised as a connector.
+    expect(within(table()).queryByText('OpenForge')).toBeNull()
+
+    // The integrals lock underneath, which is the stronger claim.
+    expect(within(table()).getAllByText('OpenLOCK')).toHaveLength(2)
+    expect(within(table()).getAllByText('underneath')).toHaveLength(2)
+    // `topless` is a print option, shown as itself rather than as a discount.
+    expect(within(table()).getByText('topless')).toBeInTheDocument()
+  })
+
+  it('lets the user choose a variant, and swapping replaces so Back still closes', async () => {
+    const router = await renderAt('/catalog')
+    await open(router, ORD.archTopper)
+
+    await act(async () => {
+      fireEvent.click(within(drawer()).getByRole('button', { name: /^Show the 2 parts print/ }))
+      await Promise.resolve()
+    })
+    expect(openTile(router)).toBe(ORD.archTopper)
+
+    await act(async () => {
+      fireEvent.click(
+        within(drawer()).getByRole('button', {
+          name: /^Show the 1 part print, cave%arch\.2x\.openlock\.topless\.stl/,
+        }),
+      )
+      await Promise.resolve()
+    })
+    expect(openTile(router)).toBe(ORD.archTopless)
 
     // Two variants browsed, and still exactly one entry to consume.
     await act(async () => {
@@ -368,9 +515,132 @@ describe('family variants', () => {
     expect(router.history.canGoBack()).toBe(false)
   })
 
-  it('shows no variant section for a family with one size', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.coded)}`)
-    expect(within(drawer()).queryByText('Other sizes in this family')).toBeNull()
+  it('marks the row it is showing, and only that one', async () => {
+    await renderAt(`/catalog?tile=${String(ORD.archTopless)}`)
+
+    const current = bodyRows().filter((row) => row.getAttribute('aria-current') === 'true')
+    expect(current).toHaveLength(1)
+    expect(current[0]).toHaveTextContent('cave%arch.2x.openlock.topless.stl')
+    expect(
+      within(drawer()).getByRole('button', { name: /^Showing the 1 part print/ }),
+    ).toBeInTheDocument()
+  })
+
+  /* ------------------------------------------------------------- canonical */
+
+  it('applies the build preference for a link to the item, and says it did', async () => {
+    // `?tile=30` is `variants[0]`, so A4 reports `canonical: true`: the link
+    // named the item and the preference may decide. With no lock chosen the
+    // rank still prefers one part over two and a full top over `topless`, so
+    // the drawer shows the plain openlock integral — not the address holder.
+    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+
+    const current = bodyRows().filter((row) => row.getAttribute('aria-current') === 'true')
+    expect(current[0]).toHaveTextContent('cave%arch.2x.openlock.stl')
+    // And it does not claim a preference the visitor never expressed: the store
+    // defaults to `openlock` and `lockChosen` is false, so the note says why
+    // without naming a build.
+    expect(within(drawer()).getByText(/best match for the item/)).toBeInTheDocument()
+    expect(within(drawer()).queryByText(/Chosen for your/)).toBeNull()
+  })
+
+  it('honours a chosen lock, moving the shown row to the only file that can serve it', async () => {
+    // No integral offers dragonlock, so A1's rank falls through to tier 2 —
+    // topper plus base — and the shown row becomes the topper.
+    act(() => {
+      setLockSystem('dragonlock')
+    })
+    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+
+    const current = bodyRows().filter((row) => row.getAttribute('aria-current') === 'true')
+    expect(current[0]).toHaveTextContent('cave%arch.2x.openforge.stl')
+    // The topper is also `variants[0]`, so the preference did not move the row —
+    // it agreed with it, and the note distinguishes the two.
+    expect(
+      within(drawer()).getByText(/your DragonLock preference agrees with the first file/),
+    ).toBeInTheDocument()
+  })
+
+  it('never applies a preference to a link that named a file, and says so', async () => {
+    // `?tile=32` is not the group minimum, so `canonical` is false. Even with a
+    // lock chosen that would rank this file last, the URL wins.
+    act(() => {
+      setLockSystem('dragonlock')
+    })
+    await renderAt(`/catalog?tile=${String(ORD.archTopless)}`)
+
+    const current = bodyRows().filter((row) => row.getAttribute('aria-current') === 'true')
+    expect(current[0]).toHaveTextContent('cave%arch.2x.openlock.topless.stl')
+    expect(within(drawer()).getByText(/Showing the file this link named/)).toBeInTheDocument()
+    expect(within(drawer()).queryByText(/Chosen for your/)).toBeNull()
+  })
+
+  it('leaves the URL alone when the preference moves the shown row', async () => {
+    // Rewriting `?tile=` to the preferred file would consume A4's `canonical`
+    // signal and freeze a preference into a shareable link.
+    const router = await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    expect(openTile(router)).toBe(ORD.archTopper)
+  })
+
+  /* ------------------------------------------------------- the 55.4% case */
+
+  it('states the single way to print a one-file item, without a table', async () => {
+    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+
+    expect(within(drawer()).queryByRole('table')).toBeNull()
+    expect(within(drawer()).getByText(/nothing to choose/)).toBeInTheDocument()
+    // The same facts a row would have carried.
+    expect(within(drawer()).getByText('2 parts.')).toBeInTheDocument()
+    expect(within(drawer()).getByText(/Print this and a base/)).toBeInTheDocument()
+    expect(within(drawer()).getByText('cave%floor.1x1.stl')).toBeInTheDocument()
+    expect(within(drawer()).getByText(/1\.3 MB to download/)).toBeInTheDocument()
+  })
+
+  it('says so where a file declares no connection system at all', async () => {
+    // The `insert`, whose `conn` resolves to nothing on either face.
+    await renderAt(`/catalog?tile=${String(ORD.noSprite)}`)
+    expect(within(drawer()).getByText('No connection system declared')).toBeInTheDocument()
+  })
+
+  /* ---------------------------------------------------------------- slots */
+
+  it('lists an accessory slot with the print that carries it, and not the base slot', async () => {
+    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+
+    expect(within(drawer()).getByText('Accessory slots')).toBeInTheDocument()
+    expect(within(drawer()).getByText('torch')).toBeInTheDocument()
+    expect(within(drawer()).getByText('optional')).toBeInTheDocument()
+
+    // Provenance: only the topper declares it, and the slot names that file by
+    // the same label the table's row carries.
+    const slot = within(drawer()).getByText('torch').closest('div')
+    expect(slot).toHaveTextContent('Only on 1 of 3 prints')
+    expect(slot).toHaveTextContent('cave%arch.2x.openforge.stl')
+
+    // The `base` slot restates `needsBase`, which the part count already says,
+    // so it is never listed as an accessory.
+    expect(drawer().querySelectorAll('.of-detail-slots dt')).toHaveLength(1)
+
+    // And the item is flagged as declaring different slots on different prints.
+    expect(within(drawer()).getByText(/which file you print decides what it can hold/)).toBeInTheDocument()
+  })
+
+  it('words a one-file item’s slot in the singular', async () => {
+    await renderAt(`/catalog?tile=${String(ORD.wall)}`)
+
+    // One variant, so the slot is universal by definition — and "on every one
+    // of the 1 prints" is not a sentence.
+    expect(within(drawer()).queryByRole('table')).toBeNull()
+    expect(within(drawer()).getByText('torch')).toBeInTheDocument()
+    expect(within(drawer()).getByText('On the only print of this item.')).toBeInTheDocument()
+    expect(within(drawer()).queryByText(/of the 1 prints/)).toBeNull()
+    // Required, not optional — absence of the flag means required.
+    expect(within(drawer()).queryByText('optional')).toBeNull()
+  })
+
+  it('shows no slot section for an item that declares no composition', async () => {
+    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    expect(within(drawer()).queryByText('Accessory slots')).toBeNull()
   })
 })
 
@@ -386,14 +656,22 @@ describe('focus', () => {
     expect(card).toHaveFocus()
 
     await open(router, ORD.floor1x1)
-    expect(drawer().contains(document.activeElement)).toBe(true)
+    // `waitFor`, because Base UI moves focus in an effect rather than during
+    // the navigation: the drawer's body mounts a sprite rotator and a variants
+    // table, so "the drawer has rendered" and "focus has landed in it" are not
+    // the same tick. What is asserted is unchanged — focus ends up inside.
+    await waitFor(() => {
+      expect(drawer().contains(document.activeElement)).toBe(true)
+    })
 
     await act(async () => {
       fireEvent.keyDown(drawer(), { key: 'Escape' })
       await Promise.resolve()
     })
 
-    expect(card).toHaveFocus()
+    await waitFor(() => {
+      expect(card).toHaveFocus()
+    })
   })
 })
 
