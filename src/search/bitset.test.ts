@@ -19,15 +19,19 @@ describe('bitset geometry', () => {
     expect(wordCount(1)).toBe(1)
     expect(wordCount(32)).toBe(1)
     expect(wordCount(33)).toBe(2)
-    // The live corpus: 8,702 = 271 × 32 + 30, so the tail is never empty.
+    // Both live populations, and neither is a whole number of words: the 3,822
+    // aggregates the engine indexes (119 × 32 + 14) and the 8,702 files behind
+    // them (271 × 32 + 30).
+    expect(wordCount(3822)).toBe(120)
     expect(wordCount(8702)).toBe(272)
   })
 
   it('masks the tail so a full set counts exactly its population', () => {
     // The bug this guards: an unmasked tail reads correctly for every size that
-    // is a multiple of 32 and over-counts for every size that is not — and 8,702
-    // is not, so the whole catalog would report 8,704 tiles.
-    for (const size of [0, 1, 30, 31, 32, 33, 8702]) {
+    // is a multiple of 32 and over-counts for every size that is not — and
+    // neither 3,822 nor 8,702 is, so the whole catalog would report 3,840 items
+    // over 8,704 files.
+    for (const size of [0, 1, 30, 31, 32, 33, 3822, 8702]) {
       expect(popcount(fullBitset(size))).toBe(size)
     }
   })

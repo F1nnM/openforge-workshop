@@ -5,28 +5,66 @@
  *
  * The naive implementation counts every facet value against the *fully* filtered
  * result set. Select `dungeon_stone` and every other texture immediately reads
- * zero, because no tile is both `dungeon_stone` and `cave`. The sidebar becomes a
+ * zero, because no item is both `dungeon_stone` and `cave`. The sidebar becomes a
  * dead end: the user's only legal next action is to undo what they just did.
  *
  * The fix is that **a facet's own counts are computed with that facet's filter
- * excluded**. With `dungeon_stone` selected, `cave` still reads 368 — "click here
- * and you get 368 tiles" — while the other three facets narrow normally. Every
+ * excluded**. With `dungeon_stone` selected, `cave` still reads 77 — "click here
+ * and you get 77 items" — while the other three facets narrow normally. Every
  * faceted-search product does this; it is easy to leave out and it has no
  * symptom in a unit test that only ever selects one value, which is why
- * `facets.test.ts` checks the counts against a brute-force oracle with two and
- * three facets active at once.
+ * `engine.test.ts` and `corpus.test.ts` check the counts against a brute-force
+ * oracle with two and three facets active at once.
+ *
+ * ## A member is an aggregate, and that changes what a count *means*
+ *
+ * Row A2 moved every index in this directory off records and onto row A1's
+ * aggregates: **3,822 documents, not 8,702**. `documents.ts` explains the
+ * addressing; what matters here is the semantics.
+ *
+ * A count was a number of files and is now a number of *items*, and an item
+ * matches a facet value when **any** of its variants does. For three of the four
+ * facets that is a distinction without a difference, because A1 measured that
+ * `kinds`, `build` and the texture tags do not vary inside a group and
+ * `pipeline/aggregate.ts` fails the build if they ever do. For `conn` it is the
+ * whole point of aggregating: 1,563 aggregates hold two distinct values of it,
+ * and the union takes "carries two or more systems" from **28.6% of files to
+ * 42.0% of items**. An item whose openlock variant and whose openforge variant
+ * are different files is in *both* buckets, though no single file is — so a
+ * facet's counts are no longer a sum over its records, and the bucket totals
+ * over-count the corpus by more than they used to.
+ *
+ * Which is also why the counts are built by *setting a bit per document* rather
+ * than by tallying: {@link Collector} tests the bit before it counts, so two
+ * variants agreeing on a value contribute one member, and two variants
+ * disagreeing contribute one member to each of two values.
  *
  * ## The four facets, and why none of them is a plain enum
  *
  * Each shape below is a measured property of the corpus, not a preference. The
- * numbers are re-derived from the emitted index by `corpus.test.ts`.
+ * numbers are over the 3,822 aggregates and are re-derived from the emitted
+ * index by `corpus.test.ts`.
  *
  * | facet   | semantics                                    | the fact that forces it |
  * | ------- | -------------------------------------------- | ----------------------- |
- * | `kinds` | multi-select OR, plus {@link KIND_OTHER}      | 19.5% of tiles are in 2+ buckets and 11.9% in none — neither is expressible as one value, and without an explicit "other" bucket 1,032 tiles are unreachable from the sidebar |
+ * | `kinds` | multi-select OR, plus {@link KIND_OTHER}      | 13.7% of items are in 2+ buckets and 16.0% in none — neither is expressible as one value, and without an explicit "other" bucket 611 items are unreachable from the sidebar |
  * | `tex`   | multi-select OR of **namespace prefixes**     | 37 roots with 45 deeper paths beneath them; selecting `dungeon_stone` must also match `texture\|dungeon_stone\|eroded` |
- * | `build` | single-select, plus {@link BUILD_UNSPECIFIED} | 2,978 tiles (34.2%) carry no `build\|` tag, so absence is a value |
- * | `conn`  | multi-select OR                              | 2,493 tiles (28.6%) carry 2+ systems |
+ * | `build` | single-select, plus {@link BUILD_UNSPECIFIED} | 1,511 items (39.5%) carry no `build\|` tag, so absence is a value |
+ * | `conn`  | multi-select OR                              | 1,605 items (42.0%) carry 2+ systems, against 2,493 files (28.6%) |
+ *
+ * ## Two facets are read off the aggregate, and two off its variants
+ *
+ * `kinds` and `build` come from {@link TileAggregate}, which hoists them — one
+ * value per item, so `build` still *partitions* the corpus and its buckets still
+ * sum to exactly 3,822. `tex` and `conn` are unioned over the group's records,
+ * because the aggregate publishes neither a tag list nor a per-face connection
+ * set (see `documents.ts` for why).
+ *
+ * The oracle in `oracle.ts` deliberately reads **all four** as "any variant
+ * matches". The two implementations agreeing is therefore a live check that
+ * hoisting is legitimate: if `build` ever varied inside a group, the fast path
+ * would report the hoisted value and the oracle the union, and the comparison
+ * would fail rather than quietly showing a filter that drops items.
  *
  * ## The texture facet is matched on tags, not on `record.texture`
  *
@@ -36,10 +74,10 @@
  * `stucco` is **always** alphabetically later than its co-tag, so it never wins
  * the field and a vocabulary read off `record.texture` has 36 entries where the
  * tag table has 37. Rather than assert 37 and get 36, this indexes every
- * `texture|…` tag a record carries — which gives all 37 roots a non-zero count
- * (`stucco` reaches 24 tiles), makes the two-root tiles findable under both
- * names, and gets prefix matching for free because the deeper paths are just
- * longer keys in the same map.
+ * `texture|…` tag the group's records carry — which gives all 37 roots a
+ * non-zero count (`stucco` reaches 24 items), makes the two-root tiles findable
+ * under both names, and gets prefix matching for free because the deeper paths
+ * are just longer keys in the same map.
  *
  * Prefixes match on **segment boundaries**, so `stone` does not match
  * `stone_brick` and `cave` does not match `cavern`. Those are the facet-side
@@ -47,9 +85,10 @@
  * silently widens is worse than one that finds nothing, because the user can see
  * the second happen.
  */
-import type { CatalogRecord } from '@/catalog'
+import type { TileAggregate } from '@/catalog'
 
 import { andInto, copyInto, createBitset, fullBitset, getBit, orInto, popcountAnd, setBit } from './bitset'
+import type { SearchDoc } from './documents'
 import { BUILD_UNSPECIFIED, readBuildFilter } from './searchSchema'
 import type { FacetSearch } from './searchSchema'
 
@@ -81,7 +120,12 @@ const TEXTURE_SEGMENT = '|'
 export interface FacetBucket {
   /** The value to put in the URL. May be {@link KIND_OTHER} or {@link BUILD_UNSPECIFIED}. */
   readonly value: string
-  /** Tiles this value would yield, with this facet's own filter excluded. */
+  /**
+   * **Items** this value would yield, with this facet's own filter excluded.
+   *
+   * Aggregates, not files: an item counts once however many of its variants
+   * carry the value, and counts under every value any of them carries.
+   */
   readonly count: number
   /** Whether the current search selects it. */
   readonly selected: boolean
@@ -103,7 +147,7 @@ interface FacetField {
    */
   readonly vocabulary: readonly string[]
   /**
-   * Every filterable value → the tiles carrying it.
+   * Every filterable value → the items carrying it.
    *
    * A superset of `vocabulary` for `tex`, where the 45 deeper namespace paths
    * are filterable but are not top-level chips.
@@ -113,6 +157,7 @@ interface FacetField {
 
 /** The facet index over one catalog, in document order. */
 export interface FacetIndex {
+  /** Documents indexed — 3,822 aggregates for the live corpus, not 8,702 files. */
   readonly size: number
   readonly fields: { readonly [K in FacetKey]: FacetField }
   readonly vocabulary: FacetVocabulary
@@ -121,14 +166,17 @@ export interface FacetIndex {
 /* ------------------------------------------------------------------- building */
 
 /**
- * Build the facet index.
+ * Build the facet index over the aggregate documents.
  *
- * `records` must already be in **document order** — the engine numbers documents
- * by manifest ordinal — and `tagTable` must be the intern table those records'
- * `tags` index into.
+ * `docs` must already be in **document order** — `buildSearchDocs` emits it,
+ * ascending {@link TileAggregate.address} — and `tagTable` must be the intern
+ * table the records' `tags` index into.
+ *
+ * `kinds` and `build` are taken from the aggregate and `tex` and `conn` from the
+ * union over its records; the module docblock has the argument for the split.
  */
-export function buildFacetIndex(records: readonly CatalogRecord[], tagTable: readonly string[]): FacetIndex {
-  const size = records.length
+export function buildFacetIndex(docs: readonly SearchDoc[], tagTable: readonly string[]): FacetIndex {
+  const size = docs.length
   const texturePaths = textureTagPaths(tagTable)
 
   const kinds = new Collector(size)
@@ -137,19 +185,21 @@ export function buildFacetIndex(records: readonly CatalogRecord[], tagTable: rea
   const conn = new Collector(size)
 
   for (let doc = 0; doc < size; doc++) {
-    const record = records[doc]
-    if (record === undefined) continue
+    const entry = docs[doc]
+    if (entry === undefined) continue
+    const aggregate: TileAggregate = entry.aggregate
 
-    if (record.kinds.length === 0) kinds.add(KIND_OTHER, doc)
-    else for (const kind of record.kinds) kinds.add(kind, doc)
+    if (aggregate.kinds.length === 0) kinds.add(KIND_OTHER, doc)
+    else for (const kind of aggregate.kinds) kinds.add(kind, doc)
 
-    for (const tag of record.tags) {
-      for (const path of texturePaths[tag] ?? EMPTY) tex.add(path, doc)
+    build.add(aggregate.build ?? BUILD_UNSPECIFIED, doc)
+
+    for (const record of entry.records) {
+      for (const tag of record.tags) {
+        for (const path of texturePaths[tag] ?? EMPTY) tex.add(path, doc)
+      }
+      for (const system of record.conn) conn.add(system, doc)
     }
-
-    build.add(record.build ?? BUILD_UNSPECIFIED, doc)
-
-    for (const system of record.conn) conn.add(system, doc)
   }
 
   const fields = {
@@ -218,8 +268,11 @@ class Collector {
       bits = createBitset(this.size)
       this.bits.set(value, bits)
     }
-    // A tile tagged `texture|cave` and `texture|cave|sandstone` reaches `cave`
-    // twice; counting the member rather than the visit keeps the total honest.
+    // Two ways to reach the same value twice, and the second is new to A2: a
+    // tile tagged `texture|cave` and `texture|cave|sandstone` reaches `cave`
+    // twice, and now so does an item whose openlock topper and openlock
+    // integral variant both name openlock. Counting the *member* rather than the
+    // visit is what makes a bucket a number of items.
     if (getBit(bits, doc)) return
     setBit(bits, doc)
     this.counts.set(value, (this.counts.get(value) ?? 0) + 1)
