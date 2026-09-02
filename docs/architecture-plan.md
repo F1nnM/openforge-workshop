@@ -40,23 +40,35 @@ Search, faceting and constraint resolution run in the browser.
 Verified figures, with the definition each depends on. Definitions matter: v1 of this plan
 quoted percentages whose definitions were never written down, and they did not reproduce.
 
-### Footprints — 91.5% today, and the remaining gap is measured
+### Footprints — 91.7%, and coverage going *down* is the system working
 
-**This section has been wrong twice and both corrections are recorded, because the second one
-refuted a fix the plan had already scheduled on the strength of the first.**
+**This section has been wrong twice, and the retired "target" column is gone. Both corrections
+stay recorded, because the second one refuted a fix the plan had already scheduled on the
+strength of the first.**
 
-| Primitive | Shipped classifier | Research classifier — the old "target" |
+| Primitive | Tiles | Share |
 | --- | ---: | ---: |
-| `RECT` | **3,454 (39.7%)** | 42.9% |
-| `WALL_SEG` | 3,116 (35.8%) | 36.5% |
-| `ARC` | 1,391 (16.0%) | 14.1% |
-| `COLUMN` | — (row W4) | 1.6% |
-| `DIAGONAL` | — (row W4) | within wall/rect |
-| `NONE` | **741 (8.5%)** | 428 (4.9%) |
-| **Coverage** | **91.5%** | 95.1% |
+| `rect` | 3,449 | 39.6% |
+| `wall` | 3,079 | 35.4% |
+| `arc` | 1,199 | 13.8% |
+| `diag` | 121 | 1.4% |
+| `column` | 119 | 1.4% |
+| `tri` | 9 | 0.1% |
+| `none` | 726 | 8.3% |
+| **Coverage** | **8,003 → 7,976** | **91.7%** |
 
-Run [`verify-catalog-facts.py`](verify-catalog-facts.py) for the left column; it is what the
-tests assert against. The right column is kept only so the two are not conflated again.
+Run [`verify-catalog-facts.py`](verify-catalog-facts.py) for these; they are what the tests
+assert against.
+
+**Coverage is deliberately not monotone, and that is the point.** It went 86.9 → 91.5 → 92.0 →
+91.7 as rows W3, W4 and W5 landed. **104 tiles have lost a footprint** across W4 and W5, because
+measurement showed the footprint they had was wrong — a `QxG` tagged 4 units that is 3.000, a
+floor tagged 2 that is 1.700 and would overlap its neighbour, a `7x7` fragment that is 5 × 2. A
+number that only ever rises is a number nobody is checking.
+
+The old "research classifier" column promised 95.1% with `RECT` at 42.9%. It is deleted rather
+than kept for comparison: it was never measured, it was quoted once as though it had been, and
+two rows have now been scheduled against figures derived from it.
 
 **Correction 1.** An earlier draft quoted the research column alone and presented it as measured.
 It was not; our own classifier said 86.9%.
@@ -81,6 +93,18 @@ replaced the veto.
 That moved **403** tiles, not 742, and coverage to **91.5%**, not 95%. The other 339 cannot move
 on tags alone: 283 are fragments whose real extent only measurement supplies, and 56 are hex
 corners carrying no size tag at all. They are still `NONE`, but now for a true reason.
+
+**Then W4 and W5 moved it again, in both directions.** W4 added `COLUMN` (119), `DIAGONAL` (121)
+and a right triangle (9), de-arced the 84 `xG` walls, and found the rule that closed the
+angle-less arcs for good: **a radius is an outline only when no tag reassigns it to a feature** —
+the `xG` interface, the `inverted` cut and the `lintel` arch, summing to exactly the 165 tiles
+that carried a radius and no sweep. `DEFAULT_ARC_SWEEP_DEG` is deleted, not defaulted.
+
+W5 then reshaped `arc` into an annular sector and sent a further **27** curved-interface floors to
+`NONE` rather than fabricate a band for shapes measured not to have one. Two of the five bands —
+`convex` and `s2w_radial` — have **no accepted measurement at all** (43 attempted and refused, and
+10 never attempted), so they carry a written fallback that the schema refuses to let anyone stamp
+as measured.
 
 **What remains in `NONE` (741) is a partition, asserted in the oracle:** 283 `size|segment`
 fragments, 161 carrying a tessellation code (row W4 resolves these — it was "223 of 1,144" before
@@ -839,7 +863,7 @@ the thumbnail pipeline; the deployment surface. 34 PRs, 1,276 tests.
 [`v2-pr-series.md`](v2-pr-series.md). Nine workstreams:
 
 1. **Tessellation-aware footprints** — six primitives, curves as annular sectors. Coverage is
-   **91.5% as of row W3**, not the 95.1% this plan once promised; §2 records why. The 165
+   **91.7% after rows W3, W4 and W5**, not the 95.1% this plan once promised; §2 records why. The 165
    angle-less tiles are not merely mis-swept — row W1 refused all 165 as non-sectors, so the
    primitive is wrong for every one of them.
 2. **Tile aggregation** — one item per design, lock resolved per build, variants disclosed.
