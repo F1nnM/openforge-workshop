@@ -42,11 +42,12 @@
  */
 import { useRouter } from '@tanstack/react-router'
 
-import type { TileAggregate, TileVariant } from '@/catalog'
+import type { CatalogFile, TileAggregate, TileVariant } from '@/catalog'
 import { showTileInDrawer } from '@/routes'
 import type { LockSystem } from '@/store'
 import { Chip, Eyebrow } from '@/ui/primitives'
 
+import { SlotFills } from './slots'
 import type { SlotRow, VariantJoin, VariantRow } from './variants'
 import { optionNote, slotRows, systemLabel, variantRows } from './variants'
 
@@ -92,11 +93,20 @@ export interface VariantsTableProps {
   /** The variant the drawer is showing — always one of `aggregate.variants`. */
   readonly shown: TileVariant
   readonly choice: VariantChoice
+  /**
+   * The parsed index, for row C2's slot picker.
+   *
+   * Threaded through rather than loaded here: the picker resolves a slot's
+   * candidates against the whole tag table, and the drawer already holds the
+   * file. See `./slots` — the composition index it builds is memoised on this
+   * object, so passing the caller's copy is what keeps it to one build.
+   */
+  readonly catalog: CatalogFile
 }
 
 /* ----------------------------------------------------------------- the table */
 
-export function VariantsTable({ aggregate, shown, choice }: VariantsTableProps) {
+export function VariantsTable({ aggregate, shown, choice, catalog }: VariantsTableProps) {
   const rows = variantRows(aggregate)
   const slots = slotRows(aggregate)
   const only = rows.length === 1 ? rows[0] : undefined
@@ -134,7 +144,9 @@ export function VariantsTable({ aggregate, shown, choice }: VariantsTableProps) 
         <OnlyVariant row={only} />
       )}
 
-      {slots.length === 0 ? null : <SlotList aggregate={aggregate} rows={rows} slots={slots} />}
+      {slots.length === 0 ? null : (
+        <SlotList aggregate={aggregate} catalog={catalog} rows={rows} shown={shown} slots={slots} />
+      )}
     </>
   )
 }
@@ -294,11 +306,15 @@ function VariantChoiceNote({
  */
 function SlotList({
   aggregate,
+  catalog,
   rows,
+  shown,
   slots,
 }: {
   aggregate: TileAggregate
+  catalog: CatalogFile
   rows: readonly VariantRow[]
+  shown: TileVariant
   slots: readonly SlotRow[]
 }) {
   return (
@@ -344,8 +360,17 @@ function SlotList({
           : aggregate.configVaries
             ? 'This item declares different slots on different prints, so which file you print decides what it can hold. '
             : 'Every print of this item declares the same slots. '}
-        Choosing what fills a slot is not built yet.
+        What fills each one is chosen below, against the print shown above.
       </p>
+
+      {/*
+        Row C2. The picker resolves against the **shown variant** and not against
+        the aggregate, which is C1's rule rather than a convenience: `config`
+        varies within 828 aggregates and the tags a `constrain` entry inherits
+        are this file's, so a picker keyed on the item would answer for a print
+        the user is not looking at.
+      */}
+      <SlotFills catalog={catalog} parent={shown.id} />
     </>
   )
 }

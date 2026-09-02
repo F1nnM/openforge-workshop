@@ -1,0 +1,92 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the plan's accessory slots, under the bill of tiles.
+
+   Row C2. Hand-written rather than Tailwind utilities, following
+   `../panels.css` and the note at the top of `../../../ui/shell/shell.css`.
+   Unlayered, same as the rest of the app's own CSS.
+
+   ## What this file does not restate
+
+   The grid, the cards and the greying are `../../../screens/detail/slots/
+   slots.css`, which `SlotFills` imports itself — the panel reuses the whole
+   picker, so it reuses the picker's styling. Only the plan-side frame is here:
+   the heading, the summary, and one block per placed piece. Restating a
+   `.of-slotfill-*` rule would be two definitions of one class and a race over
+   which `<style>` Vite emits second, which is the mistake `../panels.css`
+   already records.
+
+   ## It is the third child of a two-row column
+
+   `screens/builder/builder.css` sizes `.of-builder-bill` as
+   `grid-template-rows: auto minmax(0, 1fr)` — the lock notice, then the bill.
+   This panel is added after the bill, so it lands in an implicit `auto` row and
+   the bill keeps the `1fr`. `max-height` is what stops an eight-card grid from
+   pushing the bill down to nothing on a short window: past it, this panel
+   scrolls and the bill does not move.
+
+   Light only. Parchment is the committed direction; see `tokens.css`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-planslots {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+}
+
+.of-planslots-head {
+  margin: 0;
+  color: var(--ink);
+}
+
+.of-planslots-note {
+  margin: 0;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* An archive gap, not a task. Stated in the accent so it is not read as a
+   count the user can work down. */
+.of-planslots-gap {
+  margin: 0;
+  color: var(--acc);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.of-planslots-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-planslots-piece {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-family: var(--face-display);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+/* A grid position is a measured fact, so it is mono — the rule at the top of
+   `tokens.css`. */
+.of-planslots-at {
+  flex: none;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
