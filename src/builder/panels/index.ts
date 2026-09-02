@@ -35,5 +35,14 @@ export type {
 export { MAX_SEARCH_ROWS, paletteRows, searchRows, starterSet } from './palette'
 export type { PaletteRow } from './palette'
 
-export { billInventory, noteCopy, thresholdLabel, verdictCopy } from './billView'
-export type { BillInventory, BillPlacement, BillRow, NoteCopy, VerdictCopy } from './billView'
+export { billInventory, noteCopy, resolutionSummary, rowResolutionCopy, thresholdLabel, verdictCopy } from './billView'
+export type {
+  BillInventory,
+  BillPlacement,
+  BillRow,
+  NoteCopy,
+  ResolutionSummary,
+  RowResolution,
+  RowResolutionCopy,
+  VerdictCopy,
+} from './billView'

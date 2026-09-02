@@ -9,6 +9,15 @@
  *
  * The rule set, in full:
  *
+ *   0. **Resolve the item to a file before anything else.** A placement names a
+ *      file, but §7 places *designs*, and 1,705 designs hold more than one file.
+ *      So the first thing resolution does is ask row A1's aggregate layer which
+ *      variant of the placed item this build's lock preference actually wants —
+ *      and for **1,419 of the 3,822 aggregates (37.1%)** the three lock systems
+ *      do not agree on the answer. This is the step that makes rule 1 a
+ *      *fallback*: under openlock, 1,808 of the 4,363 topper files (41.4%)
+ *      resolve to a sibling that needs no base at all, so no base is inserted
+ *      because none is needed. See {@link resolveVariant}.
  *   1. **The one hard rule.** Every `connection|openforge` piece gets a base
  *      line item, auto-inserted. It is enforced by *adding* a part.
  *   2. **Everything else informs.** No condition in this module rejects a
@@ -36,9 +45,11 @@
  *
  * Resolution is a function of the placed tile and the lock preference only. `x`,
  * `z` and `rotation` do not change what you print, so they are carried through
- * untouched for the canvas and never read here.
+ * untouched for the canvas and never read here — which is why the variant probe
+ * {@link resolveVariant} takes a `TileId` and no placement at all.
  */
-import type { CatalogRecord } from '@/catalog'
+import type { CatalogRecord, TileId, VariantVerdict } from '@/catalog'
+import { selectVariant } from '@/catalog'
 import type { LockSystem, Placement } from '@/store'
 
 import type { AssemblyIndex, PrintOption } from './assemblyIndex'
@@ -149,6 +160,97 @@ export interface AssemblyPart {
   match?: BaseMatch
 }
 
+/* ------------------------------------------------------------------ verdicts */
+
+/**
+ * What resolving one placement in this build's lock system amounts to.
+ *
+ * `docs/tile-aggregation.md` §5.2's six verdicts, **complete for the first
+ * time**. `selectVariant` in `src/catalog/aggregate.ts` answers the half that is
+ * a property of the aggregate and stops there, on purpose: `with-base`,
+ * `mismatched` and `no-base` all need {@link matchBase}, which needs the base
+ * index, and `src/catalog` sits *below* this module in the graph. So A1 returns
+ * `needs-base` and this module splits it three ways.
+ *
+ * Measured over all 3,822 aggregates, and the three columns are the whole
+ * argument for aggregating:
+ *
+ * |                    | openlock | dragonlock | magnetic | no preference |
+ * | ------------------ | -------: | ---------: | -------: | ------------: |
+ * | `self-sufficient`  |    1,497 |        359 |      255 |         1,591 |
+ * | `with-base`        |    1,878 |      2,759 |    2,753 |         1,878 |
+ * | `mismatched`       |        0 |          2 |       12 |             0 |
+ * | `no-base`          |      259 |        301 |      303 |           259 |
+ * | `wrong-system`     |        1 |        214 |      312 |             0 |
+ * | `unknown-joinery`  |       93 |         93 |       93 |             0 |
+ * | `insert`           |       94 |         94 |       94 |            94 |
+ *
+ * `self-sufficient` + `with-base` is exactly row A7's **buildability** — 3,375 /
+ * 3,118 / 3,008 designs, 88.3 / 81.6 / 78.7% — reproduced here by composition
+ * rather than by a second implementation, and `assembly.test.ts` asserts the two
+ * agree. That is why {@link matchBase} stays private: A7 asked for it or for a
+ * `baseLocksFor` probe, and {@link resolveVariant} answers the question both were
+ * for without handing out a base record anyone could build a second parts list
+ * from.
+ *
+ * Note what the last two columns say. Without a preference nothing is in the
+ * wrong system and nothing is unknown, because there is nothing to disagree
+ * with — the 93 `joineryUntagged` aggregates become `self-sufficient`. A
+ * preference is what makes those two verdicts possible at all.
+ */
+export type PlacementVerdict =
+  /** One part. A variant needs no base and carries the requested system underneath. */
+  | 'self-sufficient'
+  /** Two parts: a topper, and a base that carries the requested system. */
+  | 'with-base'
+  /** Two parts, and the base is in another system — it will not clip to its neighbours. */
+  | 'mismatched'
+  /** A topper the archive holds no base for. See {@link missingBaseNote} for which of the three gaps. */
+  | 'no-base'
+  /** A self-sufficient variant exists, none in this system. Informs; never refuses. */
+  | 'wrong-system'
+  /** No joinery tag anywhere on any variant — unknown, not incompatible. */
+  | 'unknown-joinery'
+  /** Every variant is fitted into another piece rather than standing on the grid. */
+  | 'insert'
+
+/**
+ * Which file a placement resolved to, and how good an answer that is.
+ *
+ * The reason this is a record and not just a `TileId`: §7 auto-inserts parts the
+ * user never placed, and this row adds a second invisible decision on top —
+ * *substituting the file itself*. A bill that showed the outcome and not the
+ * choice would be two decisions deep with nothing said about either.
+ */
+export interface VariantResolution {
+  readonly verdict: PlacementVerdict
+  /** The file the placement names — `Placement.tileId`. */
+  readonly placed: TileId
+  /**
+   * The file to print. Differs from {@link placed} whenever the lock preference
+   * found a better variant of the same item.
+   */
+  readonly resolved: TileId
+  /** `resolved !== placed`. The bill marks these rows; nothing else is a substitution. */
+  readonly substituted: boolean
+  /**
+   * Files in the item. `1` means there was nothing to choose and the resolution
+   * is the identity — 2,117 of 3,822 aggregates are singletons.
+   */
+  readonly variants: number
+  /**
+   * Two variants tied on every stated criterion and offer **different print
+   * options**, so the pick came down to `bytes`.
+   *
+   * `VariantSelection.optionTie`, carried through unchanged. It is reached on 121
+   * variant tuples covering 297 records, every one of them a `base` — so never
+   * for a tile that sits *on* a base.
+   */
+  readonly optionTie: boolean
+  /** The preference the resolution was made under. `undefined` is "no preference". */
+  readonly lock: LockSystem | undefined
+}
+
 /** One placement, resolved. */
 export interface ResolvedPlacement {
   /** Carried through unchanged; nothing here reads `x`, `z` or `rotation`. */
@@ -165,6 +267,22 @@ export interface ResolvedPlacement {
   /** The parts to print, placed tile first. Empty only for an unknown tile. */
   parts: AssemblyPart[]
   notes: Note[]
+  /**
+   * Which variant of the placed item this build resolved to, and how complete an
+   * assembly that is. `undefined` only for an unknown tile, alongside the empty
+   * part list.
+   *
+   * **{@link tile} is the resolved record, not the placed one**, and that is
+   * safe only because of A1's strongest measurement: over all 3,822 aggregates,
+   * the number holding two distinct values of `name`, `kinds`, `texture`,
+   * `build`, `foot`, `sizeCode` or `rotStep` is **zero**. So substituting the
+   * record changes `blob`, `bytes`, `file`, `family`, `conn`, `layer`, `sprite`
+   * and `config` — exactly the connection axis and its consequences — and cannot
+   * change the tile's name, its shape on the grid or its size label. The canvas
+   * therefore needs no notice of this at all; it draws from
+   * `placement.tileId`'s own footprint and gets the same polygon either way.
+   */
+  resolution: VariantResolution | undefined
 }
 
 /* ------------------------------------------------------------------ matching */
@@ -255,6 +373,17 @@ function isLockSystem(value: string): boolean {
   return Object.hasOwn(LOCK_SYSTEMS, value)
 }
 
+/**
+ * A base and the match that chose it.
+ *
+ * One object rather than two returns, so `resolvePlacement` can run the match
+ * once in rule 0 and hand the result to rule 1 instead of matching twice.
+ */
+export interface MatchedBase {
+  base: CatalogRecord
+  match: BaseMatch
+}
+
 interface Candidates {
   key: 'sizeCode' | 'footprint'
   on: string
@@ -336,12 +465,31 @@ function optionOf(index: AssemblyIndex, base: CatalogRecord): PrintOption {
  * print and then on catalog path, and the choice is a pure function of the
  * corpus. Everything that is *about the topper* is in the score, not in that
  * order: see {@link MATCH_WEIGHTS}.
+ *
+ * ## Why this is exported, having been private through D1, D4 and D5
+ *
+ * Row A7 asked for it or for a `baseLocksFor` probe, and row A6 first answered
+ * with {@link resolveVariant} instead — a narrower thing that hands out no base
+ * record. That answer was wrong, for a reason A6 only found by breaking 22 tests:
+ * **rule 0 means `resolvePlacement` is no longer a way to observe the base match
+ * at all.** Under openlock 1,808 of the 4,363 topper files resolve to a sibling
+ * that needs no base, so a caller who asks the resolver "what base does this
+ * topper get?" is now told "none, because you would not print that file" — a
+ * true answer to a different question.
+ *
+ * Every corpus guard D1, D4 and D5 left behind asks the base-match question:
+ * that the topless auto-insert rate is zero, that every base handed to a topper
+ * is congruent to it, that the gap splits 86 / 31 / 260. Those are statements
+ * about *this function*, and without a name for it they became unwritable rather
+ * than merely awkward. So the function gets the name.
+ *
+ * What stays private is the **score** — a number with no unit invites a UI to
+ * render it — and rule 1. This returns a match, never a part: an auto-inserted
+ * base still enters a bill through {@link resolvePlacement} and nowhere else, so
+ * there remains exactly one implementation of "every openforge piece gets a
+ * base".
  */
-function matchBase(
-  tile: CatalogRecord,
-  index: AssemblyIndex,
-  lock: LockSystem | undefined,
-): { base: CatalogRecord; match: BaseMatch } | undefined {
+export function matchBase(tile: CatalogRecord, index: AssemblyIndex, lock: LockSystem | undefined): MatchedBase | undefined {
   const candidates = candidatesFor(tile, index)
   if (candidates === undefined || candidates.records.length === 0) return undefined
 
@@ -380,6 +528,147 @@ function matchBase(
   }
 }
 
+/* -------------------------------------------------------- variant resolution */
+
+/** The whole of rule 0's output: the file, why, and the base it already found. */
+interface Chosen {
+  record: CatalogRecord
+  resolution: VariantResolution
+  /** Present iff the resolved variant is a topper *and* the archive has a base for it. */
+  matched: MatchedBase | undefined
+}
+
+/**
+ * Split A1's `needs-base` on the base match; pass the other four through.
+ *
+ * `lockAgrees` is `true` when no preference was given, so "no preference" yields
+ * `with-base` rather than `mismatched` — nothing can disagree with a preference
+ * that was never stated.
+ */
+function verdictOf(verdict: VariantVerdict, matched: MatchedBase | undefined): PlacementVerdict {
+  if (verdict !== 'needs-base') return verdict
+  if (matched === undefined) return 'no-base'
+  return matched.match.lockAgrees ? 'with-base' : 'mismatched'
+}
+
+/**
+ * Rule 0: which file of the placed item this lock preference wants.
+ *
+ * Two hops and one call. `CatalogRecord.design` is the aggregation key, so
+ * `byDesign` reaches the item in one lookup — A4's ordinal→variant→design hop is
+ * not needed here because a placement already names a record. Then
+ * {@link selectVariant} ranks the item's files, and the verdict it cannot reach
+ * without a base index is finished by {@link matchBase}.
+ *
+ * **`PRINT_OPTIONS` is passed, always.** `VariantPreference.options` is optional
+ * and what omitting it costs is measured: the rank falls through to `bytes`
+ * ascending, which is the tie-break D1 removed from base matching for cause —
+ * the topless print of a base is its smallest file. There is exactly one right
+ * value for this argument and it lives one module over, so it is supplied rather
+ * than offered as a choice.
+ *
+ * **The item's topper variants are interchangeable for base matching, and that
+ * is a theorem rather than a hope.** 760 aggregates hold two or more toppers, and
+ * the base handed out is identical across all of them in every one — because
+ * {@link matchBase} reads only `foot`, `sizeCode`, `kinds` and `texture` off the
+ * topper, and A1 measures **zero** aggregates holding two distinct values of any
+ * of the four. So this function does not walk the topper pool looking for one
+ * with a base: there is nothing to find. `assembly.test.ts` asserts the zero, so
+ * the day an aggregate does hold two footprints this simplification fails loudly
+ * instead of quietly handing out the wrong base.
+ */
+function chooseVariant(placed: CatalogRecord, index: AssemblyIndex, lock: LockSystem | undefined): Chosen {
+  const aggregate = index.aggregates.byDesign.get(placed.design)
+  if (aggregate === undefined) return withoutAggregate(placed, index, lock)
+
+  const selection = selectVariant(aggregate, { bottom: lock, options: PRINT_OPTIONS })
+  // `byId` and the aggregate layer are built from the same record array, so the
+  // fallback is unreachable on a matched pair — and it is the honest answer for
+  // the mismatched pair `buildAssemblyIndex`'s optional argument makes possible:
+  // keep the file the user placed rather than one from another catalog.
+  const record = index.byId.get(selection.variant.id) ?? placed
+  // A topper is exactly what `needs-base` selects, and nothing else selects one:
+  // every other branch of `selectVariant` draws from a pool it has filtered
+  // `needsBase` out of, or is reached only when that pool is empty.
+  const matched = selection.verdict === 'needs-base' ? matchBase(record, index, lock) : undefined
+
+  return {
+    record,
+    matched,
+    resolution: {
+      verdict: verdictOf(selection.verdict, matched),
+      placed: placed.id,
+      resolved: record.id,
+      substituted: record.id !== placed.id,
+      variants: aggregate.variants.length,
+      optionTie: selection.optionTie,
+      lock,
+    },
+  }
+}
+
+/**
+ * The degraded path: this record's design is not in the aggregate layer.
+ *
+ * Reachable only by handing {@link buildAssemblyIndex} an aggregate index built
+ * from a *different* catalog, which its optional second argument permits. The
+ * response is to make no choice — the placed file is the resolved file — and to
+ * claim only the verdicts a lone record can support.
+ *
+ * It deliberately does **not** guess `wrong-system` or `unknown-joinery`. Both
+ * are questions about the *underside*, and `CatalogRecord.conn` is the flattened
+ * connection list with the position segment thrown away: 1,283 toppers carry a
+ * lock on the side and none underneath, so a `conn`-based answer here would
+ * advertise joinery the mesh does not have. Only the aggregate layer holds the
+ * positional split, and without it the honest report is "needs no base".
+ */
+function withoutAggregate(placed: CatalogRecord, index: AssemblyIndex, lock: LockSystem | undefined): Chosen {
+  const matched = placed.layer === 'topper' ? matchBase(placed, index, lock) : undefined
+  const verdict: PlacementVerdict =
+    placed.layer === 'insert'
+      ? 'insert'
+      : placed.layer === 'topper'
+        ? verdictOf('needs-base', matched)
+        : 'self-sufficient'
+  return {
+    record: placed,
+    matched,
+    resolution: {
+      verdict,
+      placed: placed.id,
+      resolved: placed.id,
+      substituted: false,
+      variants: 1,
+      optionTie: false,
+      lock,
+    },
+  }
+}
+
+/**
+ * Which file this item resolves to under this preference — rule 0 on its own.
+ *
+ * The probe row A7 asked for, and deliberately **not** the exported `matchBase`
+ * it offered as the alternative. A7 reads `BaseMatch.lockAgrees` through a
+ * synthetic `Placement` to decide whether a design is buildable; this answers
+ * that question directly, in one call per *item* rather than one per topper
+ * variant, and with no placement to fabricate. What it does not do is hand out
+ * the base record, which is what keeps rule 1 — "enforced by adding a part" —
+ * with the one function that adds parts.
+ *
+ * `undefined` for an id this catalog does not hold, which is the same condition
+ * that gives {@link resolvePlacement} an empty part list.
+ */
+export function resolveVariant(
+  tileId: TileId,
+  index: AssemblyIndex,
+  options: AssemblyOptions = {},
+): VariantResolution | undefined {
+  const placed = index.byId.get(tileId)
+  if (placed === undefined) return undefined
+  return chooseVariant(placed, index, options.lock).resolution
+}
+
 /* ----------------------------------------------------------------- resolution */
 
 /**
@@ -388,21 +677,30 @@ function matchBase(
  * Total: every input produces a `ResolvedPlacement`. Nothing throws and nothing
  * is refused — the only way to get an empty part list is an id the catalog does
  * not hold.
+ *
+ * Every note below is asked about the **resolved** record, not the placed one,
+ * and for `lock-unavailable` that is the point rather than an implementation
+ * detail: placing the dragonlock file of an item in an openlock build used to
+ * warn that the tile offers dragonlock and not openlock, while the openlock file
+ * of the same item sat in the archive. Now the resolution hands over that file
+ * and there is nothing to warn about.
  */
 export function resolvePlacement(
   placement: Placement,
   index: AssemblyIndex,
   options: AssemblyOptions = {},
 ): ResolvedPlacement {
-  const tile = index.byId.get(placement.tileId)
+  const placed = index.byId.get(placement.tileId)
   const notes: Note[] = []
 
-  if (tile === undefined) {
+  if (placed === undefined) {
     const message = `${placement.tileId} is not in this catalog build; it may have been retired.`
     notes.push(note('unknown-tile', message, placement.tileId))
-    return { placement, tile: undefined, parts: [], notes }
+    return { placement, tile: undefined, parts: [], notes, resolution: undefined }
   }
 
+  const chosen = chooseVariant(placed, index, options.lock)
+  const tile = chosen.record
   const parts: AssemblyPart[] = [{ role: 'placed', record: tile }]
 
   if (tile.foot.shape === 'none') {
@@ -429,22 +727,29 @@ export function resolvePlacement(
   }
 
   if (tile.layer === 'topper') {
-    appendBase(tile, index, options.lock, parts, notes)
+    appendBase(tile, index, options.lock, chosen.matched, parts, notes)
   }
 
-  return { placement, tile, parts, notes }
+  return { placement, tile, parts, notes, resolution: chosen.resolution }
 }
 
-/** Rule 1, and the three ways the corpus can fail to satisfy it. */
+/**
+ * Rule 1, and the three ways the corpus can fail to satisfy it.
+ *
+ * The match arrives already made. Rule 0 has to run {@link matchBase} to tell
+ * `with-base` from `no-base`, and matching a second time here would be the same
+ * scan over the same pre-sorted candidate list for the same answer — worse, it
+ * would be a *second* place the base is chosen, which is exactly the duplication
+ * that makes a verdict and a bill able to disagree.
+ */
 function appendBase(
   tile: CatalogRecord,
   index: AssemblyIndex,
   lock: LockSystem | undefined,
+  matched: MatchedBase | undefined,
   parts: AssemblyPart[],
   notes: Note[],
 ): void {
-  const matched = matchBase(tile, index, lock)
-
   if (matched === undefined) {
     notes.push(missingBaseNote(tile, index))
     return
@@ -568,8 +873,16 @@ function autoInsertedMessage(
  * yet: a topper whose code *is* carried by bases, of a shape those bases are not
  * — the ambiguity `sizeCode.ts` measures. That one is a congruence gap, and it
  * says so.
+ *
+ * Exported for {@link matchBase}'s reason, which it shares exactly: rule 1 has
+ * two halves — find a base, or say which of the three gaps stopped you — and
+ * rule 0 means neither is observable through `resolvePlacement` any more. A
+ * topper that resolves to a self-sufficient sibling is neither given a base nor
+ * warned about, correctly, so a corpus-level claim about the gap has to ask the
+ * classifier directly. It takes a tile and an index and reads nothing else: the
+ * gap is a fact about the archive, and no lock preference moves it.
  */
-function missingBaseNote(tile: CatalogRecord, index: AssemblyIndex): Note {
+export function missingBaseNote(tile: CatalogRecord, index: AssemblyIndex): Note {
   const codeUnanswered = tile.sizeCode !== undefined && !index.basesBySizeCode.has(tile.sizeCode)
 
   if (footprintKey(tile.foot) !== undefined) {

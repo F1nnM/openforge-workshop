@@ -17,7 +17,8 @@
  * compares it once per candidate. It is a fact, not a key: nothing is grouped by
  * it, and the ranking that consumes it is `resolve.ts`'s.
  */
-import type { BlobId, CatalogFile, CatalogRecord, TileId } from '@/catalog'
+import type { AggregateIndex, BlobId, CatalogFile, CatalogRecord, TileId } from '@/catalog'
+import { buildAggregateIndex } from '@/catalog'
 
 import { footprintKey } from './footprint'
 
@@ -185,6 +186,24 @@ export interface AssemblyIndex {
    */
   readonly basePrintOption: ReadonlyMap<TileId, PrintOption>
 
+  /**
+   * Row A1's aggregate layer over the same catalog — **one item per `design`**,
+   * with every file in the group as a variant.
+   *
+   * It rides on this index rather than being a parameter of `resolvePlacement`
+   * because of what the store says a placement *is*: `Placement.tileId`'s own
+   * docblock fixes the concrete file as "a function of the placed tile plus the
+   * global lock preference … resolving it at download time keeps a saved scene
+   * correct when the user later changes that preference". That makes variant
+   * resolution part of resolution, not an option a caller may forget — and a
+   * caller who forgot would silently get the pre-A6 behaviour, which is the one
+   * failure mode there is no symptom for.
+   *
+   * See `resolve.ts#resolveVariant` for what reads it, and
+   * {@link buildAssemblyIndex} on why it is still a parameter of the *builder*.
+   */
+  readonly aggregates: AggregateIndex
+
   readonly stats: AssemblyIndexStats
 }
 
@@ -205,8 +224,19 @@ export interface AssemblyIndex {
  * bases equally suited to the same topper, where the cheaper print is the honest
  * answer. Keeping the two apart is also what lets the maps be rekeyed without
  * touching the ranking.
+ *
+ * **{@link AssemblyIndex.aggregates} is a parameter with a default**, the pattern
+ * `ui/lock-picker/build.ts#deriveLockBuild` established and for its reason: the
+ * aggregate index costs 62 ms against this function's 12 ms, and a caller that
+ * already holds one — `SearchEngine` builds one for its facets — should pay for
+ * it once. Defaulted rather than required so that no existing call site has to
+ * change to keep working, and so that a test can build an index from a fixture
+ * with one argument.
  */
-export function buildAssemblyIndex(catalog: CatalogFile): AssemblyIndex {
+export function buildAssemblyIndex(
+  catalog: CatalogFile,
+  aggregates: AggregateIndex = buildAggregateIndex(catalog),
+): AssemblyIndex {
   const byId = new Map<TileId, CatalogRecord>()
   const basesBySizeCode = new Map<string, CatalogRecord[]>()
   const basesByFootprint = new Map<string, CatalogRecord[]>()
@@ -261,6 +291,7 @@ export function buildAssemblyIndex(catalog: CatalogFile): AssemblyIndex {
     byBlob,
     blobsByFilename,
     basePrintOption,
+    aggregates,
     stats: {
       records: catalog.records.length,
       bases,

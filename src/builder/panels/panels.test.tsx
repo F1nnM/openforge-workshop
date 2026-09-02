@@ -36,7 +36,7 @@ import type { BlobSource, SaveEnvironment } from '@/download'
 import { BlobFetchError, PreviewMeshRefusedError } from '@/download'
 import { createSearchEngine, defaultFacetSearch } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
-import type { Placement } from '@/store'
+import type { LockSystem, Placement } from '@/store'
 import {
   clearPersistedWorkshopState,
   placeTile,
@@ -440,7 +440,11 @@ describe('the bill of tiles', () => {
     // The consequence, spelled out — this is the note that decides whether
     // somebody prints a wall that cannot stand up.
     expect(note).toHaveTextContent(/nothing to lock to and will not stay upright/)
-    expect(note).toHaveTextContent(/129 tiles corpus-wide/)
+    // Row D4's re-key took this bucket from 129 tiles over nine size codes to 86
+    // over six, and row A6 corrected the copy. Asserted rather than left to a
+    // reader, because a stale corpus figure in user-facing prose is exactly the
+    // thing nobody notices.
+    expect(note).toHaveTextContent(/six size codes are affected, over 86 tiles corpus-wide/)
     // And it is not inside the `<details>` the info notes live in.
     expect(note?.closest('details')).toBeNull()
   })
@@ -472,12 +476,17 @@ describe('the bill of tiles', () => {
 /**
  * The three ways a topper can end up with nothing under it, rendered.
  *
- * 385 of the 4,363 live openforge toppers reach one of them, and the whole of
+ * 377 of the 4,363 live openforge toppers reach one of them, and the whole of
  * row D5 is that they are **three different problems with three different
- * remedies** — the archive is missing a base (129 tiles), no base can carry the
- * shape (21), or the tile publishes no key to search bases by (235). One generic
+ * remedies** — the archive is missing a base (86 tiles), no base can carry the
+ * shape (31), or the tile publishes no key to search bases by (260). One generic
  * "no base found" would tell the first group they had made a mistake and send the
  * second group looking for an object that cannot exist.
+ *
+ * Those are the *archive's* counts. What a user meets under openlock is
+ * 29 / 29 / 247, because row A6's rule 0 resolves 72 of the 377 to a sibling
+ * variant that needs no base at all — see `variant resolution in the bill`
+ * below, which is where that half is asserted.
  *
  * The shared fixture only covers the first case, so this block extends it rather
  * than editing it: `src/builder/canvas` and `src/screens/builder` parse the same
@@ -1040,6 +1049,281 @@ describe('the download action', () => {
 })
 
 /* --------------------------------------------------------------- the library */
+
+/* ------------------------------------------- row A6: variant resolution in the bill */
+
+/**
+ * One design published twice — the merge the whole aggregation epic is for.
+ *
+ * **The shared fixture cannot express this and deliberately does not try.** Every
+ * one of its nine records has its own `design`, because row A2 had to give `twin`
+ * one: two records in a group must agree on `name`, `kinds`, `texture`, `build`,
+ * `foot`, `sizeCode` and `rotStep` — A1 measures zero live aggregates that hold
+ * two of any of them, and `pipeline/aggregate.ts` fails the build on it — and
+ * `twin` carries a different display name from `floor1` on purpose. So a
+ * two-variant item is a *new* fixture, built to that invariant rather than
+ * against it, and this block extends the shared catalog the way `gapCatalog`
+ * does.
+ *
+ * Three items, and each is one verdict rule 0 has to reach:
+ *
+ *   - **`mergedTopper` + `mergedIntegral`** — `d-merged`, one item, two files.
+ *     Under openlock the integral file wins and the assembly is one part; under
+ *     dragonlock and magnetic there is no integral variant in that system, so the
+ *     topper wins and a base is added. This is the item the row exists for.
+ *   - **`dragonOnly`** — `d-dragon`, a single self-sufficient file carrying
+ *     dragonlock. Under openlock the honest verdict is `wrong-system`: it will
+ *     print and stand and it will not clip to its neighbours.
+ *   - **`untagged`** — `d-untagged`, a single file with **no connection tag at
+ *     all**. 93 live aggregates (2.4%) are in this state, 33 of which name a lock
+ *     in the filename only. The verdict is `unknown-joinery`, and because
+ *     `notes.ts` has no code for it the row mark is the only place it can surface.
+ *
+ * `mergedIntegral` shares `mergedTopper`'s name, kinds, texture, build, foot and
+ * size code, and differs only in `file`, `family`, `blob`, `bytes`, `conn` and
+ * `layer` — which is exactly the axis A1 measures as the only one that varies.
+ */
+const A6_TAGS = [...FIXTURE_CATALOG.tags, 'connection|dragonlock'] as const
+
+const A6_IDS = {
+  mergedTopper: 'tiles/towne/floors/floor/openforge/towne#floor.2x2.merged.openforge.stl',
+  mergedIntegral: 'tiles/towne/floors/floor/openlock/towne#floor.2x2.merged.openlock.stl',
+  dragonOnly: 'tiles/towne/walls/wall/dragonlock/towne#wall.2x.dragonlock.stl',
+  untagged: 'tiles/towne/props/pillar/towne#pillar.1x1.stl',
+} as const
+
+const A6_NAMES = {
+  merged: 'Towne Merged Floor 2x2',
+  dragonOnly: 'Towne Dragonlock Wall 2x',
+  untagged: 'Towne Pillar 1x1',
+} as const
+
+function a6Catalog(): CatalogFile {
+  const tag = (name: string): number => A6_TAGS.indexOf(name as (typeof A6_TAGS)[number])
+  const next = FIXTURE_CATALOG.records.length
+  // Everything the two `d-merged` variants must agree on, spelled once so the
+  // fixture cannot drift out of A1's hoisting invariant.
+  const merged = {
+    design: 'd-merged',
+    name: A6_NAMES.merged,
+    kinds: ['floor'],
+    build: 'separate wall',
+    texture: 'towne',
+    foot: { shape: 'rect', w: 2, d: 2 },
+    sizeCode: 'A',
+    sprite: true,
+  }
+  return CatalogFileSchema.parse({
+    ...FIXTURE_CATALOG,
+    tags: [...A6_TAGS],
+    records: [
+      ...FIXTURE_CATALOG.records,
+      {
+        ...merged,
+        id: A6_IDS.mergedTopper,
+        ord: next,
+        blob: 'd'.repeat(32),
+        file: 'towne#floor.2x2.merged.openforge.stl',
+        bytes: 4_000_000,
+        family: 'tiles/towne/floors/floor/openforge',
+        conn: ['openforge'],
+        layer: 'topper',
+        tags: [tag('shape|floor'), tag('connection|openforge')],
+      },
+      {
+        // The same design, printed with the OpenLOCK footer in the mesh. Bigger
+        // than the topper, which is the ordinary case and the reason `bytes` is
+        // never the tie-break that decides a variant.
+        ...merged,
+        id: A6_IDS.mergedIntegral,
+        ord: next + 1,
+        blob: 'e'.repeat(32),
+        file: 'towne#floor.2x2.merged.openlock.stl',
+        bytes: 4_600_000,
+        family: 'tiles/towne/floors/floor/openlock',
+        conn: ['openlock'],
+        layer: 'integral',
+        tags: [tag('shape|floor'), tag('connection|openlock')],
+      },
+      {
+        id: A6_IDS.dragonOnly,
+        ord: next + 2,
+        blob: 'f'.repeat(32),
+        file: 'towne#wall.2x.dragonlock.stl',
+        bytes: 2_000_000,
+        sprite: true,
+        family: 'tiles/towne/walls/wall/dragonlock',
+        design: 'd-dragon',
+        name: A6_NAMES.dragonOnly,
+        kinds: ['wall'],
+        conn: ['dragonlock'],
+        layer: 'integral',
+        build: 'separate wall',
+        texture: 'towne',
+        tags: [tag('shape|wall'), tag('connection|dragonlock')],
+        foot: { shape: 'wall', length: 2 },
+      },
+      {
+        id: A6_IDS.untagged,
+        ord: next + 3,
+        blob: '1'.repeat(31) + 'a',
+        file: 'towne#pillar.1x1.stl',
+        bytes: 700_000,
+        sprite: true,
+        family: 'tiles/towne/props/pillar',
+        design: 'd-untagged',
+        name: A6_NAMES.untagged,
+        kinds: ['column'],
+        // No connection tag anywhere, which is what `joineryUntagged` is.
+        conn: [],
+        layer: 'integral',
+        texture: 'towne',
+        tags: [tag('shape|floor')],
+        foot: { shape: 'rect', w: 1, d: 1 },
+      },
+    ],
+  })
+}
+
+const A6_ALL_IDS = { ...FIXTURE_IDS, ...A6_IDS }
+
+/** The bill over `a6Catalog`, under a stated lock preference. */
+function A6Harness({
+  tiles,
+  lock,
+}: {
+  tiles: readonly (keyof typeof A6_ALL_IDS)[]
+  lock: LockSystem
+}) {
+  const a6File = useMemo(a6Catalog, [])
+  const a6Assembly = useMemo(() => buildAssemblyIndex(a6File), [a6File])
+  const placements = useMemo<Record<string, Placement>>(
+    () =>
+      Object.fromEntries(
+        tiles.map((key, i) => [`p${String(i)}`, { tileId: A6_ALL_IDS[key] as TileId, x: i * 2, z: 0, rotation: 0 }]),
+      ),
+    [tiles],
+  )
+  const bill = useMemo(
+    () => buildBillOfTiles(Object.values(placements), a6Assembly, { lock }),
+    [placements, a6Assembly, lock],
+  )
+  return (
+    <BillPanel
+      bill={bill}
+      placements={placements}
+      assets={a6File.assets}
+      sheet={a6File.sprite}
+      download={inertDownload(bill)}
+    />
+  )
+}
+
+describe('variant resolution in the bill', () => {
+  /** Every row's leading text, in the order the panel renders them. */
+  function rowNames(): string[] {
+    return [...document.querySelectorAll('.of-bill-name')].map((element) => element.textContent ?? '')
+  }
+
+  function rowMarks(): string[] {
+    return [...document.querySelectorAll('.of-bill-auto')].map((element) => element.textContent ?? '')
+  }
+
+  it('prints one part under openlock and two under magnetic, for the same placement', () => {
+    // The owner's request, end to end: *"in the builder one can just choose a
+    // lock system for the current build, and we choose the correct file from the
+    // aggregated item, or add a base if there is no tile of that system."*
+    render(<A6Harness tiles={['mergedTopper']} lock="openlock" />)
+    expect(rowNames()).toHaveLength(1)
+    expect(screen.getByText(/1 tile placed/)).toBeInTheDocument()
+    // The openlock file, not the one that was placed — and named as such.
+    expect(document.body).toHaveTextContent(/openlock · one part/)
+    expect(document.body).toHaveTextContent(/Printed instead of towne#floor\.2x2\.merged\.openforge\.stl/)
+    expect(document.body).toHaveTextContent(/carries its own joinery, so nothing goes under it/)
+    // One part, so no "parts to print" subline and no added base.
+    expect(document.body).not.toHaveTextContent(/base · added/)
+  })
+
+  it('falls back to base auto-insertion when no variant carries the lock', () => {
+    render(<A6Harness tiles={['mergedTopper']} lock="magnetic" />)
+    // Two rows: the topper the user placed, and the base the resolver added.
+    // `BASE_2X2` is openlock and `magnetic` has no base in this fixture, so the
+    // match is a lock mismatch — which is the honest outcome and is disclosed.
+    expect(rowNames()).toHaveLength(2)
+    expect(document.body).toHaveTextContent(/2 parts to print/)
+    expect(document.body).toHaveTextContent(/base · added/)
+    expect(screen.getByText(/matched base does not offer your lock system/)).toBeInTheDocument()
+  })
+
+  it('says so when no version of a tile carries the chosen lock', () => {
+    render(<A6Harness tiles={['dragonOnly']} lock="openlock" />)
+    expect(document.body).toHaveTextContent(/not openlock/)
+    expect(document.body).toHaveTextContent(/No version of this tile carries openlock/)
+    // And §7's rule holds: informed, never refused. The row is in the bill.
+    expect(rowNames()).toHaveLength(1)
+    expect(screen.getByText(/has no version in your lock system/)).toBeInTheDocument()
+  })
+
+  it('reports untagged joinery as unknown rather than as incompatible', () => {
+    render(<A6Harness tiles={['untagged']} lock="openlock" />)
+    expect(document.body).toHaveTextContent(/joinery untagged/)
+    expect(document.body).toHaveTextContent(/missing data rather than an incompatibility/)
+    // The one verdict `notes.ts` has no code for, so the row mark is the only
+    // surface it has. If a note is ever added for it, this is where the two
+    // would start saying the same thing twice.
+    expect(document.body).not.toHaveTextContent(/no version in your lock system/)
+  })
+
+  it('summarises what the preference did to the whole scene, once', () => {
+    render(<A6Harness tiles={['mergedTopper', 'floor2', 'floor1']} lock="openlock" />)
+    const summary = screen.getByText(/Resolved for openlock/).closest('.of-bill-note')
+    expect(summary).toHaveAttribute('data-tone', 'resolved')
+    // `mergedTopper` becomes one part, `floor2` keeps its base, `floor1` needed
+    // nothing to begin with.
+    expect(summary).toHaveTextContent(/2 print as one part/)
+    expect(summary).toHaveTextContent(/1 needs a base under it/)
+    expect(summary).toHaveTextContent(/1 of 3 placements print a different file of the same tile/)
+    // Quieter than a warning, and below them: the block is disclosure, and a
+    // missing base must stay the loudest thing in the column.
+    expect(summary?.closest('details')).toBeNull()
+  })
+
+  it('says nothing at all when the preference changed nothing', () => {
+    // A scene of one self-sufficient tile that was placed as itself. A permanent
+    // row of reassurance is how a warning surface stops being read.
+    render(<A6Harness tiles={['floor1']} lock="openlock" />)
+    expect(screen.queryByText(/Resolved for/)).toBeNull()
+    expect(rowMarks()).toEqual([])
+  })
+
+  it('keeps a substituted placement removable rather than reporting it as retired', () => {
+    // The join this row had to rewrite. `line.tileIds` names the *resolved* file
+    // and the store's placement names the *placed* one, so the pre-A6 join found
+    // nothing for a substituted placement and would have put it in the orphan
+    // block: "not in this catalog build", offered for removal, about a tile that
+    // is in the bill and printing correctly.
+    render(<A6Harness tiles={['mergedTopper']} lock="openlock" />)
+    expect(screen.queryByText(/not in this catalog build/)).toBeNull()
+
+    const row = screen.getByRole('button', { expanded: false })
+    fireEvent.click(row)
+    // Reachable and removable from the keyboard, which is the whole reason the
+    // join exists — see `BillPanel.tsx` on the canvas being one tab stop.
+    expect(screen.getByRole('button', { name: /Remove/ })).toBeInTheDocument()
+    expect(screen.getByText('x 0, z 0')).toBeInTheDocument()
+  })
+
+  it('names the resolved file in the row, and the placed one only in the mark', () => {
+    // A1 measures zero aggregates holding two display names, so the *name* is
+    // identical either side of a substitution and naming it would say nothing.
+    // The file is what changed, so the file is what the mark names.
+    render(<A6Harness tiles={['mergedTopper']} lock="openlock" />)
+    expect(rowNames()[0]).toContain(A6_NAMES.merged)
+    const marks = rowMarks()
+    expect(marks).toHaveLength(1)
+    expect(marks[0]).toContain('towne#floor.2x2.merged.openforge.stl')
+  })
+})
 
 describe('the library block', () => {
   it('drops ids the catalog no longer holds rather than rendering a nameless row', () => {
