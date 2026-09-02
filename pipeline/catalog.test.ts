@@ -30,6 +30,7 @@ import {
   MAX_SECTOR_SWEEP_DEG,
   arcBandIsMeasured,
   arcInterfaceRadius,
+  buildAggregateIndex,
   resolveTags,
   shardedPath,
 } from '../src/catalog'
@@ -48,6 +49,7 @@ import {
   COLUMN_TOKEN_BY_LETTER,
   CURVE_TAG_SEGMENTS,
   NON_CURVE_TAG_SEGMENTS,
+  TESSELLATION_BY_CODE,
   arcBandFor,
   arcBandSideOfRadius,
   isMeasured,
@@ -95,6 +97,33 @@ describeCorpus(title, () => {
   const shapeByPath = new Map<string, string>(
     result.file.records.map((record) => [record.id, record.foot.shape]),
   )
+
+  /**
+   * The primitive a congruence key names, from the key string alone.
+   *
+   * `docs/verify-catalog-facts.py` publishes its per-code spans as keys
+   * (`rect:1x1`, `tri:4`, `arc:*`), and its keys are deliberately coarser than
+   * `src/assembly/footprint.ts#footprintKey`: an `arc`'s radii come from its
+   * band, a `diag`'s length and an `xG` wall's run from W2's table, and all
+   * three are **parameters** the script does not hold — W5's rule, so the
+   * offsets keep one home.
+   *
+   * This file cannot import `footprintKey` to compare keys directly:
+   * `tsconfig.node.json` admits `src/catalog` into the pipeline project and not
+   * `src/assembly`, whose `@/` alias this project does not resolve either. So
+   * the cross-check runs at the granularity both sides can spell — the
+   * discriminant — and it is exact rather than approximate, because every key
+   * either *is* a shape name or is prefixed by one.
+   */
+  const shapeOfKey = (key: string): string => key.split(':')[0] ?? key
+
+  /** A `name count, name count` string ordered by descending count, as the script renders it. */
+  const renderTally = (tally: Readonly<Record<string, number>>): string =>
+    Object.entries(tally)
+      .filter(([, count]) => count > 0)
+      .sort(([, a], [, b]) => b - a)
+      .map(([name, count]) => `${name} ${String(count)}`)
+      .join(', ')
 
   /* ------------------------------------------------------------ the contract */
 
@@ -322,6 +351,61 @@ describeCorpus(title, () => {
       expect([...new Set(arcs.map((foot) => foot.sweep))].sort((a, b) => a - b)).toEqual([11.25, 22.5, 45, 90])
     })
 
+    it('agrees on where each of the 1,199 sectors got its band from', () => {
+      // Row W5's resolution order, measured end to end. The verify script owns
+      // the half that is a fact about tags — 1,090 sectors name their own band
+      // and 109 do not — and this owns the half that needs W2's table, because
+      // splitting those 109 means asking whether the tile's code has an `arc`
+      // row. Neither side can produce the other's number, which is the whole
+      // reason the split is where it is.
+      const facts = verifyFacts()
+      const arcs = result.file.records.filter((record) => record.foot.shape === 'arc')
+      expect(arcs).toHaveLength(1_199)
+
+      // The band modifiers, derived from `CURVE_TAG_SEGMENTS` rather than listed:
+      // a curve's segments are `curved` plus the three that say which SIDE of the
+      // interface radius the material is on, and only those three name a band.
+      // The script derives its own list the same way from the same four, so
+      // neither can grow a fourth modifier without the other.
+      const bandModifiers = CURVE_TAG_SEGMENTS.filter((segment) => segment !== 'curved')
+      expect([...bandModifiers].sort()).toEqual(['concave', 'convex', 'radial'])
+
+      const routeOf = (record: (typeof arcs)[number]): 'modifier' | 'code' | 'default' => {
+        const tags = resolveTags(result.file, record)
+        if (tags.some((tag) => tag.split('|').some((segment) => bandModifiers.includes(segment)))) {
+          return 'modifier'
+        }
+        const row = record.sizeCode === undefined ? undefined : TESSELLATION_BY_CODE.get(record.sizeCode)
+        return row?.size.kind === 'arc' ? 'code' : 'default'
+      }
+      const routes = { modifier: 0, code: 0, default: 0 }
+      const codesUsed = new Map<string, number>()
+      for (const record of arcs) {
+        const route = routeOf(record)
+        routes[route] += 1
+        if (route === 'code' && record.sizeCode !== undefined) {
+          codesUsed.set(record.sizeCode, (codesUsed.get(record.sizeCode) ?? 0) + 1)
+        }
+      }
+
+      expect(routes).toEqual({ modifier: 1_090, code: 54, default: 55 })
+      expect(routes.modifier).toBe(leading(facts, 'ARC naming its own band'))
+      expect(routes.code + routes.default).toBe(leading(facts, 'ARC naming no band'))
+      // The five codes carrying an arc row, and the reason `arcBandFromCode`
+      // exists at all: `V` and `VxE` carry identical tags and are a quarter disc
+      // and an annular band, so nothing but the letter separates them.
+      expect([...codesUsed.entries()].sort()).toEqual([
+        ['F', 6],
+        ['V', 6],
+        ['VxE', 6],
+        ['X', 18],
+        ['XA', 18],
+      ])
+      // A tile on the default route names no band and its code carries no arc
+      // row — so `radial` is written, not derived, and `bandBasis` says so.
+      expect(arcs.filter((record) => routeOf(record) === 'default').every((record) => record.foot.shape === 'arc' && record.foot.bandBasis === 'fallback')).toBe(true)
+    })
+
     it('places every column it can and refuses the one letter nobody measured', () => {
       const facts = verifyFacts()
       const columns = live.filter((row) => row.tags.some((tag) => tag.startsWith('size|column_shape|')))
@@ -434,6 +518,101 @@ describeCorpus(title, () => {
         new Set([JSON.stringify({ shape: 'wall', length: 3 })]),
       )
       expect(qxg.every((record) => resolveTags(result.file, record).includes('size|width|4'))).toBe(true)
+    })
+
+    it('agrees on the four size codes that span two primitives, from the emitted shape', () => {
+      // Row D4's premise, derived a third time and from a third artefact. The
+      // verify script reads it off the TAGS with a coarse key,
+      // `src/assembly/assembly.test.ts` reads it off the built index with the
+      // fully dimensioned `footprintKey`, and this reads it off the footprint
+      // this build just emitted. All three have to name the same four codes out
+      // of 36 — and the second half of this test is stronger than that: the
+      // script's per-code spans are compared key by key against the emitted
+      // shapes, so a span that drifted would have to drift on both sides in the
+      // same direction to survive.
+      const facts = verifyFacts()
+      const spans = new Map<string, Map<string, number>>()
+      for (const record of result.file.records) {
+        if (record.sizeCode === undefined || record.foot.shape === 'none') continue
+        const tally = spans.get(record.sizeCode) ?? new Map<string, number>()
+        tally.set(record.foot.shape, (tally.get(record.foot.shape) ?? 0) + 1)
+        spans.set(record.sizeCode, tally)
+      }
+
+      const ambiguous = [...spans.entries()]
+        .filter(([, tally]) => tally.size > 1)
+        .map(([code]) => code)
+        .sort()
+      expect(ambiguous).toEqual(['I', 'O', 'S', 'X'])
+      expect(ambiguous).toHaveLength(leading(facts, 'codes spanning 2+ primitives'))
+      expect(ambiguous).toEqual(facts.get('codes spanning 2+ primitives')?.split(': ')[1]?.split(', '))
+      // 36 codes, 35 of which reach a footprint: `T` is W2's one unmeasured
+      // column letter and all 14 of its tiles are NONE, so it has no span at all.
+      expect(new Set(result.file.records.map((record) => record.sizeCode).filter((code) => code !== undefined)).size).toBe(36)
+      expect(spans.size).toBe(35)
+
+      // The script's row, key by key. `O = 34 column, 5 tri:2, 4 tri:4` becomes
+      // `{ column: 34, tri: 9 }` — the dimensions are the half only the script
+      // spells here, and the discriminant is the half only the emitted footprint
+      // can confirm.
+      const fromScript = new Map<string, Record<string, number>>()
+      for (const span of (facts.get('ambiguous code spans') ?? '').split(' \u00b7 ')) {
+        const [code, tail] = span.split(' = ')
+        if (code === undefined || tail === undefined) continue
+        const tally: Record<string, number> = {}
+        for (const part of tail.split(', ')) {
+          const [count, key] = part.split(' ')
+          if (count === undefined || key === undefined) continue
+          tally[shapeOfKey(key)] = (tally[shapeOfKey(key)] ?? 0) + Number(count)
+        }
+        fromScript.set(code, tally)
+      }
+      expect([...fromScript.keys()].sort()).toEqual(ambiguous)
+      for (const code of ambiguous) {
+        expect(Object.fromEntries([...(spans.get(code) ?? [])])).toEqual(fromScript.get(code))
+      }
+      // And the headline case in full, because "a code spans two primitives" is
+      // abstract and "a code join can put a 0.5 x 0.5 pillar under a 4 x 4
+      // triangle" is what it means.
+      expect(fromScript.get('O')).toEqual({ column: 34, tri: 9 })
+      expect(fromScript.get('X')).toEqual({ arc: 18, column: 11 })
+      expect(fromScript.get('I')).toEqual({ column: 24, rect: 84 })
+      expect(fromScript.get('S')).toEqual({ rect: 176, wall: 6 })
+
+      const under = result.file.records.filter(
+        (record) =>
+          record.sizeCode !== undefined && ambiguous.includes(record.sizeCode) && record.foot.shape !== 'none',
+      )
+      expect(under).toHaveLength(leading(facts, 'records under an ambiguous code'))
+      expect(under).toHaveLength(362)
+    })
+
+    it('agrees on the base range that bounds every match', () => {
+      // What a topper can possibly be matched to, and the fact rows D4 and D5
+      // both rest on: **not one base in the corpus is a triangle, a diagonal run
+      // or a pillar.** So the 130 `shape|angled|right` tiles and the 119 columns
+      // are a gap in what has been published, not a resolver failure — which is
+      // why D5 files them upstream rather than widening the match.
+      //
+      // The count of classes those bases fall into is asserted where the key
+      // lives: `src/assembly/assembly.test.ts` pins `stats.baseFootprints` at 44
+      // over 1,835 keyed bases. This side owns the distribution and the absence.
+      const facts = verifyFacts()
+      const bases = result.file.records.filter((record) => record.layer === 'base')
+      expect(bases).toHaveLength(leading(facts, 'layer base'))
+
+      const shapes: Record<string, number> = {}
+      for (const record of bases) shapes[record.foot.shape] = (shapes[record.foot.shape] ?? 0) + 1
+      // The script's row verbatim, which it renders alphabetically.
+      expect(
+        Object.entries(shapes)
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([name, count]) => `${String(count)} ${name}`)
+          .join(', '),
+      ).toBe(facts.get('base primitives'))
+      expect(shapes).toEqual({ arc: 313, none: 128, rect: 1_037, wall: 485 })
+      expect(Object.keys(shapes).sort()).toEqual(['arc', 'none', 'rect', 'wall'])
+      expect(1_963 - 128).toBe(1_835)
     })
 
     it('agrees that the only curve markers the substring scan added were hex', () => {
@@ -669,6 +848,40 @@ describeCorpus(title, () => {
       expect(withSideLock).toHaveLength(leading(facts, 'topper \u00b7 side lock only'))
       expect(withSideLock.length).toBeGreaterThan(1_000)
       expect(withSideLock.every((row) => connectionSystems(row.tags).some(isLockSystem))).toBe(true)
+    })
+
+    it('agrees on the five shapes a design collapses into', () => {
+      // Row A1's class counts, derived a second time. `pipeline/aggregate.test.ts`
+      // asserts them off `buildAggregateIndex`; the verify script now derives the
+      // same five from the raw fixtures, grouping on its own `design_key` and its
+      // own port of `classifyLayer`. Two independent derivations of one figure is
+      // the whole point — a copy of A1's numbers would have proved nothing.
+      const facts = verifyFacts()
+      const index = buildAggregateIndex(result.file)
+      expect(index.stats.aggregates).toBe(leading(facts, 'distinct designs (connection only)'))
+      expect(renderTally(index.stats.classes)).toBe(facts.get('aggregate classes'))
+
+      // `mixed` is 0 **by construction**, not by measurement, and the script says
+      // so in that many words: `classifyLayer` reads `part|`, `shape|base` and
+      // `connection|openforge`, and the design key collapses only the last — so
+      // the only two layers that can meet inside one design are topper and
+      // integral. Asserting 0 here would be an invariant that cannot fail; what
+      // can fail is the premise, so that is what is checked.
+      expect(index.stats.classes.mixed).toBe(0)
+      expect(leading(facts, 'designs whose layer signal varies')).toBe(0)
+      const signals = (tags: readonly string[]) =>
+        `${String(tags.some((tag) => tag.startsWith('part|')))}/${String(tags.some((tag) => tag.startsWith('shape|base')))}`
+      const perDesign = new Map<string, Set<string>>()
+      for (const record of result.file.records) {
+        const design = record.design as unknown as string
+        const seen = perDesign.get(design) ?? new Set<string>()
+        seen.add(signals(resolveTags(result.file, record)))
+        perDesign.set(design, seen)
+      }
+      expect([...perDesign.values()].filter((seen) => seen.size > 1)).toEqual([])
+
+      const spread = `${String(index.aggregates.filter((aggregate) => aggregate.variants.length === 1).length)} singletons, largest ${String(Math.max(...index.aggregates.map((aggregate) => aggregate.variants.length)))}`
+      expect(spread).toBe(facts.get('aggregate spread'))
     })
 
     it('agrees on the design count', () => {

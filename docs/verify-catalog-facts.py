@@ -10,6 +10,24 @@ quotes these numbers; CI should run this and fail the build when they drift.
 Every definition used here is stated explicitly, because the first draft of the plan
 quoted figures whose definitions were never written down and which turned out to be
 irreproducible.
+
+Row W7 folded in the figures the v2 series rests on -- the size-code ambiguity (D4),
+the base range and print options (D1), joinery per face (D2), the band a curve names
+(W5) and what a design collapses into (A1) -- on one rule for where each one lives:
+
+  * this script reads RAW FIXTURES and is the authority on the CORPUS. A figure that
+    is a fact about tags belongs here, with an invariant that fails when it moves.
+  * a figure about the SHIPPED INDEX belongs in `pipeline/catalog.test.ts`, which
+    reads the emitted artefact and cross-checks these rows against it.
+  * a figure that needs a MEASURED PARAMETER -- an arc band's radii, a diagonal's
+    run, an xG wall's length -- is not mirrored here at all. Those live in
+    `pipeline/tessellation.ts`, and a second copy would give them two homes; this
+    script stars the dimension out and says which file carries the real one.
+
+Two rows deliberately report a figure and do not assert it clean: `mixed` aggregates
+are 0 by construction rather than by measurement, and `a system named past the system
+segment` records a live defect. Both say so in the Definition column, because an
+invariant that cannot fail is worth less than a number that admits what it is.
 """
 
 from __future__ import annotations
@@ -192,6 +210,48 @@ CONNECTION_POSITIONS = ("side", "bottom", "left", "right")
 # system, so folding the two spellings together is a no-op today and correct if a
 # `connection|bottom|<sys>` tag ever appears.
 OWN_POSITION = "bottom"
+
+# The band segment a curve names in its own tags: exactly CURVE_SEGMENTS minus
+# the bare `curved`. `curved` says the outline IS a curve; the other three say
+# which SIDE of the interface radius the material sits on, which is the band.
+# Derived from that tuple rather than written out again, so the two cannot drift.
+#
+# `arcBandFromModifier` in `pipeline/footprint.ts` scans these three plus `s2w`,
+# and `s2w` only chooses between two radial bands -- it can never be the reason a
+# tile names a band at all -- so "names a band" is the same predicate in both.
+#
+# The band's RADII are deliberately absent. They are a parameter, they live in
+# `pipeline/tessellation.ts`, and W5's reasoning for keeping them out of this
+# script is that a mirror would give the offsets two homes. This file only asks
+# whether the corpus names a band; `pipeline/catalog.test.ts` asserts which band,
+# how wide, and where each one came from, against the emitted index.
+BAND_MODIFIER_SEGMENTS = tuple(s for s in CURVE_SEGMENTS if s != "curved")
+
+# The print modifiers, which sit from the modifier slot onwards -- segment two of
+# `connection|<system>|...`, or segment three when a position leads. Never at the
+# system position. Mirrors `PRINT_MODIFIERS` in `src/catalog/aggregate.ts`.
+#
+# `pegs` and `filament` are NOT here, and the research that listed them among
+# five modifiers had them in the wrong slot: both are SYSTEMS. The corpus spells
+# them `connection|pegs` (147 tags) and `connection|side|filament` (114) -- the
+# same slot `openlock` occupies. They appear in `distinct connection systems`
+# below, and the table asserts neither ever reaches a modifier slot.
+PRINT_MODIFIERS = ("topless", "unsupported", "flex", "split")
+
+# The two modifiers that name a base which is a DIFFERENT OBJECT, worst first.
+# Mirrors `PRINT_OPTIONS` in `src/assembly/assemblyIndex.ts` reversed -- that
+# list is best-first and a fold wants the worst. The other two are excluded on
+# measurements the table below re-derives: `flex` is on all 1,141 magnetic bases
+# and on no other base, so it describes the system rather than a choice inside
+# it, and `split` never lands on a base at all.
+RANKED_PRINT_MODIFIERS = ("topless", "unsupported")
+
+# The three primitives whose dimension is a MEASURED PARAMETER rather than a tag:
+# an `arc`'s two radii come from its band, a `diag`'s length and an `xG` wall's
+# run from W2's table. All three live in `pipeline/tessellation.ts`, so the
+# congruence key below stars them out instead of mirroring them. See
+# `footprint_key`.
+PARAMETRIC_KEYS = ("arc:*", "diag:*", "wall:*")
 
 
 def load(fixtures: pathlib.Path) -> list[dict]:
@@ -457,6 +517,117 @@ def footprint_kind(row: dict) -> str:
     if width is not None:
         return "wall"
     return "none"
+
+
+def footprint_key(row: dict, kind: str) -> str | None:
+    """The congruence class two tiles share iff a base of one fits under the other.
+
+    Mirrors `footprintKey` in `src/assembly/footprint.ts`, with one deliberate
+    difference: three of the seven primitives carry a dimension this script does
+    not hold. An `arc`'s radii come from its BAND, a `diag`'s length and an `xG`
+    wall's run from W2's measured table, and all three are PARAMETERS owned by
+    `pipeline/tessellation.ts` -- mirroring them here would give the offsets two
+    homes, which is the trade W5 already settled. Those three collapse to a
+    starred class (PARAMETRIC_KEYS) and `pipeline/catalog.test.ts` carries the
+    dimensioned key against the emitted index.
+
+    The collapse is checked rather than assumed, in both directions. The
+    ambiguity row below reports the codes that span two classes under THIS key,
+    and the pipeline test asserts the dimensioned key finds the same four -- so a
+    code ambiguous only INSIDE a starred class fails there instead of hiding
+    here. And where a starred class would change an answer, the table says so:
+    the 43 recoverable toppers are asserted to key on a dimensioned class.
+
+    `None` for NONE, and that is the load-bearing return rather than a
+    convenience. The 726 tiles with no derivable footprint are not congruent to
+    each other; `footprintKey` returns `undefined` for the same reason, and its
+    docstring counts the false pairs a shared `'none'` key would mint.
+    """
+    if kind == "rect":
+        width, depth = numeric(row, "size|width"), numeric(row, "size|depth")
+        if width is None or depth is None:
+            return None
+        return f"rect:{min(width, depth):g}x{max(width, depth):g}"
+    if kind == "wall":
+        if CURVED_INTERFACE_TAG in tags_of(row):
+            return "wall:*"
+        width = numeric(row, "size|width")
+        return None if width is None else f"wall:{width:g}"
+    if kind == "tri":
+        leg = triangle_leg(row)
+        return None if leg is None else f"tri:{leg:g}"
+    if kind == "column":
+        return "column"
+    if kind == "diag":
+        return "diag:*"
+    if kind == "arc":
+        return "arc:*"
+    return None
+
+
+def modifier_slot_segments(row: dict) -> list[str]:
+    """Every segment sitting where a print modifier can sit, whatever it is.
+
+    Segment two of `connection|<system>|...`, or segment three when a position
+    leads. Returned unfiltered so the table can name what turns up there that is
+    not a modifier: today a position spelled backwards (`connection|openlock|side`,
+    3 tags) and one system spelled backwards (`connection|openforge|dragonlock`,
+    5 tags, and every reader in the repo drops it -- see the row that counts it).
+
+    Reading from segment one instead is the `connection|side|openlock` defect one
+    namespace over: segment one is a position or the system itself, and no
+    modifier ever occupies it.
+    """
+    found: list[str] = []
+    for tag in tags_of(row):
+        if not tag.startswith("connection|"):
+            continue
+        parts = tag.split("|")[1:]
+        positioned = bool(parts) and parts[0] in CONNECTION_POSITIONS
+        found.extend(parts[2:] if positioned else parts[1:])
+    return found
+
+
+def print_options(row: dict) -> set[str]:
+    """The print modifiers a tile names. Mirrors `project` in `src/catalog/aggregate.ts`."""
+    return {segment for segment in modifier_slot_segments(row) if segment in PRINT_MODIFIERS}
+
+
+def print_option(row: dict) -> str:
+    """The one print option a tile amounts to: the WORST modifier it names.
+
+    Mirrors `printOption` in `src/assembly/assemblyIndex.ts`. Worst rather than
+    first, so a base tagged `openlock|topless` beside a plain `magnetic` is
+    topless -- it has no top whichever system you clip it with. Total even though
+    zero live bases carry both, because a tag that carried both must not resolve
+    to the flattering answer; the table asserts the zero separately.
+    """
+    named = print_options(row)
+    for modifier in RANKED_PRINT_MODIFIERS:
+        if modifier in named:
+            return modifier
+    return "plain"
+
+
+def aggregate_class(layers: frozenset[str]) -> str:
+    """What one design's files amount to. Mirrors `classify` in `src/catalog/aggregate.ts`.
+
+    `both` is the pair the whole aggregation row exists for -- a base-integrated
+    tile beside the base-less tile of the same design -- and `mixed` is any other
+    combination. `mixed` is 0, which is what lets row A3 render one availability
+    chip set per card; the table asserts it rather than assuming it.
+    """
+    if len(layers) == 1:
+        (only,) = tuple(layers)
+        return {
+            "topper": "topper-only",
+            "base": "base-only",
+            "integral": "integrated-only",
+            "insert": "insert-only",
+        }[only]
+    if layers == frozenset({"topper", "integral"}):
+        return "both"
+    return "mixed"
 
 
 def design_key(row: dict, *, collapse: tuple[str, ...]) -> tuple:
@@ -753,6 +924,62 @@ def main() -> int:
     if arc_no_angle != 0:
         failures.append(f"{arc_no_angle} arc tiles carry no size|angle, so a sweep is being fabricated")
 
+    # -------------------------------------------------- row W5: naming the band
+    # A sector needs two radii and `size|radius` gives one, so the missing piece
+    # is the BAND -- which side of that radius the material sits on. The offsets
+    # are a parameter and stay in `pipeline/tessellation.ts`; what belongs here is
+    # whether the CORPUS names a band at all, because that is a fact about tags
+    # and it is the figure the plan quoted wrongly. Its draft said "292 of 1,391
+    # arc tiles (21.0%) carry no band modifier", which is true of the tiles
+    # carrying a radius and no longer true of the ARC bucket: W4 and W5 moved 183
+    # of those 292 out of it.
+    arcs = [r for r in live if kind_of[id(r)] == "arc"]
+    named_band = {id(r) for r in live if segments_of(r) & set(BAND_MODIFIER_SEGMENTS)}
+    arcs_named = sum(1 for r in arcs if id(r) in named_band)
+    arcs_unnamed = len(arcs) - arcs_named
+    out.append(
+        (
+            "ARC naming its own band",
+            f"{arcs_named} ({pct(arcs_named, len(arcs))} of ARC)",
+            "a concave/convex/radial tag SEGMENT -- the tile says which side of the interface radius it is on",
+        )
+    )
+    out.append(
+        (
+            "ARC naming no band",
+            str(arcs_unnamed),
+            "resolved from W2's table where the code carries an arc row and from a written default otherwise. The 54/55 split needs the table and lives in pipeline/catalog.test.ts; this row is the population it partitions",
+        )
+    )
+
+    radius_unnamed = [r for r in live if numeric(r, "size|radius") is not None and id(r) not in named_band]
+    landed_unnamed = Counter(kind_of[id(r)] for r in radius_unnamed)
+    out.append(
+        (
+            "radius, and no band named",
+            f"{len(radius_unnamed)}: " + ", ".join(f"{v} {k}" for k, v in sorted(landed_unnamed.items())),
+            "the plan's 292. Only the ARC share of it is still a band question -- the 84 xG walls, 24 inverted plates and 75 refused tiles stopped being sectors in W4 and W5",
+        )
+    )
+    if set(landed_unnamed) - {"arc", "wall", "rect", "none"}:
+        failures.append(
+            f"a radius-carrying tile that names no band landed in {sorted(set(landed_unnamed) - {'arc', 'wall', 'rect', 'none'})}, "
+            "which is a primitive W4 and W5 never sent one to -- the band question now reaches a case with no rule"
+        )
+
+    interface_named = sum(1 for r in live if CURVED_INTERFACE_TAG in tags_of(r) and id(r) in named_band)
+    out.append(
+        (
+            "curved interfaces naming a band",
+            str(interface_named),
+            f"MUST be 0 -- not one of the 111 says which side its radius is on, which is why the 27 floors have nothing to place. {arcs_unnamed} + 27 = {arcs_unnamed + 27} is the count the arc bucket carried before W5 de-arced them",
+        )
+    )
+    if interface_named != 0:
+        failures.append(
+            f"{interface_named} curved-interface tiles name a band, so W5's reason for refusing the 27 floors moved"
+        )
+
     # ---------------------------------------------------------------- joinery
     no_conn = sum(1 for r in live if not any(t.startswith("connection|") for t in tags_of(r)))
     openforge = sum(1 for r in live if any(t.startswith("connection|openforge") for t in tags_of(r)))
@@ -830,6 +1057,372 @@ def main() -> int:
 
     if layers["topper"] and sum(1 for r in live if layer_of(r) == "topper" and locks_at(r, OWN_POSITION)):
         failures.append("a topper carries a bottom lock -- connection|openforge IS the underside")
+
+    # The other side of the same fact, and the one nothing asserted: a base is
+    # defined by having joinery underneath, so a base with no bottom lock is a
+    # base nothing can be clipped to. All 1,963 carry one today. This fails if a
+    # `shape|base` row is ever published without one -- at which point D1's
+    # ranking has a candidate it cannot rank and A6's fallback has a base it
+    # cannot honestly insert.
+    base_rows = [r for r in live if layer_of(r) == "base"]
+    topper_rows = [r for r in live if layer_of(r) == "topper"]
+    lockless_bases = [r for r in base_rows if not locks_at(r, OWN_POSITION)]
+    out.append(
+        (
+            "bases with no bottom lock",
+            str(len(lockless_bases)),
+            "MUST be 0 -- a base IS its underside joinery, and D1 ranks candidates on a lock it assumes is there",
+        )
+    )
+    if lockless_bases:
+        failures.append(f"{len(lockless_bases)} bases carry no lock on their own underside")
+
+    # A DEFECT, reported rather than fixed, because it is the footnote on the row
+    # above it. All three readers of the connection namespace --
+    # `connections_by_position` here, `connectionsByPosition` in
+    # pipeline/facets.ts and `project` in src/catalog/aggregate.ts -- take the
+    # system from ONE segment and treat everything after it as a print modifier.
+    # `connection|openforge|dragonlock` puts a second SYSTEM there, and all three
+    # drop it; `printOption` in src/assembly/assemblyIndex.ts scans the same
+    # slots for `topless`/`unsupported` and so is untroubled by it.
+    #
+    # So "0 of the 4,363 toppers carry a bottom lock" is 0 under the reading the
+    # code has, and would be 5 under a reading that took the trailing segment:
+    # all five tags are on `necro#wall.{A,BA,D,IA,Q}.openforge+dragonlock,side`
+    # toppers, the filename agrees with the tag, and dragonlock appears nowhere
+    # else on those five rows -- so the system is genuinely lost rather than
+    # merely understated. Pinned to the measured population: a sixth tag fails
+    # here, and so does a reader that starts honouring them, which is what makes
+    # this row an invariant rather than a note.
+    system_names = set(all_systems)
+    lost: list[dict] = []
+    lost_systems: set[str] = set()
+    trailing: Counter[str] = Counter()
+    trailing_rows: list[dict] = []
+    for r in live:
+        named: set[str] = set()
+        for tag in tags_of(r):
+            if not tag.startswith("connection|"):
+                continue
+            parts = tag.split("|")[1:]
+            positioned = bool(parts) and parts[0] in CONNECTION_POSITIONS
+            found = {s for s in (parts[2:] if positioned else parts[1:]) if s in system_names}
+            if found:
+                trailing[tag] += 1
+                named |= found
+        if named:
+            trailing_rows.append(r)
+            if named - connection_systems(r):
+                lost_systems |= named - connection_systems(r)
+                lost.append(r)
+    out.append(
+        (
+            "a system named past the system segment",
+            f"{sum(trailing.values())} tags / {len(trailing_rows)} records: "
+            + ", ".join(f"{v}x {k}" for k, v in sorted(trailing.items())),
+            "MUST be the 5 `connection|openforge|dragonlock` necro walls. Every reader takes segment one as the system and the rest as print modifiers, so the trailing system is discarded -- which is the asterisk on `topper . bottom lock` being 0. A sixth tag fails here; teaching THIS script to read them fails the row below; teaching only `pipeline/facets.ts` fails catalog.test.ts's per-face cross-check",
+        )
+    )
+    out.append(
+        (
+            "records losing a system that way",
+            f"{len(lost)} {'/'.join(sorted({layer_of(r) for r in lost})) or '-'}, losing {', '.join(sorted(lost_systems)) or '(nothing)'}",
+            "the trailing system is on no other tag of the same row, so it is lost and not merely unpositioned. Contrast `connection|openlock|side` (3 tags), which spells a POSITION backwards and whose system IS on a sibling tag",
+        )
+    )
+    if dict(trailing) != {"connection|openforge|dragonlock": 5} or len(lost) != 5:
+        failures.append(
+            f"the trailing-system population moved: {dict(trailing)}, {len(lost)} losing a system "
+            "(measured: 5x connection|openforge|dragonlock, all 5 losing dragonlock). Either the corpus "
+            "grew one or a reader started honouring them -- both change `topper . bottom lock`"
+        )
+
+    # ------------------------------------------------- row D4: the size code
+    # `resolve.ts` keyed base to topper on `size|openlock` until row D4, on the
+    # argument that a code covers tiles a width does not. The argument was sound
+    # about WIDTHS and wrong about SHAPES, and these rows are the measurement that
+    # says so. The key is now the resolved primitive; the code keeps a width, a
+    # tie-break and one last-resort path.
+    key_of = {id(r): footprint_key(r, kind_of[id(r)]) for r in live}
+    code_of = {id(r): tag_value(r, "size|openlock") for r in live}
+    codes = sorted({code_of[id(r)] for r in live if code_of[id(r)] is not None})
+    spans: dict[str, Counter] = defaultdict(Counter)
+    for r in live:
+        code, key = code_of[id(r)], key_of[id(r)]
+        if code is not None and key is not None:
+            spans[code][key] += 1
+    ambiguous = {code: tally for code, tally in spans.items() if len(tally) > 1}
+    ambiguous_records = sum(sum(t.values()) for t in ambiguous.values())
+    codeless = sorted(set(codes) - set(spans))
+    out.append(
+        (
+            "size|openlock codes",
+            f"{len(codes)}, {len(spans)} with a placeable record",
+            f"the ones with none: {', '.join(codeless) or '(none)'} -- MUST be T alone, the column letter W2 marks unmeasured, whose 14 tiles are all NONE",
+        )
+    )
+    out.append(
+        (
+            "codes spanning 2+ primitives",
+            f"{len(ambiguous)} of {len(codes)}: {', '.join(sorted(ambiguous))}",
+            "the whole of D4's premise. Kept parseable because `pipeline/catalog.test.ts` re-derives the same set from the EMITTED footprint, where the dimensions are real, and a disagreement between the two derivations is the thing worth failing on",
+        )
+    )
+    out.append(
+        (
+            "ambiguous code spans",
+            " · ".join(
+                f"{code} = " + ", ".join(f"{v} {k}" for k, v in sorted(tally.items()))
+                for code, tally in sorted(ambiguous.items())
+            ),
+            "`O` is the loudest: a code join can put a 0.5 x 0.5 pillar under a 4 x 4 triangle, and the old ranking compared the DISCRIMINANT (rect vs tri) rather than the dimensions, so it could not see the difference",
+        )
+    )
+    out.append(
+        (
+            "records under an ambiguous code",
+            f"{ambiguous_records} ({pct(ambiguous_records, n)})",
+            "every record a code join could have mis-shaped",
+        )
+    )
+    if codeless != ["T"]:
+        failures.append(
+            f"the codes with no placeable record are {codeless}, not T alone -- a whole code lost its footprint"
+        )
+    if not ambiguous:
+        failures.append(
+            "no size|openlock code spans two primitives any more, so D4's docstring and AMBIGUOUS_SIZE_CODES "
+            "both describe a corpus that no longer exists"
+        )
+
+    # Why the defect was latent, in two independent measurements. Neither is a
+    # rule about codes, and both are one published base away from ending -- which
+    # is the argument for having moved the key rather than patched the ranking.
+    base_codes: dict[str, list[dict]] = defaultdict(list)
+    for r in base_rows:
+        code = code_of[id(r)]
+        if code is not None:
+            base_codes[code].append(r)
+    heterogeneous = sorted(
+        code
+        for code, group in base_codes.items()
+        if len({key_of[id(x)] for x in group}) > 1 or any(key_of[id(x)] is None for x in group)
+    )
+    out.append(
+        (
+            "codes on the base side",
+            f"{len(base_codes)}, {len(base_codes) - len(heterogeneous)} of them footprint determinants",
+            "MUST be all of them. `resolve.ts`'s last-resort code path is gated on `sharedPrimitive`, so a code whose bases disagree makes it refuse rather than pick -- and 14 toppers lose their base line item",
+        )
+    )
+    out.append(
+        (
+            "ambiguous codes a base carries",
+            f"{len(set(base_codes) & set(ambiguous))} of {len(ambiguous)}: "
+            + ", ".join(sorted(set(base_codes) & set(ambiguous))),
+            f"O is absent, and that is reason two: {len(base_codes.get('O', []))} bases carry it, so the join it would have mis-shaped never ran",
+        )
+    )
+    if heterogeneous:
+        failures.append(f"a base-side size code spans two primitives: {heterogeneous}")
+    if base_codes.get("O"):
+        failures.append(
+            f"{len(base_codes['O'])} bases now carry code O, which spans column/tri:2/tri:4 -- "
+            "sizeCode.ts's latency argument is stale and the code path needs re-reading"
+        )
+
+    # Row D5's gap, split the way D4 left it. A topper whose code no base carries
+    # is not the same thing as a topper no base fits: 43 of the 129 are congruent
+    # to a base the archive does have and were reachable only once the key moved.
+    base_keys = {key_of[id(r)] for r in base_rows if key_of[id(r)] is not None}
+    gap = [r for r in topper_rows if code_of[id(r)] is not None and code_of[id(r)] not in base_codes]
+    recovered = [r for r in gap if key_of[id(r)] in base_keys]
+    starred = [r for r in recovered if key_of[id(r)] in PARAMETRIC_KEYS]
+    out.append(
+        (
+            "toppers whose code no base carries",
+            f"{len(gap)}: " + ", ".join(f"{v}x {k}" for k, v in sorted(Counter(code_of[id(r)] for r in gap).items())),
+            "a fact about tags, and unchanged by D4",
+        )
+    )
+    out.append(
+        (
+            "of those, congruent to a base that exists",
+            f"{len(recovered)}: "
+            + ", ".join(f"{v}x {k}" for k, v in sorted(Counter(code_of[id(r)] for r in recovered).items()))
+            + " -> "
+            + ", ".join(sorted({key_of[id(r)] or "?" for r in recovered})),
+            "reachable under the primitive key and not under the code. MUST key on a dimensioned class, never a starred one -- a starred class would mean this count came from a parameter this script does not hold",
+        )
+    )
+    out.append(
+        (
+            "of those, no base under either key",
+            str(len(gap) - len(recovered)),
+            "the real corpus gap: `notes.ts` warns on these. Row D5's docstring says 129 over nine codes, which was the whole gap before D4 recovered 43 of it",
+        )
+    )
+    if starred:
+        failures.append(
+            f"{len(starred)} recoverable toppers key on a starred class {sorted({key_of[id(r)] for r in starred})}, "
+            "so this split now depends on a parameter that lives in pipeline/tessellation.ts -- move the row to "
+            "pipeline/catalog.test.ts rather than trusting it here"
+        )
+
+    # The base range, which is what bounds every one of those answers.
+    base_kinds = Counter(kind_of[id(r)] for r in base_rows)
+    keyed_bases = [r for r in base_rows if key_of[id(r)] is not None]
+    absent = sorted({"tri", "diag", "column"} & set(base_kinds))
+    out.append(
+        (
+            "base primitives",
+            ", ".join(f"{v} {k}" for k, v in sorted(base_kinds.items())),
+            "MUST hold no tri, diag or column. The corpus publishes no triangular, diagonal or pillar base at all, so the 130 angled-right tiles and the 119 columns can never be matched to one -- which is the shape of the gap D5 files upstream, not a resolver bug",
+        )
+    )
+    out.append(
+        (
+            "base congruence classes",
+            f"{len(keyed_bases)} keyed / {len({key_of[id(r)] for r in keyed_bases})} classes",
+            "starred classes collapsed: every arc base counts once here, and every diag and xG wall base would. The dimensioned count is 44 and belongs to pipeline/catalog.test.ts, which reads the emitted index and has the bands",
+        )
+    )
+    if absent:
+        failures.append(
+            f"the corpus now publishes {absent} bases, so D5's shape gap and D4's base range both moved"
+        )
+
+    # ------------------------------------------------ row D1: the print option
+    # `byCost` sorted candidate bases on bytes ascending, so a topless base -- a
+    # base with no top surface -- won every tie, and 79.1% of auto-inserted
+    # openlock bases had no top. The ranking is D1's; the vocabulary it ranks over
+    # is a corpus fact and belongs here.
+    modifier_slots = Counter(s for r in live for s in modifier_slot_segments(r))
+    option_tally = {s: c for s, c in modifier_slots.items() if s in PRINT_MODIFIERS}
+    strays = {s: c for s, c in modifier_slots.items() if s not in PRINT_MODIFIERS}
+    out.append(
+        (
+            "print-option vocabulary",
+            f"{len(option_tally)}: " + ", ".join(f"{k} {v}" for k, v in sorted(option_tally.items(), key=lambda kv: -kv[1])),
+            "segments in a modifier slot that really are modifiers. Four values, and the research's five were wrong twice over -- `pegs` and `filament` are SYSTEMS, and `flex` and `split` never rank a base",
+        )
+    )
+    out.append(
+        (
+            "non-modifiers in a modifier slot",
+            ", ".join(f"{k} {v}" for k, v in sorted(strays.items())) or "(none)",
+            "MUST hold neither pegs nor filament. Both exist -- `connection|pegs` 147 tags, `connection|side|filament` 114 -- at the SYSTEM position, which is why they are connection systems below and not print options here",
+        )
+    )
+    if {"pegs", "filament"} & set(strays):
+        failures.append(
+            f"{sorted({'pegs', 'filament'} & set(strays))} reached a modifier slot; they are systems everywhere else "
+            "in the corpus, so either the fixture is wrong or the print-option vocabulary is five values now"
+        )
+
+    base_options = Counter(print_option(r) for r in base_rows)
+    both_modifiers = [r for r in base_rows if len(print_options(r) & set(RANKED_PRINT_MODIFIERS)) > 1]
+    out.append(
+        (
+            "bases by print option",
+            ", ".join(f"{k} {v}" for k, v in sorted(base_options.items())),
+            "the candidate pool D1 re-ranks. `plain` is the absence of both ranked modifiers, not a tag",
+        )
+    )
+    out.append(
+        (
+            "bases carrying both modifiers",
+            str(len(both_modifiers)),
+            "MUST be 0 -- `printOption` folds to the worst anyway, so a base with both resolves to `topless` rather than to the flattering answer, but nothing live exercises that branch",
+        )
+    )
+    if sum(base_options.values()) != len(base_rows):
+        failures.append("bases by print option does not sum to the base count")
+    if both_modifiers:
+        failures.append(
+            f"{len(both_modifiers)} bases now carry both topless and unsupported; D1's ranking asserts zero and "
+            "assemblyIndex.ts's fold is what covers it"
+        )
+
+    flex_bases = {id(r) for r in base_rows if "flex" in print_options(r)}
+    magnetic_bases = {id(r) for r in base_rows if "magnetic" in connection_systems(r)}
+    split_bases = [r for r in base_rows if "split" in print_options(r)]
+    out.append(
+        (
+            "bases carrying flex",
+            f"{len(flex_bases)} / {len(magnetic_bases)} magnetic bases",
+            "MUST be equal. `flex` is why it is not a ranked option: it describes the magnetic system rather than a choice inside it, so ranking on it would order bases by lock twice",
+        )
+    )
+    out.append(
+        (
+            "bases carrying split",
+            str(len(split_bases)),
+            "MUST be 0 -- `split` is on one record corpus-wide and it is not a base, so it can never rank one",
+        )
+    )
+    if flex_bases != magnetic_bases:
+        failures.append(
+            f"flex and magnetic no longer describe the same {len(magnetic_bases)} bases "
+            f"({len(flex_bases - magnetic_bases)} flex without magnetic, {len(magnetic_bases - flex_bases)} the other way) "
+            "-- assemblyIndex.ts excludes flex from PRINT_OPTIONS on exactly that identity"
+        )
+    if split_bases:
+        failures.append(f"{len(split_bases)} bases now carry `split`, which PRINT_OPTIONS omits as unreachable")
+
+    # -------------------------------------------- row A1: what a design amounts to
+    # One catalog item per design, and the five shapes rows A2 through A7 are
+    # scoped against. Derived here from the tags and the layer rule; A1's own
+    # figures come from `buildAggregateIndex` over the emitted index, and
+    # `pipeline/aggregate.test.ts` asserts those -- so these rows are a second,
+    # independent derivation of the same numbers rather than a copy of them.
+    by_design_rows: dict[tuple, list[dict]] = defaultdict(list)
+    for r in live:
+        by_design_rows[design_key(r, collapse=("connection",))].append(r)
+    classes = Counter(
+        aggregate_class(frozenset(layer_of(x) for x in group)) for group in by_design_rows.values()
+    )
+    out.append(
+        (
+            "aggregate classes",
+            ", ".join(f"{k} {v}" for k, v in sorted(classes.items(), key=lambda kv: -kv[1])),
+            "one design's files, by the layers they occupy. `both` is the pair the aggregation row exists for -- a base-integrated tile beside the base-less tile of the same design",
+        )
+    )
+    signal_varies = sum(
+        1
+        for group in by_design_rows.values()
+        if len({(any(t.startswith("part|") for t in tags_of(x)), any(t.startswith("shape|base") for t in tags_of(x))) for x in group}) > 1
+    )
+    out.append(
+        (
+            "aggregates mixing other layers",
+            f"{classes['mixed']}, and 0 BY CONSTRUCTION",
+            "not a corpus measurement. `layer_of` reads three namespaces and the design key collapses only one of them -- `connection|openforge` -- so `part|` and `shape|base` are constant inside a design and the only two layers that can meet are topper and integral. The row beside it is the checkable half",
+        )
+    )
+    out.append(
+        (
+            "designs whose layer signal varies",
+            str(signal_varies),
+            "MUST be 0, and it is what `mixed` would need to be non-zero: a design holding both a `part|` row and a non-`part|` row. Widen `design_key`'s collapse list to a namespace `layer_of` reads and this fires -- which is the only way `AggregateClass.mixed` becomes reachable",
+        )
+    )
+    out.append(
+        (
+            "aggregate spread",
+            f"{sum(1 for g in by_design_rows.values() if len(g) == 1)} singletons, largest {max(len(g) for g in by_design_rows.values())}",
+            "how much visible duplication the collapse removes",
+        )
+    )
+    if sum(classes.values()) != len(by_design_rows):
+        failures.append("aggregate classes do not partition the designs")
+    if signal_varies or classes["mixed"]:
+        failures.append(
+            f"{signal_varies} designs hold two different `part|`/`shape|base` signals and {classes['mixed']} are "
+            "`mixed`: the design key now collapses a namespace `layer_of` reads, so `AggregateClass.mixed` is "
+            "reachable and A3's chips have no rendering for it"
+        )
 
     # ------------------------------------------------- lock reachability by design
     # The real question the plan needs: if a user commits to ONE lock system, what
