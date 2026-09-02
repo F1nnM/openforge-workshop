@@ -6,6 +6,8 @@
  * whole directory exists to turn the `openforge-catalog` fixtures into one
  * static `catalog.json`, at build time, once.
  */
+export { MIN_DETECTION_RECALL, assertAggregation, measureAggregation } from './aggregate'
+export type { AggregateViolation, AggregationReport, DetectionScore } from './aggregate'
 export { buildCatalog } from './build'
 export type { BuildOptions, BuildResult, BuildStats } from './build'
 export { buildDesignIndex, designId, designKey } from './design'

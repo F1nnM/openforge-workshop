@@ -12,6 +12,15 @@ import type { CatalogAssets } from '../src/catalog'
  * different footprint tie-break, a different kind vocabulary, a different way of
  * folding connection variants. The two numbers move independently, which is why
  * `VersionStamp` carries both.
+ *
+ * **Row A1 did not bump it, and row X4 — which owns this stamp across five
+ * artefacts — needs the reason.** Aggregation changed no field's derivation and
+ * added none: it groups the records the pipeline already emits, by the `design`
+ * key `pipeline/design.ts` already computes, and emits nothing of its own. What
+ * the build gained is a *check* — `pipeline/aggregate.ts` fails the build when a
+ * field the aggregate hoists onto a card is not constant within a group — and a
+ * check is not a derivation. `SCHEMA_VERSION` stays 3 for the same reason; its
+ * docblock carries the payload measurement behind that decision.
  */
 export const PIPELINE_VERSION = 1
 
@@ -27,6 +36,21 @@ export const PIPELINE_VERSION = 1
  * 71% of budget. Adding full tags and configs to the slim index cost 24.8 KB
  * between them, not the doubling §5 feared. `assertWithinBudget` in `emit.ts`
  * records why, and what the actual lever is.
+ *
+ * **The reshape and the aggregate, re-measured.** Rows W4 and W5 took it to
+ * **365,474 B brotli — 71.4%** (5,739,104 B raw). Row A1 added **0 bytes**: the
+ * aggregate layer is derived in the browser, and the reason is arithmetic. Its
+ * leanest emittable form — design id, address and the member ordinals, no
+ * hoisted facets and no variant detail — measures **40,454 B brotli**, which
+ * would take the index to 79.3% to say something a reader recomputes in one pass
+ * over data it already holds. Row C1's precomputed candidate sets are the real
+ * threat to this budget (29 KB to 9.4 MB by reading), and 8 percentage points
+ * spent here is 8 it would not have.
+ *
+ * One caveat on any before/after comparison, established by W4: `version.built`
+ * is a clock reading, and the timestamp alone swings brotli by roughly ±210 B.
+ * CI does not pin `SOURCE_DATE_EPOCH`. A trustworthy delta therefore has to
+ * re-serialise one built file both ways rather than subtract two build outputs.
  */
 export const SIZE_BUDGET_BYTES = 500 * 1024
 

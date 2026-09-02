@@ -67,7 +67,13 @@ const NUL_SEPARATOR = '\u0000'
 function trackedTextFiles(): string[] {
   // `git ls-files` rather than a directory walk: it already honours .gitignore,
   // so build output and downloaded fixtures cannot make this test fail.
-  const listed = execFileSync('git', ['ls-files', '-z'], {
+  //
+  // `--others --exclude-standard` alongside `--cached` is not optional. Without
+  // them the listing is tracked files only, so a brand-new file carrying a raw
+  // NUL passes locally — it is not tracked yet — and fails in CI, where the
+  // commit has made it tracked. That happened exactly once, on the row that
+  // added `src/catalog/aggregate.ts`, and cost a red build to learn.
+  const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
@@ -103,7 +109,8 @@ describe('source hygiene', () => {
         bytes = readFileSync(resolve(REPO_ROOT, path))
       } catch {
         // Listed by git but absent from the working tree: a deletion staged on
-        // another branch, not a hygiene failure.
+        // another branch, or a path listed while being rewritten. Not a hygiene
+        // failure.
         continue
       }
       const found = controlBytes(bytes)

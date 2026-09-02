@@ -88,6 +88,17 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * `rOut` on the 585 `concave` tiles, and it carries no band at all, so a reader
  * of this shape would take `undefined` for a band and place 1,199 curves from a
  * single radius. The stamp is the only thing that makes that loud.
+ *
+ * **Row A1 deliberately did not bump this, and the reason is worth recording**
+ * because a reader who knows the aggregate exists will look for a 4. Aggregation
+ * adds no field to `CatalogRecord` and no key to `CatalogFile`: an aggregate is a
+ * pure function of the records already here, derived by
+ * `src/catalog/aggregate.ts` the way `buildAssemblyIndex` derives its four maps.
+ * Measured, the leanest shippable form of the grouping — design id, address and
+ * the member ordinals, nothing else — is **40,454 B brotli**, which would take an
+ * index at 71.4% of its 500 KB budget to 79.3% to say something the reader can
+ * recompute in one pass. A schema-3 index is therefore fully readable under
+ * aggregation, which is exactly what the stamp is supposed to mean.
  */
 export const SCHEMA_VERSION = 3
 
@@ -181,6 +192,52 @@ export type TagId = z.infer<typeof TagId>
  */
 export const ManifestOrdinal = z.number().int().nonnegative().brand<'ManifestOrdinal'>()
 export type ManifestOrdinal = z.infer<typeof ManifestOrdinal>
+
+/**
+ * A catalog item's address: the **lowest {@link ManifestOrdinal} in its
+ * aggregate**, and *not* a manifest ordinal.
+ *
+ * Both are non-negative integers over the same records, and the whole point of
+ * the second brand is that they are not interchangeable — the same argument
+ * {@link TagId} makes, one level up. `AggregateAddress` is not assignable to
+ * `ManifestOrdinal` and vice versa, so the one conversion that exists has to be
+ * written down: {@link aggregateAddress} in `src/catalog/aggregate.ts`. There is
+ * no path back.
+ *
+ * **Why an aggregate must never mint an ordinal into the manifest.** An
+ * aggregate is a *derived* grouping — a hash of a tag set with `connection|`
+ * removed — and a tag set can change. Add one tag to one file and that file
+ * leaves its design and joins another: the group's membership changes. Worse, a
+ * group can **split** (a tag added to half its files) or **merge**, and neither
+ * is expressible in an append-only array of ids. The manifest's entire
+ * enforcement mechanism is that the index *is* the ordinal and a rewrite is
+ * visible in review; a grouping that can split has no stable index to be. So
+ * `pipeline/ordinals/manifest.json` stays a per-file record, `version.manifest`
+ * is not bumped, and `pipeline/aggregate.ts` asserts that every address is an
+ * ordinal **already issued to a member of its own group** — a reference, never a
+ * new number.
+ *
+ * The stability properties, stated precisely because they are the reason this is
+ * a catalog URL and not a share link:
+ *
+ *   - **Stable under append.** New files take ordinals strictly above every
+ *     issued one (rule 2 of {@link ManifestOrdinal}), so a file joining an
+ *     existing aggregate can never become its lowest.
+ *   - **Stable under a tag edit** that does not move the lowest-ordinal file.
+ *   - **NOT stable under retirement.** If the lowest-ordinal file leaves the
+ *     corpus the address changes even though the group only shrank. Measured:
+ *     **1,705 of 3,822 aggregates (44.6%)** hold two or more files and are
+ *     exposed to this.
+ *   - **NOT stable under a design split**, where one aggregate becomes two and
+ *     one of them keeps the old address.
+ *
+ * That is acceptable *only* because this number never enters a share link. A
+ * stale catalog URL degrading to "that item moved" is a normal web outcome; a
+ * share link decoding to a different room, silently, is the worst failure §13
+ * names.
+ */
+export const AggregateAddress = z.number().int().nonnegative().brand<'AggregateAddress'>()
+export type AggregateAddress = z.infer<typeof AggregateAddress>
 
 /* ----------------------------------------------------------------- footprint */
 
