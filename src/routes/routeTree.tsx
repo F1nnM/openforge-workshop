@@ -44,6 +44,12 @@
  * navigate to `tile: null` would push a third entry and make Back re-open the
  * drawer. `src/routes/tileDrawer.ts` owns that, and the test file proves it.
  *
+ * What `?tile=` *means* moved once, in row A4: the catalog now lists 3,822 items
+ * over 8,702 files, so the param still names a file by ordinal and
+ * `src/routes/tileAddress.ts` resolves that to the item plus the variant it
+ * named. The route declaration is unchanged by it — the schema, the middleware
+ * and the close semantics all still describe a single optional number.
+ *
  * ## Why `/library` and `/` carry no search params
  *
  * The library is grouped by kind and shows everything the user saved
