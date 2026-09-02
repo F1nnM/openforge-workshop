@@ -5,6 +5,11 @@
  * without touching the CLI or the tests. Nothing here runs in the browser: this
  * whole directory exists to turn the `openforge-catalog` fixtures into one
  * static `catalog.json`, at build time, once.
+ *
+ * Two artefacts now, not one. `./templates` reads the 20 `*.yaml` fixtures the
+ * JSON loader deliberately skips and emits the 40 recipe templates as a
+ * generated module; they are not records, carry no `file_metadata` and are not
+ * in `catalog.json` — `./templates` carries the measurement behind that.
  */
 export { MIN_DETECTION_RECALL, assertAggregation, measureAggregation } from './aggregate'
 export type { AggregateViolation, AggregationReport, DetectionScore } from './aggregate'
@@ -35,12 +40,14 @@ export {
 export type { ConnectionPosition, ConnectionsByPosition } from './facets'
 export {
   DEFAULT_FIXTURES_DIR,
+  FixtureRow,
+  fixtureFingerprint,
   fixturesDir,
   liveRows,
   loadFixtureRows,
   resolveFixturesRef,
 } from './fixtures'
-export type { FixtureConfig, FixtureRow } from './fixtures'
+export type { FixtureConfig } from './fixtures'
 export {
   COLUMN_SHAPE_TAG,
   CURVED_INTERFACE_TAG,
@@ -69,6 +76,16 @@ export {
 } from './ordinals'
 export type { OrdinalAssignment } from './ordinals'
 export { buildTagTable, hasTagPrefix, namespaceRoots, numericTagValue, tagValue } from './tags'
+export {
+  TEMPLATES_MODULE_PATH,
+  loadTemplateFixtures,
+  printFixture,
+  printTemplateModule,
+  readTemplateFile,
+  templateFixturesDir,
+  templateSlug,
+} from './templates'
+export type { TemplateFixture } from './templates'
 export {
   THUMB_INVENTORY_PATH,
   THUMB_INVENTORY_VERSION,

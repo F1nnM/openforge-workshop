@@ -2,9 +2,16 @@
  * Reading the `openforge-catalog` blueprint fixtures, and recording where they came from.
  *
  * The fixtures directory holds `*.json` **and** `*.yaml` files. Only the JSON is
- * read, because that is what `docs/verify-catalog-facts.py` reads, and this
- * pipeline's counts are asserted against that script. Globbing `*` here would
- * silently change every number in the plan.
+ * read *here*, because that is what `docs/verify-catalog-facts.py` reads, and
+ * this pipeline's counts are asserted against that script. Globbing `*` here
+ * would silently change every number in the plan.
+ *
+ * The other 20 files are the recipe templates, and `./templates.ts` is where
+ * they are read — a second loader with a second glob rather than one loader with
+ * a wider one, so no count in the plan can move by accident and no template can
+ * reach {@link loadFixtureRows}. Templates carry no `file_metadata`, which is
+ * required below, so one fed to {@link FixtureRow} fails rather than becoming a
+ * record.
  *
  * Rows are validated with Zod rather than cast. The fixtures are an external
  * input maintained in another repository by a different process; a shape change
@@ -60,7 +67,7 @@ const FixtureConfig = z.object({
   fulfills: z.array(z.object({ part: z.string().min(1) })).optional(),
 })
 
-const FixtureRow = z.object({
+export const FixtureRow = z.object({
   /** Truthy on the 19 rows that never reach a `CatalogRecord`. */
   deprecated: z.unknown().optional(),
   tags: z.array(z.string().min(1)).default([]),
@@ -135,7 +142,7 @@ export function resolveFixturesRef(dir: string): string {
   const head = readGitHead(dir)
   if (head) return head
 
-  return `content:${hashDirectory(dir).slice(0, 16)}`
+  return `content:${fixtureFingerprint(dir).slice(0, 16)}`
 }
 
 /** Walk up from `dir` to the nearest git repository and read the commit `HEAD` points at. */
@@ -179,10 +186,26 @@ function findGitDir(from: string): string | undefined {
   }
 }
 
-/** A stable fingerprint of every `*.json` fixture's bytes, for when there is no git checkout. */
-function hashDirectory(dir: string): string {
+/**
+ * A stable fingerprint of every fixture's bytes, for when there is no git checkout.
+ *
+ * **Both halves of the directory, and that is a fix rather than a widening.**
+ * This covered `*.json` only, which was correct while nothing read the YAML.
+ * `pipeline/templates.ts` now does, so a checkout without `.git` — a tarball in
+ * CI is the case {@link resolveFixturesRef} names — would have reported an
+ * unchanged `version.fixtures` after a recipe template changed, and §16's risk 1
+ * is exactly that class of undetected drift. The git path was never affected:
+ * `HEAD` covers every file in the repository, YAML included.
+ *
+ * The `.py` file in the directory is deliberately still out. This hashes what
+ * the pipeline reads; `docs/verify-catalog-facts.py` is not an input to it.
+ */
+export function fixtureFingerprint(dir: string): string {
   const hash = createHash('sha256')
-  for (const name of readdirSync(dir).filter((n) => n.endsWith('.json')).sort()) {
+  const inputs = readdirSync(dir)
+    .filter((n) => n.endsWith('.json') || n.endsWith('.yaml'))
+    .sort()
+  for (const name of inputs) {
     hash.update(name)
     hash.update(readFileSync(join(dir, name)))
   }

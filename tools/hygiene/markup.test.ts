@@ -19,7 +19,7 @@
  *      test: the failure mode of a second button class is not a broken button,
  *      it is a second place to change the padding.
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -57,11 +57,28 @@ function withoutComments(source: string): string {
 const rawHead = readFileSync(resolve(REPO_ROOT, 'index.html'), 'utf8')
 const head = withoutComments(rawHead)
 
-/** Every tracked file under `src/`, so a deleted alias stays deleted. */
+/**
+ * Every tracked file under `src/` that is still on disk, so a deleted alias
+ * stays deleted.
+ *
+ * The `existsSync` filter is not defensive padding. `git ls-files --cached`
+ * answers "what does the index track", which is not "what is on disk": a file
+ * deleted in the working tree but not yet staged is still listed, and reading it
+ * threw `ENOENT` and took this whole assertion down rather than passing over it.
+ * Row X8 hit it deleting `src/screens/assemblies/fixtures.ts` — a red suite that
+ * said nothing about `.of-action` and would have gone green again the moment the
+ * deletion was staged, which is the worst kind of local failure. The
+ * control-byte guard beside this one already reads inside a `try` for the same
+ * reason.
+ *
+ * It cannot mask the thing this test looks for: a file that does not exist
+ * carries no `className`.
+ */
 function trackedSources(): string[] {
   return execFileSync('git', ['ls-files', '-z', 'src'], { cwd: REPO_ROOT, encoding: 'utf8' })
     .split('\0')
     .filter((path) => path !== '')
+    .filter((path) => existsSync(resolve(REPO_ROOT, path)))
 }
 
 describe('the document head', () => {

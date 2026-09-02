@@ -1,11 +1,17 @@
 /**
  * The 40 recipe templates, as data.
  *
- * **Generated. Do not edit.** `corpus.test.ts` asserts this file is
- * byte-identical to `printTemplatesModule(readTemplateFixtures())`, so an edit
- * here fails the suite rather than drifting quietly. `fixtures.ts` carries the
- * provenance: what the 40 are, why they are not in `catalog.json`, and the
- * round-trip proof that the reader which produced them lost nothing.
+ * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`
+ * fixtures beside the JSON and emits this file; `npm run import:catalog` writes
+ * it and `pipeline/templates.test.ts` asserts the committed bytes are exactly
+ * `printTemplateModule(loadTemplateFixtures())`, so an edit here fails the suite
+ * rather than drifting quietly.
+ *
+ * The 40 are not in `catalog.json`: none of them carries `file_metadata`, so none
+ * is an STL and none is a `CatalogRecord`. Putting them in the index anyway was
+ * measured at +1,260 B brotli and declined — `pipeline/templates.ts` carries the
+ * table and the reason, which is that the recipe list is the one part of this
+ * screen that renders before the index lands.
  *
  * 40 templates over 20 fixture files, 128 parts.
  */

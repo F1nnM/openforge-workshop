@@ -719,8 +719,59 @@ export type TagRef = z.infer<typeof TagRef>
  * When the semantics are pinned down, §5's instruction is to port the catalog
  * frontend's existing `src/utils/config-processing.ts` (~140 lines, 69 tests)
  * rather than derive them afresh — and that port owns the resolved shape.
+ *
+ * ## `siblings`, and why it is here now
+ *
+ * Row C1 wrote the prediction this field is the answer to: *"zero live
+ * `constrain` entries carry `siblings` or `parent`… if a fixture ever writes
+ * one, `src/catalog/schema.ts` has to widen `ConstrainRef` or Zod will strip it
+ * and the source control will be lost in silence."* It is still in
+ * `src/composition/config.ts`, and **a fixture already did**.
+ *
+ * Re-measured over the *whole* fixtures directory rather than its JSON half —
+ * which is what moved: C1's denominator was 9,180 entries and the real one is
+ * **9,406**, because `pipeline/fixtures.ts` reads only `*.json` and the 20
+ * `*.yaml` recipe templates carry 226 more.
+ *
+ * | | `*.json` (8,721 rows) | `*.yaml` (40 templates) | corpus |
+ * | --- | ---: | ---: | ---: |
+ * | `constrain` entries | 9,180 | 226 | 9,406 |
+ * | carrying `siblings` | 0 | **30** | **30** |
+ * | carrying `parent` | 0 | 0 | 0 |
+ *
+ * The prediction reproduced exactly, and *silently*: `ConstrainRef.safeParse({
+ * tag: 'connection|side', siblings: ['right wall', 'left wall'] })` returned
+ * `success: true` with `{ tag: 'connection|side' }`. Zod object schemas strip
+ * what they do not model, so there was no error to notice — the reason C1 wrote
+ * "in silence" and the reason this had to be fixed *before* the pipeline read
+ * the YAML rather than after.
+ *
+ * `siblings` rides on the `{ tag }` form alone, which is the grammar and not an
+ * accident of the corpus: a `filter` removes a prefix from what the `tag`
+ * entries collected, so it has nothing to inherit and no source to control.
+ * `pipeline/templates.ts` throws on a `filter` carrying one rather than letting
+ * this union quietly pick its second branch and drop it.
+ *
+ * `parent` is still **not** modelled, and now on a corpus-wide 0 rather than a
+ * JSON-half 0. Same for `accept` on {@link PartSlot}: 0 slots in either half.
+ * They are grammar `src/composition/config.ts` implements and no fixture writes;
+ * modelling them here would be a field with no measured fact behind it, which is
+ * the one thing this module does not do. C1's report stands for both.
  */
-export const ConstrainRef = z.union([TagRef, z.object({ filter: z.string().min(1) })])
+export const ConstrainRef = z.union([
+  TagRef.extend({
+    /**
+     * Which sibling parts to inherit from. 30 entries carry one, all in the
+     * templates; every one names 2 or 3 sibling part names.
+     *
+     * `undefined` and `[]` are different states in
+     * `src/composition/config.ts` — absent means every sibling, empty means
+     * none — so this is `.optional()` and never defaulted to `[]`.
+     */
+    siblings: z.array(z.string().min(1)).optional(),
+  }),
+  z.object({ filter: z.string().min(1) }),
+])
 export type ConstrainRef = z.infer<typeof ConstrainRef>
 
 /**
@@ -741,6 +792,16 @@ export type ConstrainRef = z.infer<typeof ConstrainRef>
  * `id` groups sibling slots that must resolve together (the left/right halves of
  * a grate). Six occurrences corpus-wide; rare, but dropping it would silently
  * decouple those pairs.
+ *
+ * `fulfills` is the second half of C1's report, and the same silent strip: a
+ * part-level `fulfills` is **0 of the 3,703 JSON part declarations and 20 of the
+ * 128 template parts**, and before this row `PartSlot.safeParse` returned
+ * `success: true` for a part carrying one, with the key gone from its output.
+ * Scoped to *nested* parts rather than siblings — `src/composition/config.ts`
+ * and the spec's one line — where the record-level
+ * {@link CompositionConfig.fulfills} is the inverse relation over siblings. Two
+ * different relations that happen to share a name, which is why both are
+ * modelled and neither is folded into the other.
  */
 export const PartSlot = z.object({
   name: z.string().min(1),
@@ -751,6 +812,8 @@ export const PartSlot = z.object({
     deny: z.array(TagRef).optional(),
     constrain: z.array(ConstrainRef).optional(),
   }),
+  /** Part names whose *nested* occurrence this part's own fill covers. */
+  fulfills: z.array(z.object({ part: z.string().min(1) })).optional(),
 })
 export type PartSlot = z.infer<typeof PartSlot>
 

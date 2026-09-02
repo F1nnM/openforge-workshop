@@ -1,25 +1,31 @@
 /**
- * The 40 recipes against their own fixtures and against the live archive.
+ * The 40 recipes against the live archive.
  *
- * Two independent halves with two independent gates, because they need different
- * inputs and either can be missing on a fresh checkout:
+ * One half, one gate. **`catalog.json`**, gitignored and rebuilt by `npm run
+ * import:catalog`: this file is the census — **every figure quoted in
+ * `assembly.ts`**, computed rather than restated, plus the four invariants
+ * `assertTemplates` throws on. Absent, it skips **loudly**, naming the path and
+ * the command, the precedent `src/composition/corpus.test.ts` and
+ * `src/search/corpus.test.ts` both set.
  *
- *   1. **The fixtures** (`OPENFORGE_FIXTURES`, or the literal
- *      `pipeline/fixtures.ts` uses). This half proves the reader lost nothing —
- *      re-emitting each of the 20 YAML files and comparing **bytes** — and that
- *      the committed `templates.ts` is exactly what the generator produces from
- *      them. It also measures the JSON half of the directory, which is where the
- *      claim *"these two grammar features exist only in the templates"* is either
- *      true or not.
- *   2. **`catalog.json`**, gitignored and rebuilt by `npm run import:catalog`.
- *      This half is the census: **every figure quoted in `assembly.ts`**, computed
- *      rather than restated, plus the four invariants `assertTemplates` throws on.
+ * ## The fixtures half moved, and so did the reader
  *
- * Either half absent skips **loudly**, naming the path and the command — the
- * precedent `src/composition/corpus.test.ts` and `src/search/corpus.test.ts` both
- * set. CI has both: the fixtures are pinned and the stamp step regenerates the
- * index before the suite runs, so every assertion below fires on every pull
- * request.
+ * Row C3 also measured the *fixtures* here, because it owned a `node:fs` reader
+ * under `src/` and nothing else could. Row X8 gave the 40 their durable home in
+ * `pipeline/templates.ts` — the strict YAML reader, the byte-for-byte round-trip
+ * over all 20 files, the emitter that writes `./templates.ts`, and the census of
+ * the JSON half that the "these two grammar features exist only in the
+ * templates" claim rests on. Those assertions live in `pipeline/templates.test.ts`
+ * now, unchanged in substance and stronger in one respect: the reader validates
+ * through `PartSlot` from `src/catalog/schema.ts`, so the round-trip proves the
+ * app's shared grammar carries `constrain[].siblings` and part-level `fulfills`
+ * as well as proving the reader lost nothing.
+ *
+ * `./templates.ts` is still where the 40 are, and it is still asserted
+ * byte-identical to its generator's output — from `pipeline/`, over
+ * `TEMPLATES_MODULE_PATH`. Putting them in `catalog.json` instead was measured at
+ * **+1,260 B brotli** and declined, because the recipe list is the one part of
+ * this screen that renders before the 5.6 MB index lands.
  *
  * ## What these tests cannot do
  *
@@ -29,202 +35,15 @@
  * uniquely proves is that the rules are being applied to the archive the plan
  * describes, and that a fixture import which moved any of it says so.
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
 import { CatalogFile } from '@/catalog'
 
 import { STEP_PAGE, assemblyState, createRecipeIndex } from './assembly'
-import {
-  printFixture,
-  printTemplatesModule,
-  readTemplateFile,
-  readTemplateFixtures,
-  templateFixturesDir,
-} from './fixtures'
 import { assertTemplates, measureTemplates } from './measure'
 import { RECIPE_TEMPLATES } from './templates'
-
-/* ---------------------------------------------------------------- the boundary */
-
-describe('the fixture reader’s boundary', () => {
-  /**
-   * `fixtures.ts` is the only file under `src/` that imports a `node:` module,
-   * and the only thing keeping that safe is that nothing the browser reaches
-   * imports it. Asserted rather than trusted: an `import './fixtures'` added to
-   * the screen would build locally in the dev server's Node context and fail in
-   * the production bundle, which is exactly the class of mistake worth a test.
-   */
-  it('is imported by no file the app can reach', () => {
-    const reachable = ['assembly.ts', 'templates.ts', 'AssembliesScreen.tsx', 'index.ts', 'measure.ts']
-    const offenders = reachable.filter((name) =>
-      /from '\.\/fixtures'/.test(readFileSync(`src/screens/assemblies/${name}`, 'utf8')),
-    )
-
-    expect(offenders).toEqual([])
-  })
-
-  it('is the only file under src/ reaching for the filesystem, outside tests', () => {
-    // A directory walk rather than `git ls-files`, so an untracked new file
-    // counts — the lesson `tools/hygiene/source.test.ts` records paying for.
-    const walk = (dir: string): string[] =>
-      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-        const path = join(dir, entry.name)
-        if (entry.isDirectory()) return walk(path)
-        return /\.tsx?$/.test(entry.name) && !entry.name.includes('.test.') ? [path] : []
-      })
-    const importers = walk('src').filter((path) => readFileSync(path, 'utf8').includes("from 'node:"))
-
-    expect(importers).toEqual(['src/screens/assemblies/fixtures.ts'])
-  })
-})
-
-/* --------------------------------------------------------------- the fixtures */
-
-const FIXTURES = templateFixturesDir()
-const hasFixtures = existsSync(FIXTURES)
-const describeFixtures = hasFixtures ? describe : describe.skip
-const fixturesTitle = hasFixtures
-  ? 'the blueprint fixtures'
-  : `the blueprint fixtures — SKIPPED, no ${FIXTURES} (set OPENFORGE_FIXTURES)`
-
-/** The module path, so a failure can name the file that is out of date. */
-const MODULE = 'src/screens/assemblies/templates.ts'
-
-const REFRESH =
-  'npx tsx -e "import {writeFileSync} from \'node:fs\';' +
-  "import {readTemplateFixtures,printTemplatesModule} from './src/screens/assemblies/fixtures.ts';" +
-  `writeFileSync('${MODULE}', printTemplatesModule(readTemplateFixtures()))"`
-
-describeFixtures(fixturesTitle, () => {
-  const yaml = hasFixtures ? readdirSync(FIXTURES).filter((name) => name.endsWith('.yaml')).sort() : []
-  const json = hasFixtures ? readdirSync(FIXTURES).filter((name) => name.endsWith('.json')).sort() : []
-
-  it('holds 20 YAML files beside 21 JSON ones', () => {
-    // The number the row's "40 recipe templates" comes out of. Two entries per
-    // YAML file; `pipeline/fixtures.ts` reads only the JSON, deliberately.
-    expect(yaml).toHaveLength(20)
-    expect(json).toHaveLength(21)
-  })
-
-  it('re-emits every YAML file byte for byte, which is the proof the reader lost nothing', () => {
-    const mismatched: string[] = []
-    for (const name of yaml) {
-      const text = readFileSync(join(FIXTURES, name), 'utf8')
-      if (printFixture(readTemplateFile(name, text)) !== text) mismatched.push(name)
-    }
-    expect(
-      mismatched,
-      'The reader dropped or reordered something. It is a strict subset reader; widen it rather than loosening this comparison.',
-    ).toEqual([])
-  })
-
-  it('reads exactly 40 templates, none of which is a file in the catalog', () => {
-    const entries = readTemplateFixtures(FIXTURES)
-    expect(entries).toHaveLength(40)
-    expect(entries.reduce((total, entry) => total + entry.parts.length, 0)).toBe(128)
-    // A template has no `file_metadata`, which is exactly why it is a recipe and
-    // not a tile. The reader models no such field, so this is structural: nothing
-    // it can return could ever become a `CatalogRecord`.
-    expect(entries.every((entry) => entry.type === 'blueprint')).toBe(true)
-  })
-
-  it('has the committed templates.ts byte-identical to the generator’s output', () => {
-    expect(
-      printTemplatesModule(readTemplateFixtures(FIXTURES)),
-      `${MODULE} is out of date or hand-edited. Regenerate it:\n${REFRESH}`,
-    ).toBe(readFileSync(MODULE, 'utf8'))
-  })
-
-  it('carries 30 sibling lists and 20 part-level fulfills, all naming base', () => {
-    const parts = readTemplateFixtures(FIXTURES).flatMap((entry) => entry.parts)
-    const constrain = parts.flatMap((part) => part.constrain)
-
-    expect(constrain.filter((entry) => entry.siblings !== undefined)).toHaveLength(30)
-    expect(parts.flatMap((part) => part.fulfills)).toEqual(Array.from({ length: 20 }, () => 'base'))
-    // `require` is on all 128; `deny` on 82 and `constrain` on 110.
-    expect(parts.filter((part) => part.require.length > 0)).toHaveLength(128)
-    expect(parts.filter((part) => part.deny.length > 0)).toHaveLength(82)
-    expect(parts.filter((part) => part.constrain.length > 0)).toHaveLength(110)
-    expect(constrain.filter((entry) => entry.filter !== undefined)).toHaveLength(36)
-  })
-
-  /**
-   * The other half of the directory, read raw.
-   *
-   * `assembly.ts` and `fixtures.ts` both rest on the claim that
-   * `constrain[].siblings` and part-level `fulfills` occur **only** in the
-   * templates. That claim is about the JSON, so it is measured on the JSON —
-   * without Zod, because `pipeline/fixtures.ts`'s schema models neither field
-   * and would strip both before a count could see them. That stripping is itself
-   * the finding C1 predicted, and it is reported to the schema's owner.
-   */
-  it('finds neither grammar feature in the 8,721 JSON rows', () => {
-    interface RawPart {
-      readonly name: string
-      readonly optional?: boolean
-      readonly id?: string
-      readonly fulfills?: unknown
-      readonly tags?: { readonly constrain?: readonly Record<string, unknown>[] }
-    }
-    interface RawRow {
-      readonly config?: { readonly parts?: readonly RawPart[]; readonly fulfills?: readonly unknown[] }
-    }
-
-    const rows: RawRow[] = json.flatMap((name) => {
-      const parsed: unknown = JSON.parse(readFileSync(join(FIXTURES, name), 'utf8'))
-      return Array.isArray(parsed) ? (parsed as RawRow[]) : []
-    })
-    const parts = rows.flatMap((row) => row.config?.parts ?? [])
-
-    expect(rows).toHaveLength(8_721)
-    expect(parts).toHaveLength(3_703)
-    expect(parts.filter((part) => part.fulfills !== undefined)).toHaveLength(0)
-    expect(
-      parts
-        .flatMap((part) => part.tags?.constrain ?? [])
-        .filter((entry) => 'siblings' in entry || 'parent' in entry),
-    ).toHaveLength(0)
-    // The two the JSON does have and the templates do not, for the same table.
-    expect(parts.filter((part) => part.optional !== undefined)).toHaveLength(2_653)
-    expect(parts.filter((part) => part.id !== undefined)).toHaveLength(6)
-    expect(rows.filter((row) => (row.config?.fulfills ?? []).length > 0)).toHaveLength(21)
-  })
-
-  /**
-   * The sharpest fact in this row, and the one that makes the templates
-   * load-bearing rather than decorative.
-   *
-   * The corpus's 21 `config.fulfills` declarations name `column`, `left wall` and
-   * `right wall`. If those names occur as part names in the JSON, the corpus can
-   * resolve its own inverse relation. They do not, anywhere — so it cannot, and
-   * the only place they exist is the four corner recipes here.
-   */
-  it('names three parts in config.fulfills that exist in no JSON part declaration', () => {
-    interface RawRow {
-      readonly config?: {
-        readonly parts?: readonly { readonly name: string }[]
-        readonly fulfills?: readonly { readonly part: string }[]
-      }
-    }
-    const rows: RawRow[] = json.flatMap((name) => {
-      const parsed: unknown = JSON.parse(readFileSync(join(FIXTURES, name), 'utf8'))
-      return Array.isArray(parsed) ? (parsed as RawRow[]) : []
-    })
-    const declared = new Set(rows.flatMap((row) => row.config?.parts ?? []).map((part) => part.name))
-    const named = new Set(rows.flatMap((row) => row.config?.fulfills ?? []).map((entry) => entry.part))
-
-    expect([...named].sort()).toEqual(['column', 'left wall', 'right wall'])
-    expect([...named].filter((name) => declared.has(name))).toEqual([])
-    // And all three are template part names.
-    const templateParts = new Set(
-      readTemplateFixtures(FIXTURES).flatMap((entry) => entry.parts.map((part) => part.name)),
-    )
-    expect([...named].every((name) => templateParts.has(name))).toBe(true)
-  })
-})
 
 /* ----------------------------------------------------------------- the corpus */
 
