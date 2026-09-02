@@ -43,6 +43,13 @@
  * does not publish; the bill panel's remove-and-replace is the honest interim,
  * and it is reachable from the keyboard, which a drag is not.
  *
+ * **And the 3D view is one element, not a fifth decision.** `<Builder3DPanel>`
+ * (row G2) is mounted inside the stage and owns its own open state, its own
+ * lazy chunk and its own empty states, over the same `planCatalog` and the same
+ * `placements` map this screen already holds. So the 2D drawing and the 3D room
+ * are two projections of one store rather than two scenes to keep in step, and
+ * this screen gains no state for it.
+ *
  * It renders a `<section>`, not a `<main>`: `AppFrame` owns the document's one
  * `<main>`. The `<h1>` is clipped — the contract opens this screen on the palette
  * and the drawing, not on a title, and a visible heading would cost the canvas a
@@ -55,6 +62,7 @@ import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { PlanCanvas, describeCell, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
 import type { PlanStatus } from '@/builder/canvas'
 import { BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
+import { Builder3DPanel } from '@/builder/three'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
 import { clearPlacements, useLockSystem, usePlacements } from '@/store'
@@ -173,6 +181,16 @@ function Builder({ index }: { index: CatalogIndex }) {
             <span className="of-build-at">{describeCell(status.cursor[0], status.cursor[1])}</span>
           )}
         </p>
+
+        {/*
+          Row G2. Closed it is a plate in the stage's top-right and costs 1.17 kB
+          gzipped; opened it covers the stage, and three.js, r3f and the glTF
+          loader arrive in their own chunk on that press. It covers rather than
+          replaces the canvas because `PlanCanvas` holds its viewport — zoom, pan,
+          cursor — outside the store, and swapping it out would reset the drawing
+          every time somebody glanced at the room.
+        */}
+        <Builder3DPanel catalog={planCatalog} placements={placements} assets={index.file.assets} />
       </div>
 
       <div className="of-builder-bill">
