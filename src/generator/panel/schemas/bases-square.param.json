@@ -1,0 +1,308 @@
+{
+  "parameters": [
+    {
+      "caption": "How many squares on the X axis",
+      "group": "Base Tile Size",
+      "initial": 2,
+      "name": "x",
+      "options": [
+        {
+          "name": "2",
+          "value": 2
+        },
+        {
+          "name": "3",
+          "value": 3
+        },
+        {
+          "name": "4",
+          "value": 4
+        },
+        {
+          "name": "5",
+          "value": 5
+        },
+        {
+          "name": "6",
+          "value": 6
+        },
+        {
+          "name": "7",
+          "value": 7
+        },
+        {
+          "name": "8",
+          "value": 8
+        }
+      ],
+      "type": "number"
+    },
+    {
+      "caption": "How many squares on the Y axis",
+      "group": "Base Tile Size",
+      "initial": 2,
+      "name": "y",
+      "options": [
+        {
+          "name": "2",
+          "value": 2
+        },
+        {
+          "name": "3",
+          "value": 3
+        },
+        {
+          "name": "4",
+          "value": 4
+        },
+        {
+          "name": "5",
+          "value": 5
+        },
+        {
+          "name": "6",
+          "value": 6
+        },
+        {
+          "name": "7",
+          "value": 7
+        },
+        {
+          "name": "8",
+          "value": 8
+        }
+      ],
+      "type": "number"
+    },
+    {
+      "caption": "How tall is the tile in mm on the Z axis",
+      "group": "Base Tile Size",
+      "initial": 6,
+      "name": "HEIGHT",
+      "type": "number"
+    },
+    {
+      "caption": "What is the size in mm of a square?",
+      "group": "Square Basis",
+      "initial": "inch",
+      "name": "SQUARE_BASIS",
+      "options": [
+        {
+          "name": "25mm - Dwarven Forge/Hirstarts",
+          "value": "25mm"
+        },
+        {
+          "name": "inch 25.4 - OpenLOCK/Dragonlock/Dungeonworks",
+          "value": "inch"
+        },
+        {
+          "name": "1 1/4 inch 31.75 - Wyloch",
+          "value": "wyloch"
+        },
+        {
+          "name": "1 1/2 inch 38.1 - Dragon's Rest",
+          "value": "drc"
+        }
+      ],
+      "type": "string"
+    },
+    {
+      "caption": "Select the type of clip lock",
+      "group": "Lock",
+      "initial": "openlock",
+      "name": "LOCK",
+      "options": [
+        {
+          "name": "openlock",
+          "value": "openlock"
+        },
+        {
+          "name": "triplex",
+          "value": "triplex"
+        },
+        {
+          "name": "infinitylock",
+          "value": "infinitylock"
+        },
+        {
+          "name": "dragonlock",
+          "value": "dragonlock"
+        },
+        {
+          "name": "none",
+          "value": "none"
+        }
+      ],
+      "type": "string"
+    },
+    {
+      "caption": "If OpenLock remove top of openlock bays",
+      "group": "Lock",
+      "initial": "true",
+      "name": "TOPLESS",
+      "options": [
+        {
+          "name": "true",
+          "value": "true"
+        },
+        {
+          "name": "false",
+          "value": "false"
+        }
+      ],
+      "type": "string"
+    },
+    {
+      "caption": "If OpenLock, do we want supports?",
+      "group": "Lock",
+      "initial": "true",
+      "name": "SUPPORTS",
+      "options": [
+        {
+          "name": "true",
+          "value": "true"
+        },
+        {
+          "name": "false",
+          "value": "false"
+        }
+      ],
+      "type": "string"
+    },
+    {
+      "caption": "Use magnets or not.",
+      "group": "Magnets",
+      "initial": "flex_magnetic",
+      "name": "MAGNETS",
+      "options": [
+        {
+          "name": "magnetic",
+          "value": "magnetic"
+        },
+        {
+          "name": "flex_magnetic",
+          "value": "flex_magnetic"
+        },
+        {
+          "name": "none",
+          "value": "none"
+        }
+      ],
+      "type": "string"
+    },
+    {
+      "caption": "Size of hole for magnet.  6 works well for 5mm buckyball style magnets.",
+      "group": "Magnets",
+      "initial": 6,
+      "name": "MAGNET_HOLE",
+      "type": "number"
+    },
+    {
+      "caption": "Should this have enough space for electronics.",
+      "group": "Electronics",
+      "initial": "false",
+      "name": "ELECTRONICS",
+      "type": "string"
+    },
+    {
+      "caption": "Do you want lock or magnets to win when the two conflict",
+      "group": "Priority",
+      "initial": "lock",
+      "name": "PRIORITY",
+      "options": [
+        {
+          "name": "lock",
+          "value": "lock"
+        },
+        {
+          "name": "magnets",
+          "value": "magnets"
+        }
+      ],
+      "type": "string"
+    },
+    {
+      "caption": "Removes a square from the tile of notch_x by notch_y",
+      "group": "Notch Options",
+      "initial": "false",
+      "name": "NOTCH",
+      "options": [
+        {
+          "name": "true",
+          "value": "true"
+        },
+        {
+          "name": "false",
+          "value": "false"
+        }
+      ],
+      "type": "string"
+    },
+    {
+      "group": "Notch Options",
+      "initial": 2,
+      "name": "NOTCH_X",
+      "options": [
+        {
+          "name": "1",
+          "value": 1
+        },
+        {
+          "name": "2",
+          "value": 2
+        },
+        {
+          "name": "3",
+          "value": 3
+        }
+      ],
+      "type": "number"
+    },
+    {
+      "group": "Notch Options",
+      "initial": 2,
+      "name": "NOTCH_Y",
+      "options": [
+        {
+          "name": "1",
+          "value": 1
+        },
+        {
+          "name": "2",
+          "value": 2
+        },
+        {
+          "name": "3",
+          "value": 3
+        }
+      ],
+      "type": "number"
+    },
+    {
+      "caption": "Keep center clear, fill it in, or do a grid every 2x",
+      "group": "Center Options",
+      "initial": "none",
+      "name": "CENTER",
+      "options": [
+        {
+          "name": "none",
+          "value": "none"
+        },
+        {
+          "name": "grid",
+          "value": "grid"
+        },
+        {
+          "name": "cube",
+          "value": "cube"
+        },
+        {
+          "name": "false",
+          "value": "false"
+        }
+      ],
+      "type": "string"
+    }
+  ],
+  "title": "bases-square"
+}
