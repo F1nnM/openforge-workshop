@@ -11,10 +11,10 @@
  *
  * Those are exactly the two footprint cases v1's builder can place — 3,449
  * `rect` plus 3,079 `wall` tiles, **75.0%** of the live corpus
- * (`src/catalog/schema.ts`, `Footprint`). `arc` (14.1%) lands in v1.1, and so do
+ * (`src/catalog/schema.ts`, `Footprint`). `arc` (13.8%) lands in v1.1, and so do
  * the three cases row W4 added: `diag` (1.4%), `column` (1.4%) and `tri` (0.1%),
  * which is 249 tiles the builder can now describe and still not draw — row W6 is
- * where they arrive on the canvas. `none` (8.0%) is never placeable. So a hero
+ * where they arrive on the canvas. `none` (8.3%) is never placeable. So a hero
  * drawn from rectangles and wall segments is not a simplification of the
  * product: it is a picture of what the product does, and it cannot promise a
  * shape the builder would refuse.

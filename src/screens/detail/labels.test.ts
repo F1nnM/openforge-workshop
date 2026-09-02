@@ -88,9 +88,30 @@ describe('footprintLabel', () => {
     expect(value.note).toContain('12.7 mm')
   })
 
-  it('tier 3 — an arc prints radius and sweep, never a width × depth', () => {
-    const value = footprintLabel(record({ foot: { shape: 'arc', radius: 2, angle: 22.5 } }), [])
-    expect(value).toMatchObject({ text: '2r 22.5°', basis: 'arc' })
+  it('tier 3 — an arc prints its band pair and sweep, never a width × depth', () => {
+    // Row W5. The old expectation was `2r 22.5°`, the tagged radius — which for a
+    // `concave` tile is neither edge of the piece, because a curved wall is named
+    // after the floor it clips to. The cell now shows the outline and the note
+    // names the tag it was derived from.
+    const concave = { shape: 'arc', rIn: 2, rOut: 2.5, sweep: 22.5, band: 'concave', bandBasis: 'measured' }
+    const value = footprintLabel(record({ foot: concave }), [])
+    expect(value).toMatchObject({ text: '2 – 2.5 r 22.5°', basis: 'arc' })
+    expect(value.note).toContain('tagged radius of 2')
+    expect(value.note).toContain('outside which the material lies')
+    expect(value.note).toContain('Confirmed against 36 measured meshes')
+  })
+
+  it('tier 3 — a disc prints one radius, and a fallback band says it is one', () => {
+    const disc = { shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' }
+    expect(footprintLabel(record({ foot: disc }), [])).toMatchObject({ text: '2 r 90°' })
+
+    // `convex` has no accepted W1 sector fit behind it — 43 meshes attempted and
+    // 43 refused — so the cell still prints the sector and the note refuses to
+    // call it measured.
+    const convex = { shape: 'arc', rIn: 1.5, rOut: 2, sweep: 45, band: 'convex', bandBasis: 'fallback' }
+    const value = footprintLabel(record({ foot: convex }), [])
+    expect(value.text).toBe('1.5 – 2 r 45°')
+    expect(value.note).toContain('Not confirmed against a measured mesh')
   })
 
   it('tier 4 — no footprint, but an OpenLOCK code', () => {
@@ -124,7 +145,7 @@ describe('footprintLabel', () => {
     const shapes = [
       { shape: 'rect', w: 1, d: 1 },
       { shape: 'wall', length: 1 },
-      { shape: 'arc', radius: 1, angle: 90 },
+      { shape: 'arc', rIn: 0, rOut: 1, sweep: 90, band: 'radial', bandBasis: 'measured' },
       { shape: 'none' },
     ]
     for (const foot of shapes) {

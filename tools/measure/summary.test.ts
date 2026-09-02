@@ -15,7 +15,7 @@ const CATALOG = testCatalog([
     id: 'tiles/a.stl',
     ord: 0,
     blob: blobOf('a'),
-    foot: { shape: 'arc', radius: 2, angle: 90 },
+    foot: { shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' },
     tags: ['shape|curved', 'size|radius|2'],
   },
 ])

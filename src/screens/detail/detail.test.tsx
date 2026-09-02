@@ -141,7 +141,7 @@ const CATALOG = CatalogFile.parse({
       file: 'cave%curve.2r90.stl',
       family: 'tiles/cave/walls/curve',
       name: 'Cave Curve 2r90',
-      foot: { shape: 'arc', radius: 2, angle: 90 },
+      foot: { shape: 'arc', rIn: 2, rOut: 2.5, sweep: 90, band: 'concave', bandBasis: 'measured' },
     }),
     tile({
       id: 'tiles/cave/misc/coded/cave%coded.stl',
@@ -410,7 +410,7 @@ describe('the spec grid', () => {
   it.each([
     [ORD.floor1x1, '1 × 1 in'],
     [ORD.wall, '2 × 0.5 in'],
-    [ORD.arc, '2r 90°'],
+    [ORD.arc, '2 – 2.5 r 90°'],
     [ORD.coded, 'OpenLOCK BA'],
     [ORD.shapeless, 'Curved'],
     [ORD.noSprite, 'Size not specified'],

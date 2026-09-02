@@ -127,7 +127,7 @@ function sizeWords(tags: readonly string[], foot: Footprint): string[] {
 }
 
 /**
- * The size a tile is *labelled* with, for the 699 tiles whose footprint is
+ * The size a tile is *labelled* with, for the 726 tiles whose footprint is
  * `none` and the 121 whose footprint is a measured `diag` run.
  *
  * §2 is explicit that the size tags are design-family labels rather than mesh

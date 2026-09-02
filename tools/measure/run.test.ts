@@ -75,7 +75,14 @@ function catalogFor(blobs: readonly string[]) {
       id: `tiles/t${String(index)}.stl`,
       ord: index,
       blob,
-      foot: { shape: 'arc' as const, radius: 2, angle: 90 },
+      foot: {
+        shape: 'arc' as const,
+        rIn: 0,
+        rOut: 2,
+        sweep: 90,
+        band: 'radial' as const,
+        bandBasis: 'measured' as const,
+      },
       tags: ['shape|curved', 'size|radius|2'],
     })),
   )

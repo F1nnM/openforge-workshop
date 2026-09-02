@@ -25,8 +25,8 @@
  *
  * ## Footprint is a union, and only 39.6% of it is a `W×D`
  *
- * `CatalogRecord.foot` is `rect` (39.6%) / `wall` (35.4%) / `arc` (14.1%) /
- * `diag` (1.4%) / `column` (1.4%) / `tri` (0.1%) / `none` (8.0%).
+ * `CatalogRecord.foot` is `rect` (39.6%) / `wall` (35.4%) / `arc` (13.8%) /
+ * `diag` (1.4%) / `column` (1.4%) / `tri` (0.1%) / `none` (8.3%).
  * {@link footprintLabel} is a nine-tier cascade, and every tier reports which
  * one it came from so the cell can name its own provenance:
  *
@@ -34,7 +34,7 @@
  * | ---- | ---------------- | --------------------------------------- | ---------- |
  * | 1    | `1 × 1`          | `rect` — tagged width and depth          | 39.6%      |
  * | 2    | `2 × 0.5`        | `wall` — tagged length × measured 12.7mm | 35.4%      |
- * | 3    | `2r 90°`         | `arc` — radius and sweep                 | 14.1%      |
+ * | 3    | `2 – 2.5 r 90°`  | `arc` — the band pair and the sweep      | 13.8%      |
  * | 4    | `2.83 × 0.5 at 45°` | `diag` — measured run × the constant  | 1.4%       |
  * | 5    | `0.5 × 0.5`      | `column` — the measured pillar            | 1.4%       |
  * | 6    | `2 × 2 triangle` | `tri` — the leg, twice                    | 0.1%       |
@@ -69,8 +69,14 @@
  * is a *word for a human*, not a footprint, so it is unaffected by W3's finding
  * that `hex` is not a curve — the 56 hex tiles reach tier 8 either way.
  */
-import type { CatalogAssets, CatalogRecord } from '@/catalog'
-import { WALL_THICKNESS_MM, WALL_THICKNESS_UNITS, shardedPath } from '@/catalog'
+import type { ArcFootprint, CatalogAssets, CatalogRecord } from '@/catalog'
+import {
+  ARC_BAND_EVIDENCE,
+  WALL_THICKNESS_MM,
+  WALL_THICKNESS_UNITS,
+  arcInterfaceRadius,
+  shardedPath,
+} from '@/catalog'
 
 /* ------------------------------------------------------------------ numbers */
 
@@ -174,6 +180,49 @@ export const SHAPE_WORDS: readonly string[] = [
 /** The tier-6 text, exported so the tests and the corpus check share one string. */
 export const NO_FOOTPRINT = 'Size not specified'
 
+/**
+ * A sector's outline, in the cell's own words.
+ *
+ * `4 – 4.5 r 90°` for a band, `2 r 90°` for a disc — a disc's inner radius is
+ * zero, and printing `0 – 2 r` would invite the reader to look for a hole that is
+ * not there. This is the one place in the app that shows the band pair rather
+ * than the tagged interface radius, because it is the one place with room to say
+ * what the two numbers are: the card chip and the search token stay `2r90`, which
+ * is what the filenames write.
+ */
+function arcText(foot: ArcFootprint): string {
+  const sweep = `${formatUnits(foot.sweep)}°`
+  if (foot.rIn === 0) return `${formatUnits(foot.rOut)} r ${sweep}`
+  return `${formatUnits(foot.rIn)} – ${formatUnits(foot.rOut)} r ${sweep}`
+}
+
+/**
+ * Where a sector's two radii came from, for the cell's `title`.
+ *
+ * The note names the tagged radius as well as the band, because the tagged radius
+ * is the number in the filename and the one the user will have seen — and it is
+ * *neither* of the two printed for a `concave` tile, whose material lies outside
+ * it. A `fallback` band says so in as many words rather than dropping the value:
+ * every band in the corpus is a 0.5-unit wall or a 2-unit floor either way, and
+ * what is unconfirmed is narrower than "the shape".
+ */
+function arcNote(foot: ArcFootprint): string {
+  const evidence = ARC_BAND_EVIDENCE[foot.band]
+  const interface_ = formatUnits(arcInterfaceRadius(foot))
+  const provenance =
+    foot.bandBasis === 'measured'
+      ? `Confirmed against ${String(evidence.measuredBlobs)} measured meshes.`
+      : 'Not confirmed against a measured mesh of this corpus — the band rule is the ' +
+        'tessellation research’s, and the tile is placed on it.'
+  return (
+    `An annular sector: the ${foot.band} band ${evidence.expression} swept ` +
+    `${formatUnits(foot.sweep)}°, where R is the tile’s tagged radius of ${interface_} — the ` +
+    `interface where it meets its neighbour, ${evidence.side} which the material lies. ` +
+    `${provenance} Curves are not given as width × depth: on a curve the size tags name the ` +
+    `design family and diverge from the mesh by 96 mm at the median.`
+  )
+}
+
 function shapeWord(tags: readonly string[]): string | undefined {
   const segments = new Set<string>()
   for (const tag of tags) {
@@ -211,13 +260,7 @@ export function footprintLabel(
           `wall — ${formatUnits(WALL_THICKNESS_UNITS)} units is the measured ${formatUnits(WALL_THICKNESS_MM)} mm wall thickness.`,
       }
     case 'arc':
-      return {
-        text: `${formatUnits(foot.radius)}r ${formatUnits(foot.angle)}°`,
-        basis: 'arc',
-        note:
-          'Radius and swept angle. Curves are not given as width × depth: on a curve the size ' +
-          'tags name the design family, and diverge from the mesh by 96 mm at the median.',
-      }
+      return { text: arcText(foot), basis: 'arc', note: arcNote(foot) }
     case 'diag':
       return {
         text: `${formatUnits(foot.run)} × ${formatUnits(WALL_THICKNESS_UNITS)} at 45°`,

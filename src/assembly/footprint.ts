@@ -18,11 +18,30 @@
  * rotation on a grid the builder can already rotate on, not a fudge — §7's
  * rotation step exists precisely because tiles turn.
  *
- * Nothing else is normalised. `arc` keys on radius *and* sweep because §2
- * records that the size tags diverge from the mesh on curves (median error
- * 96 mm) — so radius alone would match a 90° elbow to a 270° sweep. `none`
- * collapses to a single key, which is correct rather than convenient: the 699
- * tiles with no derivable footprint are not congruent to each other, so the
+ * Nothing else is normalised. `arc` keys on the **band pair and the sweep**, not
+ * on the tagged radius, and row W5 is why: the tagged radius is the *interface*
+ * radius, and two curves that share it are not the same piece. A `concave` wall
+ * band at R = 4 occupies [4, 4.5] and a `convex` one occupies [3.5, 4]; under the
+ * pre-W5 key both were `arc:4@90`, and **nine of the ten arc base keys mixed at
+ * least two bands** — `arc:4.0@90.0` mixed five, including a quarter disc with a
+ * 0.5-unit wall band. Measured over the corpus, the pre-W5 key offered the 542
+ * arc toppers **29,011** candidate bases across 10 keys and the sector key offers
+ * **11,246** across 20, so 17,765 of those candidate pairs were pieces curving
+ * the wrong way.
+ *
+ * **Ten toppers lose their last arc base, and that is the correct outcome.** They
+ * are exactly the ten `s2w_radial` tiles — `dungeon_stone%block#floor+s2w+curved+
+ * radial…` — whose band is `[R−1.5, R]`, the radial floor inset by 0.5 to leave
+ * room for its own separately printed wall. They used to match a plain `[R−2, R]`
+ * radial base, which is 0.5 units too deep at the inside edge: exactly the room
+ * the wall was inset for. The corpus holds no `s2w` curved base at all, and a
+ * missing base reported as missing is what row D5 exists to surface.
+ *
+ * The band *name* is deliberately not in the key: congruence is about shape, and
+ * a `radial` [0, 2] sector and a `disc` [0, 2] sector are the same sector.
+ *
+ * `none` collapses to a single key, which is correct rather than convenient: the
+ * 726 tiles with no derivable footprint are not congruent to each other, so the
  * `none` key is treated as **no key at all** by {@link footprintKey}'s callers
  * and never used to match.
  *
@@ -58,7 +77,7 @@ export function footprintKey(foot: Footprint): string | undefined {
     case 'wall':
       return `wall:${String(foot.length)}`
     case 'arc':
-      return `arc:${String(foot.radius)}@${String(foot.angle)}`
+      return `arc:${String(foot.rIn)}-${String(foot.rOut)}@${String(foot.sweep)}`
     case 'diag':
       return `diag:${String(foot.run)}`
     case 'tri':

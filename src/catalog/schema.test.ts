@@ -17,6 +17,8 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
 import {
+  ARC_BAND_EVIDENCE,
+  ArcBand,
   BlobId,
   CatalogAssets,
   CatalogFile,
@@ -27,6 +29,7 @@ import {
   Footprint,
   GRID_UNIT_MM,
   Layer,
+  MAX_SECTOR_SWEEP_DEG,
   MEASURED_SPRITE_SHEET,
   ManifestOrdinal,
   SCHEMA_VERSION,
@@ -34,6 +37,8 @@ import {
   TileId,
   WALL_THICKNESS_MM,
   WALL_THICKNESS_UNITS,
+  arcBandIsMeasured,
+  arcInterfaceRadius,
   resolveTags,
   shardedPath,
 } from './schema'
@@ -152,11 +157,9 @@ describe('Footprint', () => {
   it('accepts all seven primitives', () => {
     expect(Footprint.parse({ shape: 'rect', w: 2, d: 1 })).toEqual({ shape: 'rect', w: 2, d: 1 })
     expect(Footprint.parse({ shape: 'wall', length: 4 })).toEqual({ shape: 'wall', length: 4 })
-    expect(Footprint.parse({ shape: 'arc', radius: 2, angle: 90 })).toEqual({
-      shape: 'arc',
-      radius: 2,
-      angle: 90,
-    })
+    expect(
+      Footprint.parse({ shape: 'arc', rIn: 2, rOut: 2.5, sweep: 90, band: 'concave', bandBasis: 'measured' }),
+    ).toEqual({ shape: 'arc', rIn: 2, rOut: 2.5, sweep: 90, band: 'concave', bandBasis: 'measured' })
     expect(Footprint.parse({ shape: 'diag', run: 2.828 })).toEqual({ shape: 'diag', run: 2.828 })
     expect(Footprint.parse({ shape: 'column' })).toEqual({ shape: 'column' })
     expect(Footprint.parse({ shape: 'tri', leg: 4 })).toEqual({ shape: 'tri', leg: 4 })
@@ -195,14 +198,87 @@ describe('Footprint', () => {
     expect(Footprint.safeParse({ shape: 'arc', w: 2, d: 1 }).success).toBe(false)
   })
 
+  it('takes a disc sector, whose inner radius is legitimately zero', () => {
+    // The `radial` band is 2 units wide at every radius, so at R = 2 it
+    // degenerates to a quarter disc and `rIn` is exactly 0 — which is why `rIn`
+    // is `nonnegative` where every other extent in this union is `positive`.
+    const disc = Footprint.parse({
+      shape: 'arc',
+      rIn: 0,
+      rOut: 2,
+      sweep: 90,
+      band: 'radial',
+      bandBasis: 'measured',
+    })
+    expect(disc).toMatchObject({ rIn: 0, rOut: 2 })
+  })
+
+  it('refuses a sector with no band width, because that is not a sector', () => {
+    const degenerate = { shape: 'arc', rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' }
+    expect(Footprint.safeParse({ ...degenerate, rIn: 2 }).success).toBe(false)
+    expect(Footprint.safeParse({ ...degenerate, rIn: 3 }).success).toBe(false)
+    expect(Footprint.safeParse({ ...degenerate, rIn: -1 }).success).toBe(false)
+  })
+
+  it('refuses a `measured` stamp on a band W1 never fitted', () => {
+    // Row W5. `convex` and `s2w_radial` have zero accepted W1 sector fits behind
+    // them — 43 attempted and refused for the first, none attempted for the
+    // second — so the rule they place on is the tessellation research's, and the
+    // schema is what stops an importer laundering it into a measurement.
+    const convex = { shape: 'arc', rIn: 1.5, rOut: 2, sweep: 90, band: 'convex' } as const
+    expect(Footprint.safeParse({ ...convex, bandBasis: 'fallback' }).success).toBe(true)
+    expect(Footprint.safeParse({ ...convex, bandBasis: 'measured' }).success).toBe(false)
+    const s2w = { shape: 'arc', rIn: 4.5, rOut: 6, sweep: 45, band: 's2w_radial' } as const
+    expect(Footprint.safeParse({ ...s2w, bandBasis: 'fallback' }).success).toBe(true)
+    expect(Footprint.safeParse({ ...s2w, bandBasis: 'measured' }).success).toBe(false)
+    // And it does not veto the three bands W1 did fit.
+    for (const band of ['disc', 'radial', 'concave'] as const) {
+      expect(arcBandIsMeasured(band)).toBe(true)
+    }
+    for (const band of ['convex', 's2w_radial'] as const) {
+      expect(arcBandIsMeasured(band)).toBe(false)
+    }
+  })
+
+  it('recovers the tagged interface radius, which is neither rIn nor rOut', () => {
+    // The one asymmetry in the band vocabulary: `concave` is the only band whose
+    // material lies outside the radius the tag names, because a curved wall is
+    // named after the floor tile it clips to. 585 tiles are on that side.
+    expect(
+      arcInterfaceRadius({ shape: 'arc', rIn: 4, rOut: 4.5, sweep: 90, band: 'concave', bandBasis: 'measured' }),
+    ).toBe(4)
+    expect(
+      arcInterfaceRadius({ shape: 'arc', rIn: 3.5, rOut: 4, sweep: 90, band: 'convex', bandBasis: 'fallback' }),
+    ).toBe(4)
+    expect(
+      arcInterfaceRadius({ shape: 'arc', rIn: 2, rOut: 4, sweep: 90, band: 'radial', bandBasis: 'measured' }),
+    ).toBe(4)
+    expect(ArcBand.options.filter((band) => ARC_BAND_EVIDENCE[band].side === 'outside')).toEqual(['concave'])
+  })
+
   it('rejects an unknown primitive and a zero extent', () => {
     expect(Footprint.safeParse({ shape: 'hex' }).success).toBe(false)
     expect(Footprint.safeParse({ shape: 'rect', w: 0, d: 1 }).success).toBe(false)
     expect(Footprint.safeParse({ shape: 'wall' }).success).toBe(false)
   })
 
-  it('allows a 270 degree sweep, which the corner pieces really use', () => {
-    expect(Footprint.parse({ shape: 'arc', radius: 1, angle: 270 })).toMatchObject({ angle: 270 })
+  it('refuses a sweep above 90 degrees, where the box formula stops being true', () => {
+    // This inverts a pre-W5 expectation, and the correction is measured. The old
+    // test read `size|angle|270` as a sweep; W2 established that 270 is one of
+    // the two `IL` corner markers on a 1 x 1 cell and that 60/120/240/300 are
+    // hex-corner angles, and that *no* tile carrying a `size|radius` carries any
+    // of them. Meanwhile `arcSectorExtent` — `rOut − rIn·cos θ` by `rOut·sin θ` —
+    // is only correct while the extreme point sits on a bounding radius, i.e. for
+    // θ ≤ 90. Accepting 270 therefore admitted no real tile and did admit a
+    // sector whose bounding box would come out smaller than the piece.
+    const arc = { shape: 'arc', rIn: 0, rOut: 1, band: 'radial', bandBasis: 'measured' } as const
+    expect(Footprint.safeParse({ ...arc, sweep: 270 }).success).toBe(false)
+    expect(Footprint.safeParse({ ...arc, sweep: 0 }).success).toBe(false)
+    expect(MAX_SECTOR_SWEEP_DEG).toBe(90)
+    // The whole ladder the corpus actually uses parses.
+    for (const sweep of [11.25, 22.5, 45, 90]) {
+      expect(Footprint.safeParse({ ...arc, sweep }).success).toBe(true)
+    }
   })
 })
 
@@ -414,7 +490,7 @@ describe('round trip', () => {
       aRecord({
         id: tileId('tiles/c.stl'),
         ord: ordinal(2),
-        foot: { shape: 'arc', radius: 2, angle: 22.5 },
+        foot: { shape: 'arc', rIn: 1.5, rOut: 2, sweep: 22.5, band: 'convex', bandBasis: 'fallback' },
         sprite: false,
         config: {
           parts: [
@@ -522,11 +598,46 @@ function numericTag(tags: string[], prefix: string): number | undefined {
   return Number.isFinite(value) ? value : undefined
 }
 
+/**
+ * The band a curve names, for {@link footprintOf}'s sector.
+ *
+ * Deliberately the crude version: the real resolution — modifier, then W2's code
+ * table, then the default — lives in `pipeline/footprint.ts`, and this file's
+ * whole point is to validate the schema against the corpus *without* the
+ * importer. What it does need is a band per curve that produces a well-formed
+ * sector for every one of the 8,702 rows, so that a parse failure is a schema
+ * defect rather than a defect in this helper.
+ */
+function bandOf(tags: string[]): ArcBand {
+  const segments = new Set(tags.flatMap((tag) => tag.split('|')))
+  if (segments.has('concave')) return 'concave'
+  if (segments.has('convex')) return 'convex'
+  return 'radial'
+}
+
 /** Mirrors `footprint_kind()` in verify-catalog-facts.py, ordering included. */
 function footprintOf(tags: string[]): Footprint {
   const radius = numericTag(tags, 'size|radius')
   if (radius !== undefined && radius > 0) {
-    return { shape: 'arc', radius, angle: numericTag(tags, 'size|angle') ?? DEFAULT_ROTATION_STEP_DEG }
+    // No fabricated sweep. Row W4 deleted `DEFAULT_ARC_SWEEP_DEG` because W1
+    // refused a sector fit on all 165 tiles that had one, and this helper used to
+    // stand in `DEFAULT_ROTATION_STEP_DEG` for the same missing number — a
+    // rotation step is not a swept angle, and a radius with no sweep is not a
+    // sector.
+    const sweep = numericTag(tags, 'size|angle')
+    if (sweep === undefined || sweep <= 0 || sweep > MAX_SECTOR_SWEEP_DEG) return { shape: 'none' }
+    const band = bandOf(tags)
+    const inner = band === 'concave' ? radius : Math.max(0, radius - 0.5)
+    const outer = band === 'concave' ? radius + 0.5 : radius
+    if (outer <= inner) return { shape: 'none' }
+    return {
+      shape: 'arc',
+      rIn: inner,
+      rOut: outer,
+      sweep,
+      band,
+      bandBasis: arcBandIsMeasured(band) ? 'measured' : 'fallback',
+    }
   }
   const joined = tags.join(' ')
   if (NON_RECT_MARKERS.some((marker) => joined.includes(marker))) return { shape: 'none' }

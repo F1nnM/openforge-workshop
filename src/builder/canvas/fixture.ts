@@ -147,7 +147,11 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       texture: 'cave',
       tags: [tag('shape|floor'), tag('texture|cave')],
-      foot: { shape: 'arc', radius: 2, angle: 90 },
+      // A quarter-disc floor sector: the `radial` band at R = 2, where R − 2
+      // degenerates to 0. W1's most-measured arc shape — 11 accepted fits at
+      // [0.000, 2.001] — and `radial` is a band the schema will accept a
+      // `'measured'` stamp on.
+      foot: { shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' },
     },
     {
       id: 'tiles/cave/hex/hex.stl',

@@ -40,7 +40,12 @@ export interface FamilyVariant {
 }
 
 /**
- * Sort weight: area for a rectangle, length for a wall, radius for an arc.
+ * Sort weight: area for a rectangle, length for a wall, outer radius for an arc.
+ *
+ * An arc weighs `rOut`, the edge of its band, because that is the extent the
+ * piece actually reaches — and because after row W5 two curves sharing a tagged
+ * radius can be different sizes: a `concave` band at R = 4 reaches 4.5 and a
+ * `convex` one reaches 4.0.
  *
  * A `tri` weighs its own area, half the box, so a 2 x 2 triangle sorts below a
  * 2 x 2 rectangle rather than beside it. A `diag` weighs its run, the same
@@ -56,7 +61,7 @@ function extent(record: CatalogRecord): number {
     case 'wall':
       return foot.length
     case 'arc':
-      return foot.radius
+      return foot.rOut
     case 'diag':
       return foot.run
     case 'tri':

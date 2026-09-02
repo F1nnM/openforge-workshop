@@ -23,7 +23,16 @@ import { basename, dirname, join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { CatalogFile, resolveTags, shardedPath } from '../src/catalog'
+import {
+  ARC_BAND_EVIDENCE,
+  ArcBand,
+  CatalogFile,
+  MAX_SECTOR_SWEEP_DEG,
+  arcBandIsMeasured,
+  arcInterfaceRadius,
+  resolveTags,
+  shardedPath,
+} from '../src/catalog'
 
 import type { BuildResult } from './build'
 import { buildCatalog } from './build'
@@ -33,8 +42,16 @@ import type { FixtureRow } from './fixtures'
 import { fixturesDir, liveRows, loadFixtureRows } from './fixtures'
 import { TAG_ALIASES, normaliseTags } from './normalise'
 import { emptyManifest } from './ordinals'
-import { radiusIsFeature } from './footprint'
-import { COLUMN_TOKEN_BY_LETTER, CURVE_TAG_SEGMENTS, NON_CURVE_TAG_SEGMENTS, isMeasured } from './tessellation'
+import { CURVED_INTERFACE_TAG, radiusIsFeature } from './footprint'
+import {
+  ARC_BAND_RULES,
+  COLUMN_TOKEN_BY_LETTER,
+  CURVE_TAG_SEGMENTS,
+  NON_CURVE_TAG_SEGMENTS,
+  arcBandFor,
+  arcBandSideOfRadius,
+  isMeasured,
+} from './tessellation'
 import { SIZE_BUDGET_BYTES } from './version'
 
 const FIXTURES_DIR = fixturesDir()
@@ -198,23 +215,24 @@ describeCorpus(title, () => {
       //   arc  -> rect      24   inverted plates whose box the mesh honours
       //   arc  -> none      57   36 inverted fragments, 21 lintel inserts
       //   rect -> none      20   lettered component| parts of a curved design
+      //   arc  -> none      27   W5: the xG interface FLOORS, whose width is nowhere
       //
-      // 3454 - 9 - 20 + 24 = 3449 · 3116 - 121 + 84 = 3079 · 1391 - 165 = 1226 ·
-      // 741 - 119 + 57 + 20 = 699.
+      // 3454 - 9 - 20 + 24 = 3449 · 3116 - 121 + 84 = 3079 · 1391 - 192 = 1199 ·
+      // 741 - 119 + 57 + 20 + 27 = 726.
       expect(result.stats.footprints.rect).toBe(3_449)
       expect(result.stats.footprints.wall).toBe(3_079)
-      expect(result.stats.footprints.arc).toBe(1_226)
+      expect(result.stats.footprints.arc).toBe(1_199)
       expect(result.stats.footprints.diag).toBe(121)
       expect(result.stats.footprints.column).toBe(119)
       expect(result.stats.footprints.tri).toBe(9)
-      expect(result.stats.footprints.none).toBe(699)
+      expect(result.stats.footprints.none).toBe(726)
 
-      // 92.0%, computed. Coverage is deliberately not monotone across the list
-      // above — 77 tiles LOSE a footprint, because W1 measured them and the one
+      // 91.7%, computed. Coverage is deliberately not monotone across the list
+      // above — 104 tiles LOSE a footprint, because W1 measured them and the one
       // they had was wrong. The plan predicted ~95% before it had measurements;
       // this is what the change produces.
       const covered = result.stats.records - (result.stats.footprints.none ?? 0)
-      expect(((100 * covered) / result.stats.records).toFixed(1)).toBe('92.0')
+      expect(((100 * covered) / result.stats.records).toFixed(1)).toBe('91.7')
       expect(((100 * covered) / result.stats.records).toFixed(1)).toBe(
         facts.get('coverage all seven cases')?.replace('%', ''),
       )
@@ -231,6 +249,77 @@ describeCorpus(title, () => {
         'tri',
         'wall',
       ])
+    })
+
+    it('gives every sector a band, and says which of them are measured', () => {
+      // Row W5. A sector needs two radii and the tag gives one, so the missing
+      // piece is the band — and the band is a PARAMETER, which is why the
+      // verify script does not mirror it: the offsets live in
+      // `pipeline/tessellation.ts` and the code-to-band map in W2's table, and a
+      // second copy in Python would give both two homes. This asserts against
+      // the emitted index instead, which is a stronger check than a mirror.
+      const arcs = result.file.records
+        .map((record) => record.foot)
+        .filter((foot): foot is Extract<typeof foot, { shape: 'arc' }> => foot.shape === 'arc')
+      expect(arcs).toHaveLength(1_199)
+
+      const tally = (values: readonly string[]) => {
+        const counts: Record<string, number> = {}
+        for (const value of values) counts[value] = (counts[value] ?? 0) + 1
+        return counts
+      }
+      expect(tally(arcs.map((foot) => foot.band))).toEqual({
+        concave: 585,
+        convex: 397,
+        radial: 195,
+        s2w_radial: 10,
+        disc: 12,
+      })
+      // `F` is a `disc` and not a `radial`, which is W2's table's call and not
+      // this module's: `[0, 2]` at R = 2 is exactly where the radial band
+      // degenerates to a quarter disc. Reading the table beats restating a
+      // code-to-band map, and this is the case that proves it.
+      expect(ARC_BAND_EVIDENCE.disc.measuredBlobs).toBe(11)
+
+      // `measured` means the band rule has an accepted W1 sector fit behind it
+      // AND the tile named its band. The 462 that do not: 397 `convex` (43
+      // meshes attempted, 43 refused), 10 `s2w_radial` (never attempted — all 10
+      // carry a modifier, so they were in none of W1's five target sets) and 55
+      // that named no band at all and took the `radial` default.
+      expect(tally(arcs.map((foot) => foot.bandBasis))).toEqual({ measured: 737, fallback: 462 })
+      expect(397 + 10 + 55).toBe(462)
+
+      // The two unmeasured bands can never be stamped otherwise, and the schema
+      // is what enforces it rather than this test — `CatalogFile.parse` has
+      // already run over every record by the time we get here.
+      for (const foot of arcs) {
+        if (foot.band === 'convex' || foot.band === 's2w_radial') expect(foot.bandBasis).toBe('fallback')
+        expect(arcBandIsMeasured(foot.band)).toBe(ARC_BAND_EVIDENCE[foot.band].basis === 'measured')
+      }
+
+      // Every band rule agrees with W2's offsets, which is where they live, and
+      // every pair is a real band: the sector formula needs rOut > rIn and the
+      // schema refines on it.
+      for (const foot of arcs) {
+        const pair = arcBandFor(foot.band, arcInterfaceRadius(foot))
+        expect(pair.innerRadiusUnits).toBeCloseTo(foot.rIn, 10)
+        expect(pair.outerRadiusUnits).toBeCloseTo(foot.rOut, 10)
+        expect(foot.rOut).toBeGreaterThan(foot.rIn)
+        expect(foot.sweep).toBeLessThanOrEqual(MAX_SECTOR_SWEEP_DEG)
+      }
+
+      // The two vocabularies are the same five strings, and W2's `ArcBand` is
+      // the one that holds the numbers. `arcBandFor` above is typed on it, so a
+      // divergence in the names is already a compile error; this checks the
+      // runtime lists have not drifted apart either.
+      expect([...ArcBand.options].sort()).toEqual(Object.keys(ARC_BAND_RULES).sort())
+      for (const band of ArcBand.options) {
+        expect(ARC_BAND_EVIDENCE[band].side).toBe(arcBandSideOfRadius(band))
+        expect(ARC_BAND_EVIDENCE[band].expression).toBe(ARC_BAND_RULES[band].expression)
+      }
+
+      // The sweeps the corpus actually uses: a bisection ladder and nothing else.
+      expect([...new Set(arcs.map((foot) => foot.sweep))].sort((a, b) => a - b)).toEqual([11.25, 22.5, 45, 90])
     })
 
     it('places every column it can and refuses the one letter nobody measured', () => {
@@ -298,19 +387,27 @@ describeCorpus(title, () => {
       )
     })
 
-    it('de-arcs exactly the 165 tiles W1 refused a sector fit on', () => {
+    it('de-arcs exactly the 192 tiles W1 refused a sector fit on', () => {
       const facts = verifyFacts()
       const shapeOf = (row: FixtureRow) => shapeByPath.get(row.file_metadata.full_name)
       const withRadius = live.filter((row) => row.tags.some((tag) => tag.startsWith('size|radius|')))
       const reassigned = withRadius.filter((row) => radiusIsFeature(row.tags))
 
       expect(reassigned).toHaveLength(leading(facts, 'radius reassigned to a feature'))
-      expect(reassigned).toHaveLength(165)
-      // The same 165 that carried no `size|angle` before this row — which is why
-      // there is now no arc anywhere with a fabricated sweep.
-      expect(new Set(reassigned)).toEqual(
-        new Set(withRadius.filter((row) => !row.tags.some((tag) => tag.startsWith('size|angle|')))),
-      )
+      expect(reassigned).toHaveLength(192)
+      // W4's 165 were exactly the radius-carrying tiles with no `size|angle`.
+      // W5's 27 are the other side of the same fact: they DO carry a sweep, and
+      // W1 refused a sector fit on them anyway, because a curved interface is a
+      // bite out of a rectangle rather than a sector. So the set is no longer
+      // "radius without a sweep" — it is "radius that is not an outline", which
+      // is what `radiusIsFeature` was always named for.
+      const sweepless = withRadius.filter((row) => !row.tags.some((tag) => tag.startsWith('size|angle|')))
+      expect(sweepless).toHaveLength(165)
+      expect(sweepless.every((row) => reassigned.includes(row))).toBe(true)
+      const swept = reassigned.filter((row) => !sweepless.includes(row))
+      expect(swept).toHaveLength(27)
+      expect(swept.every((row) => row.tags.includes(CURVED_INTERFACE_TAG))).toBe(true)
+      expect(swept.every((row) => shapeOf(row) === 'none')).toBe(true)
       expect(reassigned.some((row) => shapeOf(row) === 'arc')).toBe(false)
 
       const landed = (predicate: (row: FixtureRow) => boolean) => {
@@ -322,6 +419,10 @@ describeCorpus(title, () => {
         }
         return counts
       }
+      // 111 curved interfaces, and the split inside them is the whole of W5's
+      // classification change: a wall run has a measured length in W2's table, a
+      // floor has nothing, and their code is not even in `size|openlock`.
+      expect(landed((row) => row.tags.includes(CURVED_INTERFACE_TAG))).toEqual({ none: 27, wall: 84 })
       expect(landed((row) => row.tags.some((tag) => tag === 'size|openlock|QxG' || tag === 'size|openlock|AxG' || tag === 'size|openlock|BAxG'))).toEqual({ wall: 84 })
       expect(landed((row) => row.tags.some((tag) => tag.split('|').includes('inverted')))).toEqual({ rect: 24, none: 36 })
       expect(landed((row) => row.tags.includes('part|lintel'))).toEqual({ none: 21 })
@@ -392,7 +493,11 @@ describeCorpus(title, () => {
       expect(fragments.every((row) => shapeOf(row) === 'none')).toBe(true)
 
       // The movers, and the honest label on them: a curve-marked RECT is an
-      // axis-aligned over-approximation of an annular sector. W5 reshapes it.
+      // axis-aligned over-approximation of an annular sector. **W5 reshaped none
+      // of them**, and this count is the guard that the set did not drift while
+      // it reshaped the arcs: W1 fitted 402 of the 407 and accepted 96, so 306
+      // carry no measured sector and no radius or sweep to build one from, and a
+      // trusted over-approximation places where a fabricated sector does not.
       // 407, not W3's 403: the 24 unlettered `inverted` plates arrived from ARC
       // and the 20 `shingles` barge-boards left for NONE.
       const curvedRects = live.filter(
@@ -418,18 +523,24 @@ describeCorpus(title, () => {
       const stranded = live.filter((row) => shapeByPath.get(row.file_metadata.full_name) === 'none')
       const coded = stranded.filter((row) => row.tags.some((tag) => tag.startsWith('size|openlock|')))
       const fragments = stranded.filter((row) => row.tags.some((tag) => tag.startsWith('size|segment|')))
-      const neither = stranded.filter((row) => !coded.includes(row) && !fragments.includes(row))
+      const interfaces = stranded.filter((row) => row.tags.includes(CURVED_INTERFACE_TAG))
+      const neither = stranded.filter(
+        (row) => !coded.includes(row) && !fragments.includes(row) && !interfaces.includes(row),
+      )
 
       expect(stranded).toHaveLength(leading(facts, 'footprint NONE'))
       expect(fragments).toHaveLength(leading(facts, 'NONE \u00b7 a fragment'))
+      expect(interfaces).toHaveLength(leading(facts, 'NONE \u00b7 a curved interface, no code'))
       expect(neither).toHaveLength(leading(facts, 'NONE \u00b7 no code, no part letter'))
-      // The three are disjoint and exhaustive: no NONE tile carries both a code
-      // and a fragment letter, so the breakdown is a partition and W1's and W5's
-      // shares of the remaining 699 do not overlap.
+      // The four are disjoint and exhaustive: no NONE tile carries both a code
+      // and a fragment letter, and W5's 27 carry no code at all, so the breakdown
+      // is a partition and the rows' shares of the 726 do not overlap.
       expect(coded.filter((row) => fragments.includes(row))).toEqual([])
-      expect(coded.length + fragments.length + neither.length).toBe(stranded.length)
-      expect(stranded).toHaveLength(699)
+      expect(interfaces.filter((row) => coded.includes(row) || fragments.includes(row))).toEqual([])
+      expect(coded.length + fragments.length + interfaces.length + neither.length).toBe(stranded.length)
+      expect(stranded).toHaveLength(726)
       expect(fragments).toHaveLength(319)
+      expect(interfaces).toHaveLength(27)
 
       // W3 left 161 coded tiles here and W4 places 119 of them. The 42 that
       // remain are **deliberate refusals**, not unread tags, and they are two

@@ -132,7 +132,7 @@ describe('measureTargets', () => {
         ord: 0,
         blob: shared,
         bytes: 100,
-        foot: { shape: 'arc', radius: 2, angle: 90 },
+        foot: { shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' },
         tags: ['shape|curved', 'size|radius|2', 'size|angle|90'],
       },
       {
@@ -140,7 +140,7 @@ describe('measureTargets', () => {
         ord: 1,
         blob: shared,
         bytes: 100,
-        foot: { shape: 'arc', radius: 2, angle: 90 },
+        foot: { shape: 'arc', rIn: 0, rOut: 2, sweep: 90, band: 'radial', bandBasis: 'measured' },
         tags: ['shape|base|radial', 'size|radius|2'],
       },
       {

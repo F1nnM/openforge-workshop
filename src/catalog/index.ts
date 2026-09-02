@@ -6,7 +6,11 @@
  * schema, a type inferred from one, a measured constant, or a helper over them —
  * no data and no I/O.
  */
+export type { ArcBandEvidence, ArcFootprint } from './schema'
 export {
+  ARC_BAND_EVIDENCE,
+  ArcBand,
+  ArcBandBasis,
   BlobId,
   CatalogAssets,
   CatalogFile,
@@ -18,6 +22,7 @@ export {
   Footprint,
   GRID_UNIT_MM,
   Layer,
+  MAX_SECTOR_SWEEP_DEG,
   MEASURED_SPRITE_SHEET,
   ManifestOrdinal,
   PartSlot,
@@ -29,6 +34,8 @@ export {
   VersionStamp,
   WALL_THICKNESS_MM,
   WALL_THICKNESS_UNITS,
+  arcBandIsMeasured,
+  arcInterfaceRadius,
   resolveTags,
   shardedPath,
 } from './schema'

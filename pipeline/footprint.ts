@@ -4,8 +4,8 @@
  * **This is a line-by-line port of `footprint_kind` in
  * `docs/verify-catalog-facts.py`, and it must stay one.** That script's output
  * is the authority for every footprint figure the architecture plan quotes
- * (RECT 3,449 / WALL 3,079 / ARC 1,226 / COLUMN 119 / DIAG 121 / TRI 9 /
- * NONE 699), and `catalog.test.ts` runs the script and compares its table
+ * (RECT 3,449 / WALL 3,079 / ARC 1,199 / COLUMN 119 / DIAG 121 / TRI 9 /
+ * NONE 726), and `catalog.test.ts` runs the script and compares its table
  * against what this module produces. Any "improvement" made here without making
  * it there first will fail that test.
  *
@@ -14,42 +14,47 @@
  * and which the script deliberately does not duplicate. The two agree on which
  * bucket a tile is in; the numbers inside the bucket have one home.
  *
- * ## What row W4 changed, and what W1's measurements settled
+ * ## What rows W4 and W5 changed, and what W1's measurements settled
  *
- * W3 left four cases and 91.5% coverage. W4 adds three cases, corrects what
- * `arc` asserts, and lands at **92.0%** — measured, and not the ~95% the plan
- * predicted before it had any measurements. The movement is seven groups and
- * nothing else:
+ * W3 left four cases and 91.5% coverage. W4 added three cases and corrected what
+ * `arc` asserts, reaching **92.0%**; W5 made `arc` an annular sector and de-arced
+ * the last 27 tiles whose radius is not an outline, landing at **91.7%** —
+ * measured, and not the ~95% the plan predicted before it had any measurements.
+ * The movement is eight groups and nothing else:
  *
- * | movement                                | tiles | why                                                     |
- * | --------------------------------------- | ----: | ------------------------------------------------------- |
- * | `none` → `column`                       |   119 | `size|column_shape`, four measured letters              |
- * | `wall` → `diag`                         |   121 | `shape|angled|right` with no depth — `P` `PA` `PB` `PC` |
- * | `rect` → `tri`                          |     9 | `shape|angled|right` with a depth — the `O`/`OA` pair   |
- * | `arc`  → `wall`                         |    84 | the `xG` interface walls, de-arced                      |
- * | `arc`  → `rect`                         |    24 | `inverted` plates whose box the mesh honours            |
- * | `arc`  → `none`                         |    57 | 36 `inverted` fragments, 21 `lintel` inserts            |
- * | `rect` → `none`                         |    20 | lettered `component|` parts of a curved design          |
+ * | row | movement                          | tiles | why                                                     |
+ * | --- | --------------------------------- | ----: | ------------------------------------------------------- |
+ * | W4  | `none` → `column`                 |   119 | `size|column_shape`, four measured letters              |
+ * | W4  | `wall` → `diag`                   |   121 | `shape|angled|right` with no depth — `P` `PA` `PB` `PC` |
+ * | W4  | `rect` → `tri`                    |     9 | `shape|angled|right` with a depth — the `O`/`OA` pair   |
+ * | W4  | `arc`  → `wall`                   |    84 | the `xG` interface walls, de-arced                      |
+ * | W4  | `arc`  → `rect`                   |    24 | `inverted` plates whose box the mesh honours            |
+ * | W4  | `arc`  → `none`                   |    57 | 36 `inverted` fragments, 21 `lintel` inserts            |
+ * | W4  | `rect` → `none`                   |    20 | lettered `component|` parts of a curved design          |
+ * | W5  | `arc`  → `none`                   |    27 | the `xG` interface *floors*, whose width is nowhere     |
  *
- * Coverage is not monotone across that list and was not meant to be: 77 tiles
+ * Coverage is not monotone across that list and was not meant to be: 104 tiles
  * *lose* a footprint, because W1 measured them and the footprint they had was
  * wrong. A wrong primitive placed confidently is worse than a refusal.
  *
  * ### A radius is an outline only when nothing reassigns it
  *
- * The load-bearing change. `arc` asserts *the outline is an annular sector*, and
- * W1 fitted a sector to all **165** arc tiles that carry no `size|angle` and
- * **refused every one of them** (`fit: 'rejected'`, 165/165). So the fabricated
- * 90° sweep the previous version of this module supplied was not the defect; the
- * primitive was. The corpus says so in tags, three different ways, and
- * {@link radiusIsFeature} is those three ways:
+ * The load-bearing change of both rows. `arc` asserts *the outline is an annular
+ * sector*, and W1 refused a sector fit on **192** tiles that carry a radius —
+ * every one of the 165 with no `size|angle` (`fit: 'rejected'`, 165/165) plus the
+ * 27 `curved_interface` floors, which do carry a `size|angle|90` and are refused
+ * all the same. So the fabricated 90° sweep an earlier version of this module
+ * supplied was not the defect; the primitive was. The corpus says so in tags,
+ * three different ways, and {@link radiusIsFeature} is those three ways:
  *
- *   - **84 `AxG` / `BAxG` / `QxG`** — `shape|option|curved_interface`. A straight
- *     wall run whose *end face* is curved to meet a curved tile. The radius is
- *     the interface, 2.5 on all 84, and the outline is the run. Measured:
- *     `AxG` 1.991 × 0.500, `BAxG` 1.547 × 0.500, `QxG` **3.000** × 0.500 — the
- *     last against a tagged `size|width|4`, wrong by a full unit and an exact
- *     76.20 mm multiple. Zero annular sectors among the 84.
+ *   - **111 `shape|option|curved_interface`** — a piece whose *end face* is curved
+ *     to meet a curved tile, so the radius is the interface and the interface
+ *     eats into the tagged cell. The radius is 2.5 on all 111. 84 are wall runs
+ *     with a measured length in W2's table (`AxG` 1.991, `BAxG` 1.547, `QxG`
+ *     **3.000** against a tagged `size|width|4`, wrong by a full unit and an exact
+ *     76.20 mm multiple) and become a `wall`; 27 are floors with no derivable
+ *     width and become `none`. Zero annular sectors among the 111. See
+ *     {@link CURVED_INTERFACE_TAG}.
  *   - **60 `inverted`** — `shape|base|inverted` (40) or `shape|curved|inverted`
  *     (20). A square plate with a curved *cut*: the complement of a sector, so
  *     its outline is the square. The 24 with no segment letter measure their
@@ -57,7 +62,9 @@
  *     `.5x5+4r` is 5.000 × 5.000, exactly, and the textured `dungeon_stone`
  *     risers land within 0.060 units of theirs. The other 36 carry
  *     `size|segment|a|b|c` and are handled by {@link isDesignFragment}: tagged
- *     7 × 7, measured 5 × 2, 1.685 × 1.685 and 2 × 5.
+ *     7 × 7, measured 5 × 2, 1.685 × 1.685 and 2 × 5. **27 of these stay `rect`
+ *     and W5 must not reshape them** — a complement is not an over-approximation,
+ *     and `hasCurveMarker`'s docstring is where that exclusion is recorded.
  *   - **21 `part|lintel`** — the radius is the arch the lintel drops *into*, not
  *     the lintel. Measured 1.31 × 0.48–0.63 against a tagged 2r/3r/4r whose
  *     sector box would be 2–4 units. Every one is an `insert`, reached through a
@@ -66,9 +73,42 @@
  *     no special case, which is the honest answer for a piece with no grid
  *     outline. The measured boxes are in the sidecar if a later row wants them.
  *
- * 84 + 60 + 21 = 165, exactly W1's set. After it, **every remaining `arc` tile
- * carries a `size|angle`**, so `DEFAULT_ARC_SWEEP_DEG` has no reach left and is
- * deleted rather than left as a no-op.
+ * 111 + 60 + 21 = 192, exactly W1's refused set among the radius-carrying tiles.
+ * After it, **every remaining `arc` tile carries a `size|angle` in (0, 90]**, so
+ * `DEFAULT_ARC_SWEEP_DEG` has no reach left and is deleted rather than left as a
+ * no-op.
+ *
+ * ### Every sector carries a band, and every band says where it came from
+ *
+ * W5's own change. A sector needs an inner and an outer radius and the tag gives
+ * one number, so the missing piece is the **band** — which side of the interface
+ * radius the material lies on and how wide it is. {@link arcBandOf} resolves it
+ * three ways, in this order, over the 1,199 arc tiles:
+ *
+ * | route      | tiles | how                                                              |
+ * | ---------- | ----: | ---------------------------------------------------------------- |
+ * | modifier   | 1,090 | a `concave` / `convex` / `radial` (+ `s2w`) tag segment          |
+ * | code       |    54 | W2's table, on `size|openlock` — `X` 18, `XA` 18, `F` 6, `V` 6, `VxE` 6 |
+ * | default    |    55 | {@link DEFAULT_ARC_BAND}, for a curve that names no band          |
+ *
+ * and the resulting distribution is `concave` 585, `convex` 397, `radial` 195,
+ * `s2w_radial` 10, `disc` 12. Note where `F` lands: W2's table gives it `disc`,
+ * not `radial`, because `[0, 2]` at R = 2 *is* a quarter disc — the two bands
+ * coincide exactly where the radial band degenerates. Reading the table rather
+ * than restating a code-to-band map is what got that right.
+ *
+ * **The offsets are not here.** `arcBandFor` in `pipeline/tessellation.ts` owns
+ * them, this module names the band, and `ARC_BAND_EVIDENCE` in
+ * `src/catalog/schema.ts` records what W1 measured per band. Three files, one
+ * number each, which is why a band cannot drift into an offset.
+ *
+ * `ArcBandBasis` comes out **measured on 737 tiles and fallback on 462**: the two
+ * bands with no accepted W1 fit behind them are `convex` (attempted 43 times,
+ * refused 43 times) and `s2w_radial` (never attempted, because all 10 of its
+ * tiles carry a modifier and so were in none of W1's target sets), plus the 55
+ * that took the default. The schema refuses a `'measured'` stamp on either of
+ * those two bands outright, so the laundering is a parse error rather than a
+ * plausible number.
  *
  * ### The letter: W3 was right to decline it, and W1 says why
  *
@@ -127,14 +167,20 @@
  *     for any of them; it is the measured `WALL_THICKNESS_UNITS` constant, which
  *     is why the schema's cases have no field for a guess to be written into.
  */
-import type { Footprint } from '../src/catalog'
-import { WALL_THICKNESS_UNITS } from '../src/catalog'
+import type { ArcBand, ArcBandBasis, Footprint } from '../src/catalog'
+import {
+  MAX_SECTOR_SWEEP_DEG,
+  WALL_THICKNESS_UNITS,
+  arcBandIsMeasured,
+  arcInterfaceRadius,
+} from '../src/catalog'
 
 import { numericTagValue, tagValue } from './tags'
 import {
   COLUMN_TOKEN_BY_LETTER,
   CURVE_TAG_SEGMENTS,
   TESSELLATION_BY_CODE,
+  arcBandFor,
   isMeasured,
 } from './tessellation'
 
@@ -185,10 +231,20 @@ const LINTEL_TAG = 'part|lintel'
  *
  * This is not a veto. It is the flag that says a `rect` footprint is an
  * axis-aligned over-approximation of an annular sector rather than the outline
- * itself: 407 of the 3,449 RECT tiles are curve-marked, and W5, which reshapes
- * `arc` into a sector, is the row that consumes it. **27 of the 407 are
- * `inverted`**, where the box is the outline exactly rather than an
- * over-approximation of it — W5 must not reshape those.
+ * itself: **407 of the 3,449 RECT tiles are curve-marked, and W5 reshaped none of
+ * them.** The set is unchanged across the row and `catalog.test.ts` guards both
+ * halves of it, because a reshape here would have to invent the radius and the
+ * sweep these tiles do not carry: W1 fitted 402 of the 407 and accepted 96, so
+ * 306 have no measured sector to be reshaped into and the tagged width/depth pair
+ * is the only thing about them that is trusted. A trusted over-approximation is a
+ * placement; a fabricated sector is not.
+ *
+ * **27 of the 407 are `inverted`**, where the box is the outline exactly rather
+ * than an over-approximation of it — a square with a curved cut is the
+ * *complement* of a sector, and `plain#base+curved+inverted.3x3+2r` measures
+ * 3.000 × 3.000 against its tagged 3 × 3. Those 27 must never be reshaped even
+ * once a later row has measured the other 380, which is why the verifier reports
+ * them as their own row rather than as a footnote to the 407.
  *
  * Two false positives it drops relative to the substring scan it replaces. Only
  * the first exists in the corpus today; both are the same mistake.
@@ -252,30 +308,157 @@ export function isLetteredCurvePart(tags: readonly string[]): boolean {
 }
 
 /**
- * The three codes whose radius is a curved *interface* on a straight wall run.
+ * `shape|option|curved_interface` — the tag on a piece whose `size|radius` is the
+ * curve it *mates with*, cut into one face, rather than its own outline.
  *
- * Named here rather than detected from `shape|option|curved_interface`, which is
- * on **111** tiles: the other 27 are the `ExG`/`RxG`/`SxG`/`UxG`/`UxG2` floors,
- * which carry a `size|angle|90` and belong to W5's 292-tile band question. Their
- * boxes are measured too and their sector fits are also refused — tagged 2 × 1
- * measuring 1.700 × 1.000, tagged 4 × 4 measuring 2.487 × 4.000 — but their
- * width is not tag-derivable and the `arc` bucket is W5's to reshape.
+ * **111 tiles, and W1 refused a sector fit on every one.** W4 could only name the
+ * three `xG` wall codes, because the other 27 were the `arc` bucket's to settle
+ * and this is that row. The two populations end up in different cases and the
+ * reason is the same fact in both directions — the interface eats into the tagged
+ * cell, so the tagged pair over-states the outline:
+ *
+ *   - **84 walls** (`AxG` 28, `BAxG` 28, `QxG` 28). A run length is set by the
+ *     tessellation, so W2's table has it measured: `AxG` 1.991, `BAxG` 1.547,
+ *     `QxG` 3.000 — the last against a tagged `size|width|4`, wrong by a full
+ *     unit. They become a `wall` of the measured run.
+ *   - **27 floors** (`ExG` 4, `RxG` 8, `SxG` 8, `UxG` 4, `UxG2` 3, by filename
+ *     token). Nothing supplies their width. Measured, `ExG` and `SxG` are 1.700
+ *     against a tagged 2 and `RxG`/`UxG` are 2.487 against a tagged 4 — over-
+ *     stated by 0.300 and 1.513 units, which on a tessellating floor is an
+ *     overlap with the neighbour rather than a rounding error. Their codes are
+ *     **not in `size|openlock`** (all 27 carry no code tag at all; the letters
+ *     live only in the filename), so no table lookup can recover the width
+ *     either. They become `none`.
+ *
+ * Four of the 27 do measure their tagged pair exactly — the three `UxG2` and one
+ * of the four `UxG` — and no tag separates them from the 23 that do not, since
+ * `UxG` and `UxG2` carry identical size tags. Refusing all 27 is the conservative
+ * read of an unseparable set, not a claim about those four.
  */
-export const XG_INTERFACE_CODES: readonly string[] = ['AxG', 'BAxG', 'QxG']
+export const CURVED_INTERFACE_TAG = 'shape|option|curved_interface'
 
 /**
  * Whether a `size|radius` on this tile parameterises a **feature** rather than
  * the outline, so the tile is not an annular sector.
  *
- * The three cases, and the 165 tiles they cover exactly, are in the module
+ * The three cases and the 192 tiles they cover exactly are in the module
  * docstring. All three are read off tags the corpus already carries; none is a
- * per-file exception list.
+ * per-file exception list. W4 spelled the first case as a tuple of three wall
+ * codes and W5 replaced that with the tag itself, which is what the corpus
+ * actually says and which covers the 27 floors the code tuple could not see —
+ * see {@link CURVED_INTERFACE_TAG}.
  */
 export function radiusIsFeature(tags: readonly string[]): boolean {
-  const code = tagValue(tags, 'size|openlock')
-  if (code !== undefined && XG_INTERFACE_CODES.includes(code)) return true
+  if (tags.includes(CURVED_INTERFACE_TAG)) return true
   if (tags.includes(LINTEL_TAG)) return true
   return tags.some((tag) => tag.split('|').includes('inverted'))
+}
+
+/**
+ * The band modifier this tile carries, or `undefined` when it names none.
+ *
+ * Order is the contract and only one pair of it can fire together: 6 of the 10
+ * `s2w` floors also carry `concave`, and the separate-wall inset wins, because
+ * W2's research measured `[R−1.5, R]` on exactly those rows (`6r11.25`
+ * [4.505, 6.005], `6r22.5` [4.503, 6.003], `6r45` [4.502, 6.001]). Reading them
+ * as `concave` would put the material on the wrong side of the radius and 1.5
+ * units out.
+ *
+ * `disc` is deliberately absent: **no modifier spells it.** `V` and `VxE` carry
+ * identical tags — `shape|base`, `shape|base|curved`, `shape|curved`,
+ * `shape|floor` — and are a quarter disc and an annular band respectively, so the
+ * only thing that tells them apart is the code letter. That is why
+ * {@link arcBandFromCode} runs at all rather than the modifier scan standing
+ * alone.
+ */
+function arcBandFromModifier(tags: readonly string[]): ArcBand | undefined {
+  const segments = new Set(tags.flatMap((tag) => tag.split('|')))
+  if (segments.has('s2w') && segments.has('radial')) return 's2w_radial'
+  if (segments.has('concave')) return 'concave'
+  if (segments.has('convex')) return 'convex'
+  if (segments.has('radial')) return 'radial'
+  return undefined
+}
+
+/**
+ * The band W2's table records for this tile's `size|openlock` code, or
+ * `undefined`.
+ *
+ * Read from `TESSELLATION_BY_CODE` rather than restated as a code→band map, so
+ * the band has one home; `size.kind === 'arc'` is the gate, which is exactly W2's
+ * `CURVE_CODES`. It fires on 54 of the 1,199 arc tiles — `X` 18 and `XA` 18
+ * (`concave`), `F` 6 and `V` 6 (`disc`), `VxE` 6 (`radial`) — and every one of
+ * the 54 is a mesh W1 measured. `F` being a `disc` rather than a `radial` is the
+ * table's call and it is right: `[0, 2]` at R = 2 is where the two coincide.
+ *
+ * **`ambiguous` is deliberately not a gate here**, unlike in {@link wallRunLength}
+ * and {@link diagonalRun}. `X` is flagged ambiguous because the letter is both
+ * the radius-4 curved wall band and the four-way column, and that ambiguity is
+ * already resolved by the time this runs: a column is caught by
+ * {@link columnKind} on `size|column_shape`, whose 133 tiles carry no radius at
+ * all, and this tile has a radius and a sweep. The row's *size* is the
+ * discriminator — a column row is a `rect`, so `U`'s 4 × 4 floor reading returns
+ * `undefined` from here rather than a band.
+ *
+ * `measured` is separate from the band, and carries the row's own confidence
+ * through: `G` (`unmeasured`) and `GA` (`inferred`) both hold a `concave` band
+ * that no mesh has confirmed. Zero live tiles carry either code today, so this
+ * is a branch written for correctness rather than for coverage.
+ */
+function arcBandFromCode(tags: readonly string[]): { band: ArcBand; measured: boolean } | undefined {
+  const code = tagValue(tags, 'size|openlock')
+  if (code === undefined) return undefined
+  const row = TESSELLATION_BY_CODE.get(code)
+  if (row === undefined || row.size.kind !== 'arc') return undefined
+  return { band: row.size.band, measured: isMeasured(row) }
+}
+
+/**
+ * The band a curve with no modifier and no code falls back to.
+ *
+ * `radial` — the floor sector, `[R−2, R]`. What is left after the modifiers and
+ * the codes is **55 tiles and they are all floor-family curves**: 5 uncoded
+ * `plain#base+cf` curved-floor bases, 28 curved risers and 22 curved staircases.
+ * The floor band is the one W1 confirms on them — the 5 bases measure [0.000,
+ * 2.001] at a tagged R = 2 (5 of 5 accepted) and one riser measures [1.995,
+ * 3.993] at a tagged R = 4, both exactly `[R−2, R]`. The other 49 are the same
+ * families at other radii and sweeps, and W1's fitter refused them for the reason
+ * it refuses most textured meshes: `few-arc-vertices`, surface relief hiding the
+ * arc.
+ *
+ * It is stamped `'fallback'` regardless, because the tile named no band. That is
+ * the distinction {@link ArcBandBasis} exists to keep: `radial`'s *rule* is
+ * measured, this tile's *assignment* to it is a default, and a consumer must be
+ * able to see the difference.
+ */
+export const DEFAULT_ARC_BAND: ArcBand = 'radial'
+
+/** The band and its provenance, for a tile the classifier has already called an `arc`. */
+export function arcBandOf(tags: readonly string[]): { band: ArcBand; basis: ArcBandBasis } {
+  const modifier = arcBandFromModifier(tags)
+  if (modifier !== undefined) {
+    return { band: modifier, basis: arcBandIsMeasured(modifier) ? 'measured' : 'fallback' }
+  }
+  const coded = arcBandFromCode(tags)
+  if (coded !== undefined) {
+    const measured = coded.measured && arcBandIsMeasured(coded.band)
+    return { band: coded.band, basis: measured ? 'measured' : 'fallback' }
+  }
+  return { band: DEFAULT_ARC_BAND, basis: 'fallback' }
+}
+
+/**
+ * Whether a `size|angle` value is a sector sweep this build will place.
+ *
+ * `(0, 90]`. The upper bound is {@link MAX_SECTOR_SWEEP_DEG}, and it is the
+ * domain of the box formula rather than a taste: `arcSectorExtent` is only
+ * correct while the extreme point sits on a bounding radius. No live tile is
+ * excluded by it — a radius co-occurs only with 11.25, 22.5, 45 and 90 — and the
+ * angles that would be, 120 / 240 / 270 / 300, are hex-corner and `IL`-corner
+ * markers on tiles that carry no radius.
+ */
+function isSectorSweep(angle: number | undefined): angle is number {
+  return angle !== undefined && angle > 0 && angle <= MAX_SECTOR_SWEEP_DEG
 }
 
 /**
@@ -370,12 +553,22 @@ export function footprintKind(tags: readonly string[]): Footprint['shape'] {
 
   // A sector needs a sweep, and W4 stopped inventing one. Zero live tiles reach
   // the `none` here — every arc that survives `radiusIsFeature` carries a
-  // `size|angle`, and the verifier asserts that count is 0 — but the branch is
-  // written rather than left to `resolveFootprint`, so this function and the
-  // resolver cannot disagree about a tile's case for any input at all.
+  // `size|angle` in (0, 90], and the verifier asserts that count is 0 — but the
+  // branch is written rather than left to `resolveFootprint`, so this function
+  // and the resolver cannot disagree about a tile's case for any input at all.
   if (radius !== undefined && !radiusIsFeature(tags)) {
-    return numericTagValue(tags, 'size|angle') !== undefined ? 'arc' : 'none'
+    if (radius <= 0) return 'none'
+    return isSectorSweep(numericTagValue(tags, 'size|angle')) ? 'arc' : 'none'
   }
+
+  // A curved interface eats into the tagged cell, so the tagged pair over-states
+  // the outline. A wall run's real length is in W2's table; a floor's is nowhere,
+  // so it is refused rather than placed 0.300–1.513 units long. 84 walls and 27
+  // floors, and this branch is why the 27 are not `rect`.
+  if (tags.includes(CURVED_INTERFACE_TAG)) {
+    return wallRunLength(tags) !== undefined ? 'wall' : 'none'
+  }
+
   if (isDesignFragment(tags)) return 'none'
   if (isLetteredCurvePart(tags)) return 'none'
   if (width !== undefined && depth !== undefined) return 'rect'
@@ -399,13 +592,32 @@ export function resolveFootprint(tags: readonly string[]): Footprint {
       return { shape: 'diag', run }
     }
     case 'arc': {
+      // The tagged radius is the *interface* radius, and the band turns it into
+      // the pair a builder places. `arcBandFor` is W2's, so the offsets have one
+      // home; the sweep is the tile's own tag, because a code fixes one sweep
+      // (`X` 90, `XA` 45) while the corpus writes the whole ladder.
       const radius = numericTagValue(tags, 'size|radius')
-      const angle = numericTagValue(tags, 'size|angle')
-      // Every remaining arc carries a sweep: the 165 that did not were the 165
-      // W1 refused a sector fit on, and radiusIsFeature has taken all of them
-      // out of this case. `catalog.test.ts` asserts the count is 0.
-      if (radius === undefined || radius <= 0 || angle === undefined) return { shape: 'none' }
-      return { shape: 'arc', radius, angle }
+      const sweep = numericTagValue(tags, 'size|angle')
+      // Every remaining arc carries a sweep: the 192 that did not, or that meant
+      // something else by their radius, are the ones W1 refused a sector fit on,
+      // and radiusIsFeature has taken all of them out of this case.
+      // `catalog.test.ts` asserts the count is 0.
+      if (radius === undefined || radius <= 0 || !isSectorSweep(sweep)) return { shape: 'none' }
+      const { band, basis } = arcBandOf(tags)
+      const { innerRadiusUnits, outerRadiusUnits } = arcBandFor(band, radius)
+      // A band wider than its own outer radius is not a sector. Unreachable on
+      // the live corpus — the narrowest band is 0.5 and the smallest radius 2 —
+      // but the schema refines on it, so refusing here keeps this function from
+      // emitting a record that `CatalogFile.parse` would reject.
+      if (outerRadiusUnits <= innerRadiusUnits) return { shape: 'none' }
+      return {
+        shape: 'arc',
+        rIn: innerRadiusUnits,
+        rOut: outerRadiusUnits,
+        sweep,
+        band,
+        bandBasis: basis,
+      }
     }
     case 'rect': {
       const w = numericTagValue(tags, 'size|width')
@@ -455,7 +667,10 @@ export function sizeToken(foot: Footprint): string | undefined {
     case 'wall':
       return `${formatUnit(foot.length)}x`
     case 'arc':
-      return `${formatUnit(foot.radius)}r${formatUnit(foot.angle)}`
+      // The *interface* radius, not either end of the band: `2r90` is what the
+      // filenames write and so what a user types. `arcInterfaceRadius` recovers
+      // it exactly — see its docstring for why the token is not the band pair.
+      return `${formatUnit(arcInterfaceRadius(foot))}r${formatUnit(foot.sweep)}`
     case 'column':
       return `${formatUnit(WALL_THICKNESS_UNITS)}x${formatUnit(WALL_THICKNESS_UNITS)}`
     case 'tri':

@@ -186,7 +186,9 @@ export const FIXTURE_CATALOG = {
       layer: 'base',
       texture: 'plain',
       tags: [tag('shape|base')],
-      foot: { shape: 'arc', radius: 2, angle: 90 },
+      // A concave curved wall base: the band lies *outside* the tagged radius of
+      // 2, which is the case a fixture keyed on a single radius could not express.
+      foot: { shape: 'arc', rIn: 2, rOut: 2.5, sweep: 90, band: 'concave', bandBasis: 'measured' },
     },
     {
       id: FIXTURE_IDS.slab,

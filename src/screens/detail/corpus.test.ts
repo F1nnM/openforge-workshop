@@ -87,37 +87,43 @@ describeCorpus('footprint cascade over the live corpus', () => {
     //                           0.5 × 0.5 instead of printing "OpenLOCK L".
     //                           The 42 left are the codes W4 refuses — 28 `U`
     //                           (ambiguous) and 14 `col+T` (unmeasured).
-    //   `shape-word` 399 → 476  +77: the 57 de-arced tiles W1 proved are not
-    //                           sectors and have no other tagged dimension,
-    //                           plus the 20 `shingles` barge-boards whose pair
-    //                           the mesh contradicts by up to 2.905 units.
-    //   `unspecified` 181       untouched. Nothing W4 did took a tile from
-    //                           having something to say to having nothing.
+    //   `shape-word` 399 → 503  +104: the 57 de-arced tiles W4 proved are not
+    //                           sectors and have no other tagged dimension, the
+    //                           20 `shingles` barge-boards whose pair the mesh
+    //                           contradicts by up to 2.905 units, and W5's 27
+    //                           `curved_interface` floors, which keep the word
+    //                           "Curved" and lose a width that over-stated the
+    //                           mesh by 0.300 or 1.513 units.
+    //   `unspecified` 181       untouched across both rows. Nothing either did
+    //                           took a tile from having something to say to
+    //                           having nothing — a de-arced curve is still a
+    //                           curve, and tier 8 says so.
     //
     // `diag` 121 came out of `wall` and `tri` 9 out of `rect`, so both are a
     // relabel of a tile that already had a dimension, printed more precisely.
     expect(tally(footprints.map((value) => value.basis))).toEqual({
       rect: 3449,
       wall: 3079,
-      arc: 1226,
+      arc: 1199,
       diag: 121,
       column: 119,
       tri: 9,
       'size-code': 42,
-      'shape-word': 476,
+      'shape-word': 503,
       unspecified: 181,
     })
   })
 
-  it('is a printable dimension for 92.0% of the corpus', () => {
+  it('is a printable dimension for 91.7% of the corpus', () => {
     const dimensioned = footprints.filter((value) =>
       (['rect', 'wall', 'arc', 'diag', 'column', 'tri'] as const).some((basis) => value.basis === basis),
     ).length
-    expect(dimensioned / records.length).toBeCloseTo(0.92, 3)
-    // The three W4 tiers are worth 249 tiles of it, and they are the reason the
-    // figure moved 91.5% → 92.0% rather than to the ~95% the plan predicted:
-    // 77 tiles left a dimensioned tier in the same change, because W1 measured
-    // them and the dimension they had was wrong.
+    expect(dimensioned / records.length).toBeCloseTo(0.917, 3)
+    // The three W4 tiers are worth 249 tiles of it, and the figure moved
+    // 91.5% → 92.0% → 91.7% rather than to the ~95% the plan predicted, because
+    // 104 tiles left a dimensioned tier across the two rows: W1 measured them
+    // and the dimension they had was wrong. Coverage is not the objective; a
+    // dimension that is right is.
     const measuredByW4 = footprints.filter((value) =>
       (['diag', 'column', 'tri'] as const).some((basis) => value.basis === basis),
     ).length

@@ -112,15 +112,43 @@ MEASURED_COLUMN_LETTERS = ("I", "L", "O", "X")
 # width and no depth, all 9 O tiles have both, with width equal to depth.
 DIAGONAL_TAG = "shape|angled|right"
 
-# The three codes whose `size|radius` is a curved INTERFACE on a straight wall
-# run, not an outline. Measured by W1: AxG 1.991 x 0.500, BAxG 1.547 x 0.500,
-# QxG 3.000 x 0.500 -- the last against a tagged `size|width|4`, wrong by a full
-# unit and an exact 76.20 mm multiple. Zero annular sectors among the 84.
+# The tag on a piece whose `size|radius` is the curve it MATES WITH, cut into one
+# face, rather than its own outline. 111 tiles, and W1 refused a sector fit on
+# every one. Row W4 could only spell the three `xG` wall codes because the other 27
+# were the arc bucket's to settle; row W5 replaced the code tuple with the tag,
+# which is what the corpus actually says.
 #
-# Named rather than detected from `shape|option|curved_interface`, which is on 111
-# tiles: the other 27 are the ExG/RxG/SxG/UxG/UxG2 floors, which carry a
-# `size|angle|90` and belong to row W5's 292-tile band question.
-XG_INTERFACE_CODES = ("AxG", "BAxG", "QxG")
+#   84 walls   AxG 28, BAxG 28, QxG 28. A run length is set by the tessellation, so
+#              W2's table has it measured: AxG 1.991, BAxG 1.547, QxG 3.000 -- the
+#              last against a tagged `size|width|4`, wrong by a full unit and an
+#              exact 76.20 mm multiple. They become a WALL of the measured run.
+#   27 floors  ExG/RxG/SxG/UxG/UxG2 by filename token, and NOT ONE of them carries
+#              a `size|openlock` tag, so no table lookup can supply the width the
+#              tag over-states. Measured, ExG and SxG are 1.700 against a tagged 2
+#              and RxG/UxG are 2.487 against a tagged 4 -- over-stated by 0.300 and
+#              1.513 units, which on a tessellating floor is an overlap with the
+#              neighbour rather than a rounding error. They become NONE.
+#
+# Four of the 27 do measure their tagged pair (three UxG2 and one UxG) and no tag
+# separates them from the 23 that do not, since UxG and UxG2 carry identical size
+# tags. Refusing all 27 is the conservative read of an unseparable set.
+CURVED_INTERFACE_TAG = "shape|option|curved_interface"
+
+# The codes among the 111 that W2's table gives a measured `wall_run` length. This
+# script mirrors the code list only -- the runs live in `pipeline/tessellation.ts`,
+# where `wallRunLength` gates on `shape: "wall_run"` rather than on a tuple. The
+# two agree because these are the only `size|openlock` values that co-occur with
+# CURVED_INTERFACE_TAG at all: AxG 28, BAxG 28, QxG 28, and no code on the other 27.
+CURVED_INTERFACE_WALL_CODES = ("AxG", "BAxG", "QxG")
+
+# The widest sweep an ARC may carry. Mirrors MAX_SECTOR_SWEEP_DEG in
+# `src/catalog/schema.ts`, and it is the domain of the sector box formula rather
+# than a taste: `bboxX = rOut - rIn*cos(theta)` and `bboxY = rOut*sin(theta)` are
+# only correct while the extreme point sits on a bounding radius, i.e. theta <= 90.
+# No live tile is excluded by it -- a `size|radius` co-occurs only with 11.25, 22.5,
+# 45 and 90 -- and the angles that would be, 120/240/270/300, are hex-corner and
+# `IL`-corner markers on tiles that carry no radius.
+MAX_SECTOR_SWEEP_DEG = 90
 
 # The four codes W2 gives `shape: "diagonal_wall"`, with their measured runs. All
 # four are tagged `size|width|2` without exception and none is 2 units long:
@@ -315,20 +343,24 @@ def is_lettered_curve_part(row: dict) -> bool:
 def radius_is_feature(row: dict) -> bool:
     """Whether a `size|radius` parameterises a FEATURE rather than the outline.
 
-    `arc` asserts that the outline is an annular sector. W1 fitted a sector to all
-    165 arc tiles carrying no `size|angle` and REFUSED every one of them
-    (fit: rejected, 165/165), so the fabricated 90-degree sweep was not the
-    defect -- the primitive was. The corpus says so in tags, three ways, and this
-    is those three ways. They cover the 165 exactly:
+    `arc` asserts that the outline is an annular sector, and W1 refused a sector fit
+    on 192 tiles that carry a radius: all 165 that carry no `size|angle`
+    (fit: rejected, 165/165) plus the 27 `curved_interface` floors, which do carry a
+    `size|angle|90` and are refused all the same. So the fabricated 90-degree sweep
+    was not the defect -- the primitive was. The corpus says so in tags, three ways,
+    and this is those three ways. They cover the 192 exactly:
 
-      84  AxG/BAxG/QxG        the radius is the curved INTERFACE on a straight run
+     111  curved_interface    the radius is the curve this piece MATES WITH, cut
+                              into one face. 84 become a WALL of their measured
+                              run, 27 have no derivable width and become NONE.
       60  `inverted`          a square plate with a curved CUT -- the complement
       21  part|lintel         the radius of the arch the lintel drops into
 
     None of the three is a per-file exception list. After it, every remaining arc
-    tile carries a `size|angle`, which the table below asserts is 0 exceptions.
+    tile carries a `size|angle` in (0, 90], which the table below asserts is 0
+    exceptions.
     """
-    if tag_value(row, "size|openlock") in XG_INTERFACE_CODES:
+    if CURVED_INTERFACE_TAG in tags_of(row):
         return True
     if LINTEL_TAG in tags_of(row):
         return True
@@ -404,7 +436,18 @@ def footprint_kind(row: dict) -> str:
     # reach the "none" here -- every arc surviving `radius_is_feature` carries a
     # `size|angle`, and the ARC-with-no-angle row below asserts that is 0.
     if radius is not None and not radius_is_feature(row):
-        return "arc" if numeric(row, "size|angle") is not None else "none"
+        if radius <= 0:
+            return "none"
+        sweep = numeric(row, "size|angle")
+        return "arc" if sweep is not None and 0 < sweep <= MAX_SECTOR_SWEEP_DEG else "none"
+
+    # A curved interface eats into the tagged cell, so the tagged pair over-states
+    # the outline. A wall run's real length is in W2's table; a floor's is nowhere,
+    # so it is refused rather than placed 0.300-1.513 units long. 84 walls, 27
+    # floors, and this branch is why the 27 are not RECT.
+    if CURVED_INTERFACE_TAG in tags_of(row):
+        return "wall" if tag_value(row, "size|openlock") in CURVED_INTERFACE_WALL_CODES else "none"
+
     if is_design_fragment(row):
         return "none"
     if is_lettered_curve_part(row):
@@ -467,11 +510,18 @@ def main() -> int:
     out.append(("coverage RECT only", pct(rect, n), "v1 lower bound"))
     out.append(("coverage RECT+WALL", pct(rect + wall, n), "v1 scope"))
     out.append(("coverage RECT+WALL+ARC", pct(rect + wall + arc, n), "the four cases W3 left"))
+
+    # The band an arc's sector occupies is a PARAMETER, not a classification, and
+    # this script deliberately holds only the classification: the offsets live in
+    # `pipeline/tessellation.ts` and the code-to-band map in W2's table, so a
+    # mirror here would give both two homes. `pipeline/catalog.test.ts` asserts the
+    # band distribution and its provenance against the emitted index instead, which
+    # is a stronger check than a reimplementation -- it reads what shipped.
     out.append(
         (
             "coverage all seven cases",
             pct(n - none, n),
-            "everything but NONE — the figure row W4 is accountable for, computed and not targeted",
+            "everything but NONE — the figure rows W4 and W5 are accountable for, computed and not targeted",
         )
     )
 
@@ -503,7 +553,7 @@ def main() -> int:
         (
             "RECT that is really a sector",
             f"{len(curved_rects)} ({pct(len(curved_rects), rect)} of RECT)",
-            "curve-marked with a trusted width/depth pair -- the axis-aligned box is an over-approximation, W5 reshapes it",
+            "curve-marked with a trusted width/depth pair -- the axis-aligned box is an over-approximation. W5 reshaped NONE of them: W1 fitted 402 and accepted 96, so 306 carry no measured sector and neither a radius nor a sweep to build one from, and a trusted over-approximation beats a fabricated sector. The count guards the set against drift",
         )
     )
     out.append(
@@ -584,11 +634,11 @@ def main() -> int:
         (
             "radius reassigned to a feature",
             str(len(de_arced)),
-            "MUST equal the 165 arc tiles W1 refused a sector fit on: 84 xG interfaces, 60 inverted cuts, 21 lintel arches",
+            "MUST equal the 192 radius-carrying tiles W1 refused a sector fit on: 111 curved interfaces (84 walls, 27 floors), 60 inverted cuts, 21 lintel arches",
         )
     )
     for label, rows_in in (
-        ("xG interface walls", [r for r in de_arced if tag_value(r, "size|openlock") in XG_INTERFACE_CODES]),
+        ("curved interfaces", [r for r in de_arced if CURVED_INTERFACE_TAG in tags_of(r)]),
         ("inverted plates", [r for r in de_arced if "inverted" in segments_of(r)]),
         ("lintel inserts", [r for r in de_arced if LINTEL_TAG in tags_of(r)]),
     ):
@@ -597,11 +647,11 @@ def main() -> int:
             (
                 f"de-arced · {label}",
                 f"{len(rows_in)}: " + ", ".join(f"{v} {k}" for k, v in sorted(landed.items())),
-                "where the 165 went once the radius stopped being read as an outline",
+                "where the 192 went once the radius stopped being read as an outline",
             )
         )
-    if len(de_arced) != 165:
-        failures.append(f"radius_is_feature covers {len(de_arced)} tiles, not W1's measured 165")
+    if len(de_arced) != 192:
+        failures.append(f"radius_is_feature covers {len(de_arced)} tiles, not W1's measured 192")
     if any(kind_of[id(r)] == "arc" for r in de_arced):
         failures.append("a tile whose radius is a feature is still an arc")
 
@@ -611,10 +661,13 @@ def main() -> int:
     # them is a deliberate refusal rather than an unread tag.
     none_rows = [r for r in live if kind_of[id(r)] == "none"]
     none_coded = [r for r in none_rows if tag_value(r, "size|openlock") is not None]
+    none_interface = [r for r in none_rows if CURVED_INTERFACE_TAG in tags_of(r)]
     none_sizeless = sum(
         1
         for r in none_rows
-        if not is_design_fragment(r) and tag_value(r, "size|openlock") is None
+        if not is_design_fragment(r)
+        and tag_value(r, "size|openlock") is None
+        and CURVED_INTERFACE_TAG not in tags_of(r)
     )
     out.append(
         (
@@ -625,9 +678,18 @@ def main() -> int:
         )
     )
     out.append(("NONE · a fragment", str(frag_none), "the pair names the whole design; W1 measured 36 of them and the tag was wrong on all 36"))
+    out.append(
+        (
+            "NONE · a curved interface, no code",
+            str(len(none_interface)),
+            "row W5's 27 ExG/RxG/SxG/UxG floors: the tagged width over-states the mesh by 0.300 or 1.513 units and their code is not in `size|openlock` at all, so nothing supplies the real one",
+        )
+    )
     out.append(("NONE · no code, no part letter", str(none_sizeless), "nothing in the tags to resolve from -- 56 hex corners, 21 lintel inserts, 20 barge-boards"))
-    if len(none_coded) + frag_none + none_sizeless != none:
+    if len(none_coded) + frag_none + len(none_interface) + none_sizeless != none:
         failures.append("the NONE breakdown does not sum to the NONE bucket")
+    if len(none_interface) != 27:
+        failures.append(f"the curved-interface floors in NONE number {len(none_interface)}, not 27")
 
     # The columns, and the refusal. `col+T` is W2's one unmeasured column letter.
     columns = [r for r in live if tag_value(r, COLUMN_SHAPE_PREFIX) is not None]
