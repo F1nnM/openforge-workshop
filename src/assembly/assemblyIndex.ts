@@ -99,7 +99,7 @@ export interface AssemblyIndexStats {
   bases: number
   /** `layer === 'topper'`, i.e. `connection|openforge` — 4,363 (50.1%). */
   toppers: number
-  /** Bases carrying a `size|openlock` code — 774 of 1,963. */
+  /** Bases carrying a `size|openlock` code — 774 of 1,963. Not a key; see {@link AssemblyIndex}. */
   basesWithSizeCode: number
   /**
    * Bases per {@link PrintOption} — plain 1,379, unsupported 206, topless 378.
@@ -109,7 +109,7 @@ export interface AssemblyIndexStats {
    * drawing 79.1% of its openlock answers from.
    */
   basesByPrintOption: Readonly<Record<PrintOption, number>>
-  /** Distinct footprint keys the bases cover — the fallback join's reach. */
+  /** Distinct footprint keys the bases cover — the join's reach. 44. */
   baseFootprints: number
   /** md5s carried by more than one record — 171, over 520 rows. */
   sharedBlobs: number
@@ -134,14 +134,21 @@ export interface AssemblyIndex {
   /**
    * `size|openlock` code → the bases carrying it, in match-ranking order.
    *
-   * 26 codes on the base side against 27 on the topper side, which is the whole
-   * of the gap this key can produce: a topper code absent here has no
-   * size-matched base anywhere in the corpus (129 toppers, 6.5% of the 1,999
-   * that carry a code).
+   * 26 codes on the base side against 27 on the topper side; 129 toppers (6.5%
+   * of the 1,999 that carry a code) name a code no base carries. **Not the join
+   * key** — row D4 moved that to {@link basesByFootprint}, because a code
+   * determines a width and not a shape and four of them span more than one
+   * primitive. What this map is still for: the ranking's family tie-break, the
+   * gate that keeps the one remaining code path honest, and naming the code in
+   * the gap report. See `resolve.ts#candidatesFor` and `sizeCode.ts`.
    */
   readonly basesBySizeCode: ReadonlyMap<string, readonly CatalogRecord[]>
 
-  /** {@link footprintKey} → the bases congruent to it. The fallback for coded-less toppers. */
+  /**
+   * {@link footprintKey} → the bases congruent to it. **The join key**: 44
+   * congruence classes over the 1,835 bases that have a derivable footprint, of
+   * which the toppers reach 43.
+   */
   readonly basesByFootprint: ReadonlyMap<string, readonly CatalogRecord[]>
 
   /**

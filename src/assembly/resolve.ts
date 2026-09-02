@@ -15,12 +15,24 @@
  *      placement. §7: "Compatibility informs; it never refuses a placement."
  *      Refusal would need trustworthy per-edge connector data, and the corpus
  *      has none — see `notes.ts`.
- *   3. **Never join a base to a topper on the `build|` tag.** Zero bases carry
- *      `build|wall on tile` while 863 tiles use that system, 857 of them
- *      toppers. A build join therefore returns *no base* for every one of them,
- *      and the symptom — a missing base — is indistinguishable from missing
- *      data. `assembly.test.ts` asserts the 857-against-0 split so nobody
- *      reintroduces it as an optimisation.
+ *   3. **Join on the resolved primitive, never on a tag.** The base has to be
+ *      the same shape as the thing standing on it, and only
+ *      {@link footprintKey} says what shape that is. Two tags have been tried as
+ *      keys and both are refuted in the corpus:
+ *
+ *        - **`build|`** — zero bases carry `build|wall on tile` while 863 tiles
+ *          use that system, 857 of them toppers. A build join returns *no base*
+ *          for every one of them, and the symptom is indistinguishable from
+ *          missing data.
+ *        - **`size|openlock`** — a width is not a footprint. Four codes span
+ *          more than one primitive (`O` spans three), so a code join can put a
+ *          0.5 × 0.5 pillar under a 4 × 4 triangle. See `sizeCode.ts`, which
+ *          holds the measurements and the gate the one remaining code path runs
+ *          through.
+ *
+ *      `assembly.test.ts` asserts both — the 857-against-0 split, and that every
+ *      base handed to a topper with a primitive is congruent to it — so neither
+ *      can come back as an optimisation.
  *
  * Resolution is a function of the placed tile and the lock preference only. `x`,
  * `z` and `rotation` do not change what you print, so they are carried through
@@ -34,6 +46,7 @@ import { PRINT_OPTIONS } from './assemblyIndex'
 import { footprintKey } from './footprint'
 import type { Note } from './notes'
 import { note } from './notes'
+import { sharedPrimitive } from './sizeCode'
 
 /* ------------------------------------------------------------------- options */
 
@@ -73,16 +86,29 @@ export type PartRole =
  * a number with no unit invites a UI to render it.
  */
 export interface BaseMatch {
-  /** Which key joined. `sizeCode` is the primary; `footprint` is the fallback. */
+  /**
+   * Which key joined. `footprint` is the primary and the physical one;
+   * `sizeCode` is the last resort for a topper with no primitive at all — 14
+   * toppers, all coded `U`, and only where the code's bases agree on one
+   * primitive. See {@link candidatesFor}.
+   */
   key: 'sizeCode' | 'footprint'
-  /** The key's value — the size code, or the canonical footprint key. */
+  /** The key's value — the canonical footprint key, or the size code. */
   on: string
-  /** How many bases satisfied the key. Ranges 3–132 for size codes. */
+  /**
+   * How many bases satisfied the key.
+   *
+   * 2–150 across the 43 congruence keys the toppers actually reach, against the
+   * 3–132 the size code used to offer, and 7 for `U` — the one size code that
+   * still finds a base at all. The pools are wider because congruence pools
+   * *across* the code families: 383,252 candidate pairs over 3,986 matched
+   * toppers where the code key gave 334,189 over 3,943.
+   */
   candidates: number
   /**
-   * Which of the three products the chosen base is. `plain` for 3,769 of 3,769
-   * openforge toppers under openlock; the old ranking made it `topless` for
-   * 2,983 of them and said nothing.
+   * Which of the three products the chosen base is. `plain` for 3,986 of 3,986
+   * openforge toppers under openlock; the pre-D1 ranking, re-keyed, makes it
+   * `topless` for 3,258 of them and says nothing.
    */
   option: PrintOption
   /**
@@ -95,11 +121,22 @@ export interface BaseMatch {
    * preference. The choice itself never consults it; {@link matchBase} does.
    */
   optionsOffered: PrintOption[]
-  /** The base's footprint shape equals the topper's. Available for 92.8% of coded toppers. */
-  shapeAgrees: boolean
+  /**
+   * The base publishes the same `size|openlock` code as the topper.
+   *
+   * The successor to `shapeAgrees`, which the join key made vacuous: under a
+   * congruence key every candidate has the topper's shape, so the old field said
+   * `true` for every footprint match and `false` for every code match and
+   * carried no information the {@link key} did not. What is left to discriminate
+   * inside a congruent set is *family*, and the code is it: a code-agreeing
+   * congruent base exists for **1,870 of the 1,999 coded toppers**, and the
+   * ranking hands one to every single one of them. The other 129 publish a code
+   * no base in the archive carries at all.
+   */
+  codeAgrees: boolean
   /** The base shares a non-`base` kind bucket with the topper (`base+wall` under a wall). */
   kindAgrees: boolean
-  /** Texture roots are equal. Only reachable for 61.1% of coded toppers — see {@link MATCH_WEIGHTS}. */
+  /** Texture roots are equal. Reachable for 1,237 of 1,999 coded toppers (61.9%) — see {@link MATCH_WEIGHTS}. */
   textureAgrees: boolean
   /** The base offers the preferred lock system, or no preference was given. */
   lockAgrees: boolean
@@ -151,17 +188,31 @@ export interface ResolvedPlacement {
  *     Second because these are different products (§5.3) — a base with no top
  *     surface is not the piece the user asked for — and *below* lock because a
  *     topless base still clips to its neighbours while a plain one in the wrong
- *     system does not. Ranking it above the shape and texture criteria is what
- *     makes the guarantee unconditional: within one candidate set (one size code,
- *     or one congruent footprint) a `topless` base can only win if **every**
- *     plainer candidate fails on the lock, and that case is disclosed by name.
- *   - **`shape`** because a shape-agreeing base exists for 1,856 of the 1,999
- *     coded toppers (92.8%) — high enough to insist on when available.
- *   - **`kind`** as the `base+wall`-under-a-wall signal. Weaker than shape
+ *     system does not. Ranking it above the family and texture criteria is what
+ *     makes the guarantee unconditional: within one candidate set a `topless`
+ *     base can only win if **every** plainer candidate fails on the lock, and
+ *     that case is disclosed by name.
+ *   - **`code`** — the `size|openlock` family, and row D4's replacement for the
+ *     `shape` criterion it displaced. Geometric fit is no longer a criterion at
+ *     all: it is the *key*, so every candidate has it and scoring it would score
+ *     a constant. What the key leaves open is which member of a congruent family
+ *     to hand out — `wall:2` holds 101 bases across the codes `A` (86), `AS` (6)
+ *     and nine uncoded — and the code is the sharpest signal available for that,
+ *     ranked here for the same reason `shape` was: physical identity before
+ *     cosmetics. `sizeCode.ts` is where its limits are measured.
+ *
+ *     It is neither decorative nor free, and both halves are measured. Under all
+ *     four lock preferences it moves the chosen base for **434 toppers**, taking
+ *     code-agreeing bases from 1,436 to 1,870 — and those 434 are exactly what
+ *     makes this row's re-key hand out the *same base as before* for all 3,943
+ *     toppers the code key had matched, gaining 43 and losing none. What it costs
+ *     is 16 texture agreements (1,237 available, 1,221 taken), which is the
+ *     ladder doing what it says: family above colour.
+ *   - **`kind`** as the `base+wall`-under-a-wall signal. Weaker than the code
  *     because 566 toppers carry no kind bucket at all, so it is silent for them.
  *   - **`texture` last, and it can only ever be a tie-break.** Bases cover 15
- *     texture roots against the toppers' 23, and only 1,221 of 1,999 coded
- *     toppers (61.1%) can be given a texture-matched base *at all*. Weighting it
+ *     texture roots against the toppers' 23, and only 1,237 of 1,999 coded
+ *     toppers (61.9%) can be given a texture-matched base *at all*. Weighting it
  *     higher would trade a base that locks for a base that matches the colour.
  *
  * Below the whole scale sits the index's `bytes`-ascending order, reached only
@@ -169,7 +220,7 @@ export interface ResolvedPlacement {
  * separating most candidates, which is how 79.1% of auto-inserted openlock bases
  * came to be topless: the topless print of a base is its smallest file.
  */
-export const MATCH_WEIGHTS = Object.freeze({ lock: 32, option: 8, shape: 4, kind: 2, texture: 1 })
+export const MATCH_WEIGHTS = Object.freeze({ lock: 32, option: 8, code: 4, kind: 2, texture: 1 })
 
 /**
  * Steps of {@link MATCH_WEIGHTS}.option each print option earns.
@@ -213,27 +264,55 @@ interface Candidates {
 /**
  * The bases that could sit under this topper, and the key that found them.
  *
- * Size code first, footprint second, and **never both** — a topper with a code
- * whose code has no base does *not* fall through to a footprint match. That is
- * deliberate: the code is a functional determinant of width (see `sizeCode.ts`)
- * and a topper that publishes one is telling us which base family it belongs
- * to. Falling back would answer a different question and report it as a success,
- * hiding the 129-topper gap that §7 wants surfaced.
+ * **The resolved primitive first, and where there is one it is the only key
+ * tried.** A base is a physical object under another physical object: it has to
+ * be the same shape, and `footprintKey` is the only thing in the record that
+ * says what shape either of them is. Rule 3 of the module doc is what this
+ * function is.
+ *
+ * The **no-fall-through** discipline is kept from the row before this one, and
+ * inverted along with the priority: a topper whose primitive no base is
+ * congruent to does *not* then try its size code. Falling back would answer a
+ * different question — "which family?" instead of "which shape?" — and report it
+ * as a success, hiding a gap §7 wants surfaced. It is also precisely how the 43
+ * `II`/`IO`/`IX` toppers used to be reported as unsupportable while 119 congruent
+ * `rect:1x1` bases sat in the archive: the *code* was missing, the *base* was
+ * not, and a code-first join could not tell those apart.
+ *
+ * The size code survives here as a **last resort with a gate**: reached only by
+ * a topper with no primitive at all (14 toppers, every one coded `U`), and only
+ * when the bases carrying that code agree on one primitive. Without the gate this
+ * one path would still be able to hand a `column` base to a `tri` topper the day
+ * a base carries an ambiguous code — see {@link sharedPrimitive}, and
+ * `sizeCode.ts` for which four codes are ambiguous and why none of them can do
+ * it today.
  */
 function candidatesFor(tile: CatalogRecord, index: AssemblyIndex): Candidates | undefined {
-  if (tile.sizeCode !== undefined) {
-    const records = index.basesBySizeCode.get(tile.sizeCode)
-    return records === undefined ? undefined : { key: 'sizeCode', on: tile.sizeCode, records }
-  }
   const foot = footprintKey(tile.foot)
-  if (foot === undefined) return undefined
-  const records = index.basesByFootprint.get(foot)
-  return records === undefined ? undefined : { key: 'footprint', on: foot, records }
+  if (foot !== undefined) {
+    const records = index.basesByFootprint.get(foot)
+    return records === undefined ? undefined : { key: 'footprint', on: foot, records }
+  }
+  if (tile.sizeCode === undefined) return undefined
+  const records = index.basesBySizeCode.get(tile.sizeCode)
+  if (records === undefined || sharedPrimitive(records) === undefined) return undefined
+  return { key: 'sizeCode', on: tile.sizeCode, records }
 }
 
 function kindsAgree(tile: CatalogRecord, base: CatalogRecord): boolean {
   // `base` itself is on every base by definition, so it carries no information.
   return base.kinds.some((kind) => kind !== 'base' && tile.kinds.includes(kind))
+}
+
+/**
+ * The base and the topper publish the same `size|openlock` code.
+ *
+ * Both sides have to *have* one: `undefined === undefined` is not a family, and
+ * scoring it would reward every uncoded base under every uncoded topper equally,
+ * which is the `foot.shape === 'none'` trap one namespace over.
+ */
+function codesAgree(tile: CatalogRecord, base: CatalogRecord): boolean {
+  return tile.sizeCode !== undefined && base.sizeCode === tile.sizeCode
 }
 
 /**
@@ -275,7 +354,7 @@ function matchBase(
     offered.add(option)
     let score = OPTION_STEPS[option] * MATCH_WEIGHTS.option
     if (lock === undefined || base.conn.includes(lock)) score += MATCH_WEIGHTS.lock
-    if (base.foot.shape === tile.foot.shape) score += MATCH_WEIGHTS.shape
+    if (codesAgree(tile, base)) score += MATCH_WEIGHTS.code
     if (kindsAgree(tile, base)) score += MATCH_WEIGHTS.kind
     if (base.texture !== undefined && base.texture === tile.texture) score += MATCH_WEIGHTS.texture
     if (score > bestScore) {
@@ -293,7 +372,7 @@ function matchBase(
       candidates: candidates.records.length,
       option: optionOf(index, best),
       optionsOffered: PRINT_OPTIONS.filter((option) => offered.has(option)),
-      shapeAgrees: best.foot.shape === tile.foot.shape,
+      codeAgrees: codesAgree(tile, best),
       kindAgrees: kindsAgree(tile, best),
       textureAgrees: best.texture !== undefined && best.texture === tile.texture,
       lockAgrees: lock === undefined || best.conn.includes(lock),
@@ -367,7 +446,7 @@ function appendBase(
   const matched = matchBase(tile, index, lock)
 
   if (matched === undefined) {
-    notes.push(missingBaseNote(tile))
+    notes.push(missingBaseNote(tile, index))
     return
   }
 
@@ -385,7 +464,7 @@ function appendBase(
     notes.push(note('base-option-chosen', message, base.id))
   }
   if (!match.lockAgrees && lock !== undefined) {
-    const message = `${base.name} does not offer ${lock}; no ${lock} base carries ${match.on}.`
+    const message = `${base.name} does not offer ${lock}; no ${lock} base carries ${keyLabel(match)}.`
     notes.push(note('base-lock-mismatch', message, base.id))
   }
   if (!match.textureAgrees) {
@@ -405,7 +484,7 @@ const OPTION_PROSE: Readonly<Record<PrintOption, string>> = Object.freeze({
   topless: 'no top surface',
 })
 
-/** `size code A`, `footprint rect:2x2` — the same words `missingBaseNote` uses. */
+/** `footprint rect:2x2`, `size code U` — the key, named the way a reader can check it. */
 function keyLabel(match: BaseMatch): string {
   return `${match.key === 'sizeCode' ? 'size code' : 'footprint'} ${match.on}`
 }
@@ -454,7 +533,7 @@ function autoInsertedMessage(
   const reasons: string[] = []
   if (lock !== undefined && match.lockAgrees) reasons.push(`offers ${lock}`)
   reasons.push(optionClause(match, lock))
-  if (match.shapeAgrees) reasons.push('footprint agrees')
+  if (match.codeAgrees) reasons.push('same size code')
   if (match.kindAgrees) reasons.push('kind agrees')
   if (match.textureAgrees) reasons.push('texture agrees')
 
@@ -469,27 +548,57 @@ function autoInsertedMessage(
  * Which of the three gaps this topper fell into.
  *
  * Three codes rather than one, because the remedies differ: a `no-matching-base`
- * is a base the corpus should have and does not (129 toppers), a
- * `no-congruent-base` is a shape nothing supports (21 toppers, all thin strips),
- * and a `base-unmatchable` is a topper with neither key to match on (444
- * toppers) — a data problem in the *topper*, not in the bases. Collapsing them
- * would report 594 identical warnings and hide which of the three anyone can
- * act on.
+ * is a base the corpus should have and does not (86 toppers), a
+ * `no-congruent-base` is a shape nothing supports (31 toppers), and a
+ * `base-unmatchable` is a topper with no key at all (260 toppers) — a data
+ * problem in the *topper*, not in the bases. Collapsing them would report 377
+ * identical warnings and hide which of the three anyone can act on.
+ *
+ * **The classification is not the join, and row D4 is where the two came apart.**
+ * The join asks "which shape?" and the report asks "what should someone go and
+ * fix?", and for the 86 those are different questions with different answers:
+ * every one of them publishes a code (`L`, `O`, `P`, `PA`, `PB`, `PC`) that **no
+ * base in the archive carries**, and naming that code is what a report upstream
+ * can act on — `docs/corpus-base-gap.md` is indexed by it. Saying "no base is
+ * congruent to a 0.5 × 0.5 column" instead would be true, and would read as
+ * geometry rather than as the omission it is.
+ *
+ * So `no-matching-base` is claimed only when the code really is absent from the
+ * base range, which keeps the sentence honest in the case that does not exist
+ * yet: a topper whose code *is* carried by bases, of a shape those bases are not
+ * — the ambiguity `sizeCode.ts` measures. That one is a congruence gap, and it
+ * says so.
  */
-function missingBaseNote(tile: CatalogRecord): Note {
-  if (tile.sizeCode !== undefined) {
+function missingBaseNote(tile: CatalogRecord, index: AssemblyIndex): Note {
+  const codeUnanswered = tile.sizeCode !== undefined && !index.basesBySizeCode.has(tile.sizeCode)
+
+  if (footprintKey(tile.foot) !== undefined) {
+    if (codeUnanswered) {
+      return note(
+        'no-matching-base',
+        `no base in the catalog carries size code ${tile.sizeCode ?? ''}, and none is congruent to ` +
+          `${tile.name}'s footprint, so it has no base to sit on.`,
+        tile.id,
+      )
+    }
+    return note('no-congruent-base', `no base is congruent to ${tile.name}'s footprint.`, tile.id)
+  }
+
+  if (tile.sizeCode === undefined) {
     return note(
-      'no-matching-base',
-      `no base in the catalog carries size code ${tile.sizeCode}, so ${tile.name} has no base to sit on.`,
+      'base-unmatchable',
+      `${tile.name} carries neither a size code nor a footprint, so no base can be matched to it.`,
       tile.id,
     )
   }
-  if (footprintKey(tile.foot) !== undefined) {
-    return note('no-congruent-base', `no base is congruent to ${tile.name}'s footprint.`, tile.id)
-  }
-  return note(
-    'base-unmatchable',
-    `${tile.name} carries neither a size code nor a footprint, so no base can be matched to it.`,
-    tile.id,
-  )
+
+  // No footprint, so the code was the only key — and it did not join. Either no
+  // base carries it, or the bases that do disagree about what shape they are,
+  // which `candidatesFor` refuses to guess at. Both are `no-matching-base`: the
+  // archive holds no base this topper can be matched to.
+  const message = codeUnanswered
+    ? `no base in the catalog carries size code ${tile.sizeCode}, so ${tile.name} has no base to sit on.`
+    : `the bases carrying size code ${tile.sizeCode} are not all the same shape, and ${tile.name} ` +
+      `publishes no footprint to choose between them.`
+  return note('no-matching-base', message, tile.id)
 }
