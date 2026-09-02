@@ -49,7 +49,8 @@
  * | --- | --- | --- |
  * | `BufferGeometry` from the worker payload | `useStlModel` effect cleanup | unmount, or the record changing |
  * | `MeshStandardMaterial` | `releaseMaterial`, by refcount | when the last holder lets go |
- * | `EffectComposer` + `RenderPass`/N8AO/SMAA render targets | `PostStack` effect cleanup | `<Canvas>` unmount |
+ * | `EffectComposer` + `RenderPass`/N8AO/SMAA render targets | `useStageComposer` effect cleanup | `<Canvas>` unmount |
+ * | A shared-canvas slot's 2D backing store | the DOM, when the card unmounts | card unmount |
  * | Parse worker | `StlParser.terminate()` | unmount, or an abort |
  * | In-flight fetch | `AbortController` | unmount |
  * | `WebGLRenderer`, its context, the JSX lights | r3f | `<Canvas>` unmount |
@@ -61,8 +62,13 @@
  *   reclaiming the GPU context is the browser's decision. Browsers cap live
  *   contexts (~16 in Chrome) and drop the oldest, so a page that mounted and
  *   unmounted dozens of canvases can lose the *earliest* one. One drawer at a
- *   time is well inside that, and this is a note for whoever builds a grid of
- *   live previews: they need one shared canvas, not one per card.
+ *   time is well inside that. **A grid of live previews is not**, and it now has
+ *   an answer: `SharedStage.tsx` hosts many subjects on one canvas — one context
+ *   and one post stack however long the grid — with `SharedPreview.tsx` as the
+ *   per-card slot and `subjects.ts` as the registry. Both are reached by deep
+ *   import, never from this barrel: the host because it *is* the renderer, and
+ *   the slot because it is deliberately renderer-free and a card can mount it
+ *   from the entry chunk (`boundary.test.ts` asserts both directions).
  * - **The material cache survives unmount by design.** Refcounted entries drop to
  *   zero and dispose; the `Map` itself stays. `clearMaterialCache()` exists for a
  *   full teardown and nothing in the app calls it.

@@ -171,6 +171,73 @@ describe('the viewer chunk', () => {
   })
 })
 
+/**
+ * Row **G3**'s own boundary, which runs the opposite way to the viewer's.
+ *
+ * The shared canvas is two halves. The **host** (`SharedStage.tsx`) is a
+ * renderer and belongs behind a `lazy` import like `Viewer.tsx`. The **slot**
+ * (`SharedPreview.tsx`) is a 2D canvas and a registration, and it is meant to be
+ * mountable from a catalog card — which is in the entry chunk. So the assertion
+ * is not "the barrel does not reach it" but "the slot does not reach a
+ * renderer": one convenience import of `Stage.tsx` from that file would put
+ * three, r3f, drei, `postprocessing` and n8ao in the bundle every visitor
+ * downloads, with the app working perfectly throughout.
+ */
+describe('the shared canvas', () => {
+  const slot = staticClosure(join(THREE_DIR, 'SharedPreview.tsx'))
+
+  it('has a slot side that reaches no renderer package', () => {
+    const offenders = FORBIDDEN_PACKAGES.flatMap((name) =>
+      (slot.packages.get(name) ?? []).map((file) => `${name} ← ${file}`),
+    )
+    expect(offenders).toEqual([])
+  })
+
+  it('has a slot side that reaches only the pool, the frame and React', () => {
+    // Short and explicit, like the entry surface's list above: if this grows,
+    // something crossed the line.
+    expect(slot.files.sort()).toEqual([
+      'three/SharedPreview.tsx',
+      'three/frame.ts',
+      'three/subjects.ts',
+    ])
+    expect([...slot.packages.keys()].sort()).toEqual(['react'])
+  })
+
+  it('has a frame module every side can read without a renderer', () => {
+    // `frame.ts` exists precisely so the numbers `Stage.tsx` was tuned with are
+    // reachable from the eager side. If it ever imports three, both halves of
+    // that arrangement collapse.
+    const frame = staticClosure(join(THREE_DIR, 'frame.ts'))
+    expect(frame.files).toEqual(['three/frame.ts'])
+    expect([...frame.packages.keys()]).toEqual([])
+  })
+
+  it('keeps the renderer on the host’s side of the line', () => {
+    // The mirror image: if `SharedStage.tsx` stopped importing the renderer, the
+    // boundary above would be trivially satisfied and meaningless.
+    const host = staticClosure(join(THREE_DIR, 'SharedStage.tsx'))
+    const packages = [...host.packages.keys()]
+
+    expect(packages).toContain('three')
+    expect(packages).toContain('@react-three/fiber')
+    expect(packages).toContain('postprocessing')
+    expect(packages).toContain('n8ao')
+    expect(host.files).toContain('three/Stage.tsx')
+  })
+
+  it('is reached by deep import, never through the barrel', () => {
+    // The barrel closure above is pinned to three files, so this is a statement
+    // about intent as much as a check: a consumer mounts the host through
+    // `lazy(() => import('@/three/SharedStage'))`, exactly as the drawer reaches
+    // `Viewer`.
+    const barrel = readFileSync(join(THREE_DIR, 'index.ts'), 'utf8')
+    for (const specifier of ['./SharedStage', './SharedPreview', './subjects']) {
+      expect(staticImports(barrel)).not.toContain(specifier)
+    }
+  })
+})
+
 describe('the parse worker', () => {
   it('imports nothing but the parser and the protocol', () => {
     const closure = staticClosure(join(THREE_DIR, 'stl', 'worker.ts'))

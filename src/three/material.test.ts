@@ -1,8 +1,13 @@
+/// <reference types="node" />
 /**
- * The materials come from the registry, and the refcount actually counts.
+ * The materials come from the registry, the refcount actually counts, and the
+ * face mode is part of the key.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { afterEach, describe, expect, it } from 'vitest'
-import { Color, DoubleSide } from 'three'
+import { BackSide, Color, DoubleSide, FrontSide } from 'three'
 
 import { resolveMaterial } from '@/materials'
 
@@ -76,6 +81,102 @@ describe('acquireMaterial', () => {
     expect(acquireMaterial(resolution).color.getHexString()).toBe(
       new Color().setStyle(resolution.family.tint, 'srgb').getHexString(),
     )
+  })
+})
+
+describe('the side option', () => {
+  it('defaults to both faces, so the detail viewer is unchanged', () => {
+    expect(acquireMaterial(resolveMaterial(['texture|cave'])).side).toBe(DoubleSide)
+  })
+
+  it('gives front faces when asked, without touching the shared material', () => {
+    const resolution = resolveMaterial(['texture|cut_stone'])
+    const shared = acquireMaterial(resolution)
+    const room = acquireMaterial(resolution, { side: FrontSide })
+
+    expect(room.side).toBe(FrontSide)
+    // The whole point of the option: a room asking for front faces must not be
+    // able to change what the drawer is showing.
+    expect(shared.side).toBe(DoubleSide)
+    expect(room).not.toBe(shared)
+    expect(materialCacheSize()).toBe(2)
+  })
+
+  it('keys the cache on the face mode as well as the variant', () => {
+    const resolution = resolveMaterial(['texture|brick'])
+    acquireMaterial(resolution, { side: FrontSide })
+    acquireMaterial(resolution, { side: BackSide })
+    acquireMaterial(resolution, { side: FrontSide })
+
+    expect(materialCacheSize()).toBe(2)
+    // And a release names the material it acquired, not merely the variant.
+    expect(releaseMaterial(resolution, { side: BackSide })).toBe(true)
+    expect(releaseMaterial(resolution, { side: FrontSide })).toBe(false)
+    expect(releaseMaterial(resolution, { side: FrontSide })).toBe(true)
+    expect(materialCacheSize()).toBe(0)
+  })
+
+  it('still names itself with the registry’s variant, which the face mode is not part of', () => {
+    const resolution = resolveMaterial(['texture|sewer'])
+    expect(acquireMaterial(resolution, { side: FrontSide }).name).toBe(resolution.variantKey)
+  })
+
+  it('takes every other scalar from the registry regardless of the face mode', () => {
+    const resolution = resolveMaterial(['texture|pool'])
+    const front = acquireMaterial(resolution, { side: FrontSide })
+    expect(front.flatShading).toBe(true)
+    expect(front.roughness).toBe(resolution.finish.roughness)
+    expect(front.transparent).toBe(true)
+  })
+})
+
+/**
+ * The reason the option exists, read out of the installed three rather than
+ * quoted from a docblock.
+ *
+ * `material.ts` claims that under `flatShading` a back face is lit with the
+ * front face's normal, because three's `FLAT_SHADED` branch derives the normal
+ * from the screen-space derivatives and omits the `faceDirection` flip that the
+ * smooth branch applies under `DOUBLE_SIDED`. That is a claim about a shader
+ * chunk in `node_modules`, so it is checked there — the same discipline
+ * `src/builder/three/contract.test.ts` applies to the LOD format.
+ */
+describe('the shader fact behind it', () => {
+  const chunk = readFileSync(
+    join(
+      process.cwd(),
+      'node_modules',
+      'three',
+      'src',
+      'renderers',
+      'shaders',
+      'ShaderChunk',
+      'normal_fragment_begin.glsl.js',
+    ),
+    'utf8',
+  )
+
+  const flatBranch = chunk.slice(
+    chunk.indexOf('#ifdef FLAT_SHADED'),
+    chunk.indexOf('#else', chunk.indexOf('#ifdef FLAT_SHADED')),
+  )
+
+  it('finds the branch at all, so this cannot pass vacuously', () => {
+    expect(flatBranch).toContain('dFdx')
+    expect(chunk).toContain('float faceDirection = gl_FrontFacing')
+  })
+
+  it('derives a flat normal from the derivatives, with no faceDirection flip', () => {
+    expect(flatBranch).toMatch(/normalize\(\s*cross\(\s*fdx,\s*fdy\s*\)\s*\)/)
+    expect(flatBranch).not.toContain('faceDirection')
+  })
+
+  it('applies the flip only on the smooth path, which is the asymmetry', () => {
+    const smoothBranch = chunk.slice(
+      chunk.indexOf('#else', chunk.indexOf('#ifdef FLAT_SHADED')),
+      chunk.indexOf('#endif', chunk.indexOf('#ifdef FLAT_SHADED')),
+    )
+    expect(smoothBranch).toContain('normal *= faceDirection')
   })
 })
 

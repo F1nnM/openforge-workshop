@@ -23,8 +23,26 @@ export interface StlModelProps {
   material: MeshStandardMaterial
 }
 
-/** −90° about X: the archive's Z-up into three.js's Y-up. */
-const Z_UP_TO_Y_UP: [number, number, number] = [-Math.PI / 2, 0, 0]
+/**
+ * The rotation, in radians: **−90°**.
+ *
+ * Exported as a scalar as well as a triple because `src/builder/three/place.ts`
+ * needs the angle rather than an Euler triple — it composes
+ * `Matrix4.makeRotationX(…)` into an instance matrix — and had duplicated this
+ * value with a note asking for it, since it was private to this module and row
+ * **G3** owns this file. One definition now, in the module that measured it.
+ */
+export const Z_UP_TO_Y_UP_RADIANS = -Math.PI / 2
+
+/**
+ * −90° about X: the archive's Z-up into three.js's Y-up, as a `<mesh rotation>`.
+ *
+ * The same fact in the shape JSX wants. It matters to more than this component:
+ * G1's GLBs carry the source STL's axes unchanged, so the *container* says Y-up
+ * (glTF's convention) while the bytes are Z-up, and a consumer that trusts the
+ * container lays every tile on its back.
+ */
+export const Z_UP_TO_Y_UP: [number, number, number] = [Z_UP_TO_Y_UP_RADIANS, 0, 0]
 
 export function StlModel({ geometry, material }: StlModelProps) {
   return (
