@@ -26,18 +26,21 @@ export {
 export type { CorpusDigest, CorpusDrift } from './corpus'
 export { corpusDigest, corpusDrift, isClean } from './corpus'
 
-export type { DerivationDigests, LockCheck } from './lock'
+export type { DerivationDigests, DigestSlot, LockCheck } from './lock'
 export {
+  DIGEST_SLOTS,
   DerivationLock,
   FIXTURES_ENV_PATH,
   LOCK_FIXTURES_REF,
   LOCK_PATH,
   checkLock,
   derivationDigests,
+  keysIn,
   lockFor,
   lockedBuild,
   pinnedFixturesRef,
   readLock,
+  unclassifiedKeys,
   writeLock,
 } from './lock'
 

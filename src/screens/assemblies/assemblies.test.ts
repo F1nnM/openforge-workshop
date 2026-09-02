@@ -422,7 +422,7 @@ describe('the shipped templates', () => {
     const parts = RECIPE_TEMPLATES.flatMap((template) => template.parts)
     const siblings = parts
       .flatMap((part) => part.tags.constrain ?? [])
-      .filter((entry) => entry.siblings !== undefined)
+      .filter((entry) => 'tag' in entry && entry.siblings !== undefined)
 
     expect(siblings).toHaveLength(30)
     expect(parts.flatMap((part) => part.fulfills)).toEqual(Array.from({ length: 20 }, () => 'base'))
@@ -434,8 +434,7 @@ describe('the shipped templates', () => {
     const constrained = new Set(
       RECIPE_TEMPLATES.flatMap((template) => template.parts)
         .flatMap((part) => part.tags.constrain ?? [])
-        .map((entry) => entry.tag)
-        .filter((tag): tag is string => tag !== undefined)
+        .flatMap((entry) => ('tag' in entry ? [entry.tag] : []))
         .map(root),
     )
 

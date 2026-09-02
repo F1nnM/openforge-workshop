@@ -174,25 +174,76 @@ import type {
   TileVariant,
 } from '@/catalog'
 import { selectVariant } from '@/catalog'
-import type { CompositionIndex, SiblingSelection, SlotTags } from '@/composition'
+import type { CompositionIndex, SiblingSelection } from '@/composition'
 import { createCompositionIndex, resolveSlotTags } from '@/composition'
 
 /* --------------------------------------------------------------- the template */
 
 /**
- * One part of a recipe — a name, a constraint block, and what it covers.
+ * One part of a recipe: the schema's `PartSlot`, with `fulfills` projected.
  *
- * Deliberately **not** `PartSlot`. Two fields of the fixture's grammar have no
- * home in that schema and both live only in the templates: `constrain[].siblings`
- * (30 entries; 0 in the 8,721 JSON rows) and part-level `fulfills` (20; 0 in the
- * JSON). `fixtures.ts` carries the census and the report to the schema's owner.
+ * ## The reason this was not `PartSlot` is gone
+ *
+ * This declaration used to say *"deliberately **not** `PartSlot`"*, because
+ * `constrain[].siblings` and part-level `fulfills` had no home in that schema.
+ * **That reason no longer holds.** C1 predicted the silent strip, row X8
+ * reproduced it — `PartSlot.safeParse` returned `success: true` with both keys
+ * gone from its output — and widened `ConstrainRef` and `PartSlot` for them, so
+ * `pipeline/templates.ts` validates all 128 template parts with `PartSlot`
+ * itself and its byte-for-byte round-trip proves the schema carries the whole
+ * grammar. `name` and `tags` are taken from `PartSlot` here rather than
+ * re-declared, so an emitted part's constraint block has the same type as the
+ * block the pipeline validated.
+ *
+ * ## What the adoption cost, and what it did not buy
+ *
+ * The one-import version X8 asked for did not exist, and finding out why turned
+ * up a defect. `src/composition/config.ts` claimed *"`PartSlot['tags']` is
+ * assignable to this"* of its `SlotTags`, and under this repo's
+ * `exactOptionalPropertyTypes` it was **false**: `z.infer` types those members
+ * `TagRef[] | undefined`, and `TS2379` rejects that for a `?:` member declared
+ * without `undefined`. `src/composition/candidates.ts` was already working
+ * around it with `resolveSlotTags(slot.tags as SlotTags, …)` — a cast in the one
+ * place the schema's grammar meets that port. Row X11 wrote `| undefined` on the
+ * members of `SlotTags` and `ConstrainEntry`, dropped the cast, and only then
+ * could this field be the schema's own type.
+ *
+ * What was left was narrowing, at four sites. `ConstrainRef` is a **union** of
+ * `{ tag }` and `{ filter }` where `ConstrainEntry` is one flat all-optional
+ * interface, so `entry.tag` became `'tag' in entry ? … : …` in `measure.ts`
+ * twice and `assemblies.test.ts` twice. That is more accurate rather than merely
+ * different — a `{ filter }` entry has no tag to read — but it buys **no new
+ * guard**: what catches a `ConstrainRef` widening the emitter does not print is
+ * `pipeline/templates.test.ts`'s round-trip, not this type.
+ *
+ * ## The three differences that stay
+ *
+ *   - **`fulfills` is `readonly string[]` rather than `{ part: string }[]`, and
+ *     it is always present.** The flattening is `printTemplateModule`'s named
+ *     derivation — the relationship `CatalogRecord.blob` has to
+ *     `file_metadata.md5` — and `pipeline/templates.test.ts` asserts the
+ *     committed bytes of `templates.ts` are exactly what that emitter prints.
+ *     Adopting `PartSlot['fulfills']` would either re-emit all 128 parts to
+ *     carry `[{ part: 'base' }]` or push the unwrapping into every consumer.
+ *   - **`id` and `optional` are dropped by the `Pick`, on a measured 0.** The 20
+ *     `*.yaml` fixtures contain exactly thirteen distinct keys — `name` (168),
+ *     `type` (40), `tags` (168), `config` (40), `parts` (40), `require` (128),
+ *     `deny` (82), `constrain` (110), `siblings` (30), `fulfills` (20), `tag`
+ *     (779), `filter` (36) and `part` (20) — and neither `id` nor `optional` is
+ *     one of them. `PartSlot.id` has six occurrences corpus-wide, all in the
+ *     JSON half.
+ *
+ * {@link RecipeTemplate} has no counterpart to adopt at all: none of the 40
+ * carries `file_metadata`, so none is a `CatalogRecord` and the schema models no
+ * template — `pipeline/templates.ts` owns that shape. Where the data *is* a
+ * whole `PartSlot` this file already said so before this row:
+ * {@link AssemblyOption.nested}, read off `CatalogRecord.config.parts`.
  */
-export interface TemplatePart {
-  /** `wall`, `floor`, `base`, `column`, `left wall`, `right wall`. */
-  readonly name: string
-  /** C1's `SlotTags`, which models `siblings` where `PartSlot`'s `ConstrainRef` does not. */
-  readonly tags: SlotTags
-  /** Part names whose *nested* occurrence this part covers. 20 entries, all `base`. */
+export interface TemplatePart extends Readonly<Pick<PartSlot, 'name' | 'tags'>> {
+  /**
+   * Part names whose *nested* occurrence this part covers. 20 entries, all
+   * `base` — the emitter's flattening of `PartSlot['fulfills']`.
+   */
   readonly fulfills: readonly string[]
 }
 
