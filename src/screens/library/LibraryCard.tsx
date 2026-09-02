@@ -12,7 +12,8 @@
  *     well, explicit intrinsic dimensions so the well does not resize when the
  *     image lands, lazy loading, and the "no render" plate for the one live tile
  *     with no sheet. A second copy of that is a second place for the same four
- *     bugs.
+ *     bugs. Row P0 moved it from the catalog card to `@/ui/thumb`, so this import
+ *     no longer reaches into another screen for it.
  *   - **The mono file size**, which the contract's list does not mention. It is
  *     here because the screen's summary is a byte total the user is expected to
  *     act on: a library over 512 MB tells them *that* there is a problem, and the
@@ -57,15 +58,10 @@
 import { Link } from '@tanstack/react-router'
 
 import type { CatalogAssets, SpriteSheet, TileVariant } from '@/catalog'
-import {
-  AvailabilityStrip,
-  TileThumb,
-  fileSizeLabel,
-  sizeLabel,
-  variantTokenLabel,
-} from '@/screens/catalog'
+import { AvailabilityStrip, fileSizeLabel, sizeLabel, variantTokenLabel } from '@/screens/catalog'
 import { removeFromLibrary } from '@/store'
 import { Chip, VisuallyHidden } from '@/ui/primitives'
+import { TileThumb } from '@/ui/thumb'
 
 import type { LibraryItem } from './grouping'
 

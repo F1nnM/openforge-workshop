@@ -15,10 +15,13 @@
  *     tested without a DOM. That file's docblock carries the corpus figures
  *     behind the precedence order and the md5 dedupe; they are the two decisions
  *     on this screen that are not obvious from the contract.
- *   - **The thumbnail, the size chip and every formatted figure** come from
- *     `@/screens/catalog`. `TileThumb` is the sprite-sheet maths and the
- *     `format` helpers are what make a size chip here read identically to the
- *     same chip on a catalog card.
+ *   - **The thumbnail** is `@/ui/thumb` — the sprite-sheet maths, moved out of the
+ *     catalog card by row P0 because four subtrees render it. The skeleton below
+ *     is the one place this screen draws a `.of-thumb` well itself: a bare
+ *     shimmer plate, with no image and nothing to tint.
+ *   - **The size chip and every formatted figure** come from `@/screens/catalog`,
+ *     whose `format` helpers are what make a size chip here read identically to
+ *     the same chip on a catalog card.
  *   - **The library itself** is `@/store`. This screen holds no state beyond the
  *     import report, which belongs to the control that produced it.
  *
