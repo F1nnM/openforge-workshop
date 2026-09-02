@@ -23,6 +23,8 @@ import { basename, dirname, join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { printOption } from '../src/assembly/assemblyIndex'
+import { footprintKey } from '../src/assembly/footprint'
 import {
   ARC_BAND_EVIDENCE,
   ArcBand,
@@ -108,12 +110,15 @@ describeCorpus(title, () => {
    * three are **parameters** the script does not hold — W5's rule, so the
    * offsets keep one home.
    *
-   * This file cannot import `footprintKey` to compare keys directly:
-   * `tsconfig.node.json` admits `src/catalog` into the pipeline project and not
-   * `src/assembly`, whose `@/` alias this project does not resolve either. So
-   * the cross-check runs at the granularity both sides can spell — the
+   * So the cross-check runs at the granularity both sides can spell — the
    * discriminant — and it is exact rather than approximate, because every key
    * either *is* a shape name or is prefixed by one.
+   *
+   * **That last clause used to be an assertion about code this file could not
+   * import.** Row W7 filed the boundary against `tsconfig.node.json`, row X4
+   * admitted `src/assembly/footprint.ts` and `assemblyIndex.ts` to the pipeline
+   * project, and row X5 spent it: the claim is now checked against the real
+   * `footprintKey` over all 8,702 emitted footprints, below.
    */
   const shapeOfKey = (key: string): string => key.split(':')[0] ?? key
 
@@ -585,6 +590,80 @@ describeCorpus(title, () => {
       )
       expect(under).toHaveLength(leading(facts, 'records under an ambiguous code'))
       expect(under).toHaveLength(362)
+    })
+
+    it('coarsens a congruence key to its discriminant without losing anything', () => {
+      // The premise `shapeOfKey` rests on, and the reason the comparison above is
+      // exact rather than approximate: a `footprintKey` is its shape name, or its
+      // shape name followed by `:` and the parameters the verify script does not
+      // hold. Checked against the real function over every emitted footprint, not
+      // asserted in a comment — which is what it was until rows W7, X4 and X5
+      // between them made the import possible.
+      //
+      // What makes this fail: a new footprint case whose key does not start with
+      // its own discriminant (`0.5sq` for a column, say). The span comparison
+      // above would then silently compare a key against a shape name that is not
+      // a prefix of it, and agree by mapping both sides to nonsense.
+      const keyed = result.file.records.filter((record) => record.foot.shape !== 'none')
+      expect(keyed.length).toBe(result.stats.records - (result.stats.footprints.none ?? 0))
+      for (const record of keyed) {
+        const key = footprintKey(record.foot)
+        expect(key, record.id).toBeDefined()
+        expect(shapeOfKey(key ?? ''), record.id).toBe(record.foot.shape)
+      }
+      // And the other half of the rule: `none` keys to nothing at all, because a
+      // shared `'none'` key would match every shapeless topper to every shapeless
+      // base. `footprint.ts` prices that at 27,976 false pairs.
+      for (const record of result.file.records) {
+        if (record.foot.shape !== 'none') continue
+        expect(footprintKey(record.foot), record.id).toBeUndefined()
+      }
+      // How much the coarsening actually throws away, as a number: **76 distinct
+      // keys collapse onto 6 discriminants.** That is the price of comparing at
+      // the granularity the script can spell, stated rather than implied, and it
+      // moves if a new footprint case lands or a band is re-measured.
+      const keys = new Set(keyed.map((record) => footprintKey(record.foot)))
+      expect(keys.size).toBe(76)
+      expect([...new Set([...keys].map((key) => shapeOfKey(key ?? '')))].sort()).toEqual([
+        'arc',
+        'column',
+        'diag',
+        'rect',
+        'tri',
+        'wall',
+      ])
+    })
+
+    it('agrees with the script on the print option every base amounts to', () => {
+      // Row D1's candidate pool, derived from the emitted tags by the same
+      // function the assembly index folds with. The script reads the raw fixture
+      // rows and ranks the modifier slot itself; this reads `printOption` over
+      // the interned tag list the index will actually serve. W7 asked for this
+      // comparison and could not have it — the pipeline project did not admit
+      // `src/assembly/assemblyIndex.ts` until row X4.
+      //
+      // What makes this fail: `printOption`'s ranking and the script's
+      // `RANKED_PRINT_MODIFIERS` disagreeing about which modifier wins, or a
+      // normalisation step rewriting a `connection|…|topless` segment on the way
+      // into the index. Either way one side moves and the other does not.
+      const facts = verifyFacts()
+      const bases = result.file.records.filter((record) => record.layer === 'base')
+      expect(bases).toHaveLength(leading(facts, 'shape|base tiles'))
+
+      const tally: Record<string, number> = {}
+      for (const record of bases) {
+        const option = printOption(resolveTags(result.file, record))
+        tally[option] = (tally[option] ?? 0) + 1
+      }
+      const rendered = Object.entries(tally)
+        .sort(([a], [b]) => (a < b ? -1 : 1))
+        .map(([option, count]) => `${option} ${String(count)}`)
+        .join(', ')
+      expect(rendered).toBe(facts.get('bases by print option'))
+      // The headline, in full: 584 of the 1,963 bases are a print variant rather
+      // than the base itself, which is the pool D1's old bytes-ascending
+      // tie-break was drawing 79.1% of its openlock answers from.
+      expect(tally).toEqual({ plain: 1379, topless: 378, unsupported: 206 })
     })
 
     it('agrees on the base range that bounds every match', () => {

@@ -109,10 +109,48 @@ export const SCHEMA_VERSION = 3
  * `tiles/cave/thick_wall/wall/corner/openlock/cave%aggregate+2#corner.IL+corner,90.openlock.stl`.
  *
  * This — not the md5 — is the primary key. React keys, placements and share
- * links all address a tile by `id`. All 8,702 live `full_name` values start
- * `tiles/`.
+ * links all address a tile by `id`.
+ *
+ * **Row X5 tightened this from `min(1)` to a catalog path.** `min(1)` took any
+ * non-empty string, and that is not a cosmetic looseness:
+ * `src/store/migrations.ts` runs `TileId.safeParse` over every key of a
+ * `localStorage` library and every `placements[…].tileId`, so the brand is the
+ * only thing standing between a corrupted store and a library full of ids that
+ * resolve to nothing and cannot be removed from the UI. `"undefined"`, `"null"`
+ * and a whole JSON blob all used to survive that filter.
+ *
+ * Measured over all 8,702 live records: **8,702 start `tiles/`**, none contains
+ * an empty path segment, and the paths run 3 to 8 segments deep and 39 to 183
+ * characters long. Three of those four facts are reported rather than enforced,
+ * each for a reason:
+ *
+ *   - **The depth is not enforced.** A hand-written fixture has no reason to
+ *     carry six directories, so `tiles/x.stl` parses.
+ *   - **The `.stl` suffix is not enforced**, though all 8,702 carry it.
+ *     `src/download/download.test.ts` deliberately builds a catalog whose ids
+ *     are `tiles/x/LICENSE.txt` and `tiles/x/ATTRIBUTION.csv`, to prove that a
+ *     catalog path cannot shadow the archive's own licensing entries — the
+ *     defence being the `models/` prefix every model is written under. Requiring
+ *     `.stl` here would make that adversarial case unrepresentable and delete a
+ *     defence that has to hold whatever the corpus starts publishing.
+ *   - **No length bound.** 183 is today's longest and nothing downstream has a
+ *     budget in it.
+ *
+ * **Whitespace is deliberately permitted.** 5 live ids carry a directory named
+ * `dragonlock, magnetic+flex`, space included, so a `\S+` pattern would reject
+ * real catalog paths.
+ *
+ * What makes this fail: an import that emits an id outside `tiles/`. It is
+ * rejected by `CatalogFile.parse` inside `buildCatalog`, so `npm run
+ * import:catalog` and CI's stamp step fail before the index is written, rather
+ * than shipping ids that `migrations.ts` would then start silently dropping from
+ * users' saved libraries. `schema.test.ts` pins the accepted and rejected shapes
+ * so the pattern cannot be loosened back without a red test.
  */
-export const TileId = z.string().min(1).brand<'TileId'>()
+export const TileId = z
+  .string()
+  .regex(/^tiles\/(?:[^/]+\/)*[^/]+$/, 'a tile id is a `tiles/…` catalog path')
+  .brand<'TileId'>()
 export type TileId = z.infer<typeof TileId>
 
 /**
@@ -829,11 +867,30 @@ export const CatalogRecord = z.object({
   /**
    * Texture root — the first segment after `texture|`, e.g. `dungeon_stone`.
    *
-   * 38 distinct roots, all of which the material registry must cover (§9).
+   * **36 distinct values land here, and that is not the same number as either of
+   * the two it used to be quoted as.** Three figures are in play and this field
+   * is the narrowest of them:
+   *
+   *   - **37** roots occur on some `texture|` tag in the emitted table;
+   *   - **36** reach this field, because `texture` is the root of a tile's
+   *     *first* texture tag and `stucco` is always secondary to an
+   *     alphabetically earlier root, so it never wins first position;
+   *   - **38** are mapped by `TEXTURE_ROOT_MATERIAL` (§9), which keeps the
+   *     retired `foundations` spelling on purpose as the fallback for a caller
+   *     resolving straight off raw fixtures.
+   *
+   * All three are asserted separately — `pipeline/catalog.test.ts` ("resolves 36
+   * of the 37 texture roots onto a record") and `src/materials/corpus.test.ts` —
+   * because conflating them is what let "38" stand here after row D3 collapsed
+   * `texture|foundations` into `texture|foundation` and moved two of them.
+   *
    * Optional because 89 tiles (1.0%) carry no texture tag and fall back to the
    * unknown material. Beware tag drift (§16): `texture|towne|stone-stucco` and
    * `texture|towne|stucco-stone` are one material tagged twice with the words
-   * reversed, so the importer normalises before this field is written.
+   * reversed, and that pair is deliberately *not* collapsed
+   * (`pipeline/normalise.ts#NOT_COLLAPSED`) — both have root `towne`, so at root
+   * level there is nothing to normalise, and rewriting the tag strings would
+   * desynchronise them from the `require`/`deny` refs that name them.
    */
   texture: z.string().min(1).optional(),
 

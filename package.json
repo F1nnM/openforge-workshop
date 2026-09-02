@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "import:catalog": "tsx scripts/import-catalog.ts",
+    "stamp": "tsx tools/stamp/cli.ts",
     "thumbs": "tsx tools/thumbnails/cli.ts",
     "measure": "tsx tools/measure/cli.ts",
     "lod": "tsx tools/lod/cli.ts",

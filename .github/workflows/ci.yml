@@ -83,7 +83,7 @@ jobs:
       # blockers B1 and B2 are open. `--require thumbs,lod` promotes them, and
       # adding it is the whole of what X1 and X6 owe this step.
       - name: Regenerate and stamp the derived artefacts
-        run: npx tsx tools/stamp/cli.ts --summary "$GITHUB_STEP_SUMMARY"
+        run: npm run stamp -- --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Lint
         run: npm run lint

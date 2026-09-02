@@ -65,13 +65,28 @@ describe('src/composition, for row C1', () => {
     expect(MAX_DEAD_END_RATE).toBeGreaterThan(0)
   })
 
-  it('is a corpus assertion, which is the argument for moving it into the build', () => {
+  it('is a corpus assertion, which is why the build declines to run it', () => {
     // `assertComposition` refuses an index with no `constrain` refs at all,
     // because C1's whole reading of `constrain` rests on the split between 91
     // exact `require` refs and 4 namespace-root `constrain` ones. So it cannot
-    // be satisfied by a fixture — it has to run where the corpus is, which is
-    // `pipeline/build.ts`, which is what C1 asked this tsconfig entry for. This
+    // be satisfied by a fixture — it has to run where the corpus is. This
     // asserts the refusal so the capability is proved rather than assumed.
+    //
+    // **Row X5 measured the move C1 asked for and declined it.** Two facts
+    // decided it, and neither was available when C1 filed the request:
+    //
+    //   - `measureComposition` costs **644 ms** on the 8,702-record corpus (one
+    //     index build and two candidate passes over 3,695 slots). `buildCatalog`
+    //     runs five times over the real rows inside `pipeline/catalog.test.ts`
+    //     alone, so the move adds ~3.2 s to a 9.2 s file.
+    //   - It would buy no coverage. `src/composition/corpus.test.ts` already
+    //     calls `assertComposition` on the emitted index, and since X4 that
+    //     index exists in CI — the stamp step regenerates it before the suite
+    //     runs. The assertion fires on every pull request either way.
+    //
+    // What the tsconfig entry is still for is this file: the boundary stays
+    // crossed and called, so deleting the entry is a red typecheck rather than a
+    // quiet loss of the option.
     const bare = testCatalog([{ id: 'tiles/test/a.stl', ord: 1, blob: blobOf('aa') }])
     expect(() => {
       assertComposition(measureComposition(bare))

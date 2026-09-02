@@ -55,6 +55,14 @@ const ordinal = (n: number) => ManifestOrdinal.parse(n)
  * list reproduces the ones named in `docs/texture-materials.draft.ts` and fills
  * the rest with names of the same shape and length. It exists to size a URL,
  * not to define a vocabulary, so being length-representative is what matters.
+ *
+ * **38 is the registry's number, and it is deliberately not the facet's.** Row
+ * D3 collapsed `texture|foundations`, so 37 roots occur on a tag and 36 reach
+ * `record.texture` while `TEXTURE_ROOT_MATERIAL` still maps 38 (it keeps the
+ * retired spelling as a fallback). Row X5 checked all three against this file
+ * and left it at 38: the worst case a URL budget has to survive is the widest
+ * vocabulary anyone might select, so the registry's count is the conservative
+ * one to size against. `src/catalog/schema.ts#texture` names all three.
  */
 const TEXTURE_ROOTS = [
   'aztlan',

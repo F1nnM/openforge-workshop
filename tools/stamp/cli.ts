@@ -2,11 +2,15 @@
 /**
  * The version stamp, in one command.
  *
- *     npx tsx tools/stamp/cli.ts                     # regenerate, check, write
- *     npx tsx tools/stamp/cli.ts --dry-run           # check, write nothing
- *     npx tsx tools/stamp/cli.ts --require thumbs,lod
- *     npx tsx tools/stamp/cli.ts --relock            # re-take the derivation lock
- *     npx tsx tools/stamp/cli.ts --worklist tools/stamp/out/worklist.json
+ *     npm run stamp                                  # regenerate, check, write
+ *     npm run stamp -- --dry-run                     # check, write nothing
+ *     npm run stamp -- --require thumbs,lod
+ *     npm run stamp -- --relock                      # re-take the derivation lock
+ *     npm run stamp -- --worklist tools/stamp/out/worklist.json
+ *
+ * Row X5 added the `stamp` script, so the entry point CI runs is the one a
+ * developer types. `npx tsx tools/stamp/cli.ts` still works and is what the
+ * script expands to.
  *
  * This is the CI step. It replaces `npm run import:catalog` there — it does the
  * same build and writes the same two files — and adds the four checks the row is

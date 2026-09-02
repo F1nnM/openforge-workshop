@@ -8,7 +8,7 @@ import type { ArtefactId } from './report'
 
 export const USAGE = `Regenerate the derived artefacts and stamp them against one index.
 
-usage: tsx tools/stamp/cli.ts [options]
+usage: npm run stamp -- [options]
 
   --dry-run          check only; write neither catalog.json nor stamp.json
   --require LIST     comma-separated artefact ids whose bad status fails the run

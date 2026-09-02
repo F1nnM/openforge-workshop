@@ -33,8 +33,13 @@
  * magnitude, not to pin a benchmark to a laptop's clock.
  *
  * `catalog.json` is gitignored and rebuilt from the fixtures
- * (`npm run import:catalog`), so it is not present in CI. The whole block then
- * skips **loudly**, naming the path and the command, following the precedent
+ * (`npm run import:catalog`). **CI does have it**: the stamp step regenerates it
+ * from the pinned fixtures before the suite runs, so the measurements below are
+ * taken on every pull request rather than only on a developer's machine. Row X5
+ * corrected this note, which claimed the opposite.
+ *
+ * Absent — a fresh checkout that has not imported — the whole block skips
+ * **loudly**, naming the path and the command, following the precedent
  * `pipeline/catalog.test.ts` sets: a quietly skipped real-data test is worse than
  * a failing one.
  */

@@ -4,21 +4,10 @@
  * ## The input is the one place with local state, and it is not a facet mirror
  *
  * `q` lives in the URL like every other filter, but a URL write per keypress
- * would make typing feel like it is being fought: TanStack revalidates, the
- * screen re-searches, and the cursor position is at the mercy of a controlled
- * value arriving a tick late. So the field holds the *draft* and pushes it after
- * {@link COMMIT_DELAY_MS}.
- *
- * That leaves exactly one hard problem: the draft must follow the URL when the
- * URL changes for a reason that is not this field — a Back press, a shared link,
- * the "Clear filters" button — and must **not** follow it when the change is this
- * field's own navigation echoing back. `committed` is the discriminator: it holds
- * the last value this field sent, so a `q` that differs from it came from
- * somewhere else and wins.
- *
- * The naive version (`useEffect(() => setDraft(q), [q])`) looks identical and is
- * broken in a way that is hard to see: mid-word, the echo of keystroke *n* arrives
- * while the user has typed *n+2*, and the field silently rewinds two characters.
+ * would make typing feel like it is being fought. The draft-and-commit state
+ * machine that fixes it — and the mid-word rewind the naive version causes — is
+ * `./useDraftQuery.ts`, shared with the builder's palette since row X5. This
+ * component owns the markup and the count; the hook owns the timing.
  *
  * ## The count is announced
  *
@@ -42,22 +31,12 @@
  * thing you choose, place and print, whichever of its 2.28 files you end up
  * printing.
  */
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId } from 'react'
 
 import { MAX_QUERY_LENGTH } from '@/search'
 
 import { countLabel } from './format'
-
-/**
- * How long a keystroke waits before it reaches the URL.
- *
- * 180 ms is below the ~250 ms at which an interface starts to feel unresponsive
- * and above a fast typist's inter-key interval (~120 ms), so a word normally
- * costs one navigation rather than one per letter. The search itself is not what
- * is being deferred — the engine answers an unfiltered query in 2.6 ms and a
- * filtered one in about 1 ms — the history entry and the router round-trip are.
- */
-export const COMMIT_DELAY_MS = 180
+import { useDraftQuery } from './useDraftQuery'
 
 export interface SearchFieldProps {
   /** `q` from the URL. The source of truth; the draft only leads it briefly. */
@@ -78,42 +57,7 @@ export interface SearchFieldProps {
 
 export function SearchField({ query, total, files, filtered, onQueryChange }: SearchFieldProps) {
   const inputId = useId()
-  const [draft, setDraft] = useState(query)
-  const committed = useRef(query)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    if (query === committed.current) return
-    // The URL moved on its own — Back, a link, or "Clear filters". Drop any
-    // pending commit, or it would immediately undo the navigation that just
-    // happened.
-    if (timer.current !== null) {
-      clearTimeout(timer.current)
-      timer.current = null
-    }
-    committed.current = query
-    setDraft(query)
-  }, [query])
-
-  // Only on unmount: a timer left running would call `onQueryChange` after the
-  // screen is gone, which TanStack turns into a navigation to a route nothing is
-  // rendering.
-  useEffect(
-    () => () => {
-      if (timer.current !== null) clearTimeout(timer.current)
-    },
-    [],
-  )
-
-  function change(text: string) {
-    setDraft(text)
-    if (timer.current !== null) clearTimeout(timer.current)
-    timer.current = setTimeout(() => {
-      timer.current = null
-      committed.current = text
-      onQueryChange(text)
-    }, COMMIT_DELAY_MS)
-  }
+  const { draft, change } = useDraftQuery(query, onQueryChange)
 
   return (
     <div className="of-catalog-search">

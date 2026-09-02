@@ -291,6 +291,50 @@ describe('identities', () => {
     )
   })
 
+  it('accepts the five live ids with a space in a directory name', () => {
+    // `dragonlock, magnetic+flex` is a real fixture directory, comma and space
+    // included, on 5 of the 8,702 live rows. So the pattern cannot be `\S+`, and
+    // this case is here to say that out loud — it is exactly the tightening a
+    // later reader would reach for.
+    expect(
+      tileId(
+        'tiles/bases/separate_wall/primary_walls/base#wall%aztlan/dragonlock, magnetic+flex/aztlan#base+wall.A.dragonlock,magnetic+flex.stl',
+      ),
+    ).toContain('dragonlock, magnetic+flex')
+  })
+
+  it('rejects a string that is not a tiles/… catalog path', () => {
+    // Row X5 tightened `TileId` from `min(1)`, which took any non-empty string.
+    // `src/store/migrations.ts` runs `safeParse` over every key of a
+    // `localStorage` library, so the brand is what stops a corrupted store from
+    // producing library entries that resolve to nothing and cannot be removed.
+    //
+    // These fail if the pattern is ever relaxed back towards `min(1)`.
+    for (const bad of [
+      '',
+      'undefined',
+      'null',
+      'tiles',
+      'tiles/',
+      'cave/x.stl',
+      'bases/stone/a.stl',
+      '/tiles/cave/x.stl',
+      'tiles/cave//x.stl',
+      'tiles/cave/x.stl/',
+      '{"id":"tiles/cave/x.stl"}',
+    ]) {
+      expect(TileId.safeParse(bad).success, bad).toBe(false)
+    }
+  })
+
+  it('does not require the .stl suffix all 8,702 live ids carry', () => {
+    // Deliberate, and `TileId`'s docblock carries the argument: the download
+    // row's archive-shadowing test builds ids called `LICENSE.txt` and
+    // `ATTRIBUTION.csv` on purpose, and the `models/` prefix that defends
+    // against them has to hold whatever the corpus starts publishing.
+    expect(tileId('tiles/x/LICENSE.txt')).toBe('tiles/x/LICENSE.txt')
+  })
+
   it('only accepts 32 lowercase hex characters as a BlobId', () => {
     expect(blobId('02e5007cca035ad01aa378c4f6752ddc')).toBe('02e5007cca035ad01aa378c4f6752ddc')
     expect(BlobId.safeParse('02E5007CCA035AD01AA378C4F6752DDC').success).toBe(false)
