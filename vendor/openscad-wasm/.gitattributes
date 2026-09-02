@@ -1,0 +1,8 @@
+# Nothing in this directory may be rewritten on checkout. `openscad.wasm` is a
+# binary and `openscad.js` is Emscripten glue; `COPYING` is a licence whose
+# bytes are hashed in MANIFEST.sha256 and asserted by
+# src/generator/engine/vendor.test.ts. An EOL normalisation would change every
+# hash at once and read in review as tampering rather than as a checkout
+# artefact. Same reasoning, same pin, as the vendored .scad sources.
+* -text
+openscad.wasm binary
