@@ -594,6 +594,32 @@ describe('remove', () => {
   })
 })
 
+/* ------------------------------------------------------------------- buttons */
+
+describe('the screen’s five buttons', () => {
+  it('styles all of them through the button primitive, at the default size', async () => {
+    // Row X2's swap. Until it these carried `.of-lib-action`, a second class name
+    // `primitives.css` had to answer to; `md` is the library's size and is the
+    // primitive's default, so nothing here names a size. Three of the five are
+    // in this render: the head's `Link`, and the backup block's `<button>` and
+    // its `<label>` wrapping a clipped file input.
+    save(0)
+    await renderLibrary()
+
+    const head = screen.getByRole('link', { name: /Open in builder/ })
+    const exportAction = screen.getByRole('button', { name: 'Export JSON' })
+    const importAction = screen.getByLabelText('Import JSON', { selector: 'input' }).closest('label')
+
+    for (const action of [head, exportAction, importAction]) {
+      expect(action).toHaveClass('of-button')
+      expect(action).toHaveAttribute('data-size', 'md')
+    }
+    expect(head).toHaveAttribute('data-tone', 'primary')
+    expect(exportAction).toHaveAttribute('data-tone', 'secondary')
+    expect(importAction).toHaveAttribute('data-tone', 'secondary')
+  })
+})
+
 /* --------------------------------------------------------------- empty state */
 
 describe('the empty state', () => {

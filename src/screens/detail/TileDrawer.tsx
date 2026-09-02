@@ -3,9 +3,38 @@
  *
  * A 442px right-hand drawer over the scrim, opened by `?tile={ordinal}` on
  * `/catalog` and containing, in the mock's order: a mono accent eyebrow, the
- * 288px preview well, a serif title with its family subtitle, the two actions,
- * the 2x2 spec grid, the storage address, the tag chips, and — row A5 — the
- * variants table.
+ * 288px preview well, the gated 3D panel, a serif title with its family
+ * subtitle, the two actions, the 2x2 spec grid, the storage address, and — row
+ * A5 — the variants table, then the tag chips.
+ *
+ * ## The 3D panel, and which host it uses
+ *
+ * design-contract.md §2.5 asks for a *"288px live 3D canvas"*. Row 21 built it
+ * as {@link Tile3DPanel} and mounted it nowhere, so until row X2 three.js
+ * reached `dist/` only through the builder's own room. It is one line here,
+ * under the sprite rotator, exactly as that module's docblock specifies — and
+ * the two coexist rather than replace each other, because the rotator is the
+ * **keyboard** route to every angle (`role="slider"`, arrow keys, a pole pad)
+ * and `OrbitControls` has no key bindings. The panel is offered closed: the
+ * chunk, the WebGL context and the up-to-25 MB fetch all start on the same
+ * press, and 978 tiles (11.2%) are over the gate and get a sentence instead of
+ * a control.
+ *
+ * The host is `Stage` — the panel's own canvas, reached through
+ * `lazy(() => import('./Viewer'))`. Not row G3's `SharedStage`, which exists for
+ * the case a grid of live previews creates: browsers cap live WebGL contexts and
+ * drop the oldest, so *many* subjects need one shared context. G3 stated the
+ * rule when it declined to move `BuilderRoom` — a room is one subject, so it
+ * keeps `Stage` — and **a drawer is one subject too, and only ever one at a
+ * time**: the drawer unmounts its whole subtree on close. Routing it through the
+ * shared host would buy nothing and would put the subject registry and the 2D
+ * blit in the path of the single-canvas case the plain host already serves.
+ *
+ * The record the panel needs is assembled from the **aggregate and the shown
+ * variant**, not from {@link recordOf}. `blob`, `bytes` and `file` are
+ * per-variant fields and A1 measured `name`'s variance within an aggregate at 0,
+ * so every field is already in hand — and the panel then renders for the one
+ * record a scan could in principle miss, which a preview well should survive.
  *
  * ## The drawer shows an item, and the URL names a file
  *
@@ -102,6 +131,7 @@ import { buildAggregateIndex, resolveTags, selectVariant } from '@/catalog'
 import { closeTileDrawer, resolveTileTarget } from '@/routes'
 import { MAX_QUERY_LENGTH } from '@/search'
 import { addToLibrary, sendTileToBuilder, toggleLibrary, useIsInLibrary, useLockChosen, useLockSystem } from '@/store'
+import { Tile3DPanel } from '@/three'
 import { Chip, Drawer, Eyebrow } from '@/ui/primitives'
 import { loadCatalogIndex } from '@/ui/shell'
 
@@ -317,6 +347,23 @@ function TileDetail({
         name={aggregate.name}
         sheet={catalog.sprite}
         sheetUrl={shown.sprite ? spriteSheetUrl(catalog.assets, shown.blob) : null}
+      />
+
+      {/*
+        §2.5's live 3D view, gated on `bytes` and opened on a press. The record
+        is assembled from the aggregate and the variant rather than read off a
+        `CatalogRecord` — see the module docblock for why, and for why this uses
+        the panel's own `Stage` and not row G3's shared canvas.
+      */}
+      <Tile3DPanel
+        record={{
+          blob: shown.blob,
+          bytes: shown.bytes,
+          file: shown.file,
+          name: aggregate.name,
+        }}
+        tags={tags}
+        assets={catalog.assets}
       />
 
       {/*

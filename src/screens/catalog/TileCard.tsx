@@ -25,6 +25,11 @@
  *     by 323 aggregates and a card that cannot be told from its neighbour is not
  *     a card. See {@link fileTokenLabel} for what it separates and what it does
  *     not.
+ *   - **Tag chips close the remainder** — row X2, and the last row of A3's
+ *     cascade. The token leaves 21 groups over 45 items identical on every other
+ *     facet; measured, these chips take that to **0**, and nothing else the card
+ *     could show would. {@link cardTagChips} carries the three rules and the
+ *     measurement, and {@link TagStrip} the markup.
  *   - **The thumbnail still renders a file** — {@link TileAggregate.preview},
  *     A1's answer to which variant has a sprite sheet. A sprite sheet, a blob id
  *     and a material are per-file things, and an aggregate does not have them.
@@ -37,9 +42,12 @@
  * a few pixels per row, and by hundreds of pixels 40 rows down: the scrollbar
  * drifts and the grid jumps when it corrects. So the title is clamped to two
  * lines at a fixed height, the texture line to one, the size chip renders an em
- * dash rather than disappearing, and **the availability strip is a fixed two-line
- * box holding a variable one to four chips**. `catalog.css` holds the numbers and
- * `availability.ts`'s `CHIP_BUDGET` holds the arithmetic behind the strip's height.
+ * dash rather than disappearing, **the availability strip is a fixed two-line box
+ * holding a variable one to four chips**, and **the tag row is a fixed single
+ * line** that is empty on 1,044 of 3,822 items. `catalog.css` holds the numbers,
+ * `availability.ts`'s `CHIP_BUDGET` the arithmetic behind the strip's height, and
+ * `format.ts`'s `TAG_CHIP_BUDGET` the width the tag row can hold — which is why
+ * that row truncates rather than wraps.
  *
  * ## The thumbnail is a sprite sheet, and it is the screen's real cost
  *
@@ -62,7 +70,8 @@ import { TileThumb } from '@/ui/thumb'
 
 import type { AvailabilityChip } from './availability'
 import { availabilityChips, availabilityOf } from './availability'
-import { bytesRangeLabel, fileTokenLabel, humaniseSegment, sizeLabel } from './format'
+import type { CardTagChip } from './format'
+import { bytesRangeLabel, cardTagChips, fileTokenLabel, humaniseSegment, sizeLabel } from './format'
 
 /* ---------------------------------------------------------------------- card */
 
@@ -87,6 +96,8 @@ export interface TileCardProps {
 export function TileCard({ item, preview, tags, assets, sheet }: TileCardProps) {
   const material = resolveMaterial(tags, preview.file)
   const token = fileTokenLabel(preview.file)
+  const texture = item.texture === undefined ? 'Untextured' : humaniseSegment(item.texture)
+  const size = sizeLabel(item.foot, item.sizeCode)
 
   return (
     <article className="of-card">
@@ -119,11 +130,11 @@ export function TileCard({ item, preview, tags, assets, sheet }: TileCardProps) 
           title={MATERIALS[material.material].label}
           aria-hidden="true"
         />
-        {item.texture === undefined ? 'Untextured' : humaniseSegment(item.texture)}
+        {texture}
       </p>
 
       <p className="of-card-meta">
-        <Chip tone="size">{sizeLabel(item.foot, item.sizeCode)}</Chip>
+        <Chip tone="size">{size}</Chip>
         {/*
           The filename's variant token, between the size and the bytes because
           all three are the same kind of fact — a measured property of the thing,
@@ -138,6 +149,13 @@ export function TileCard({ item, preview, tags, assets, sheet }: TileCardProps) 
       </p>
 
       <AvailabilityStrip item={item} />
+
+      {/*
+        The design contract's tag chips, last before the toggle as §2.2 lists
+        them. What the card has already said is passed in rather than re-derived,
+        so the suppression rule is measured against the exact strings above.
+      */}
+      <TagStrip tags={tags} said={[item.name, texture, size]} />
 
       <LibraryToggle item={item} />
     </article>
@@ -177,6 +195,52 @@ function AvailabilityChipItem({ chip }: { chip: AvailabilityChip }) {
   return (
     <li className="of-avail" data-kind={chip.kind} data-state={chip.state}>
       {chip.label} <VisuallyHidden>— {chip.hint}</VisuallyHidden>
+    </li>
+  )
+}
+
+/* ----------------------------------------------------------------- tag chips */
+
+/**
+ * The tag row — design-contract.md §2.2's tag chips, and A3's last facet.
+ *
+ * A `<ul>` for the same reason the availability strip is one: it is a list of
+ * independent claims about one item, so a screen reader announces its length and
+ * can step through it. Each chip prints the tag's last segment and carries the
+ * segments above it as clipped text, because a one-word label is often only
+ * meaningful in its path — `Imperial` does not say imperial *what*, and
+ * `interface · secret door · magnetic` does.
+ *
+ * The row is **always rendered**, empty on 1,044 of 3,822 items, because
+ * `VirtuosoGrid` assumes a uniform item height and a row that disappeared on a
+ * quarter of the cards would drift the scroll position. It has no `aria-label`
+ * when it is empty: an empty list announced as "Tags, list, 0 items" is noise
+ * about a card that simply has nothing left to say.
+ *
+ * There is no `showTags` prop. §2.2 describes one, defaulting off; it would have
+ * exactly one call site, which always passes it, and defaulting it off would ship
+ * the 45 indistinguishable cards this row exists to fix. The prop is reported
+ * back to the contract rather than implemented.
+ */
+export function TagStrip({ tags, said }: { tags: readonly string[]; said: readonly string[] }) {
+  const chips = cardTagChips(tags, said)
+
+  return (
+    <ul className="of-card-tags" {...(chips.length === 0 ? {} : { 'aria-label': 'Tags' })}>
+      {chips.map((chip) => (
+        <TagChipItem chip={chip} key={chip.tag} />
+      ))}
+    </ul>
+  )
+}
+
+function TagChipItem({ chip }: { chip: CardTagChip }) {
+  return (
+    <li>
+      <Chip tone="tag">
+        {chip.label}
+        {chip.hint === '' ? null : <VisuallyHidden> — {chip.hint}</VisuallyHidden>}
+      </Chip>
     </li>
   )
 }

@@ -21,10 +21,12 @@
  * Two things guarantee uniformity here and neither is optional:
  *
  *   1. **The card is a fixed height** (`catalog.css`: clamped title, fixed
- *      texture line, an em dash where a size chip would be missing, and a
+ *      texture line, an em dash where a size chip would be missing, a
  *      fixed-height two-line availability strip whatever number of chips it
  *      holds — see `availability.ts#CHIP_BUDGET` for the width arithmetic that
- *      keeps four chips inside two lines).
+ *      keeps four chips inside two lines — and a fixed single-line tag row that
+ *      is reserved even on the 1,044 items with nothing to put in it, see
+ *      `format.ts#TAG_CHIP_BUDGET`).
  *   2. **The thumbnail is `aspect-ratio: 4 / 3`**, reserved before the image
  *      loads, so a card does not grow when its sheet arrives.
  *
@@ -59,9 +61,11 @@ import { TileCard } from './TileCard'
 /**
  * Pixels of cards mounted beyond the viewport, ahead and behind.
  *
- * One card is roughly 300 px tall — the availability strip added 49 px of it —
- * so this is about one extra row in the scroll direction. See the module docblock
- * for why it is not larger.
+ * One card is roughly 326 px tall — the availability strip is 49 px of it and row
+ * X2's tag row a further 23 — so this is a little under one extra row in the
+ * scroll direction. Left where it is rather than raised with the card: the reason
+ * not to overscan is what a mounted card costs in decoded image memory, and that
+ * argument got stronger, not weaker. See the module docblock.
  */
 export const OVERSCAN = { main: 300, reverse: 150 } as const
 

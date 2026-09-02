@@ -98,17 +98,17 @@
 
 /* Pushed to the end of the head row, so the primary action sits opposite the
    heading rather than trailing the summary. */
-.of-lib-head .of-lib-action[data-tone='primary'] {
+.of-lib-head .of-button[data-tone='primary'] {
   margin-left: auto;
 }
 
 /* ── Actions ─────────────────────────────────────────────────────────────────
    Nothing left. What was a 45-line copy of `../landing/landing.css`'s button
-   block is now `../../ui/primitives/primitives.css`, which answers to
-   `.of-lib-action` as well as to `.of-button` — the tones, the hover, the
+   block is now `../../ui/primitives/primitives.css` — the tones, the hover, the
    outlined tone's one-pixel padding trick and this screen's `md` size all live
-   there in one place. New call sites use `<Button>` and `buttonProps()`; this
-   alias goes when row 14's markup is next opened.
+   there in one place. The `.of-lib-action` alias that used to carry it here is
+   gone: row X2 swapped this screen's five call sites onto `<Button>` and
+   `buttonProps()`, so there is one class name for a button again.
 
    The rules below are the two things that are genuinely this screen's: where a
    button sits in this layout, not what it looks like.
@@ -384,8 +384,8 @@
   padding: 30px 0 40px;
 }
 
-.of-lib-empty .of-lib-action,
-.of-lib-error .of-lib-action {
+.of-lib-empty .of-button,
+.of-lib-error .of-button {
   margin-top: 8px;
 }
 
@@ -489,12 +489,12 @@
     font-size: 28px;
   }
 
-  .of-lib-head .of-lib-action[data-tone='primary'] {
+  .of-lib-head .of-button[data-tone='primary'] {
     margin-left: 0;
     width: 100%;
   }
 
-  .of-lib-transfer-actions .of-lib-action {
+  .of-lib-transfer-actions .of-button {
     flex: 1;
   }
 

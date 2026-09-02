@@ -1,4 +1,8 @@
 # dependencies
+# Trailing slash matters: a worktree provisioned by scratchpad/wt-add.sh gets a
+# node_modules *symlink*, which `node_modules/` does not match, so `git add -A`
+# in that worktree would stage the link. See wt-node_modules note below.
+node_modules
 node_modules/
 .pnpm-store/
 

@@ -833,6 +833,63 @@ describe('the actions', () => {
 
 /* ------------------------------------------------------------- the preview */
 
+describe('the gated 3D panel', () => {
+  it('is offered under the rotator, closed, with the download size in its label', async () => {
+    // Row 21 built `Tile3DPanel` and mounted it nowhere; row X2 put it here, one
+    // line under the rotator, exactly as that module's docblock specifies. The
+    // floor is 1.3 MB, inside the 24 MiB gate, so the control is offered.
+    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+
+    const button = within(drawer()).getByRole('button', { name: /View in 3D/ })
+    expect(button).toHaveTextContent('1.3 MB')
+    // Closed on open: the chunk, the WebGL context and the fetch all start on
+    // the same press, so nothing has been paid for yet.
+    expect(drawer().querySelector('.of-3d-well')).toBeNull()
+    expect(drawer().querySelector('.of-3d-panel')).toHaveAttribute('data-gate', 'open')
+  })
+
+  it('sits between the rotator and the title, and does not replace either', async () => {
+    // The two previews coexist, and the reason is a capability rather than
+    // taste: `OrbitControls` has no key bindings, so the rotator's `role="slider"`
+    // remains the keyboard route to every angle.
+    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+
+    const rotator = within(drawer()).getByRole('slider')
+    const panel = drawer().querySelector('.of-3d-panel')
+    const title = drawer().querySelector('.of-detail-title')
+
+    expect(panel).not.toBeNull()
+    expect(rotator.compareDocumentPosition(panel as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect((panel as Node).compareDocumentPosition(title as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+  })
+
+  it('describes the variant on screen, which is not always the one the URL named', async () => {
+    // The panel's record is assembled from the aggregate and the **shown**
+    // variant, so a link to the address holder that resolves to a different file
+    // offers that file's size and not the address holder's. `archTopper` is
+    // 2.1 MB and the preference-selected integral is 2.4 MB.
+    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+
+    expect(within(drawer()).getByRole('button', { name: /View in 3D/ })).toHaveTextContent('2.4 MB')
+  })
+
+  it('is not a WebGL test, and jsdom could not make it one', async () => {
+    // Stated rather than implied. Pressing the button loads a `lazy()` chunk
+    // that constructs a `WebGLRenderer` and uploads two `Float32Array`s to a GPU
+    // jsdom does not have; it rasterises nothing and reports every box as 0x0.
+    // What is provable here is the gate's decision, the label, the placement and
+    // the closed initial state — all of which are above. The renderer's own
+    // states live in `src/three/panel.test.tsx`, the corpus split behind the gate
+    // in `src/three/gate.test.ts`, and the promise that none of it reaches the
+    // entry chunk in `src/three/boundary.test.ts`, which reads the import graph.
+    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+
+    expect(drawer().querySelector('canvas')).toBeNull()
+  })
+})
+
 describe('the sprite rotator', () => {
   const frame = () => within(drawer()).getByRole('slider')
 

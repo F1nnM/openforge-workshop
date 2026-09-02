@@ -29,6 +29,12 @@
        height is `2 × --of-avail-h + --of-avail-gap` rather than a magic number,
        and `src/screens/catalog/availability.ts#CHIP_BUDGET` carries the width
        arithmetic proving the measured worst case (4 chips, 60 characters) fits.
+     - `.of-card-tags` is a **fixed single line**, empty on 1,044 of 3,822 items
+       and never wrapping. `format.ts#TAG_CHIP_BUDGET` carries the width
+       arithmetic and `cardTagChips` drops what will not fit, so the `overflow`
+       here is a guard rather than the mechanism — a chip is never half-visible.
+       One line and not two because the row is empty on a quarter of the corpus
+       and a second reserved line would be dead space on every one of those cards.
 
    Light only. There is no dark block, for the same reason there is none in
    tokens.css: Parchment is the committed direction.
@@ -547,6 +553,41 @@
 .of-avail[data-kind='note'] {
   border-style: dotted;
   opacity: 0.9;
+}
+
+/* ── Tag chips ───────────────────────────────────────────────────────────────
+   design-contract.md §2.2's tag chips — and A3's last facet, the one that takes
+   the 21 remaining identical cards to 0. The chips themselves are the `Chip`
+   primitive at `data-tone="tag"` (9.5px mono, muted, on the chip fill), so
+   nothing about their look lives here; this is the row they sit in.
+
+   `--of-tag-h` is 15px, which is `.of-chip[data-tone='tag']`'s own box: 9.5px
+   type at `line-height: normal` (~11px) plus its 2px of vertical padding each
+   side. Declared as the row's height rather than left to the content, because a
+   card with no chips must be exactly as tall as a card with four.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-card-tags {
+  --of-tag-h: 15px;
+
+  display: flex;
+  align-items: center;
+  /* `TAG_CHIP_BUDGET.gapPx`. Changing it means changing that constant, which
+     `corpus.test.ts` measures the widest row against. */
+  gap: 3px;
+  height: var(--of-tag-h);
+  margin: 0;
+  padding: 0;
+  /* Never a second line: `cardTagChips` has already dropped what would not fit,
+     so this only catches a font that measures wider than the budget assumes. */
+  flex-wrap: nowrap;
+  overflow: hidden;
+  list-style: none;
+}
+
+.of-card-tags > li {
+  display: flex;
+  min-width: 0;
 }
 
 /* ── Library toggle ──────────────────────────────────────────────────────── */

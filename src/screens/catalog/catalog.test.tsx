@@ -45,12 +45,13 @@ import { FIXTURE_CATALOG, FIXTURE_NAMES } from './fixture'
  * `itemWidth` matters as much as the height: the grid divides the viewport width
  * by it to get the row length, and a zero there means zero items per row.
  *
- * `itemHeight` is 309 rather than 260 because row A3's availability strip added a
- * fixed 49px to the card — a 41px two-line box plus the card's 8px gap. It is a
- * number the virtualiser is told rather than one it measures, so it has to move
- * with the card.
+ * `itemHeight` is 332 rather than 260 because two rows have added fixed boxes to
+ * the card: A3's availability strip is 49px of it (a 41px two-line box plus the
+ * card's 8px gap) and row X2's tag row a further 23 (a 15px line plus the same
+ * gap). It is a number the virtualiser is told rather than one it measures, so it
+ * has to move with the card.
  */
-const VIEWPORT = { viewportHeight: 1200, viewportWidth: 960, itemHeight: 309, itemWidth: 232 }
+const VIEWPORT = { viewportHeight: 1200, viewportWidth: 960, itemHeight: 332, itemWidth: 232 }
 
 function stubFetch(): void {
   vi.stubGlobal(
@@ -123,6 +124,18 @@ const chipLabels = () =>
 const chipStates = () =>
   [...document.querySelectorAll('.of-card .of-avail')].map(
     (chip) => `${chip.getAttribute('data-kind') ?? ''}:${chip.getAttribute('data-state') ?? ''}`,
+  )
+
+/**
+ * The tag chips on the one rendered card, in order.
+ *
+ * Read off the DOM for the same reason `chipLabels` is: these assertions fail if
+ * the row stops rendering, not only if `cardTagChips` changes its answer.
+ * `format.test.ts` covers the three rules and `corpus.test.ts` the corpus.
+ */
+const tagLabels = () =>
+  [...document.querySelectorAll('.of-card .of-card-tags .of-chip')].map((chip) =>
+    (chip.textContent ?? '').split('—')[0]?.trim(),
   )
 
 const group = (name: string) => screen.getByRole('group', { name })
@@ -619,6 +632,101 @@ describe('the filename token', () => {
     for (const record of FIXTURE_CATALOG.records) {
       expect(screen.queryByText(record.file)).not.toBeInTheDocument()
     }
+  })
+})
+
+/* ------------------------------------------------------------------ tag chips */
+
+describe('the tag chips', () => {
+  it('shows a tag the title does not already carry', async () => {
+    await renderCatalog('/catalog?kinds=base')
+
+    // `dungeon_stone%base+square.1x3.openlock.stl` carries `shape|base`,
+    // `texture|dungeon_stone`, `build|separate wall` and `connection|openlock`.
+    // Three of the four are already on the card — "Base" and "Dungeon Stone" in
+    // the title, the connection in the availability strip — so one chip is left,
+    // and it is the one the card had no other way to say.
+    expect(tagLabels()).toEqual(['Separate wall'])
+  })
+
+  it('renders the row even when there is nothing to put in it', async () => {
+    // "Wood Floor Wall 1x1" carries `shape|floor`, `shape|wall`, `texture|wood`
+    // and `connection|side|openlock`: every one is suppressed or dropped. The
+    // `<ul>` is still in the DOM, because `VirtuosoGrid` assumes a uniform item
+    // height and a row that disappeared on a quarter of the corpus would drift
+    // the scroll position. jsdom reports every box as 0x0, so what this proves is
+    // that the element is rendered — **not** that it occupies 15px. Only a real
+    // engine can show that, and `catalog.css` is where the height is declared.
+    await renderCatalog('/catalog?tex=wood')
+
+    expect(tagLabels()).toEqual([])
+    expect(document.querySelector('.of-card .of-card-tags')).toBeInTheDocument()
+    // And it is not announced as an empty list.
+    expect(document.querySelector('.of-card .of-card-tags')).not.toHaveAttribute('aria-label')
+  })
+
+  it('never chips a connection tag, which the availability strip owns', async () => {
+    await renderCatalog()
+
+    // Every fixture record but one carries a `connection|` tag, and no card
+    // shows one as a chip: `conn` throws the position segment away, which is the
+    // measured reason `availability.ts` derives the claim instead of printing it.
+    for (const label of ['OpenLOCK', 'DragonLock', 'openlock', 'dragonlock']) {
+      expect(
+        [...document.querySelectorAll('.of-card .of-card-tags .of-chip')].map((chip) => chip.textContent),
+      ).not.toContain(label)
+    }
+  })
+
+  it('carries the tag’s own path in the chip’s accessible name', async () => {
+    await renderCatalog('/catalog?kinds=base')
+
+    // "Separate wall" alone does not say what kind of fact it is. The clipped
+    // hint is the segments above the label — here just `build`.
+    const chip = document.querySelector('.of-card .of-card-tags .of-chip')
+    expect(chip?.textContent).toContain('Separate wall')
+    expect(chip?.textContent).toContain('build')
+  })
+})
+
+/* -------------------------------------------------------------- detail drawer */
+
+describe('the detail drawer', () => {
+  it('opens on a card press, which until row X2 it could not', async () => {
+    // `src/screens/detail/index.ts` had said since row 13 that the catalog
+    // screen mounts `TileDrawer`. It did not: the card's link set `?tile=`, the
+    // URL changed and nothing opened — and because nothing imported the
+    // component, the whole of §2.5 was tree-shaken out of `dist/`. This is the
+    // assertion that would have caught it.
+    await renderCatalog('/catalog?kinds=base')
+
+    fireEvent.click(screen.getByRole('link', { name: new RegExp(FIXTURE_NAMES[5]) }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: FIXTURE_NAMES[5] })).toBeInTheDocument()
+    })
+  })
+
+  it('offers the gated 3D view inside it, which is where row 21 put it', async () => {
+    // The other half of the same defect: `Tile3DPanel` was mounted nowhere, so
+    // G2 measured three.js as absent from the bundle entirely. The fixture base
+    // is 838 KB, well inside the 24 MiB gate, so the control is offered rather
+    // than refused.
+    //
+    // What this proves is that the panel is mounted and its gate decided `stl`.
+    // It does **not** prove anything renders: the press behind this button loads
+    // a `lazy()` chunk that constructs a `WebGLRenderer`, and jsdom has no WebGL
+    // and rasterises nothing. `src/three/panel.test.tsx` covers the panel's own
+    // states and `src/three/gate.test.ts` the corpus split behind the gate.
+    await renderCatalog('/catalog?kinds=base')
+    fireEvent.click(screen.getByRole('link', { name: new RegExp(FIXTURE_NAMES[5]) }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /View in 3D/ })).toBeInTheDocument()
+    })
+    // The size is part of the label, not decoration: the press starts the
+    // download, so the figure has to be legible before it.
+    expect(screen.getByRole('button', { name: /View in 3D/ })).toHaveTextContent('0.8 MB')
   })
 })
 

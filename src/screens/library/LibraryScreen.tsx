@@ -72,7 +72,7 @@ import { useMemo } from 'react'
 import type { CatalogAssets, SpriteSheet, TileId } from '@/catalog'
 import { countLabel, kindLabel, useCatalogIndex } from '@/screens/catalog'
 import { removeFromLibrary, useLibrary } from '@/store'
-import { Chip, Eyebrow } from '@/ui/primitives'
+import { Button, Chip, Eyebrow, buttonProps } from '@/ui/primitives'
 
 import type { LibraryContents, LibraryItem } from './grouping'
 import { collectLibrary, roundBytesLabel, totalBytesLabel } from './grouping'
@@ -151,7 +151,7 @@ export function LibraryScreen() {
         </p>
 
         {saved > 0 ? (
-          <Link className="of-lib-action" data-tone="primary" to="/builder">
+          <Link {...buttonProps({ tone: 'primary' })} to="/builder">
             Open in builder <span aria-hidden="true">→</span>
           </Link>
         ) : null}
@@ -168,9 +168,9 @@ export function LibraryScreen() {
             {state.error.message} Your library is safe — this screen needs the index to describe the
             tiles in it.
           </p>
-          <button type="button" className="of-lib-action" data-tone="secondary" onClick={state.retry}>
+          <Button tone="secondary" onClick={state.retry}>
             Try again
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -319,7 +319,7 @@ function LibraryEmpty() {
         Saved tiles are the palette the builder draws from — add the ones you print with, and they
         stay here between visits. If you kept a JSON backup, import it below.
       </p>
-      <Link className="of-lib-action" data-tone="primary" to="/catalog">
+      <Link {...buttonProps({ tone: 'primary' })} to="/catalog">
         Browse the catalog
       </Link>
     </div>

@@ -31,6 +31,28 @@
  * than being asked of the engine — the engine's `files` is the *corpus* total
  * and does not narrow with a filter.
  *
+ * ## The drawer is mounted here, and until row X2 it was mounted nowhere
+ *
+ * `src/screens/detail/index.ts` has said since row 13 that *"`TileDrawer` is
+ * mounted once, by the catalog screen"*. It was not. Every card links to
+ * `?tile={ordinal}` and the drawer reads that param, so the link worked, the URL
+ * changed, and nothing opened — and because nothing imported the component,
+ * `detail.css`, the sprite rotator, the variants table and `Tile3DPanel` were all
+ * tree-shaken out of `dist/` entirely. It is one line, and it is the line that
+ * makes row 21's 3D panel and row A5's variants table reachable at all.
+ *
+ * Both optional props are passed, which is the documented preferred form: the
+ * screen has already fetched and parsed the 5.6 MB index and already holds the
+ * engine, and `buildAggregateIndex` measures 86.8 ms over the real corpus, so
+ * letting the drawer derive a second copy would pay that on the first open for
+ * nothing.
+ *
+ * It is mounted **outside** `.of-catalog-results` and unconditionally, rather
+ * than beside the grid or behind the `ready` state. Unconditionally because the
+ * drawer's own `unknown` state is the honest answer to a rotted `?tile=` link and
+ * it can only render that if it is mounted; outside the results column because
+ * it is an overlay on the scrim and has no place in the grid's flow.
+ *
  * ## It renders a `<section>`, not a `<main>`
  *
  * `AppFrame` owns the document's one `<main>`. The `<h1>` is clipped rather than
@@ -41,6 +63,8 @@
  */
 import { getRouteApi } from '@tanstack/react-router'
 import { useMemo } from 'react'
+
+import { TileDrawer } from '@/screens/detail'
 
 import { useCatalogIndex } from './catalogIndex'
 import { FacetSidebar } from './FacetSidebar'
@@ -121,6 +145,17 @@ export function CatalogScreen() {
           )
         ) : null}
       </div>
+
+      {/*
+        §2.5's drawer, reading `?tile=` off the URL. See the docblock: it is
+        unconditional, and both props are the index and the aggregate layer this
+        screen already holds.
+      */}
+      <TileDrawer
+        {...(state.status === 'ready'
+          ? { catalog: state.index.file, aggregates: state.index.engine.aggregates }
+          : {})}
+      />
     </section>
   )
 }

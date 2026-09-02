@@ -35,14 +35,23 @@
  * element: `<Button>` for real buttons, `{...buttonProps({ tone: 'primary' })}`
  * for everything else. One set of declarations either way.
  *
- * ## The legacy class names still resolve
+ * ## The two legacy class names are gone
  *
- * `.of-action` and `.of-lib-action` are listed beside `.of-button` in
- * `primitives.css`, so the landing and library screens' stylesheets keep no
- * button declarations at all — only where a button sits in their layouts. Their
- * *markup* belongs to rows 16 and 14, which is why the class names survive the
- * extraction; when either screen's components are next opened, swapping the class
- * for this component is one line per call site and deletes both aliases.
+ * `.of-action` and `.of-lib-action` were listed beside `.of-button` in
+ * `primitives.css` when this component was extracted, because the *markup*
+ * carrying them belonged to other rows. Row X2 opened both screens and swapped
+ * all seven call sites — the landing hero's two `Link`s at `size: 'lg'`, the
+ * library head's and empty state's two `Link`s, its retry `<button>`, and the
+ * backup block's export `<button>` and import `<label>` — so **both aliases have
+ * been deleted** and `.of-button` is the only class name for a button in the app.
+ * What the two screens' stylesheets still hold is where a button sits in their
+ * layouts, never what it looks like.
+ *
+ * The swap was one line per call site and nothing but the selector lists changed
+ * in `primitives.css`, which is what listing the aliases there rather than
+ * aliasing from the screens was for: a custom property set in another file would
+ * have resolved differently depending on which stylesheet the bundler emitted
+ * first.
  */
 import type { ButtonHTMLAttributes } from 'react'
 
