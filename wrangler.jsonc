@@ -3,17 +3,67 @@
   "name": "openforge-workshop",
   "compatibility_date": "2026-08-01",
 
-  // Static assets only. There is no Worker script in v1: the catalog index ships
-  // as a static asset and every query runs in the browser, so nothing needs edge
-  // compute. Static asset requests are free and unmetered on Cloudflare, and
-  // adding a script would put a billed CPU hop in front of them for no benefit.
+  // The bulk-download fallback for iOS and multi-gigabyte packs (plan section 11).
+  // Until this row it was recorded here as "deliberately not here yet"; the
+  // reasoning that kept it out has not changed, so read how it is wired before
+  // adding anything else to it.
   //
-  // The one Worker v1 may still gain is the bulk-download fallback for iOS and
-  // multi-gigabyte packs (plan section 11). It is deliberately not here yet.
+  // The original argument was that static asset requests are free and unmetered
+  // on Cloudflare, and that adding a Worker script would put a billed CPU hop in
+  // front of every one of them for no benefit. That is still true, and
+  // `assets.run_worker_first` below is how both things hold at once: it names the
+  // *only* path that reaches this script, so every page load, every catalog index
+  // fetch and every sprite request is served by the asset worker exactly as
+  // before, with no script in front of it.
+  //
+  // Same origin as the app rather than a second Worker on its own hostname,
+  // which buys two things: the app's requests to it need no CORS at all, and
+  // there is one deploy rather than two.
+  "main": "./workers/zip/index.ts",
+
   "assets": {
     "directory": "./dist",
     // Client-side routing: unknown paths serve index.html rather than 404ing.
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // Without this, `not_found_handling` would swallow /zip and serve index.html
+    // to a download request. Scoped to the one path, so nothing else is billed.
+    "run_worker_first": ["/zip"]
+  },
+
+  "limits": {
+    // Measured, not guessed. The vendored client-zip writes STORE entries at
+    // 488 MB/s of CPU (256,000,966 archive bytes in 524 ms of CPU on node 22 /
+    // V8), i.e. 2,048 ms of CPU per GB — almost all of it CRC-32. So:
+    //
+    //   - the 1.6435 GB worst case (50 placements at the corpus p95) is 3,366 ms,
+    //     which fits the 30,000 ms default with 8.9x to spare;
+    //   - the Worker's own 8 GB cap is 16,384 ms, which does not fit
+    //     comfortably, and it is the *cap* that has to fit rather than the
+    //     typical case.
+    //
+    // 300,000 ms is Cloudflare's maximum on Workers Paid. CPU is billed on what
+    // is used and not on the limit, so raising it costs nothing and removes the
+    // one failure mode where a legitimate large archive dies two thirds of the
+    // way through with nothing useful in the log.
+    //
+    // Wall clock is deliberately not limited: a Worker has no duration limit
+    // while it is doing I/O, and this one is almost entirely I/O — 1.6435 GB
+    // takes 144-483 s at the 11.4-3.4 MB/s row W1 measured against this bucket.
+    "cpu_ms": 300000
+  },
+
+  // `main`, `assets`, `limits` and `observability` are inheritable, so the
+  // environments below take them as written above. `vars` is *not* inheritable —
+  // wrangler warns about exactly this — so it is repeated per environment.
+  "vars": {
+    // The models bucket, as a binding rather than as request input. A Worker that
+    // fetched a caller-supplied URL would be an open proxy, and a download path
+    // that accepts a URL is one that can be pointed at a decimated preview
+    // (plan section 10, obligation 3). `workers/zip/url.ts` validates that
+    // whatever this is composes into the one URL shape the corpus uses, so a
+    // value pointing at the sprite bucket is a startup error rather than an
+    // archive full of PNGs.
+    "MODELS_BASE": "https://objects.openforge.tools/models"
   },
 
   "observability": {
@@ -22,10 +72,16 @@
 
   "env": {
     "staging": {
-      "name": "openforge-workshop-staging"
+      "name": "openforge-workshop-staging",
+      "vars": {
+        "MODELS_BASE": "https://objects.openforge.tools/models"
+      }
     },
     "production": {
-      "name": "openforge-workshop"
+      "name": "openforge-workshop",
+      "vars": {
+        "MODELS_BASE": "https://objects.openforge.tools/models"
+      }
     }
   }
 }
