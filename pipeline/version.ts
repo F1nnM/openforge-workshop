@@ -21,6 +21,18 @@ import type { CatalogAssets } from '../src/catalog'
  * field the aggregate hoists onto a card is not constant within a group — and a
  * check is not a derivation. `SCHEMA_VERSION` stays 3 for the same reason; its
  * docblock carries the payload measurement behind that decision.
+ *
+ * **Row C1 did not bump it either, and the reason is the same one twice over.**
+ * `constrain` resolution is derived in the browser by `src/composition/`, so no
+ * field's derivation changed, no field was added, and **the emitted record shape
+ * is byte-identical**: the `config` block is still carried through from the
+ * fixture verbatim, unresolved, exactly as `pipeline/fixtures.ts` describes it.
+ * What the build gained is again a check — {@link BuildStats.configRefs}'
+ * companion `assertConfigRefs` in `build.ts` — plus three stats fields, and
+ * neither a check nor a report is a derivation. Note what a bump *would* have
+ * meant here: `PIPELINE_VERSION` is what a consumer memoises a derived layer on,
+ * and moving it would invalidate every cached aggregate and search index to
+ * announce a change no consumer can observe.
  */
 export const PIPELINE_VERSION = 1
 
@@ -43,9 +55,20 @@ export const PIPELINE_VERSION = 1
  * leanest emittable form — design id, address and the member ordinals, no
  * hoisted facets and no variant detail — measures **40,454 B brotli**, which
  * would take the index to 79.3% to say something a reader recomputes in one pass
- * over data it already holds. Row C1's precomputed candidate sets are the real
- * threat to this budget (29 KB to 9.4 MB by reading), and 8 percentage points
- * spent here is 8 it would not have.
+ * over data it already holds.
+ *
+ * **Row C1 added 0 bytes too, and it turned out not to be a budget question.**
+ * The plan expected candidate sets of 29 KB to 9.4 MB and named them the real
+ * threat to this budget. Measured, all four encodings this row could have
+ * shipped fit: the leanest is 513 B brotli and the fattest — a per-tile-slot set
+ * of full catalog ids, 15,107,263 B *raw*, which is the 9.4 MB order the plan
+ * feared — is **37,542 B brotli** against the 146,597 B free here. So the
+ * argument for deriving is not the payload; it is that `constrain` is a join
+ * over runtime sibling selections, so any precomputed set is stale after one
+ * click. `src/composition/measure.ts` carries the whole table and
+ * `src/composition/corpus.test.ts` re-measures every figure in it. **A reading
+ * chosen because it fit the budget would have been the wrong reading, and this
+ * one was not chosen that way.**
  *
  * One caveat on any before/after comparison, established by W4: `version.built`
  * is a clock reading, and the timestamp alone swings brotli by roughly ±210 B.
