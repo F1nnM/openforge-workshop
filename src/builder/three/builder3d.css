@@ -1,0 +1,163 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the instanced 3D builder (row G2).
+
+   Two states in one stylesheet, because they are one component: a small pill in
+   the corner of `.of-builder-stage`, and the same element expanded to cover that
+   stage when the room is open.
+
+   Covering rather than replacing is deliberate. `PlanCanvas` owns its own
+   viewport — zoom, pan, the cursor position — and none of it is in the store, so
+   swapping the canvas out and back would silently reset the drawing every time
+   somebody looked at the room. The plan stays mounted underneath and comes back
+   exactly as it was.
+
+   The well's geometry is transcribed from `../../three/three.css` rather than
+   invented: the same `radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg))`
+   ground, the same 1px `--line` border. That matters beyond tidiness — `Stage`
+   draws with a transparent buffer, so this gradient *is* the background of the
+   3D scene and the AO contour is tuned against it.
+
+   Unlayered, matching the rest of the app's CSS.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-b3d-launch {
+  position: absolute;
+  z-index: 3;
+}
+
+/* Closed: a plate in the stage's top-right, clear of the floating toolbar
+   (centred, `top: 12px`) and of both corner plates (`bottom: 12px`). */
+.of-b3d-launch[data-open='false'] {
+  top: 12px;
+  right: 12px;
+}
+
+/* Open: the whole stage. `inset: 0` rather than a width/height pair so it tracks
+   a resized panel without a resize observer. */
+.of-b3d-launch[data-open='true'] {
+  inset: 0;
+}
+
+/* ── The toggle ──────────────────────────────────────────────────────────── */
+
+.of-b3d-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg2) 88%, transparent);
+  color: var(--ink);
+  font-family: var(--face-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.of-b3d-toggle:hover:not(:disabled) {
+  background: var(--bg2);
+}
+
+.of-b3d-toggle:disabled {
+  color: var(--mut);
+  cursor: default;
+}
+
+/* The note is part of the label, not decoration. Before the backfill it says the
+   meshes are not published yet, so the empty room is expected rather than a
+   surprise after a press. */
+.of-b3d-toggle-note {
+  font-family: var(--face-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--mut);
+}
+
+/* ── The open room ───────────────────────────────────────────────────────── */
+
+.of-b3d {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  background: var(--bg);
+}
+
+.of-b3d-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.of-b3d-canvas,
+.of-b3d-well {
+  min-height: 0;
+  background: radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg));
+}
+
+.of-b3d-well {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+}
+
+.of-b3d-note {
+  max-width: 46ch;
+  margin: 0;
+  color: var(--mut);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.of-b3d-detail {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+/* ── The readout ─────────────────────────────────────────────────────────────
+   Instances against draw calls is the whole claim of this row, so it is on
+   screen rather than in a devtools panel. `auto-fit` so it reflows to one column
+   in a narrow stage instead of overflowing it — D6's lesson: a clipped child
+   that escapes its container costs the page a scrollbar. */
+.of-b3d-readout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 2px 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+}
+
+.of-b3d-readout > div {
+  min-width: 0;
+}
+
+.of-b3d-wide {
+  grid-column: 1 / -1;
+}
+
+.of-b3d-readout dt {
+  color: var(--mut);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.of-b3d-readout dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+}
