@@ -11,6 +11,16 @@
  * perfectly and renders a blank page. It mounts with `createRoot` and React's
  * own `act` rather than a testing library — this repo has none, and adding one
  * is not this PR's to add.
+ *
+ * Row X10 made four of the six routes lazy and had to lean on that block, which
+ * is when **three of its five markers turned out not to be able to fail**:
+ * `Catalog`, `Library` and `Builder` are also the header's own nav labels, so
+ * those three cases passed against exactly the blank screen the block exists to
+ * catch. Every marker is now a string only the screen can produce, and the block
+ * covers `/settings` too. The `lazy or eager` block below is the other half:
+ * mounting proves a lazy route resolves, and that block proves the four that are
+ * lazy still are, because re-inflating the eager bundle by 42 kB gzipped is one
+ * convenient `import` away and nothing else in the repo would notice.
  */
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { act, createElement } from 'react'
@@ -24,6 +34,14 @@ import { BUILD_ANY, BUILD_UNSPECIFIED, buildSystemFilter, defaultCatalogSearch }
 import { OVERLAP, catalogOf } from './fixture'
 import { createWorkshopRouter } from './router'
 import type { WorkshopRouter } from './router'
+import {
+  assembliesRoute,
+  builderRoute,
+  catalogRoute,
+  landingRoute,
+  libraryRoute,
+  settingsRoute,
+} from './routeTree'
 import { closeTileDrawer, openTileDrawer, showTileInDrawer } from './tileDrawer'
 
 const ordinal = (n: number) => ManifestOrdinal.parse(n)
@@ -96,6 +114,72 @@ describe('route tree', () => {
     expect(leafRouteId(junk)).toBe('/assemblies')
     await junk.navigate({ to: '/catalog' })
     expect(href(junk)).toBe('/catalog')
+  })
+})
+
+describe('lazy or eager, as row X10 measured it', () => {
+  /**
+   * The one thing about laziness that is observable from a test.
+   *
+   * A statically mounted route's `component` **is** the screen's own function; a
+   * lazily mounted one is TanStack's wrapper around an `import()`, and the
+   * screen function is not reachable from the route at all. Asserting that
+   * identity in both directions is what holds row X10's measurement in place,
+   * and it needs holding: a static `import` of one screen is a one-line
+   * convenience that re-inflates the eager bundle and that **nothing else in
+   * this repository would notice**, because the only other evidence is a
+   * `vite build` nobody runs in CI.
+   *
+   * `lazyRouteComponent`'s own `.preload` is deliberately not what is asserted:
+   * it clears itself to `undefined` on the first successful load, and the block
+   * above this one loads every route, so an assertion on it would pass or fail
+   * on test order. Identity does not move.
+   *
+   * The numbers, from `routeTree.tsx`'s module note: the four lazy routes are
+   * worth -155,509 B raw / -42,058 B gz / -33,113 B br of eager payload on every
+   * page. `/` and `/catalog` are eager because a lazy route paints **nothing**
+   * until its chunk lands — no header, no nav — and defers the header's
+   * `catalog.json` request behind it, which on the two screens people cold-load
+   * costs more than the bytes it saves.
+   */
+  /**
+   * Both screen imports below are deferred, and that is a finding rather than a
+   * style.
+   *
+   * `@/screens/detail` imports `@/routes` — for `openTileDrawer` and
+   * `resolveTileTarget`, reasonably — which closes a cycle back onto
+   * `routeTree.tsx` through the catalog screen's drawer. Whichever side is
+   * entered first wins: the app enters `routeTree.tsx` first and is fine, but a
+   * **static** `import { CatalogScreen } from '@/screens/catalog'` at the top of
+   * this file is entered first, and then the tree is built while that module is
+   * still initialising and both eager routes get `component: undefined`.
+   *
+   * Measured, by writing it that way first: `catalogRoute.options.component`
+   * came back `undefined` and `/catalog` mounted the frame and nothing else. The
+   * four lazy routes are immune — their import is deferred by construction — so
+   * `/` and `/catalog` are the whole remaining exposure, and it is silent
+   * everywhere except in the mounting block above, whose markers now come from
+   * the screens instead of from the nav.
+   */
+  it('mounts the two cold-loaded screens eagerly', async () => {
+    const { Landing } = await import('@/screens/landing')
+    const { CatalogScreen } = await import('@/screens/catalog')
+    expect(landingRoute.options.component).toBe(Landing)
+    expect(catalogRoute.options.component).toBe(CatalogScreen)
+  })
+
+  it('mounts the four press-reached screens lazily', async () => {
+    const lazy = [
+      [libraryRoute, (await import('@/screens/library')).LibraryScreen],
+      [builderRoute, (await import('@/screens/builder')).BuilderScreen],
+      [settingsRoute, (await import('@/screens/settings')).SettingsScreen],
+      [assembliesRoute, (await import('@/screens/assemblies')).AssembliesScreen],
+    ] as const
+    expect(lazy).toHaveLength(4)
+    for (const [route, screen] of lazy) {
+      expect(typeof route.options.component).toBe('function')
+      expect(route.options.component).not.toBe(screen)
+    }
   })
 })
 
@@ -312,22 +396,44 @@ describe('mounting', () => {
     }
   }
 
+  /**
+   * Every marker here is a string **only that screen can produce**, and that is
+   * a correction rather than a style.
+   *
+   * `Catalog`, `Library`, `Builder`, `Assemblies` and `Settings` are the
+   * header's five nav labels, so the frame renders all five of them on every
+   * route — measured, by dumping `container.textContent` for each path. Three of
+   * this block's markers used to be exactly those words, which means the three
+   * cases that mattered most passed against a route rendering nothing at all.
+   * The replacements are a search field's label, an empty-library sentence, the
+   * builder's own index-failure copy, C3's headline and the settings screen's
+   * `<h2>`.
+   *
+   * The builder's is a pattern rather than a string on purpose: jsdom's `fetch`
+   * of `/catalog/catalog.json` fails, so a mounted builder shows either its
+   * loading or its error branch depending on when the rejection flushes. Both
+   * sentences are `BuilderScreen`'s and neither is the frame's, which is all
+   * this block asks of them.
+   */
   it.each([
     // The real landing screen (PR 16) replaced `LandingPlaceholder`, so the
     // marker is a phrase from its headline rather than the placeholder's title.
     ['/', 'Every tile in the archive'],
-    ['/catalog', 'Catalog'],
-    ['/library', 'Library'],
-    ['/builder', 'Builder'],
+    ['/catalog', 'Search the catalog'],
+    ['/library', 'Your library is empty.'],
+    ['/builder', /Loading the archive index|The catalog index could not be loaded\./],
     // Row C3's screen. This case is the whole point of mounting it: C3 verified
     // that `dist/` contained none of its files, because an unmounted route means
     // an unreachable component and an unbundled one. A route entry that resolved
     // but rendered nothing would pass the `routes to` case above and fail here.
     ['/assemblies', 'Guided assemblies'],
-  ])('renders %s inside the app frame', async (path, heading) => {
+    // Never covered here until row X10 made it lazy, which is the point at
+    // which "does this screen still render" stopped being obvious.
+    ['/settings', 'Lock system'],
+  ])('renders %s inside the app frame', async (path, marker) => {
     const { text, unmount } = await mount(routerAt(path))
     expect(text).toContain('OPENFORGE')
-    expect(text).toContain(heading)
+    expect(text).toMatch(marker)
     unmount()
   })
 

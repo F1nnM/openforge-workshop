@@ -105,6 +105,49 @@ export type NoteCode =
    * regression there would be loud instead of silent.
    */
   | 'base-option-chosen'
+  /**
+   * A base was auto-inserted for a topper that **already has a base under it**
+   * on the plan — so the bill asks the user to print two.
+   *
+   * Row S5 flagged this for hand-placed catalog bases and row X9 found it
+   * structurally true for generated ones as well. Row X10 reproduced both and
+   * measured what it actually costs, which is narrower than either reported:
+   * the *download* is unchanged, because `buildBillOfTiles` folds by md5 and
+   * both copies are the same file — 13,124,868 B with the base placed and
+   * 13,124,868 B without it. What doubles is the **print count**: one line at
+   * quantity 2, `baseCopies` 1. So the harm is a wasted print and a wrong parts
+   * list, not a wasted download.
+   *
+   * **This note discloses it; it deliberately does not suppress the insert.**
+   * Suppressing would mean accepting whatever base is underneath, and the
+   * candidate pool that would be accepted is measured: the median topper
+   * carrying a size code has **79** same-code bases to choose from (max 132, over
+   * 1,999 toppers), and **584 of the 1,963 bases (29.7%) are a print variant
+   * rather than the base itself** — 378 topless, 206 unsupported. A topless base
+   * has no top surface; it is a different product. Row D1 exists because a
+   * ranking that fell through to file size handed one out for 79.1% of openlock
+   * toppers silently, and a suppression rule with no congruence check reopens
+   * that door from the other side. Telling the user beats guessing for them.
+   *
+   * The condition is **a shared anchor**, not an overlap test, and that is a
+   * layering fact rather than laziness: overlap lives in
+   * `src/builder/canvas/overlap.ts`, which imports `@/assembly`, so the geometry
+   * cannot come back the other way without a cycle. A shared `(x, z)` needs no
+   * geometry, and it is how these actually stack — the base for a separate-wall
+   * topper is itself `wall`-shaped, so base and topper are anchored together. It
+   * will not see a base whose anchor is offset from the topper's; the honest fix
+   * for that is `AssemblyOptions` taking the answer from the builder, which owns
+   * the geometry, and that is a row across both modules.
+   *
+   * `warn`, and the frequency says that is not wallpaper: it needs the user to
+   * have placed a base *and* a topper on the same cell, which no fixture and no
+   * default scene does. **2,250 of 4,363 topper files (51.6%)** still receive an
+   * auto-inserted base after A6's rule 0 substitutes a self-sufficient sibling
+   * where one exists, and **1,835 of the 1,963 bases (93.5%)** are placeable from
+   * the palette, so the population that can reach this is large — it is the
+   * coincidence that is rare.
+   */
+  | 'base-already-on-plan'
   /** The chosen base does not offer the preferred lock system. */
   | 'base-lock-mismatch'
   /** The chosen base's texture differs from the topper's. Normal, not a fault. */
@@ -128,6 +171,7 @@ export const NOTE_SEVERITY: Readonly<Record<NoteCode, 'info' | 'warn'>> = Object
   'base-unmatchable': 'warn',
   'no-congruent-base': 'warn',
   'base-option-chosen': 'warn',
+  'base-already-on-plan': 'warn',
   'base-lock-mismatch': 'warn',
   'base-texture-mismatch': 'info',
   'lock-unavailable': 'warn',

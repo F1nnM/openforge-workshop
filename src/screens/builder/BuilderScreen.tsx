@@ -151,9 +151,28 @@ function Builder({ index }: { index: CatalogIndex }) {
 
   const planCatalog = useMemo(() => planCatalogFromFile(index.file), [index])
   const assembly = useMemo(() => buildAssemblyIndex(index.file), [index])
+  // Anchors only, and memoised rather than mapped inline: a fresh array on every
+  // render would be a new dependency identity every render, so the bill below —
+  // one pass over the scene — would rebuild on a hover or a status change.
+  const generatedBaseAnchors = useMemo(
+    () => Object.values(generatedPlacements).map((placement) => ({ x: placement.x, z: placement.z })),
+    [generatedPlacements],
+  )
+  /**
+   * `generatedBases` is the one thing the catalog bill needs from the generated
+   * map, and it is positions only.
+   *
+   * Row X9 reported that `buildBillOfTiles` sees `placements` alone, so the
+   * auto-insert rule cannot see a generated base and adds a catalog one beside
+   * it. It still adds one — row X10 measured why suppressing would be worse than
+   * disclosing, in `assembly/notes.ts#base-already-on-plan` — but the bill can
+   * now *say* so, and this is the argument it needs to. Nothing else about a
+   * generated base crosses into the catalog bill: the two remain the separate
+   * derivations S5 made them, for the reasons in the note below.
+   */
   const bill = useMemo(
-    () => buildBillOfTiles(Object.values(placements), assembly, { lock }),
-    [placements, assembly, lock],
+    () => buildBillOfTiles(Object.values(placements), assembly, { lock, generatedBases: generatedBaseAnchors }),
+    [placements, assembly, lock, generatedBaseAnchors],
   )
 
   /**

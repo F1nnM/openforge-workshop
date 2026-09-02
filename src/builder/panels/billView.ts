@@ -598,6 +598,19 @@ export function noteCopy(note: BillNote): NoteCopy {
           'was placed. The rows below mark which files those are.',
       }
 
+    case 'base-already-on-plan':
+      return {
+        ...base,
+        headline: `${n} ${pieces} ${has} a base on the plan and a second one in the bill`,
+        detail:
+          'A base is a line item for every OpenForge topper whether or not one was placed, and one is already ' +
+          'sitting on that cell — so the bill asks you to print two. The download is unaffected: both copies are ' +
+          'the same file and it is fetched once. Nothing is removed for you, because the base under the piece ' +
+          'might not be the one it needs — 584 of the 1,963 bases in the archive are a print variant rather than ' +
+          'the base itself, 378 of them with no top surface at all. Check the two against each other and take ' +
+          'one off the grid, or print the one the bill chose.',
+      }
+
     case 'base-option-chosen':
       return {
         ...base,

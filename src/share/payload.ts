@@ -46,7 +46,8 @@
  *
  * ```text
  *   u8      format version          SHARE_FORMAT_VERSION
- *   u8      flags                   bit 0 x exact, bit 1 z exact, bit 2 rotation exact
+ *   u8      flags                   bits 0–2 tile x/z/rotation exact,
+ *                                   bits 3–5 generated x/z/rotation exact
  *   uvar    manifest version        CatalogFile.version.manifest
  *   u8      lock index              index into LOCK_ORDER
  *   uvar    count                   number of placements
@@ -55,7 +56,52 @@
  *   x column                        count × zigzag(x · 2)   or   count × f64
  *   z column                        count × zigzag(z · 2)   or   count × f64
  *   rotation column                 count × uvar(rot · 4)   or   count × f64
+ *   uvar    recipe count            distinct generated bases in the scene
+ *   recipe table                    recipeCount × (uvar byte length, UTF-8 bytes)
+ *   uvar    generated count         generated placements on the scene
+ *   recipe column                   genCount × uvar (index into the recipe table)
+ *   generated x column              genCount × zigzag(x · 2)   or   genCount × f64
+ *   generated z column              genCount × zigzag(z · 2)   or   genCount × f64
+ *   generated rotation column       genCount × uvar(rot · 4)   or   genCount × f64
  * ```
+ *
+ * ## The generated half, and why it is a table of strings
+ *
+ * A generated base is not a catalog file, so there is no manifest ordinal to
+ * stand in for it (`src/generator/placement/scene.ts` — it is a third identity).
+ * What identifies one is its **recipe**, and the recipe has to travel as text,
+ * because the alternative — a positional tuple of parameter values against the
+ * pinned `.scad` schema — drops the parameter *names*, and `panel/recipe.ts` is
+ * explicit that a recipe which does not record what it meant silently changes
+ * meaning the day a `.scad` default moves. A URL sits in a chat log for years;
+ * that is the last place to put a positional encoding against a pin.
+ *
+ * So the table holds one JSON document per **distinct** base, and the placements
+ * index into it. The dedup is the whole reason it is affordable: a room is one
+ * base recipe repeated, and the measured cost is the *first* document.
+ *
+ * Measured, `deflate-raw` then base64url, against a 2,000-character URL on
+ * `https://openforge.tools/builder` — see `capacity.test.ts`, which prints it:
+ *
+ * | scene                                    | link chars | of budget |
+ * | ---------------------------------------- | ---------: | --------: |
+ * | 90 tiles, no generated bases             |        130 |      6.5% |
+ * | 90 tiles, 1 generated base               |        570 |     28.5% |
+ * | 90 tiles, 16 generated bases, 1 recipe   |        608 |     30.4% |
+ * | 90 tiles, 90 generated bases, 1 recipe   |        636 |     31.8% |
+ * | 90 tiles, 90 generated bases, 3 recipes  |        680 |     34.0% |
+ * | 90 tiles, 90 generated bases, 90 recipes |      1,784 |     89.2% |
+ * | 400 tiles, 64 generated bases, 2 recipes |        756 |     37.8% |
+ *
+ * **The first base costs 440 characters and the next 89, sharing its recipe, cost
+ * 66 between them.** The widest of the five shapes at file defaults is a
+ * 242-character recipe key, so a document — the id and the recipe, and the id
+ * *is* the key — is 563 bytes raw; deflate takes the ninetieth copy of that text
+ * to almost nothing, and the table means it only ever sees one.
+ *
+ * The adversarial row is a scene of ninety bases with ninety *different* recipes,
+ * which is not a thing anyone builds, and it still fits. So the loss X9 found is
+ * worth the bytes rather than worth a warning.
  *
  * ## Quantisation, and why there is an exact escape hatch
  *
@@ -88,8 +134,21 @@ import { ByteReader, ByteWriter, MalformedPayloadError } from './bytes'
  * were where this build expects them. It is separate from the manifest version:
  * this one says "these bytes are laid out differently", that one says "these
  * integers mean different tiles".
+ *
+ * **2 — the generated half.** A v1 payload ends after the rotation column, so a
+ * v2 reader meeting one runs off the end and a v1 reader meeting a v2 payload
+ * finds trailing bytes. Both are refusals rather than a plausible wrong room,
+ * which is what the version byte is for; the version check in
+ * {@link decodePayload} is what makes the first of those a named failure.
+ *
+ * The bump is free **because nothing has ever written a v1 link**: no module
+ * under `src/` outside `src/share/**` imports the codec (`tools/stamp/run.ts`
+ * and `tools/hygiene/project.test.ts` reach for `buildShareManifest`, which is
+ * the manifest and not the codec), so there is no link in the wild to refuse.
+ * That was checked rather than assumed, and it will not be true again — the next
+ * change to this layout is the one that has to be additive.
  */
-export const SHARE_FORMAT_VERSION = 1
+export const SHARE_FORMAT_VERSION = 2
 
 /**
  * Ceiling on the declared placement count.
@@ -102,6 +161,23 @@ export const SHARE_FORMAT_VERSION = 1
  * first; this catches the rest.
  */
 export const MAX_SHARE_PLACEMENTS = 100_000
+
+/**
+ * Ceiling on the declared generated-placement count, and on the recipe table.
+ *
+ * One number for both, and the same allocation-guard argument as
+ * {@link MAX_SHARE_PLACEMENTS}: a hand-edited payload can claim any count. The
+ * real ceiling is the URL budget, which the measured table above puts at well
+ * under a hundred distinct recipes, so this is four orders of magnitude of
+ * headroom rather than a product limit.
+ *
+ * It is lower than {@link MAX_SHARE_PLACEMENTS} because a recipe table entry is
+ * a *string*, so a claimed count is a claim about far more than one byte each.
+ * The cheaper "count against bytes remaining" check in {@link decodePayload}
+ * catches almost every corrupt header first; this catches a header corrupt in a
+ * buffer big enough to survive that.
+ */
+export const MAX_SHARE_GENERATED = 10_000
 
 /**
  * Position quantum: values are stored as `x · 2`, i.e. in half grid units.
@@ -125,7 +201,11 @@ const ROT_SCALE = 4
 const FLAG_X_EXACT = 1
 const FLAG_Z_EXACT = 2
 const FLAG_ROT_EXACT = 4
-const KNOWN_FLAGS = FLAG_X_EXACT | FLAG_Z_EXACT | FLAG_ROT_EXACT
+const FLAG_GEN_X_EXACT = 8
+const FLAG_GEN_Z_EXACT = 16
+const FLAG_GEN_ROT_EXACT = 32
+const KNOWN_FLAGS =
+  FLAG_X_EXACT | FLAG_Z_EXACT | FLAG_ROT_EXACT | FLAG_GEN_X_EXACT | FLAG_GEN_Z_EXACT | FLAG_GEN_ROT_EXACT
 
 /**
  * Lock systems in wire order. **Append-only, for the same reason ordinals are.**
@@ -150,6 +230,24 @@ export interface WirePlacement {
 }
 
 /**
+ * One generated base as the wire sees it: an index into the recipe table, and
+ * the same three numbers.
+ *
+ * Structurally a {@link WirePlacement} with `recipe` where `ordinal` was, and
+ * kept a separate type rather than reusing it under a rename, because the two
+ * integers index different things — one the catalog manifest, one this payload's
+ * own table — and a codec that let them be assigned to each other would make an
+ * ordinal/index mix-up a silent wrong room. Same argument `TagId` and
+ * `ManifestOrdinal` are branded apart for in `src/catalog/schema.ts`.
+ */
+export interface WireGenerated {
+  readonly recipe: number
+  readonly x: number
+  readonly z: number
+  readonly rotation: number
+}
+
+/**
  * A whole payload, before compression and before any catalog knowledge.
  *
  * `lockIndex` rather than a `LockSystem` because decoding must be able to *report*
@@ -161,6 +259,18 @@ export interface WirePayload {
   readonly lockIndex: number
   readonly digest: number
   readonly placements: readonly WirePlacement[]
+  /**
+   * The distinct generated bases in the scene, as opaque strings.
+   *
+   * Opaque *here*: this module neither parses nor validates them, for the same
+   * reason it does not validate an ordinal. `link.ts` runs each through zod and
+   * drops a document it cannot read by name. What this module does guarantee is
+   * that every {@link WireGenerated.recipe} is a valid index into this array —
+   * that is internal consistency of the payload, not meaning, so it is checked
+   * here.
+   */
+  readonly recipes: readonly string[]
+  readonly generated: readonly WireGenerated[]
 }
 
 /* ------------------------------------------------------------------ columns */
@@ -213,8 +323,9 @@ function readColumn(reader: ByteReader, count: number, scale: number, signed: bo
  *
  * Throws {@link MalformedPayloadError} only on input this app cannot produce (a
  * negative count, a lock index off the end, an ordinal that is not a
- * non-negative safe integer). Callers construct the input from validated values,
- * so a throw here is a bug in the caller rather than bad user data.
+ * non-negative safe integer, a recipe index off the end of the table it names).
+ * Callers construct the input from validated values, so a throw here is a bug in
+ * the caller rather than bad user data.
  */
 export function encodePayload(payload: WirePayload): Uint8Array {
   if (payload.placements.length > MAX_SHARE_PLACEMENTS) {
@@ -225,18 +336,48 @@ export function encodePayload(payload: WirePayload): Uint8Array {
   if (!Number.isInteger(payload.lockIndex) || payload.lockIndex < 0 || payload.lockIndex > 0xff) {
     throw new MalformedPayloadError(`lock index ${String(payload.lockIndex)} does not fit one byte`)
   }
+  if (payload.generated.length > MAX_SHARE_GENERATED) {
+    throw new MalformedPayloadError(
+      `${String(payload.generated.length)} generated bases exceeds the ${String(MAX_SHARE_GENERATED)} the format carries`,
+    )
+  }
+  if (payload.recipes.length > MAX_SHARE_GENERATED) {
+    throw new MalformedPayloadError(
+      `${String(payload.recipes.length)} recipes exceeds the ${String(MAX_SHARE_GENERATED)} the format carries`,
+    )
+  }
+  for (const generated of payload.generated) {
+    if (!Number.isInteger(generated.recipe) || generated.recipe < 0 || generated.recipe >= payload.recipes.length) {
+      throw new MalformedPayloadError(
+        `generated base names recipe ${String(generated.recipe)} of ${String(payload.recipes.length)}`,
+      )
+    }
+  }
 
   const xs = payload.placements.map((placement) => placement.x)
   const zs = payload.placements.map((placement) => placement.z)
   const rotations = payload.placements.map((placement) => placement.rotation)
+  const genXs = payload.generated.map((generated) => generated.x)
+  const genZs = payload.generated.map((generated) => generated.z)
+  const genRotations = payload.generated.map((generated) => generated.rotation)
 
   const xExact = !quantisable(xs, COORD_SCALE)
   const zExact = !quantisable(zs, COORD_SCALE)
   const rotExact = !quantisable(rotations, ROT_SCALE)
+  const genXExact = !quantisable(genXs, COORD_SCALE)
+  const genZExact = !quantisable(genZs, COORD_SCALE)
+  const genRotExact = !quantisable(genRotations, ROT_SCALE)
 
   const writer = new ByteWriter()
   writer.u8(SHARE_FORMAT_VERSION)
-  writer.u8((xExact ? FLAG_X_EXACT : 0) | (zExact ? FLAG_Z_EXACT : 0) | (rotExact ? FLAG_ROT_EXACT : 0))
+  writer.u8(
+    (xExact ? FLAG_X_EXACT : 0) |
+      (zExact ? FLAG_Z_EXACT : 0) |
+      (rotExact ? FLAG_ROT_EXACT : 0) |
+      (genXExact ? FLAG_GEN_X_EXACT : 0) |
+      (genZExact ? FLAG_GEN_Z_EXACT : 0) |
+      (genRotExact ? FLAG_GEN_ROT_EXACT : 0),
+  )
   writer.uvar(payload.manifestVersion)
   writer.u8(payload.lockIndex)
   writer.uvar(payload.placements.length)
@@ -249,6 +390,14 @@ export function encodePayload(payload: WirePayload): Uint8Array {
   writeColumn(writer, xs, COORD_SCALE, true, xExact)
   writeColumn(writer, zs, COORD_SCALE, true, zExact)
   writeColumn(writer, rotations, ROT_SCALE, false, rotExact)
+
+  writer.uvar(payload.recipes.length)
+  for (const recipe of payload.recipes) writer.utf8(recipe)
+  writer.uvar(payload.generated.length)
+  for (const generated of payload.generated) writer.uvar(generated.recipe)
+  writeColumn(writer, genXs, COORD_SCALE, true, genXExact)
+  writeColumn(writer, genZs, COORD_SCALE, true, genZExact)
+  writeColumn(writer, genRotations, ROT_SCALE, false, genRotExact)
 
   return writer.bytes()
 }
@@ -315,6 +464,39 @@ export function decodePayload(bytes: Uint8Array): WirePayload {
   const zs = readColumn(reader, count, COORD_SCALE, true, (flags & FLAG_Z_EXACT) !== 0)
   const rotations = readColumn(reader, count, ROT_SCALE, false, (flags & FLAG_ROT_EXACT) !== 0)
 
+  const recipeCount = reader.uvar()
+  if (recipeCount > MAX_SHARE_GENERATED) {
+    throw new MalformedPayloadError(
+      `payload claims ${String(recipeCount)} recipes, above the ${String(MAX_SHARE_GENERATED)} limit`,
+    )
+  }
+  // A recipe costs at least its own one-byte length prefix, so a count above the
+  // bytes left cannot be honoured. Saying so beats allocating for it.
+  if (recipeCount > reader.remaining) {
+    throw new MalformedPayloadError(
+      `payload claims ${String(recipeCount)} recipes but holds ${String(reader.remaining)} more bytes`,
+    )
+  }
+  const recipes: string[] = []
+  for (let i = 0; i < recipeCount; i += 1) recipes.push(reader.utf8())
+
+  const genCount = reader.uvar()
+  if (genCount > MAX_SHARE_GENERATED) {
+    throw new MalformedPayloadError(
+      `payload claims ${String(genCount)} generated bases, above the ${String(MAX_SHARE_GENERATED)} limit`,
+    )
+  }
+  if (genCount * 4 > reader.remaining) {
+    throw new MalformedPayloadError(
+      `payload claims ${String(genCount)} generated bases but holds ${String(reader.remaining)} more bytes`,
+    )
+  }
+  const recipeIndices: number[] = []
+  for (let i = 0; i < genCount; i += 1) recipeIndices.push(reader.uvar())
+  const genXs = readColumn(reader, genCount, COORD_SCALE, true, (flags & FLAG_GEN_X_EXACT) !== 0)
+  const genZs = readColumn(reader, genCount, COORD_SCALE, true, (flags & FLAG_GEN_Z_EXACT) !== 0)
+  const genRotations = readColumn(reader, genCount, ROT_SCALE, false, (flags & FLAG_GEN_ROT_EXACT) !== 0)
+
   if (!reader.atEnd) {
     throw new MalformedPayloadError('payload has trailing bytes after the last column')
   }
@@ -329,5 +511,20 @@ export function decodePayload(bytes: Uint8Array): WirePayload {
     })
   }
 
-  return { manifestVersion, lockIndex, digest, placements }
+  const generated: WireGenerated[] = []
+  for (let i = 0; i < genCount; i += 1) {
+    const recipe = recipeIndices[i] ?? 0
+    // Internal consistency, not meaning: the table this index addresses is in the
+    // same payload, so an index off its end is the payload contradicting itself.
+    // Left to `link.ts` it would have to become another `dropped` reason for a
+    // condition that cannot arise from any encoder.
+    if (recipe >= recipes.length) {
+      throw new MalformedPayloadError(
+        `generated base ${String(i)} names recipe ${String(recipe)} of ${String(recipes.length)}`,
+      )
+    }
+    generated.push({ recipe, x: genXs[i] ?? 0, z: genZs[i] ?? 0, rotation: genRotations[i] ?? 0 })
+  }
+
+  return { manifestVersion, lockIndex, digest, placements, recipes, generated }
 }

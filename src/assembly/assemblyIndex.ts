@@ -244,7 +244,7 @@ export function buildAssemblyIndex(
   const blobsByFilename = new Map<string, BlobId[]>()
   const basePrintOption = new Map<TileId, PrintOption>()
 
-  // The intern table is 916 strings against 84,023 references, so classifying it
+  // The intern table is 915 strings against 84,023 references, so classifying it
   // once and indexing by tag id is two orders of magnitude less work than
   // de-interning each base's tags — and it is the same rule either way, because
   // `printOption` is a fold of the classifier this array is built from.

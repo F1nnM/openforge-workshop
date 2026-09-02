@@ -55,6 +55,22 @@ export class MalformedPayloadError extends Error {
  */
 const MAX_VARINT_BYTES = 8
 
+/**
+ * Largest length-prefixed string this codec will read, in bytes.
+ *
+ * The same kind of guard as {@link MAX_VARINT_BYTES} and for the same reason: a
+ * length prefix is a stranger's number, and a reader that trusted it would
+ * allocate from it. 64 KiB is four orders of magnitude above the only string the
+ * format carries — a canonical generated-base recipe document, measured at 563
+ * bytes for the widest of the five shapes at file defaults — so it cannot bite a
+ * real payload, and it bounds a hand-edited one at something a browser shrugs at.
+ *
+ * It is deliberately *not* tight to 563: the parameter set is a pinned upstream
+ * export and a future `.scad` may declare more parameters, so a cap that tracked
+ * today's widest recipe would turn an engine bump into a refused link.
+ */
+const MAX_STRING_BYTES = 65_536
+
 /** Growable output buffer. */
 export class ByteWriter {
   private readonly out: number[] = []
@@ -93,6 +109,28 @@ export class ByteWriter {
     const view = new DataView(new ArrayBuffer(8))
     view.setFloat64(0, value, true)
     for (let i = 0; i < 8; i += 1) this.out.push(view.getUint8(i))
+  }
+
+  /**
+   * A length-prefixed UTF-8 string: `uvar` byte length, then the bytes.
+   *
+   * Byte length rather than code-unit length, because the prefix is what the
+   * reader advances by. A lone surrogate — which a `string` can hold and JSON
+   * cannot — encodes as U+FFFD here, so the round trip is not the identity on
+   * one; the only strings this format carries are `JSON.stringify` output, which
+   * escapes a lone surrogate rather than emitting it, so the case cannot arise
+   * from the encoder. It is bounded rather than rejected because rejecting would
+   * mean a second scan of every string to gain nothing.
+   */
+  utf8(value: string): void {
+    const bytes = new TextEncoder().encode(value)
+    if (bytes.length > MAX_STRING_BYTES) {
+      throw new MalformedPayloadError(
+        `cannot write a ${String(bytes.length)}-byte string; the format carries ${String(MAX_STRING_BYTES)}`,
+      )
+    }
+    this.uvar(bytes.length)
+    for (const byte of bytes) this.out.push(byte)
   }
 
   /** Bytes written so far, copied. */
@@ -155,5 +193,32 @@ export class ByteReader {
     const view = new DataView(new ArrayBuffer(8))
     for (let i = 0; i < 8; i += 1) view.setUint8(i, this.u8())
     return view.getFloat64(0, true)
+  }
+
+  /**
+   * A length-prefixed UTF-8 string, the counterpart of {@link ByteWriter.utf8}.
+   *
+   * The declared length is checked against the buffer **before** the slice, so a
+   * hand-edited prefix claiming 40 MB is a `TruncatedPayloadError` naming the
+   * shortfall rather than an allocation. Decoding is not `fatal`, so ill-formed
+   * UTF-8 comes back with replacement characters; the caller validates the string
+   * as JSON afterwards and drops it by name, which is a better failure than
+   * refusing the whole link over one bad byte.
+   */
+  utf8(): string {
+    const length = this.uvar()
+    if (length > MAX_STRING_BYTES) {
+      throw new MalformedPayloadError(
+        `payload declares a ${String(length)}-byte string, above the ${String(MAX_STRING_BYTES)} limit`,
+      )
+    }
+    if (length > this.remaining) {
+      throw new TruncatedPayloadError(
+        `payload declares a ${String(length)}-byte string but holds ${String(this.remaining)} more bytes`,
+      )
+    }
+    const slice = this.source.subarray(this.at, this.at + length)
+    this.at += length
+    return new TextDecoder().decode(slice)
   }
 }

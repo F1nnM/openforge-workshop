@@ -28,7 +28,7 @@ import type { WirePayload, WirePlacement } from './payload'
 import { LOCK_ORDER, MAX_SHARE_PLACEMENTS, SHARE_FORMAT_VERSION, decodePayload, encodePayload } from './payload'
 
 function payload(placements: readonly WirePlacement[], overrides: Partial<WirePayload> = {}): WirePayload {
-  return { manifestVersion: 1, lockIndex: 0, digest: 0xdeadbeef, placements, ...overrides }
+  return { manifestVersion: 1, lockIndex: 0, digest: 0xdeadbeef, placements, recipes: [], generated: [], ...overrides }
 }
 
 const ROOM: readonly WirePlacement[] = [
@@ -98,7 +98,9 @@ describe('payload round trip', () => {
   it('is exact for an empty scene', () => {
     const decoded = decodePayload(encodePayload(payload([])))
     expect(decoded).toEqual(payload([]))
-    expect(encodePayload(payload([])).length).toBe(9)
+    // Nine bytes of header and empty columns, plus the two zero counts that open
+    // the generated half — a recipe table of none and no generated placements.
+    expect(encodePayload(payload([])).length).toBe(11)
   })
 
   it('carries the manifest version and the lock index verbatim', () => {
@@ -211,8 +213,13 @@ describe('payload decode is total under corruption', () => {
   })
 
   it('rejects unknown flag bits', () => {
+    // Bit 6, the lowest bit no flag claims. Bits 0-2 are the tile columns' exact
+    // escape hatch and bits 3-5 the generated columns', so this assertion has to
+    // move up as the byte fills - and it must be a *reserved* bit, because a
+    // known one is a legal payload rather than a rejected one. That is not
+    // hypothetical: format 2 took bit 3, and this test caught the stale 0b1000.
     const wrong = Uint8Array.from(good)
-    wrong[1] = 0b1000
+    wrong[1] = 0b100_0000
     expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
   })
 

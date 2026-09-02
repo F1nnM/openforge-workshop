@@ -129,6 +129,7 @@ import { PRINT_OPTIONS } from '@/assembly'
 import type { AggregateIndex, CatalogFile, CatalogRecord, TileAggregate, TileId, TileVariant } from '@/catalog'
 import { buildAggregateIndex, resolveTags, selectVariant } from '@/catalog'
 import { closeTileDrawer, resolveTileTarget } from '@/routes'
+import { resolveMaterial } from '@/materials'
 import { MAX_QUERY_LENGTH } from '@/search'
 import { addToLibrary, sendTileToBuilder, toggleLibrary, useIsInLibrary, useLockChosen, useLockSystem } from '@/store'
 import { Tile3DPanel } from '@/three'
@@ -337,6 +338,11 @@ function TileDetail({
 
   // Every one of these is hoisted or per-variant — see the docblock. `foot` and
   // `sizeCode` come off the aggregate because A1 measured their variance at 0.
+  // Per-variant, not hoisted: the material comes from the *shown* file's tags
+  // and filename, and `resolveMaterial` is the full resolution rather than
+  // `TEXTURE_ROOT_MATERIAL[record.texture]` — row P3 measured those two
+  // disagreeing on 691 of 8,702 records (7.9%).
+  const material = useMemo(() => resolveMaterial(tags, shown.file).material, [tags, shown.file])
   const footprint = footprintLabel({ foot: aggregate.foot, sizeCode: aggregate.sizeCode }, tags)
   const height = heightLabel(tags)
   const address = storageAddress(catalog.assets, shown)
@@ -344,6 +350,7 @@ function TileDetail({
   return (
     <>
       <SpriteRotator
+        material={material}
         name={aggregate.name}
         sheet={catalog.sprite}
         sheetUrl={shown.sprite ? spriteSheetUrl(catalog.assets, shown.blob) : null}

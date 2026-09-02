@@ -35,6 +35,7 @@
  * rather than an obviously broken one.
  */
 import type { TileId } from '@/catalog'
+import type { GeneratedPlacement } from '@/generator/placement/scene'
 import type { LockSystem, Placement } from '@/store'
 import { DEFAULT_LOCK_SYSTEM, normalizeRotation } from '@/store'
 import { parseCompactSearch, stringifyCompactSearch } from '@/search/searchSchema'
@@ -42,9 +43,10 @@ import { parseCompactSearch, stringifyCompactSearch } from '@/search/searchSchem
 import { MalformedPayloadError, TruncatedPayloadError } from './bytes'
 import type { ShareManifest } from './manifest'
 import { resolveOrdinals } from './manifest'
-import type { WirePlacement } from './payload'
+import type { WireGenerated, WirePlacement } from './payload'
 import {
   LOCK_ORDER,
+  MAX_SHARE_GENERATED,
   MAX_SHARE_PLACEMENTS,
   SHARE_FORMAT_VERSION,
   decodePayload,
@@ -52,6 +54,7 @@ import {
   payloadFormatVersion,
 } from './payload'
 import type { SharedScene } from './scene'
+import { SharedGeneratedBase, stringifySharedGeneratedBase } from './scene'
 import { deflateRaw, fromBase64Url, inflateRaw, isShareCodecSupported, toBase64Url } from './transport'
 
 /* ----------------------------------------------------------------- the URL */
@@ -110,6 +113,8 @@ export type ShareEncodeFailure =
   | 'unsupported'
   /** More placements than the format carries — see `MAX_SHARE_PLACEMENTS`. */
   | 'too-many'
+  /** More generated bases than the format carries — see `MAX_SHARE_GENERATED`. */
+  | 'too-many-generated'
 
 export type ShareEncodeResult =
   | {
@@ -220,6 +225,17 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
     }
   }
 
+  const { recipes, generated } = collectGenerated(scene.generated, dropped)
+  if (generated.length > MAX_SHARE_GENERATED || recipes.length > MAX_SHARE_GENERATED) {
+    return {
+      ok: false,
+      reason: 'too-many-generated',
+      message:
+        `A share link carries at most ${String(MAX_SHARE_GENERATED)} generated bases; ` +
+        `this scene has ${String(generated.length)}.`,
+    }
+  }
+
   let lockIndex = LOCK_ORDER.indexOf(scene.lock)
   if (lockIndex === -1) {
     lockIndex = Math.max(0, LOCK_ORDER.indexOf(DEFAULT_LOCK_SYSTEM))
@@ -231,7 +247,7 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
     manifest,
   )
 
-  const raw = encodePayload({ manifestVersion: manifest.version, lockIndex, digest, placements })
+  const raw = encodePayload({ manifestVersion: manifest.version, lockIndex, digest, placements, recipes, generated })
   const compressed = await deflateRaw(raw)
   if (compressed === undefined) {
     return { ok: false, reason: 'unsupported', message: 'This browser cannot create share links.' }
@@ -246,6 +262,57 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
     compressedBytes: compressed.length,
     dropped,
   }
+}
+
+/**
+ * Deduplicate the scene's generated bases into a recipe table and a column of
+ * indices into it.
+ *
+ * Keyed on the {@link GeneratedPlacement.base} id, which S5 makes equal exactly
+ * when the two recipes are equal — `recipeKey` *is* recipe equality, and nothing
+ * on this path hashes anything — so the table holds one entry per distinct
+ * recipe by construction rather than by comparison. That is the dedup the
+ * measured cost depends on: ninety bases sharing one recipe cost one document.
+ *
+ * The first placement to name a base decides the document, so two placements
+ * carrying the same id and different recipes would share the first one's. That
+ * cannot come from the store — the id is derived from the recipe — and it is the
+ * same assumption `placeGeneratedBase` already makes; the honest alternative
+ * (key on the serialised document and let two ids collide in the table) would
+ * put the disagreement in the *link* rather than surfacing it.
+ *
+ * A non-finite coordinate drops the placement and names it, for the reason the
+ * tile path gives: there is no safe default position, and stacking it on the
+ * origin reads as a builder bug.
+ */
+function collectGenerated(
+  placements: readonly GeneratedPlacement[],
+  dropped: string[],
+): { recipes: string[]; generated: WireGenerated[] } {
+  const recipes: string[] = []
+  const indexOf = new Map<string, number>()
+  const generated: WireGenerated[] = []
+
+  placements.forEach((placement, index) => {
+    if (!Number.isFinite(placement.x) || !Number.isFinite(placement.z)) {
+      dropped.push(`generated base ${String(index)}: position is not a finite point`)
+      return
+    }
+    let recipe = indexOf.get(placement.base)
+    if (recipe === undefined) {
+      recipe = recipes.length
+      indexOf.set(placement.base, recipe)
+      recipes.push(stringifySharedGeneratedBase({ base: placement.base, recipe: placement.recipe }))
+    }
+    generated.push({
+      recipe,
+      x: placement.x + 0,
+      z: placement.z + 0,
+      rotation: normalizeRotation(placement.rotation),
+    })
+  })
+
+  return { recipes, generated }
 }
 
 /* ----------------------------------------------------------------- decoding */
@@ -358,7 +425,14 @@ export async function decodeShareFragment(fragment: string, manifest: ShareManif
  * and verification are one step, and the salvage loop reads the result of it.
  */
 function assembleScene(
-  decoded: { manifestVersion: number; lockIndex: number; digest: number; placements: readonly WirePlacement[] },
+  decoded: {
+    manifestVersion: number
+    lockIndex: number
+    digest: number
+    placements: readonly WirePlacement[]
+    recipes: readonly string[]
+    generated: readonly WireGenerated[]
+  },
   manifest: ShareManifest,
 ): ShareDecodeResult {
   const resolved = resolveOrdinals(
@@ -404,7 +478,86 @@ function assembleScene(
     })
   })
 
-  return { ok: true, scene: { lock: readLock(decoded.lockIndex, dropped), placements }, dropped }
+  const generated = assembleGenerated(decoded.recipes, decoded.generated, dropped)
+
+  return { ok: true, scene: { lock: readLock(decoded.lockIndex, dropped), placements, generated }, dropped }
+}
+
+/**
+ * Turn the recipe table and the generated columns back into placements.
+ *
+ * The table is parsed **once per entry, not once per placement**, because a bad
+ * document should be reported as one problem rather than as ninety — a room with
+ * ninety bases on one unreadable recipe would otherwise produce ninety lines of
+ * `dropped` saying the same thing, and `dropped` is meant for a notice beside the
+ * opened room.
+ *
+ * Every failure is a value, per the module docblock: a document that is not JSON,
+ * or is JSON that {@link SharedGeneratedBase} refuses — an id that is not in the
+ * `gen:` space, an entry point this build's panel does not offer, a parameter
+ * value that is not a number, string, boolean or numeric vector — drops the bases
+ * that name it and says which and how many. The rest of the room opens.
+ *
+ * `JSON.parse` is the only throw on this path and it is caught here rather than
+ * at the module boundary, because catching it further out would lose the index
+ * that makes the message useful.
+ */
+function assembleGenerated(
+  recipes: readonly string[],
+  wire: readonly WireGenerated[],
+  dropped: string[],
+): GeneratedPlacement[] {
+  const uses = new Map<number, number>()
+  for (const entry of wire) uses.set(entry.recipe, (uses.get(entry.recipe) ?? 0) + 1)
+
+  const table = new Map<number, SharedGeneratedBase>()
+  recipes.forEach((document, index) => {
+    const count = uses.get(index) ?? 0
+    const parsed = readGeneratedDocument(document)
+    if (parsed === undefined) {
+      // A table entry nothing names is not a loss, so it is not reported. That is
+      // reachable: an encoder is free to leave one, and a hand-edited payload does.
+      if (count > 0) {
+        dropped.push(
+          `generated recipe ${String(index)}: not a readable base recipe, ` +
+            `dropping ${String(count)} base${count === 1 ? '' : 's'}`,
+        )
+      }
+      return
+    }
+    table.set(index, parsed)
+  })
+
+  const generated: GeneratedPlacement[] = []
+  wire.forEach((entry, index) => {
+    const document = table.get(entry.recipe)
+    if (document === undefined) return
+    if (!Number.isFinite(entry.x) || !Number.isFinite(entry.z)) {
+      dropped.push(`generated base ${String(index)}: position is not a finite point`)
+      return
+    }
+    generated.push({
+      base: document.base,
+      recipe: document.recipe,
+      x: entry.x + 0,
+      z: entry.z + 0,
+      rotation: normalizeRotation(entry.rotation),
+    })
+  })
+
+  return generated
+}
+
+/** One table entry, or `undefined` if it is not one. Total; never throws. */
+function readGeneratedDocument(document: string): SharedGeneratedBase | undefined {
+  let json: unknown
+  try {
+    json = JSON.parse(document)
+  } catch {
+    return undefined
+  }
+  const parsed = SharedGeneratedBase.safeParse(json)
+  return parsed.success ? parsed.data : undefined
 }
 
 /**

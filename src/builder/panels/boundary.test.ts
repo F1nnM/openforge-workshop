@@ -52,92 +52,45 @@
  * walk by design — that is the mechanism rather than a hole. The measurements are
  * in this row's report and in `routeTree.tsx`'s `assembliesRoute` docblock.
  *
- * The closure walker below is the **fourth** copy of the same twenty lines in
+ * The closure walker below **was** the fourth copy of the same twenty lines in
  * this repository, after `src/three/`, `src/generator/panel/` and
- * `src/generator/placement/`. A test file cannot import another test file's
- * helper without becoming part of that suite, and moving it to `tools/` would
- * make a test utility a shipped module; four copies of a pure function that four
- * suites assert against is the cheaper of the two. Worth a shared
- * `tools/boundary/` module if a fifth is ever needed.
+ * `src/generator/placement/`. This note argued the four copies were cheaper, and
+ * that moving the walker to `tools/` "would make a test utility a shipped
+ * module". Row X10 extracted it to `tools/boundary/closure.ts` anyway, and both
+ * halves of that argument are worth correcting: nothing under `src/` imports it
+ * outside a test, so it is in no bundle and was never going to be shipped; and
+ * the four copies were not cheaper, because they had already diverged into four
+ * different answers — one `EISDIR` bug, one walker that could not resolve an
+ * `index.tsx`, and three that could not see a bare `import './x'` at all. The
+ * fifth copy this note said would justify the extraction was not needed; the
+ * divergence between the first four was. `closure.ts` carries the three
+ * placements that were tried and the two that are closed.
  */
-import { readFileSync, statSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { staticClosure as walk, staticImports } from '../../../tools/boundary/closure'
+
 const SRC = resolve(process.cwd(), 'src')
 
-/** Static `import`/`export … from` specifiers, excluding type-only ones. */
-function staticImports(source: string): string[] {
-  const found: string[] = []
-  const pattern = /^\s*(?:import|export)\s+(?!type\s)([^;]*?)\s*from\s*'([^']+)'/gm
-
-  for (const match of source.matchAll(pattern)) {
-    const clause = match[1] ?? ''
-    const specifier = match[2] ?? ''
-    const values = clause
-      .replace(/^\{|\}$/g, '')
-      .split(',')
-      .map((part) => part.trim())
-      .filter((part) => part !== '' && !part.startsWith('type '))
-    if (clause.startsWith('{') && values.length === 0) continue
-    found.push(specifier)
-  }
-  return found
-}
-
 /**
- * A specifier to a file, or `null` for a package.
+ * The walk, from `tools/boundary/closure.ts` — one copy for the four boundary tests.
  *
- * **`isFile()`, not `existsSync()`, and that is a fix rather than a preference.**
- * The three existing copies of this walker test `existsSync(candidate) &&
- * !candidate.endsWith('/')`, which accepts a **directory**: `@/materials`
- * resolves to `src/materials`, which exists and does not end in a slash, so the
- * walker returns the directory and the next `readFileSync` throws `EISDIR`. It is
- * latent in the other three only because none of their closures happens to
- * contain a bare-directory import; every closure here does. Reported, so the
- * other three can be fixed in whichever row next owns them — an `EISDIR` from a
- * boundary test reads as a broken test rather than as a boundary breach, which
- * is the worse of the two failures.
+ * Row X10 collapsed the four near-identical walkers, one of which was this
+ * file's; that module carries the `EISDIR` fix, the bare-side-effect import the
+ * three copies outside `src/three` could not see, and why an asset specifier is
+ * neither followed nor reported. The adapter below is the shape this file's
+ * assertions already read: the entry dropped, and package names without their
+ * importers.
  */
-function resolveModule(from: string, specifier: string): string | null {
-  const base = specifier.startsWith('@/')
-    ? join(SRC, specifier.slice(2))
-    : specifier.startsWith('.')
-      ? resolve(dirname(from), specifier)
-      : null
-  if (base === null) return null
-
-  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')]) {
-    try {
-      if (statSync(candidate).isFile()) return candidate
-    } catch {
-      // Not there. Try the next shape.
-    }
-  }
-  return null
-}
-
-/** Walk the static graph from one entry, following in-repo modules only. */
 function closureOf(entry: string): { files: string[]; packages: string[] } {
-  const files = new Set<string>()
-  const packages = new Set<string>()
-  const queue = [entry]
-
-  while (queue.length > 0) {
-    const file = queue.pop()
-    if (file === undefined || files.has(file)) continue
-    files.add(file)
-    for (const specifier of staticImports(readFileSync(file, 'utf8'))) {
-      if (specifier.endsWith('.css') || specifier.endsWith('.json')) continue
-      const resolved = resolveModule(file, specifier)
-      if (resolved === null) packages.add(specifier)
-      else queue.push(resolved)
-    }
+  const closure = walk(entry)
+  return {
+    files: closure.files.filter((file) => file !== entry).map((file) => file.slice(SRC.length + 1)),
+    packages: [...closure.packages.keys()],
   }
-
-  files.delete(entry)
-  return { files: [...files].map((file) => file.slice(SRC.length + 1)), packages: [...packages] }
 }
 
 /** Modules no eagerly-reachable file may reach, and what each one costs. */
@@ -233,11 +186,23 @@ describe('the download hook reaches row S5’s pack dynamically', () => {
 describe('the bill panel’s generated section', () => {
   it('takes only the light half of row S5 — the bill and the scene, not the schemas', () => {
     const reached = closureOf(join(SRC, 'builder/panels/GeneratedBillSection.tsx')).files
-    expect(reached).toContain('generator/placement/bill.ts')
     expect(reached).toContain('generator/placement/scene.ts')
     expect(reached).toContain('generator/placement/geometry.ts')
     expect(reached).not.toContain('generator/panel/schemas.ts')
     expect(reached).not.toContain('generator/panel/recipe.ts')
+
+    // **`bill.ts` is deliberately *not* asserted here any more, and why it used
+    // to appear is worth recording.** This component imports `GeneratedBill` and
+    // `GeneratedBillLine` `type`-only, so it has no value edge to `bill.ts` at
+    // all — the walker was reaching it the long way round, through
+    // `@/routes` → `routeTree.tsx` → a static import of `BuilderScreen`, which
+    // is the one module that calls `buildGeneratedBill`. Row X10 made the five
+    // remaining routes lazy and that edge went with them, so the assertion
+    // failed for a reason that was an improvement. The truthful statement is the
+    // one left standing: the section reaches the light half by path and reaches
+    // neither of the two heavy modules. Row S5's own `index.ts` note carries the
+    // measurement for why the barrel is not used here.
+    expect(reached).not.toContain('generator/placement/bill.ts')
   })
 
   it('does not reach the plan canvas component, only its geometry helpers', () => {

@@ -854,10 +854,11 @@ and **size is nearly flat** — 1×1 to 8×8 is a *53× triangle range for 6× t
 per-1,000-triangle cost falling from 45 ms to 5 ms. The cost is the fixed CSG tree, not the
 output.
 
-That refutes §3.4's watchdog advice, which offers "drop magnets, or step the size down one" as
+That refuted §3.4's watchdog advice, which offered "drop magnets, or step the size down one" as
 the two levers that move render time. Stepping down barely helps. And **for dragonlock, dropping
 magnets is backwards**: magnets *off* yields more triangles (12,304 vs 10,976) and a slower
-render.
+render. Row X10 struck the `Simplify` button those two levers were for, and rewrote §3.5 around
+the measured table — this section had already been corrected and needed nothing.
 
 **The triangle extrapolation was half right.** The formula `(bytes − 84)/50` is exact on 48 of 48
 meshes, but every estimate overstates triangles by a consistent **3.46–3.68×**, and the

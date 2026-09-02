@@ -30,16 +30,18 @@
  *     the manifest moving underneath one. This is the whole risk of the feature.
  *   - `payload.ts` — the columnar layout, the measured reason for it, and the
  *     quantisation escape hatch that keeps it exact.
- *   - `scene.ts` — what a link carries and what it deliberately does not, and the
- *     three lines that apply a decoded scene to the store.
+ *   - `scene.ts` — what a link carries and what it deliberately does not, the
+ *     four lines that apply a decoded scene to the store, and the measured reason
+ *     generated bases travel in the link rather than being warned about.
  */
 export type { ShareManifest, ShareManifestSource, ResolvedOrdinals } from './manifest'
 export { buildShareManifest, resolveOrdinals } from './manifest'
 
-export type { SharedScene } from './scene'
-export { emptySharedScene, sharedSceneFromState } from './scene'
+export type { SharedGeneratedBase, SharedScene } from './scene'
+export { SharedGeneratedBase as SharedGeneratedBaseSchema } from './scene'
+export { emptySharedScene, sharedSceneFromState, stringifySharedGeneratedBase } from './scene'
 
-export { LOCK_ORDER, MAX_SHARE_PLACEMENTS, SHARE_FORMAT_VERSION } from './payload'
+export { LOCK_ORDER, MAX_SHARE_GENERATED, MAX_SHARE_PLACEMENTS, SHARE_FORMAT_VERSION } from './payload'
 
 export { isShareCodecSupported } from './transport'
 

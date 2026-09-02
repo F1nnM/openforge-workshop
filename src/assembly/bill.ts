@@ -219,6 +219,7 @@ export function buildBillOfTiles(
 
   const lines = toLines(groups)
   notes.push(...mixedBuildNote(resolved))
+  notes.push(...doubleBaseNotes(resolved, options.generatedBases ?? []))
 
   return {
     lines,
@@ -321,6 +322,65 @@ function mixedBuildNote(resolved: readonly ResolvedPlacement[]): Note[] {
   if (systems.size < 2) return []
   const listed = [...systems].sort().join(', ')
   return [note('mixed-build-systems', `this scene mixes ${listed}, which do not interleave on the table.`)]
+}
+
+/**
+ * A cell key for the double-base check: the anchor, exactly.
+ *
+ * Exact equality on the two numbers, not a tolerance, and that is deliberate.
+ * §7 snaps the builder to 0.5 units and the coordinate schema folds `-0` to
+ * `+0`, so two pieces the user put on the same cell hold *identical* numbers —
+ * `move.ts` writes the snapped value, it does not accumulate a drag delta. A
+ * tolerance would therefore buy nothing and would start reporting neighbours: at
+ * half a unit of slack a base would claim the cell beside it.
+ */
+function anchorKey(x: number, z: number): string {
+  return `${String(x)}|${String(z)}`
+}
+
+/**
+ * The one note this module raises about the scene rather than about a placement:
+ * a topper got a base added while a base was already sitting on its cell.
+ *
+ * Both populations are checked against the same set of anchors, so a hand-placed
+ * catalog base and a generated one produce the same note — which is the point,
+ * because the second is the case row X9 found and there is no reason for the user
+ * to meet two different messages for one mistake.
+ *
+ * The base's *own* anchor is what is compared, and a base that is itself a topper
+ * cannot contribute: only `layer === 'base'` on the **resolved** record counts,
+ * because A6's rule 0 may have substituted a sibling and it is the resolved file
+ * that gets printed. Bases the *rule* inserted are not in this set either — they
+ * have no anchor, being line items rather than pieces — so the note cannot fire
+ * on two toppers sharing a cell.
+ */
+function doubleBaseNotes(
+  resolved: readonly ResolvedPlacement[],
+  generatedBases: readonly { readonly x: number; readonly z: number }[],
+): Note[] {
+  const occupied = new Set<string>()
+  for (const { placement, tile } of resolved) {
+    if (tile?.layer === 'base') occupied.add(anchorKey(placement.x, placement.z))
+  }
+  for (const base of generatedBases) occupied.add(anchorKey(base.x, base.z))
+  if (occupied.size === 0) return []
+
+  const notes: Note[] = []
+  for (const { placement, tile, parts } of resolved) {
+    if (tile === undefined) continue
+    if (!occupied.has(anchorKey(placement.x, placement.z))) continue
+    const inserted = parts.find((part) => part.role === 'base')
+    if (inserted === undefined) continue
+    notes.push(
+      note(
+        'base-already-on-plan',
+        `${inserted.record.name} was added for ${tile.name}, and a base is already on that cell — ` +
+          'the bill asks for two prints of a base you have placed once.',
+        tile.id,
+      ),
+    )
+  }
+  return notes
 }
 
 function byId(a: CatalogRecord, b: CatalogRecord): number {
