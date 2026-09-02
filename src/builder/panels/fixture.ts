@@ -12,10 +12,14 @@
  *     did not place.
  *   - **`WALL_NO_BASE`** — an openforge topper whose size code (`ZZ`) no base
  *     answers to. This is the `no-matching-base` warning, which stands in for the
- *     129 live corpus tiles in that state, and it is the note the panel must not
- *     swallow: printed alone it is a wall with nothing to stand on.
- *   - **`ARC`** and **`SLAB`** — the two footprints the plan view refuses, 29.1%
- *     of the corpus between them. The palette must grey both and offer neither.
+ *     86 live corpus tiles in that state (129 until row D4's re-key), and it is
+ *     the note the panel must not swallow: printed alone it is a wall with
+ *     nothing to stand on.
+ *   - **`SLAB`** — the one footprint the plan view refuses: `none`, 8.3% of the
+ *     corpus. The palette must grey it and offer no control for it. **`ARC`** is
+ *     its control and used to be its twin — row W6 made annular sectors
+ *     placeable, so the pair now proves that the refusal is `none` alone rather
+ *     than everything curved.
  *   - **`TWIN`** — a second catalog path over `FLOOR_1X1`'s md5. 171 live md5s are
  *     shared by 520 rows, and the bill must show one line and charge for one
  *     download.

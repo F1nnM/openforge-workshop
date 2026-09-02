@@ -5,12 +5,15 @@
  * obvious from the contract:
  *
  *   - **{@link paletteRows}** orders the library so the tiles that can be placed
- *     come first. 29.1% of the corpus has an `arc` or `none` footprint and the
- *     plan view refuses all of it (`isPlaceable`), so a library assembled from the
- *     catalog screen will contain some. Interleaving greyed rows with live ones
- *     turns the list into a minefield; sinking them into one contiguous block at
- *     the end makes the refusal legible as a group and keeps the top of the list
- *     usable.
+ *     come first. 8.3% of the corpus — the 726 tiles with a `none` footprint —
+ *     is all the plan view refuses (`isPlaceable`), so a library assembled from
+ *     the catalog screen will contain some. Interleaving greyed rows with live
+ *     ones turns the list into a minefield; sinking them into one contiguous
+ *     block at the end makes the refusal legible as a group and keeps the top of
+ *     the list usable.
+ *
+ *     It was 29.1% and an `arc`-or-`none` test until row W6 made annular sectors
+ *     placeable; `none` is the whole of it now.
  *   - **{@link searchRows}** caps the result list. The engine answers an
  *     unfiltered query with all 8,702 ids in 2.6 ms, and rendering that many
  *     sprite-sheet thumbnails in a 272px column is 8,702 × 529 KB of images.
@@ -30,7 +33,7 @@ import { isPlaceable } from '@/builder/canvas'
 /** One row of the palette. */
 export interface PaletteRow {
   readonly record: CatalogRecord
-  /** `isPlaceable(record)` — false for the 29.1% the plan view cannot draw. */
+  /** `isPlaceable(record)` — false for the 8.3% the plan view cannot draw. */
   readonly placeable: boolean
   /** Whether the tile is already saved, which decides "+ add" versus nothing. */
   readonly inLibrary: boolean

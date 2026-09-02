@@ -8,7 +8,7 @@
  *
  * ## It is a warning surface, not a footnote
  *
- * Three things this panel exists to say out loud, all of them measured rather
+ * Four things this panel exists to say out loud, all of them measured rather
  * than defensive:
  *
  *   1. **The total carries its verdict.** Fifty placements at the corpus median
@@ -17,9 +17,9 @@
  *      ordinary room is a gigabyte download. `verdictCopy` turns
  *      `buildBillOfTiles`' verdict into the sentence, at exactly the thresholds
  *      the library screen uses.
- *   2. **Every warning note is on screen.** 594 openforge toppers in the live
+ *   2. **Every warning note is on screen.** 377 openforge toppers in the live
  *      corpus have no base the archive can supply, in three categories with three
- *      different remedies (129 absent base, 21 unsupportable thin strips, 444 with
+ *      different remedies (86 absent base, 31 unsupportable shapes, 260 with
  *      nothing to match on). Somebody printing a wall with no base gets a wall
  *      that will not stand up. Those notes are rendered in full, above the rows,
  *      with the detail visible — not behind a disclosure, and not summarised as
@@ -27,6 +27,14 @@
  *   3. **Auto-inserted bases are marked.** A base is a line item the user did not
  *      place and often the larger print of the pair. A row they cannot account
  *      for reads as a bug in the bill.
+ *   4. **The variant the lock preference chose is named.** Row A6 put a second
+ *      invisible decision above the base: a placement resolves to a *different
+ *      file of the same item* when the build's lock system has a better one, and
+ *      for 1,419 of 3,822 items the three systems disagree about which. So the
+ *      panel carries a `Resolved for openlock` block saying what the preference
+ *      did to the scene, and marks the individual rows it moved. Without those
+ *      the bill would be two decisions deep with nothing said about either — and
+ *      the visible symptom would be a row naming a file the user never picked.
  *
  * The `info` notes are quieter but still present, in a `<details>`: they are
  * true, and `build-unspecified` alone fires on a third of the archive, so giving
@@ -56,7 +64,7 @@ import { removePlacement } from '@/store'
 import { Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
 
 import type { BillPlacement, BillRow } from './billView'
-import { billInventory, noteCopy, verdictCopy } from './billView'
+import { billInventory, noteCopy, resolutionSummary, rowResolutionCopy, verdictCopy } from './billView'
 import { DownloadAction } from './DownloadAction'
 import type { ArchiveDownload } from './useArchiveDownload'
 
@@ -75,6 +83,10 @@ export function BillPanel({ bill, placements, assets, sheet, download }: BillPan
   const headingId = useId()
   const { rows, orphans } = billInventory(bill, placements)
   const verdict = verdictCopy(bill.download)
+  // What the lock preference did to the whole scene, once. Below the download
+  // verdict and the warnings deliberately: it is disclosure rather than a
+  // problem, and it must not push a missing base off the top of the panel.
+  const resolution = resolutionSummary(bill)
   // `unknown-tile` is deliberately dropped from this list: `OrphanBlock` below is
   // that note's rendering, and it is the better one — it names the retired ids and
   // offers to take them off the grid. Two paragraphs saying the same sentence, one
@@ -91,7 +103,14 @@ export function BillPanel({ bill, placements, assets, sheet, download }: BillPan
         </h2>
         {bill.parts > bill.placements ? (
           <p className="of-bill-sub">
-            {countLabel(bill.parts)} parts to print — every OpenForge topper needs a base under it.
+            {/*
+              "the pieces that need one" rather than "every OpenForge topper":
+              row A6's rule 0 resolves 1,808 of the 4,363 topper files to a
+              sibling that needs no base under openlock, so the old sentence
+              over-claimed for exactly the placements this panel no longer
+              expands.
+            */}
+            {countLabel(bill.parts)} parts to print — a base is added under the pieces that need one.
           </p>
         ) : null}
       </header>
@@ -111,6 +130,12 @@ export function BillPanel({ bill, placements, assets, sheet, download }: BillPan
             </p>
           )
         })}
+
+        {resolution === null ? null : (
+          <p className="of-bill-note" data-tone="resolved">
+            <strong className="of-bill-note-head">{resolution.headline}.</strong> {resolution.detail}
+          </p>
+        )}
 
         {orphans.length > 0 ? <OrphanBlock orphans={orphans} /> : null}
 
@@ -182,6 +207,7 @@ function BillRowView({
   const listId = useId()
   const [open, setOpen] = useState(false)
   const { line, placements, autoBaseOnly } = row
+  const resolution = rowResolutionCopy(row)
 
   const body = (
     <>
@@ -246,6 +272,12 @@ function BillRowView({
           {line.baseQuantity === 1 ? 'copy is' : 'copies are'} an added base.
         </p>
       ) : null}
+
+      {resolution === null ? null : (
+        <p className="of-bill-auto" data-tone={resolution.tone}>
+          <Chip tone="tag">{resolution.chip}</Chip> {resolution.detail}
+        </p>
+      )}
 
       {open && placements.length > 0 ? (
         <ul className="of-bill-places" id={listId} role="list">

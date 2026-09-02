@@ -7,11 +7,14 @@
  *
  * ## The unplaceable tiles are marked, and they are not buttons
  *
- * `isPlaceable` is false for the `none` footprint — 8.3% of the corpus —
- * and the plan view refuses them visibly rather than silently. Offering a row
- * that arms a tile the canvas will then refuse would make a correct refusal look
- * like a broken palette, so those rows render as static text with the reason
- * beside them instead of as a control. Not a `disabled` button: a disabled button
+ * `isPlaceable` is false for the `none` footprint — 726 tiles, 8.3% of the
+ * corpus — and the plan view refuses them visibly rather than silently. Curves
+ * are **not** among them: row W6 made annular sectors placeable, so the copy
+ * beside the library block names the missing footprint and nothing else.
+ *
+ * Offering a row that arms a tile the canvas will then refuse would make a
+ * correct refusal look like a broken palette, so those rows render as static
+ * text with the reason beside them instead of as a control. Not a `disabled` button: a disabled button
  * is out of the tab order, and a keyboard user would then meet a row they cannot
  * reach and cannot read the reason from. Static text is read by every screen
  * reader and skipped by Tab, which is exactly the intent.
@@ -130,9 +133,9 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
             {unplaceable > 0 ? (
               <p className="of-pal-note">
                 {countLabel(unplaceable)} saved {unplaceable === 1 ? 'tile' : 'tiles'} at the end of
-                the list cannot be laid out in plan view: a curved piece, or one whose footprint the
-                archive does not state. {unplaceable === 1 ? 'It is' : 'They are'} still in your
-                library, and still printable.
+                the list cannot be laid out in plan view: the archive does not state a footprint for{' '}
+                {unplaceable === 1 ? 'it' : 'them'}. {unplaceable === 1 ? 'It is' : 'They are'} still
+                in your library, and still printable.
               </p>
             ) : null}
           </>
