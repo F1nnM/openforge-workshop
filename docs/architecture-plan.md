@@ -215,13 +215,33 @@ assembly?*
 
 | Lock | Integrated outright | **With base fallback** |
 | --- | ---: | ---: |
-| openlock | 1,497 (39.2%) | **3,199 (83.7%)** |
-| dragonlock | 359 (9.4%) | **2,928 (76.6%)** |
-| magnetic | 255 (6.7%) | **2,818 (73.7%)** |
+| openlock | 1,497 (39.2%) | **3,375 (88.3%)** |
+| dragonlock | 359 (9.4%) | **3,118 (81.6%)** |
+| magnetic | 255 (6.7%) | **3,008 (78.7%)** |
 
-**Spread 10.0 points, against §2's 40.2.** The two measure different questions — §2 counts a
+**Spread 9.6 points, against §2's 40.2.** The two measure different questions — §2 counts a
 lock-less design as reachable — but aggregation turns the lock choice from a 40-point cliff
-into a 10-point one. 622 aggregates are unreachable under every lock.
+into a ten-point one. **446 designs are buildable under no system at all**, and that is an
+exact partition: 94 insert-only, 93 with untagged joinery, 259 topper-only with no matching
+base. 2,988 build under all three.
+
+**This table has moved three times and the movement is the interesting part.** The research
+measured 3,199 / 2,928 / 2,818 (83.7 / 76.6 / 73.7); row A1 measured 3,352 / 3,087 / 2,977;
+row A7 measures the figures above. The fixtures never changed — it is the same pinned commit
+throughout. **The pipeline changed underneath it:** W3 and W4 gave 403 and then 249 more tiles
+a footprint, so more toppers resolve a congruent base, and every one of those gains lands
+here. A7 confirmed the figure is definition-independent — three different readings of
+"buildable" return 3,375 / 3,118 / 3,008 exactly.
+
+**The two readings rank the systems identically** — openlock, then dragonlock, then magnetic,
+both times — but the spread collapses, and dragonlock sits 6.7 points behind openlock on
+buildability against 25.2 on tags. Nothing in the picker assumes the orders agree; a test
+proves a corpus where they diverged would reorder the options.
+
+**The tier-1 column runs the other way, and that is the real cost of choosing magnetic.**
+1,497 openlock designs print as one part against magnetic's 255 — so a magnetic build is two
+printed pieces almost every time, which is not a percentage of the catalog and would be
+invisible in a single bar.
 
 **Nothing is deployed, so no share link, saved library or stored scene exists to preserve.**
 That removes the migration constraint the aggregation research worked around: ordinals can be
@@ -450,12 +470,37 @@ and the fix at that point is shortening ids, not shedding fields.
 
 The fixture grammar is `require` / `deny` / `constrain{tag}` / `constrain{filter}`, and
 `constrain` means "inherit this from the parent or a named sibling" — a *join*, not a filter.
-**Its exact semantics are not yet pinned down, and every downstream number depends on it.**
+**Its exact semantics are now pinned down — row C1 ported them from the catalog's own
+`config-processing.ts` with all 69 of its tests rather than deriving them from the spec.**
 Under one reading the median slot has thousands of candidates; under another, twelve.
-Precomputed candidate sets range from 29 KB to 9.4 MB accordingly.
+**Closed by row C1, and the plan had the wrong worry.** The 9.4 MB was a *raw* figure: the
+fattest encoding measured is 15.1 MB raw but **37,542 B brotli**, which the remaining budget
+absorbs three times over. Measured, per reading:
 
-This is the largest single unknown in the plan and it is a research task, not a coding task.
-It is scheduled explicitly in §14 and blocks nothing in v1. The existing catalog frontend
+| Reading | Sets | Median candidates | Brotli |
+| --- | ---: | ---: | ---: |
+| wide — `constrain` deferred | 110 | 1,868 | 513 B |
+| ported — per tile-slot, ordinals | 3,695 | 14 | 3,606 B |
+| ported — ids as strings | 3,695 | 14 | 37,542 B |
+| every sibling-selection state | 99,931 | — | 5,767 B |
+| **shipped: nothing** | — | — | **0 B** |
+
+**Payload was never the binding constraint. Correctness is.** `constrain` reads *sibling
+selections*, which are runtime state, so every precomputed row above is stale after one click
+— and 535 tiles carry two or more slots. So C1 emits **0 bytes** and derives at selection time,
+for 1,438 B brotli of JavaScript and a 339,756 B in-memory index.
+
+The plan's "thousands versus twelve" reproduces exactly — wide median **1,868**, ported median
+**14**, a 133.4× narrowing — because `parent` defaults to true, so a slot is narrowed *before
+any interaction*. 76.9% of slots then have under 50 candidates.
+
+The corpus settles the semantics independently: **all 91 `require` refs exist as exact tags and
+none of the 4 `constrain` roots does** — `shape`, `size|depth`, `size|width` and `texture` are
+namespace prefixes that are not tags. One matching rule for both could not produce that split.
+
+This was the largest single unknown in the plan. It turned out to be a research task whose
+answer was already written down in the catalog repo, and porting it — rather than re-deriving
+it — is what made the corpus cross-check above possible. The existing catalog frontend
 already implements it in `src/utils/config-processing.ts` (~140 lines with 69 Jest tests) —
 port it and its tests rather than deriving new semantics from the 332-line spec.
 
