@@ -140,8 +140,19 @@ and a caption stating the demo downloads a manifest while production bundles a z
 - A 2×2 spec grid: **Footprint**, **Height**, **Build system**, **File** (STL · MB).
 - **Storage address** in mono, shown in the secondary accent — the design deliberately
   surfaces the raw archive URL.
-- Tag chips.
-- "Other sizes in this family" — variant buttons that swap the drawer's subject.
+- Tag chips. **Still unimplemented** — row X2 owns them, and row A3 measured that a tag chip is
+  the only thing left that separates the final 21 name-collision groups (45 items). Every other
+  field on a card fails: texture and the size chip separate **nothing**, because the display name
+  is synthesised from those very tags.
+- ~~"Other sizes in this family" — variant buttons that swap the drawer's subject.~~
+  **Superseded, and deliberately not reimplemented.** This was built in v1 as `familyVariants`,
+  grouping by `record.family` across 1,130 folders. Row A4 established that the drawer resolves
+  through the *aggregate*, and row A5 retired the module: an item's own variants are now a table
+  that discloses all of them, so "other sizes in this family" no longer names a real relation
+  from the drawer's subject.
+  A post-aggregation equivalent would list **aggregates** in the same folder rather than
+  records, which is a different feature with a different information architecture. **It is
+  unowned.** Reschedule it deliberately or drop it deliberately, but it is not simply pending.
 
 ---
 

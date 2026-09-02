@@ -963,8 +963,11 @@ export function variantsByPreference(
  *   2. **Otherwise fall back to topper + base**, which is what
  *      `resolvePlacement` already does for half the corpus. This is where the
  *      lock penalty collapses: measured over the emitted index, buildability
- *      reaches **87.7% / 80.8% / 77.9%** against a per-design reachability of
- *      99.9% / 74.7% / 59.7% — a 9.8-point spread in place of 40.2. Magnetic
+ *      reaches **88.3% / 81.6% / 78.7%** against a per-design reachability of
+ *      99.9% / 74.7% / 59.7% — a 9.6-point spread in place of 40.2. (This
+ *      docblock quoted 87.7 / 80.8 / 77.9 and 9.8 when it was written; row A7
+ *      re-measured after the footprint rows landed, and row W7 now guards the
+ *      figures in the verifier so the next move fails a build.) Magnetic
  *      *rises* because the auto-inserted base supplies magnetic where the tile
  *      has none, and openlock *falls* because tier 2 refuses to count a design it
  *      cannot actually resolve.
