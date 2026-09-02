@@ -64,6 +64,7 @@ import type { PlanStatus } from '@/builder/canvas'
 import { BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
+import { GeneratorPanel } from '@/generator/panel'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
 import { clearPlacements, useLockSystem, usePlacements } from '@/store'
@@ -193,6 +194,26 @@ function Builder({ index }: { index: CatalogIndex }) {
         */}
         <Builder3DPanel catalog={planCatalog} placements={placements} assets={index.file.assets} />
 
+        {/*
+          Row S4. Closed it is a plate in the stage's top-left and costs 656 B
+          gzipped, A/B measured; opened it is a non-modal 442px drawer down the
+          stage's right edge, and the parameter schemas, the sweep tables and the
+          resolver arrive in their own chunk on that press. The OpenSCAD engine
+          is a second boundary further on and loads only when a parameter set
+          resolves to no archived file. Each shape opens on one that does, so
+          the first paint of the drawer compiles nothing.
+
+          It takes `records` because catalog-first resolution is a join against
+          the archive's own base filenames, and the index this screen already
+          holds is the only copy of those: `resolve.ts` measures the alternative,
+          a shipped reverse index, at 3,776 B brotli to say what the records
+          already say.
+
+          `onPlace` is row S5's seam and is deliberately not passed yet. The
+          drawer renders no placement action without it rather than a disabled
+          one, so nothing here advertises a feature that has not landed.
+        */}
+        <GeneratorPanel records={index.file.records} assets={index.file.assets} />
       </div>
 
       <div className="of-builder-bill">

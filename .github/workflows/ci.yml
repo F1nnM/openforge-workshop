@@ -91,6 +91,33 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Row S4's gate, run before the whole suite so a generator failure is
+      # attributable rather than one red line among 2,700.
+      #
+      # Two things must fail the build here, and both are silent otherwise:
+      #
+      #   1. **A `.scad` default changed.** The panel paints from parameter
+      #      exports committed under `src/generator/panel/schemas/`, and the
+      #      resolver's canonical form fills every unset parameter from them —
+      #      so a moved default silently changes what a stored recipe means and
+      #      stops the archive's tuples matching. `engine.test.ts` re-runs
+      #      OpenSCAD's own `--export-format=param` on all five offered entry
+      #      points and compares the whole export, option sets included.
+      #   2. **A base filename stopped parsing.** `corpus.test.ts` classifies
+      #      every one of the archive's 1,963 bases into one of five classes on
+      #      evidence in its own name, cross-checked against the size code the
+      #      pipeline derived from the tags, and throws on a name it cannot
+      #      place. It runs against the index the stamp step above rebuilt, so
+      #      it sees the pinned fixtures rather than a stale artefact.
+      #
+      # The gate belongs inside `buildCatalog`, and one line of another row's
+      # file stands in the way: `tsconfig.node.json` would have to list
+      # `src/generator/panel/resolve.ts` and `sweep.ts` in its `include`, as it
+      # already lists `src/catalog` and `src/composition` for rows C1 and W7.
+      # Until then this step is the gate.
+      - name: Generator gate
+        run: npx vitest run src/generator
+
       # Fails if a suite that should have run against the corpus was skipped
       # instead — the failure mode this whole job exists to prevent.
       - name: Test
