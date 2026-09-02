@@ -29,6 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AssemblyIndex, BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
+import type { PlanStatus } from '@/builder/canvas'
 import { usePlanTools } from '@/builder/canvas'
 import type { CatalogFile, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, resolveTags } from '@/catalog'
@@ -369,11 +370,29 @@ describe('the pre-selection handoff', () => {
 
 /* -------------------------------------------------------------- the toolbar */
 
-function ToolbarHarness() {
+function ToolbarHarness({ moving }: { moving?: string }) {
   const tools = usePlanTools()
   const placements = usePlacements()
   const placed = Object.keys(placements).length
   const armed = tools.selectedTileId === null ? undefined : index.engine.record(tools.selectedTileId)
+  // The canvas reports its readout through `onStatus`; the toolbar only reads it.
+  // `moving` is the one field this harness needs to stand in for, so the rest is
+  // the empty readout the toolbar already handles.
+  const status: PlanStatus | null =
+    moving === undefined
+      ? null
+      : {
+          cursor: [0, 0],
+          snap: tools.snap,
+          step: tools.step,
+          tool: tools.tool,
+          hint: '',
+          selectedName: null,
+          refusal: null,
+          moving,
+          placements: placed,
+          conflicts: 0,
+        }
   return (
     <div>
       <button type="button" onClick={() => tools.setSelectedTileId(id('floor1'))}>
@@ -381,7 +400,7 @@ function ToolbarHarness() {
       </button>
       <PlanToolbar
         tools={tools}
-        status={null}
+        status={status}
         armed={armed}
         placed={placed}
         onClear={() => {
@@ -434,6 +453,22 @@ describe('the toolbar', () => {
     render(<ToolbarHarness />)
     fireEvent.click(screen.getByRole('button', { name: 'Erase' }))
     expect(screen.getByRole('button', { name: 'Erase' })).toHaveAttribute('data-pressed')
+  })
+
+  it('offers Move as a third mode, and only one mode is ever up', () => {
+    // PR #29 refused a move because a drag on the primary button is already
+    // drag-paint. A mode removes the ambiguity rather than arbitrating it; the
+    // canvas's Shift-drag is the same operation without the mode switch.
+    render(<ToolbarHarness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
+    expect(screen.getByRole('button', { name: 'Move' })).toHaveAttribute('data-pressed')
+    expect(screen.getByRole('button', { name: 'Place' })).not.toHaveAttribute('data-pressed')
+    expect(screen.getByRole('button', { name: 'Erase' })).not.toHaveAttribute('data-pressed')
+  })
+
+  it('names the piece in the air, which a Shift-drag move leaves no mode to show', () => {
+    render(<ToolbarHarness moving="Cut stone wall 2" />)
+    expect(screen.getByText(/moving Cut stone wall 2/)).toBeInTheDocument()
   })
 })
 

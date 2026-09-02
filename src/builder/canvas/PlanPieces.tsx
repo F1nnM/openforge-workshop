@@ -39,6 +39,7 @@
 import { memo } from 'react'
 
 import { MATERIALS } from '@/materials'
+import type { PlacementId } from '@/store'
 
 import type { PlanBox, PlanShape } from './geometry'
 import { boxCentre } from './geometry'
@@ -87,7 +88,7 @@ export function shapeTransform(shape: PlanShape, box: PlanBox, angle: number): s
  * bounding box is up to 41% larger than the tile, and drawing it would show the
  * user a piece that does not exist.
  */
-function Piece({ piece }: { piece: PlanPiece }) {
+function Piece({ piece, moving }: { piece: PlanPiece; moving: boolean }) {
   const { box, shape, style } = piece
   const family = MATERIALS[style.material]
   const outline = { d: shape.outline }
@@ -98,6 +99,7 @@ function Piece({ piece }: { piece: PlanPiece }) {
       data-band={piece.band}
       data-conflict={piece.conflict ? 'true' : undefined}
       data-basis={piece.caveat === null ? undefined : 'fallback'}
+      data-moving={moving ? 'true' : undefined}
       transform={shapeTransform(shape, box, piece.angle)}
     >
       <path {...outline} fill={style.tint} />
@@ -128,13 +130,23 @@ function contourWidth(piece: PlanPiece): number {
 
 export interface PlanPiecesProps {
   readonly pieces: readonly PlanPiece[]
+  /**
+   * The placement being carried by a move, or `null`.
+   *
+   * Marked `data-moving` and dimmed by `canvas.css`, so the piece at its origin
+   * *is* the origin marker — exact, and one attribute rather than a second
+   * outline. It does not cost the memoisation anything: this prop changes when a
+   * piece is picked up and when it is put down, twice per gesture, while the
+   * preview that follows the pointer lives in `PlanCanvas` outside this subtree.
+   */
+  readonly movingId?: PlacementId | null
 }
 
-export const PlanPieces = memo(function PlanPieces({ pieces }: PlanPiecesProps) {
+export const PlanPieces = memo(function PlanPieces({ pieces, movingId = null }: PlanPiecesProps) {
   return (
     <g className="of-plan-pieces">
       {pieces.map((piece) => (
-        <Piece key={piece.id} piece={piece} />
+        <Piece key={piece.id} piece={piece} moving={piece.id === movingId} />
       ))}
     </g>
   )

@@ -43,6 +43,16 @@
   cursor: cell;
 }
 
+/* Move mode offers the grab; a piece in the air takes it, in every mode — a
+   Shift-drag move shows `grabbing` without the mode ever having changed. */
+.of-plan-canvas[data-tool='move'] {
+  cursor: grab;
+}
+
+.of-plan-canvas[data-moving='true'] {
+  cursor: grabbing;
+}
+
 /* A canvas that takes the arrow keys must show that it has them. Not
    `:focus-visible`: this element is focused by a click as well as by Tab, and
    after a click the keys are live, so hiding the ring would be a lie. */
@@ -75,6 +85,27 @@
 .of-plan-caret {
   stroke: var(--ink);
   opacity: 0.7;
+}
+
+/* ── A piece in the air (`move.ts`) ──────────────────────────────────────────
+   The piece is dimmed where it still is and the proposal is drawn where it would
+   land, joined by a leader line. Dimming rather than hiding is what keeps the
+   origin readable: the user has to be able to see the gap they are opening, and
+   a piece that vanished the instant it was grabbed would make a drag feel like a
+   delete.
+
+   Opacity only — no colour of its own. The fills and contours come from the
+   material registry through inline attributes, and a token here would put the
+   moved piece in a different palette from the one it is about to join.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-plan-pieces g[data-moving='true'] {
+  opacity: 0.28;
+}
+
+.of-plan-move-lead {
+  stroke: var(--mut);
+  opacity: 0.75;
 }
 
 /* ── Corner plates (§2.4) ────────────────────────────────────────────────────

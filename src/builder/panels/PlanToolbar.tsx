@@ -2,7 +2,21 @@
  * The floating toolbar — design-contract.md §2.4's centred plate at the top of
  * the canvas.
  *
- * `Place` / `Erase`, `⟳ Rotate`, `Clear`, and a mono `snap {value}` readout.
+ * `Place` / `Erase` / `Move`, `⟳ Rotate`, `Clear`, and a mono `snap {value}`
+ * readout.
+ *
+ * ## The third mode
+ *
+ * §2.4's toggle names two modes. `Move` is the third, and it is here because
+ * PR #29's objection to a move was a *gesture* objection — the primary button is
+ * already drag-paint — which a mode answers without arbitrating anything. The
+ * canvas also takes `Shift` with the primary button as a move in any mode, so
+ * this control is the discoverable path rather than the only one; `M` is its
+ * shortcut, beside the existing `P` and `E`.
+ *
+ * A `Shift`-drag move leaves this toggle showing `Place`, which is why the
+ * readout below reports `status.moving`: a piece in the air with no mode to show
+ * it would be the one editing state the toolbar could not see.
  *
  * ## Snap offers 0.5 and 1.0, and there is no 0.25
  *
@@ -70,6 +84,7 @@ export function PlanToolbar({ tools, status, armed, placed, onClear }: PlanToolb
       >
         <ToggleItem value="place">Place</ToggleItem>
         <ToggleItem value="erase">Erase</ToggleItem>
+        <ToggleItem value="move">Move</ToggleItem>
       </ToggleGroup>
 
       <Button
@@ -110,12 +125,18 @@ export function PlanToolbar({ tools, status, armed, placed, onClear }: PlanToolb
       </Button>
 
       {/*
-        The mono status tail. Only ever shows what is true: a pending rotation the
-        user has to be able to see (it applies to the *next* placement, so nothing
-        on the drawing carries it yet) and the overlap count, which is the canvas's
-        own conflict hatch counted up.
+        The mono status tail. Only ever shows what is true: the piece currently in
+        the air, a pending rotation the user has to be able to see (it applies to
+        the *next* placement, so nothing on the drawing carries it yet) and the
+        overlap count, which is the canvas's own conflict hatch counted up.
       */}
       <p className="of-build-readout">
+        {status?.moving == null ? null : (
+          <span>
+            <span aria-hidden="true">✥ </span>
+            moving {status.moving}
+          </span>
+        )}
         {tools.rotation === 0 ? null : (
           <span>
             <span aria-hidden="true">⟳ </span>

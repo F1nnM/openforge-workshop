@@ -71,16 +71,31 @@
  *   - **`[` and `]` step the cursor through the placements** in reading order,
  *     announcing each, so every piece is reachable and removable without a
  *     pointer and without a 200-deep tab chain.
+ *   - **A piece can be picked up, carried and dropped from the keyboard.**
+ *     `Shift`+`Enter` — or plain `Enter` in the Move mode — picks up whatever is
+ *     under the cursor; the arrow keys then carry the *piece* instead of the
+ *     cursor, announcing each step and any overlap; `Enter` drops it and
+ *     `Escape` puts it back. See `move.ts`.
  *   - Every action, refusal and conflict is announced through a polite live
  *     region.
  *
+ * ## The move, and how it stays out of drag-paint's way
+ *
+ * PR #29 refused a move on a real objection: the primary button is already
+ * drag-paint, so a drag-to-move on the same button is ambiguous. Two things
+ * resolve it, neither of which arbitrates the ambiguous case:
+ *
+ *   - a **Move mode** in §2.4's toolbar, where the primary button has no other
+ *     job, which is the discoverable path; and
+ *   - **`Shift` with the primary button**, which moves in *any* mode. That is
+ *     precisely the shape `Alt` + primary already has for panning — a gesture
+ *     with no mode of its own — so it is one more modifier on a vocabulary the
+ *     canvas already teaches, not a second editing model.
+ *
+ * `Alt` is tested first, so `Alt`+`Shift`+primary pans.
+ *
  * **What is not accessible in v1, stated rather than left unmentioned:**
  *
- *   - **There is no keyboard *move*.** Repositioning a piece is erase-then-place.
- *     `movePlacement` exists in the store and this canvas does not call it,
- *     because a drag-to-move gesture is ambiguous against drag-to-paint on the
- *     one mouse button the contract's two-mode toolbar leaves free, and a
- *     keyboard move with no pointer equivalent would be a second model to learn.
  *   - **The drawing itself is not readable by a screen reader.** The `<svg>` is
  *     `role="img"` with a summary — tile count, material count, conflict count —
  *     and the per-piece detail is reachable only by moving the cursum through it
@@ -96,7 +111,7 @@ import type { CatalogRecord } from '@/catalog'
 import { GRID_UNIT_MM } from '@/catalog'
 import type { MaterialId } from '@/materials'
 import type { PlacementId } from '@/store'
-import { placeTile, removePlacement, rotatePlacement, usePlacements } from '@/store'
+import { movePlacement, placeTile, removePlacement, rotatePlacement, usePlacements } from '@/store'
 
 import type { PlanCatalog, PlanStyle } from './catalog'
 import { createStyleResolver } from './catalog'
@@ -112,6 +127,18 @@ import {
 import { computeGhost } from './ghost'
 import type { PlanGhost } from './ghost'
 import { useAnnouncer, useCanvasSize } from './hooks'
+import type { MoveDrag, MovePreview } from './move'
+import {
+  beginMove,
+  describeCancel,
+  describeDrop,
+  describeGrab,
+  describeMoveHint,
+  describeNudge,
+  dragMoveTo,
+  nudgeMove,
+  previewMove,
+} from './move'
 import { PlanPieces, shapeTransform } from './PlanPieces'
 import { buildPlanScene, navigationOrder, pieceAt } from './scene'
 import type { PlanPiece, PlanScene } from './scene'
@@ -153,6 +180,14 @@ export interface PlanStatus {
   readonly selectedName: string | null
   /** Set when the armed tile cannot be drawn at all. */
   readonly refusal: string | null
+  /**
+   * The name of the piece currently in the air, or `null`.
+   *
+   * Reported rather than left to the canvas because a move started with
+   * `Shift`+drag has no mode showing in the toolbar, and a user who has picked a
+   * piece up needs the toolbar to say so somewhere.
+   */
+  readonly moving: string | null
   readonly placements: number
   readonly conflicts: number
 }
@@ -216,6 +251,23 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
     [selected, tools.rotation, tools.step, cursor, scene],
   )
   const under = useMemo(() => pieceAt(scene, cursor), [scene, cursor])
+
+  /**
+   * The move in progress, and its resolution against the scene.
+   *
+   * Component state, never the store — `src/store/schema.ts` is explicit that a
+   * drag-in-progress belongs here, and it is also what makes the move **one**
+   * store write: a forty-event pointer drag writes nothing and the drop writes
+   * once. `dragRef` is the synchronous mirror the stable pointer handlers read,
+   * for the same reason `latest` exists.
+   */
+  const [drag, setDrag] = useState<MoveDrag | null>(null)
+  const dragRef = useRef<MoveDrag | null>(null)
+  const setMove = useCallback((next: MoveDrag | null) => {
+    dragRef.current = next
+    setDrag(next)
+  }, [])
+  const moving = useMemo(() => (drag === null ? undefined : previewMove(drag, scene)), [drag, scene])
 
   /**
    * Everything the event handlers need, refreshed each render.
@@ -288,6 +340,16 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
     [say],
   )
 
+  /** Remove one piece, named. Shared by the erase gesture and the move's `Delete`. */
+  const erasePiece = useCallback(
+    (piece: PlanPiece): boolean => {
+      removePlacement(piece.id)
+      say(`Removed ${piece.record.name} from ${describeCell(piece.placement.x, piece.placement.z)}.`)
+      return true
+    },
+    [say],
+  )
+
   /** Remove the topmost piece under a point. */
   const erase = useCallback(
     (at: PlanPoint): boolean => {
@@ -296,12 +358,75 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
         say(`Nothing to remove at ${describeCell(at[0], at[1])}.`)
         return false
       }
-      removePlacement(piece.id)
-      say(`Removed ${piece.record.name} from ${describeCell(piece.placement.x, piece.placement.z)}.`)
+      return erasePiece(piece)
+    },
+    [erasePiece, say],
+  )
+
+  /* ------------------------------------------------------------------- move */
+
+  /**
+   * Pick up the topmost piece under a point.
+   *
+   * `from` is the world point a pointer grabbed at, or `null` for a keyboard
+   * grab; `move.ts` uses it to keep the piece under the part of it that was
+   * grabbed instead of centring it on the cursor.
+   */
+  const grabAt = useCallback(
+    (at: PlanPoint, from: PlanPoint | null): boolean => {
+      const { scene: currentScene } = latest.current
+      const piece = pieceAt(currentScene, at)
+      if (piece === undefined) {
+        say(`Nothing to move at ${describeCell(at[0], at[1])}.`)
+        return false
+      }
+      const next = beginMove(piece, from)
+      const preview = previewMove(next, currentScene)
+      if (preview === undefined) return false
+      setMove(next)
+      say(describeGrab(preview))
       return true
     },
-    [say],
+    [say, setMove],
   )
+
+  /**
+   * Put the piece down.
+   *
+   * The **only** store write the whole gesture makes, and the refusal set is
+   * `ghost.ts`'s: an identical tile at identical coordinates and an identical
+   * angle is refused and the piece goes back, an overlap is committed and
+   * announced, and a drop where the piece already is writes nothing at all. See
+   * `move.ts` for why an overlap informs rather than prevents.
+   */
+  const drop = useCallback((): boolean => {
+    const current = dragRef.current
+    if (current === null) return false
+    const preview = previewMove(current, latest.current.scene)
+    setMove(null)
+    if (preview === undefined) return false
+    if (preview.refusal !== null) {
+      say(preview.refusal.message)
+      return false
+    }
+    if (!preview.committable) {
+      say(describeDrop(preview))
+      return false
+    }
+    movePlacement(current.id, current.anchor[0], current.anchor[1])
+    say(describeDrop(preview))
+    return true
+  }, [say, setMove])
+
+  /** Abandon the move. Nothing was written, so there is nothing to put back but the state. */
+  const cancelMove = useCallback((): boolean => {
+    const current = dragRef.current
+    if (current === null) return false
+    const preview = previewMove(current, latest.current.scene)
+    setMove(null)
+    say(preview === undefined ? 'Move cancelled.' : describeCancel(preview))
+    return true
+  }, [say, setMove])
 
   /**
    * Turn the piece under the cursor, or the ghost when there is none.
@@ -323,7 +448,13 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
   const rotate = useCallback(
     (direction: 1 | -1 = 1) => {
       const { under, selected: record, tools: current, scene: currentScene } = latest.current
-      const sticky = rotationTarget.current
+      // A piece in the air outranks both the sticky target and the cursor: `R`
+      // during a move turns the piece being carried, and the preview follows it
+      // because `previewMove` reads the rotation the scene holds rather than a
+      // copy taken at grab time. The rotation is its own store write; the move
+      // is still one.
+      const held = dragRef.current
+      const sticky = held?.id ?? rotationTarget.current
       const piece = (sticky === null ? undefined : currentScene.pieces.find((it) => it.id === sticky)) ?? under
       if (piece !== undefined) {
         rotationTarget.current = piece.id
@@ -355,7 +486,7 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
 
   /* ---------------------------------------------------------------- pointer */
 
-  const dragging = useRef<'pan' | 'act' | null>(null)
+  const dragging = useRef<'pan' | 'act' | 'move' | null>(null)
   const lastPointer = useRef<{ x: number; y: number } | null>(null)
 
   const localPoint = useCallback((event: React.PointerEvent | WheelEvent): { x: number; y: number } => {
@@ -380,11 +511,25 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
         return
       }
       if (event.button !== 0) return
+      const point = toWorld(latest.current.view, local.x, local.y)
+      // Move mode, or Shift in any mode. Tested after the pan clause, so
+      // Alt+Shift+primary pans rather than being ambiguous between the two.
+      if (latest.current.tools.tool === 'move' || event.shiftKey) {
+        setCursor(point)
+        if (grabAt(point, point)) {
+          dragging.current = 'move'
+          capture(event)
+          event.preventDefault()
+        } else {
+          dragging.current = null
+        }
+        return
+      }
       dragging.current = 'act'
       capture(event)
-      actAt(toWorld(latest.current.view, local.x, local.y))
+      actAt(point)
     },
-    [actAt, localPoint],
+    [actAt, grabAt, localPoint],
   )
 
   const onPointerMove = useCallback(
@@ -405,15 +550,41 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
       const point = toWorld(latest.current.view, local.x, local.y)
       rotationTarget.current = null
       setCursor(point)
+      // A pointer drag is not announced step by step: the outline is already
+      // following the pointer, and a live region firing on every one of the
+      // hundreds of moves in a drag would drown the drop that matters.
+      if (dragging.current === 'move') {
+        const current = dragRef.current
+        if (current !== null) setMove(dragMoveTo(current, point, latest.current.tools.step))
+        return
+      }
       if (dragging.current === 'act') actAt(point)
     },
-    [actAt, localPoint],
+    [actAt, localPoint, setMove],
   )
 
-  const endDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    dragging.current = null
-    release(event)
-  }, [])
+  const endDrag = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (dragging.current === 'move') drop()
+      dragging.current = null
+      release(event)
+    },
+    [drop],
+  )
+
+  /**
+   * A drag the platform took away, or one that walked off the canvas without
+   * pointer capture. Put the piece back rather than committing a position the
+   * user never released on.
+   */
+  const abortDrag = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (dragging.current === 'move') cancelMove()
+      dragging.current = null
+      release(event)
+    },
+    [cancelMove],
+  )
 
   /**
    * Zoom on the wheel, anchored at the pointer.
@@ -474,6 +645,33 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
     [say],
   )
 
+  /**
+   * Carry the held piece by one keyboard step, and take the cursor with it.
+   *
+   * The cursor follows so that the caret stays on the piece and `ensureVisible`
+   * scrolls the view to keep it on screen — a keyboard user carrying a piece off
+   * the viewport would otherwise be moving something they cannot see.
+   */
+  const nudge = useCallback(
+    (dx: number, dz: number) => {
+      const current = dragRef.current
+      if (current === null) return
+      const { scene: currentScene, tools, view: currentView, size: currentSize } = latest.current
+      const next = nudgeMove(current, dx, dz, tools.step)
+      const preview = previewMove(next, currentScene)
+      if (preview === undefined) {
+        setMove(null)
+        return
+      }
+      setMove(next)
+      const centre = boxCentre(preview.box)
+      setCursor([centre.x, centre.z])
+      setView(ensureVisible(currentView, currentSize, preview.box, 1.5))
+      say(describeNudge(preview))
+    },
+    [say, setMove],
+  )
+
   const zoomCentre = useCallback((factor: number) => {
     setView((current) => zoomAt(current, factor, latest.current.size.width / 2, latest.current.size.height / 2))
   }, [])
@@ -486,6 +684,54 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
         event.preventDefault()
         event.stopPropagation()
         setKeyHelp(true)
+      }
+
+      // A piece in the air claims exactly the six keys the gesture needs. Every
+      // other key falls through to the map below and keeps working — zoom, fit,
+      // snap, bracket navigation — because the drag is component state and
+      // depends on none of them. Switching snap mid-carry changes the step the
+      // arrows travel, which is the behaviour a builder wants.
+      if (dragRef.current !== null) {
+        switch (event.key) {
+          case 'ArrowLeft':
+            handled()
+            nudge(-step, 0)
+            return
+          case 'ArrowRight':
+            handled()
+            nudge(step, 0)
+            return
+          case 'ArrowUp':
+            handled()
+            nudge(0, -step)
+            return
+          case 'ArrowDown':
+            handled()
+            nudge(0, step)
+            return
+          case 'Enter':
+          case ' ':
+            handled()
+            drop()
+            return
+          case 'Escape':
+            handled()
+            cancelMove()
+            return
+          case 'Delete':
+          case 'Backspace': {
+            // Deleting what you are holding is a coherent thing to mean, and it
+            // is the one case where the drag ends without either a drop or a
+            // put-back.
+            handled()
+            const held = currentScene.pieces.find((piece) => piece.id === dragRef.current?.id)
+            setMove(null)
+            if (held !== undefined) erasePiece(held)
+            return
+          }
+          default:
+            break
+        }
       }
 
       switch (event.key) {
@@ -508,7 +754,10 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
         case 'Enter':
         case ' ':
           handled()
-          actAt(cursorRef.current)
+          // Shift is the modeless move on the keyboard exactly as it is on the
+          // pointer, so the modifier means one thing on both.
+          if (current.tool === 'move' || event.shiftKey) grabAt(cursorRef.current, null)
+          else actAt(cursorRef.current)
           return
         case 'Delete':
         case 'Backspace':
@@ -548,6 +797,12 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
           current.setTool('place')
           say('Place mode.')
           return
+        case 'm':
+        case 'M':
+          handled()
+          current.setTool('move')
+          say('Move mode. Drag a tile, or press Enter on one to pick it up.')
+          return
         case '+':
         case '=':
           handled()
@@ -570,12 +825,29 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
           return
       }
     },
-    [actAt, erase, moveCursor, rotate, say, stepToPiece, zoomCentre],
+    [
+      actAt,
+      cancelMove,
+      drop,
+      erase,
+      erasePiece,
+      grabAt,
+      moveCursor,
+      nudge,
+      rotate,
+      say,
+      setMove,
+      stepToPiece,
+      zoomCentre,
+    ],
   )
 
   /* ----------------------------------------------------------------- status */
 
-  const hint = useMemo(() => buildHint(tools, selected, ghost, under), [tools, selected, ghost, under])
+  const hint = useMemo(
+    () => buildHint(tools, selected, ghost, under, moving),
+    [tools, selected, ghost, under, moving],
+  )
   const status = useMemo<PlanStatus>(
     () => ({
       cursor,
@@ -585,10 +857,11 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
       hint,
       selectedName: selected?.name ?? null,
       refusal: ghost?.refusal?.message ?? null,
+      moving: moving?.piece.record.name ?? null,
       placements: scene.pieces.length,
       conflicts: scene.conflicts.size,
     }),
-    [cursor, tools.snap, tools.step, tools.tool, hint, selected, ghost, scene],
+    [cursor, tools.snap, tools.step, tools.tool, hint, selected, ghost, moving, scene],
   )
 
   useEffect(() => {
@@ -600,7 +873,10 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
   const frame = viewBox(view, size)
   const ghostStyle = ghost === null ? null : styleOf(ghost.record)
   const materials = useMemo(() => usedMaterials(scene, ghostStyle), [scene, ghostStyle])
-  const showGhost = ghost !== null && (pointerInside || focused)
+  // The place-ghost is suppressed while a piece is in the air: two dashed
+  // outlines following the same pointer, one of which cannot be committed, is
+  // the drawing telling the user two contradictory things.
+  const showGhost = ghost !== null && moving === undefined && (pointerInside || focused)
 
   return (
     <div
@@ -613,15 +889,16 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
       tabIndex={0}
       data-tool={tools.tool}
       data-snap={tools.snap}
+      data-moving={moving === undefined ? undefined : 'true'}
       data-keys={keyHelp ? 'on' : undefined}
       onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onPointerLeave={() => {
+      onPointerCancel={abortDrag}
+      onPointerLeave={(event) => {
         setPointerInside(false)
-        dragging.current = null
+        abortDrag(event)
       }}
       onFocus={() => {
         setFocused(true)
@@ -655,8 +932,9 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
           vectorEffect="non-scaling-stroke"
         />
 
-        <PlanPieces pieces={scene.pieces} />
+        <PlanPieces pieces={scene.pieces} movingId={moving?.id ?? null} />
 
+        {moving === undefined ? null : <MoveShadow preview={moving} style={styleOf(moving.piece.record)} />}
         {showGhost && ghostStyle !== null ? <Ghost ghost={ghost} style={ghostStyle} /> : null}
         {focused ? <Caret at={cursor} /> : null}
       </svg>
@@ -676,9 +954,11 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
 
       <p className="of-plan-keys" id={KEY_HELP_ID}>
         Arrow keys move the plan cursor by the snap step, Shift for four steps. Enter places the armed tile, Delete
-        removes the one under the cursor, R turns it. Square brackets step through the placed tiles. G switches snap
-        between half a unit and one unit, P and E switch between place and erase, plus and minus zoom, 0 fits the room.
-        Drag with the middle button or Alt to pan.
+        removes the one under the cursor, R turns it. Shift and Enter together pick the tile under the cursor up to
+        move it; the arrow keys then carry the tile, Enter drops it and Escape puts it back. Square brackets step
+        through the placed tiles. G switches snap between half a unit and one unit, P, E and M switch between place,
+        erase and move, plus and minus zoom, 0 fits the room. Drag with the middle button or Alt to pan, and Shift-drag
+        to move a tile.
       </p>
 
       <p className="of-plan-live" aria-live="polite" aria-atomic="true">
@@ -768,6 +1048,62 @@ function Ghost({ ghost, style }: { ghost: PlanGhost; style: PlanStyle }) {
 }
 
 /**
+ * The piece in the air: a leader line from where it was, and the outline where
+ * it would land.
+ *
+ * Drawn through `shapeTransform` and the shape's own `outline`, the same two
+ * things `PlanPieces.tsx` and `Ghost` use, so the preview cannot be a different
+ * piece from the one that lands. The piece at its origin is not re-drawn here —
+ * it is the real piece, dimmed in place by `data-moving`, which keeps the origin
+ * marker exact and costs no extra nodes.
+ *
+ * The leader line is what makes the displacement legible: without a reference
+ * point a user pushing a 2 × 0.5 wall along a run has no way to see whether they
+ * have travelled one step or three, and a plan has no other cue.
+ */
+function MoveShadow({ preview, style }: { preview: MovePreview; style: PlanStyle }) {
+  const outline = { d: preview.piece.shape.outline }
+  const transform = shapeTransform(preview.piece.shape, preview.box, preview.angle)
+  const blocked = preview.refusal !== null || preview.conflict
+  const from = boxCentre(preview.fromBox)
+  const to = boxCentre(preview.box)
+
+  return (
+    <g
+      className="of-plan-move"
+      data-blocked={blocked ? 'true' : undefined}
+      data-basis={preview.piece.caveat === null ? undefined : 'fallback'}
+    >
+      {preview.unchanged ? null : (
+        <path
+          className="of-plan-move-lead"
+          d={`M ${String(from.x)} ${String(from.z)} L ${String(to.x)} ${String(to.z)}`}
+          fill="none"
+          strokeWidth={1.25}
+          strokeDasharray="3 4"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      <g transform={transform}>
+        <path {...outline} fill={style.tint} opacity={0.55} />
+        {/* The unmeasured mark travels with the piece. 462 of the 1,199 curves
+            carry it, and a move must not be the operation that quietly drops the
+            one disclosure the builder makes about a curve's provenance. */}
+        {preview.piece.caveat === null ? null : <path {...outline} fill={`url(#${UNMEASURED_PATTERN_ID})`} />}
+        <path
+          {...outline}
+          fill="none"
+          stroke={blocked ? 'var(--acc)' : style.edge}
+          strokeWidth={blocked ? 2.5 : 2}
+          strokeDasharray="5 4"
+          vectorEffect="non-scaling-stroke"
+        />
+      </g>
+    </g>
+  )
+}
+
+/**
  * The plan cursor's crosshair.
  *
  * Shown only while the canvas has focus, because it exists for the keyboard: a
@@ -810,7 +1146,16 @@ function buildHint(
   selected: CatalogRecord | undefined,
   ghost: PlanGhost | null,
   under: PlanPiece | undefined,
+  moving: MovePreview | undefined,
 ): string {
+  // A piece in the air out-ranks every other state, including a refusal about
+  // the armed tile: nothing else on screen is what the user is doing.
+  if (moving !== undefined) return describeMoveHint(moving)
+  if (tools.tool === 'move') {
+    return under === undefined
+      ? 'Move: drag a tile to reposition it, or press Enter with the cursor on one. Shift-drag does the same in any mode.'
+      : `Move: drag ${under.record.name}, or press Enter to pick it up.`
+  }
   if (tools.tool === 'erase') {
     return under === undefined ? 'Erase: click a tile to remove it.' : `Erase: click to remove ${under.record.name}.`
   }

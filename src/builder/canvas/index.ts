@@ -40,6 +40,12 @@
  *     them now placeable, and on all 1,199 curves the step *equals the sweep* —
  *     which is what makes one press land a curve beside its predecessor.
  *   - **`SNAP_STEP`** is the only place the snap values are written down.
+ *   - **`move.ts`** is the move operation PR #29 refused: `beginMove`,
+ *     `dragMoveTo` / `nudgeMove` and `previewMove` are the whole of it, and the
+ *     drag they describe is *ephemeral canvas state* — the store sees one
+ *     `movePlacement` write on the drop and nothing at all on a cancel. The
+ *     toolbar's third mode is `PlanTool`'s `'move'`; `PlanStatus.moving` names
+ *     the piece in the air, because a `Shift`-drag move shows no mode.
  *
  * Row 18 owns the bill of tiles and does **not** get it from here: it comes from
  * `buildBillOfTiles(Object.values(placements), assemblyIndex, { lock })` in
@@ -120,6 +126,22 @@ export type { PlanOmission, PlanPiece, PlanScene } from './scene'
 
 export { computeGhost, ghostOverlaps } from './ghost'
 export type { PlanGhost } from './ghost'
+
+export {
+  beginMove,
+  concentricNote,
+  concentricOffset,
+  describeCancel,
+  describeDrop,
+  describeGrab,
+  describeMoveHint,
+  describeNudge,
+  dragMoveTo,
+  isConcentricOnLattice,
+  nudgeMove,
+  previewMove,
+} from './move'
+export type { MoveDrag, MoveNote, MoveNoteCode, MovePreview, MoveRefusal, MoveRefusalCode } from './move'
 
 export {
   DEFAULT_SCALE,
