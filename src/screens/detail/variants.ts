@@ -26,6 +26,7 @@
  * length, which puts each kind in its own ascending run.
  */
 import type { CatalogFile, CatalogRecord, ManifestOrdinal } from '@/catalog'
+import { WALL_THICKNESS_UNITS } from '@/catalog'
 
 import { footprintLabel } from './labels'
 
@@ -38,7 +39,15 @@ export interface FamilyVariant {
   name: string
 }
 
-/** Sort weight: area for a rectangle, length for a wall, radius for an arc. */
+/**
+ * Sort weight: area for a rectangle, length for a wall, radius for an arc.
+ *
+ * A `tri` weighs its own area, half the box, so a 2 x 2 triangle sorts below a
+ * 2 x 2 rectangle rather than beside it. A `diag` weighs its run, the same
+ * quantity a `wall` contributes. A `column` is the smallest thing in the corpus
+ * and weighs its 0.25 square units. `none` sorts last, which is what the
+ * infinity is for.
+ */
 function extent(record: CatalogRecord): number {
   const foot = record.foot
   switch (foot.shape) {
@@ -48,6 +57,12 @@ function extent(record: CatalogRecord): number {
       return foot.length
     case 'arc':
       return foot.radius
+    case 'diag':
+      return foot.run
+    case 'tri':
+      return (foot.leg * foot.leg) / 2
+    case 'column':
+      return WALL_THICKNESS_UNITS * WALL_THICKNESS_UNITS
     case 'none':
       return Number.POSITIVE_INFINITY
   }

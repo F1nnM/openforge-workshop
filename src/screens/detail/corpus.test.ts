@@ -75,30 +75,56 @@ const heights = records.map((record) => heightLabel(tagsOf(record)))
 describeCorpus('footprint cascade over the live corpus', () => {
   it('covers every tile, with the documented tier distribution', () => {
     expect(records).toHaveLength(8702)
-    // Row W3 moved 403 tiles into tier 1. `rect` went 3,051 → 3,454 and the three
-    // fallback tiers gave up exactly those 403: `size-code` 223 → 161 (the 62
-    // `IL+corner` cells, which are measured 1.000 × 1.000 and were being labelled
-    // by their code because a `concave`/`convex` *corner sense* was read as a
-    // curve), `shape-word` 709 → 399, `unspecified` 212 → 181. `wall` and `arc`
-    // are untouched, which is the check that W3 stayed inside its own bucket.
+    // Row W3 moved 403 tiles into tier 1: `rect` went 3,051 → 3,454, and the
+    // fallback tiers gave up exactly those 403, including the 62 `IL+corner`
+    // cells that were labelled by their code because a `concave`/`convex`
+    // *corner sense* was read as a curve.
+    //
+    // Row W4 added tiers 4 to 6, and every tile that reaches one of them arrives
+    // from a *worse* tier rather than a better one:
+    //
+    //   `size-code` 161 → 42    the 119 columns now state their measured
+    //                           0.5 × 0.5 instead of printing "OpenLOCK L".
+    //                           The 42 left are the codes W4 refuses — 28 `U`
+    //                           (ambiguous) and 14 `col+T` (unmeasured).
+    //   `shape-word` 399 → 476  +77: the 57 de-arced tiles W1 proved are not
+    //                           sectors and have no other tagged dimension,
+    //                           plus the 20 `shingles` barge-boards whose pair
+    //                           the mesh contradicts by up to 2.905 units.
+    //   `unspecified` 181       untouched. Nothing W4 did took a tile from
+    //                           having something to say to having nothing.
+    //
+    // `diag` 121 came out of `wall` and `tri` 9 out of `rect`, so both are a
+    // relabel of a tile that already had a dimension, printed more precisely.
     expect(tally(footprints.map((value) => value.basis))).toEqual({
-      rect: 3454,
-      wall: 3116,
-      arc: 1391,
-      'size-code': 161,
-      'shape-word': 399,
+      rect: 3449,
+      wall: 3079,
+      arc: 1226,
+      diag: 121,
+      column: 119,
+      tri: 9,
+      'size-code': 42,
+      'shape-word': 476,
       unspecified: 181,
     })
   })
 
-  it('is a printable dimension for 91.5% of the corpus', () => {
-    const dimensioned = footprints.filter(
-      (value) => value.basis === 'rect' || value.basis === 'wall' || value.basis === 'arc',
+  it('is a printable dimension for 92.0% of the corpus', () => {
+    const dimensioned = footprints.filter((value) =>
+      (['rect', 'wall', 'arc', 'diag', 'column', 'tri'] as const).some((basis) => value.basis === basis),
     ).length
-    expect(dimensioned / records.length).toBeCloseTo(0.915, 3)
+    expect(dimensioned / records.length).toBeCloseTo(0.92, 3)
+    // The three W4 tiers are worth 249 tiles of it, and they are the reason the
+    // figure moved 91.5% → 92.0% rather than to the ~95% the plan predicted:
+    // 77 tiles left a dimensioned tier in the same change, because W1 measured
+    // them and the dimension they had was wrong.
+    const measuredByW4 = footprints.filter((value) =>
+      (['diag', 'column', 'tri'] as const).some((basis) => value.basis === basis),
+    ).length
+    expect(measuredByW4).toBe(249)
     // The contract's own figure: a `W × D` alone reaches only two fifths.
     const rects = footprints.filter((value) => value.basis === 'rect').length
-    expect(rects / records.length).toBeCloseTo(0.397, 3)
+    expect(rects / records.length).toBeCloseTo(0.396, 3)
   })
 
   it('never renders a blank, and refuses explicitly where it must', () => {

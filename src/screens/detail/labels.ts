@@ -23,39 +23,51 @@
  * fabricated measurement in mono type next to three real ones. `corpus.test.ts`
  * asserts the 21.0% so the fallback rate stays a measured fact.
  *
- * ## Footprint is a union, and only 39.7% of it is a `W×D`
+ * ## Footprint is a union, and only 39.6% of it is a `W×D`
  *
- * `CatalogRecord.foot` is `rect` (39.7%) / `wall` (35.8%) / `arc` (16.0%) /
- * `none` (8.5%). {@link footprintLabel} is a six-tier cascade, and every tier
- * reports which one it came from so the cell can name its own provenance:
+ * `CatalogRecord.foot` is `rect` (39.6%) / `wall` (35.4%) / `arc` (14.1%) /
+ * `diag` (1.4%) / `column` (1.4%) / `tri` (0.1%) / `none` (8.0%).
+ * {@link footprintLabel} is a nine-tier cascade, and every tier reports which
+ * one it came from so the cell can name its own provenance:
  *
  * | tier | label            | source                                  | live tiles |
  * | ---- | ---------------- | --------------------------------------- | ---------- |
- * | 1    | `1 × 1`          | `rect` — tagged width and depth          | 39.7%      |
- * | 2    | `2 × 0.5`        | `wall` — tagged length × measured 12.7mm | 35.8%      |
- * | 3    | `2r 90°`         | `arc` — radius and sweep                 | 16.0%      |
- * | 4    | `OpenLOCK D`     | `size|openlock`, when there is no shape  | 1.9%       |
- * | 5    | `Curved`         | a geometry word from `shape|…`           | 4.6%       |
- * | 6    | `Size not specified` | nothing to go on                     | 2.1%       |
+ * | 1    | `1 × 1`          | `rect` — tagged width and depth          | 39.6%      |
+ * | 2    | `2 × 0.5`        | `wall` — tagged length × measured 12.7mm | 35.4%      |
+ * | 3    | `2r 90°`         | `arc` — radius and sweep                 | 14.1%      |
+ * | 4    | `2.83 × 0.5 at 45°` | `diag` — measured run × the constant  | 1.4%       |
+ * | 5    | `0.5 × 0.5`      | `column` — the measured pillar            | 1.4%       |
+ * | 6    | `2 × 2 triangle` | `tri` — the leg, twice                    | 0.1%       |
+ * | 7    | `OpenLOCK D`     | `size|openlock`, when there is no shape  | 0.5%       |
+ * | 8    | `Curved`         | a geometry word from `shape|…`           | 5.4%       |
+ * | 9    | `Size not specified` | nothing to go on                     | 2.1%       |
  *
  * Row W3 moved 403 tiles from tier 5 / tier 4 / tier 6 up into tier 1: a curve
  * marker no longer vetoes a tagged width/depth pair, because the mesh honours
  * that pair wherever the tile is not one lettered `size|segment` of a larger
- * design. Tiers 4 to 6 lost 62, 310 and 31 tiles respectively.
+ * design.
+ *
+ * Row W4 added tiers 4 to 6, and the tile counts in the table are what its
+ * verifier reports rather than what this cascade was told to expect. The three
+ * new tiers are all *measurements*, which is why they outrank the size code: a
+ * `column` that fell through to tier 7 would print "OpenLOCK L" while the
+ * catalog knows it is 12.70 mm square, and a `diag` would print "OpenLOCK P"
+ * where tier 2 previously printed a length.
  *
  * Tier 2 is the one deliberate addition to the cascade the brief specified. A
  * `wall` footprint has a real tagged length and no depth field at all, because
  * the depth is not in the data — it is `WALL_THICKNESS_UNITS`, measured from the
- * meshes and bit-exact at exactly half a grid unit. Dropping those 3,116 tiles
- * to tier 4 or 5 would throw away a measurement in order to print a size code,
+ * meshes and bit-exact at exactly half a grid unit. Dropping those 3,079 tiles
+ * to tier 7 or 8 would throw away a measurement in order to print a size code,
  * so the cell prints `length × 0.5` and its note names the constant. Nothing is
  * guessed at: `Footprint`'s comment forbids an importer *writing* a depth, not a
- * reader stating the constant it uses to place the tile.
+ * reader stating the constant it uses to place the tile. `diag` and `column`
+ * read the same constant for the same reason.
  *
- * Tier 5's vocabulary is ordered, and the order is load-bearing for the measured
+ * Tier 8's vocabulary is ordered, and the order is load-bearing for the measured
  * coverage above: a tile carrying both `hex` and `curved` resolves to `hex`. This
  * is a *word for a human*, not a footprint, so it is unaffected by W3's finding
- * that `hex` is not a curve — the 56 hex tiles reach tier 5 either way.
+ * that `hex` is not a curve — the 56 hex tiles reach tier 8 either way.
  */
 import type { CatalogAssets, CatalogRecord } from '@/catalog'
 import { WALL_THICKNESS_MM, WALL_THICKNESS_UNITS, shardedPath } from '@/catalog'
@@ -105,7 +117,16 @@ function humanise(value: string): string {
 /* --------------------------------------------------------------- provenance */
 
 /** Which tier of {@link footprintLabel}'s cascade produced a label. */
-export type FootprintBasis = 'rect' | 'wall' | 'arc' | 'size-code' | 'shape-word' | 'unspecified'
+export type FootprintBasis =
+  | 'rect'
+  | 'wall'
+  | 'arc'
+  | 'diag'
+  | 'column'
+  | 'tri'
+  | 'size-code'
+  | 'shape-word'
+  | 'unspecified'
 
 /**
  * A spec-grid value, plus where it came from.
@@ -196,6 +217,33 @@ export function footprintLabel(
         note:
           'Radius and swept angle. Curves are not given as width × depth: on a curve the size ' +
           'tags name the design family, and diverge from the mesh by 96 mm at the median.',
+      }
+    case 'diag':
+      return {
+        text: `${formatUnits(foot.run)} × ${formatUnits(WALL_THICKNESS_UNITS)} at 45°`,
+        basis: 'diag',
+        note:
+          `A wall run set at 45°. The run is measured from the mesh — all 121 of these carry ` +
+          `size|width|2, and none of them is 2 units long, because the tag names the cell the ` +
+          `piece cuts across rather than the piece.`,
+      }
+    case 'column':
+      return {
+        text: `${formatUnits(WALL_THICKNESS_UNITS)} × ${formatUnits(WALL_THICKNESS_UNITS)}`,
+        basis: 'column',
+        note:
+          `Every column in the catalog is one wall thickness square — ` +
+          `${formatUnits(WALL_THICKNESS_MM)} mm, measured on four of the five port letters and ` +
+          `stated independently by Printable Scenery. The letter beside the name is the port ` +
+          `arrangement, not a size.`,
+      }
+    case 'tri':
+      return {
+        text: `${formatUnits(foot.leg)} × ${formatUnits(foot.leg)} triangle`,
+        basis: 'tri',
+        note:
+          'A right isosceles triangle: two legs on the axes and the hypotenuse across the ' +
+          'diagonal, so it fills half of the cell its legs name.',
       }
     case 'none':
       break

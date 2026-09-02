@@ -62,6 +62,7 @@ export const FIXTURE_CATALOG = {
     models: 'https://objects.openforge.tools/models',
     sprites: 'https://objects.openforge.tools/sprites',
     thumbs: 'https://objects.openforge.tools/thumbs',
+    lod: 'https://objects.openforge.tools/lod',
   },
   // The measured layout: 2 rows × 5 columns of 512 px frames, frame 0 default.
   sprite: { rows: 2, cols: 5, tile: 512, frames: 10, defaultFrame: 0 },

@@ -9,13 +9,15 @@
  *
  * ## Why the room is drawn from `rect` and `wall` only
  *
- * Those are exactly the two footprint cases v1's builder can place — 3,454
- * `rect` plus 3,116 `wall` tiles, **75.5%** of the live corpus
- * (`src/catalog/schema.ts`, `Footprint`). `arc` (16.0%) lands in v1.1 and `none`
- * (8.5%) is never placeable. (`rect` was 3,051 and 70.9% until row W3 stopped a
- * curve marker vetoing a tagged width/depth pair.) So a hero drawn from rectangles and wall segments
- * is not a simplification of the product: it is a picture of what the product
- * does, and it cannot promise a shape the builder would refuse.
+ * Those are exactly the two footprint cases v1's builder can place — 3,449
+ * `rect` plus 3,079 `wall` tiles, **75.0%** of the live corpus
+ * (`src/catalog/schema.ts`, `Footprint`). `arc` (14.1%) lands in v1.1, and so do
+ * the three cases row W4 added: `diag` (1.4%), `column` (1.4%) and `tri` (0.1%),
+ * which is 249 tiles the builder can now describe and still not draw — row W6 is
+ * where they arrive on the canvas. `none` (8.0%) is never placeable. So a hero
+ * drawn from rectangles and wall segments is not a simplification of the
+ * product: it is a picture of what the product does, and it cannot promise a
+ * shape the builder would refuse.
  *
  * Every wall segment is {@link WALL_THICKNESS_UNITS} (0.5 units, the measured
  * 12.7 mm) on its short axis, and every coordinate here is a multiple of 0.25

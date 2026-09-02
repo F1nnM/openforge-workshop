@@ -40,10 +40,14 @@ export {
 } from './fixtures'
 export type { FixtureConfig, FixtureRow } from './fixtures'
 export {
-  DEFAULT_ARC_SWEEP_DEG,
+  COLUMN_SHAPE_TAG,
+  DIAGONAL_TAG,
+  XG_INTERFACE_CODES,
   footprintKind,
   hasCurveMarker,
   isDesignFragment,
+  isLetteredCurvePart,
+  radiusIsFeature,
   resolveFootprint,
   sizeToken,
 } from './footprint'

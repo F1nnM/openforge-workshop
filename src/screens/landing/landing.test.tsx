@@ -55,6 +55,7 @@ const RAW_INDEX = {
     models: 'https://objects.example.test/models',
     sprites: 'https://objects.example.test/sprites',
     thumbs: 'https://objects.example.test/thumbs',
+    lod: 'https://objects.example.test/lod',
   },
   sprite: { rows: 2, cols: 5, tile: 512, frames: 10, defaultFrame: 0 },
   tags: ['texture|cave', 'texture|cave|wet', 'texture|towne|stucco', 'build|s2w', 'shape|floor'],

@@ -251,15 +251,38 @@ describeCorpus(corpusSuite, () => {
     expect(mismatches).toEqual([])
   })
 
-  it('shows why the code beats the width: 299 coded tiles have no measurable footprint', () => {
+  it('shows why the code beats the width: 345 coded tiles have no width to join on', () => {
     const codedWithoutFootprint = records.filter(
       (record) => record.sizeCode !== undefined && record.foot.shape !== 'rect' && record.foot.shape !== 'wall',
     )
-    // 361 before row W3. The 62 that gained a footprint are the `IL+corner`
-    // cells, whose `concave`/`convex` tag is the sense of a right angle and not
-    // curvature, and which measure 1.000 x 1.000. The argument is unchanged and
-    // 299 tiles still make it: a size code reaches tiles a width cannot.
-    expect(codedWithoutFootprint).toHaveLength(299)
+    // 361 before row W3, 299 after it, 345 after W4 — and the rise is the
+    // argument getting *stronger*, not weaker. W4 gave 249 of these tiles a
+    // measured footprint, and none of the three cases it added carries a `w` or
+    // a `length` a width join could read:
+    //
+    //   column 119   no size tag at all beyond the code letter. The code is
+    //                literally the only thing these tiles carry.
+    //   diag   121   a `run` measured at 2.828-3.536 against a tagged
+    //                `size|width|2`. A width join would match all 121 at 2
+    //                units, which is worse than missing them.
+    //   tri      9   a `leg`, which is the tagged width — the one case here
+    //                where a width join would have been right.
+    //   none    42   the codes W4 refuses: 28 ambiguous `U`, 14 unmeasured
+    //                `col+T`.
+    //   arc     54   what is left of the coded arcs once the 84 xG walls
+    //                de-arced into `wall` and out of this population.
+    expect(codedWithoutFootprint).toHaveLength(345)
+    const byShape = new Map<string, number>()
+    for (const record of codedWithoutFootprint) {
+      byShape.set(record.foot.shape, (byShape.get(record.foot.shape) ?? 0) + 1)
+    }
+    expect(Object.fromEntries([...byShape.entries()].sort())).toEqual({
+      arc: 54,
+      column: 119,
+      diag: 121,
+      none: 42,
+      tri: 9,
+    })
   })
 
   /* ------------------------------------------------------------ the hard rule */
@@ -404,25 +427,28 @@ describeCorpus(corpusSuite, () => {
     for (const topper of toppers) expect(index.basePrintOption.has(topper.id)).toBe(false)
   })
 
-  it('collapses the topless auto-insert rate under openlock from 79.9% to zero', () => {
+  it('collapses the topless auto-insert rate under openlock from 79.7% to zero', () => {
     const before = survey(legacyBase, 'openlock')
     const after = survey(shippedBase, 'openlock')
 
     // Same toppers matched either way: the ranking chooses, it never refuses.
-    // 3,769 before row W3 gave 403 tiles a footprint; the extra 209 are toppers
-    // that now have a footprint key to match a base on, so the denominator grew
-    // and the defect it measures got worse rather than smaller.
-    expect(before.matched).toBe(3978)
-    expect(after.matched).toBe(3978)
+    // 3,769 before row W3 gave 403 tiles a footprint and 3,978 after; row W4
+    // takes 25 back, and both halves of that are false pairs it removed rather
+    // than matches it lost — see 'separates the three ways a base can be
+    // missing' for the two causes. The denominator is the honest one.
+    expect(before.matched).toBe(3953)
+    expect(after.matched).toBe(3953)
 
     // The defect, measured on this corpus by the old ranking written out above.
-    expect(before.byOption.topless).toBe(3179)
-    expect(before.byOption.topless / before.matched).toBeCloseTo(0.799, 3)
-    expect(before.byOption.unsupported).toBe(177)
+    // Still 79.7% of everything it matches, so the finding is untouched: the 25
+    // came out of a population that was 80% wrong either way.
+    expect(before.byOption.topless).toBe(3150)
+    expect(before.byOption.topless / before.matched).toBeCloseTo(0.797, 3)
+    expect(before.byOption.unsupported).toBe(181)
     expect(before.byOption.plain).toBe(622)
 
     // And after: every auto-inserted openlock base is the full base.
-    expect(after.byOption).toEqual({ plain: 3978, unsupported: 0, topless: 0 })
+    expect(after.byOption).toEqual({ plain: 3953, unsupported: 0, topless: 0 })
   })
 
   it('collapses it under every lock preference, to the three cases the corpus forces', () => {
@@ -432,16 +458,24 @@ describeCorpus(corpusSuite, () => {
       after: survey(shippedBase, lock).byOption,
     }))
 
-    // Every `before` row grew by row W3's 209 newly matchable toppers and every
-    // `after` row is still all-plain but for the three magnetic cases the corpus
-    // forces. The shape of the finding is what is asserted; the totals moved.
-    const allPlain: Record<PrintOption, number> = { plain: 3978, unsupported: 0, topless: 0 }
-    const magneticAfter: Record<PrintOption, number> = { plain: 3975, unsupported: 0, topless: 3 }
+    // Every `before` row grew by row W3's 209 newly matchable toppers, then lost
+    // row W4's 25 false pairs, and every `after` row is still all-plain but for
+    // the three magnetic cases the corpus forces. The shape of the finding is
+    // what is asserted; the totals moved.
+    //
+    // The `before` rows also shift *within* their total, by up to 29 tiles,
+    // because de-arcing the 36 xG bases moved them out of the `arc:2.5@90`
+    // congruence bucket and into `wall:1.991`, `wall:1.547` and `wall:3` — where
+    // `byCost`, ranking bytes-ascending, reaches a different candidate. That is
+    // the pre-D1 ranking being arbitrary, which is the defect this test exists
+    // to record, and `after` is unmoved at all-plain.
+    const allPlain: Record<PrintOption, number> = { plain: 3953, unsupported: 0, topless: 0 }
+    const magneticAfter: Record<PrintOption, number> = { plain: 3950, unsupported: 0, topless: 3 }
     expect(measured).toEqual([
-      { lock: 'openlock', before: { plain: 622, unsupported: 177, topless: 3179 }, after: allPlain },
-      { lock: 'dragonlock', before: { plain: 3819, unsupported: 156, topless: 3 }, after: allPlain },
-      { lock: 'magnetic', before: { plain: 2256, unsupported: 35, topless: 1687 }, after: magneticAfter },
-      { lock: 'none', before: { plain: 824, unsupported: 333, topless: 2821 }, after: allPlain },
+      { lock: 'openlock', before: { plain: 622, unsupported: 181, topless: 3150 }, after: allPlain },
+      { lock: 'dragonlock', before: { plain: 3798, unsupported: 152, topless: 3 }, after: allPlain },
+      { lock: 'magnetic', before: { plain: 2243, unsupported: 35, topless: 1675 }, after: magneticAfter },
+      { lock: 'none', before: { plain: 811, unsupported: 333, topless: 2809 }, after: allPlain },
     ])
   })
 
@@ -475,22 +509,32 @@ describeCorpus(corpusSuite, () => {
     const before = survey(legacyBase, 'openlock')
     const after = survey(shippedBase, 'openlock')
 
-    // The headline figure of the defect: 110 of 1,963 bases ever handed out, and
-    // 92 of those 110 were print variants rather than bases.
-    expect(before.reach.size).toBe(110)
-    expect(before.reachByOption).toEqual({ plain: 18, unsupported: 12, topless: 80 })
+    // The headline figure of the defect: 111 of 1,963 bases ever handed out, and
+    // 92 of those 111 were print variants rather than bases.
+    //
+    // 110 before row W4. De-arcing the 36 xG bases moved them out of the
+    // `arc:2.5@90` congruence bucket into `wall:1.991`, `wall:1.547` and
+    // `wall:3`, and `byCost` — ranking bytes-ascending over a changed candidate
+    // list — reaches one more distinct base, a plain one. That is the pre-D1
+    // ranking being arbitrary, which is the whole point of the `before` survey.
+    expect(before.reach.size).toBe(111)
+    expect(before.reachByOption).toEqual({ plain: 19, unsupported: 13, topless: 79 })
 
-    // After: the count barely moves — one candidate set collapses onto a base
-    // another already reached — but every base it reaches is now a full base, so
-    // the reachable *product* range is six times wider.
-    expect(after.reach.size).toBe(110)
-    expect(after.reachByOption).toEqual({ plain: 110, unsupported: 0, topless: 0 })
-    expect(after.reachByOption.plain).toBeGreaterThan(6 * before.reachByOption.plain)
+    // After: the count does not move at all now — but every base it reaches is
+    // a full base, so the reachable *product* range is 5.8 times wider. It was
+    // 6.1 times before row W4, and the ratio moved because the denominator did:
+    // `byCost` reaches 19 plain bases instead of 18, not because D1's ranking
+    // reaches fewer.
+    expect(after.reach.size).toBe(111)
+    expect(after.reachByOption).toEqual({ plain: 111, unsupported: 0, topless: 0 })
+    expect(after.reachByOption.plain / before.reachByOption.plain).toBeCloseTo(5.842, 3)
+    expect(after.reachByOption.plain).toBeGreaterThan(5 * before.reachByOption.plain)
 
     // Across the four preferences a user can actually pick, the reachable set
-    // itself grows: 303 → 317 distinct bases, 181 → 316 of them full bases. Row
-    // W3's 403 new footprints widened both unions by 3, so the gain the ranking
-    // is responsible for is unchanged at 14 bases and 135 full ones.
+    // itself grows. Row W3's 403 new footprints widened both unions by 3 and row
+    // W4's de-arced bases widen the `before` union by 3 more, so the gain the
+    // ranking is responsible for is asserted as the difference rather than as
+    // two absolute counts — it is the only part of this figure D1 owns.
     const union = (rank: (tile: CatalogRecord, lock: LockSystem | undefined) => CatalogRecord | undefined) => {
       const reach = new Set<TileId>()
       for (const lock of preferences) for (const id of survey(rank, lock).reach) reach.add(id)
@@ -498,14 +542,15 @@ describeCorpus(corpusSuite, () => {
     }
     const beforeUnion = union(legacyBase)
     const afterUnion = union(shippedBase)
-    expect(beforeUnion.size).toBe(303)
-    expect(afterUnion.size).toBe(317)
-    expect(afterUnion.size).toBeGreaterThan(beforeUnion.size)
+    expect(beforeUnion.size).toBe(306)
+    expect(afterUnion.size).toBe(320)
+    expect(afterUnion.size - beforeUnion.size).toBe(14)
 
     const full = (reach: Set<TileId>) =>
       [...reach].filter((id) => optionOf(index.byId.get(id) as CatalogRecord) === 'plain').length
-    expect(full(beforeUnion)).toBe(181)
-    expect(full(afterUnion)).toBe(316)
+    expect(full(beforeUnion)).toBe(184)
+    expect(full(afterUnion)).toBe(319)
+    expect(full(afterUnion) - full(beforeUnion)).toBe(135)
   })
 
   /* ----------------------------------------------------------- the disclosure */
@@ -614,12 +659,27 @@ describeCorpus(corpusSuite, () => {
         if (entry.code in gaps) gaps[entry.code as keyof typeof gaps] += 1
       }
     }
-    // 129 bases the corpus should have and does not; 21 footprints nothing
-    // supports; 235 toppers with neither a code nor a shape to match on. That
-    // last was 444 before row W3: giving 403 tiles a footprint halved the
-    // population that has nothing to match on, and moved none of it into the
-    // other two causes, which are unchanged.
-    expect(gaps).toEqual({ 'no-matching-base': 129, 'no-congruent-base': 21, 'base-unmatchable': 235 })
+    // 129 bases the corpus should have and does not; 34 footprints nothing
+    // supports; 247 toppers with neither a code nor a shape to match on. That
+    // last was 444 before row W3 and 235 after it: giving 403 tiles a footprint
+    // halved the population with nothing to match on.
+    //
+    // Row W4 moved 25 toppers out of `matched` and into the other two causes,
+    // and both moves are corrections rather than losses:
+    //
+    //   +13 no-congruent-base   The `ExG`/`RxG`/`SxG` curved-interface floors.
+    //       Their old base match existed **only because a sweep was
+    //       fabricated**: `DEFAULT_ARC_SWEEP_DEG` gave the 36 xG bases the key
+    //       `arc:2.5@90`, the same key these floors carry, so a floor measuring
+    //       2.487 x 2.000 was being matched to a wall base measuring
+    //       3.000 x 0.500. De-arcing the bases dissolves the coincidence.
+    //   +12 base-unmatchable    The `riser+…,curved+inverted.7x7+6r+{a,b,c}`
+    //       toppers. Tagged 7 x 7; W1 measured them at 5 x 2, 1.685 x 1.685 and
+    //       2 x 5, so the pair names the design and there is nothing to place.
+    //
+    // `no-matching-base` is unchanged at 129, because the code step runs first
+    // and the P-family and column codes were already failing it.
+    expect(gaps).toEqual({ 'no-matching-base': 129, 'no-congruent-base': 34, 'base-unmatchable': 247 })
   })
 
   const GAP_CODES = ['no-matching-base', 'no-congruent-base', 'base-unmatchable']
@@ -721,12 +781,14 @@ describeCorpus(corpusSuite, () => {
     expect(new Set(toppers.map((record) => record.sizeCode).filter((code) => code !== undefined)).size).toBe(27)
   })
 
-  it('shows the 21 unsupportable shapes are geometry, not an omission', () => {
+  it('shows the 34 unsupportable shapes are geometry, not an omission', () => {
     // The classification's second cause. The distinction matters for the copy:
     // 17 of these are half a unit wide and the base range starts at a full unit,
     // so no base can carry them and telling somebody to go and find one would
-    // send them after an object that does not exist. The other four are a real
-    // hole in an otherwise complete range.
+    // send them after an object that does not exist. Four are a real hole in an
+    // otherwise complete range. The 13 W4 added are the third kind: a shape the
+    // corpus has bases *for*, whose bases stopped being congruent once the
+    // fabricated sweep that made them congruent was removed.
     const shapeless = toppers.filter((record) => {
       const resolved = resolvePlacement(place(record.id), index, { lock: 'openlock' })
       return resolved.notes.some((entry) => entry.code === 'no-congruent-base')
@@ -737,10 +799,18 @@ describeCorpus(corpusSuite, () => {
       keys.set(key, (keys.get(key) ?? 0) + 1)
     }
     expect(Object.fromEntries([...keys.entries()].sort())).toEqual({
+      'arc:2.5@90': 13,
       'rect:0.5x1': 3,
       'rect:0.5x2': 14,
       'rect:2x6': 4,
     })
+
+    // The 13 are the `curved+interface` floors, and there is now no base at
+    // that key at all — where before row W4 there were 36, every one of them an
+    // `AxG`/`BAxG`/`QxG` wall base that only shared the key because
+    // `DEFAULT_ARC_SWEEP_DEG` invented its 90 degrees.
+    expect(index.basesByFootprint.has('arc:2.5@90')).toBe(false)
+    expect(shapeless.filter((record) => footprintKey(record.foot) === 'arc:2.5@90')).toHaveLength(13)
 
     // Why no base can carry the 17: nothing in the base range has an extent
     // below one grid unit.
@@ -828,15 +898,19 @@ describeCorpus(corpusSuite, () => {
     }
   })
 
-  it('reaches 89.2% of the code-less toppers through the footprint fallback', () => {
+  it('reaches 88.1% of the code-less toppers through the footprint fallback', () => {
     const codeless = toppers.filter((record) => record.sizeCode === undefined)
     const matched = codeless.filter(
       (record) => resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts.length === 2,
     )
-    // 1,899 of 2,364 before row W3. The fallback is unchanged; what changed is
-    // that 209 more code-less toppers now have a footprint for it to key on.
+    // 1,899 of 2,364 before row W3 and 2,108 after it: the fallback is
+    // unchanged and 209 more code-less toppers had a footprint to key on. Row W4
+    // takes 25 back — 13 `curved+interface` floors whose base match rested on a
+    // fabricated sweep, and 12 `curved+inverted` riser fragments whose tagged
+    // 7 x 7 the mesh contradicts. Both were false pairs, so 2,083 is a more
+    // honest 88.1% than the 89.2% it replaces.
     expect(codeless).toHaveLength(2364)
-    expect(matched).toHaveLength(2108)
+    expect(matched).toHaveLength(2083)
   })
 
   /* --------------------------------------------------------------- md5 dedupe */

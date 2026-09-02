@@ -54,6 +54,7 @@ const ASSETS = CatalogAssets.parse({
   models: 'https://objects.openforge.tools/models',
   sprites: 'https://objects.openforge.tools/sprites',
   thumbs: 'https://objects.openforge.tools/thumbs',
+  lod: 'https://objects.openforge.tools/lod',
 })
 
 /* ----------------------------------------------------------------- numbers */

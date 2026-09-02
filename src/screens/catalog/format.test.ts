@@ -24,7 +24,7 @@ describe('sizeLabel', () => {
   })
 
   it('renders a wall as its length only, because its depth is not data', () => {
-    // 3,116 tiles carry a numeric `size|width` and no `size|depth` at all; the
+    // 3,079 tiles carry a numeric `size|width` and no `size|depth` at all; the
     // depth is the measured 12.7 mm constant, so a chip that showed one would be
     // inventing it.
     expect(sizeLabel(foot({ shape: 'wall', length: 4 }))).toBe('4×')
@@ -33,6 +33,20 @@ describe('sizeLabel', () => {
 
   it('renders an arc as radius and sweep', () => {
     expect(sizeLabel(foot({ shape: 'arc', radius: 4, angle: 22.5 }))).toBe('4r22.5')
+  })
+
+  it('marks the two 45-degree cases so neither reads as an axis-aligned one', () => {
+    // A `diag` is a wall run, and a chip of `2.83×` alone would say it is a
+    // straight 2.83-unit wall. A `tri` fills half the cell its legs name, and a
+    // chip of `2×2` alone would say it fills all of it. Both carry a mark.
+    expect(sizeLabel(foot({ shape: 'diag', run: 2.828 }))).toBe('2.828×∡')
+    expect(sizeLabel(foot({ shape: 'tri', leg: 2 }))).toBe('2×2◺')
+  })
+
+  it('renders a column as the measured pillar, the same for all 119', () => {
+    // A column carries no dimension of its own — the footprint case has no
+    // fields — so the chip states the constant rather than reading a field.
+    expect(sizeLabel(foot({ shape: 'column' }))).toBe('0.5×0.5')
   })
 
   it('falls back to the openlock size code when no footprint is derivable', () => {

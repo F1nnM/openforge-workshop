@@ -12,6 +12,7 @@
  * through `src/screens/catalog/index.ts` rather than kept private.
  */
 import type { Footprint } from '@/catalog'
+import { WALL_THICKNESS_UNITS } from '@/catalog'
 import { BUILD_UNSPECIFIED, KIND_OTHER } from '@/search'
 
 /* ------------------------------------------------------------------- numbers */
@@ -65,7 +66,10 @@ function formatUnit(value: number): string {
  * | `rect`    | `2×2`    | width × depth in grid units |
  * | `wall`    | `4×`     | length only; the depth is the measured 12.7 mm constant, not data |
  * | `arc`     | `4r22.5` | radius and sweep; the tagged width/depth are design-family labels, not measurements |
- * | `none`    | the `size|openlock` code, or `—` | 741 tiles have no derivable footprint |
+ * | `diag`    | `2.83×∡`  | the measured 45° run; the `∡` is what stops it reading as a straight 2.83 wall |
+ * | `column`  | `0.5×0.5` | the measured pillar. All 119 are the same square, so the chip does not vary |
+ * | `tri`     | `2×2◺`   | the bounding cell, marked as half of it |
+ * | `none`    | the `size|openlock` code, or `—` | 699 tiles have no derivable footprint |
  *
  * `—` rather than an omitted chip: `VirtuosoGrid` assumes a uniform item size,
  * so a card that sometimes drops a row of content would drift the scroll
@@ -80,6 +84,12 @@ export function sizeLabel(foot: Footprint, sizeCode?: string): string {
       return `${formatUnit(foot.length)}×`
     case 'arc':
       return `${formatUnit(foot.radius)}r${formatUnit(foot.angle)}`
+    case 'diag':
+      return `${formatUnit(foot.run)}×∡`
+    case 'column':
+      return `${formatUnit(WALL_THICKNESS_UNITS)}×${formatUnit(WALL_THICKNESS_UNITS)}`
+    case 'tri':
+      return `${formatUnit(foot.leg)}×${formatUnit(foot.leg)}◺`
     case 'none':
       return sizeCode ?? '—'
   }
