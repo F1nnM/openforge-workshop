@@ -46,6 +46,50 @@
  * `ASSET_BASES` gained `lod` in W4 without any field's derivation changing. They
  * are locked separately so that changing one has to be re-locked deliberately —
  * a real check — without it demanding a version bump it does not deserve.
+ *
+ * ## Every top-level key is classified, because the digest cannot be total
+ *
+ * Row X8 found the hole in this file while deciding where to put the 40 recipe
+ * templates: `derivationDigests` cannot see a **new** top-level key at all.
+ * Adding a 40-entry `templates` key to the locked build leaves *both digests
+ * byte-identical* — X8 verified it, and `lock.test.ts` now keeps the same
+ * experiment as an assertion. Had the templates gone into `catalog.json`, "a
+ * derivation changed and nothing announced it" would never have fired.
+ *
+ * The answer is not a digest over the whole file, for three reasons:
+ *
+ *   - **It cannot be over the whole file.** `version.built` is a clock and moves
+ *     on every build, so `version` has to be out; "the whole file" is therefore
+ *     always "the whole file minus an exemption list", which is exactly the
+ *     partition below with the classification left implicit instead of written
+ *     down.
+ *   - **A total digest classifies every future key as a derivation, and that
+ *     default is wrong for configuration.** `assets` and `sprite` are hashed
+ *     apart because W4 added `ASSET_BASES.lod` with no field's derivation
+ *     changing; under one digest over everything-but-`version` that would have
+ *     reported "a derivation changed and nothing announced it" and demanded a
+ *     `PIPELINE_VERSION` bump no consumer could observe — the misattribution the
+ *     split exists to prevent. A new key inherits the same wrong default.
+ *   - **The digest's scope is quoted in three other modules.**
+ *     `pipeline/version.ts`, `src/catalog/schema.ts` and `pipeline/thumbs.ts`
+ *     each state the biconditional over `{tags, records}`. Widening it makes
+ *     three docblocks false and forces a re-lock, to buy a coverage the
+ *     classification gives without moving a byte.
+ *
+ * So {@link DIGEST_SLOTS} maps **every** key of `CatalogFile` to the digest it
+ * lives in, and both digests are projected *from that map* rather than from a
+ * literal — the map cannot claim a coverage the hash does not have. It is
+ * `satisfies Record<keyof CatalogFile, DigestSlot>`, so a key added to
+ * `CatalogFile` is a **compile error in this file** naming the key, and
+ * {@link unclassifiedKeys} re-checks the map against the schema's own shape at
+ * runtime, because `npx tsx tools/stamp/cli.ts` does not typecheck and the CI
+ * step has to fail on its own.
+ *
+ * What this does **not** do is make the digest total. A key marked `exempt` is
+ * trusted on the classifier's word; the guard makes the decision mandatory and
+ * visible, not correct. It is top-level only, matching the digests' own
+ * granularity — a new field *inside* `version` is still invisible to both, and
+ * `stampDifference` in `artefacts.ts` would drop it too.
  */
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -55,7 +99,7 @@ import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 
 import type { CatalogFile } from '../../src/catalog'
-import { SCHEMA_VERSION } from '../../src/catalog'
+import { CatalogFile as CatalogFileSchema, SCHEMA_VERSION } from '../../src/catalog'
 import type { FixtureRow } from '../../pipeline'
 import { PAYLOAD_TIMESTAMP, PIPELINE_VERSION, buildCatalog, emptyManifest } from '../../pipeline'
 
@@ -89,6 +133,54 @@ export const DerivationLock = z.object({
 })
 export type DerivationLock = z.infer<typeof DerivationLock>
 
+/** Which of the two digests a top-level key of the emitted file belongs to. */
+export type DigestSlot = 'content' | 'config' | 'exempt'
+
+/**
+ * Every top-level key of `CatalogFile`, and the digest that covers it.
+ *
+ * The `satisfies` is the guard, not documentation: a key added to `CatalogFile`
+ * with no slot here fails `npm run typecheck` in this file and names the key,
+ * and a slot for a key the schema no longer declares fails the same way.
+ *
+ * Declaration order is the digest's byte order — `{tags, records}` and
+ * `{assets, sprite}`, the two literals X4 locked, which is why this refactor
+ * moved neither digest. Reordering it re-hashes both; `lock.test.ts` pins the
+ * projection against those literals so a reorder fails saying so, rather than
+ * surfacing as a phantom derivation change.
+ */
+export const DIGEST_SLOTS = {
+  /**
+   * `built` is a clock, `fixtures` is a literal in the locked build, `manifest`
+   * comes from `emptyManifest()`, and `schema`/`pipeline` are the lock's own
+   * two fields. All five are either an input to the digest or a statement
+   * *about* it, so none of them can be inside it. See the module note.
+   */
+  version: 'exempt',
+  assets: 'config',
+  sprite: 'config',
+  tags: 'content',
+  records: 'content',
+} as const satisfies Record<keyof CatalogFile, DigestSlot>
+
+/** The keys in one slot, in {@link DIGEST_SLOTS} order. */
+export function keysIn(slot: DigestSlot): (keyof CatalogFile)[] {
+  const keys = Object.keys(DIGEST_SLOTS) as (keyof CatalogFile)[]
+  return keys.filter((key) => DIGEST_SLOTS[key] === slot)
+}
+
+/**
+ * Top-level keys `CatalogFile` declares that {@link DIGEST_SLOTS} does not
+ * classify — the runtime half of the `satisfies` above.
+ *
+ * `declared` is a parameter so that the failure is provable without editing the
+ * schema: `lock.test.ts` passes the schema's real keys plus X8's `templates` and
+ * asserts both this function and {@link checkLock} complain.
+ */
+export function unclassifiedKeys(declared: readonly string[] = Object.keys(CatalogFileSchema.shape)): string[] {
+  return declared.filter((key) => !(key in DIGEST_SLOTS))
+}
+
 export interface DerivationDigests {
   content: string
   config: string
@@ -96,14 +188,21 @@ export interface DerivationDigests {
   tags: number
 }
 
-/** The two digests over a built file. */
+/** The two digests over a built file, projected from {@link DIGEST_SLOTS}. */
 export function derivationDigests(file: CatalogFile): DerivationDigests {
   return {
-    content: sha256(JSON.stringify({ tags: file.tags, records: file.records })),
-    config: sha256(JSON.stringify({ assets: file.assets, sprite: file.sprite })),
+    content: sha256(project(file, 'content')),
+    config: sha256(project(file, 'config')),
     records: file.records.length,
     tags: file.tags.length,
   }
+}
+
+/** One slot's keys, as the JSON string its digest is taken over. */
+function project(file: CatalogFile, slot: DigestSlot): string {
+  const subject: Record<string, unknown> = {}
+  for (const key of keysIn(slot)) subject[key] = file[key]
+  return JSON.stringify(subject)
 }
 
 /**
@@ -164,9 +263,30 @@ const RELOCK = 'Re-lock with `npx tsx tools/stamp/cli.ts --relock` and commit to
  * derivation changed and nothing announced it" — the right complaint about the
  * wrong event.
  */
-export function checkLock(lock: DerivationLock, file: CatalogFile, fixturesRef: string): LockCheck {
+export function checkLock(
+  lock: DerivationLock,
+  file: CatalogFile,
+  fixturesRef: string,
+  declared: readonly string[] = Object.keys(CatalogFileSchema.shape),
+): LockCheck {
   const digests = derivationDigests(file)
   const violations: string[] = []
+
+  // First, and before the corpus: this is a statement about the tree rather
+  // than about the snapshot, and an unclassified key is the one fault that
+  // makes every comparison below silently narrower than it reads.
+  const unclassified = unclassifiedKeys(declared)
+  if (unclassified.length > 0) {
+    violations.push(
+      `the emitted file has a top-level key no digest covers: ${unclassified.join(', ')}. ` +
+        'Neither hash reads it, so its arrival — with however much content inside it — leaves both ' +
+        'digests byte-identical and this gate reports the build as clean; row X8 measured exactly that ' +
+        'with a 40-entry `templates` key. Give it a slot in DIGEST_SLOTS in tools/stamp/lock.ts: ' +
+        "'content' if the pipeline derives it from the corpus, so a change to it has to be announced " +
+        "by a version bump; 'config' if it is stamped-in configuration no derivation produced; " +
+        `'exempt' only if it is an input or a clock, as version's five fields are. ${RELOCK}`,
+    )
+  }
 
   const versionsMoved = lock.schema !== SCHEMA_VERSION || lock.pipeline !== PIPELINE_VERSION
   const versionsNow = `schema ${String(SCHEMA_VERSION)} · pipeline ${String(PIPELINE_VERSION)}`

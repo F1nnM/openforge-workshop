@@ -338,9 +338,9 @@ export function measureTemplates(
 
   const constrain = parts.flatMap((part) => part.tags.constrain ?? [])
   const templateRoots = roots(templates.flatMap((template) => template.tags))
-  const constrainRoots = roots(
-    constrain.map((entry) => entry.tag).filter((tag): tag is string => tag !== undefined),
-  )
+  // `'tag' in entry` and not `entry.tag`, because `ConstrainRef` is a union:
+  // a `{ filter }` entry has no tag to take a root from.
+  const constrainRoots = roots(constrain.flatMap((entry) => ('tag' in entry ? [entry.tag] : [])))
 
   const initialFiles: number[] = []
   const initialItems: number[] = []
@@ -460,7 +460,7 @@ export function measureTemplates(
     parts: parts.length,
     duplicatePartNames,
     partNames: [...new Set(parts.map((part) => part.name))].sort(),
-    siblingsEntries: constrain.filter((entry) => entry.siblings !== undefined).length,
+    siblingsEntries: constrain.filter((entry) => 'tag' in entry && entry.siblings !== undefined).length,
     fulfillsEntries: parts.flatMap((part) => part.fulfills).length,
     fulfillsNotBase: parts.flatMap((part) => part.fulfills).filter((name) => name !== 'base').length,
     tagRoots: templateRoots,

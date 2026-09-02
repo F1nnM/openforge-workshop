@@ -96,9 +96,9 @@ import type { PartSlot, TagRef } from '@/catalog'
  */
 export interface ConstrainEntry {
   /** A tag *prefix* to inherit under. Never an exact-match requirement itself. */
-  readonly tag?: string
+  readonly tag?: string | undefined
   /** A prefix to remove from what the `tag` entries collected. Cannot carry source control. */
-  readonly filter?: string
+  readonly filter?: string | undefined
   /**
    * Which sibling parts to inherit from.
    *
@@ -106,24 +106,46 @@ export interface ConstrainEntry {
    * **no siblings at all**, which is a third state and not the same as absent.
    * The catalog's function distinguishes all three and so does this one.
    */
-  readonly siblings?: readonly string[]
+  readonly siblings?: readonly string[] | undefined
   /** `false` to exclude the parent's own tags. Absent means `true`. */
-  readonly parent?: boolean
+  readonly parent?: boolean | undefined
 }
 
 /**
  * A slot's constraint block.
  *
- * `PartSlot['tags']` is assignable to this. `accept` is here because the spec has
- * it and the ported tests pass it; **no live slot carries one**, and
- * `src/catalog/schema.ts` does not model it, so one arriving in a fixture would
- * be stripped before it ever reached this type.
+ * `accept` is here because the spec has it and the ported tests pass it; **no
+ * live slot carries one**, and `src/catalog/schema.ts` does not model it, so one
+ * arriving in a fixture would be stripped before it ever reached this type.
+ *
+ * ## Why every optional member here and on {@link ConstrainEntry} says `| undefined`
+ *
+ * This docblock used to claim *"`PartSlot['tags']` is assignable to this"*, and
+ * row X11 measured that it was **not**: `exactOptionalPropertyTypes` is on in
+ * `tsconfig.app.json`, `z.infer` gives `PartSlot['tags']` members the type
+ * `TagRef[] | undefined`, and `TS2379` rejects that for a `?:` member declared
+ * without `undefined`. `candidates.ts` was already working around it with
+ * `resolveSlotTags(slot.tags as SlotTags, …)` — a cast, in the one place the
+ * schema's grammar meets this port, which would have gone on compiling if the
+ * two shapes genuinely diverged. Writing `| undefined` on the four members makes
+ * the claim true, and that call site now passes `slot.tags` straight through, so
+ * a real divergence is a compile error there instead of nothing at all.
+ *
+ * What this does not make interchangeable is `constrain`. {@link ConstrainEntry}
+ * is one flat all-optional interface and the schema's `ConstrainRef` is a
+ * **union** of `{ tag }` and `{ filter }`, so code that reads `.tag` off an entry
+ * without narrowing compiles against this type and not against the schema's.
+ * That is a real difference and not a defect — this type is what the port
+ * *consumes*, and it models two of the spec's keys the schema deliberately does
+ * not (`accept`, `constrain[].parent`, both 0 corpus-wide). Adopting
+ * `PartSlot['tags']` in `src/screens/assemblies/assembly.ts` therefore took four
+ * `'tag' in entry` narrowings with it; its docblock names them.
  */
 export interface SlotTags {
-  readonly require?: readonly TagRef[]
-  readonly deny?: readonly TagRef[]
-  readonly accept?: readonly TagRef[]
-  readonly constrain?: readonly ConstrainEntry[]
+  readonly require?: readonly TagRef[] | undefined
+  readonly deny?: readonly TagRef[] | undefined
+  readonly accept?: readonly TagRef[] | undefined
+  readonly constrain?: readonly ConstrainEntry[] | undefined
 }
 
 /** What the catalog's function returns: two exact-match tag lists. */

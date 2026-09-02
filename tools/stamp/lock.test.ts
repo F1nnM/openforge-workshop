@@ -11,17 +11,52 @@
  * every machine and in CI. One corpus-gated test at the end checks the committed
  * lock against the real tree.
  */
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { SCHEMA_VERSION } from '../../src/catalog'
+import { CatalogFile as CatalogFileSchema, SCHEMA_VERSION } from '../../src/catalog'
 import type { CatalogFile } from '../../src/catalog'
 import { PIPELINE_VERSION, fixturesDir, loadFixtureRows, resolveFixturesRef } from '../../pipeline'
 import { blobOf, testCatalog } from '../measure/fixtures/catalog'
 
 import type { DerivationLock } from './lock'
-import { LOCK_FIXTURES_REF, checkLock, derivationDigests, lockFor, lockedBuild, pinnedFixturesRef, readLock } from './lock'
+import {
+  DIGEST_SLOTS,
+  LOCK_FIXTURES_REF,
+  checkLock,
+  derivationDigests,
+  keysIn,
+  lockFor,
+  lockedBuild,
+  pinnedFixturesRef,
+  readLock,
+  unclassifiedKeys,
+} from './lock'
+
+/** The schema's own top-level key list, which the classification must exhaust. */
+const DECLARED = Object.keys(CatalogFileSchema.shape)
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+/**
+ * The locked build plus a 40-entry `templates` key — row X8's experiment,
+ * reproduced rather than quoted.
+ *
+ * A cast, because the whole point is that this key is not in the schema: an
+ * excess-property error here would mean the situation could not arise, and it
+ * can — X8 was one design decision away from putting the 40 templates in
+ * `catalog.json`.
+ */
+function withTemplates(file: CatalogFile): CatalogFile {
+  return {
+    ...file,
+    templates: Array.from({ length: 40 }, (_, at) => ({ id: `template-${String(at)}`, parts: [] })),
+  } as CatalogFile
+}
 
 const FIXTURES_DIR = fixturesDir()
 const hasFixtures = existsSync(FIXTURES_DIR) && readdirSync(FIXTURES_DIR).some((name) => name.endsWith('.json'))
@@ -54,6 +89,72 @@ describe('the two pins cannot diverge', () => {
     const lock = readLock()
     expect(lock.schema).toBe(SCHEMA_VERSION)
     expect(lock.pipeline).toBe(PIPELINE_VERSION)
+  })
+})
+
+describe('every top-level key is classified', () => {
+  it('exhausts what CatalogFile declares, so nothing falls outside both digests', () => {
+    // Fails the moment the schema gains a top-level key, which is the point: a
+    // new key is invisible to both digests, so it has to be classified before it
+    // can be emitted. `satisfies Record<keyof CatalogFile, DigestSlot>` fails
+    // `npm run typecheck` on the same event; this is the runtime half, because
+    // `npx tsx tools/stamp/cli.ts` does not typecheck and the CI step has to fail
+    // on its own.
+    expect(unclassifiedKeys()).toEqual([])
+    expect([...keysIn('content'), ...keysIn('config'), ...keysIn('exempt')].sort()).toEqual([...DECLARED].sort())
+    // And the classification is the one X4's two digests actually implement.
+    expect(keysIn('content')).toEqual(['tags', 'records'])
+    expect(keysIn('config')).toEqual(['assets', 'sprite'])
+    expect(keysIn('exempt')).toEqual(['version'])
+  })
+
+  it('names an unclassified key instead of hashing around it', () => {
+    expect(unclassifiedKeys([...DECLARED, 'templates'])).toEqual(['templates'])
+  })
+
+  it('fails the lock when a declared key has no slot, before anything else is compared', () => {
+    // The mutation: the schema declares `templates` and DIGEST_SLOTS does not.
+    // Injected rather than done by editing schema.ts, so the failure is provable
+    // in this file; the live demonstration is in the row's report.
+    const file = fixture()
+    const check = checkLock(lockOf(file), file, LOCK_FIXTURES_REF, [...DECLARED, 'templates'])
+
+    expect(check.ok).toBe(false)
+    expect(check.violations.join('\n')).toContain('top-level key no digest covers: templates')
+    // Reported even though the digests themselves are in perfect agreement —
+    // which is exactly the state that made the gap invisible.
+    expect(check.violations.join('\n')).not.toContain('a derivation changed and nothing announced it')
+  })
+
+  it('reports it ahead of a moved corpus, since it is a fault in the tree and not the snapshot', () => {
+    const file = fixture()
+    const check = checkLock(lockOf(file), file, 'some-other-commit', [...DECLARED, 'templates'])
+
+    expect(check.violations).toHaveLength(2)
+    expect(check.violations[0]).toContain('top-level key no digest covers')
+    expect(check.violations[1]).toContain('the corpus moved')
+  })
+
+  it('records what the digests cannot see, which is why the classification is the guard', () => {
+    // X8's measurement, kept as an assertion: a new top-level key moves neither
+    // digest. This is not a bug being pinned — it is the digests' declared scope,
+    // quoted by pipeline/version.ts, src/catalog/schema.ts and
+    // pipeline/thumbs.ts — so the classification above is what makes a new key
+    // impossible to add in silence. If someone later widens `content` to hash
+    // the whole file, this fails and sends them to those three docblocks.
+    const file = fixture()
+    expect(derivationDigests(withTemplates(file))).toEqual(derivationDigests(file))
+  })
+
+  it('projects the two literals X4 locked, in that order', () => {
+    // DIGEST_SLOTS is declaration-ordered and the digests are built from it, so
+    // a reorder would silently re-hash both. It fails here with that reason
+    // rather than as "a derivation changed and nothing announced it".
+    const file = fixture()
+    const digests = derivationDigests(file)
+    expect(digests.content).toBe(sha256(JSON.stringify({ tags: file.tags, records: file.records })))
+    expect(digests.config).toBe(sha256(JSON.stringify({ assets: file.assets, sprite: file.sprite })))
+    expect(Object.keys(DIGEST_SLOTS)).toEqual(DECLARED)
   })
 })
 

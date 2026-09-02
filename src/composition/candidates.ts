@@ -56,7 +56,7 @@ import type {
 } from '@/catalog'
 import { buildAggregateIndex } from '@/catalog'
 
-import type { ResolvedSlot, SiblingSelection, SlotTags } from './config'
+import type { ResolvedSlot, SiblingSelection } from './config'
 import { resolveSlotTags } from './config'
 
 /* ------------------------------------------------------------------ postings */
@@ -306,7 +306,7 @@ export function createCompositionIndex(
     slotsOf: (tile) => recordOf(tile)?.config?.parts ?? [],
     tagsOf,
     resolve(slot, parent, siblings = []) {
-      return candidatesFor(resolveSlotTags(slot.tags as SlotTags, tagsOf(parent), siblings))
+      return candidatesFor(resolveSlotTags(slot.tags, tagsOf(parent), siblings))
     },
     candidatesFor,
   }
