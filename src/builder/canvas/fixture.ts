@@ -33,7 +33,7 @@
  * real path through `CatalogFile.parse`, which is where a fixture that drifted
  * from the schema gets caught.
  */
-import type { CatalogFile } from '@/catalog'
+import type { CatalogFile, DesignId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
 
 const TAGS = [
@@ -300,6 +300,53 @@ export const FIXTURE_CATALOG = {
 export function fixtureCatalogFile(): CatalogFile {
   return CatalogFileSchema.parse(FIXTURE_CATALOG)
 }
+
+/**
+ * The design a fixture *file* belongs to.
+ *
+ * The bridge row V4 needs in the tests: a scene helper is handed a file id,
+ * because that is what a canvas test is about — which outline, which band, which
+ * tint — and a placement holds an item. Every record here is its own design, so
+ * the conversion is total and injective, and a test that places
+ * `FIXTURE_IDS.floor1` still draws exactly `FIXTURE_IDS.floor1`.
+ *
+ * Throws on an id the fixture does not hold, which is what a test placing a
+ * retired tile wants: those tests pass a design id directly (see
+ * `plan.test.ts`'s unknown-tile case) rather than asking this to invent one.
+ */
+export function fixtureDesignOf(tileId: string): DesignId {
+  const record = FIXTURE_CATALOG.records.find((candidate) => candidate.id === tileId)
+  if (record === undefined) throw new Error(`no fixture record for ${tileId}`)
+  return record.design as DesignId
+}
+
+/**
+ * **Designs** by role — what a test places, since row V4.
+ *
+ * Every record in this fixture is its own design (eleven records, eleven
+ * designs), so this map is one-to-one with {@link FIXTURE_IDS} and a test that
+ * places `FIXTURE_DESIGNS.floor1` gets the record at `FIXTURE_IDS.floor1`. That
+ * is a property of *this* fixture and not of the corpus, where a design averages
+ * 2.28 files; a test that needs an item with two variants builds its own
+ * catalog, and `assembly.test.ts` is full of them.
+ *
+ * {@link FIXTURE_IDS} stays because plenty of questions are still about a file:
+ * which blob an instanced mesh keys on, which entry a download pack writes,
+ * which record `materialOf` tints.
+ */
+export const FIXTURE_DESIGNS = {
+  floor1: 'd-floor-1',
+  floor2: 'd-floor-2',
+  wall2: 'd-wall-2',
+  angled: 'd-angled',
+  arc: 'd-arc',
+  arcFallback: 'd-arc-convex',
+  column: 'd-column',
+  tri: 'd-tri',
+  diag: 'd-diag',
+  shapeless: 'd-none',
+  thickWall: 'd-thick-wall',
+} as const
 
 /** Ids by role, so a test reads as its intent rather than as a path. */
 export const FIXTURE_IDS = {

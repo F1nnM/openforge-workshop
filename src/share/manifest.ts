@@ -1,18 +1,53 @@
 /**
- * The ordinal ↔ tile mapping a share link is written against, and the checksum
- * that detects it having moved underneath a link.
+ * The ordinal ↔ tile ↔ design mapping a share link is written against, and the
+ * checksum that detects it having moved underneath a link.
  *
  * ## Why a link carries ordinals at all
  *
  * A `TileId` is the fixture `full_name`:
  * `tiles/cave/thick_wall/wall/corner/openlock/cave%aggregate+2#corner.IL+corner,90.openlock.stl`
- * — 92 characters here, ~50 on average, and it contains `#`, `%` and `+`, so a
- * single unescaped copy-paste truncates the URL at the `#`. The manifest ordinal
- * is at most four digits and encodes to two varint bytes. That ratio *is* the
- * share link: at ~50 characters per placement a link holds about thirty tiles, at
- * two bytes it holds hundreds to tens of thousands. `src/routes/tileDrawer.ts`
- * already addresses a tile by ordinal for the same reason, so this is the app's
- * one URL currency for a tile rather than a second scheme.
+ * — 92 characters here, 39 to 183 across the corpus, and it contains `#`, `%`
+ * and `+`, so a single unescaped copy-paste truncates the URL at the `#`. The
+ * manifest ordinal is at most four digits and encodes to two varint bytes. That
+ * ratio *is* the share link: at ~50 characters per placement a link holds about
+ * thirty tiles, at two bytes it holds hundreds to tens of thousands.
+ * `src/routes/tileDrawer.ts` already addresses a tile by ordinal for the same
+ * reason, so this is the app's one URL currency for a tile rather than a second
+ * scheme.
+ *
+ * ## Why a *design* still travels as an ordinal — row V4
+ *
+ * A placement names a {@link DesignId} now, and the obvious move would be to put
+ * one on the wire: it is 13 characters flat against a `TileId`'s 39–183, which
+ * looks like a saving of 26 to 170 characters per placement. **It is not a
+ * saving at all, and this is the arithmetic that says so.** The codec has never
+ * written a `TileId`; it writes an *ordinal*, which is one or two varint bytes,
+ * and 13 raw characters is 6 to 13 times worse than that. A design id on the
+ * wire would also need its own dedup table to stop repeating, which is what the
+ * ordinal column gets for free from deflate.
+ *
+ * So a design travels as **the lowest {@link ManifestOrdinal} among its files**
+ * — which is A1's {@link AggregateAddress}, computed here from the records
+ * rather than imported, because this module's dependency is two fields per
+ * record and building an aggregate index to read one number would pull the whole
+ * derivation into the codec. Encoding takes that ordinal for determinism (two
+ * shares of one scene must produce one link); decoding accepts **any** ordinal
+ * of any variant and resolves it to the design, through {@link designOf}.
+ *
+ * That asymmetry is deliberate and it is what makes a version 2 link readable:
+ * a v2 payload carried the ordinal of the exact file the user placed, and
+ * resolving *that* ordinal to its design gives the design they placed. See
+ * `payload.ts#SHARE_FORMAT_VERSION`.
+ *
+ * The cost of the address's known instability — A1: *"NOT stable under
+ * retirement"* — is bounded and is a straight trade against what file addressing
+ * cost. Under files, retiring **any** file dropped every placement of it. Under
+ * design addressing, retiring the lowest-ordinal file of a design drops every
+ * placement of that design, and retiring any other file of it drops nothing;
+ * 1,705 of 3,822 designs (44.6%) hold two or more files, so the second case is
+ * the common one and it used to be a loss. Either way the failure is the same
+ * `unresolved` report the checksum blind spot already has words for, never a
+ * plausible wrong room.
  *
  * ## The risk this module exists to manage
  *
@@ -45,23 +80,32 @@
  * dropped, the checksum is reported as unverified, and the caller is told so —
  * rather than being told "drift", which would be a false alarm for a legal import.
  */
-import type { ManifestOrdinal, TileId } from '@/catalog'
+import type { DesignId, ManifestOrdinal, TileId } from '@/catalog'
 
 /**
- * What the codec needs from a catalog: a manifest version and the ordinal of each
- * tile.
+ * What the codec needs from a catalog: a manifest version, and each record's
+ * ordinal and design.
  *
  * Structural rather than `CatalogFile` on purpose. A parsed `CatalogFile`
  * satisfies it as-is, so the app passes one straight through; but the codec's real
- * dependency is two fields, and saying so keeps a test from having to fabricate
+ * dependency is three fields, and saying so keeps a test from having to fabricate
  * 8,702 records with a footprint and a tag list to check a checksum.
+ *
+ * `id` is still here and is not redundant with `design`: the **checksum** is over
+ * (ordinal, tile id) pairs, because §13's failure is two ordinals swapping the
+ * *files* they name, and a digest over designs would miss a swap inside one
+ * design entirely.
  */
 export interface ShareManifestSource {
   readonly version: { readonly manifest: number }
-  readonly records: readonly { readonly id: TileId; readonly ord: ManifestOrdinal }[]
+  readonly records: readonly {
+    readonly id: TileId
+    readonly ord: ManifestOrdinal
+    readonly design: DesignId
+  }[]
 }
 
-/** The bidirectional ordinal ↔ tile lookup, built once per catalog load. */
+/** The ordinal ↔ tile ↔ design lookup, built once per catalog load. */
 export interface ShareManifest {
   /**
    * `CatalogFile.version.manifest`. Written into every payload and compared on
@@ -70,8 +114,19 @@ export interface ShareManifest {
   readonly version: number
   /** Tiles this build can resolve. Not the highest ordinal — ordinals are not dense. */
   readonly size: number
-  /** Ordinal for a tile, or `undefined` if this build does not carry it. */
-  ordinalOf(id: TileId): ManifestOrdinal | undefined
+  /** Designs this build can resolve. 3,822 against `size`'s 8,702 on the live corpus. */
+  readonly designs: number
+  /**
+   * The ordinal a **design** travels as — the lowest among its files — or
+   * `undefined` if this build does not carry the design.
+   *
+   * Takes a {@link DesignId} and not a {@link TileId} since row V4, and the
+   * brands are what make that a compile error rather than a lookup that misses:
+   * the two spaces are separate zod brands, so a caller still handing over a
+   * file id does not silently get `undefined` and drop every placement in the
+   * scene.
+   */
+  ordinalOf(design: DesignId): ManifestOrdinal | undefined
   /**
    * Tile for an ordinal, or `undefined`.
    *
@@ -81,6 +136,17 @@ export interface ShareManifest {
    * are reported the same way.
    */
   tileOf(ordinal: number): TileId | undefined
+  /**
+   * The design an ordinal belongs to, or `undefined`.
+   *
+   * Total over the same population as {@link tileOf} — every record has a design
+   * — so a link's ordinal resolves to a design exactly when it resolves to a
+   * tile, and the two never disagree about what was lost. **Any** ordinal of any
+   * variant answers, which is what lets a version 2 link (which encoded the
+   * placed file) decode under version 3's reading (which encodes the design's
+   * address).
+   */
+  designOf(ordinal: number): DesignId | undefined
 }
 
 /**
@@ -92,21 +158,30 @@ export interface ShareManifest {
  * link containing it ambiguous — so this does not re-check; **first writer wins**
  * if an unvalidated source is passed, which is deterministic rather than correct
  * and is the reason validation belongs at the parse.
+ *
+ * The design → ordinal direction takes the **minimum** rather than the first
+ * writer, and that is not tidiness: `CatalogFile.records` is emitted in ordinal
+ * order today, so first-writer and minimum agree, and a link's determinism must
+ * not rest on an emission order no schema states. A `Math.min` cannot be wrong
+ * about it.
  */
 export function buildShareManifest(source: ShareManifestSource): ShareManifest {
-  const byId = new Map<string, ManifestOrdinal>()
-  const byOrdinal = new Map<number, TileId>()
+  const byOrdinal = new Map<number, { id: TileId; design: DesignId }>()
+  const addressOf = new Map<DesignId, ManifestOrdinal>()
 
   for (const record of source.records) {
-    if (!byId.has(record.id)) byId.set(record.id, record.ord)
-    if (!byOrdinal.has(record.ord)) byOrdinal.set(record.ord, record.id)
+    if (!byOrdinal.has(record.ord)) byOrdinal.set(record.ord, { id: record.id, design: record.design })
+    const current = addressOf.get(record.design)
+    if (current === undefined || record.ord < current) addressOf.set(record.design, record.ord)
   }
 
   return {
     version: source.version.manifest,
     size: byOrdinal.size,
-    ordinalOf: (id) => byId.get(id),
-    tileOf: (ordinal) => byOrdinal.get(ordinal),
+    designs: addressOf.size,
+    ordinalOf: (design) => addressOf.get(design),
+    tileOf: (ordinal) => byOrdinal.get(ordinal)?.id,
+    designOf: (ordinal) => byOrdinal.get(ordinal)?.design,
   }
 }
 

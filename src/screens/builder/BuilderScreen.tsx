@@ -158,7 +158,25 @@ function Builder({ index }: { index: CatalogIndex }) {
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
 
-  const planCatalog = useMemo(() => planCatalogFromFile(index.file), [index])
+  /**
+   * The canvas's view of the catalog — **memoised on the lock as well as the
+   * index**, since row V4.
+   *
+   * A placement names an item, so something has to turn one into the record a
+   * renderer can draw, and `planCatalogFromFile` is where that happens: it
+   * resolves each design through `selectVariantForLock`, the same function the
+   * bill's rule 0 uses, so the mesh in the 3D room and the line in the bill are
+   * the same file. That makes the lock an input, and a `PlanCatalog` held across
+   * a change of preference would draw the previous one's variants.
+   *
+   * `index.engine.aggregates` is handed over rather than letting the default
+   * build a second aggregate index over the same file — 3,822 groups of work
+   * this screen has already paid for.
+   */
+  const planCatalog = useMemo(
+    () => planCatalogFromFile(index.file, lock, index.engine.aggregates),
+    [index, lock],
+  )
   const assembly = useMemo(() => buildAssemblyIndex(index.file), [index])
   // Anchors only, and memoised rather than mapped inline: a fresh array on every
   // render would be a new dependency identity every render, so the bill below —
@@ -266,7 +284,9 @@ function Builder({ index }: { index: CatalogIndex }) {
     if (mesh !== null) holdGeneratedMesh(placed.placement.base, mesh)
   }, [])
 
-  const armed = tools.selectedTileId === null ? undefined : index.engine.record(tools.selectedTileId)
+  // The armed item, as the record this build would print — `planCatalog` is the
+  // one place that hop lives, so the toolbar names the same file the bill will.
+  const armed = tools.selectedDesign === null ? undefined : planCatalog.record(tools.selectedDesign)
 
   return (
     <section className="of-builder" aria-label="Builder">
@@ -400,7 +420,7 @@ function Builder({ index }: { index: CatalogIndex }) {
           slot is not a placement, so `buildBillOfTiles` neither counts a torch
           in a wall's `torch` slot nor can.
         */}
-        <SlotsPanel catalog={index.file} placements={placements} />
+        <SlotsPanel catalog={index.file} placements={placements} lock={lock} />
       </div>
     </section>
   )

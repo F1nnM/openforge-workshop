@@ -45,6 +45,7 @@ import type { CatalogFile, CatalogRecord, Footprint } from '@/catalog'
 import {
   CatalogFile as CatalogFileSchema,
   CatalogRecord as CatalogRecordSchema,
+  DesignId,
   TileId,
   buildAggregateIndex,
   resolveTags,
@@ -61,8 +62,16 @@ import { AMBIGUOUS_SIZE_CODES, SIZE_CODE_WIDTH_UNITS, sharedPrimitive, sizeCodeW
 
 /* -------------------------------------------------------------- test helpers */
 
-const place = (tileId: string, x = 0, z = 0): Placement => ({
-  tileId: TileId.parse(tileId),
+/**
+ * A placement of one **item**, since row V4.
+ *
+ * Every call site has a `CatalogRecord` in hand and passes `record.design`,
+ * which is the same resolution the old `place(record.design)` produced — that helper
+ * hopped file → design before doing anything — so every corpus figure below is
+ * measured over the same population as before.
+ */
+const place = (design: string, x = 0, z = 0): Placement => ({
+  design: DesignId.parse(design),
   x,
   z,
   rotation: 0,
@@ -135,7 +144,7 @@ function fixtureIndex(records: readonly CatalogRecord[]): AssemblyIndex {
  */
 function baseFor(topper: CatalogRecord, index: AssemblyIndex) {
   const matched = matchBase(topper, index, 'openlock')
-  const resolved = resolvePlacement(place(topper.id), index, { lock: 'openlock' })
+  const resolved = resolvePlacement(place(topper.design), index, { lock: 'openlock' })
   return {
     base: matched?.base,
     match: matched?.match,
@@ -523,7 +532,10 @@ describeCorpus(corpusSuite, () => {
    * blocks give every record its own design and so never substitute at all.
    */
   function resolvesToItself(record: CatalogRecord, lock?: LockSystem): boolean {
-    return resolveVariant(record.id, index, lock === undefined ? {} : { lock })?.substituted === false
+    // `resolved === record.id`, since row V4 removed `substituted`: there is no
+    // "placed" file to differ from any more, so the question "did the preference
+    // pick *this* file" is asked directly.
+    return resolveVariant(record.design, index, lock === undefined ? {} : { lock })?.resolved === record.id
   }
   const bases = byLayer('base')
 
@@ -703,15 +715,16 @@ describeCorpus(corpusSuite, () => {
     const topper = toppers.find((record) => {
       const key = footprintKey(record.foot)
       if (key === undefined || !index.basesByFootprint.has(key)) return false
-      const resolution = resolveVariant(record.id, index, { lock: 'openlock' })
+      const resolution = resolveVariant(record.design, index, { lock: 'openlock' })
       return resolution?.verdict === 'with-base' && resolution.variants === 1
     })
     expect(topper).toBeDefined()
 
-    const resolved = resolvePlacement(place(topper?.id ?? ''), index, { lock: 'openlock' })
+    const resolved = resolvePlacement(place(topper?.design ?? ''), index, { lock: 'openlock' })
     expect(resolved.parts.map((part) => part.role)).toEqual(['placed', 'base'])
-    // Rule 0 made no substitution here, which is why rule 1 could fire at all.
-    expect(resolved.resolution?.substituted).toBe(false)
+    // Rule 0 had nothing to choose here — the item holds one file — which is why
+    // rule 1 could fire at all.
+    expect(resolved.resolution?.variants).toBe(1)
     expect(resolved.tile?.id).toBe(topper?.id)
 
     const base = resolved.parts[1]
@@ -744,7 +757,7 @@ describeCorpus(corpusSuite, () => {
 
   it('leaves an integral tile alone — it carries its own joinery', () => {
     const integral = byLayer('integral')[0]
-    const resolved = resolvePlacement(place(integral?.id ?? ''), index)
+    const resolved = resolvePlacement(place(integral?.design ?? ''), index)
     expect(resolved.parts).toHaveLength(1)
     expect(resolved.parts[0]?.role).toBe('placed')
     expect(resolved.notes.map((entry) => entry.code)).not.toContain('base-auto-inserted')
@@ -752,7 +765,7 @@ describeCorpus(corpusSuite, () => {
 
   it('does not stack a base under a base', () => {
     const base = bases[0]
-    const resolved = resolvePlacement(place(base?.id ?? ''), index)
+    const resolved = resolvePlacement(place(base?.design ?? ''), index)
     expect(resolved.parts).toHaveLength(1)
   })
 
@@ -760,7 +773,7 @@ describeCorpus(corpusSuite, () => {
     let withBase = 0
     let onePart = 0
     for (const record of records) {
-      const resolved = resolvePlacement(place(record.id), index, { lock: 'openlock' })
+      const resolved = resolvePlacement(place(record.design), index, { lock: 'openlock' })
       expect(resolved.parts.length).toBeGreaterThan(0)
       expect(resolved.resolution).toBeDefined()
       if (resolved.parts.length > 1) withBase += 1
@@ -1077,7 +1090,7 @@ describeCorpus(corpusSuite, () => {
     const topper = toppers.find((record) => record.sizeCode === 'A' && record.texture === 'dungeon_stone')
     expect(topper).toBeDefined()
 
-    const resolved = resolvePlacement(place(topper?.id ?? ''), index, { lock: 'openlock' })
+    const resolved = resolvePlacement(place(topper?.design ?? ''), index, { lock: 'openlock' })
     const base = resolved.parts[1]?.record
     const message = resolved.notes.find((entry) => entry.code === 'base-auto-inserted')?.message ?? ''
 
@@ -1099,7 +1112,7 @@ describeCorpus(corpusSuite, () => {
 
   it('says a base has no top surface, and names the lock that forced it', () => {
     const forced = toppers
-      .map((topper) => ({ topper, resolved: resolvePlacement(place(topper.id), index, { lock: 'magnetic' }) }))
+      .map((topper) => ({ topper, resolved: resolvePlacement(place(topper.design), index, { lock: 'magnetic' }) }))
       .filter(({ resolved }) => resolved.parts[1]?.match?.option === 'topless')
 
     expect(forced).toHaveLength(3)
@@ -1116,7 +1129,7 @@ describeCorpus(corpusSuite, () => {
 
   it('reports the options a candidate set offered, best first', () => {
     for (const topper of toppers) {
-      const match = resolvePlacement(place(topper.id), index, { lock: 'openlock' }).parts[1]?.match
+      const match = resolvePlacement(place(topper.design), index, { lock: 'openlock' }).parts[1]?.match
       if (match === undefined) continue
       const offered = match.optionsOffered
       expect(offered.length).toBeGreaterThan(0)
@@ -1586,7 +1599,7 @@ describeCorpus(corpusSuite, () => {
     // that gains a footprint leaves this bucket. What cannot change is which
     // bucket a keyless topper lands in.
     const unmatchable = toppers.filter((record) => {
-      const resolved = resolvePlacement(place(record.id), index, { lock: 'openlock' })
+      const resolved = resolvePlacement(place(record.design), index, { lock: 'openlock' })
       return resolved.notes.some((entry) => entry.code === 'base-unmatchable')
     })
     expect(unmatchable.length).toBeGreaterThan(0)
@@ -1607,7 +1620,7 @@ describeCorpus(corpusSuite, () => {
     for (const lock of preferences) {
       let count = 0
       for (const record of toppers) {
-        const resolved = resolvePlacement(place(record.id), index, lock === undefined ? {} : { lock })
+        const resolved = resolvePlacement(place(record.design), index, lock === undefined ? {} : { lock })
         const match = resolved.parts[1]?.match
         const notes = resolved.notes.filter((entry) => entry.code === 'base-option-chosen')
         // The biconditional, on every topper: the note fires exactly when the
@@ -1629,7 +1642,7 @@ describeCorpus(corpusSuite, () => {
 
   it('says which print and why in the option note', () => {
     const forced = toppers
-      .map((topper) => resolvePlacement(place(topper.id), index, { lock: 'magnetic' }))
+      .map((topper) => resolvePlacement(place(topper.design), index, { lock: 'magnetic' }))
       .filter((resolved) => resolved.parts[1]?.match?.option === 'topless')
     expect(forced).toHaveLength(3)
 
@@ -1674,7 +1687,7 @@ describeCorpus(corpusSuite, () => {
     expect(first?.id).not.toBe(second?.id)
     expect(first?.blob).toBe(second?.blob)
 
-    const bill = buildBillOfTiles([place(first?.id ?? ''), place(second?.id ?? '', 1)], index)
+    const bill = buildBillOfTiles([place(first?.design ?? ''), place(second?.design ?? '', 1)], index)
 
     // One file to download, two copies to print, both tiles named.
     expect(bill.files).toBe(1)
@@ -1689,7 +1702,7 @@ describeCorpus(corpusSuite, () => {
 
   it('counts a tile placed twice as two copies of one file', () => {
     const tile = byLayer('integral').find((record) => resolvesToItself(record))
-    const bill = buildBillOfTiles([place(tile?.id ?? ''), place(tile?.id ?? '', 2)], index)
+    const bill = buildBillOfTiles([place(tile?.design ?? ''), place(tile?.design ?? '', 2)], index)
     expect(bill.files).toBe(1)
     expect(bill.copies).toBe(2)
     expect(bill.download.bytes).toBe(tile?.bytes)
@@ -1712,7 +1725,7 @@ describeCorpus(corpusSuite, () => {
     expect(picks.length).toBeGreaterThan(1)
 
     const bill = buildBillOfTiles(
-      picks.map((record, i) => place(record.id, i)),
+      picks.map((record, i) => place(record.design, i)),
       index,
     )
     const lines = bill.lines.filter((line) => line.filename === filename)
@@ -1734,7 +1747,7 @@ describeCorpus(corpusSuite, () => {
     const unique = records.find(
       (record) => (index.blobsByFilename.get(record.file)?.length ?? 0) === 1 && resolvesToItself(record),
     )
-    const bill = buildBillOfTiles([place(unique?.id ?? '')], index)
+    const bill = buildBillOfTiles([place(unique?.design ?? '')], index)
     expect(bill.lines[0]?.filenameCollides).toBe(false)
     expect(bill.lines[0]?.entryName).toBe(unique?.file)
     expect(bill.collisions).toEqual([])
@@ -1746,7 +1759,7 @@ describeCorpus(corpusSuite, () => {
     const [, blobs] = threeWay ?? ['', []]
     const picks = blobs.map((blob) => index.byBlob.get(blob)?.[0]).filter((record) => record !== undefined)
     const bill = buildBillOfTiles(
-      picks.map((record, i) => place(record.id, i)),
+      picks.map((record, i) => place(record.design, i)),
       index,
     )
     expect(new Set(bill.lines.map((line) => line.entryName)).size).toBe(bill.lines.length)
@@ -1758,7 +1771,7 @@ describeCorpus(corpusSuite, () => {
     const room = realisticRoom(records, 50)
     expect(room).toHaveLength(50)
 
-    const placements = room.map((record, i) => place(record.id, i % 10, Math.floor(i / 10)))
+    const placements = room.map((record, i) => place(record.design, i % 10, Math.floor(i / 10)))
     const bill = buildBillOfTiles(placements, index, { lock: 'openlock' })
 
     // Brute force, computed a different way: resolve each placement, flatten the
@@ -1786,7 +1799,7 @@ describeCorpus(corpusSuite, () => {
   it('resolves a realistic room to more parts than placements', () => {
     const room = realisticRoom(records, 50)
     const bill = buildBillOfTiles(
-      room.map((record, i) => place(record.id, i)),
+      room.map((record, i) => place(record.design, i)),
       index,
       { lock: 'openlock' },
     )
@@ -1829,7 +1842,7 @@ describeCorpus(corpusSuite, () => {
   it('warns before an unshippable download', () => {
     const biggest = [...records].sort((a, b) => b.bytes - a.bytes).slice(0, 60)
     const bill = buildBillOfTiles(
-      biggest.map((record, i) => place(record.id, i)),
+      biggest.map((record, i) => place(record.design, i)),
       index,
       { lock: 'openlock' },
     )
@@ -1855,7 +1868,7 @@ describeCorpus(corpusSuite, () => {
 
   it('notes an unknown tile instead of throwing or dropping the scene', () => {
     const known = byLayer('integral')[0]
-    const bill = buildBillOfTiles([place('tiles/does/not/exist.stl'), place(known?.id ?? '', 1)], index)
+    const bill = buildBillOfTiles([place('d-not-a-design'), place(known?.design ?? '', 1)], index)
     expect(bill.placements).toBe(2)
     expect(bill.files).toBe(1)
     expect(bill.notes.map((entry) => entry.code)).toContain('unknown-tile')
@@ -1866,7 +1879,7 @@ describeCorpus(corpusSuite, () => {
   it('never refuses a placement — not a shapeless tile, not an insert', () => {
     const shapeless = records.find((record) => record.foot.shape === 'none')
     const insert = byLayer('insert')[0]
-    const bill = buildBillOfTiles([place(shapeless?.id ?? ''), place(insert?.id ?? '', 1)], index)
+    const bill = buildBillOfTiles([place(shapeless?.design ?? ''), place(insert?.design ?? '', 1)], index)
     expect(bill.placements).toBe(2)
     expect(bill.parts).toBeGreaterThanOrEqual(2)
     const codes = bill.notes.map((entry) => entry.code)
@@ -1882,11 +1895,15 @@ describeCorpus(corpusSuite, () => {
     // and there is nothing to warn about.
     const withOpenlock = records.find((record) => {
       if (!record.conn.includes('dragonlock') || record.conn.includes('openlock')) return false
-      return resolveVariant(record.id, index, { lock: 'openlock' })?.verdict === 'self-sufficient'
+      return resolveVariant(record.design, index, { lock: 'openlock' })?.verdict === 'self-sufficient'
     })
     expect(withOpenlock).toBeDefined()
-    const swapped = resolvePlacement(place(withOpenlock?.id ?? ''), index, { lock: 'openlock' })
-    expect(swapped.resolution?.substituted).toBe(true)
+    const swapped = resolvePlacement(place(withOpenlock?.design ?? ''), index, { lock: 'openlock' })
+    // The item holds more than one file and the preference took the openlock one
+    // — not the dragonlock-only record the search started from, which is the
+    // whole of what used to be reported as a substitution.
+    expect(swapped.resolution?.variants).toBeGreaterThan(1)
+    expect(swapped.resolution?.resolved).not.toBe(withOpenlock?.id)
     expect(swapped.tile?.conn).toContain('openlock')
     expect(swapped.notes.map((entry) => entry.code)).not.toContain('lock-unavailable')
 
@@ -1894,10 +1911,10 @@ describeCorpus(corpusSuite, () => {
     // variant of which carries openlock. 214 aggregates under dragonlock and 312
     // under magnetic are in that position, against 1 under openlock.
     const dragonOnly = records.find(
-      (record) => resolveVariant(record.id, index, { lock: 'openlock' })?.verdict === 'wrong-system',
+      (record) => resolveVariant(record.design, index, { lock: 'openlock' })?.verdict === 'wrong-system',
     )
     expect(dragonOnly).toBeDefined()
-    const resolved = resolvePlacement(place(dragonOnly?.id ?? ''), index, { lock: 'openlock' })
+    const resolved = resolvePlacement(place(dragonOnly?.design ?? ''), index, { lock: 'openlock' })
     expect(resolved.notes.map((entry) => entry.code)).toContain('lock-unavailable')
   })
 
@@ -1936,7 +1953,7 @@ describeCorpus(corpusSuite, () => {
     /** A topper that still receives an auto-inserted base after rule 0. */
     function topperWithAutoBase(lock: LockSystem): { topper: CatalogRecord; base: CatalogRecord } | undefined {
       for (const record of toppers) {
-        const resolved = resolvePlacement(place(record.id), index, { lock })
+        const resolved = resolvePlacement(place(record.design), index, { lock })
         const inserted = resolved.parts.find((part) => part.role === 'base')
         if (inserted !== undefined && resolved.tile !== undefined) {
           return { topper: resolved.tile, base: inserted.record }
@@ -1951,7 +1968,7 @@ describeCorpus(corpusSuite, () => {
       // real population, not the 3,986 that `matchBase` alone would suggest.
       let withAuto = 0
       for (const record of toppers) {
-        if (resolvePlacement(place(record.id), index, { lock: 'openlock' }).parts.some((p) => p.role === 'base')) {
+        if (resolvePlacement(place(record.design), index, { lock: 'openlock' }).parts.some((p) => p.role === 'base')) {
           withAuto += 1
         }
       }
@@ -1967,8 +1984,8 @@ describeCorpus(corpusSuite, () => {
       expect(found).toBeDefined()
       if (found === undefined) return
 
-      const alone = buildBillOfTiles([place(found.topper.id)], index, { lock: 'openlock' })
-      const stacked = buildBillOfTiles([place(found.topper.id), place(found.base.id)], index, { lock: 'openlock' })
+      const alone = buildBillOfTiles([place(found.topper.design)], index, { lock: 'openlock' })
+      const stacked = buildBillOfTiles([place(found.topper.design), place(found.base.design)], index, { lock: 'openlock' })
 
       // Two placements, three parts: the topper, the base the user placed, and
       // the base the rule inserted.
@@ -1992,7 +2009,7 @@ describeCorpus(corpusSuite, () => {
       expect(found).toBeDefined()
       if (found === undefined) return
 
-      const withGenerated = buildBillOfTiles([place(found.topper.id, 2, 3)], index, {
+      const withGenerated = buildBillOfTiles([place(found.topper.design, 2, 3)], index, {
         lock: 'openlock',
         generatedBases: [{ x: 2, z: 3 }],
       })
@@ -2009,7 +2026,7 @@ describeCorpus(corpusSuite, () => {
       const found = topperWithAutoBase('openlock')
       expect(found).toBeDefined()
       if (found === undefined) return
-      const bill = buildBillOfTiles([place(found.topper.id, 0, 0), place(found.base.id, dx, dz)], index, {
+      const bill = buildBillOfTiles([place(found.topper.design, 0, 0), place(found.base.design, dx, dz)], index, {
         lock: 'openlock',
       })
       expect(bill.notes.map((entry) => entry.code)).not.toContain('base-already-on-plan')
@@ -2028,12 +2045,12 @@ describeCorpus(corpusSuite, () => {
 
       // A base placed as a piece in its own right is the normal case and must not
       // warn: 1,963 bases are placeable and a user may want one bare.
-      const bare = buildBillOfTiles([place(found.base.id)], index, { lock: 'openlock' })
+      const bare = buildBillOfTiles([place(found.base.design)], index, { lock: 'openlock' })
       expect(bare.notes.map((entry) => entry.code)).not.toContain('base-already-on-plan')
 
       // Two toppers on one cell each get their own inserted base, and an inserted
       // base has no anchor, so the note must not fire on the pair.
-      const pair = buildBillOfTiles([place(found.topper.id), place(found.topper.id)], index, { lock: 'openlock' })
+      const pair = buildBillOfTiles([place(found.topper.design), place(found.topper.design)], index, { lock: 'openlock' })
       expect(pair.parts).toBe(4)
       expect(pair.notes.map((entry) => entry.code)).not.toContain('base-already-on-plan')
     })
@@ -2087,7 +2104,7 @@ a6Corpus('variant resolution', () => {
   const verdictsOver = (lock: LockSystem | undefined): Record<string, number> => {
     const tally: Record<string, number> = {}
     for (const aggregate of aggregates.aggregates) {
-      const resolution = resolveVariant(aggregate.variants[0].id, index, lock === undefined ? {} : { lock })
+      const resolution = resolveVariant(aggregate.design, index, lock === undefined ? {} : { lock })
       const verdict = resolution?.verdict ?? 'missing'
       tally[verdict] = (tally[verdict] ?? 0) + 1
     }
@@ -2168,7 +2185,7 @@ a6Corpus('variant resolution', () => {
       new Map(
         aggregates.aggregates.map((aggregate) => [
           aggregate.design as string,
-          resolveVariant(aggregate.variants[0].id, index, { lock })?.resolved as string,
+          resolveVariant(aggregate.design, index, { lock })?.resolved as string,
         ]),
       )
     const openlock = under('openlock')
@@ -2186,7 +2203,7 @@ a6Corpus('variant resolution', () => {
     for (const aggregate of aggregates.aggregates) {
       const files = new Set(
         (['openlock', 'dragonlock', 'magnetic'] as const).map(
-          (lock) => resolveVariant(aggregate.variants[0].id, index, { lock })?.resolved,
+          (lock) => resolveVariant(aggregate.design, index, { lock })?.resolved,
         ),
       )
       if (files.size > 1) differs += 1
@@ -2200,7 +2217,7 @@ a6Corpus('variant resolution', () => {
     // base auto-insertion a *fallback*: placing one of these used to put two
     // objects on the print bed and now puts one.
     const onePart = (lock: LockSystem): number =>
-      toppers.filter((record) => resolveVariant(record.id, index, { lock })?.verdict === 'self-sufficient').length
+      toppers.filter((record) => resolveVariant(record.design, index, { lock })?.verdict === 'self-sufficient').length
     expect(onePart('openlock')).toBe(1808)
     // Almost entirely an openlock effect, because that is where the archive's
     // integrated variants are: 1,497 aggregates against dragonlock's 359 and
@@ -2218,7 +2235,7 @@ a6Corpus('variant resolution', () => {
     const notesFor = (lock: LockSystem): Record<string, number> => {
       const gaps: Record<string, number> = { 'no-matching-base': 0, 'no-congruent-base': 0, 'base-unmatchable': 0 }
       for (const record of toppers) {
-        for (const entry of resolvePlacement(place(record.id), index, { lock }).notes) {
+        for (const entry of resolvePlacement(place(record.design), index, { lock }).notes) {
           if (entry.code in gaps) gaps[entry.code] = (gaps[entry.code] ?? 0) + 1
         }
       }
@@ -2271,20 +2288,30 @@ a6Corpus('variant resolution', () => {
   })
 
   it('is idempotent, and never changes anything the card or the canvas shows', () => {
-    let substituted = 0
+    // **Row V4 makes idempotence structural rather than measured.** Resolution
+    // used to take a file and could return a different one, so "resolve the
+    // result again" was a real second question and a drifting answer would have
+    // moved a saved scene every time it was reopened. Now it takes a design, and
+    // a design is not a possible output — so the loop below asserts the property
+    // the *record* substitution had, which is the one every consumer relies on:
+    // whichever file an item resolves to, everything the card and the canvas
+    // read off it is identical.
+    let moved = 0
     for (const record of records) {
-      const first = resolveVariant(record.id, index, { lock: 'openlock' })
+      const first = resolveVariant(record.design, index, { lock: 'openlock' })
       expect(first).toBeDefined()
-      // Resolving the resolved file again is the identity — so a scene saved
-      // after a resolution and reopened does not drift a second time.
-      if (first !== undefined) {
-        expect(resolveVariant(first.resolved, index, { lock: 'openlock' })?.resolved).toBe(first.resolved)
-      }
-      if (first?.substituted !== true) continue
-      substituted += 1
-      // A1's hoisting invariant, asserted through the substitution rather than
+      if (first === undefined) continue
+      // The design is carried through unchanged, which is what makes a second
+      // resolution the same question rather than a new one.
+      expect(first.design).toBe(record.design)
+      expect(resolveVariant(first.design, index, { lock: 'openlock' })?.resolved).toBe(first.resolved)
+      if (first.resolved === record.id) continue
+      moved += 1
+      // A1's hoisting invariant, asserted through the resolution rather than
       // over the aggregate: this is what lets `ResolvedPlacement.tile` be the
-      // resolved record without the canvas or the palette being told.
+      // resolved record without the canvas or the palette being told, and what
+      // lets `builder/canvas/catalog.ts` resolve the same design independently
+      // and still draw the same outline.
       const to = index.byId.get(first.resolved)
       expect(to?.name).toBe(record.name)
       expect(to?.foot).toEqual(record.foot)
@@ -2292,7 +2319,9 @@ a6Corpus('variant resolution', () => {
       expect(to?.texture).toBe(record.texture)
       expect(to?.kinds).toEqual(record.kinds)
     }
-    expect(substituted).toBe(4880)
+    // The same 4,880 records A6 measured: files whose item resolves, under
+    // openlock, to a sibling rather than to them.
+    expect(moved).toBe(4880)
   })
 
   it('carries the print-option tie, which is reachable and is mostly about bases', () => {
@@ -2306,7 +2335,7 @@ a6Corpus('variant resolution', () => {
       let total = 0
       let bases = 0
       for (const record of records) {
-        if (resolveVariant(record.id, index, { lock })?.optionTie !== true) continue
+        if (resolveVariant(record.design, index, { lock })?.optionTie !== true) continue
         total += 1
         if (record.layer === 'base') bases += 1
       }
@@ -2323,36 +2352,41 @@ a6Corpus('variant resolution', () => {
     // The probe row A7 asked for. Same answer as the full resolution, without
     // fabricating an `x`, a `z` and a `rotation` that nothing reads.
     for (const record of records.slice(0, 400)) {
-      const probe = resolveVariant(record.id, index, { lock: 'magnetic' })
-      const full = resolvePlacement(place(record.id), index, { lock: 'magnetic' })
+      const probe = resolveVariant(record.design, index, { lock: 'magnetic' })
+      const full = resolvePlacement(place(record.design), index, { lock: 'magnetic' })
       expect(probe).toEqual(full.resolution)
       expect(full.tile?.id).toBe(probe?.resolved)
       // A base is in the part list exactly when the verdict says one was found.
       const hasBase = full.parts.some((part) => part.role === 'base')
       expect(hasBase).toBe(probe?.verdict === 'with-base' || probe?.verdict === 'mismatched')
     }
-    expect(resolveVariant(TileId.parse('tiles/nothing/here.stl'), index)).toBeUndefined()
+    expect(resolveVariant(DesignId.parse('d-nothing-here'), index)).toBeUndefined()
+    // A `TileId` in the design slot does not resolve either, and the brands make
+    // it a compile error rather than a lookup that misses — this is the runtime
+    // half of the same claim, for the `unknown` path a share link can produce.
+    expect(resolveVariant(records[0]?.id as unknown as DesignId, index)).toBeUndefined()
   })
 
-  it('makes no choice when handed an aggregate layer from another catalog', () => {
-    // `buildAssemblyIndex`' optional second argument makes this reachable, so it
-    // has a defined answer rather than a crash: the placed file is the resolved
-    // file, and the verdict claims only what a lone record can support.
+  it('resolves nothing at all when handed an aggregate layer from another catalog', () => {
+    // `buildAssemblyIndex`' optional second argument makes this reachable, and
+    // **row V4 changed the answer**. The old degraded path kept the placed file
+    // as the resolved file and claimed only the verdicts a lone record can
+    // support (`withoutAggregate`, now deleted, with a long note on why it
+    // refused to guess `wrong-system` from the flattened `conn` list). A
+    // placement names a design now, so there is no placed file to fall back to
+    // and no way to reach a record without the aggregate layer: the honest
+    // answer is the one an unknown item already gets.
     const foreign = buildAssemblyIndex(file, buildAggregateIndex({ records: [], tags: [] } as unknown as CatalogFile))
     for (const record of records.slice(0, 200)) {
-      const resolution = resolveVariant(record.id, index, { lock: 'openlock' })
-      const degraded = resolveVariant(record.id, foreign, { lock: 'openlock' })
-      expect(degraded?.substituted).toBe(false)
-      expect(degraded?.resolved).toBe(record.id)
-      expect(degraded?.variants).toBe(1)
-      // It still answers rule 1 correctly, which is the half it can see.
-      if (record.layer === 'topper') {
-        expect(['with-base', 'mismatched', 'no-base']).toContain(degraded?.verdict)
-      }
-      // And it never claims `wrong-system` or `unknown-joinery`, both of which
-      // are questions about the underside that only the aggregate layer answers.
-      expect(['wrong-system', 'unknown-joinery']).not.toContain(degraded?.verdict)
-      expect(resolution).toBeDefined()
+      expect(resolveVariant(record.design, index, { lock: 'openlock' })).toBeDefined()
+      expect(resolveVariant(record.design, foreign, { lock: 'openlock' })).toBeUndefined()
+
+      // And through the full resolver: no parts, no resolution, one named note.
+      const resolved = resolvePlacement(place(record.design), foreign, { lock: 'openlock' })
+      expect(resolved.parts).toEqual([])
+      expect(resolved.resolution).toBeUndefined()
+      expect(resolved.notes.map((entry) => entry.code)).toEqual(['unknown-tile'])
+      expect(resolved.notes[0]?.message).toContain(record.design)
     }
   })
 })

@@ -9,11 +9,12 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { TileId } from '@/catalog'
 import type { PlacementId, WorkshopState } from '@/store'
 
 import { createStyleResolver, planCatalogFromFile } from './catalog'
-import { FIXTURE_IDS, fixtureCatalogFile } from './fixture'
+import type { DesignId } from '@/catalog'
+
+import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from './fixture'
 import { computeGhost, ghostOverlaps } from './ghost'
 import { SNAP_STEP, planBox, planQuad } from './geometry'
 import { findConflicts, partsOverlap, planBand, quadsOverlap } from './overlap'
@@ -25,17 +26,32 @@ const file = fixtureCatalogFile()
 const catalog = planCatalogFromFile(file)
 const styleOf = createStyleResolver(catalog)
 
+/**
+ * The record a fixture file id names.
+ *
+ * Through `fixtureDesignOf` since row V4: `PlanCatalog.record` is keyed by
+ * design and resolves the variant the build would print, and with one file per
+ * fixture design that is the file asked for.
+ */
 const record = (id: string) => {
-  const found = catalog.record(id as TileId)
+  const found = catalog.record(fixtureDesignOf(id))
   if (found === undefined) throw new Error(`no fixture record ${id}`)
   return found
 }
 
-/** A scene from a list of `[key, tileId, x, z, rotation]` tuples. */
+/**
+ * A scene from a list of `[key, tileId, x, z, rotation]` tuples.
+ *
+ * The tuple still names a **file**, because that is what a canvas test is about
+ * — which outline, which band, which tint — and `fixtureDesignOf` carries it to
+ * the item a placement actually holds since row V4. Every fixture record is its
+ * own design, so the conversion is injective and the scene draws exactly the
+ * file the tuple names.
+ */
 function sceneOf(rows: readonly [string, string, number, number, number][]): WorkshopState['placements'] {
   const placements: WorkshopState['placements'] = {}
   for (const [key, tileId, x, z, rotation] of rows) {
-    placements[key as PlacementId] = { tileId: tileId as TileId, x, z, rotation }
+    placements[key as PlacementId] = { design: fixtureDesignOf(tileId), x, z, rotation }
   }
   return placements
 }
@@ -226,10 +242,19 @@ describe('scene', () => {
     expect(scene.pieces.map((piece) => piece.band)).toEqual(['area', 'edge'])
   })
 
-  it('reports a placement whose tile has left the corpus instead of throwing', () => {
-    const scene = buildPlanScene(sceneOf([['p1', 'tiles/gone/retired.stl', 0, 0, 0]]), catalog, styleOf)
+  it('reports a placement whose item has left the corpus instead of throwing', () => {
+    // A **design** this catalog does not hold, built by hand rather than through
+    // `fixtureDesignOf`: since row V4 that is what strands a placement, and it
+    // is a different event from a file being retired — a design survives as
+    // long as one of its variants does, so what does this is the whole item
+    // leaving or a tag edit moving its files to another design.
+    const placements: WorkshopState['placements'] = {
+      ['p1' as PlacementId]: { design: 'd-gone-retired' as DesignId, x: 0, z: 0, rotation: 0 },
+    }
+    const scene = buildPlanScene(placements, catalog, styleOf)
     expect(scene.pieces).toEqual([])
     expect(scene.unknown).toHaveLength(1)
+    expect(scene.unknown[0]?.design).toBe('d-gone-retired')
     expect(scene.unknown[0]?.reason).toContain('retired')
   })
 

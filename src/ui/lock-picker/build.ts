@@ -46,18 +46,43 @@
  *
  * ## Why the definition is the resolver's and not a re-implementation
  *
- * `matchBase` is private to `src/assembly/resolve.ts`, so the probe below goes
- * through `resolvePlacement` — the same call the builder makes for a real
- * placement — and reads `BaseMatch.lockAgrees`. Copying the match here would
- * give the picker its own opinion of which base a topper gets, and a picker that
- * disagreed with the bill of tiles about whether a design is printable would be
- * worse than one with no figures at all.
+ * The probe below calls **`matchBase`** and reads `BaseMatch.lockAgrees`.
+ * Copying the match here would give the picker its own opinion of which base a
+ * topper gets, and a picker that disagreed with the bill of tiles about whether
+ * a design is printable would be worse than one with no figures at all.
  *
- * It costs a synthetic `Placement`, which is the honest price of that: nothing in
- * `resolvePlacement` reads `x`, `z` or `rotation` (its own docblock says so), but
- * the shape has to be supplied. An exported `matchBase`, or a
- * `baseLocksFor(tile, index)` probe, would remove both the abuse and most of the
- * work; that belongs to whoever owns `src/assembly/resolve.ts` next.
+ * **It used to call `resolvePlacement` through a synthetic `Placement`, and that
+ * was answering a different question.** This docblock said `matchBase` was
+ * private and closed with *"an exported `matchBase`, or a `baseLocksFor(tile,
+ * index)` probe, would remove both the abuse and most of the work; that belongs
+ * to whoever owns `src/assembly/resolve.ts` next."* Row A6 had already exported
+ * it, and row V4 — which does own that file — is what forced the switch: a
+ * `Placement` names a *design* now, so a per-variant probe cannot be expressed
+ * as one at all.
+ *
+ * **The switch moves no figure, and that was worth measuring rather than
+ * assuming — the expectation going in was that it would.** `resolvePlacement`
+ * runs rule 0 first, so handing it a topper returns whichever variant the
+ * preference prefers; where that is a self-sufficient sibling there is *no base
+ * part*, so the old probe answered `false` where the archive holds a perfectly
+ * good base. That is `resolvePlacement`'s own documented hazard — *"a true
+ * answer to a different question"* — and it looked like a live understatement of
+ * buildability.
+ *
+ * It is not, and the reason is the `!self` guard below. Measured over all 3,822
+ * aggregates × 3 systems: the two probes disagree **0 times**, and rule 0
+ * substitutes away from a topper for **931 aggregates under openlock, 6 under
+ * dragonlock and 0 under magnetic** — every one of them to a self-sufficient
+ * variant that *carries the requested system*, which is exactly the condition
+ * `selfSufficientConn.includes(system)` catches one line earlier. So the
+ * hazard is real and unreachable through this call site, and it was
+ * unreachable before this row as well.
+ *
+ * `matchBase` is still the right call: it asks the question this function's name
+ * states, in one lookup instead of a whole resolution, and it is the only way to
+ * ask a **per-variant** question at all now that a `Placement` names a design.
+ * `build.test.ts` re-derives every figure in the table above, so "no figure
+ * moved" is a measurement and not a claim.
  *
  * ## What it costs to run
  *
@@ -68,7 +93,7 @@
  * the first topper that resolves rather than scoring all of them.
  */
 import type { AssemblyIndex } from '@/assembly'
-import { buildAssemblyIndex, resolvePlacement } from '@/assembly'
+import { buildAssemblyIndex, matchBase } from '@/assembly'
 import type { AggregateIndex, CatalogFile, TileAggregate } from '@/catalog'
 import { buildAggregateIndex } from '@/catalog'
 import type { LockSystem } from '@/store'
@@ -154,13 +179,18 @@ export interface LockBuild {
  * Stops at the first one that resolves. `lockAgrees` is the resolver's own
  * verdict and is what separates tier 2 from tier 3: a topper handed a base in
  * *another* system is a defect the bill flags, not a design you can build.
+ *
+ * The `undefined` skip is unreachable on the two indexes `deriveLockBuild`
+ * builds from one file — both are derived from the same record array — and is
+ * the honest answer for the mismatched pair its optional arguments allow: a
+ * variant this assembly index has never seen supplies no base.
  */
 function baseSupplies(aggregate: TileAggregate, assembly: AssemblyIndex, system: LockSystem): boolean {
   for (const variant of aggregate.variants) {
     if (!variant.needsBase) continue
-    const resolved = resolvePlacement({ tileId: variant.id, x: 0, z: 0, rotation: 0 }, assembly, { lock: system })
-    const base = resolved.parts.find((part) => part.role === 'base')
-    if (base?.match?.lockAgrees === true) return true
+    const record = assembly.byId.get(variant.id)
+    if (record === undefined) continue
+    if (matchBase(record, assembly, system)?.match.lockAgrees === true) return true
   }
   return false
 }

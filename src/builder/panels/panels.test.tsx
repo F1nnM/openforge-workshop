@@ -28,10 +28,10 @@ import { useMemo } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AssemblyIndex, BillOfTiles } from '@/assembly'
-import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
+import { buildAssemblyIndex, buildBillOfTiles, selectVariantForLock } from '@/assembly'
 import type { PlanStatus } from '@/builder/canvas'
 import { usePlanTools } from '@/builder/canvas'
-import type { CatalogFile, DesignId, TileId } from '@/catalog'
+import type { CatalogFile, DesignId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, resolveTags, selectVariant } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
 import { BlobFetchError, PreviewMeshRefusedError } from '@/download'
@@ -69,14 +69,15 @@ import { DownloadAction } from './DownloadAction'
 
 /* ------------------------------------------------------------------ scaffold */
 
-const id = (key: keyof typeof FIXTURE_IDS): TileId => FIXTURE_IDS[key] as TileId
 /**
  * The design behind a fixture key.
  *
- * The library and the selection channel are design-keyed since row V1 and a
- * palette row is an item since row V3, so most of what used to be `id(…)` in
- * this file is now `design(…)`. Both helpers exist because both units are still
- * real: a *placement* names a file until row V4.
+ * The library and the selection channel are design-keyed since row V1, a palette
+ * row is an item since row V3, and a **placement** is one since row V4 — so
+ * everything that used to be `id(…)` in this file is now `design(…)`. `id`
+ * survives for the assertions that are genuinely about a file: which entry a
+ * download pack writes, which record a bill line names, which blob a thumb
+ * loads.
  */
 const design = (key: keyof typeof FIXTURE_DESIGNS): DesignId => FIXTURE_DESIGNS[key] as DesignId
 
@@ -104,9 +105,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function place(key: keyof typeof FIXTURE_IDS, x = 0, z = 0): void {
+function place(key: keyof typeof FIXTURE_DESIGNS, x = 0, z = 0): void {
   act(() => {
-    placeTile({ tileId: id(key), x, z, rotation: 0 })
+    placeTile({ design: design(key), x, z, rotation: 0 })
   })
 }
 
@@ -131,7 +132,7 @@ function PaletteHarness({ query = '' }: { query?: string }) {
         search={{ ...defaultFacetSearch(), q: query }}
         onQueryChange={() => undefined}
       />
-      <p data-testid="armed">{tools.selectedTileId ?? 'none'}</p>
+      <p data-testid="armed">{tools.selectedDesign ?? 'none'}</p>
       <p data-testid="tool">{tools.tool}</p>
     </div>
   )
@@ -191,7 +192,7 @@ describe('the palette', () => {
 
     fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) }))
 
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor1)
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor1)
     // §3: "Sets the active tile and forces place mode."
     expect(screen.getByTestId('tool')).toHaveTextContent('place')
     expect(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })).toHaveAttribute(
@@ -329,7 +330,7 @@ describe('the pre-selection handoff', () => {
 
     mountPalette()
 
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor1)
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor1)
     // The harness opens in `erase`; arming forces `place`, as a click does.
     expect(screen.getByTestId('tool')).toHaveTextContent('place')
     expect(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })).toHaveAttribute(
@@ -345,7 +346,7 @@ describe('the pre-selection handoff', () => {
     })
 
     const first = mountPalette()
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor1)
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor1)
     expect(useSelectionStore.getState().pending).toBeNull()
 
     first.unmount()
@@ -363,7 +364,7 @@ describe('the pre-selection handoff', () => {
     })
 
     mountPalette()
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor2)
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor2)
   })
 
   it('arms nothing for an item the plan view cannot place, and the library note says why', () => {
@@ -411,9 +412,9 @@ describe('the pre-selection handoff', () => {
     })
 
     mountPalette()
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor2)
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor2)
 
-    const bill = buildBillOfTiles([{ tileId: id('floor2'), x: 0, z: 0, rotation: 0 }], assembly, {
+    const bill = buildBillOfTiles([{ design: design('floor2'), x: 0, z: 0, rotation: 0 }], assembly, {
       lock: 'openlock',
     })
     expect(bill.placements).toBe(1)
@@ -503,41 +504,53 @@ describe('the two-sided item', () => {
    * is the honest version of the reason, and the reason the arming rule is
    * `selectVariant`'s rather than `preview`'s.
    */
-  it('arms the integral, so the bill prints what the palette armed', () => {
+  it('arms the item, and the bill prints the integral of it', () => {
     render(<PaletteHarness />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor2) }))
 
+    // **The armed value is the item.** Under V3 this read `MIXED_INTEGRAL.id`,
+    // because the palette had to resolve a file for the canvas to place; V4
+    // deleted that hop and the assertion collapses to the design the row is
+    // keyed by.
     const armed = screen.getByTestId('armed').textContent ?? ''
-    expect(armed).toBe(MIXED_INTEGRAL.id)
+    expect(armed).toBe(FIXTURE_DESIGNS.floor2)
 
-    const bill = buildBillOfTiles([{ tileId: armed as TileId, x: 0, z: 0, rotation: 0 }], mixedAssembly, {
+    const bill = buildBillOfTiles([{ design: armed as DesignId, x: 0, z: 0, rotation: 0 }], mixedAssembly, {
       lock: 'openlock',
     })
+    // One part, and it is the integral — the file the row's thumbnail is *not*
+    // showing, which is the whole of the disagreement V3 measured on 1,598 of
+    // 3,822 items. Nobody had to choose it and nobody can freeze it: the bill
+    // resolves it here, under the preference in force here.
     expect(bill.parts).toBe(1)
     expect(bill.lines.map((line) => line.tile.id)).toEqual([MIXED_INTEGRAL.id])
-    expect(bill.resolved[0]?.resolution?.substituted).toBe(false)
+    expect(bill.resolved[0]?.resolution?.resolved).toBe(MIXED_INTEGRAL.id)
+    // Two files in the item, so the bill has something to disclose — the
+    // successor to the `substituted` flag this test used to read.
+    expect(bill.resolved[0]?.resolution?.variants).toBe(2)
 
-    // The same scene with the preview armed instead: the same single part, and a
-    // substitution the user has to be told about.
-    const asTopper = buildBillOfTiles(
-      [{ tileId: id('floor2'), x: 0, z: 0, rotation: 0 }],
-      mixedAssembly,
-      { lock: 'openlock' },
-    )
-    expect(asTopper.parts).toBe(1)
-    expect(asTopper.resolved[0]?.resolution?.substituted).toBe(true)
-    expect(asTopper.resolved[0]?.resolution?.resolved).toBe(MIXED_INTEGRAL.id)
+    // There is no second scene to compare against any more. Arming the preview
+    // instead of the integral was a state the store could hold under V3 and
+    // cannot hold now: both are the same design, and `Placement` has nowhere to
+    // put the difference. `@ts-expect-error` is the demonstration — the day a
+    // file id becomes assignable there again, this line stops failing and the
+    // build breaks.
+    // @ts-expect-error a placement holds a DesignId; MIXED_INTEGRAL.id is a TileId
+    const unrepresentable: Placement = { design: MIXED_INTEGRAL.id, x: 0, z: 0, rotation: 0 }
+    expect(unrepresentable.design).toBe(MIXED_INTEGRAL.id)
   })
 
   /**
-   * The pressed row is decided by the item, not by re-resolving under the lock.
+   * The pressed row survives a change of lock preference.
    *
-   * `armFile` is taken once, at the press. Deciding the pressed state by
-   * comparing `armFile(item, lock)` to the armed id would un-press the row the
-   * moment the lock preference changed, leaving the canvas armed with nothing
-   * highlighted — the three locks disagree about the file for **37.1%** of items,
-   * so this is a common state and not a corner. `armedItem` asks the corpus which
-   * design a file belongs to instead, which no setting can change.
+   * **This test is the same and its subject is gone.** Under V3 the palette armed
+   * a *file*, so the pressed state had to be decided by asking which design that
+   * file belonged to (`armedItem`); comparing `armFile(item, lock)` to the armed
+   * id would have un-pressed the row the moment the preference changed — the
+   * three locks disagree about the file for **37.1%** of items, so a common state
+   * and not a corner — leaving the canvas armed with nothing highlighted. After
+   * V4 the armed value *is* the row's key and there is nothing a preference can
+   * move. Kept as a regression on the behaviour, not on the mechanism.
    */
   it('keeps the row pressed when the lock preference changes under it', () => {
     render(<PaletteHarness />)
@@ -552,7 +565,7 @@ describe('the two-sided item', () => {
     })
 
     expect(row()).toHaveAttribute('aria-pressed', 'true')
-    // Nothing re-armed either: the canvas still holds the file it was given.
+    // Nothing re-armed either: the canvas still holds the item it was given.
     expect(screen.getByTestId('armed')).toHaveTextContent(armed ?? '')
   })
 })
@@ -563,7 +576,12 @@ function ToolbarHarness({ moving }: { moving?: string }) {
   const tools = usePlanTools()
   const placements = usePlacements()
   const placed = Object.keys(placements).length
-  const armed = tools.selectedTileId === null ? undefined : index.engine.record(tools.selectedTileId)
+  // The armed item as the record this build would print — `BuilderScreen` asks
+  // `planCatalog.record` for the same thing; this harness holds no `PlanCatalog`,
+  // so it runs the one function that hop is made of.
+  const armedItem = tools.selectedDesign === null ? null : index.engine.aggregates.byDesign.get(tools.selectedDesign)
+  const armed =
+    armedItem == null ? undefined : index.engine.record(selectVariantForLock(armedItem, 'openlock').variant.id)
   // The canvas reports its readout through `onStatus`; the toolbar only reads it.
   // `moving` is the one field this harness needs to stand in for, so the rest is
   // the empty readout the toolbar already handles.
@@ -584,7 +602,7 @@ function ToolbarHarness({ moving }: { moving?: string }) {
         }
   return (
     <div>
-      <button type="button" onClick={() => tools.setSelectedTileId(id('floor1'))}>
+      <button type="button" onClick={() => tools.setSelectedDesign(design('floor1'))}>
         arm
       </button>
       <PlanToolbar
@@ -762,7 +780,10 @@ describe('the bill of tiles', () => {
 
   it('lists a placement whose tile the catalog no longer holds, and offers to remove it', () => {
     act(() => {
-      placeTile({ tileId: 'tiles/retired/gone.stl' as TileId, x: 4, z: 4, rotation: 0 })
+      // A design this catalog does not hold. Since row V4 that is what strands
+      // a placement — the whole item gone from the corpus, or a tag edit having
+      // moved its files to another design.
+      placeTile({ design: 'd-retired-gone' as DesignId, x: 4, z: 4, rotation: 0 })
     })
     render(<BillHarness />)
 
@@ -770,7 +791,7 @@ describe('the bill of tiles', () => {
     // dropped from the warning list because this block is its rendering and can
     // act on it. See `BillPanel.tsx`.
     expect(screen.getByText(/1 placed tile is not in this catalog build/)).toBeInTheDocument()
-    expect(screen.getByText('tiles/retired/gone.stl')).toBeInTheDocument()
+    expect(screen.getByText('d-retired-gone')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Remove the retired tile/ }))
     expect(placementCount()).toBe(0)
@@ -866,6 +887,14 @@ describe('the bill of tiles', () => {
  * by position.
  */
 const GAP_TAGS = [...FIXTURE_CATALOG.tags, 'connection|openlock|topless'] as const
+
+/** Each gap record's design. One file per design, as in the shared fixture. */
+const GAP_DESIGNS = {
+  strip: 'd-strip',
+  shapeless: 'd-shapeless',
+  toplessTopper: 'd-topless-topper',
+  toplessBase: 'd-topless-base',
+} as const
 
 const GAP_IDS = {
   strip: 'tiles/cut-stone/misc/risers/risers/cut-stone#riser+high.2x0.5.openforge.stl',
@@ -984,16 +1013,20 @@ function gapCatalog(): CatalogFile {
 }
 
 /** Both id maps, so a scene can mix a shared-fixture tile with a gap one. */
-const ALL_IDS = { ...FIXTURE_IDS, ...GAP_IDS }
+/** The keys as designs, which is what a placement names since row V4. */
+const ALL_DESIGNS = { ...FIXTURE_DESIGNS, ...GAP_DESIGNS }
 
 /** The panel over `gapCatalog`, with the placements passed in rather than stored. */
-function GapHarness({ tiles }: { tiles: readonly (keyof typeof ALL_IDS)[] }) {
+function GapHarness({ tiles }: { tiles: readonly (keyof typeof ALL_DESIGNS)[] }) {
   const gapFile = useMemo(gapCatalog, [])
   const gapAssembly = useMemo(() => buildAssemblyIndex(gapFile), [gapFile])
   const placements = useMemo<Record<string, Placement>>(
     () =>
       Object.fromEntries(
-        tiles.map((key, i) => [`p${String(i)}`, { tileId: ALL_IDS[key] as TileId, x: i * 2, z: 0, rotation: 0 }]),
+        tiles.map((key, i) => [
+          `p${String(i)}`,
+          { design: ALL_DESIGNS[key] as DesignId, x: i * 2, z: 0, rotation: 0 },
+        ]),
       ),
     [tiles],
   )
@@ -1373,7 +1406,7 @@ describe('the download action', () => {
     })
     const brokenIndex = buildAssemblyIndex(broken)
     const placements: Record<string, Placement> = {
-      p1: { tileId: id('floor1'), x: 0, z: 0, rotation: 0 },
+      p1: { design: design('floor1'), x: 0, z: 0, rotation: 0 },
     }
     const bill = buildBillOfTiles(Object.values(placements), brokenIndex, { lock: 'openlock' })
 
@@ -1564,14 +1597,23 @@ function a6Catalog(): CatalogFile {
   })
 }
 
-const A6_ALL_IDS = { ...FIXTURE_IDS, ...A6_IDS }
+/**
+ * The A6 fixture's designs.
+ *
+ * `mergedTopper` and `mergedIntegral` share `d-merged` — that is the point of the
+ * fixture — so this map has three entries where {@link A6_IDS} has four, and the
+ * two merged keys are gone rather than aliased: after row V4 a placement cannot
+ * name one file of an item rather than the other, so a key that claimed to would
+ * be a lie about what the store can hold.
+ */
+const A6_ALL_DESIGNS = { ...FIXTURE_DESIGNS, merged: 'd-merged', dragonOnly: 'd-dragon', untagged: 'd-untagged' } as const
 
 /** The bill over `a6Catalog`, under a stated lock preference. */
 function A6Harness({
   tiles,
   lock,
 }: {
-  tiles: readonly (keyof typeof A6_ALL_IDS)[]
+  tiles: readonly (keyof typeof A6_ALL_DESIGNS)[]
   lock: LockSystem
 }) {
   const a6File = useMemo(a6Catalog, [])
@@ -1579,7 +1621,10 @@ function A6Harness({
   const placements = useMemo<Record<string, Placement>>(
     () =>
       Object.fromEntries(
-        tiles.map((key, i) => [`p${String(i)}`, { tileId: A6_ALL_IDS[key] as TileId, x: i * 2, z: 0, rotation: 0 }]),
+        tiles.map((key, i) => [
+          `p${String(i)}`,
+          { design: A6_ALL_DESIGNS[key] as DesignId, x: i * 2, z: 0, rotation: 0 },
+        ]),
       ),
     [tiles],
   )
@@ -1613,19 +1658,25 @@ describe('variant resolution in the bill', () => {
     // The owner's request, end to end: *"in the builder one can just choose a
     // lock system for the current build, and we choose the correct file from the
     // aggregated item, or add a base if there is no tile of that system."*
-    render(<A6Harness tiles={['mergedTopper']} lock="openlock" />)
+    render(<A6Harness tiles={['merged']} lock="openlock" />)
     expect(rowNames()).toHaveLength(1)
     expect(screen.getByText(/1 tile placed/)).toBeInTheDocument()
-    // The openlock file, not the one that was placed — and named as such.
+    // The openlock file, chosen from the item's two — and disclosed as a choice
+    // rather than as a substitution, because after row V4 the user placed the
+    // item and never named a file for the app to override. The old copy read
+    // "Printed instead of towne#floor.2x2.merged.openforge.stl"; there is no
+    // "instead of" left to name.
     expect(document.body).toHaveTextContent(/openlock · one part/)
-    expect(document.body).toHaveTextContent(/Printed instead of towne#floor\.2x2\.merged\.openforge\.stl/)
+    expect(document.body).toHaveTextContent(/published as 2 files, one per connection system/)
+    expect(document.body).toHaveTextContent(/this is the one that fits openlock/)
+    expect(document.body).not.toHaveTextContent(/Printed instead of/)
     expect(document.body).toHaveTextContent(/carries its own joinery, so nothing goes under it/)
     // One part, so no "parts to print" subline and no added base.
     expect(document.body).not.toHaveTextContent(/base · added/)
   })
 
   it('falls back to base auto-insertion when no variant carries the lock', () => {
-    render(<A6Harness tiles={['mergedTopper']} lock="magnetic" />)
+    render(<A6Harness tiles={['merged']} lock="magnetic" />)
     // Two rows: the topper the user placed, and the base the resolver added.
     // `BASE_2X2` is openlock and `magnetic` has no base in this fixture, so the
     // match is a lock mismatch — which is the honest outcome and is disclosed.
@@ -1655,14 +1706,17 @@ describe('variant resolution in the bill', () => {
   })
 
   it('summarises what the preference did to the whole scene, once', () => {
-    render(<A6Harness tiles={['mergedTopper', 'floor2', 'floor1']} lock="openlock" />)
+    render(<A6Harness tiles={['merged', 'floor2', 'floor1']} lock="openlock" />)
     const summary = screen.getByText(/Resolved for openlock/).closest('.of-bill-note')
     expect(summary).toHaveAttribute('data-tone', 'resolved')
-    // `mergedTopper` becomes one part, `floor2` keeps its base, `floor1` needed
+    // `merged` becomes one part, `floor2` keeps its base, `floor1` needed
     // nothing to begin with.
     expect(summary).toHaveTextContent(/2 print as one part/)
     expect(summary).toHaveTextContent(/1 needs a base under it/)
-    expect(summary).toHaveTextContent(/1 of 3 placements print a different file of the same tile/)
+    // "1 of 3 placements is published as several files", where this read "1 of 3
+    // placements print a different file of the same tile" — and the agreement is
+    // fixed on the way past: the subject is the count, not the total.
+    expect(summary).toHaveTextContent(/1 of 3 placements is published as several files/)
     // Quieter than a warning, and below them: the block is disclosure, and a
     // missing base must stay the loudest thing in the column.
     expect(summary?.closest('details')).toBeNull()
@@ -1676,13 +1730,16 @@ describe('variant resolution in the bill', () => {
     expect(rowMarks()).toEqual([])
   })
 
-  it('keeps a substituted placement removable rather than reporting it as retired', () => {
-    // The join this row had to rewrite. `line.tileIds` names the *resolved* file
-    // and the store's placement names the *placed* one, so the pre-A6 join found
+  it('keeps a resolved placement removable rather than reporting it as retired', () => {
+    // The join A6 had to rewrite. `line.tileIds` names the *resolved* file and
+    // the store's placement named the *placed* one, so the pre-A6 join found
     // nothing for a substituted placement and would have put it in the orphan
     // block: "not in this catalog build", offered for removal, about a tile that
-    // is in the bill and printing correctly.
-    render(<A6Harness tiles={['mergedTopper']} lock="openlock" />)
+    // is in the bill and printing correctly. **Row V4 made that mistake
+    // unwritable** — a placement holds a `DesignId` and a line holds `TileId`s,
+    // so the two brands cannot be compared at all — and this is the regression
+    // that says the join still works.
+    render(<A6Harness tiles={['merged']} lock="openlock" />)
     expect(screen.queryByText(/not in this catalog build/)).toBeNull()
 
     const row = screen.getByRole('button', { expanded: false })
@@ -1693,15 +1750,27 @@ describe('variant resolution in the bill', () => {
     expect(screen.getByText('x 0, z 0')).toBeInTheDocument()
   })
 
-  it('names the resolved file in the row, and the placed one only in the mark', () => {
-    // A1 measures zero aggregates holding two display names, so the *name* is
-    // identical either side of a substitution and naming it would say nothing.
-    // The file is what changed, so the file is what the mark names.
-    render(<A6Harness tiles={['mergedTopper']} lock="openlock" />)
+  it('names how wide the choice was, and no longer names a file nobody chose', () => {
+    // **The one piece of copy row V4 deleted.** A1 measures zero aggregates
+    // holding two display names, so the *name* is identical across an item's
+    // variants and naming it would say nothing — which is why the mark used to
+    // name the *file*, `towne#floor.2x2.merged.openforge.stl`, as the thing the
+    // user was not getting.
+    //
+    // There is no such thing now. The user placed the item; no file was ever
+    // asked for, so none was overridden, and printing that filename would be
+    // naming a file nobody chose in a 302px column. What has to be disclosed is
+    // that a choice was made and how wide it was — 2,117 of 3,822 items are
+    // single-file, so the sentence appears only where there was something to
+    // choose.
+    render(<A6Harness tiles={['merged']} lock="openlock" />)
     expect(rowNames()[0]).toContain(A6_NAMES.merged)
     const marks = rowMarks()
     expect(marks).toHaveLength(1)
-    expect(marks[0]).toContain('towne#floor.2x2.merged.openforge.stl')
+    expect(marks[0]).toContain('published as 2 files')
+    expect(marks[0]).toContain('fits openlock')
+    expect(marks[0]).not.toContain('towne#floor.2x2.merged.openforge.stl')
+    expect(marks[0]).not.toContain('instead of')
   })
 })
 

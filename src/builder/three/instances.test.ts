@@ -37,9 +37,9 @@ import { describe, expect, it } from 'vitest'
 
 import { buildPlanScene, createStyleResolver, planCatalogFromFile } from '@/builder/canvas'
 import type { PlanCatalog } from '@/builder/canvas'
-import type { BlobId, CatalogFile, CatalogRecord } from '@/catalog'
+import type { BlobId, CatalogFile, CatalogRecord, DesignId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
-import { FIXTURE_IDS, fixtureCatalogFile } from '@/builder/canvas/fixture'
+import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from '@/builder/canvas/fixture'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
 import type { Placement, PlacementId, WorkshopState } from '@/store'
@@ -70,8 +70,24 @@ function placementsOf(entries: readonly (readonly [string, Placement])[]): Works
   return Object.fromEntries(entries)
 }
 
+/**
+ * A placement of the **item** this fixture file belongs to — `fixtureDesignOf`
+ * since row V4, so the tuple still reads as the file whose blob the instancing
+ * keys on.
+ */
 function place(tileId: string, x: number, z: number, rotation = 0): Placement {
-  return { tileId, x, z, rotation } as Placement
+  return { design: fixtureDesignOf(tileId), x, z, rotation }
+}
+
+/**
+ * A placement of a design named directly.
+ *
+ * For the two cases {@link place} cannot serve: a design **no** catalog holds
+ * (the retired-ordinal path), and the emitted-index test below, whose designs
+ * are the corpus's rather than the eleven-record fixture's.
+ */
+function placeDesign(design: string, x: number, z: number, rotation = 0): Placement {
+  return { design: design as DesignId, x, z, rotation }
 }
 
 function resolverFor(catalog: PlanCatalog): (record: CatalogRecord) => Resolution {
@@ -197,7 +213,7 @@ describe('buildRoom3D groups by shared geometry', () => {
       // Footprint `none` — the 726 tiles the plan view refuses.
       ['p2', place(FIXTURE_IDS.shapeless, 2, 0)],
       // Not in this build at all — a share link naming a retired ordinal.
-      ['p3', place('tiles/nothing/here.stl', 4, 0)],
+      ['p3', placeDesign('d-nothing-here', 4, 0)],
     ])
     const scene = buildPlanScene(placements, catalog, createStyleResolver(catalog))
     expect(scene.undrawable).toHaveLength(1)
@@ -375,7 +391,10 @@ describe('fifty placements across twenty real designs', () => {
       Array.from({ length: 50 }, (_unused, i) => {
         const record = chosen[i % chosen.length]
         if (record === undefined) throw new Error('no record')
-        return [`p${String(i)}` as PlacementId, place(record.id, (i % 10) * 4, Math.floor(i / 10) * 4)] as const
+        return [
+          `p${String(i)}` as PlacementId,
+          placeDesign(record.design, (i % 10) * 4, Math.floor(i / 10) * 4),
+        ] as const
       }),
     )
 

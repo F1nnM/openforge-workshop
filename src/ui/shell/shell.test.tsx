@@ -20,7 +20,7 @@ import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { DesignId, TileId } from '@/catalog'
+import { DesignId } from '@/catalog'
 import { createWorkshopRouter } from '@/routes'
 import { addToLibrary, clearPersistedWorkshopState, placeTile, resetWorkshop } from '@/store'
 
@@ -29,9 +29,6 @@ import { CatalogStatsProvider } from './catalogStats'
 
 const STATS: CatalogStats = { tileCount: 8702, archiveHost: 'objects.openforge.tools' }
 
-const TILE_A = TileId.parse(
-  'tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl',
-)
 /** Two items. The library counts items, not files, since row V1. */
 const DESIGN_A = DesignId.parse('d4c2a57740b65')
 const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
@@ -149,7 +146,7 @@ describe('nav', () => {
   it('names the counts rather than showing bare numbers', async () => {
     addToLibrary(DESIGN_A)
     addToLibrary(DESIGN_B)
-    placeTile({ tileId: TILE_A, x: 0, z: 0, rotation: 0 })
+    placeTile({ design: DESIGN_A, x: 0, z: 0, rotation: 0 })
 
     await renderApp('/catalog')
 

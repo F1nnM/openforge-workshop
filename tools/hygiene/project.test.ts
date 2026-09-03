@@ -43,7 +43,7 @@ import { describe, expect, it } from 'vitest'
 
 import { printOption } from '../../src/assembly/assemblyIndex'
 import { footprintKey } from '../../src/assembly/footprint'
-import type { TileId } from '../../src/catalog'
+import type { DesignId } from '../../src/catalog'
 import { MEASURED_SPRITE_SHEET } from '../../src/catalog'
 import { MAX_DEAD_END_RATE, assertComposition, measureComposition } from '../../src/composition'
 import { buildShareManifest } from '../../src/share/manifest'
@@ -112,7 +112,12 @@ describe('src/share/manifest.ts, for row X4', () => {
     const manifest = buildShareManifest(file)
     expect(manifest.version).toBe(file.version.manifest)
     expect(manifest.tileOf(7)).toBe('tiles/test/a.stl')
-    expect(manifest.ordinalOf('tiles/test/a.stl' as TileId)).toBe(7)
+    // Keyed by **design** since row V4 — a placement names an item, so the
+    // ordinal a link encodes is the item's address rather than the file's own.
+    const design = file.records[0]?.design
+    expect(design).toBeDefined()
+    expect(manifest.designOf(7)).toBe(design)
+    expect(manifest.ordinalOf(design as DesignId)).toBe(7)
   })
 })
 

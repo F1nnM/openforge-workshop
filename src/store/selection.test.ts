@@ -41,9 +41,6 @@ import { addToLibrary, placeTile, resetWorkshop, setLockSystem, useWorkshopStore
 const DESIGN_A = DesignId.parse('d4c2a57740b65')
 const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
 
-/** One file, for the assertions that are about a placement rather than the box. */
-const A_TILE = TileId.parse('tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl')
-
 const pending = () => useSelectionStore.getState().pending
 
 beforeEach(() => {
@@ -157,10 +154,10 @@ describe('what it is not', () => {
   it('is not a placement: sending an item puts nothing on the grid', () => {
     sendDesignToBuilder(DESIGN_A)
     expect(Object.keys(useWorkshopStore.getState().placements)).toHaveLength(0)
-    // A placement still addresses a *file* until row V4 changes it, which is
-    // why this line needs a `TileId` at all — and why the box's own currency
-    // could not be inferred from it.
-    placeTile({ tileId: A_TILE, x: 0, z: 0, rotation: 0 })
+    // Since row V4 a placement addresses the same thing the box carries, so
+    // this line needs no conversion at all — which is the shape G5's original
+    // argument said was impossible.
+    placeTile({ design: DESIGN_A, x: 0, z: 0, rotation: 0 })
     expect(pending()).toBe(DESIGN_A)
   })
 })

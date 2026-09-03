@@ -299,16 +299,16 @@ export function previewMove(drag: MoveDrag, scene: PlanScene): MovePreview | und
  * scene is.
  *
  * It is also the invariant row A6's bill join is written against:
- * `billView.ts`'s `placementKey` is `tileId|x|z|rotation`, and its docblock
+ * `billView.ts`'s `placementKey` is `design|x|z|rotation`, and its docblock
  * relies on that tuple being unique per scene. A move is the *only* operation
  * that can change three of those four fields at once, so it is the one that has
  * to hold the rule.
  *
- * Note what the move leaves alone: `movePlacement` does not touch `tileId`, and
- * a `PlacementId` survives a move. Erase-then-place did neither — it retired the
- * id and minted a new one — so a move is strictly *safer* for anything keyed on
- * a placement, `bill.resolved` included, and `resolveVariant` cannot be
- * disturbed by it at all, since resolution is a function of the tile id and the
+ * Note what the move leaves alone: `movePlacement` does not touch the identity,
+ * and a `PlacementId` survives a move. Erase-then-place did neither — it retired
+ * the id and minted a new one — so a move is strictly *safer* for anything keyed
+ * on a placement, `bill.resolved` included, and `resolveVariant` cannot be
+ * disturbed by it at all, since resolution is a function of the design and the
  * lock and knows nothing of coordinates.
  */
 function duplicateRefusal(
@@ -333,21 +333,33 @@ function duplicateRefusal(
 }
 
 /**
- * What makes two pieces the same *thing* — a `TileId` or a `GeneratedBaseId`.
+ * What makes two pieces the same *thing* — a `DesignId` or a `GeneratedBaseId`.
  *
- * Compared as bare strings across both populations, and that is safe for exactly
- * the reason row S5 built the identity the way it did: a `GeneratedBaseId` starts
- * `gen:` and therefore fails `TileId`'s `^tiles/…` pattern, so the two spaces are
- * **provably disjoint** and no generated base can be mistaken for a catalogued
- * tile here. Without that proof this comparison would need a kind check as well,
- * and a missing one would be a false twin — a refused move with no visible cause.
+ * **Qualified by population, and row V4 is why.** S5 compared the two id spaces
+ * as bare strings and proved that safe lexically: a `GeneratedBaseId` starts
+ * `gen:` and therefore fails `TileId`'s `^tiles/…` pattern, so no generated base
+ * could be mistaken for a catalogued tile here, and X9's warning was that
+ * without the proof a missing kind check would be a false twin with no visible
+ * cause.
+ *
+ * V4 put a `DesignId` in the catalog slot and **`DesignId` carries no pattern**
+ * — it is `z.string().min(1)`, and tightening it to `d` plus twelve hex would
+ * rewrite 208 fixture ids across 28 files to buy a theorem back. So the lexical
+ * proof would have degraded into a measurement of the corpus, which is exactly
+ * the kind of load-bearing measurement that goes stale in silence. Prefixing the
+ * `kind` restores the theorem instead, and more cheaply than the schema could:
+ * `'catalog'` and `'generated'` come from a closed union and neither string is a
+ * prefix of the other, so two qualified ids are equal only if both the
+ * population and the identity are. No measurement is load bearing and X9's false
+ * twin is unreachable by construction.
  *
  * A generated base's id *is* its canonical recipe key, so two generated bases are
  * the same thing iff their recipes are equal, which is the same standard the
- * catalog arm applies: identical file, identical angle, identical cell.
+ * catalog arm applies: identical item, identical angle, identical cell.
  */
 function identityOf(piece: ScenePiece): string {
-  return piece.kind === 'catalog' ? piece.placement.tileId : piece.placement.base
+  const identity = piece.kind === 'catalog' ? piece.placement.design : piece.placement.base
+  return `${piece.kind}:${identity}`
 }
 
 /* ------------------------------------------------------ the concentric limit */

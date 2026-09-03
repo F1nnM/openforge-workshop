@@ -131,10 +131,13 @@ export const SCHEMA_VERSION = 4
  * **Row X5 tightened this from `min(1)` to a catalog path.** `min(1)` took any
  * non-empty string, and that is not a cosmetic looseness:
  * `src/store/migrations.ts` runs `TileId.safeParse` over every key of a
- * `localStorage` library and every `placements[…].tileId`, so the brand is the
- * only thing standing between a corrupted store and a library full of ids that
- * resolve to nothing and cannot be removed from the UI. `"undefined"`, `"null"`
- * and a whole JSON blob all used to survive that filter.
+ * `localStorage` library and over every placement's identity, so the brand is
+ * the only thing standing between a corrupted store and a library full of ids
+ * that resolve to nothing and cannot be removed from the UI. `"undefined"`,
+ * `"null"` and a whole JSON blob all used to survive that filter. Rows V1 and
+ * V4 moved both of those fields to {@link DesignId} and this pattern is now what
+ * *recognises* the old shape there rather than what admits it — `salvageLibrary`
+ * and `salvagePlacement` both reject a `tiles/…` string by name.
  *
  * Measured over all 8,702 live records: **8,702 start `tiles/`**, none contains
  * an empty path segment, and the paths run 3 to 8 segments deep and 39 to 183

@@ -17,14 +17,14 @@
  *
  * ```tsx
  * const tools = usePlanTools()
- * <Palette onSelect={tools.setSelectedTileId} selected={tools.selectedTileId} />
+ * <Palette onSelect={tools.setSelectedDesign} selected={tools.selectedDesign} />
  * <Toolbar tools={tools} onClear={clearPlacements} />
  * <PlanCanvas catalog={catalog} tools={tools} />
  * ```
  */
 import { useCallback, useMemo, useState } from 'react'
 
-import type { TileId } from '@/catalog'
+import type { DesignId } from '@/catalog'
 
 import type { SnapMode } from './geometry'
 import { SNAP_STEP, nextRotation } from './geometry'
@@ -50,8 +50,20 @@ export interface PlanTools {
   readonly step: number
   /** The angle the next placement will be made at, in degrees, `[0, 360)`. */
   readonly rotation: number
-  /** The palette's current selection, or `null` when nothing is armed. */
-  readonly selectedTileId: TileId | null
+  /**
+   * The palette's current selection, or `null` when nothing is armed.
+   *
+   * An **item**, since row V4 — the same thing `Placement.design` holds, so the
+   * canvas can place what the palette armed without resolving anything. It was a
+   * `TileId` only because a placement was, and row V3 had to insert a
+   * resolve-to-arm hop (`palette.ts#armFile`) to bridge the two; V4 deleted the
+   * hop rather than moving it, so the palette now writes `item.design` straight
+   * in and the pressed row is `selected === item.design`.
+   *
+   * This state is renderer-agnostic and always was: nothing here touches the
+   * DOM, so the rename is invisible to whichever surface draws the plan.
+   */
+  readonly selectedDesign: DesignId | null
   setTool: (tool: PlanTool) => void
   /**
    * Swap between `place` and `erase`, the two modes that are each other's
@@ -70,28 +82,29 @@ export interface PlanTools {
    */
   rotate: (step: number, direction?: 1 | -1) => void
   setRotation: (rotation: number) => void
-  /** Arm a tile. Resets the pending rotation; see below. */
-  setSelectedTileId: (id: TileId | null) => void
+  /** Arm an item. Resets the pending rotation; see below. */
+  setSelectedDesign: (design: DesignId | null) => void
 }
 
 export interface PlanToolDefaults {
   readonly tool?: PlanTool
   readonly snap?: SnapMode
-  readonly selectedTileId?: TileId | null
+  readonly selectedDesign?: DesignId | null
 }
 
 export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
   const [tool, setTool] = useState<PlanTool>(defaults.tool ?? 'place')
   const [snap, setSnap] = useState<SnapMode>(defaults.snap ?? 'fine')
   const [rotation, setRotation] = useState(0)
-  const [selectedTileId, setSelected] = useState<TileId | null>(defaults.selectedTileId ?? null)
+  const [selectedDesign, setSelected] = useState<DesignId | null>(defaults.selectedDesign ?? null)
 
-  const setSelectedTileId = useCallback((id: TileId | null) => {
-    setSelected(id)
+  const setSelectedDesign = useCallback((design: DesignId | null) => {
+    setSelected(design)
     // A pending angle is only meaningful against a tile's own step: carrying 45°
     // over to a tile that turns in 90° increments would arm an angle that tile
     // can never reach again, and the user would have no way to get back to 0
-    // except by cycling through eight steps.
+    // except by cycling through eight steps. `rotStep` is a hoisted facet, so
+    // the step is a property of the *item* and this reset is well posed on one.
     setRotation(0)
   }, [])
 
@@ -113,15 +126,15 @@ export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
       snap,
       step: SNAP_STEP[snap],
       rotation,
-      selectedTileId,
+      selectedDesign,
       setTool,
       toggleTool,
       setSnap,
       toggleSnap,
       rotate,
       setRotation,
-      setSelectedTileId,
+      setSelectedDesign,
     }),
-    [tool, snap, rotation, selectedTileId, toggleTool, toggleSnap, rotate, setSelectedTileId],
+    [tool, snap, rotation, selectedDesign, toggleTool, toggleSnap, rotate, setSelectedDesign],
   )
 }

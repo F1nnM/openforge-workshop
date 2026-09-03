@@ -22,19 +22,25 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { TileId } from '@/catalog'
 import { STORAGE_KEY, clearPersistedWorkshopState, resetWorkshop, useWorkshopStore } from '@/store'
 
 import { planCatalogFromFile } from './catalog'
-import { FIXTURE_IDS, fixtureCatalogFile } from './fixture'
+import { FIXTURE_DESIGNS, FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from './fixture'
 import { PlanCanvas } from './PlanCanvas'
 import { usePlanTools } from './usePlanTools'
 
 const catalog = planCatalogFromFile(fixtureCatalogFile())
 
-/** The screen row 18 will build: a palette that arms a tile, plus the canvas. */
+/**
+ * The screen row 18 will build: a palette that arms a tile, plus the canvas.
+ *
+ * `initial` and the buttons still name a **file**, because these tests are about
+ * which outline the canvas draws, and `fixtureDesignOf` carries it to the item
+ * the palette arms since row V4 — one file per fixture design, so the canvas
+ * draws the file named.
+ */
 function Harness({ initial }: { initial?: string }) {
-  const tools = usePlanTools(initial === undefined ? {} : { selectedTileId: initial as TileId })
+  const tools = usePlanTools(initial === undefined ? {} : { selectedDesign: fixtureDesignOf(initial) })
   const [status, setStatus] = useState<string>('')
   return (
     <div>
@@ -44,7 +50,7 @@ function Harness({ initial }: { initial?: string }) {
             key={id}
             type="button"
             onClick={() => {
-              tools.setSelectedTileId(id as TileId)
+              tools.setSelectedDesign(fixtureDesignOf(id))
             }}
           >
             arm {id}
@@ -65,7 +71,7 @@ function Harness({ initial }: { initial?: string }) {
  * move's plumbing a dependency of the whole file.
  */
 function MovingHarness() {
-  const tools = usePlanTools({ selectedTileId: FIXTURE_IDS.floor2 as TileId })
+  const tools = usePlanTools({ selectedDesign: fixtureDesignOf(FIXTURE_IDS.floor2) })
   const [moving, setMoving] = useState<string | null>(null)
   return (
     <div>
@@ -102,7 +108,7 @@ describe('keyboard placement', () => {
     render(<Harness initial={FIXTURE_IDS.floor1} />)
     fireEvent.keyDown(plan(), { key: 'Enter' })
 
-    expect(placements()).toEqual([{ tileId: FIXTURE_IDS.floor1, x: -0.5, z: -0.5, rotation: 0 }])
+    expect(placements()).toEqual([{ design: fixtureDesignOf(FIXTURE_IDS.floor1), x: -0.5, z: -0.5, rotation: 0 }])
     expect(live()).toContain('Placed Dungeon stone floor 1×1')
   })
 
@@ -182,7 +188,7 @@ describe('place, rotate, and the store', () => {
   it('round-trips a wall, whose extents swap on the quarter turn', () => {
     render(<Harness initial={FIXTURE_IDS.wall2} />)
     fireEvent.keyDown(plan(), { key: 'Enter' })
-    expect(placements()[0]?.tileId).toBe(FIXTURE_IDS.wall2)
+    expect(placements()[0]?.design).toBe(fixtureDesignOf(FIXTURE_IDS.wall2))
 
     fireEvent.keyDown(plan(), { key: 'r' })
     expect(placements()[0]?.rotation).toBe(90)
@@ -328,7 +334,17 @@ describe('the store is the single source of truth', () => {
     const before = placements()
 
     const stored = window.localStorage.getItem(STORAGE_KEY)
-    expect(stored).toContain(FIXTURE_IDS.floor2)
+    // **The blob holds an item, not a file** — row V4 — and this is where the
+    // "a design id is 13 characters against a `TileId`'s 39-183" figure actually
+    // pays: not in the share link, whose ordinal column never carried either,
+    // but here and in `transfer.ts`'s JSON export, where a placement did carry a
+    // whole catalog path. This fixture's ids are short by corpus standards and
+    // the entry still shrank from 52 characters of JSON to 20.
+    expect(stored).toContain(FIXTURE_DESIGNS.floor2)
+    expect(stored).not.toContain(FIXTURE_IDS.floor2)
+    expect(`"design":"${FIXTURE_DESIGNS.floor2}"`.length).toBeLessThan(
+      `"tileId":"${FIXTURE_IDS.floor2}"`.length,
+    )
     if (stored === null) throw new Error('nothing was persisted')
 
     // What a reload does: an empty in-memory store, then a rehydrate from the
@@ -356,7 +372,7 @@ describe('pointer', () => {
 
     // (200, 200) with the fallback size and the default view is grid 2.545, and a
     // 1 × 1 tile centred there anchors at 2.
-    expect(placements()).toEqual([{ tileId: FIXTURE_IDS.floor1, x: 2, z: 2, rotation: 0 }])
+    expect(placements()).toEqual([{ design: fixtureDesignOf(FIXTURE_IDS.floor1), x: 2, z: 2, rotation: 0 }])
   })
 
   it('paints along a drag without stacking duplicates', () => {
@@ -459,7 +475,7 @@ describe('moving a placement', () => {
     // angle to preserve.
     fireEvent.keyDown(plan(), { key: 'r' })
     expect(placements()[0]?.rotation).toBe(45)
-    const { tileId, rotation } = placements()[0] ?? {}
+    const { design, rotation } = placements()[0] ?? {}
 
     fireEvent.keyDown(plan(), { key: 'Enter', shiftKey: true })
     fireEvent.keyDown(plan(), { key: 'ArrowRight' })
@@ -467,7 +483,7 @@ describe('moving a placement', () => {
     fireEvent.keyDown(plan(), { key: 'Enter' })
 
     expect(placements()).toHaveLength(1)
-    expect(placements()[0]?.tileId).toBe(tileId)
+    expect(placements()[0]?.design).toBe(design)
     expect(placements()[0]?.rotation).toBe(rotation)
     expect(live()).toContain('Moved Wood angled floor 2×1 from')
     expect(plan().dataset.moving).toBeUndefined()
@@ -512,7 +528,7 @@ describe('moving a placement', () => {
     fireEvent.pointerMove(plan(), { clientX: 200, clientY: 200 })
     fireEvent.pointerDown(plan(), { clientX: 200, clientY: 200, button: 0, pointerId: 1 })
     fireEvent.pointerUp(plan(), { clientX: 200, clientY: 200, button: 0, pointerId: 1 })
-    expect(placements()).toEqual([{ tileId: FIXTURE_IDS.floor1, x: 2, z: 2, rotation: 0 }])
+    expect(placements()).toEqual([{ design: fixtureDesignOf(FIXTURE_IDS.floor1), x: 2, z: 2, rotation: 0 }])
 
     // 44 px is one grid unit at the default scale, so this is a one-unit drag.
     fireEvent.pointerDown(plan(), { clientX: 200, clientY: 200, button: 0, pointerId: 2, shiftKey: true })
@@ -522,7 +538,7 @@ describe('moving a placement', () => {
     expect(placements()[0]?.x).toBe(2)
     fireEvent.pointerUp(plan(), { clientX: 244, clientY: 200, button: 0, pointerId: 2, shiftKey: true })
 
-    expect(placements()).toEqual([{ tileId: FIXTURE_IDS.floor1, x: 3, z: 2, rotation: 0 }])
+    expect(placements()).toEqual([{ design: fixtureDesignOf(FIXTURE_IDS.floor1), x: 3, z: 2, rotation: 0 }])
     expect(live()).toContain('Moved Dungeon stone floor 1×1 from x 2, z 2 to x 3, z 2')
   })
 

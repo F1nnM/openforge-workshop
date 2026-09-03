@@ -14,9 +14,10 @@
  * S4's resolver answers `archived`, `ambiguous` or `absent`, and S4's
  * instruction for the first is explicit: *place the archived md5, with an
  * archive bill line.* Taken literally that is not a new placement model at all —
- * an archived base **is** a catalog record with a `TileId`, so it becomes an
- * ordinary `Placement` and rides the store, the canvas, `resolvePlacement`, the
- * bill and the download pack that already exist, with nothing added anywhere.
+ * an archived base **is** a catalog record, so it becomes an ordinary
+ * `Placement` — addressed by its `design` since row V4 — and rides the store,
+ * the canvas, `resolvePlacement`, the bill and the download pack that already
+ * exist, with nothing added anywhere.
  * That is why {@link placeRecipe} returns a union rather than always minting a
  * generated record: the cheapest correct answer for 682 of the archive's 709
  * resolvable keys is the one that needs no new machinery.
@@ -39,7 +40,7 @@
  * parameters name, and {@link ARCHIVE_PROVENANCE} is the sentence that keeps
  * them apart wherever this placement is described.
  */
-import { DEFAULT_ROTATION_STEP_DEG, TileId } from '@/catalog'
+import { DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
 import type { Placement } from '@/store'
 import { Placement as PlacementSchema, normalizeRotation } from '@/store'
 
@@ -134,7 +135,13 @@ export function placeRecipe(recipe: BaseRecipe, resolution: Resolution, at: Plac
     const { base } = resolution
     return {
       kind: 'archived',
-      placement: PlacementSchema.parse({ tileId: TileId.parse(base.id), x: at.x, z: at.z, rotation }),
+      // The archived base's **item**, since row V4: a `Placement` names a
+      // design, and `ArchiveBase.design` is the field S4's resolver carries for
+      // exactly this call. Storing the resolved file instead would be the one
+      // place in the app where a preference is frozen into a placement — and it
+      // would be frozen to whatever the *sweep* matched rather than to a
+      // preference anybody stated.
+      placement: PlacementSchema.parse({ design: base.design, x: at.x, z: at.z, rotation }),
       base,
       recipeId: id,
       note: `Placed from the generator. ${base.file} is ${ARCHIVE_PROVENANCE}`,

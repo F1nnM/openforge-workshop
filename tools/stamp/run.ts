@@ -259,10 +259,20 @@ export function shareReport(
   const manifest = buildShareManifest(file)
   const violations: string[] = []
 
+  // **Two round trips since row V4, because the manifest carries two mappings.**
+  // The ordinal → tile direction is the one every share link's checksum is taken
+  // over and is asserted per record. The design → ordinal direction is what a
+  // link now *encodes*, and it is asserted differently on purpose: the address is
+  // the lowest ordinal in the group, so `ordinalOf(record.design) === record.ord`
+  // is false for every non-lowest variant by design. What must hold is that the
+  // address is an ordinal of this record's own item, which `designOf` closes.
   let roundTrip = 0
   const mismatched: string[] = []
   for (const record of file.records) {
-    if (manifest.ordinalOf(record.id) === record.ord && manifest.tileOf(record.ord) === record.id) {
+    const address = manifest.ordinalOf(record.design)
+    const tileTrip = manifest.tileOf(record.ord) === record.id && manifest.designOf(record.ord) === record.design
+    const designTrip = address !== undefined && address <= record.ord && manifest.designOf(address) === record.design
+    if (tileTrip && designTrip) {
       roundTrip += 1
     } else if (mismatched.length < 4) {
       mismatched.push(`${record.id} at ordinal ${String(record.ord)}`)
@@ -273,7 +283,7 @@ export function shareReport(
     violations.push(
       `the share manifest does not round-trip ${String(file.records.length - roundTrip)} of ` +
         `${String(file.records.length)} records: ${mismatched.join(', ')}. Every share link is written ` +
-        'against this mapping, so a link containing one of those ordinals decodes to a different tile.',
+        'against this mapping, so a link containing one of those ordinals decodes to a different item.',
     )
   }
 

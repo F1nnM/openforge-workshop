@@ -665,20 +665,32 @@ So the design is:
 
 1. **`ManifestOrdinal` stays a per-file ordinal, unchanged.** `pipeline/ordinals.ts` and
    `manifest.json` are untouched. `version.manifest` is **not** bumped.
-2. **`Placement.tileId` stays a `TileId`.** The store schema's own reasoning already says why —
-   the file resolves from the placed tile plus the lock preference, so a saved scene stays
-   correct when the preference changes. Aggregation makes the palette place an *aggregate*; the
-   placement records **the variant the aggregate resolved to at placement time**, which is a
-   real file with a real ordinal. **Every existing share link keeps decoding to the same room.**
-   No migration, no version bump, no `store/migrations.ts` entry.
+2. ~~**`Placement.tileId` stays a `TileId`.**~~ **Overturned by row V4** — and the clause that
+   overturned it is in this paragraph. It read: *"the placement records the variant the
+   aggregate resolved to at placement time"*. Resolving at placement time is exactly the
+   freezing the store schema's own reasoning warns against one sentence earlier: the three lock
+   systems disagree about which file for **1,419 of the 3,822 items (37.1%)**, so a scene built
+   under openlock and reopened under magnetic would print the openlock files it had frozen. A
+   placement holds a `DesignId` and the file resolves at bill, canvas and download time.
+   `STORE_VERSION` went to 5 (discarding, not migrating — nothing is deployed) and
+   `SHARE_FORMAT_VERSION` to 3.
+
+   The rest of the paragraph survives, restated: the *link* still carries an ordinal, because
+   the ordinal is one or two varint bytes and a design id is 13 characters. What it carries is
+   the design's **address** — the lowest ordinal in the group, item 4 below — and decoding
+   resolves any ordinal of any variant to its design, so a version 2 link still names the room
+   it was written for. `src/share/manifest.ts` holds the argument and `src/share/payload.ts`
+   holds the measured effect on link length, which is nil.
 3. **`?tile=<ord>` drawer links keep working.** The URL carries a file ordinal; the drawer
    resolves ordinal → file → `record.design` → aggregate and opens the aggregate with that
    variant selected. Every link already in the wild lands on the right item, now with its
    siblings visible. This is strictly better than today, where such a link lands on one of up
    to 20 near-identical cards with no indication the others exist.
-4. **`library: Record<TileId, true>` stays as it is**, grouped at render. A library holding 5
-   openlock variants of one wall collapses to one card showing "5 variants", with no persisted
-   state change and no migration.
+4. ~~**`library: Record<TileId, true>` stays as it is**~~, grouped at render. **Overturned by
+   row V1**: the library is keyed by design, because a user saves an item and not one way of
+   printing it, and grouping at render could not stop two saves of one item under two
+   preferences leaving two entries — the locks pick two or more distinct files for **1,419 of
+   the 3,822 items**. `src/store/schema.ts#library` holds the argument.
 
 The one thing that needs a decision: `TileAggregate.ord`, the aggregate's address for a
 canonical URL. **The lowest manifest ordinal in the group** is the right choice, and its

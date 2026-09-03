@@ -53,7 +53,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { planCatalogFromFile } from '@/builder/canvas'
 import * as loadLod from './loadLod'
-import { FIXTURE_IDS, fixtureCatalogFile } from '@/builder/canvas/fixture'
+import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from '@/builder/canvas/fixture'
 import type { Placement, WorkshopState } from '@/store'
 
 /**
@@ -109,7 +109,7 @@ const ASSETS = { lod: 'https://objects.openforge.tools/lod' }
 
 function placements(ids: readonly string[]): WorkshopState['placements'] {
   return Object.fromEntries(
-    ids.map((tileId, i) => [`p${String(i)}`, { tileId, x: i * 2, z: 0, rotation: 0 } as Placement]),
+    ids.map((tileId, i) => [`p${String(i)}`, { design: fixtureDesignOf(tileId), x: i * 2, z: 0, rotation: 0 } satisfies Placement]),
   )
 }
 

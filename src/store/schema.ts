@@ -23,7 +23,7 @@
  */
 import { z } from 'zod'
 
-import { DesignId, TileId } from '@/catalog'
+import { DesignId } from '@/catalog'
 import { GeneratedPlacement } from '@/generator/placement/scene'
 
 /* --------------------------------------------------------------- lock system */
@@ -69,7 +69,7 @@ export const DEFAULT_LOCK_SYSTEM: LockSystem = 'openlock'
  * keeps that door open. It also makes "move the tile the user is dragging" a
  * single-key write rather than a splice.
  *
- * Branded so a `PlacementId` cannot be passed where a {@link TileId} is
+ * Branded so a `PlacementId` cannot be passed where a `TileId` is
  * expected. Both are opaque strings over the same scene, and confusing them
  * would be a silent lookup miss rather than an error.
  */
@@ -77,26 +77,55 @@ export const PlacementId = z.string().min(1).brand<'PlacementId'>()
 export type PlacementId = z.infer<typeof PlacementId>
 
 /**
- * One tile placed on the plan-view grid.
+ * One **item** placed on the plan-view grid.
  *
  * Four fields, and the omissions are as deliberate as the inclusions:
  *
- *   - **`tileId`, not a design id.** §2 fixes `id` (the fixture `full_name`) as
- *     the key React, placements and share links address a tile by. §7's "place
- *     designs, not files" is about the *palette*, and the concrete file it
- *     resolves to is a function of the placed tile plus the global lock
- *     preference — so resolving it at download time keeps a saved scene correct
- *     when the user later changes that preference, while storing the resolved
- *     file would freeze it.
+ *   - **`design`, not a `tileId`** — row V4, and it is the reversal of the
+ *     argument this docblock used to make. That argument was: §2 fixes `id` (the
+ *     fixture `full_name`) as the key React, placements and share links address a
+ *     tile by, §7's *"place designs, not files"* is about the palette, and
+ *     resolving the concrete file at download time keeps a saved scene correct
+ *     when the user later changes the lock preference — *"while storing the
+ *     resolved file would freeze it"*.
  *
- *   - **No footprint, size or colour.** All three are `CatalogRecord` fields.
- *     Copying them here would double the persisted payload and desynchronise on
- *     the next import.
+ *     **That last clause is what defeats it.** Row V3 made the palette arm an
+ *     *item*, so by the time a click reaches the store there is no file to put in
+ *     this slot; one has to be *resolved* to fill it, under whatever preference
+ *     happened to be set at the moment of the click. Storing that is precisely
+ *     the freezing the old docblock warned against, one step earlier in the
+ *     pipeline — and the three lock systems disagree about which file for
+ *     **1,419 of the 3,822 items (37.1%)**, so it is a freeze with teeth.
+ *
+ *     A design is the identity that cannot freeze anything, because there is no
+ *     choice in it to freeze. `src/store/selection.ts` made the same move for
+ *     G5's handoff and gives the long version.
+ *
+ *     Why {@link DesignId} and not a `TileId` kept "as a hint" beside it:
+ *     two identities for one placement is two things to keep in step, and the
+ *     hint would be read — `billView.ts` used to report the difference between
+ *     the two as a *substitution*, which after this row is a difference between
+ *     nothing and something. See {@link WorkshopState.library} for why a design
+ *     hash beats an {@link AggregateAddress} in persisted state.
+ *
+ *   - **No footprint, size or colour.** All three used to be named as
+ *     `CatalogRecord` fields and now they are also **hoisted facets of the
+ *     item**: `pipeline/aggregate.ts` fails the build if any of the 3,822
+ *     aggregates holds two distinct values of `name`, `kinds`, `texture`,
+ *     `build`, `foot`, `sizeCode` or `rotStep`. So the plan-view geometry of a
+ *     placement is a function of the design alone and does not move when the
+ *     lock preference re-resolves the file — which is what makes drawing a
+ *     design as cheap as drawing a file was. Copying any of them here would
+ *     still double the persisted payload and desynchronise on the next import.
  *
  *   - **No base.** Every `connection|openforge` piece needs a base line item
  *     (§7), but it is *auto-inserted* into the bill of tiles by the assembly
  *     resolver, not placed by the user. Persisting it would produce two bases
- *     the day that rule changes.
+ *     the day that rule changes. Unchanged by this row, and strengthened by it:
+ *     under openlock 1,808 of the 4,363 base-needing files resolve to a sibling
+ *     that needs no base at all, so whether a placement has a base under it is
+ *     now a question about the *preference*, and a persisted answer would be
+ *     wrong for a third of the catalog the moment the user changed it.
  *
  * `x`/`z` are grid units — plan-view coordinates, `y` being height, which v1
  * does not model. They are validated as finite numbers and nothing stronger:
@@ -116,18 +145,20 @@ const coordinate = z
   .transform((value) => value + 0)
 
 export const Placement = z.object({
-  tileId: TileId,
+  design: DesignId,
   x: coordinate,
   z: coordinate,
   /**
    * Rotation in degrees, canonicalised to `[0, 360)`.
    *
-   * The *step* is per-tile and comes from `CatalogRecord.rotStep` — 893 tiles
+   * The *step* is per-item and comes from `CatalogRecord.rotStep` — 893 tiles
    * carry an angle that is not a multiple of 90 and would never tile on a 90°
-   * step — so the step is not stored here; only the resulting angle is. The
-   * range is enforced so that two placements at the same visual angle compare
-   * equal, which is what lets the share codec (PR 10) encode an angle as a small
-   * integer rather than as an unbounded float.
+   * step — so the step is not stored here; only the resulting angle is.
+   * `rotStep` is one of the hoisted facets, so the step is the same for every
+   * variant of a design and asking the resolved record for it is asking the
+   * item. The range is enforced so that two placements at the same visual angle
+   * compare equal, which is what lets the share codec (PR 10) encode an angle as
+   * a small integer rather than as an unbounded float.
    */
   rotation: z.number().finite().nonnegative().lt(360),
 })
@@ -178,7 +209,7 @@ export const WorkshopState = z.object({
    * sees"*, and then *"the user should be saving aggregates not individual
    * tiles."* §7 of `docs/architecture-plan.md` already said it — *"place
    * designs, not files"* — and the catalog screen honoured it while this field
-   * did not: it held a {@link TileId}, so saving an item saved **one way of
+   * did not: it held a `TileId`, so saving an item saved **one way of
    * printing it**, chosen by whatever lock preference happened to be set at the
    * moment of the click.
    *
@@ -243,18 +274,33 @@ export const WorkshopState = z.object({
    * the same {@link PlacementId} space.
    *
    * Row S5 minted the record and argued the shape; this is the field it said the
-   * store row would add. Not a widening of `Placement.tileId`, because that
-   * field is a `TileId` and every reader of the other map — the share codec,
-   * `migrations.ts`'s `TileId.safeParse` per entry, `billView.ts`'s
-   * `placementKey`, `buildBillOfTiles` — is entitled to keep assuming so. A
-   * union in that slot would make all of them conditional for a population that
-   * is not in any of their questions.
+   * store row would add. Not a widening of {@link Placement}'s identity slot,
+   * because every reader of the other map — the share codec, `migrations.ts`'s
+   * per-entry parse, `billView.ts`'s `placementKey`, `buildBillOfTiles` — is
+   * entitled to keep assuming that slot names one *item in the catalog*, and a
+   * generated base is not in the catalog at all: it has no design, no aggregate
+   * and no manifest ordinal. A union in that slot would make all of them
+   * conditional for a population that is not in any of their questions. Row V4
+   * changed that slot from a `TileId` to a `DesignId` and did not weaken this
+   * argument by one word — if anything it sharpened it, because a `DesignId` is
+   * the key of a *derivation over the catalog* and there is nothing for a
+   * recipe to derive from.
    *
-   * Sharing the id space is what makes one namespace over the whole scene, and
-   * S5 proved it is safe: a `GeneratedBaseId` starts `gen:` and therefore fails
-   * `TileId`'s `^tiles/…` pattern, so `generatedPlacementKey` and
-   * `placementKey` are disjoint by construction rather than by convention, and
-   * row G4's identical-twin refusal is unaffected.
+   * Sharing the id space is what makes one namespace over the whole scene.
+   * **What V4 did change is the proof.** S5's was lexical — a `GeneratedBaseId`
+   * starts `gen:` and therefore fails `TileId`'s `^tiles/…` pattern — and
+   * `DesignId` carries no such pattern (`z.string().min(1)`, and tightening it
+   * would rewrite 208 fixture ids across 28 files to buy back a theorem), so
+   * that argument would now rest on a measurement of the corpus rather than on
+   * the schemas. There is exactly **one** place that compares identities across
+   * the two populations, `move.ts#identityOf` behind row G4's identical-twin
+   * refusal, and it now qualifies the id with the population it came from — so
+   * the disjointness is a fact about `'catalog'` versus `'generated'` rather
+   * than about what the ids happen to look like, and no measurement is load
+   * bearing. `placementKey` and `generatedPlacementKey` were never keys of one
+   * map, so their disjointness was only ever needed for that comparison.
+   * `migrations.ts` still rejects a `TileId` or a `gen:` id in the design slot
+   * by name, because that slot reads `localStorage`.
    *
    * ## What persists, and what cannot
    *

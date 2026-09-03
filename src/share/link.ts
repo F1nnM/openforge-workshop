@@ -34,7 +34,7 @@
  * recovering, because the recovered answer would be a *plausible wrong room*
  * rather than an obviously broken one.
  */
-import type { TileId } from '@/catalog'
+import type { DesignId } from '@/catalog'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
 import type { LockSystem, Placement } from '@/store'
 import { DEFAULT_LOCK_SYSTEM, normalizeRotation } from '@/store'
@@ -81,7 +81,7 @@ export const SHARE_PARAM = 's'
  * than breaks.
  *
  * **Gate on {@link shareUrlFits}, never on a placement count.** Measured capacity
- * at this budget ranges from 243 placements to 29,713 depending only on how
+ * at this budget ranges from 243 placements to 29,705 depending only on how
  * repetitive the build is — a two-orders-of-magnitude spread, so any count-based
  * rule is wrong in one direction or the other by a factor of 100. The encoded
  * length is known before the link is shown, and it is the only honest test.
@@ -182,7 +182,7 @@ export type ShareDecodeResult =
  * action** — see `src/share/transport.ts`; PR 5 keeps persistence synchronous and
  * an `await` in that path is how rapid tile placement loses writes.
  *
- * Tolerant in one direction only. A placement whose tile this build does not carry
+ * Tolerant in one direction only. A placement whose item this build does not carry
  * is dropped and named, because encoding is triggered by a user who can be told
  * "two tiles in your room are no longer in the catalog"; there is no sense in
  * refusing to share the other forty. A placement with a non-finite coordinate is
@@ -198,9 +198,12 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
   const placements: WirePlacement[] = []
 
   scene.placements.forEach((placement, index) => {
-    const ordinal = manifest.ordinalOf(placement.tileId)
+    // The design's address — its lowest ordinal — so two shares of one scene
+    // produce one link. `manifest.ts` has the whole argument for why a design
+    // travels as an ordinal rather than as its own 13-character id.
+    const ordinal = manifest.ordinalOf(placement.design)
     if (ordinal === undefined) {
-      dropped.push(`placement ${String(index)}: ${placement.tileId} is not in this catalog build`)
+      dropped.push(`placement ${String(index)}: ${placement.design} is not in this catalog build`)
       return
     }
     if (!Number.isFinite(placement.x) || !Number.isFinite(placement.z)) {
@@ -461,8 +464,13 @@ function assembleScene(
 
   const placements: Placement[] = []
   decoded.placements.forEach((placement, index) => {
-    const tileId: TileId | undefined = resolved.tiles.get(placement.ordinal)
-    if (tileId === undefined) {
+    // Two lookups over one map, and both are needed. `resolved.tiles` is the
+    // *checksum's* view — (ordinal, tile id) pairs, because §13's failure is two
+    // ordinals swapping files — and `designOf` is what the scene is built from,
+    // since a placement holds an item. They are total over the same population,
+    // so this branch is the one condition either can report.
+    const design: DesignId | undefined = manifest.designOf(placement.ordinal)
+    if (design === undefined || !resolved.tiles.has(placement.ordinal)) {
       dropped.push(`placement ${String(index)}: tile ordinal ${String(placement.ordinal)} is not in this catalog build`)
       return
     }
@@ -471,7 +479,7 @@ function assembleScene(
       return
     }
     placements.push({
-      tileId,
+      design,
       x: placement.x + 0,
       z: placement.z + 0,
       rotation: normalizeRotation(placement.rotation),

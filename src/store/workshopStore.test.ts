@@ -57,7 +57,7 @@ const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
 const state = () => useWorkshopStore.getState()
 
 function aPlacement(over: Partial<Placement> = {}): Placement {
-  return { tileId: TILE_A, x: 0, z: 0, rotation: 0, ...over }
+  return { design: DESIGN_A, x: 0, z: 0, rotation: 0, ...over }
 }
 
 /** The raw `{ state, version }` envelope `persist` writes, or `null`. */
@@ -167,7 +167,7 @@ describe('placements', () => {
     const first = placeTile(aPlacement({ x: 1, z: 1 }))
     const second = placeTile(aPlacement({ x: 2, z: 2 }))
     expect(first).not.toBe(second)
-    expect(state().placements[first]).toEqual({ tileId: TILE_A, x: 1, z: 1, rotation: 0 })
+    expect(state().placements[first]).toEqual({ design: DESIGN_A, x: 1, z: 1, rotation: 0 })
     expect(selectPlacementCount(state())).toBe(2)
   })
 
@@ -192,7 +192,7 @@ describe('placements', () => {
   it('moves and removes', () => {
     const id = placeTile(aPlacement())
     movePlacement(id, -2.5, 4)
-    expect(state().placements[id]).toEqual({ tileId: TILE_A, x: -2.5, z: 4, rotation: 0 })
+    expect(state().placements[id]).toEqual({ design: DESIGN_A, x: -2.5, z: 4, rotation: 0 })
 
     removePlacement(id)
     expect(state().placements).toEqual({})
@@ -212,7 +212,9 @@ describe('placements', () => {
     // Loud here, where the stack names the culprit — rather than months later
     // during a hydration, where it is indistinguishable from storage corruption.
     expect(() => placeTile(aPlacement({ x: Number.NaN }))).toThrow()
-    expect(() => placeTile({ ...aPlacement(), tileId: '' as TileId })).toThrow()
+    // The empty string is the one value `DesignId`'s `min(1)` refuses, and it
+    // is what an `as DesignId` cast on a missing field produces.
+    expect(() => placeTile({ ...aPlacement(), design: '' as DesignId })).toThrow()
     expect(state().placements).toEqual({})
   })
 
@@ -340,7 +342,7 @@ describe('persistence', () => {
     const payload = storedPayload()
     expect(WorkshopState.safeParse(payload?.state).success).toBe(true)
     expect((payload?.state as WorkshopState).placements[id]).toEqual({
-      tileId: TILE_A,
+      design: DESIGN_A,
       x: 3,
       z: -1,
       rotation: 90,
@@ -419,8 +421,11 @@ describe('rehydrating', () => {
         // no record.
         library: { [DESIGN_A]: true, [DESIGN_B]: 'yes', '': true, [TILE_A]: true },
         placements: {
-          good: { tileId: TILE_A, x: 1, z: 1, rotation: 0 },
-          bad: { tileId: TILE_B, x: null, z: 1, rotation: 0 },
+          good: { design: DESIGN_A, x: 1, z: 1, rotation: 0 },
+          bad: { design: DESIGN_B, x: null, z: 1, rotation: 0 },
+          // A file id in the identity slot: the shape every version 1-4 blob
+          // wrote, and the one `salvageDesign` recognises by name.
+          stale: { design: TILE_A, x: 0, z: 0, rotation: 0 },
         },
         lock: 'padlock',
       },
@@ -523,7 +528,7 @@ describe('export and import', () => {
     addToLibrary(DESIGN_A)
     addToLibrary(DESIGN_B)
     placeTile(aPlacement({ x: 1.5, z: -2, rotation: 22.5 }))
-    placeTile(aPlacement({ tileId: TILE_B, x: 0, z: 0, rotation: 270 }))
+    placeTile(aPlacement({ design: DESIGN_B, x: 0, z: 0, rotation: 270 }))
     setLockSystem('dragonlock')
     const original = state()
 
@@ -558,7 +563,7 @@ describe('export and import', () => {
     const file = exportWorkshop()
     resetWorkshop()
     addToLibrary(DESIGN_B)
-    placeTile(aPlacement({ tileId: TILE_B }))
+    placeTile(aPlacement({ design: DESIGN_B }))
 
     importWorkshop(file)
     expect(state().library).toEqual({ [DESIGN_A]: true })
@@ -588,8 +593,8 @@ describe('export and import', () => {
         state: {
           library: { [DESIGN_A]: true },
           placements: {
-            keep: { tileId: TILE_A, x: 0, z: 0, rotation: 90 },
-            lose: { tileId: TILE_B, x: 'somewhere', z: 0, rotation: 0 },
+            keep: { design: DESIGN_A, x: 0, z: 0, rotation: 90 },
+            lose: { design: DESIGN_B, x: 'somewhere', z: 0, rotation: 0 },
           },
           lock: 'magnetic',
         },

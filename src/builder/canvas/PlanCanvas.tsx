@@ -263,7 +263,7 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
     [placements, catalog, styleOf, generated],
   )
 
-  const selected = tools.selectedTileId === null ? undefined : catalog.record(tools.selectedTileId)
+  const selected = tools.selectedDesign === null ? undefined : catalog.record(tools.selectedDesign)
   const ghost = useMemo(
     () => (selected === undefined ? null : computeGhost(selected, tools.rotation, cursor, tools.step, scene)),
     [selected, tools.rotation, tools.step, cursor, scene],
@@ -339,7 +339,11 @@ export function PlanCanvas({ catalog, tools, onStatus, chrome = true, className 
         return false
       }
       placeTile({
-        tileId: record.id,
+        // The armed **item**, since row V4. `record` is the variant this build
+        // would print, so `record.design` is the item the palette armed — and
+        // the file is deliberately not stored: the bill re-resolves it under
+        // whatever preference is set when the download is asked for.
+        design: record.design,
         x: candidate.anchor[0],
         z: candidate.anchor[1],
         rotation: candidate.rotation,

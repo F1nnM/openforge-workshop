@@ -901,7 +901,7 @@ the first commit. Share links: a columnar **varint** payload → native
 | --- | ---: | ---: |
 | naive array of objects | 554 | 159 |
 | columnar JSON | 17,128 | 204 |
-| **columnar varint (shipped)** | **29,713** | **243** |
+| **columnar varint (shipped)** | **29,705** | **243** |
 
 A 50-tile room is a 116-character URL. Layout carries the room case; representation carries
 the scattered case, which is genuinely incompressible — below about a hundred placements
@@ -911,6 +911,14 @@ the scattered case, which is genuinely incompressible — below about a hundred 
 **Cut over to a short link on measured encoded length, never on a placement count** — the
 spread between the two shapes is 122×, so any count threshold is wrong by two orders of
 magnitude at one end.
+
+Row V4 made a placement address a **design** rather than a file and this table did not
+move by one character — the column has always held a manifest ordinal, so the 13-character
+design id the row's brief expected to save with was never on the wire. The one scene V4
+shortens is a room holding two variants of one item, which only the pre-V4 palette could
+build, and it saves **2 characters of 2,000**. `SHARE_FORMAT_VERSION` went to **3** anyway,
+because the meaning of the ordinal column changed: a v2 link's ordinal is the file that was
+placed, a v3 link's is the design's address.
 
 - **Manifest index drift is the worst silent failure in the system.** Share links encode
   integer ordinals into the build-time manifest; if an import reorders them, every existing

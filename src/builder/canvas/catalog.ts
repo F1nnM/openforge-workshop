@@ -1,7 +1,7 @@
 /**
  * What the canvas needs from the catalog, and nothing more.
  *
- * The store holds `TileId`s; the records they name are looked up by the caller
+ * The store holds identities; the records they name are looked up by the caller
  * (`src/store/index.ts` is explicit about that split). So the canvas takes a
  * two-method view of the catalog rather than a `CatalogFile`, for three reasons:
  *
@@ -15,39 +15,99 @@
  *     is where the app's memoised index lives today; the builder canvas importing
  *     from a sibling screen would couple two PRs that have no business knowing
  *     about each other. Row 18 passes one of these in.
+ *
+ * ## Row V4: this interface is where a design becomes a record
+ *
+ * A placement names a {@link DesignId} and a renderer needs a
+ * {@link CatalogRecord} — a mesh has to come from somewhere. Putting that hop
+ * *here*, behind a method whose name did not change, is what keeps the change
+ * invisible above: `buildPlanScene`'s signature, `PlanScene`, `PlanPiece` and
+ * every consumer of them — the plan canvas, row R2's 3D interaction, the landing
+ * hero — are untouched, and the one thing they all read, `piece.record`, is
+ * still a record. The alternative was a `lock` parameter threaded through
+ * `buildPlanScene` into three call sites, one of them in a directory this row
+ * must not edit.
+ *
+ * **Which record.** The one this build would *print*: `selectVariantForLock`,
+ * the same function `resolvePlacement` uses for rule 0, so the mesh in the room
+ * and the line in the bill are the same file. Not `TileAggregate.preview`, which
+ * answers *what does this item look like* and disagrees with the printed file on
+ * 1,598 of 3,822 items — a 3D room drawn from `preview` would show a topper
+ * standing on nothing where the bill lists a self-sufficient integral.
+ *
+ * For the **plan view** the choice provably does not matter, which is worth
+ * knowing because it means V4 cannot have moved a single outline: `buildPlanScene`
+ * reads `foot`, `kinds` and `name` off the record and hands the tag list to
+ * `resolveMaterial`, and `foot`, `kinds` and `name` are hoisted facets — A1
+ * measures **zero** aggregates holding two distinct values of any of them. For
+ * the **3D room** it matters completely, because `record.blob` is the mesh.
  */
-import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
-import { resolveTags } from '@/catalog'
+import { selectVariantForLock } from '@/assembly'
+import type { AggregateIndex, CatalogFile, CatalogRecord, DesignId } from '@/catalog'
+import { buildAggregateIndex, resolveTags } from '@/catalog'
 import type { ContourStyle, MaterialId } from '@/materials'
 import { resolveMaterial } from '@/materials'
+import type { LockSystem } from '@/store'
 
 /** The catalog, as the canvas sees it. */
 export interface PlanCatalog {
-  /** The record for a placed tile, or `undefined` when this build does not hold it. */
-  record(id: TileId): CatalogRecord | undefined
+  /**
+   * The record a placed **item** resolves to under this build's lock
+   * preference, or `undefined` when this build does not hold the item.
+   *
+   * Takes a {@link DesignId} since row V4 — see the module note for why the hop
+   * lives here and which variant it picks.
+   */
+  record(design: DesignId): CatalogRecord | undefined
   /** That record's tags as strings, for the material registry. */
   tags(record: CatalogRecord): readonly string[]
 }
 
 /**
- * A {@link PlanCatalog} over a validated index, with both lookups memoised.
+ * A {@link PlanCatalog} over a validated index, with every lookup memoised.
  *
- * Cheap to call repeatedly — it builds the id map once — but not free, so row 18
+ * Cheap to call repeatedly — it builds its maps once — but not free, so row 18
  * should build it beside its own memoised index rather than inside a component
- * body.
+ * body. **It is memoised on the lock as well as on the file**, because the lock
+ * decides which variant every design resolves to; a caller that holds one across
+ * a change of preference would draw last preference's meshes.
+ *
+ * `lock` is optional and absent means *no preference*, which is
+ * `AssemblyOptions.lock`'s own convention and not a defaulted `openlock`:
+ * reading the store's default here would silently apply a preference to a caller
+ * that had deliberately not stated one — the landing hero and the fixtures.
+ *
+ * `aggregates` is a parameter with a default for the reason `deriveLockBuild`
+ * takes one: the builder screen already holds an aggregate index over this exact
+ * file, and building a second is 3,822 groups of work for nothing.
  */
-export function planCatalogFromFile(file: CatalogFile): PlanCatalog {
+export function planCatalogFromFile(
+  file: CatalogFile,
+  lock?: LockSystem,
+  aggregates: AggregateIndex = buildAggregateIndex(file),
+): PlanCatalog {
   const byId = new Map<string, CatalogRecord>(file.records.map((record) => [record.id, record]))
+  const resolved = new Map<DesignId, CatalogRecord | undefined>()
   const tags = new Map<string, readonly string[]>()
   return {
-    record: (id) => byId.get(id),
+    record(design) {
+      // `has` rather than `?? compute`, so a design this build does not hold is
+      // cached as a miss too. A room full of retired items would otherwise run
+      // the aggregate lookup once per placement per render.
+      if (resolved.has(design)) return resolved.get(design)
+      const aggregate = aggregates.byDesign.get(design)
+      const record =
+        aggregate === undefined ? undefined : byId.get(selectVariantForLock(aggregate, lock).variant.id)
+      resolved.set(design, record)
+      return record
+    },
     tags(record) {
-      let resolved = tags.get(record.id)
-      if (resolved === undefined) {
-        resolved = resolveTags(file, record)
-        tags.set(record.id, resolved)
+      let cached = tags.get(record.id)
+      if (cached === undefined) {
+        cached = resolveTags(file, record)
+        tags.set(record.id, cached)
       }
-      return resolved
+      return cached
     },
   }
 }

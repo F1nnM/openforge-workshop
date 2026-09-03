@@ -26,7 +26,12 @@
  * | naive JSON array of objects |               554 |             159 |
  * | columnar JSON               |            17,128 |             204 |
  * | row-major varint            |               760 |             235 |
- * | **columnar varint (this)**  |        **29,713** |         **243** |
+ * | **columnar varint (this)**  |        **29,705** |         **243** |
+ *
+ * **29,705, not the 29,713 this table read until row V4.** The figure was
+ * measured against `main` before this row changed anything — the test prints it
+ * on every run and nothing had read it — so it was stale rather than moved, and
+ * V4 measures the identical number before and after its own change.
  *
  * The two middle rows are there to separate the two effects, because they are not
  * the same size. **Layout** is what carries the room build: columnar JSON reaches
@@ -52,7 +57,8 @@
  *   u8      lock index              index into LOCK_ORDER
  *   uvar    count                   number of placements
  *   u8[4]   digest                  see manifest.ts, big-endian
- *   ordinal column                  count × uvar
+ *   ordinal column                  count × uvar   (v3: a design's address;
+ *                                   v2: the placed file — see the version note)
  *   x column                        count × zigzag(x · 2)   or   count × f64
  *   z column                        count × zigzag(z · 2)   or   count × f64
  *   rotation column                 count × uvar(rot · 4)   or   count × f64
@@ -81,17 +87,33 @@
  * base recipe repeated, and the measured cost is the *first* document.
  *
  * Measured, `deflate-raw` then base64url, against a 2,000-character URL on
- * `https://openforge.tools/builder` — see `capacity.test.ts`, which prints it:
+ * `https://openforge.tools/builder` — see `capacity.test.ts`, which prints it.
+ * **Row V4 changed what the ordinal column means and not one character of what
+ * it costs**, which is the finding: the two columns below are the same
+ * measurement before and after a placement stopped naming a file.
  *
- * | scene                                    | link chars | of budget |
- * | ---------------------------------------- | ---------: | --------: |
- * | 90 tiles, no generated bases             |        130 |      6.5% |
- * | 90 tiles, 1 generated base               |        570 |     28.5% |
- * | 90 tiles, 16 generated bases, 1 recipe   |        608 |     30.4% |
- * | 90 tiles, 90 generated bases, 1 recipe   |        636 |     31.8% |
- * | 90 tiles, 90 generated bases, 3 recipes  |        680 |     34.0% |
- * | 90 tiles, 90 generated bases, 90 recipes |      1,784 |     89.2% |
- * | 400 tiles, 64 generated bases, 2 recipes |        756 |     37.8% |
+ * | scene                                    | v2 chars | v3 chars | of budget |
+ * | ---------------------------------------- | -------: | -------: | --------: |
+ * | 90 tiles, no generated bases             |      130 |      130 |      6.5% |
+ * | 90 tiles, 1 generated base               |      570 |      570 |     28.5% |
+ * | 90 tiles, 16 generated bases, 1 recipe   |      608 |      608 |     30.4% |
+ * | 90 tiles, 90 generated bases, 1 recipe   |      636 |      636 |     31.8% |
+ * | 90 tiles, 90 generated bases, 3 recipes  |      680 |      680 |     34.0% |
+ * | 90 tiles, 90 generated bases, 90 recipes |    1,784 |    1,784 |     89.2% |
+ * | 400 tiles, 64 generated bases, 2 recipes |      756 |      756 |     37.8% |
+ *
+ * The plan expected this row to *shorten* links, on the grounds that a
+ * `DesignId` is 13 characters against a `TileId`'s 39–183. **That premise is
+ * about a string this codec has never put on the wire.** A link carries an
+ * ordinal — one or two varint bytes — so there was no 39-to-183-character cost
+ * to reclaim, and a design id in the column would have been 6 to 13 times
+ * *worse* than the ordinal it replaced. `manifest.ts` has the arithmetic. The
+ * saving the 13-character figure really buys lands in `localStorage` and in
+ * `transfer.ts`'s JSON export, where a placement did carry a whole path.
+ *
+ * Where the link genuinely does get shorter is a scene that places **two
+ * variants of one item** — two ordinals before, one after — which is a scene
+ * only the pre-V4 palette could produce.
  *
  * **The first base costs 440 characters and the next 89, sharing its recipe, cost
  * 66 between them.** The widest of the five shapes at file defaults is a
@@ -141,19 +163,50 @@ import { ByteReader, ByteWriter, MalformedPayloadError } from './bytes'
  * which is what the version byte is for; the version check in
  * {@link decodePayload} is what makes the first of those a named failure.
  *
- * The bump is free **because nothing has ever written a v1 link**: no module
- * under `src/` outside `src/share/**` imports the codec (`tools/stamp/run.ts`
- * and `tools/hygiene/project.test.ts` reach for `buildShareManifest`, which is
- * the manifest and not the codec), so there is no link in the wild to refuse.
- * That was checked rather than assumed, and it will not be true again — the next
- * change to this layout is the one that has to be additive.
+ * **3 — the ordinal column names an item, not a file.** Row V4. Not one byte
+ * moved: the field is the same `uvar` in the same position and a v2 payload and
+ * a v3 payload of the same room are byte-for-byte identical whenever the room's
+ * files happen to be its designs' address files. What changed is the *meaning*,
+ * which this constant exists to record, and it is the only kind of change the
+ * layout table cannot show.
+ *
+ * ### What a version 2 link does now: it is refused, and it did not have to be
+ *
+ * This is worth stating precisely, because a share link is the one piece of
+ * state the "nothing is deployed" licence cannot cover — it lives in somebody's
+ * chat log and outlives the build that wrote it.
+ *
+ *   - **A v2 link is refused**, by {@link decodePayload}'s equality check and by
+ *     `link.ts`'s `format-version` result, with a message telling the reader to
+ *     reload and to ask for a fresh link.
+ *   - **It could have been read.** A v2 ordinal is the ordinal of the file the
+ *     user placed; `ShareManifest.designOf` resolves *any* ordinal of any
+ *     variant to its design, so reading a v2 payload under v3's rules yields the
+ *     design the user placed, and then rule 0 re-picks the file under the lock
+ *     the link carries. The room would open, and open *better* than it was
+ *     written, because the file that was frozen at share time is no longer
+ *     frozen.
+ *   - **It is refused anyway because the population is empty, and accepting it
+ *     would be a guard that cannot fire.** No v2 link exists: no module under
+ *     `src/` outside `src/share/**` imports the codec (`tools/stamp/run.ts` and
+ *     `tools/hygiene/project.test.ts` reach for `buildShareManifest`, which is
+ *     the manifest and not the codec), so nothing in this repo has ever written
+ *     one. Row X10 checked that for the 1 → 2 bump and it is still true;
+ *     `project.test.ts` is what keeps it true.
+ *
+ * **This is the last bump that gets that answer.** The day a build is served,
+ * the paragraph above stops being an argument for refusing and becomes the
+ * recipe for accepting: keep the equality check for the *layout* and make the
+ * reader take a set of readable versions, with the ordinal column's meaning
+ * selected per version. It is cheap precisely because v2 and v3 differ in
+ * nothing else.
  */
-export const SHARE_FORMAT_VERSION = 2
+export const SHARE_FORMAT_VERSION = 3
 
 /**
  * Ceiling on the declared placement count.
  *
- * Not a product limit — the URL budget bites long before it (29,713 placements in
+ * Not a product limit — the URL budget bites long before it (29,705 placements in
  * a 2,000-character link for a room build, and a person will not build 100,000
  * tiles). It is an allocation guard: a hand-edited payload can claim any count,
  * and a reader that trusted it would size an array from a stranger's number. The
@@ -420,7 +473,9 @@ export function payloadFormatVersion(bytes: Uint8Array): number | undefined {
  *
  * The format version is checked first and hardest. Everything after byte 0 is
  * positional, so reading a v2 payload with v1's field offsets would not fail — it
- * would succeed, and produce a different room.
+ * would succeed, and produce a different room. The 2 → 3 bump is the one case
+ * where the offsets *are* the same and the check is about meaning rather than
+ * layout; {@link SHARE_FORMAT_VERSION} says why it refuses anyway.
  */
 export function decodePayload(bytes: Uint8Array): WirePayload {
   const reader = new ByteReader(bytes)

@@ -43,6 +43,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { selectVariantForLock } from '@/assembly'
 import { isPlaceable } from '@/builder/canvas'
 import type { CatalogFile, CatalogRecord, DesignId, TileAggregate, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, buildAggregateIndex } from '@/catalog'
@@ -51,7 +52,7 @@ import { LockSystem } from '@/store'
 import type { PaletteLookup } from './palette'
 import { libraryDesigns } from '@/store'
 
-import { armFile, paletteRows, searchRows, starterSet } from './palette'
+import { paletteRows, searchRows, starterSet } from './palette'
 
 const CATALOG_PATH =
   process.env.OPENFORGE_CATALOG ?? join(process.cwd(), 'public', 'catalog', 'catalog.json')
@@ -193,21 +194,34 @@ describeCorpus('a base never shares an item with anything else', () => {
 
 /* ------------------------------------------------- 3. the preview is not the print */
 
-describeCorpus('the row shows one file and arms another', () => {
+/**
+ * **Row V4 renamed the subject of this block and kept every number.**
+ *
+ * The palette no longer arms a file, so `armFile` is gone and these three tests
+ * ask the same question of the function that took its place:
+ * `selectVariantForLock`, which is rule 0's own preference and is what the bill,
+ * the canvas and the slots panel all resolve through. The disagreement measured
+ * here is therefore no longer "what the row shows against what the row arms" but
+ * **"what the row shows against what the build prints"** — a stronger claim about
+ * the same two functions, and the one the owner's defect was really about.
+ */
+describeCorpus('the row shows one file and the build prints another', () => {
   it('disagrees on every one of the 931 two-sided items under openlock', () => {
     const both = items.filter((item) => item.variantClass === 'both')
     expect(both).toHaveLength(931)
 
     // The owner's defect, counted. The palette used to render the file the
     // library held, which for these items was the `integral` — a tile with its
-    // base welded on — while the catalog card showed the topper.
-    const differing = both.filter((item) => armFile(item, 'openlock') !== item.preview)
+    // base welded on — while the catalog card showed the topper. The numbers are
+    // unchanged by row V4, which is the point: the two functions are the same
+    // two functions, and only the *caller* of the second one moved.
+    const differing = both.filter((item) => selectVariantForLock(item, 'openlock').variant.id !== item.preview)
     expect(differing).toHaveLength(931)
 
     // The other two locks disagree less, because `selectVariant` only prefers the
     // integral when the integral offers the lock the build asked for.
-    expect(both.filter((item) => armFile(item, 'dragonlock') !== item.preview)).toHaveLength(269)
-    expect(both.filter((item) => armFile(item, 'magnetic') !== item.preview)).toHaveLength(396)
+    expect(both.filter((item) => selectVariantForLock(item, 'dragonlock').variant.id !== item.preview)).toHaveLength(269)
+    expect(both.filter((item) => selectVariantForLock(item, 'magnetic').variant.id !== item.preview)).toHaveLength(396)
   })
 
   it('disagrees on 1,611 / 609 / 1,055 items over the whole corpus', () => {
@@ -217,7 +231,7 @@ describeCorpus('the row shows one file and arms another', () => {
     // variant of every tile would be answering a print-option question nobody
     // asked it.
     const counts = LOCKS.map(
-      (lock) => items.filter((item) => armFile(item, lock) !== item.preview).length,
+      (lock) => items.filter((item) => selectVariantForLock(item, lock).variant.id !== item.preview).length,
     )
     expect(Object.fromEntries(LOCKS.map((lock, at) => [lock, counts[at]]))).toEqual({
       openlock: 1611,
@@ -227,13 +241,14 @@ describeCorpus('the row shows one file and arms another', () => {
   })
 
   it('always arms a variant of the item it was asked about', () => {
-    // `armFile` is total — `variants` is a non-empty tuple — and it must never
-    // reach outside the item, because the row that armed it is found again by
-    // asking which design the armed file belongs to (`armedItem`). A file from
-    // another item would leave the canvas armed with no row pressed.
+    // `selectVariantForLock` is total — `variants` is a non-empty tuple — and it
+    // must never reach outside the item, because every consumer of it (the bill's
+    // rule 0, `PlanCatalog.record`, `planSlots`) looks the answer up in an index
+    // and then reports the item it came from. A file from another item would put
+    // somebody else's mesh under this tile's name.
     for (const lock of LOCKS) {
       const escaped = items.filter(
-        (item) => !item.variants.some((variant) => variant.id === armFile(item, lock)),
+        (item) => !item.variants.some((variant) => variant.id === selectVariantForLock(item, lock).variant.id),
       )
       expect(escaped.map((item) => item.name), lock).toEqual([])
     }

@@ -19,7 +19,10 @@
  * existing store action; nothing here writes a new field.
  *
  * **The pick is a file and the library holds designs (row V1), so one hop is
- * needed.** `SlotFills` resolves a concrete `TileId` — dead-end greying is the
+ * needed** — in this direction only. The plan side no longer needs one: row V4
+ * made a placement name a design, so `planSlots` resolves *outwards* to the file
+ * whose slots are open, and {@link designIndex} is still what carries a chosen
+ * fill *inwards* to the item it is one print of. `SlotFills` resolves a concrete `TileId` — dead-end greying is the
  * whole point of reusing it, and that is a per-file question — and
  * {@link designIndex} carries it to the item that file is one print of. The map is
  * built once per catalog rather than per pick: `TileDrawer` answers the same
@@ -48,7 +51,7 @@ import { useMemo } from 'react'
 import { describeCell } from '@/builder/canvas'
 import type { CatalogFile, DesignId, TileId } from '@/catalog'
 import { SlotFills } from '@/screens/detail/slots'
-import type { Placement } from '@/store'
+import type { LockSystem, Placement } from '@/store'
 import { addToLibrary } from '@/store'
 import { Eyebrow } from '@/ui/primitives'
 
@@ -60,6 +63,17 @@ export interface SlotsPanelProps {
   readonly catalog: CatalogFile
   /** `WorkshopState.placements`, passed straight through from the screen. */
   readonly placements: Readonly<Record<string, Placement>>
+  /**
+   * The build's lock preference, passed through for the same reason
+   * `placements` is: this panel is a projection of the store and the screen
+   * already holds both.
+   *
+   * Row V4 needs it because a placement names an item and a slot is a property
+   * of a *file* — `config` is one of the fields that differ between an item's
+   * variants — so which slots are open is a question the preference helps
+   * answer. See `planSlots.ts#PlanSlotHolder.parent`.
+   */
+  readonly lock?: LockSystem
 }
 
 /**
@@ -74,12 +88,12 @@ function designIndex(catalog: CatalogFile): ReadonlyMap<TileId, DesignId> {
   return out
 }
 
-export function SlotsPanel({ catalog, placements }: SlotsPanelProps) {
+export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
   const designOf = useMemo(() => designIndex(catalog), [catalog])
   // One resolution per placed file that declares a slot, and the panel re-renders
   // on every store change — 0.09 ms each is cheap and 50 of them on every
   // library toggle is not, so it is memoised on the placements it read.
-  const inventory = useMemo(() => planSlots(catalog, placements), [catalog, placements])
+  const inventory = useMemo(() => planSlots(catalog, placements, lock), [catalog, placements, lock])
 
   return (
     /*
@@ -153,7 +167,7 @@ export function SlotsPanel({ catalog, placements }: SlotsPanelProps) {
         <p className="of-planslots-gap">
           {`${String(inventory.orphans.length)} ${
             inventory.orphans.length === 1 ? 'placement names' : 'placements name'
-          } a file this index no longer holds, so what it can hold is unknown.`}
+          } an item this index no longer holds, so what it can hold is unknown.`}
         </p>
       )}
     </section>

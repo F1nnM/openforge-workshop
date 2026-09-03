@@ -43,20 +43,31 @@
  * is also why a variant swap cannot rescue one — there is no sibling with a
  * footprint to swap to. `palette.corpus.test.ts` re-measures both figures.
  *
- * ## Arming: an item is picked, a file is armed, and V4 removes the difference
+ * ## Arming: an item is picked, and that is the whole of it
  *
- * `usePlanTools.selectedTileId` is a `TileId` because `Placement.tileId` is one,
- * so until row V4 makes a placement address a design there has to be one hop from
- * the item the user picked to a file the canvas can place. That hop is
- * `palette.ts#armFile` — `selectVariant` under the build's lock preference, the
- * same function the bill resolves with — and its inverse `armedItem` is what
- * decides which row reads as pressed. **Both, and their call sites here, are what
- * V4 deletes**; nothing else in this file knows a file id.
+ * Row V4. `usePlanTools.selectedDesign` is a `DesignId` because
+ * `Placement.design` is one, so arming is `tools.setSelectedDesign(item.design)`
+ * and the pressed row is `selected === item.design`. **Nothing in this file
+ * knows a file id**, and the one place a file appears is the thumbnail's
+ * `row.preview`, which is a picture.
  *
- * The two directions deliberately use different rules and the pair is measured:
- * `selectVariant` names a file other than `preview` on **1,598 of 3,822** items.
- * The thumb answers *what is this*, the armed id answers *what would I print*.
- * `variantsByPreference`' docblock is the long version.
+ * V3 had to do more than that, and what it did is worth recording because the
+ * disappearance is the point. `selectedTileId` was a `TileId`, so V3 inserted a
+ * resolve-to-arm hop — `palette.ts#armFile`, `selectVariant` under the build's
+ * lock preference — plus its inverse `armedItem` to decide which row read as
+ * pressed, and the inverse could not simply re-run the hop, because that
+ * comparison is taken under *today's* lock and switching preference after arming
+ * would silently un-press the row while leaving the canvas armed. Both
+ * functions, that hazard and this section's four call sites are gone rather than
+ * moved: a design cannot be resolved under the wrong preference because it is
+ * not resolved at all.
+ *
+ * The two directions that remain still use different rules, and the pair is
+ * measured: `selectVariant` names a file other than `preview` on **1,598 of
+ * 3,822** items. The thumb answers *what is this* — `preview`, a sprite-carrying
+ * topper since V5. What answers *what would I print* is no longer here at all:
+ * it is `resolvePlacement`'s rule 0, run when the bill is built, which is where
+ * it belonged. `variantsByPreference`' docblock is the long version.
  *
  * ## The handoff from "Use in builder"
  *
@@ -85,10 +96,11 @@
  *     cannot rescue this case and must not be attempted, for the reason measured
  *     above: **no design in the corpus mixes placeable and unplaceable files.**
  *
- * What arrives is an item and never a resolution. A6's rule 0 re-picks the
- * variant when the bill is built, and the three locks disagree for 37.1% of
- * items, so the armed file is "what this build would print" while the row above
- * it is the tile itself.
+ * What arrives is an item and never a resolution, and after V4 that is true all
+ * the way to the store: nothing between the catalog drawer and
+ * `WorkshopState.placements` picks a file. A6's rule 0 picks one when the bill is
+ * built, and the three locks disagree for 37.1% of items, so a room shared under
+ * openlock and reopened under magnetic is the same room and a different pack.
  *
  * ## Where the search comes from
  *
@@ -116,19 +128,12 @@ import type { FacetSearch } from '@/search'
 import { MAX_QUERY_LENGTH } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
 import { countLabel, sizeLabel } from '@/screens/catalog'
-import { addToLibrary, claimPendingDesign, libraryDesigns, useLibrary, useLockSystem, usePendingDesign } from '@/store'
+import { addToLibrary, claimPendingDesign, libraryDesigns, useLibrary, usePendingDesign } from '@/store'
 import { Button, Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
 import type { PaletteLookup, PaletteRow } from './palette'
-import {
-  MAX_SEARCH_ROWS,
-  armFile,
-  armedItem,
-  paletteRows,
-  searchRows,
-  starterSet,
-} from './palette'
+import { MAX_SEARCH_ROWS, paletteRows, searchRows, starterSet } from './palette'
 
 import './panels.css'
 
@@ -146,7 +151,6 @@ export interface PalettePanelProps {
 
 export function PalettePanel({ index, tools, search, onQueryChange }: PalettePanelProps) {
   const library = useLibrary()
-  const lock = useLockSystem()
   const searchId = useId()
   const libraryId = useId()
 
@@ -181,25 +185,18 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
     [result, lookup, library],
   )
 
-  /**
-   * Which item is armed, whatever file is armed for it.
-   *
-   * Row V4 deletes this hop; see `palette.ts#armedItem` for why it is a lookup
-   * rather than a re-resolution under the current lock.
-   */
-  const armed = useMemo(
-    () => armedItem(tools.selectedTileId, (id) => index.engine.aggregates.byTile.get(id)?.design),
-    [tools.selectedTileId, index],
-  )
+  // Which item is armed. Row V4: the store's own currency, so there is nothing
+  // to look up and nothing that can go stale when the lock preference changes.
+  const armed = tools.selectedDesign
 
   const arm = useCallback(
     (item: TileAggregate) => {
-      tools.setSelectedTileId(armFile(item, lock))
+      tools.setSelectedDesign(item.design)
       // §3: arming forces place mode. Selecting a tile while the eraser is up
       // otherwise looks like the palette ignored the click.
       tools.setTool('place')
     },
-    [tools, lock],
+    [tools],
   )
 
   // Row G5's one call site. Claiming is read-and-clear, so this is a one-shot
@@ -284,7 +281,7 @@ function PaletteList({
 }: {
   rows: readonly PaletteRow[]
   index: CatalogIndex
-  /** The armed item, from `armedItem`. Row V4 turns this into `tools.selectedDesign`. */
+  /** The armed item — `tools.selectedDesign`, threaded down so a row can read as pressed. */
   armed: DesignId | null
   tools: PlanTools
   arm: (item: TileAggregate) => void
@@ -303,7 +300,7 @@ function PaletteList({
             // Re-selecting the armed row disarms it, which is what `aria-pressed`
             // promises.
             if (armed === row.item.design) {
-              tools.setSelectedTileId(null)
+              tools.setSelectedDesign(null)
               return
             }
             arm(row.item)

@@ -7,17 +7,21 @@
  * ## What row 18 needs from here
  *
  * ```tsx
- * const catalog = useMemo(() => planCatalogFromFile(file), [file])   // once
+ * const catalog = useMemo(() => planCatalogFromFile(file, lock), [file, lock])  // once
  * const tools = usePlanTools()                                       // shared
  * const [status, setStatus] = useState<PlanStatus | null>(null)
  *
- * <Palette selected={tools.selectedTileId} onSelect={tools.setSelectedTileId} />
+ * <Palette selected={tools.selectedDesign} onSelect={tools.setSelectedDesign} />
  * <PlanCanvas catalog={catalog} tools={tools} onStatus={setStatus} chrome={false} />
  * <Toolbar tools={tools} status={status} onClear={clearPlacements} />
  * ```
  *
+ *   - **`planCatalogFromFile(file, lock)`** is memoised on the **lock** as well
+ *     as the file since row V4, because a placement names an item and this is
+ *     where the item becomes the record this build would print. `catalog.ts` has
+ *     the argument for putting the hop there rather than in `buildPlanScene`.
  *   - **`usePlanTools()`** is the shared tool state: mode, snap, pending
- *     rotation, palette selection. Call it once in the screen and pass it to the
+ *     rotation, palette selection (an item, not a file). Call it once in the screen and pass it to the
  *     palette, the toolbar and the canvas — all three write to it.
  *   - **`PlanStatus`** carries §2.4's `snap {value}` readout, the contextual
  *     hint and the armed tile's name, so the floating toolbar can show them.

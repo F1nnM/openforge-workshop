@@ -29,8 +29,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
-import type { BlobId, CatalogFile, CatalogRecord } from '@/catalog'
-import { CatalogFile as CatalogFileSchema, MEASURED_SPRITE_SHEET, TileId } from '@/catalog'
+import type { BlobId, CatalogFile, CatalogRecord, DesignId } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, MEASURED_SPRITE_SHEET } from '@/catalog'
 import type { Placement } from '@/store'
 
 import { ATTRIBUTION_COLUMNS, attributionCsv, licenceText } from './attribution'
@@ -106,7 +106,9 @@ function catalogOf(rows: readonly RawRow[]): CatalogFile {
         sprite: true,
         thumb: false,
         family: row.id.slice(0, cut),
-        design: `design-${String(index)}`,
+        // Derived from the id so `designFor` below is exact rather than a
+        // parallel numbering that could drift from this one.
+        design: `d${row.id}`,
         name: row.id.slice(cut + 1),
         kinds: ['wall'],
         conn: ['openlock'],
@@ -118,7 +120,19 @@ function catalogOf(rows: readonly RawRow[]): CatalogFile {
   })
 }
 
-const place = (tileId: string): Placement => ({ tileId: TileId.parse(tileId), x: 0, z: 0, rotation: 0 })
+/**
+ * A placement of the item a fixture file id belongs to.
+ *
+ * The fixture gives every record its own design, so `designFor` is injective and
+ * a bill built from these ids lists exactly those files — which is what every
+ * assertion in this file is about. Row V4: a `Placement` names a design.
+ */
+const place = (tileId: string): Placement => ({ design: designFor(tileId), x: 0, z: 0, rotation: 0 })
+
+/** The design a fixture id was given. See {@link catalogOf}. */
+function designFor(tileId: string): DesignId {
+  return `d${tileId}` as DesignId
+}
 
 function billOf(catalog: CatalogFile, ids: readonly string[]): BillOfTiles {
   return buildBillOfTiles(ids.map(place), buildAssemblyIndex(catalog))
@@ -874,7 +888,7 @@ describeCorpus(corpusSuite, () => {
     const collidingFilenames = new Set(colliding.map(([filename]) => filename))
     const placements = records
       .filter((record) => collidingFilenames.has(record.file))
-      .map((record) => ({ tileId: record.id, x: 0, z: 0, rotation: 0 }))
+      .map((record) => ({ design: record.design, x: 0, z: 0, rotation: 0 }))
 
     const bill = buildBillOfTiles(placements, index)
     const names = archiveEntryNames(bill.lines)
@@ -896,7 +910,7 @@ describeCorpus(corpusSuite, () => {
 
   it('names every live tile uniquely when the whole corpus is in one bill', () => {
     const bill = buildBillOfTiles(
-      records.map((record) => ({ tileId: record.id, x: 0, z: 0, rotation: 0 })),
+      records.map((record) => ({ design: record.design, x: 0, z: 0, rotation: 0 })),
       index,
     )
     const names = archiveEntryNames(bill.lines)
@@ -918,7 +932,7 @@ describeCorpus(corpusSuite, () => {
   })
 
   it('predicts a plausible archive for a fifty-tile room and warns where it should', () => {
-    const fifty = records.slice(0, 50).map((record) => ({ tileId: record.id, x: 0, z: 0, rotation: 0 }))
+    const fifty = records.slice(0, 50).map((record) => ({ design: record.design, x: 0, z: 0, rotation: 0 }))
     const bill = buildBillOfTiles(fifty, index)
     const plan = buildArchivePlan(bill, { assets: file.assets, generatedAt: GENERATED_AT })
 
