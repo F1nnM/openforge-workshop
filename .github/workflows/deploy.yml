@@ -24,9 +24,54 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Same pin CI uses, for the same reason and one more: with the clock
+      # pinned to the commit, the artefact this job deploys is byte-identical to
+      # the one CI built and tested from that commit. Unpinned, `version.built`
+      # is a clock reading and the two differ by construction, so "CI was green
+      # on this commit" stops being a statement about the deployed bytes.
+      - name: Pin the build clock
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
       - uses: jdx/mise-action@v3
 
       - run: npm ci
+
+      # `public/catalog/catalog.json` is gitignored and derived, so a checkout
+      # does not carry it. Without these two steps this job fails twice over,
+      # and the first failure hides the second:
+      #
+      #   1. `Verify` dies in the corpus suites — `ENOENT ... catalog.json` —
+      #      because they read the real index rather than a handcrafted fixture.
+      #   2. `Build` would then bundle a site with **no catalog index at all**,
+      #      which is the serious one: a deploy that succeeds and serves an
+      #      empty catalog.
+      #
+      # Both steps are lifted from `ci.yml`, which has always had them. This job
+      # never did, and nothing noticed until the first push to `main` — the
+      # deploy path had never run end to end.
+      - name: Fetch catalog fixtures
+        run: |
+          set -euo pipefail
+          . .github/fixtures.env
+          DEST="${RUNNER_TEMP}/openforge-catalog"
+          git clone --quiet --filter=blob:none --no-checkout --sparse \
+            "https://github.com/${OPENFORGE_CATALOG_REPO}.git" "$DEST"
+          git -C "$DEST" sparse-checkout set --no-cone "${OPENFORGE_FIXTURES_PATH}"
+          git -C "$DEST" checkout --quiet "${OPENFORGE_CATALOG_SHA}"
+          FIXTURES="${DEST}/${OPENFORGE_FIXTURES_PATH}"
+          test -d "$FIXTURES"
+          echo "OPENFORGE_FIXTURES=${FIXTURES}" >> "$GITHUB_ENV"
+          echo "OPENFORGE_FIXTURES_COMMIT=${OPENFORGE_CATALOG_SHA}" >> "$GITHUB_ENV"
+
+      # Same step CI runs, and deliberately the same one rather than
+      # `npm run import:catalog`: it regenerates the index and the share
+      # manifest, joins the content-addressed derivatives by md5, checks the
+      # derivation lock and writes `public/catalog/stamp.json`. A deploy is
+      # exactly where a stale derivative must not pass.
+      - name: Regenerate and stamp the derived artefacts
+        run: npm run stamp
 
       # Deploying a build that does not typecheck or pass tests is how a green
       # board becomes a broken site. The same checks run in CI, but a push to
