@@ -24,9 +24,9 @@
  *     always mounted and every one of those states is an **overlay** on it.
  *   - **The scene was projected here.** `BuilderRoom` called `buildPlanScene`
  *     over the store's placements, which made a second projection beside
- *     `BuilderScreen`'s and `PlanCanvas`'s. It now takes the {@link PlanScene}
- *     the screen already built — *one scene, two renderers, and after row R4 one
- *     renderer* — which is also what keeps this row clear of row **V4**: a
+ *     `BuilderScreen`'s and the plan view's. It now takes the {@link PlanScene}
+ *     the screen already built — *one scene, and since row R4 one renderer of
+ *     it* — which is also what keeps this row clear of row **V4**: a
  *     placement's shape is changing under it, and nothing here reads a
  *     `Placement` field.
  *
@@ -95,7 +95,7 @@ import { resolveMaterial } from '@/materials'
 import { meshQueue, useMeshQueue } from '@/mesh'
 import { VIEW_RADIUS } from '@/three/geometry'
 import { AO_RADIUS, Stage } from '@/three/Stage'
-import { Button, Eyebrow } from '@/ui/primitives'
+import { Eyebrow } from '@/ui/primitives'
 
 import type { SurfaceStatus } from './edits'
 import { describeSurface } from './edits'
@@ -164,13 +164,12 @@ export interface BuilderRoomProps {
    * passes the whole `catalogFile.assets`, so nothing changed but the type.
    */
   readonly assets: Pick<CatalogAssets, 'lod' | 'models'>
-  readonly onClose: () => void
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
 }
 
-export function BuilderRoom({ catalog, scene, tools, assets, onClose, onStatus, fetchImpl }: BuilderRoomProps) {
+export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl }: BuilderRoomProps) {
   const armed = tools.selectedDesign === null ? undefined : catalog.record(tools.selectedDesign)
 
   /**
@@ -255,11 +254,14 @@ export function BuilderRoom({ catalog, scene, tools, assets, onClose, onStatus, 
 
   return (
     <div className="of-b3d" data-status={roomStatus(room, store.settled)}>
+      {/*
+        Row **R4** took the "Back to the plan" button out of this band: it closed
+        `Builder3DPanel`, and there is no plan view left to close it *to*. The
+        band keeps the label alone — `of-b3d-head` is still a `space-between`
+        flex row, so a later control can go back in beside it.
+      */}
       <div className="of-b3d-head">
         <Eyebrow as="span">Build in 3D</Eyebrow>
-        <Button tone="secondary" size="sm" onClick={onClose}>
-          Back to the plan
-        </Button>
       </div>
 
       <div className="of-b3d-stage">

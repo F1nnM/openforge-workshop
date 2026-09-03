@@ -4,7 +4,10 @@
  * PR #29: *"No move. It will annoy people."* Repositioning was erase-then-place,
  * which costs two actions, loses the piece's rotation unless the user re-arms it
  * at the same angle, and had **no keyboard path at all**. This module is the
- * pure half of the fix; `PlanCanvas.tsx` holds the React state and the gestures.
+ * pure half of the fix; `three/RoomSurface.tsx` holds the React state and the
+ * gestures. It was `PlanCanvas.tsx` until row **R4** deleted that renderer, and
+ * this module did not change a line for it — which is the whole point of the
+ * split.
  *
  * ## Pure, for the same reason `ghost.ts` is pure
  *

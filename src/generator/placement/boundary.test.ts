@@ -111,15 +111,33 @@ describe('the canvas path', () => {
   })
 
   it('reaches W6 and the download path by module, never through a barrel', () => {
-    // `@/builder/canvas` pulls `PlanCanvas.tsx`, 46 KB of component, into
-    // whatever imports it; `@/download` pulls the save picker, the stream and the
-    // vendored ZIP writer. Both are reached by path instead, the way
-    // `src/builder/three` reaches `@/three/gate`.
+    /*
+     * **The cost of the canvas barrel was re-measured in row R4, and a third
+     * assertion here was deleted because that row made it vacuous.**
+     *
+     * It read `expect(reached).not.toContain('builder/canvas/PlanCanvas.tsx')`,
+     * and the comment justified it as *"`@/builder/canvas` pulls
+     * `PlanCanvas.tsx`, 46 KB of component, into whatever imports it"*. R4
+     * deleted that file. An assertion that a closure does not contain a path
+     * that cannot exist can never fail, whatever anybody imports — it is the
+     * fourth vacuous guard this series has found and the first one a *deletion*
+     * created rather than a shortcut.
+     *
+     * The guard it stood beside is not vacuous and the barrel is not cheap.
+     * Walked on R4's tree, `builder/canvas/index.ts` reaches **37 in-repo
+     * modules and four packages** — the whole assembly index (`assembly/**`),
+     * the material registry (`materials/**`), eight store modules, and
+     * **`react`**, through `usePlanTools.ts`. That last one is the live version
+     * of the old argument: this directory is asserted a few lines above to reach
+     * no React at all, and one convenience import of the barrel would break that
+     * without breaking anything else. `@/download` pulls the save picker, the
+     * stream and the vendored ZIP writer. Both are reached by path instead, the
+     * way `src/builder/three` reaches `@/three/gate`.
+     */
     for (const module of ['scene.ts', 'provenance.ts', 'geometry.ts', 'bill.ts', 'pack.ts', 'placement.ts']) {
       const reached = reachedBy(module)
       expect(reached, `${module} → canvas barrel`).not.toContain(CANVAS_BARREL)
       expect(reached, `${module} → download barrel`).not.toContain(DOWNLOAD_BARREL)
-      expect(reached, `${module} → PlanCanvas`).not.toContain('builder/canvas/PlanCanvas.tsx')
     }
   })
 })

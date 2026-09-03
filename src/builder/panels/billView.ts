@@ -692,10 +692,10 @@ export function noteCopy(note: BillNote): NoteCopy {
     case 'no-footprint':
       return {
         ...base,
-        headline: `${n} ${pieces} cannot be drawn in plan view`,
+        headline: `${n} ${pieces} cannot be drawn on the plan`,
         detail:
-          'The tile is in the bill and will be downloaded. It has no footprint the plan view can derive, so it ' +
-          'has no shape on the grid — 726 corpus tiles are in this state.',
+          'The tile is in the bill and will be downloaded. The archive states no footprint for it, so it has no ' +
+          'shape on the grid — 726 corpus tiles are in this state.',
       }
 
     case 'insert-on-grid':

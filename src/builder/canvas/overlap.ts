@@ -9,7 +9,7 @@
  * tile) and 863 carry `build|wall on tile` (the wall stands *on* it), so in plan
  * a wall band and a floor square legitimately share the same square metre of
  * paper while occupying different heights. `y` is exactly the axis v1 does not
- * model, which is why the plan view cannot see the difference and has to be told
+ * model, which is why a renderer cannot see the difference and has to be told
  * about it.
  *
  * A tile-versus-tile AABB test over a real room therefore reports a conflict on

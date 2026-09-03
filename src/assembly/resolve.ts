@@ -743,7 +743,7 @@ export function resolvePlacement(
   const parts: AssemblyPart[] = [{ role: 'placed', record: tile }]
 
   if (tile.foot.shape === 'none') {
-    const message = `${tile.name} has no derivable footprint and cannot be drawn in plan view.`
+    const message = `${tile.name} has no derivable footprint and cannot be drawn on the plan.`
     notes.push(note('no-footprint', message, tile.id))
   }
   if (tile.layer === 'insert') {

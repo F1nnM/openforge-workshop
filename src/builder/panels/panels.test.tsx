@@ -16,10 +16,11 @@
  * `useArchiveDownload.ts`. Injecting them is not stubbing our code; it is using
  * the parameters that module was designed around.
  *
- * There is deliberately **no test of the plan canvas here.** Row 17 owns it and
- * `../canvas/canvas.test.tsx` covers it; what this file asserts about it is one
- * thing only — that selecting a palette row arms it, which is the contract
- * between the two PRs.
+ * There is deliberately **no test of the work surface here.** What this file
+ * asserts about it is one thing only — that selecting a palette row arms it,
+ * which is the contract between the palette and whichever renderer draws the
+ * room. Row **R4** deleted `../canvas/canvas.test.tsx` with the plan canvas it
+ * covered; the surface's own behaviour is in `src/builder/three/**`.
  */
 import { TextEncoder as NodeTextEncoder } from 'node:util'
 
@@ -29,8 +30,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AssemblyIndex, BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles, selectVariantForLock } from '@/assembly'
-import type { PlanStatus } from '@/builder/canvas'
 import { usePlanTools } from '@/builder/canvas'
+import type { SurfaceStatus } from '@/builder/three'
 import type { CatalogFile, DesignId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, resolveTags, selectVariant } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
@@ -139,7 +140,7 @@ function PaletteHarness({ query = '' }: { query?: string }) {
 }
 
 describe('the palette', () => {
-  it('greys the tiles the plan view cannot place, and offers no control for them', () => {
+  it('greys the tiles the plan cannot hold, and offers no control for them', () => {
     for (const key of ['floor1', 'arc', 'slab'] as const) {
       act(() => {
         useWorkshopStore.setState((state) => ({ library: { ...state.library, [design(key)]: true } }))
@@ -367,7 +368,7 @@ describe('the pre-selection handoff', () => {
     expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor2)
   })
 
-  it('arms nothing for an item the plan view cannot place, and the library note says why', () => {
+  it('arms nothing for an item the plan cannot hold, and the library note says why', () => {
     // The `none` footprint: 370 of 3,822 items, 726 of 8,702 files. Arming it
     // would give the user
     // an armed tile every click of which the canvas correctly refuses, which is
@@ -383,7 +384,7 @@ describe('the pre-selection handoff', () => {
     expect(screen.getByTestId('tool')).toHaveTextContent('erase')
     // The explanation is already on screen, because the drawer filed the tile on
     // its way here — so the refusal costs no new copy.
-    expect(screen.getByText(/cannot be laid out in plan view/)).toBeInTheDocument()
+    expect(screen.getByText(/cannot be laid out on the plan/)).toBeInTheDocument()
     // Claimed all the same: a handoff this palette will not act on must not sit
     // in the box waiting to arm the next mount.
     expect(useSelectionStore.getState().pending).toBeNull()
@@ -582,10 +583,11 @@ function ToolbarHarness({ moving }: { moving?: string }) {
   const armedItem = tools.selectedDesign === null ? null : index.engine.aggregates.byDesign.get(tools.selectedDesign)
   const armed =
     armedItem == null ? undefined : index.engine.record(selectVariantForLock(armedItem, 'openlock').variant.id)
-  // The canvas reports its readout through `onStatus`; the toolbar only reads it.
-  // `moving` is the one field this harness needs to stand in for, so the rest is
-  // the empty readout the toolbar already handles.
-  const status: PlanStatus | null =
+  // The 3D surface reports its readout through `onStatus`; the toolbar only
+  // reads it. `moving` is the one field this harness needs to stand in for, so
+  // the rest is the empty readout the toolbar already handles. `SurfaceStatus`
+  // since row R4 — it was `PlanStatus`, which the deleted plan canvas declared.
+  const status: SurfaceStatus | null =
     moving === undefined
       ? null
       : {

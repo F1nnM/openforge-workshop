@@ -258,7 +258,7 @@ describe('scene', () => {
     expect(scene.unknown[0]?.reason).toContain('retired')
   })
 
-  it('reports a placement the plan view cannot draw instead of dropping it', () => {
+  it('reports a placement that cannot be drawn instead of dropping it', () => {
     // `none` is the only case left: 726 tiles, and after this row the only
     // footprint with nothing to draw.
     const scene = buildPlanScene(sceneOf([['p1', FIXTURE_IDS.shapeless, 0, 0, 0]]), catalog, styleOf)

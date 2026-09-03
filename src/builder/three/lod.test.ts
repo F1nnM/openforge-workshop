@@ -146,11 +146,18 @@ describe('the memory budget', () => {
     expect(lodObjectBudget(1)).toBe(1)
   })
 
-  it('explains a refusal with both numbers in it', () => {
+  it('explains a refusal with both numbers in it, and offers the way out', () => {
     const refusal = lodBudgetRefusal(400)
     expect(refusal).toContain('400')
     expect(refusal).toContain('150')
-    expect(refusal).toContain('plan view')
+    // Row R4: this used to assert `'plan view'`, because the sentence promised
+    // that the deleted 2D renderer would draw what the room would not. The two
+    // things that have to be true now are that the placements are not lost and
+    // that the user is sent to the right axis — **distinct designs**, not the
+    // number of tiles, since a further copy of a loaded mesh costs one matrix.
+    expect(refusal).toContain('still in the bill')
+    expect(refusal).toContain('different designs')
+    expect(refusal).not.toContain('plan view')
   })
 })
 

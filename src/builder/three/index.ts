@@ -55,6 +55,48 @@
  *     for the panel and its types. Every kilobyte of the interaction layer
  *     proper is behind `lazy`.
  *
+ * ## Row R4 re-measured the chunking with the gate gone, and it did not move
+ *
+ * R2's numbers were taken with the surface still behind an open/closed pair of
+ * states, so the question R4 had to ask is whether a surface that *always* mounts
+ * belongs in a different chunk than one behind a press. **It does not**, and the
+ * A/B below is the deletion rather than the directory: `d584c98` against this
+ * tree, two `vite build`s, summing **every** chunk `dist/index.html` loads —
+ * `index-*.js`, `vanilla-*.js`, `catalog-*.js` and `index-*.css` — because a
+ * JS-only sum books a CSS relocation as a saving it has not made.
+ *
+ * | chunk | plan view present | deleted | delta |
+ * | --- | ---: | ---: | ---: |
+ * | **eager total** (4 chunks) | 661,513 / 204,189 / 177,891 | 661,496 / 204,178 / 177,871 | **−17 / −11 / −20 B** |
+ * | `/builder` route JS | 98,292 / 31,524 / 27,644 | 78,881 / 25,590 / 22,470 | **−19,411 / −5,934 / −5,174 B** |
+ * | `/builder` route CSS | 34,221 / 6,511 / 5,749 | 31,614 / 6,131 / 5,417 | **−2,607 / −380 / −332 B** |
+ * | `BuilderRoom-*.js` | 108,363 / 33,981 / 29,423 | 108,421 / 34,021 / 29,410 | +58 / +40 / −13 B |
+ * | `material-*.js` (shared renderer) | 1,187,824 / 385,089 / 335,141 | 1,187,824 / 385,091 / 335,238 | 0 raw |
+ *
+ * Raw / gzip / brotli, bytes. **2,776 deleted lines are worth 11 gzipped bytes to
+ * a catalog visitor and 6.3 kB gzipped to a builder visitor**, and the reason is
+ * the one R2's table already gives: `/builder` is a lazy route, so almost nothing
+ * the plan view weighed was ever in the entry chunk. The 17 raw bytes that did
+ * move are the route manifest's own strings.
+ *
+ * **Read the raw and gzip columns; treat brotli under about 100 B as noise.**
+ * `material-*.js` is byte-identical in *length* across the two builds and its
+ * brotli figure still moves by 97 B, because the content hashes embedded in every
+ * chunk's import specifiers change with any rebuild — same length, different
+ * bytes, slightly different compression. That is also why the eager brotli delta
+ * measured −96 B on one pair of builds and −20 B on the next with no source
+ * change between them.
+ *
+ * The chunk *shape* is byte-for-byte the shape R2 measured: `material-*.js`
+ * unchanged to the byte, `BuilderRoom-*.js` still its own chunk, `Viewer-*.js`
+ * still the detail viewer's 2.6 kB shim over the shared renderer. So the split is
+ * not about *when* the bytes are wanted — with no gate they are wanted
+ * immediately — but about **which entry point pays for them**, and that answer is
+ * unchanged: `/builder`'s route chunk, not the chunk the catalog loads.
+ * `BuilderRoom` gaining 40 gzipped bytes while losing the "Back to the plan"
+ * button is rolldown's minifier renaming across a changed module, not a
+ * regression worth chasing.
+ *
  * ## The other side of the line, and the shared-chunk question, answered
  *
  * | chunk | raw | gzip |
@@ -76,8 +118,9 @@
  * **Row R2 changed who pays it, and it is now everybody who opens `/builder`.**
  * The surface is open on arrival, because the owner asked for the 3D view to
  * *be* the builder rather than a panel behind a gate, so there is no press left
- * to withhold the chunk behind: arriving at `/builder` requests 31.54 kB
- * (route) + 33.98 kB (`BuilderRoom`) + 385.09 kB (shared renderer) gzipped. The
+ * to withhold the chunk behind: arriving at `/builder` requests 25.59 kB
+ * (route, after R4's deletion — 31.52 kB before it) + 34.02 kB (`BuilderRoom`)
+ * + 385.09 kB (shared renderer) gzipped. The
  * `lazy` boundary is still the right structure and `Builder3DPanel.tsx` says
  * why: the same bytes in the entry chunk would block first paint on **every**
  * screen, the catalog included, where behind `lazy` they are a parallel request

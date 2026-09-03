@@ -1,52 +1,18 @@
 /**
- * Two small hooks the canvas needs and nothing else does.
- */
-import { useCallback, useEffect, useRef, useState } from 'react'
-
-import type { CanvasSize } from './viewport'
-
-/**
- * The element's CSS pixel size, tracked.
+ * One small hook the 3D surface needs and nothing else does.
  *
- * `ResizeObserver` when the platform has it, a window `resize` listener when it
- * does not. jsdom implements neither and reports every element as 0 × 0 (the
- * catalog screen's tests document the same problem), so the fallback path is the
- * one component tests take — and `usableSize` turns a zero into
- * {@link FALLBACK_SIZE}, which is why the canvas still has a coherent
- * coordinate system under test.
+ * It was two. `useCanvasSize` measured an element with a `ResizeObserver` and
+ * fell back to a window `resize` listener, and its only caller was
+ * `PlanCanvas.tsx` — an SVG renderer has to know its pixel box to compute a
+ * `viewBox`. Row **R4** deleted that renderer, and r3f's `<Canvas>` does its own
+ * measuring, so the hook went with `viewport.ts`: it was the last importer of
+ * that module's `CanvasSize`, which is why deleting the one made deleting the
+ * other possible.
+ *
+ * This file therefore survives the deletion for `useAnnouncer` alone, which
+ * `BuilderRoom` imports.
  */
-export function useCanvasSize(ref: React.RefObject<HTMLElement | null>): CanvasSize | null {
-  const [size, setSize] = useState<CanvasSize | null>(null)
-
-  useEffect(() => {
-    const element = ref.current
-    if (element === null) return
-
-    const measure = () => {
-      const rect = element.getBoundingClientRect()
-      setSize((current) =>
-        current !== null && current.width === rect.width && current.height === rect.height
-          ? current
-          : { width: rect.width, height: rect.height },
-      )
-    }
-    measure()
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', measure)
-      return () => {
-        window.removeEventListener('resize', measure)
-      }
-    }
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    return () => {
-      observer.disconnect()
-    }
-  }, [ref])
-
-  return size
-}
+import { useCallback, useRef, useState } from 'react'
 
 /**
  * A polite live region's text, and a way to set it.

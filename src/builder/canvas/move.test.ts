@@ -8,10 +8,13 @@
  * limitation is disclosed on exactly the pieces it applies to.
  *
  * **What they cannot prove:** anything about the gesture. There is no pointer, no
- * canvas and no store here; whether `Shift`+drag reaches `beginMove` is
- * `canvas.test.tsx`'s question, and whether the preview *looks* like the piece is
- * nobody's — jsdom lays out no SVG and rasterises no pixel, so both files assert
- * the geometry that was emitted and never its appearance.
+ * renderer and no store here; whether `Shift`+drag reaches `beginMove` was
+ * `canvas.test.tsx`'s question, and row **R4** deleted that file with the plan
+ * view — so it is now **nobody's**, because jsdom has no WebGL context and no
+ * test in this repository can mount the 3D surface. `three/edits.ts` proves the
+ * *verdict* a gesture resolves to, which is the half that can be tested without a
+ * GPU; the gesture itself and the appearance of the preview are both browser
+ * work.
  *
  * The overlap numbers here are also not a re-proof of `overlap.ts`. That module
  * proves its own error direction over 240 randomised pairs; this file only checks

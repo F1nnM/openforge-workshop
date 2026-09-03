@@ -133,8 +133,10 @@ export const SURFACE_GRID_DROP_MM = 0.2
  * decides only whether the *release* also edits the plan.
  *
  * The consequence worth stating: there is no drag-paint in 3D. `PlanCanvas`
- * paints while the primary button is down, and here that same drag is the orbit.
- * A press-and-release places one tile.
+ * painted while the primary button was down; here that same drag is the orbit, so
+ * a press-and-release places one tile. Row **R4** deleted the renderer that
+ * painted, so this is no longer a difference between two surfaces — it is simply
+ * how placing works.
  */
 export const DRAG_THRESHOLD_PX = 5
 

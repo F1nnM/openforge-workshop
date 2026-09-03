@@ -55,13 +55,38 @@
 
    ## The top band, and the gutter that makes it safe
 
-   Three overlays share one 12px band across the top of one stacking context:
-   row S4's generator plate (top-left, `z-index: 3`), the toolbar slot — which
-   holds `PlanToolbar` *and* row L1's lock toggle (top-centre, `z-index: 2`) —
-   and row G2's 3D plate (top-right, `z-index: 3`). Each was sized by its own content
-   and none was aware of the others, so the centred slot grew straight under
-   both side plates and the plates — higher in the stacking order — were painted
-   **and hit-tested** over it.
+   Three overlays used to share one 12px band across the top of one stacking
+   context: row S4's generator plate (top-left, `z-index: 3`), the toolbar slot —
+   which holds `PlanToolbar` *and* row L1's lock toggle (top-centre,
+   `z-index: 2`) — and row G2's 3D plate (top-right, `z-index: 3`). Each was
+   sized by its own content and none was aware of the others, so the centred slot
+   grew straight under both side plates and the plates — higher in the stacking
+   order — were painted **and hit-tested** over it.
+
+   **Row R4 removed the third of them, and the gutter stays symmetric anyway.**
+   The 3D surface has no closed state left to be a corner plate in, so the band's
+   top-right is empty and only the generator plate is left to collide with. The
+   obvious tidy-up is to give up one gutter instead of two and hand the reclaimed
+   width back to the toolbar. **It re-opens L1's defect, and that is measured
+   rather than argued.** The slot is centred with `translate: -50%`, so a
+   `max-width` of `100% - gutter` puts `(100% - gutter)/2` of it on *each* side of
+   centre and its left edge back under the generator plate: the guarantee only
+   holds for a centred element if the gutter is given up on both sides. Injected
+   as a one-line `!important` override into the shipping build and swept in Chrome
+   for Testing 148:
+
+     one-sided cap    1080px  0 dead
+                      1280px  81 dead   Place 60 of 60, Erase 21 of 62
+                      1295px  73 dead   Place 60 of 60, Erase 13 of 61
+                      1440px   4 dead   Place  4 of 60
+                      1920px  0 dead
+
+   `Place` 60 of 60 is L1's defect back verbatim. Two gutters, the shipping
+   arithmetic, swept the same way after the deletion: **0 dead columns on every
+   control in the band at 820, 900, 1000, 1030, 1080, 1280, 1295, 1440 and
+   1920px**, identical to the same sweep on the pre-R4 build. What R4 did buy is
+   one fewer element that can ever claim the right-hand gutter, and the reason the
+   band cannot grow to use it.
 
    **Row X10 measured that and could not fix it: no Chrome in its environment.
    Row L1 had one (Chrome for Testing 148), and the defect was worse than
@@ -71,7 +96,7 @@
      stage          x 272 .. 993   (721 px)
      generator      x 284 .. 477   (193 px)
      toolbar slot   x 386 .. 879   (492 px, centred on the stage)
-     3D plate       x 847 .. 981   (134 px)
+     3D plate       x 847 .. 981   (134 px)   — deleted in row R4
 
      Place          60 of 60 px dead  (100%)   under the generator plate
      Erase          15 of 61 px dead  (24.6%)  under the generator plate
@@ -101,12 +126,13 @@
    add the lock toggle at all.
 
    `min(208px, 34%)` rather than a constant: 208 is 12 + 196, and 196 clears
-   today's widest side plate (the generator's 193). The 34% is the floor that
-   keeps the guarantee from inverting — the centre always keeps 100% - 2 x 34% =
-   32% of the stage, so a narrow stage shrinks the plates (which wrap their own
-   text) instead of producing a negative `max-width` and a collision again.
+   today's widest side plate (the generator's 193, which after row R4 is also the
+   only one). The 34% is the floor that keeps the guarantee from inverting — the
+   centre always keeps 100% - 2 x 34% = 32% of the stage, so a narrow stage
+   shrinks the plate (which wraps its own text) instead of producing a negative
+   `max-width` and a collision again.
 
-   Each plate gives up `gutter - 16px` rather than `gutter - 12px`, and the extra
+   The plate gives up `gutter - 16px` rather than `gutter - 12px`, and the extra
    4px is not padding for taste. With the cap at exactly `gutter - 12px` the
    plate's outer edge lands on the slot's edge, and at a stage width where the
    34% floor is fractional the two round onto the **same pixel column**: measured
@@ -150,13 +176,10 @@
      contents. */
   container-type: inline-size;
 
-  /* Read by the two side plates' closed states, in their own stylesheets. */
+  /* Read by the generator plate's closed state, in its own stylesheet, and by
+     the toolbar slot below. It was read by two plates; row R4 deleted the 3D
+     one's closed state along with the plan view it was a way back to. */
   --of-stage-gutter: min(208px, 34%);
-}
-
-.of-builder-canvas {
-  width: 100%;
-  height: 100%;
 }
 
 /* §2.4: "a floating toolbar, centred at the top". A wrapper rather than absolute
@@ -165,8 +188,8 @@
 
    It holds two children now — `PlanToolbar` and the lock toggle — so it is a
    flex row of its own that wraps. The lock toggle is **not** inside
-   `PlanToolbar`: every control in that component writes `PlanTools`, and row R4
-   deletes the plan view it belongs to. A sibling in the slot survives that. */
+   `PlanToolbar`: every control in that component writes `PlanTools`, which row
+   R4 left driving the 3D surface. A sibling in the slot survived that. */
 .of-builder-toolbar-slot {
   position: absolute;
   top: 12px;
@@ -202,10 +225,11 @@
    the full width and the guarantee is trivial rather than arithmetic.
 
    92px clears the tallest closed plate: the generator's wraps to three 11px mono
-   lines at its narrowest cap, measured at 65px tall on a 12px inset, and the
-   3D plate is 42px. It is a number rather than a `calc()` because neither plate
-   publishes its height, and erring long costs a few pixels of drawing where
-   erring short costs a dead control.
+   lines at its narrowest cap, measured at 65px tall on a 12px inset. (The 3D
+   plate was 42px and is gone as of row R4, so the generator is now the only
+   term.) It is a number rather than a `calc()` because the plate does not publish
+   its height, and erring long costs a few pixels of drawing where erring short
+   costs a dead control.
 
    Verified across 820-1920px: 0 dead columns at every width sampled. */
 @container (max-width: 600px) {
@@ -220,11 +244,13 @@
    translucent plates and pointer-transparent so a click near the bottom of the
    drawing still places a tile.
 
-   This screen draws them rather than the canvas (`chrome={false}`): the canvas's
-   own armed plate carries the `snap` readout as well, and the contract puts that
-   in the toolbar. Two of them on screen would be a designer's bug report. The
-   ~14 lines below are the canvas's plate treatment restated; if a third surface
-   ever wants a plate, it belongs in `../../ui/primitives/`.
+   This screen draws them, and until row R4 that was a decision rather than the
+   only option: `PlanCanvas` could draw its own, and its armed plate carried the
+   `snap` readout as well, which the contract puts in the toolbar — two of them on
+   screen would have been a designer's bug report. With the plan view deleted the
+   alternative is gone and `chrome={false}` with it. The ~14 lines below are the
+   plate treatment `builder3d.css` also carries for the surface's own two plates;
+   if a third surface ever wants a plate, it belongs in `../../ui/primitives/`.
    ──────────────────────────────────────────────────────────────────────────── */
 
 .of-build-plate {

@@ -23,7 +23,7 @@
  *
  *   - the two fixed track widths and `minmax(0, 1fr)` between them — without the
  *     `0` minimum a long tile name widens the palette's track and pushes the
- *     canvas out of the viewport;
+ *     stage out of the viewport;
  *   - the height in terms of `--of-header-h` rather than a restated `60px`;
  *   - `overflow: hidden` on the grid;
  *   - **`position: relative` on the grid and on both scroll containers.** This one
@@ -67,8 +67,12 @@ import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
  * boundary is still exercised by the import; only the element is swapped. What
  * this screen's tests are about — three columns, no page scroll, the bill driven
  * from the store, the query in the URL — is entirely unaffected by which
- * renderer draws the plan, and the surface's own behaviour is tested in
+ * renderer draws the room, and the surface's own behaviour is tested in
  * `src/builder/three/**` where it can be tested honestly.
+ *
+ * Row **R4** deleted the plan view, so this stub is now the *only* thing in the
+ * stage. One assertion changed for it and the change is recorded at the call
+ * site: nothing in this file can any longer see a `role="application"`.
  */
 vi.mock('@/builder/three', async () => {
   const actual = await vi.importActual<typeof BuilderThree>('@/builder/three')
@@ -138,8 +142,13 @@ describe('the builder screen', () => {
     await renderBuilder()
 
     expect(screen.getByRole('complementary', { name: 'Palette' })).toBeInTheDocument()
-    // The canvas announces itself as an application — row 17's markup.
-    expect(screen.getByRole('application')).toBeInTheDocument()
+    // The middle column. `getByRole('application')` used to stand for it, which
+    // was `PlanCanvas`'s markup: row **R4** deleted that renderer, and the 3D
+    // surface — which sets the same role on its `<canvas>` — is the stub at the
+    // top of this file, because r3f throws in jsdom. So the honest assertion at
+    // this level is that the stage's element is mounted; the role itself is
+    // asserted where a real renderer produces it, in `three/room.test.tsx`.
+    expect(screen.getByTestId('builder-3d')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /tiles placed/ })).toBeInTheDocument()
     expect(screen.queryByText(/Placeholder/)).toBeNull()
   })

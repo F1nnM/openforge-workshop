@@ -132,7 +132,7 @@
     border-color 120ms ease;
 }
 
-/* A `<div>`, not a button: the tile has no footprint the plan view can draw, so
+/* A `<div>`, not a button: the tile has no footprint that can be drawn, so
    there is nothing to arm. See `PalettePanel.tsx` on why it is not a disabled
    button. */
 .of-pal-row:not([data-placeable]) .of-pal-pick {

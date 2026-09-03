@@ -1,15 +1,15 @@
 /* ────────────────────────────────────────────────────────────────────────────
-   OpenForge Workshop — the instanced 3D builder (row G2).
+   OpenForge Workshop — the instanced 3D builder (rows G2, R2, R4).
 
-   Two states in one stylesheet, because they are one component: a small pill in
-   the corner of `.of-builder-stage`, and the same element expanded to cover that
-   stage when the room is open.
-
-   Covering rather than replacing is deliberate. `PlanCanvas` owns its own
-   viewport — zoom, pan, the cursor position — and none of it is in the store, so
-   swapping the canvas out and back would silently reset the drawing every time
-   somebody looked at the room. The plan stays mounted underneath and comes back
-   exactly as it was.
+   **One state, since row R4.** This stylesheet used to carry two, because they
+   were one component: a small pill in the corner of `.of-builder-stage`, and the
+   same element expanded to cover that stage when the room was open. The pill was
+   the way back to the plan view; R4 deleted the plan view, so the pill, its
+   button (`.of-b3d-toggle`), its note (`.of-b3d-toggle-note`) and the
+   `[data-open]` attribute they were selected on are all gone, and the surface is
+   simply the stage. What the deleted block is remembered for is below the
+   stacking-order note, because that plate is where row X10 and row L1 measured
+   the band collision and the arithmetic that fixed it is still live.
 
    The well's geometry is transcribed from `../../three/three.css` rather than
    invented: the same `radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg))`
@@ -20,38 +20,43 @@
    Unlayered, matching the rest of the app's CSS.
    ──────────────────────────────────────────────────────────────────────────── */
 
+/* The whole stage, under the whole band — rows R2 and R4.
+
+   `inset: 0` rather than a width/height pair so it tracks a resized panel without
+   a resize observer.
+
+   The surface is the *work* surface and not an overlay somebody glances at, so
+   the floating toolbar (`z-index: 2`), the lock toggle beside it and the two
+   corner plates (`z-index: 1`) have to stay above it and stay clickable: every
+   control in `PlanToolbar` writes `PlanTools`, and `PlanTools` is exactly what
+   this surface reads. At `z-index: 3` — which is what this element carried while
+   it was also a corner pill — the room covered them, and `Place`, `Erase`,
+   `Rotate`, `Clear` and the snap toggle would all have been unreachable.
+
+   `z-index: 0` rather than `auto` on purpose. This is a positioned element, so
+   `auto` would leave it in the parent's stacking order where a later sibling
+   could interleave with its children; a stacking context of its own at 0 is
+   below the whole band, which is what is wanted. R4 removed the in-flow plan
+   canvas this used to have to paint *over* as well, so 0 is now the floor of the
+   stage rather than the middle of a sandwich — the value is unchanged because the
+   half that still matters is the band above it. */
 .of-b3d-launch {
   position: absolute;
-  z-index: 3;
-}
-
-/* Open, the stacking order changes — row R2.
-
-   The open surface is now the *work* surface rather than an overlay somebody
-   glances at, so the floating toolbar (`z-index: 2`), the lock toggle beside it
-   and the two corner plates (`z-index: 1`) have to stay above it and stay
-   clickable: every control in `PlanToolbar` writes `PlanTools`, and `PlanTools`
-   is exactly what this surface reads. At `z-index: 3` the room covered them, and
-   `Place`, `Erase`, `Rotate`, `Clear` and the snap toggle would all have been
-   unreachable the moment the surface opened — the same class of defect row L1
-   measured on the closed plate, and worse.
-
-   `z-index: 0` rather than `auto` on purpose: this is a positioned element, so
-   `auto` would still paint it over the in-flow plan canvas *and* leave it in the
-   parent's stacking order where a later sibling could interleave with its
-   children. A stacking context of its own at 0 is below the whole band and above
-   the plan canvas, which is the exact sandwich wanted. */
-.of-b3d-launch[data-open='true'] {
+  inset: 0;
   z-index: 0;
 }
 
-/* Closed: a plate in the stage's top-right.
+/* ── The plate that used to be here, and why its measurement outlives it ─────
+   This element had a closed state — `[data-open='false']`, a 134 px pill in the
+   stage's top-right — and it is where the band collision in this builder was
+   found. Row R4 deleted it with the plan view it was a way back to. The numbers
+   are kept because the *fix* is still live, in a different file, and a reader who
+   meets `--of-stage-gutter` in `screens/builder/builder.css` needs to know what
+   it is defending against.
 
-   **It was NOT clear of the floating toolbar, and this comment twice said the
-   wrong thing about it.** Row X10 was handed a live measurement from a real
-   Chrome on the production build — the first in this series — and recorded that
-   at 1295 x 955, hit-testing every pixel column across the `snap 0.5` button at
-   its vertical centre:
+   Row X10 was handed a live measurement from a real Chrome on the production
+   build — the first in this series — and recorded that at 1295 x 955, hit-testing
+   every pixel column across the `snap 0.5` button at its vertical centre:
 
      snap 0.5 button      x 772 .. 860   (88 px wide)
      View in 3D plate     x 847 .. 981   (134 px wide)
@@ -63,80 +68,34 @@
    60 of 60 px, and 24.6% of `Erase`.** The builder's primary tool could not be
    pressed at that viewport.
 
-   `elementFromPoint` names `.of-b3d-toggle-note` at those columns, which is a
-   red herring twice over: the note is a **child** of `.of-b3d-toggle`, so
-   `pointer-events: none` on it would hand the hit to the button rather than to
-   the snap toggle; and being a flex-column child with `align-items: flex-end`,
-   it cannot spill outside its parent — it *sets* the plate's 134 px width, being
-   the longest line in it. The overlap was plate-over-toolbar, and the note was
-   merely the innermost element at those pixels.
+   `elementFromPoint` named `.of-b3d-toggle-note` at those columns, which was a
+   red herring twice over: the note was a **child** of `.of-b3d-toggle`, so
+   `pointer-events: none` on it would have handed the hit to the button rather
+   than to the snap toggle; and being a flex-column child with
+   `align-items: flex-end`, it could not spill outside its parent — it *set* the
+   plate's 134 px width, being the longest line in it. The overlap was
+   plate-over-toolbar, and the note was merely the innermost element at those
+   pixels.
 
-   **Fixed in row L1, with X10's second candidate: the gutter.**
-   `screens/builder/builder.css` publishes `--of-stage-gutter` on the stage and
-   gives up `2 x` it from the toolbar slot's `max-width`; each side plate is
-   capped inside the same gutter, below. Overlap is then impossible by
-   arithmetic at any width and for any number of controls in the band, which is
-   what made it safe for L1 to put a fourth control there. The cap is above this
-   plate's natural 134 px, so **the View in 3D button is not narrowed** — X10's
-   one constraint on a fix — and the cost is a toolbar that wraps to two lines on
-   a stage narrower than about 1030 px. The stage's own note carries the numbers
-   and the reasoning, including why X10's third candidate (one `auto 1fr auto`
-   grid) is still not available: this element is both the corner plate and, at
-   `[data-open='true']`, the full-stage overlay, so it cannot become a grid item
-   without moving the open state too.
+   **Fixed in row L1, with X10's second candidate: the gutter, and that fix is
+   untouched.** `screens/builder/builder.css` publishes `--of-stage-gutter` on the
+   stage and gives up `2 x` it from the toolbar slot's `max-width`; the generator
+   plate is capped inside the same gutter, in its own stylesheet. Overlap is then
+   impossible by arithmetic at any width and for any number of controls in the
+   band. **What R4 changed is the population, not the arithmetic**: this element
+   no longer competes for the band at all, so only one side plate is left, and
+   `builder.css` records why the slot still gives up the gutter on *both* sides —
+   the slot is centred, so a one-sided cap would put half of the reclaimed width
+   back under the generator plate. Re-measured with a browser after the deletion:
+   0 dead columns on every control in the band from 820px to 1920px.
 
-   Scoped to the closed state, for that same reason: a `max-width` on
-   `[data-open='true']` would clamp the room to a corner. */
-.of-b3d-launch[data-open='false'] {
-  top: 12px;
-  right: 12px;
-  max-width: calc(var(--of-stage-gutter, 208px) - 16px);
-}
-
-/* Open: the whole stage. `inset: 0` rather than a width/height pair so it tracks
-   a resized panel without a resize observer. */
-.of-b3d-launch[data-open='true'] {
-  inset: 0;
-}
-
-/* ── The toggle ──────────────────────────────────────────────────────────── */
-
-.of-b3d-toggle {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--bg2) 88%, transparent);
-  color: var(--ink);
-  font-family: var(--face-body);
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.2;
-  cursor: pointer;
-}
-
-.of-b3d-toggle:hover:not(:disabled) {
-  background: var(--bg2);
-}
-
-.of-b3d-toggle:disabled {
-  color: var(--mut);
-  cursor: default;
-}
-
-/* The note is part of the label, not decoration. Before the backfill it says the
-   meshes are not published yet, so the empty room is expected rather than a
-   surprise after a press. */
-.of-b3d-toggle-note {
-  font-family: var(--face-mono);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.02em;
-  color: var(--mut);
-}
+   X10's third candidate — laying the band out as one `auto 1fr auto` grid — is
+   now *closer* than it was. The objection was that this element was both the
+   corner plate and the full-stage overlay, so it could not become a grid item
+   without moving its open state too; it has no corner state left. The generator
+   plate is still both, so the candidate is still not available, and it is a row
+   of its own.
+   ──────────────────────────────────────────────────────────────────────────── */
 
 /* ── The open room ───────────────────────────────────────────────────────── */
 
@@ -261,18 +220,18 @@
   text-align: center;
 }
 
+/* `.of-b3d-detail` stood here — a mono line for the well's second sentence — and
+   **nothing has rendered it since row R2**, which made the canvas unconditional
+   and turned every well of prose into an overlay with one `.of-b3d-note` in it.
+   Row R4 swept it: it was six declarations selecting nothing, and this row's own
+   deletion is what prompted looking. */
+
 .of-b3d-note {
   max-width: 46ch;
   margin: 0;
   color: var(--mut);
   font-size: 12.5px;
   line-height: 1.45;
-}
-
-.of-b3d-detail {
-  font-family: var(--face-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
 }
 
 /* ── The readout ─────────────────────────────────────────────────────────────

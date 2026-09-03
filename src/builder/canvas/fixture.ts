@@ -1,7 +1,7 @@
 /**
  * An eleven-record catalog for the canvas's tests.
  *
- * Small on purpose, and every record is here to exercise one thing the plan view
+ * Small on purpose, and every record is here to exercise one thing the plan
  * has to get right:
  *
  *   - a **1 × 1 `rect` floor** and a **2 × 2 `rect` floor** — the two commonest
@@ -12,7 +12,7 @@
  *     anchor is the corner and not the centre;
  *   - a **`rect` tile with `rotStep: 45`** — one of the 893 tiles whose angle is
  *     not a multiple of 90 and which would never tile on a 90° step;
- *   - a **`none`** — the 8.3% of the corpus the plan view must refuse *visibly*,
+ *   - a **`none`** — the 8.3% of the corpus the builder must refuse *visibly*,
  *     and after this row the only case it refuses at all;
  *   - a **thick wall that arrives as a `rect`** with `kinds: ['wall']`, which is
  *     the case that makes band assignment a two-stage rule rather than a
