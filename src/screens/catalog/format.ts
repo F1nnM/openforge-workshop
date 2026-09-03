@@ -263,7 +263,7 @@ export interface CardTagChip {
 }
 
 /**
- * The two roots the card already renders as their own dedicated control.
+ * The roots the card does not print as a tag chip.
  *
  * `size|` is the size chip's axis and `connection|` is the availability strip's.
  * Both are deliberate: the size chip states the *resolved footprint* rather than
@@ -276,13 +276,25 @@ export interface CardTagChip {
  * precisely the declaration that the joinery lives on a separately printed base,
  * which the base chip already says.
  *
+ * `role|` and `form|` are here for a different reason, and it is the one that
+ * makes this a *denylist* rather than an oversight. Row B1 emits them as
+ * ordinary interned tags — that is the whole point of the encoding, because it
+ * lets a template slot say `require: [{ tag: 'role|wall' }]` with no new code in
+ * `src/composition/` — but they are a **derived predicate, not corpus
+ * vocabulary**. A scanner never wrote them, they say nothing a reader could not
+ * infer from the title, and there are exactly 15 values across all 8,702
+ * records. Left eligible they land on essentially every card: measured, the
+ * cards with an empty tag row drop from **1,044 to 78** and the cards losing a
+ * chip to the one-line budget rise from **53 to 485** — so the two least
+ * informative chips in the corpus would evict the informative ones on 432 cards.
+ *
  * Every other root — `shape|`, `component|`, `texture|`, `build|`, `interface|`,
  * `part|`, `decoration|`, `scatter|`, `set|` — is eligible, and is then filtered
  * by whether the card has already said it. That is the second rule and it does
  * most of the work: `name` is synthesised from tags, so most of a tile's tags are
  * already in its title.
  */
-const CARD_CONTROLLED_ROOTS: ReadonlySet<string> = new Set(['size', 'connection'])
+const CARD_CONTROLLED_ROOTS: ReadonlySet<string> = new Set(['size', 'connection', 'role', 'form'])
 
 /** `interface|secret_door|magnetic|imperial` → ` interface secret door magnetic imperial `. */
 function spoken(text: string): string {

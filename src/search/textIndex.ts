@@ -156,9 +156,10 @@ export interface TextMatch {
  * every (document, token, weight) triple to growable `number[]`s, which is
  * roughly 900,000 `push` calls, and `push` dominated the whole build.
  *
- *   1. Tokenise the 915-entry **tag intern table**, once. The corpus holds
- *      84,023 tag references, so tokenising per reference would be 92× the work
- *      for the same tokens.
+ *   1. Tokenise the 930-entry **tag intern table**, once. The corpus holds
+ *      101,427 tag references, so tokenising per reference would be 109× the
+ *      work for the same tokens. 15 of those entries are the derived `role|` and
+ *      `form|` axes and are skipped outright — see {@link DERIVED_TAG_NAMESPACES}.
  *   2. Tokenise each item's `name` **once** and each of its variants' `file`,
  *      interning as it goes. After this the token vocabulary is closed, which is
  *      what lets pass 4 use flat scratch indexed by token id instead of a `Map`.
@@ -174,6 +175,13 @@ export interface TextMatch {
  * already collapsed a repeated tag now also collapses a token two variants
  * share.
  */
+/**
+ * Tag namespaces the pipeline **derives** rather than reads off a scan, and
+ * which therefore contribute no free-text tokens. See the comment at their use
+ * for the three measured regressions that motivates.
+ */
+export const DERIVED_TAG_NAMESPACES: readonly string[] = ['role|', 'form|']
+
 export function buildTextIndex(docs: readonly SearchDoc[], tagTable: readonly string[]): TextIndex {
   const size = docs.length
   const tokenIds = new Map<string, number>()
@@ -188,15 +196,41 @@ export function buildTextIndex(docs: readonly SearchDoc[], tagTable: readonly st
     return id
   }
 
-  // The tag vocabulary in CSR too, rather than 915 separate `Int32Array`s. The
-  // pass-4 loop reads it 84,023 times, and a `for…of` over a typed array
+  // The tag vocabulary in CSR too, rather than 930 separate `Int32Array`s. The
+  // pass-4 loop reads it 101,427 times, and a `for…of` over a typed array
   // allocates an iterator per visit; a flat buffer with offsets is read with a
   // plain index and measurably halves the build.
+  //
+  // **The two derived namespaces contribute no tokens, and that is a decision
+  // this row had to make rather than inherit.** Row B1 emits `role|<x>` and
+  // `form|<x>` as ordinary interned tags so that a template slot can predicate
+  // on them with the grammar `src/composition/` already has. They are a derived
+  // predicate over the corpus, not words anybody wrote about a tile, and
+  // tokenising them breaks free text in three measured ways:
+  //
+  //   - **`role` and `form` would match every item** — all 3,822 of them, since
+  //     every record carries one of each — and so would every prefix of either.
+  //   - **`decor` goes from 133 hits to 15.** This is the module docblock's own
+  //     prefix rule firing in the direction it did not anticipate: `expand`
+  //     prefix-matches only tokens the corpus does *not* know, so `decor` today
+  //     expands to `decoration`. Interning `role|decor` makes `decor` an exact
+  //     token, expansion stops, and the 118 items reachable only through
+  //     `decoration` become unreachable. `stair` loses 8 the same way (it stops
+  //     expanding to `stairs`), and `straight` goes from 45 to 2,482.
+  //   - The vocabulary would go **449 → 454**, which is the figure this file's
+  //     docblock quotes twice as unchanged between file-level and item-level
+  //     indexing.
+  //
+  // The skip is here rather than in the pipeline because the *index* must carry
+  // them — that is what makes the axes build-time checkable and slot-predicable
+  // — and it is this file that decides what is a search term.
   const tagToken: number[] = []
   const tagStart = new Int32Array(tagTable.length + 1)
   for (let id = 0; id < tagTable.length; id++) {
     tagStart[id] = tagToken.length
-    for (const token of new Set(tokenise(tagTable[id] ?? '').map(intern))) tagToken.push(token)
+    const tag = tagTable[id] ?? ''
+    if (DERIVED_TAG_NAMESPACES.some((namespace) => tag.startsWith(namespace))) continue
+    for (const token of new Set(tokenise(tag).map(intern))) tagToken.push(token)
   }
   tagStart[tagTable.length] = tagToken.length
 

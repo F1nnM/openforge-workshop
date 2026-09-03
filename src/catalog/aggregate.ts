@@ -53,7 +53,7 @@
  * when the aggregate substrate needs one".
  *
  * **It does not need one.** The record already carries its full interned tag
- * list, so the positional split is one pass over 84,023 tag references here, and
+ * list, so the positional split is one pass over 101,427 tag references here, and
  * a `connBottom`/`connSide` pair on 8,702 records would be payload spent to say
  * something the reader can recompute. That is the same trade `CatalogAssets`
  * makes for the two URLs, and it is why nothing in `schema.ts` changed shape for

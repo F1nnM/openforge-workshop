@@ -10,6 +10,13 @@
  * JSON loader deliberately skips and emits the 40 recipe templates as a
  * generated module; they are not records, carry no `file_metadata` and are not
  * in `catalog.json` — `./templates` carries the measurement behind that.
+ *
+ * Row B1 added `./role`, which is the first derivation here whose output is a
+ * **tag** rather than a field: the `role|<x>` and `form|<x>` axes a template
+ * slot predicates on, interned alongside everything the scan produced. It is
+ * exported because `pipeline/families.ts` will generate the family table from
+ * the same two enums, and a second copy of a closed enum is how the two halves
+ * of a key silently stop agreeing.
  */
 export { MIN_DETECTION_RECALL, assertAggregation, measureAggregation } from './aggregate'
 export type { AggregateViolation, AggregationReport, DetectionScore } from './aggregate'
@@ -75,7 +82,16 @@ export {
   writeManifest,
 } from './ordinals'
 export type { OrdinalAssignment } from './ordinals'
-export { buildTagTable, hasTagPrefix, namespaceRoots, numericTagValue, tagValue } from './tags'
+export { FORMS, ROLES, fileTokens, inferForm, inferRole, roleTags } from './role'
+export type { Confidence, Form, Inferred, Role, RoleInput, Signal } from './role'
+export {
+  buildTagTable,
+  hasTagPrefix,
+  hasTagSegment,
+  namespaceRoots,
+  numericTagValue,
+  tagValue,
+} from './tags'
 export {
   TEMPLATES_MODULE_PATH,
   loadTemplateFixtures,
