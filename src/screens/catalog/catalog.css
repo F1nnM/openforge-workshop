@@ -470,8 +470,8 @@
   background: var(--bg3);
 }
 
-/* No base needed — verdigris, §1's "in library" confirmation colour, which is
-   the token this design uses for a thing that is already complete. */
+/* No base needed — verdigris, §1's confirmation colour, which is the token this
+   design uses for a thing that is already complete. */
 .of-avail[data-kind='base'][data-state='have'] {
   border-color: var(--acc2);
   color: var(--acc2);
@@ -542,48 +542,6 @@
 .of-card-tags > li {
   display: flex;
   min-width: 0;
-}
-
-/* ── Library toggle ──────────────────────────────────────────────────────── */
-
-.of-card-add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  margin-top: auto;
-  padding: 7px 8px;
-  background: var(--bg3);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--mut);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  transition:
-    background-color 110ms ease,
-    border-color 110ms ease,
-    color 110ms ease;
-}
-
-.of-card-add:hover {
-  border-color: var(--acc);
-  color: var(--ink);
-}
-
-/* Verdigris, the contract's secondary accent — §1 gives it the role of the "in
-   library" confirmation. */
-.of-card-add[data-in-library] {
-  background: color-mix(in srgb, var(--acc2) 16%, transparent);
-  border-color: var(--acc2);
-  color: var(--acc2);
-}
-
-.of-card-add[data-in-library]:hover {
-  border-color: var(--acc2);
-  color: var(--acc2);
 }
 
 /* ── Pending ─────────────────────────────────────────────────────────────── */
@@ -668,7 +626,6 @@
   .of-facet-row,
   .of-facet-pill,
   .of-facet-clear,
-  .of-card-add,
   .of-card-title {
     transition: none;
   }

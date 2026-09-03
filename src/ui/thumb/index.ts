@@ -11,9 +11,10 @@
  * itself — so the rules arrive with the component in all five subtrees. P3
  * moved them out of `screens/catalog/catalog.css` because it gave the well a
  * second geometry and half a stylesheet each would have been worse than either
- * whole one. `screens/library/library.css` and `builder/panels/panels.css` still
- * `@import` the catalog's, for `.of-empty-*` and `.of-search-input` respectively;
- * `screens/detail/slots/slots.css` needed nothing else and no longer does.
+ * whole one. `builder/panels/panels.css` still `@import`s the catalog's, for
+ * `.of-search-input`; `screens/library/library.css` did too, for `.of-empty-*`,
+ * until row A0 deleted the screen, and `screens/detail/slots/slots.css` needed
+ * nothing else and no longer does.
  *
  * `useTintFilters` and `TINT_FILTER_SHEET_ID` are exported because a caller that
  * draws sprite pixels *without* this component needs both: the `url(#…)` from

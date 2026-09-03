@@ -297,7 +297,9 @@
 .of-builder-bill {
   display: grid;
   /* The notice takes what it needs; the panel takes the rest and does its own
-     three-band scrolling inside. */
+     three-band scrolling inside. The accessory slots and, since row A0, the
+     backup section land in implicit `auto` rows beneath it and each caps its own
+     height, so neither can push the bill out of the column. */
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;

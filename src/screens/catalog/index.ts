@@ -5,24 +5,24 @@
  * is the only place it is mounted. Everything else on this surface exists for the
  * two rows that come next:
  *
- *   - **Row 14 (library)** renders "a lighter variant of the catalog card"
- *     (design-contract.md §2.3). The thumbnail well it shares is **no longer here**
- *     — row P0 moved it to `@/ui/thumb`, because the builder's bill and palette
- *     render it too and a component four subtrees mount is not a catalog export.
- *     `LibraryToggle` is the same button in reverse. The `format` helpers are what
- *     keep a size chip and a file size reading identically on both screens.
  *   - **Row 18 (builder palette)** searches the whole catalog, so it wants
  *     `loadCatalogSearchIndex()` rather than a second engine over the same file.
+ *     It renders the same `format` helpers, so a size chip and a file size read
+ *     identically in the palette, the bill and the grid.
+ *
+ * Row 14's library screen was the other consumer and row **A0** deleted it, with
+ * `LibraryToggle` — the card's "+ Add to library" — deleted alongside. Two things
+ * it owned survive here rather than with it, because neither was presentation:
+ * `groupKindOf`/`KIND_PRECEDENCE`, which is the rule {@link kindLabel} labels the
+ * answer of, and `totalBytesLabel`, which the builder's bill now reads for the
+ * room's whole download.
  *
  * `useCatalogIndex` and `resetCatalogSearchIndex` are exported together on
  * purpose: a component test for either screen has to stub `fetch` and clear both
  * this module's memo and the shell's (`resetCatalogIndexCache`).
  *
- * Row A3 adds `availability.ts` to that surface. The library screen renders the
- * same chips, and the two screens agreeing about what an item offers is the whole
- * point of deriving it once — a second implementation would be a second answer to
- * "does this need a base", on the two screens most likely to be compared
- * side by side.
+ * Row A3 adds `availability.ts` to that surface — one derivation of "does this
+ * need a base", so no second screen can arrive at a second answer.
  *
  * Row X5 adds `useDraftQuery`. The builder's palette search box and this screen's
  * are not the same control — 272px with a conditional count against 520px with a
@@ -39,7 +39,7 @@ export type { DraftQuery } from './useDraftQuery'
 export { COMMIT_DELAY_MS, useDraftQuery } from './useDraftQuery'
 
 export type { TileCardProps } from './TileCard'
-export { AvailabilityStrip, LibraryToggle, TileCard } from './TileCard'
+export { AvailabilityStrip, TileCard } from './TileCard'
 
 export type { Availability, AvailabilityChip, JoineryNote, LockChip, LockReach } from './availability'
 export {
@@ -58,6 +58,7 @@ export {
 
 export type { CardTagChip } from './format'
 export {
+  KIND_PRECEDENCE,
   TAG_CHIP_BUDGET,
   buildLabel,
   bytesRangeLabel,
@@ -66,9 +67,11 @@ export {
   countLabel,
   fileSizeLabel,
   fileTokenLabel,
+  groupKindOf,
   humaniseSegment,
   kindLabel,
   sizeLabel,
   tagChipRowWidth,
+  totalBytesLabel,
   variantTokenLabel,
 } from './format'

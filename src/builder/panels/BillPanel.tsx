@@ -60,7 +60,7 @@ import type { CatalogAssets, CatalogRecord, SpriteSheet } from '@/catalog'
 import type { GeneratedBill } from '@/generator/placement/bill'
 import type { MaterialId } from '@/materials'
 import { describeCell, formatUnits } from '@/builder/canvas'
-import { countLabel, fileSizeLabel, sizeLabel } from '@/screens/catalog'
+import { countLabel, fileSizeLabel, sizeLabel, totalBytesLabel } from '@/screens/catalog'
 import type { Placement, WorkshopState } from '@/store'
 import { removePlacement } from '@/store'
 import { Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
@@ -206,8 +206,15 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
           <span>
             {countLabel(bill.files)} unique {bill.files === 1 ? 'model' : 'models'}
           </span>
+          {/*
+            `totalBytesLabel` and not `fileSizeLabel`, since row A0: this is the
+            only byte figure in the app that crosses a gigabyte, and the bill
+            warns at a 2 GB threshold — beside which `2100.0 MB` is a number the
+            reader has to convert. `fileSizeLabel` stays right for the rows
+            below, where a single STL never reaches one.
+          */}
           <span className="of-bill-bytes" data-verdict={bill.download.verdict}>
-            {fileSizeLabel(bill.download.bytes)}
+            {totalBytesLabel(bill.download.bytes)}
           </span>
         </p>
         <DownloadAction

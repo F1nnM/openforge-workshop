@@ -1,9 +1,38 @@
 /**
  * The builder's left column — design-contract.md §2.4's palette.
  *
- * A search box over the *whole* catalog offering "+ add" rows for items that are
- * not saved yet, and under it the library as a selectable list with small
- * thumbnails. Selecting a row arms the canvas.
+ * A search box over the *whole* catalog and, under it, the matching items as a
+ * selectable list with small thumbnails. Selecting a row arms the canvas.
+ *
+ * ## It was two blocks and row A0 left one
+ *
+ * §2.4 wrote this column as "the library as a selectable list", with the search
+ * above it offering "+ add" rows for items not saved yet. Row **A0** deleted the
+ * library, and the two blocks collapse into the one that never needed it: the
+ * archive itself, listed by the same engine and the same ranking, armed directly.
+ *
+ * **The empty query is now a real state and it lists something.** It used to hide
+ * the search block entirely and show the library instead; with nothing to show
+ * instead, an empty query lists the first {@link MAX_SEARCH_ROWS} items the
+ * engine returns for the unfiltered facet set. That is a browse rather than a
+ * curated list, and the count beside the field says how much of the archive it is
+ * a window onto.
+ *
+ * What is gone with the library, rather than moved:
+ *
+ *   - the **"+ add"** button on each row, which was the only store write in this
+ *     file;
+ *   - the **"Add a starter set"** empty state (`palette.ts#starterSet`), which
+ *     put six floors and walls of one texture into the library;
+ *   - the **note under the library block** counting the saved items the plan
+ *     cannot hold. Unplaceable rows are still marked, individually, where the
+ *     engine's ranking puts them — the note existed because the library's own
+ *     ordering sank them into a block at the end, and a search must not reorder.
+ *
+ * **Row C1 replaces the whole of this with 52 generated template families**,
+ * grouped by role with form and build as facets. This row's job was only to stop
+ * the panel reading a field that is about to be deleted, and to leave the builder
+ * usable in between: search, arm, place.
  *
  * ## A row is an item
  *
@@ -23,8 +52,8 @@
  * `isPlaceable` is false for the `none` footprint — **370 items, 9.7% of the
  * corpus** (726 files, 8.3% of them) — and the plan view refuses them visibly
  * rather than silently. Curves are **not** among them: row W6 made annular
- * sectors placeable, so the copy beside the library block names the missing
- * footprint and nothing else.
+ * sectors placeable, so the marker on a refused row names the missing footprint
+ * and nothing else.
  *
  * Offering a row that arms an item the canvas will then refuse would make a
  * correct refusal look like a broken palette, so those rows render as static
@@ -32,9 +61,6 @@
  * button: a disabled button is out of the tab order, and a keyboard user would
  * then meet a row they cannot reach and cannot read the reason from. Static text
  * is read by every screen reader and skipped by Tab, which is exactly the intent.
- *
- * They keep their "+ add" action, though. Saving one to the library is a
- * perfectly good thing to do — it just cannot be laid out on the plan yet.
  *
  * **Refusing at item level is not an approximation.** `foot` is a hoisted facet:
  * over the emitted index, the number of items whose variants disagree about
@@ -87,14 +113,17 @@
  * the handoff arms an item only when this palette holds a *placeable* row for it,
  * and the two ways it can fail both resolve correctly without a word of new UI:
  *
- *   - **The design is not in the current catalog build.** There is no row,
- *     nothing is armed, and the library screen is the surface that reports a
- *     retired id.
+ *   - **The design is not in the current catalog build.** There is no row and
+ *     nothing is armed. The library screen used to be the surface that reported a
+ *     retired id; row A0 deleted it, and what the user sees instead is a search
+ *     for the item's name with no hit in it, which says the same thing in the
+ *     place they are looking.
  *   - **The item has the `none` footprint** — 370 of 3,822. Nothing is armed, and
- *     the note under the library block is already on screen saying why, because
- *     the drawer put the item in the library on its way here. A variant swap
- *     cannot rescue this case and must not be attempted, for the reason measured
- *     above: **no design in the corpus mixes placeable and unplaceable files.**
+ *     the row itself is on screen, marked `no plan shape`, because the drawer
+ *     seeded this panel's search with the item's name on its way here. A variant
+ *     swap cannot rescue this case and must not be attempted, for the reason
+ *     measured above: **no design in the corpus mixes placeable and unplaceable
+ *     files.**
  *
  * What arrives is an item and never a resolution, and after V4 that is true all
  * the way to the store: nothing between the catalog drawer and
@@ -128,12 +157,12 @@ import type { FacetSearch } from '@/search'
 import { MAX_QUERY_LENGTH } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
 import { countLabel, sizeLabel } from '@/screens/catalog'
-import { addToLibrary, claimPendingDesign, libraryDesigns, useLibrary, usePendingDesign } from '@/store'
-import { Button, Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
+import { claimPendingDesign, usePendingDesign } from '@/store'
+import { Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
 import type { PaletteLookup, PaletteRow } from './palette'
-import { MAX_SEARCH_ROWS, paletteRows, searchRows, starterSet } from './palette'
+import { MAX_SEARCH_ROWS, searchRows } from './palette'
 
 import './panels.css'
 
@@ -150,14 +179,12 @@ export interface PalettePanelProps {
 }
 
 export function PalettePanel({ index, tools, search, onQueryChange }: PalettePanelProps) {
-  const library = useLibrary()
   const searchId = useId()
-  const libraryId = useId()
 
   const result = useMemo(() => index.engine.search(search), [index, search])
 
   /**
-   * One resolver for both blocks, built over the one index this panel holds.
+   * The row resolver, built over the one index this panel holds.
    *
    * The `undefined` on the preview record is folded into the same drop as a
    * retired design deliberately: `item.preview` is one of the item's own variant
@@ -174,16 +201,7 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
     }
   }, [index])
 
-  // `libraryDesigns(library)` and never `Object.keys(library) as …`: the helper
-  // reads the key type off the store's own field, so the day the library is
-  // re-keyed again this line stops compiling instead of quietly resolving
-  // nothing. `palette.ts` has the compiler measurement behind that choice.
-  const rows = useMemo(() => paletteRows(libraryDesigns(library), lookup), [library, lookup])
-
-  const hits = useMemo(
-    () => searchRows(result.items, lookup, (design) => library[design] === true),
-    [result, lookup, library],
-  )
+  const rows = useMemo(() => searchRows(result.items, lookup), [result, lookup])
 
   // Which item is armed. Row V4: the store's own currency, so there is nothing
   // to look up and nothing that can go stale when the lock preference changes.
@@ -214,57 +232,30 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
     arm(row.item)
   }, [pending, rows, arm])
 
-  const searching = search.q.trim() !== ''
-  const unplaceable = rows.filter((row) => !row.placeable).length
-
   return (
     <aside className="of-palette" aria-label="Palette">
       <PaletteSearch query={search.q} total={result.total} onQueryChange={onQueryChange} />
 
-      {searching ? (
-        <section className="of-pal-block" aria-labelledby={searchId}>
-          <h2 className="of-pal-heading" id={searchId}>
-            <Eyebrow>Archive</Eyebrow> <Chip tone="count">{countLabel(result.total)}</Chip>
-          </h2>
-
-          {result.total === 0 ? (
-            <p className="of-pal-note">
-              Nothing in the organised archive matches. Untagged tiles exist in storage and are not
-              reachable from here yet.
-            </p>
-          ) : (
-            <PaletteList rows={hits} index={index} armed={armed} tools={tools} arm={arm} />
-          )}
-
-          {result.total > hits.length ? (
-            <p className="of-pal-note">
-              The first {countLabel(MAX_SEARCH_ROWS)} of {countLabel(result.total)} — narrow the
-              search to see the rest.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      <section className="of-pal-block" aria-labelledby={libraryId}>
-        <h2 className="of-pal-heading" id={libraryId}>
-          <Eyebrow>Library</Eyebrow> <Chip tone="count">{countLabel(rows.length)}</Chip>
+      <section className="of-pal-block" aria-labelledby={searchId}>
+        <h2 className="of-pal-heading" id={searchId}>
+          <Eyebrow>Archive</Eyebrow> <Chip tone="count">{countLabel(result.total)}</Chip>
         </h2>
 
-        {rows.length === 0 ? (
-          <PaletteEmpty index={index} />
+        {result.total === 0 ? (
+          <p className="of-pal-note">
+            Nothing in the organised archive matches. Untagged tiles exist in storage and are not
+            reachable from here yet.
+          </p>
         ) : (
-          <>
-            <PaletteList rows={rows} index={index} armed={armed} tools={tools} arm={arm} />
-            {unplaceable > 0 ? (
-              <p className="of-pal-note">
-                {countLabel(unplaceable)} saved {unplaceable === 1 ? 'item' : 'items'} at the end of
-                the list cannot be laid out on the plan: the archive does not state a footprint for{' '}
-                {unplaceable === 1 ? 'it' : 'them'}. {unplaceable === 1 ? 'It is' : 'They are'} still
-                in your library, and still printable.
-              </p>
-            ) : null}
-          </>
+          <PaletteList rows={rows} index={index} armed={armed} tools={tools} arm={arm} />
         )}
+
+        {result.total > rows.length ? (
+          <p className="of-pal-note">
+            The first {countLabel(MAX_SEARCH_ROWS)} of {countLabel(result.total)} — narrow the
+            search to see the rest.
+          </p>
+        ) : null}
       </section>
     </aside>
   )
@@ -334,7 +325,7 @@ function PaletteRowView({
   selected: boolean
   onSelect: () => void
 }) {
-  const { item, preview, placeable, inLibrary } = row
+  const { item, preview, placeable } = row
 
   const body = (
     <>
@@ -370,27 +361,6 @@ function PaletteRowView({
               `name` are both hoisted facets. */}
           <VisuallyHidden>{placementRefusal(item)?.message ?? ''}</VisuallyHidden>
         </div>
-      )}
-
-      {inLibrary ? null : (
-        <Button
-          size="sm"
-          className="of-pal-add"
-          onClick={() => {
-            addToLibrary(item.design)
-          }}
-        >
-          <span aria-hidden="true">+</span>
-          <span>add</span>{' '}
-          {/*
-            The space is load-bearing, not formatting. `dom-accessibility-api`
-            trims each text node before joining, so without a text node between
-            the two spans the accessible name is "addDungeon Stone Floor 2x2".
-            `../../screens/library/LibraryScreen.tsx` spaces its count chips for
-            the same reason.
-          */}
-          <VisuallyHidden>{item.name} to the library</VisuallyHidden>
-        </Button>
       )}
     </li>
   )
@@ -478,43 +448,6 @@ function PaletteSearch({
             about the noun would read as two different result sets. */}
         {query.trim() === '' ? '' : `${countLabel(total)} ${total === 1 ? 'tile' : 'tiles'} match`}
       </p>
-    </div>
-  )
-}
-
-/* -------------------------------------------------------------- empty state */
-
-/**
- * design-contract.md §2.4's "Add a starter set".
- *
- * The set is derived from the live index rather than hard-coded — see
- * `palette.ts#starterSet` — so it cannot rot when the corpus renames a file, and
- * it is one texture set so the first room looks like a room.
- *
- * Six **designs** since row V3, straight from `starterSet`. There is no file-to-
- * design hop here because there was never a per-file question in the choice: every
- * field it turns on is a hoisted facet of the item.
- */
-function PaletteEmpty({ index }: { index: CatalogIndex }) {
-  const starter = useMemo(() => starterSet(index.engine.aggregates.aggregates), [index])
-
-  return (
-    <div className="of-pal-empty">
-      <p className="of-pal-note">
-        Your library is the palette. Search the archive above, or start from a set of floors and
-        walls in one texture.
-      </p>
-      <Button
-        tone="primary"
-        size="sm"
-        disabled={starter.length === 0}
-        onClick={() => {
-          for (const design of starter) addToLibrary(design)
-        }}
-      >
-        Add a starter set{' '}
-        <VisuallyHidden>of {countLabel(starter.length)} tiles</VisuallyHidden>
-      </Button>
     </div>
   )
 }

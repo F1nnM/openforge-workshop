@@ -2,21 +2,22 @@
  * The app's one button.
  *
  * Three rows had asked for this by the time it was written. `.of-action` in
- * `../../screens/landing/landing.css` and `.of-lib-action` in
- * `../../screens/library/library.css` had arrived independently as
- * near-identical 45-line blocks — same radius, same accent fill, same outlined
- * secondary, same `filter: brightness(1.12)` hover, same "one pixel less padding
- * on the outlined tone so the border does not make it taller" trick — and the
- * builder's toolbar wanted four more of them. The library's own stylesheet said
- * out loud that extracting this was `ui/primitives/`'s call to make; this is that
- * call.
+ * `../../screens/landing/landing.css` and `.of-lib-action` in the library
+ * screen's own stylesheet had arrived independently as near-identical 45-line
+ * blocks — same radius, same accent fill, same outlined secondary, same
+ * `filter: brightness(1.12)` hover, same "one pixel less padding on the outlined
+ * tone so the border does not make it taller" trick — and the builder's toolbar
+ * wanted four more of them. The library's own stylesheet said out loud that
+ * extracting this was `ui/primitives/`'s call to make; this is that call. (Row A0
+ * has since deleted that screen, which is why only one of the two call sites can
+ * still be pointed at.)
  *
  * ## Two tones and three sizes, and nothing else
  *
  * The tones are the contract's: a filled accent primary and an outlined
  * secondary. The sizes are the three the design actually uses — `lg` is the
- * landing hero's, `md` the library head's and the bill panel's download action,
- * `sm` the builder toolbar's. Adding a fourth means finding it in
+ * landing hero's, `md` the bill panel's download action, `sm` the builder
+ * toolbar's. Adding a fourth means finding it in
  * design-contract.md first.
  *
  * ## Why a `buttonProps()` helper exists beside the component

@@ -10,17 +10,23 @@
  *   1. **Refusing at item level is well posed.** `isPlaceable` used to be asked
  *      of a file. Asking it of an item is only honest if every variant of an item
  *      answers it the same way, which is a corpus property and not a type.
- *   2. **`variantClass === 'base-only'` is the same test as `layer === 'base'`.**
- *      The starter set used to skip base *records*; it now skips base *items*,
- *      and the two agree only because a base is always its own design.
+ *   2. **`variantClass === 'base-only'` is the same test as `layer === 'base'`**,
+ *      because a base is always its own design. `shape|base` is part of the design
+ *      key, and that zero is what several arguments elsewhere rest on — including
+ *      `screens/catalog/format.ts#KIND_PRECEDENCE`, whose "a base beats
+ *      everything" ranking is sound only because a base never shares an item.
  *   3. **The preview and the armed file disagree, and that is the row's point.**
  *      The panel deliberately renders one and arms the other. If the two rules
  *      ever coincided, half of `PalettePanel`'s docblock would be describing a
  *      distinction with no cases, and the wrong one could be deleted without a
  *      test noticing.
  *
- * A fourth block pins the starter set, because turning it over to items changed
- * its input type and must not have changed its answer.
+ * **Two blocks are gone, deleted by row A0 with the library they were about.** A
+ * fourth pinned `starterSet`, which put six tiles into the library and no longer
+ * exists; a fifth was a compiler-only guard proving `paletteRows` refused a
+ * file-keyed library, and there is no `paletteRows` and no library to key. Both
+ * are gone rather than repointed: the property they held in place was "the
+ * library's key type reaches the palette", and the palette no longer reads one.
  *
  * `catalog.json` is gitignored and rebuilt from the fixtures
  * (`npm run import:catalog`). **CI does have it** — the stamp step regenerates it
@@ -45,14 +51,10 @@ import { describe, expect, it } from 'vitest'
 
 import { selectVariantForLock } from '@/assembly'
 import { isPlaceable } from '@/builder/canvas'
-import type { CatalogFile, CatalogRecord, DesignId, TileAggregate, TileId } from '@/catalog'
+import type { CatalogFile, CatalogRecord, TileAggregate } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, buildAggregateIndex } from '@/catalog'
 import { LockSystem } from '@/store'
 
-import type { PaletteLookup } from './palette'
-import { libraryDesigns } from '@/store'
-
-import { paletteRows, searchRows, starterSet } from './palette'
 
 const CATALOG_PATH =
   process.env.OPENFORGE_CATALOG ?? join(process.cwd(), 'public', 'catalog', 'catalog.json')
@@ -96,45 +98,6 @@ const filesOf = (item: TileAggregate): CatalogRecord[] =>
 
 /** The three locks, from the store's own enum rather than a fourth copy of the list. */
 const LOCKS: readonly LockSystem[] = LockSystem.options
-
-/* ------------------------------- 0. the wrong key, guarded by the compiler */
-
-/**
- * The failure row V3 fixes, asserted by `tsc` rather than at runtime.
- *
- * The palette's library block rendered **empty** after row V1 re-keyed the
- * library, because `paletteRows(Object.keys(library) as TileId[], …)` kept
- * compiling. A comment saying "that cannot happen now" would be worth nothing, so
- * the three shapes that used to compile are written out here and each carries a
- * `@ts-expect-error` — which **fails the build if the error goes away.** That is
- * what makes the claim capable of failing.
- *
- * Nothing below runs, and it is deliberately not wrapped in an `it`: the
- * assertion is the compiler's, and an `it` with no `expect` in it would be a
- * passing test that proves nothing. `npm run typecheck` and `npm run build` both
- * compile this file.
- *
- * The pairing that makes it work is measured in `palette.ts`' module note:
- * `Record<TileId, true>` **is** assignable to `Record<DesignId, true>` (a
- * branded key collapses to a `string` index signature), while `TileId[]` is
- * **not** assignable to `DesignId[]`. So the array is the safe position, and
- * `libraryDesigns` is what carries the store's key type into it.
- */
-declare const fileKeyedLibrary: Readonly<Record<TileId, true>>
-declare const fileIds: readonly TileId[]
-declare const lookupStub: PaletteLookup
-declare const inLibraryByFile: (id: TileId) => boolean
-
-// @ts-expect-error the pre-V1 library shape — a map keyed by file
-export const rejectsAFileKeyedLibrary = () => paletteRows(libraryDesigns(fileKeyedLibrary), lookupStub)
-// @ts-expect-error a bare array of file ids, which is what the old cast produced
-export const rejectsFileIds = () => paletteRows(fileIds, lookupStub)
-// @ts-expect-error a membership test that asks about a file rather than an item
-export const rejectsAFileKeyedMembershipTest = () => searchRows(items, lookupStub, inLibraryByFile)
-
-/** The shape that is meant to compile, so the three above are not rejecting everything. */
-export const acceptsDesigns = (library: Readonly<Record<DesignId, true>>) =>
-  paletteRows(libraryDesigns(library), lookupStub)
 
 /* ------------------------------------------------ 1. placeability, at item level */
 
@@ -181,9 +144,12 @@ describeCorpus('a base never shares an item with anything else', () => {
         item.variants.some((variant) => variant.layer !== 'base'),
     )
 
-    // `starterSet` skips `variantClass === 'base-only'` where it used to skip
-    // `record.layer === 'base'`. This zero is what makes those the same test —
-    // `shape|base` is part of the design key, so a base is its own design.
+    // `shape|base` is part of the design key, so a base is always its own
+    // design. `starterSet` was the caller this zero was first measured for — it
+    // skipped `variantClass === 'base-only'` where it used to skip
+    // `record.layer === 'base'` — and row A0 deleted it with the library; the
+    // zero is kept because `format.ts#KIND_PRECEDENCE` rests on it too, and
+    // because an import that broke it would grey half a tile silently.
     expect(mixed.map((item) => item.name)).toEqual([])
 
     const baseOnly = items.filter((item) => item.variantClass === 'base-only')
@@ -252,42 +218,5 @@ describeCorpus('the row shows one file and the build prints another', () => {
       )
       expect(escaped.map((item) => item.name), lock).toEqual([])
     }
-  })
-})
-
-/* -------------------------------------------------------------- 4. the starter set */
-
-describeCorpus('the starter set survived becoming a set of items', () => {
-  it('is the same six dungeon_stone tiles, now named once each', () => {
-    const starter = starterSet(items)
-    const chosen = starter.map((designId) => aggregates?.byDesign.get(designId))
-
-    // The record-level version of this function chose these six by name; the
-    // item-level one chooses the same six, which is the whole claim of the
-    // rewrite. Every field the choice turns on — `kinds`, `foot`, `texture`,
-    // `name` — is a hoisted facet, so there was never a per-file question here.
-    expect(chosen.map((item) => item?.name)).toEqual([
-      'Dungeon Stone Block Floor 1x1',
-      'Dungeon Stone Block Floor 2x2',
-      'Dungeon Stone Block Floor 2x1',
-      'Dungeon Stone Wall 1x IA',
-      'Dungeon Stone Wall 2x A',
-      'Dungeon Stone Wall 4x Q',
-    ])
-
-    // One texture, no bases, all placeable, six distinct designs.
-    expect([...new Set(chosen.map((item) => item?.texture))]).toEqual(['dungeon_stone'])
-    expect(chosen.every((item) => item?.variantClass !== 'base-only')).toBe(true)
-    expect(chosen.every((item) => item !== undefined && isPlaceable(item))).toBe(true)
-    expect(new Set(starter).size).toBe(6)
-  })
-
-  it('offers six items that are each themselves two-sided', () => {
-    // Not decoration: all six are the `both` class, so before this row every one
-    // of them opened the builder showing an `integral` — the starter set was the
-    // defect at its most visible, on the first six rows a new user ever sees.
-    const starter = starterSet(items)
-    const classes = starter.map((designId) => aggregates?.byDesign.get(designId)?.variantClass)
-    expect(classes).toEqual(['both', 'both', 'both', 'both', 'both', 'both'])
   })
 })

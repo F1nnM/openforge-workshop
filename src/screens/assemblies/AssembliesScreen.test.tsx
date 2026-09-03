@@ -47,7 +47,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetCatalogSearchIndex } from '@/screens/catalog'
-import { clearPersistedWorkshopState, resetWorkshop, useWorkshopStore } from '@/store'
+import { clearPersistedWorkshopState, resetWorkshop } from '@/store'
 import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
 
 import { STEP_PAGE } from './assembly'
@@ -456,7 +456,7 @@ describe('dead ends', () => {
 })
 
 describe('finishing', () => {
-  it('reports progress, bills the files, and writes their items to the store', async () => {
+  it('reports progress, bills the files, and offers no action for them', async () => {
     await renderScreen()
     await openRecipe()
     pick('wall', 'Torch Wall 2')
@@ -468,19 +468,18 @@ describe('finishing', () => {
     pick('base', 'Wall Base 2')
 
     expect(screen.getByText(/3 of 3 parts answered/)).toBeTruthy()
-    expect(screen.getByText('3 files to print.')).toBeTruthy()
+    expect(screen.getByText(/3 files to print\./)).toBeTruthy()
+    // The bill names files, which is what a composition resolves to.
+    const billed = [...document.querySelectorAll('.of-asm-bill li')].map((li) => li.textContent)
+    expect(billed.sort()).toEqual(['tiles/fix/base-2.stl', 'tiles/fix/floor-2.stl', 'tiles/fix/wall-2.stl'])
 
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Add all to library' }))
-    })
-
-    // Designs, not files: row V1's library holds items. The three parts of this
-    // recipe are three separate items, so the button's two counts agree and the
-    // note above it stays a bare "3 files to print." — the panel only splits the
-    // two figures when a recipe names two prints of one item, which no fixture
-    // template does.
-    expect(Object.keys(useWorkshopStore.getState().library).sort()).toEqual(['base-2', 'floor-2', 'wall-2'])
-    expect(screen.getByRole('button', { name: 'Added to your library' })).toBeTruthy()
+    // Row A0. It pressed "Add all to library" here and asserted three designs in
+    // `WorkshopState.library`; the library is gone, so the panel bills the files
+    // and stops. Asserted as an absence rather than dropped, because **row C3**
+    // puts an action back — a finished recipe becomes a placed template instance —
+    // and this is what tells C3 the surface is empty rather than half-wired.
+    expect(screen.queryByRole('button', { name: /Add all/ })).toBeNull()
+    expect(screen.getByText(/Nothing in this build places a finished assembly/)).toBeTruthy()
   })
 
   it('clears a pick when its own card is pressed again', async () => {

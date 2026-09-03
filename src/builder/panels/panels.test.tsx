@@ -62,6 +62,7 @@ import {
   fixtureCatalogFile,
   mixedCatalogFile,
 } from './fixture'
+import { searchRows } from './palette'
 import { PalettePanel } from './PalettePanel'
 import { PlanToolbar } from './PlanToolbar'
 import { useArchiveDownload } from './useArchiveDownload'
@@ -73,12 +74,11 @@ import { DownloadAction } from './DownloadAction'
 /**
  * The design behind a fixture key.
  *
- * The library and the selection channel are design-keyed since row V1, a palette
- * row is an item since row V3, and a **placement** is one since row V4 — so
- * everything that used to be `id(…)` in this file is now `design(…)`. `id`
- * survives for the assertions that are genuinely about a file: which entry a
- * download pack writes, which record a bill line names, which blob a thumb
- * loads.
+ * The selection channel is design-keyed since row V1, a palette row is an item
+ * since row V3, and a **placement** is one since row V4 — so everything that used
+ * to be `id(…)` in this file is now `design(…)`. `id` survives for the assertions
+ * that are genuinely about a file: which entry a download pack writes, which
+ * record a bill line names, which blob a thumb loads.
  */
 const design = (key: keyof typeof FIXTURE_DESIGNS): DesignId => FIXTURE_DESIGNS[key] as DesignId
 
@@ -112,10 +112,6 @@ function place(key: keyof typeof FIXTURE_DESIGNS, x = 0, z = 0): void {
   })
 }
 
-function library(): string[] {
-  return Object.keys(useWorkshopStore.getState().library)
-}
-
 function placementCount(): number {
   return Object.keys(useWorkshopStore.getState().placements).length
 }
@@ -140,52 +136,53 @@ function PaletteHarness({ query = '' }: { query?: string }) {
 }
 
 describe('the palette', () => {
-  it('greys the tiles the plan cannot hold, and offers no control for them', () => {
-    for (const key of ['floor1', 'arc', 'slab'] as const) {
-      act(() => {
-        useWorkshopStore.setState((state) => ({ library: { ...state.library, [design(key)]: true } }))
-      })
-    }
+  it('lists the archive on an empty query, which is the only list it has since row A0', () => {
+    // The panel used to hide the search block on an empty query and show the
+    // library instead. There is no library, so an empty query is a browse of the
+    // whole archive capped at `MAX_SEARCH_ROWS` — nine fixture items here, all of
+    // them, in the engine's own ranking.
     render(<PaletteHarness />)
 
-    // The floor and the curve are buttons; the footprint-less column is not a
-    // control at all — see `PalettePanel.tsx` on why not a disabled button.
-    // Row W6 made the sector placeable, so `none` is the only case left greyed.
+    expect(screen.getAllByRole('listitem')).toHaveLength(Object.keys(FIXTURE_DESIGNS).length)
+    expect(screen.getByRole('heading', { name: /Archive 9/ })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Library/ })).toBeNull()
+  })
+
+  it('greys the tiles the plan cannot hold, and offers no control for them', () => {
+    render(<PaletteHarness query="cave column" />)
+
+    // The footprint-less column is not a control at all — see `PalettePanel.tsx`
+    // on why not a disabled button. Row W6 made the annular sector placeable, so
+    // `none` is the only case left greyed.
     const rows = screen.getAllByRole('listitem')
-    expect(rows).toHaveLength(3)
+    const refused = rows.filter((row) => !row.hasAttribute('data-placeable'))
+    expect(refused).toHaveLength(1)
+    expect(refused[0]).toHaveTextContent(FIXTURE_NAMES.slab)
+    expect(within(refused[0] as HTMLElement).queryAllByRole('button')).toHaveLength(0)
 
-    const placeable = rows.filter((row) => row.hasAttribute('data-placeable'))
-    expect(placeable).toHaveLength(2)
-    expect(within(placeable[0] as HTMLElement).getByRole('button', { pressed: false })).toHaveTextContent(
-      FIXTURE_NAMES.floor1,
-    )
-
-    for (const row of rows.filter((candidate) => !candidate.hasAttribute('data-placeable'))) {
-      expect(within(row).queryAllByRole('button')).toHaveLength(0)
-    }
     expect(screen.getByText('no plan shape')).toBeInTheDocument()
     // The canvas's own refusal sentence, so the two cannot disagree about why.
     expect(screen.getByText(/no derivable footprint/)).toBeInTheDocument()
   })
 
-  it('sinks the unplaceable tiles to the end of the list rather than interleaving them', () => {
-    act(() => {
-      useWorkshopStore.setState({
-        library: { [design('slab')]: true, [design('floor2')]: true, [design('floor1')]: true },
-      })
-    })
+  it('keeps the engine’s ranking rather than sinking the refused rows', () => {
+    // Row A0's one behavioural change to the ordering. The deleted `paletteRows`
+    // sank the unplaceable items into a block at the end, which was right for a
+    // library — a list the user assembled, with no ranking of its own — and is
+    // wrong for a search: the top hit for a query has to be at the top, and
+    // silently reordering a tenth of the answers would make the count beside the
+    // field disagree with the list.
     render(<PaletteHarness />)
 
     const rows = screen.getAllByRole('listitem')
-    expect(rows.map((row) => row.hasAttribute('data-placeable'))).toEqual([true, true, false])
-    expect(rows[0]).toHaveTextContent(FIXTURE_NAMES.floor1)
-    expect(rows[1]).toHaveTextContent(FIXTURE_NAMES.floor2)
+    const refusedAt = rows.findIndex((row) => !row.hasAttribute('data-placeable'))
+    expect(refusedAt).toBeGreaterThanOrEqual(0)
+    // Not last: the fixture's refused column sits mid-ranking, which is exactly
+    // what the deleted sort would have moved.
+    expect(refusedAt).toBeLessThan(rows.length - 1)
   })
 
   it('arms the canvas when a row is selected, and forces place mode', () => {
-    act(() => {
-      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
-    })
     render(<PaletteHarness />)
 
     expect(screen.getByTestId('armed')).toHaveTextContent('none')
@@ -203,9 +200,6 @@ describe('the palette', () => {
   })
 
   it('disarms when the armed row is selected again', () => {
-    act(() => {
-      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
-    })
     render(<PaletteHarness />)
     const row = () => screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })
 
@@ -214,68 +208,35 @@ describe('the palette', () => {
     expect(screen.getByTestId('armed')).toHaveTextContent('none')
   })
 
-  it('searches the whole catalog and offers "+ add" only for tiles not saved', () => {
-    act(() => {
-      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
-    })
+  it('narrows to the matching items and writes nothing when a row is picked', () => {
     render(<PaletteHarness query="dungeon stone floor" />)
 
-    // Three fixture records match, one of which is already saved — so two "+ add"
-    // buttons in the results and none in the library block.
-    // The `+` glyph is aria-hidden, so the accessible name starts at "add" and
-    // carries the tile — forty rows must not present forty identical buttons.
-    const adds = screen.getAllByRole('button', { name: /^add / })
-    expect(adds.length).toBeGreaterThan(0)
+    // Three fixture records match. It offered a "+ add" button on each row that
+    // was not already saved, and that button was the only store write in the
+    // panel; row A0 deleted it with the library. A row is now a pick and nothing
+    // else, so the whole store is untouched until something is placed.
+    const rows = screen.getAllByRole('listitem')
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining(FIXTURE_NAMES.floor1),
+      expect.stringContaining(FIXTURE_NAMES.floor2),
+      expect.stringContaining(FIXTURE_NAMES.twin),
+    ])
+    expect(screen.queryAllByRole('button', { name: /^add / })).toHaveLength(0)
 
-    const twinAdd = screen.getByRole('button', { name: new RegExp(`add ${FIXTURE_NAMES.twin} to the library`) })
-    fireEvent.click(twinAdd)
-    expect(library()).toContain(FIXTURE_DESIGNS.twin)
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.twin) }))
+    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.twin)
+    expect(placementCount()).toBe(0)
   })
 
-  it('offers a starter set when the library is empty, and the set is one texture of floors and walls', () => {
+  it('says how much of the archive it is showing, and nothing about a starter set', () => {
+    // §2.4's "Add a starter set" put six floors and walls of one texture into the
+    // library, and row A0 deleted both. Asserted as an absence because **row C1**
+    // replaces this whole panel with 52 generated template families, and a
+    // starter set — if it comes back — is a starter *room*.
     render(<PaletteHarness />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Add a starter set/ }))
-
-    // The fixture's only textured, placeable, non-base items are the two
-    // dungeon_stone floors and the twin; the cave wall is a topper and placeable
-    // too. What matters is that a base is never offered and every key is a design
-    // this catalog holds — the starter set returns designs since row V3, so a key
-    // that did not resolve would be a library entry with no row and no way to
-    // remove it from here.
-    const saved = library()
-    expect(saved.length).toBeGreaterThan(0)
-    for (const key of saved) {
-      const item = index.engine.aggregates.byDesign.get(key as DesignId)
-      expect(item, key).toBeDefined()
-      expect(item?.variantClass).not.toBe('base-only')
-      expect(item?.foot.shape === 'rect' || item?.foot.shape === 'wall').toBe(true)
-    }
-  })
-
-  /**
-   * The defect row V3 closes, at the surface that showed it.
-   *
-   * `PalettePanel` called `paletteRows(Object.keys(library) as TileId[], …)`. The
-   * assertion made it compile after row V1 re-keyed the library to designs, and
-   * every lookup then missed — the library block rendered **empty** for every
-   * saved item, with no error anywhere. So this asserts the count rather than the
-   * content: an empty list is what the bug looked like.
-   */
-  it('lists every saved item, which the file-keyed cast rendered as an empty block', () => {
-    act(() => {
-      useWorkshopStore.setState({
-        library: {
-          [design('floor1')]: true,
-          [design('floor2')]: true,
-          [design('wallNoBase')]: true,
-        },
-      })
-    })
-    render(<PaletteHarness />)
-
-    expect(screen.getAllByRole('listitem')).toHaveLength(3)
-    expect(screen.getByRole('heading', { name: /Library 3/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add a starter set/ })).toBeNull()
+    expect(screen.getByRole('heading', { name: /Archive 9/ })).toBeInTheDocument()
   })
 })
 
@@ -298,13 +259,6 @@ describe('the pre-selection handoff', () => {
     clearPendingDesign()
   })
 
-  /** File the item, which is what `TileDrawer` does before it posts. */
-  function saveItem(key: keyof typeof FIXTURE_DESIGNS): void {
-    act(() => {
-      useWorkshopStore.setState((state) => ({ library: { ...state.library, [design(key)]: true } }))
-    })
-  }
-
   /**
    * Mount the palette inside an `act` of our own.
    *
@@ -322,9 +276,10 @@ describe('the pre-selection handoff', () => {
   }
 
   it('arms the item the catalog drawer sent, and forces place mode', () => {
-    // Exactly what `TileDrawer`'s action does, in its order: file it, then post
-    // it, then navigate — the navigation being this render.
-    saveItem('floor1')
+    // Exactly what `TileDrawer`'s action does, in its order: post it, then
+    // navigate — the navigation being this render. It filed the item in the
+    // library first, until row A0; the palette lists the archive now, so a row
+    // for the item exists without one.
     act(() => {
       sendDesignToBuilder(design('floor1'))
     })
@@ -341,7 +296,6 @@ describe('the pre-selection handoff', () => {
   })
 
   it('claims the handoff once, so a re-mount does not re-arm a tile the user disarmed', () => {
-    saveItem('floor1')
     act(() => {
       sendDesignToBuilder(design('floor1'))
     })
@@ -357,8 +311,6 @@ describe('the pre-selection handoff', () => {
   })
 
   it('takes the second press when two arrive with no claim between them', () => {
-    saveItem('floor1')
-    saveItem('floor2')
     act(() => {
       sendDesignToBuilder(design('floor1'))
       sendDesignToBuilder(design('floor2'))
@@ -368,12 +320,10 @@ describe('the pre-selection handoff', () => {
     expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor2)
   })
 
-  it('arms nothing for an item the plan cannot hold, and the library note says why', () => {
+  it('arms nothing for an item the plan cannot hold, and the row says why', () => {
     // The `none` footprint: 370 of 3,822 items, 726 of 8,702 files. Arming it
-    // would give the user
-    // an armed tile every click of which the canvas correctly refuses, which is
-    // the failure the greyed rows exist to avoid.
-    saveItem('slab')
+    // would give the user an armed tile every click of which the canvas correctly
+    // refuses, which is the failure the greyed rows exist to avoid.
     act(() => {
       sendDesignToBuilder(design('slab'))
     })
@@ -382,9 +332,12 @@ describe('the pre-selection handoff', () => {
 
     expect(screen.getByTestId('armed')).toHaveTextContent('none')
     expect(screen.getByTestId('tool')).toHaveTextContent('erase')
-    // The explanation is already on screen, because the drawer filed the tile on
-    // its way here — so the refusal costs no new copy.
-    expect(screen.getByText(/cannot be laid out on the plan/)).toBeInTheDocument()
+    // The explanation is already on screen, on the row itself, because the
+    // archive list holds every item — so the refusal costs no new copy. Row A0
+    // moved it there from a note under the library block, which counted the
+    // refused *saved* items and had nothing to count once the library went.
+    expect(screen.getByText('no plan shape')).toBeInTheDocument()
+    expect(screen.getByText(/no derivable footprint/)).toBeInTheDocument()
     // Claimed all the same: a handoff this palette will not act on must not sit
     // in the box waiting to arm the next mount.
     expect(useSelectionStore.getState().pending).toBeNull()
@@ -407,7 +360,7 @@ describe('the pre-selection handoff', () => {
     // parts, because the auto-inserted base is the resolver's decision and not
     // the palette's. `the two-sided item` below is where the arming has a real
     // choice to make.
-    saveItem('floor2')
+
     act(() => {
       sendDesignToBuilder(design('floor2'))
     })
@@ -462,9 +415,6 @@ describe('the two-sided item', () => {
       materialOf: (record) => resolveMaterial(resolveTags(mixedFile, record), record.file).material,
     }
     mixedAssembly = buildAssemblyIndex(mixedFile)
-    act(() => {
-      useWorkshopStore.setState({ library: { [design('floor2')]: true } })
-    })
   })
 
   /** The item really is two-sided, so the two assertions below are not vacuous. */
@@ -480,9 +430,14 @@ describe('the two-sided item', () => {
   })
 
   it('renders the topper in the row, not the file the resolver would print', () => {
-    render(<PaletteHarness />)
+    // Narrowed to the two-sided item's own row: the palette lists the whole
+    // archive in ranking order since row A0, so index 0 is no longer this item.
+    render(<PaletteHarness query="dungeon stone floor 2x2" />)
 
-    const row = screen.getAllByRole('listitem')[0] as HTMLElement
+    const row = screen
+      .getAllByRole('listitem')
+      .find((candidate) => candidate.textContent?.includes(FIXTURE_NAMES.floor2)) as HTMLElement
+    expect(row).toBeDefined()
     const image = within(row).getByRole('presentation', { hidden: true })
     // The sprite URL is content-addressed, so the blob in it names the file the
     // thumb is showing. `2…` is the topper's md5, `9…` the integral's.
@@ -818,7 +773,7 @@ describe('the bill of tiles', () => {
 
     expect(screen.getByText(/Over 2 GB to download/)).toBeInTheDocument()
     expect(screen.getByText(/past what one browser download reliably finishes/)).toBeInTheDocument()
-    expect(screen.getByText('2100.0 MB', { selector: '.of-bill-bytes' })).toHaveAttribute(
+    expect(screen.getByText('2.1 GB', { selector: '.of-bill-bytes' })).toHaveAttribute(
       'data-verdict',
       'huge',
     )
@@ -1776,16 +1731,29 @@ describe('variant resolution in the bill', () => {
   })
 })
 
-describe('the library block', () => {
-  it('drops ids the catalog no longer holds rather than rendering a nameless row', () => {
-    act(() => {
-      useWorkshopStore.setState({
-        library: { [design('floor1')]: true, ['d-retired-and-gone' as DesignId]: true },
-      })
-    })
-    render(<PaletteHarness />)
+describe('the row drop rule', () => {
+  /**
+   * Asserted against `searchRows` directly, since row A0.
+   *
+   * It used to be a panel test: the library could name a design the current
+   * catalog build no longer holds — an entry outlives the import that retired its
+   * files — so the panel was rendered with one live key and one retired one and
+   * had to show a single row. There is no library, and the rows now come from the
+   * engine's own result, so **no render can reach the miss**. The rule itself is
+   * unchanged and still load-bearing: a row with no name, no size and no
+   * thumbnail is worse than no row, and row G5's selection channel still carries
+   * a design across a navigation that a re-import can have invalidated.
+   */
+  it('drops a design the lookup does not hold rather than making a nameless row', () => {
+    const items = index.engine.aggregates.aggregates
+    expect(items.length).toBeGreaterThan(1)
 
-    expect(screen.getAllByRole('listitem')).toHaveLength(1)
-    expect(screen.queryByText(/retired/)).toBeNull()
+    const live = items[0]!
+    const rows = searchRows(items, (id) =>
+      id === live.design ? { item: live, preview: index.engine.record(live.preview)! } : undefined,
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.item.design).toBe(live.design)
   })
 })

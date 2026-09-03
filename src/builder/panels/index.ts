@@ -10,6 +10,11 @@
  * The plan-view canvas is **not** here: it is `@/builder/canvas` (row 17), which
  * this directory imports and never modifies.
  *
+ * Row **A0** adds a fourth: `BackupPanel`, the JSON export/import that was the
+ * deleted library screen's and is the app's only backup path. It is a panel for
+ * the reason its own docblock gives — what the envelope carries is the room, and
+ * this column is already everything about the room that is not the 3D surface.
+ *
  * Row S5's generated bases reach two of these. `BillPanel` takes an optional
  * `generated` prop and renders `GeneratedBillSection` inside its scroll area;
  * `useArchiveDownload` takes an optional `generated` option and composes the
@@ -27,6 +32,8 @@ export type { PlanToolbarProps } from './PlanToolbar'
 export { BillPanel } from './BillPanel'
 export type { BillPanelProps } from './BillPanel'
 
+export { BackupPanel } from './BackupPanel'
+
 export { GeneratedBillSection } from './GeneratedBillSection'
 export type { GeneratedBillSectionProps } from './GeneratedBillSection'
 
@@ -43,7 +50,7 @@ export type {
   GeneratedDownload,
 } from './useArchiveDownload'
 
-export { MAX_SEARCH_ROWS, paletteRows, searchRows, starterSet } from './palette'
+export { MAX_SEARCH_ROWS, searchRows } from './palette'
 export type { PaletteLookup, PaletteRow, PaletteSource } from './palette'
 
 export { billInventory, noteCopy, resolutionSummary, rowResolutionCopy, thresholdLabel, verdictCopy } from './billView'
