@@ -70,10 +70,17 @@
  * is keyed by `record.id` and `Placement.tileId` is a file"*. Row V3 made a
  * palette row an aggregate and row V4 made a placement address a design, so both
  * premises are gone; what is left is the property G5 actually wanted, and a design
- * has it more completely than a file did. **The channel and its reader now speak
- * the same currency end to end** — `claimPendingDesign` hands a `DesignId` to
- * `tools.setSelectedDesign`, which hands it to `placeTile` — so nothing between
- * the catalog drawer and the persisted scene resolves a file.
+ * has it more completely than a file did.
+ *
+ * **Row A1 parted the channel from the persisted scene again**, and row C1 owns
+ * what to do about it. V4 had made the two speak one currency end to end —
+ * `claimPendingDesign` handed a `DesignId` to `tools.setSelectedDesign`, which
+ * handed it to the store's placing action — but a placement is now a template
+ * family with a fill per slot, so there is no design in one and no action here
+ * to hand a design to. The channel still carries an item and the palette still
+ * lists 52 template families, so whether the box should carry a `TemplateId`
+ * instead is C1's decision, made where the palette is. What A1 changed in this
+ * file is one thing and it is stated at {@link clearPendingDesign}.
  *
  * **Nothing here resolves anything, and that is the load-bearing property.** A6's
  * rule 0 resolves a placed item to the variant the build's lock preference wants,
@@ -115,8 +122,11 @@ export const useSelectionStore = create<SelectionState>(() => ({ pending: null }
 /**
  * Ask the builder to arm this item.
  *
- * Does not navigate and does not touch the library — the caller does both, in
- * that order, because an item the palette cannot list is an item it cannot arm.
+ * Does not navigate; the caller does. It used to not touch the library either,
+ * and the caller was expected to add the item first because an item the palette
+ * could not list was an item it could not arm — rows A0 and A1 deleted the
+ * library, so there is no longer a first step and the palette's rows are a
+ * function of the catalog.
  *
  * Renamed from `sendTileToBuilder` along with the three functions below, and the
  * rename is deliberate rather than tidying: the box changed *kind*, and a caller
@@ -146,11 +156,22 @@ export function claimPendingDesign(): DesignId | null {
 /**
  * Empty the box without arming anything.
  *
- * For a caller that has decided the handoff is stale. Deliberately **not**
- * called from `resetWorkshop`: the reader already refuses to arm a file the
- * palette holds no placeable row for, so a reset that emptied the library
- * disarms the handoff by making it unclaimable, and coupling the persisted store
- * to this one to restate that would be a dependency bought for nothing.
+ * For a caller that has decided the handoff is stale — **and, since row A1, for
+ * `resetWorkshop`.** That is contract **C-f**, and it is a reversal of what this
+ * docblock used to say.
+ *
+ * The old argument was: *"the reader already refuses to arm a file the palette
+ * holds no placeable row for, so a reset that emptied the library disarms the
+ * handoff by making it unclaimable, and coupling the persisted store to this one
+ * to restate that would be a dependency bought for nothing."* **Its premise was
+ * the library, and rows A0 and A1 deleted it.** The palette now lists 52
+ * generated template families (§3.1), which are a function of the catalog and
+ * not of anything a reset clears — so a pending handoff survives a reset *and
+ * stays claimable*, and the first render of the builder after "clear
+ * everything" would arm a piece the user had just thrown away.
+ *
+ * The coupling is one-directional: `workshopStore.ts` imports this function and
+ * nothing here imports from there.
  */
 export function clearPendingDesign(): void {
   useSelectionStore.setState({ pending: null })
