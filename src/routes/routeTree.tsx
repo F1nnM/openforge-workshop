@@ -1,11 +1,19 @@
 /**
  * OpenForge Workshop — the route tree.
  *
- * Six routes: landing, catalog, library and builder — architecture-plan.md
- * §14's v1 scope and design-contract.md §2's screen inventory — plus `/settings`,
- * which the contract does not list because the lock preference had no home in it
- * (§2's 40.2-point lock spread gave it one), and `/assemblies`, which row C3
- * built and could not mount because this file was not its to edit.
+ * Five routes: landing, catalog, library and builder — architecture-plan.md
+ * §14's v1 scope and design-contract.md §2's screen inventory — plus
+ * `/assemblies`, which row C3 built and could not mount because this file was
+ * not its to edit.
+ *
+ * **It was six.** `/settings` existed because the lock preference had no home in
+ * the contract's inventory (§2's 40.2-point lock spread gave it one). Row L1
+ * moved that preference into the builder's work area, where the owner asked for
+ * it, and deleted the screen; `src/ui/lock-picker/LockToggle.tsx` carries the
+ * argument and the documented decision it overrules. Nothing else lived on that
+ * screen — its own docblock called it *"the only screen whose whole subject is a
+ * single preference"*, and that was accurate: it imported the store, the lock
+ * picker and one primitive, and no other module imported it.
  * The mock made all four client-side *state*, which is why nothing in it was
  * linkable — no filtered view, no open tile, no shared build. This module is the
  * fix, and the point of it is that the URL is the app's state.
@@ -58,11 +66,15 @@
  * linking. Declaring the facet schema there would put filters in the URL that
  * nothing reads.
  *
- * ## Which four routes are lazy, and why `/` and `/catalog` are not
+ * ## Which three routes are lazy, and why `/` and `/catalog` are not
  *
  * Row X9 made `/assemblies` lazy, measured it, and left the other five with its
- * figures as the argument for doing each of them properly. This is that row, and
- * **two of the five did not survive the measurement.**
+ * figures as the argument for doing each of them properly. Row X10 was that row,
+ * and **two of the five did not survive the measurement.** Row L1 then deleted
+ * one of the four it shipped, so three remain lazy: `/library`, `/builder` and
+ * `/assemblies`. The table below is X10's, kept intact because the deltas are
+ * what a future row needs and re-deriving them without the `/settings` row would
+ * hide how the `@/ui/lock-picker` sharing worked.
  *
  * Method is X9's: A/B `vite build`s of one tree at
  * `SOURCE_DATE_EPOCH=1700000000`, summing **every file `dist/index.html`
@@ -99,10 +111,14 @@
  *     raw.**
  *   - **`/settings` alone moves 8,002 B and pays for it in brotli** (+1,547 B),
  *     because splitting `@/ui/primitives` out of `index` to share it costs more
- *     compression context than the settings screen weighs. But the builder's
- *     toolbar and `LockNotice` are the other importers of `@/ui/lock-picker`, so
- *     with `/builder` already lazy the same edit takes the picker with it
- *     (10,044 + 4,484 CSS) and is worth **-21,818 raw / -3,833 gz / -1,974 br**.
+ *     compression context than the settings screen weighs. But `LockNotice` in
+ *     `BuilderScreen` is the other importer of `@/ui/lock-picker`, so with
+ *     `/builder` already lazy the same edit takes the picker with it (10,044 +
+ *     4,484 CSS) and is worth **-21,818 raw / -3,833 gz / -1,974 br**. (X10
+ *     wrote "the builder's toolbar and `LockNotice`". There was one importer,
+ *     not two: nothing in `src/builder/panels/` has ever imported the picker.
+ *     The conclusion is unchanged — one eager importer is one too many — and row
+ *     L1's `LockToggle` has since made it two for real.)
  *
  * So the four ship as a set, and cumulatively:
  *
@@ -111,13 +127,47 @@
  * | baseline (X9's tree) | 815,980 | 247,766 | 213,339 |
  * | + `/builder` lazy | 698,245 | 213,088 | 185,202 |
  * | + `/library` lazy | 682,289 | 209,541 | 182,200 |
- * | + `/settings` lazy — **shipped** | **660,471** | **205,708** | **180,226** |
+ * | + `/settings` lazy — **shipped by X10** | **660,471** | **205,708** | **180,226** |
+ *
+ * **Row L1 then deleted the route, and the saving is not where you would look
+ * for it.** A lazy route's screen was never in the eager bundle, so removing the
+ * route can only return the declaration and the `import()` wrapper — about 340
+ * raw bytes. Measured against L1's own baseline of **661,438 / 205,802 /
+ * 180,593** over **7** preloaded files, the whole row comes to **661,098 /
+ * 204,122 / 177,876** over **4**: **-340 raw / -1,680 gz / -2,717 br**.
+ *
+ * Almost all of that is the *chunk graph*, not the deleted code. With
+ * `/settings` gone, `@/ui/primitives` had one eager importer and one lazy one
+ * instead of two lazy ones, and rolldown stopped extracting it as a shared
+ * chunk — `primitives` (86,121 raw) and `scene` (1,140) folded back into `index`
+ * and compress better there. **This is the same effect the `/settings` row of
+ * the table above records, running the other way**, and it is why row L1
+ * declined an `@base-ui/react/popover` for its disclosure and reused
+ * `@/ui/primitives`' `Dialog`: the popover re-split the chunk and cost **+2,913
+ * B gz** on every page. `LockToggle.tsx` carries that A/B.
+ *
+ * The settings chunk (6,422 raw / 2,223 gz) and its stylesheet (1,586 / 548) are
+ * simply no longer emitted, and the shared `lock-picker` pair (10,044 + 4,484
+ * CSS) is now inside the builder's own chunk — one fewer request on the builder
+ * press.
  *
  * **-155,509 B raw / -42,058 B gz / -33,113 B br: 17.0% of the gzipped eager
- * payload and 15.5% of the brotli one, off every page in the app.** The four
- * on-demand chunks are `builder` 109,361 (32,177 gz) with `download` 16,265
+ * payload and 15.5% of the brotli one, off every page in the app.** X10's four
+ * on-demand chunks were `builder` 109,361 (32,177 gz) with `download` 16,265
  * beside it, `library` 23,236 (6,667 gz), `settings` 8,008 (2,773 gz) with the
- * shared `lock-picker` 14,528, and X9's `assemblies` 48,464 (5,858 gz).
+ * shared `lock-picker` 14,528, and X9's `assemblies` 48,464 (5,858 gz). After
+ * row L1 there is no `settings` pair and no shared `lock-picker`; the picker is
+ * inside `builder`.
+ *
+ * **One line of X10's method had gone stale, and the count is the part to
+ * distrust.** Its baseline is quoted "over the four preloaded files"; the tree
+ * L1 inherited preloaded **seven** — `index`, `catalog`, `primitives`,
+ * `vanilla` and `scene` plus two stylesheets — and the tree L1 shipped preloads
+ * **four** again, for the chunk-graph reason above. So the number of files is a
+ * consequence of the tree and not a property of the method. **The method is
+ * "sum every file `dist/index.html` preloads", and it is the only line of this
+ * that a future row should copy**; a fixed file count, or a JS-only sum, books a
+ * CSS relocation as a saving it has not made.
  *
  * Every row above was built from **one frozen copy** of the tree, because other
  * rows were editing this working tree while the A/Bs ran — 26 files moved under
@@ -260,40 +310,13 @@ export const builderRoute = createRoute({
 })
 
 /**
- * `/settings` — the lock system, and nothing else yet.
- *
- * No search params, for the same reason `/library` has none: there is nothing on
- * this screen worth linking to but the screen itself. The one piece of state it
- * edits is the global lock preference, which is persisted in the store rather
- * than in the URL — putting it in a search param would make a shared link
- * silently change the recipient's build settings.
- *
- * It argued for a while that it was not in the header's nav, and that gap has
- * since been closed: `Header.tsx` mounts a `Settings` tab, because a dismissed
- * `LockNotice` would otherwise strand the route. The consequence lands in
- * `routes.test.ts`: the nav label is on every page, so `Settings` is not
- * evidence that this screen rendered and the mounting marker is `Lock system`.
- *
- * **Lazy since row X10, and only worth it because `/builder` is:** on its own it
- * moves 8,002 B and *costs* 1,547 B brotli, because `@/ui/lock-picker` has two
- * other importers in the builder's toolbar and notice and so stays eager. With
- * the builder lazy the picker leaves with it, and the pair is worth -21,818 raw
- * / -3,833 gz / -1,974 br. A future row that makes the builder eager again has
- * to re-measure this one; the module note has the numbers.
- */
-export const settingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/settings',
-  component: lazyRouteComponent(() => import('@/screens/settings'), 'SettingsScreen'),
-})
-
-/**
  * `/assemblies` — row C3's guided walk through the 40 recipe templates.
  *
  * **No search params, and the selected recipe is deliberately not one.** C3's own
- * reasoning, checked against `searchSchema.test.ts` and against how `/settings`
- * shipped: this route's argument that a link must not freeze a preference applies
- * exactly, and a half-finished pick set is a preference of the worst kind. The
+ * reasoning, checked against `searchSchema.test.ts` and against how the deleted
+ * `/settings` route shipped: that route's argument that a link must not freeze a
+ * preference applies exactly, and a half-finished pick set is a preference of the
+ * worst kind. The
  * choice C3's screen holds is a `Record<stepKey, TileId>` mid-walk — putting it in
  * a URL would mean a shared link that drops the recipient into somebody else's
  * unfinished decisions, and `search: { strict: true }` on the router means it
@@ -338,9 +361,10 @@ export const settingsRoute = createRoute({
  * verified that `dist/` contained none of its files.
  *
  * X9 left the other five to a row of their own. **Row X10 did them and two of
- * them lost**: `/library`, `/builder` and `/settings` are lazy for the same
- * reason this route is, `/` and `/catalog` are not, and the module docblock
- * carries the six-route table and the cold-load measurement that decided it.
+ * them lost**: `/library` and `/builder` are lazy for the same reason this route
+ * is, `/` and `/catalog` are not, and the module docblock carries the table and
+ * the cold-load measurement that decided it. X10 also made `/settings` lazy; row
+ * L1 deleted that route outright.
  */
 export const assembliesRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -354,5 +378,4 @@ export const routeTree = rootRoute.addChildren([
   libraryRoute,
   builderRoute,
   assembliesRoute,
-  settingsRoute,
 ])

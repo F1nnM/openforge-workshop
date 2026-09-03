@@ -26,10 +26,25 @@
 
 /* Closed: top-left. The stage's other three corners are taken — the floating
    toolbar is top-centre, row G2's 3D plate is top-right, and §2.4's two hint
-   plates are along the bottom. */
+   plates are along the bottom.
+
+   `max-width` is row L1's band fix and it is load-bearing rather than tidy.
+   This plate is 193px wide at its natural size and sits `z-index: 3` over a
+   centred toolbar slot that used to be allowed to grow to the full stage width:
+   row L1 measured **`Place` 100% unclickable and `Erase` 24.6% unclickable** at
+   1295px, under this element. `screens/builder/builder.css` publishes
+   `--of-stage-gutter` and gives up `2 x` it from the slot's `max-width`; capping
+   this plate inside the same gutter is the other half, and it is what makes the
+   guarantee arithmetic instead of a claim about today's content. The cap is
+   above this plate's natural width, so nothing here narrows today — it is the
+   ceiling that stops a longer resolution string from re-opening the collision.
+
+   Scoped to the closed state on purpose: the open state is a 442px drawer down
+   the stage's right edge, and a `max-width` on that would clamp the drawer. */
 .of-gen-launch[data-open='false'] {
   top: 12px;
   left: 12px;
+  max-width: calc(var(--of-stage-gutter, 208px) - 16px);
 }
 
 .of-gen-launch[data-open='true'] {

@@ -16,11 +16,21 @@
  * is when **three of its five markers turned out not to be able to fail**:
  * `Catalog`, `Library` and `Builder` are also the header's own nav labels, so
  * those three cases passed against exactly the blank screen the block exists to
- * catch. Every marker is now a string only the screen can produce, and the block
- * covers `/settings` too. The `lazy or eager` block below is the other half:
- * mounting proves a lazy route resolves, and that block proves the four that are
- * lazy still are, because re-inflating the eager bundle by 42 kB gzipped is one
- * convenient `import` away and nothing else in the repo would notice.
+ * catch. Every marker is now a string only the screen can produce. The
+ * `lazy or eager` block below is the other half: mounting proves a lazy route
+ * resolves, and that block proves the three that are lazy still are, because
+ * re-inflating the eager bundle by 42 kB gzipped is one convenient `import` away
+ * and nothing else in the repo would notice.
+ *
+ * **Row L1 deleted `/settings`, which X10 had just covered for the first time.**
+ * That case is gone rather than relocated, and the coverage it stood for did not
+ * evaporate with it: the screen's subject — the lock preference and its two
+ * measured figures — is now a control in the builder, and the whole of that
+ * screen's test suite moved to `src/ui/lock-picker/lockToggle.test.tsx`, fixture
+ * and all. What this file loses is one route; what it must not lose is the
+ * property X10 established, so `renders %s inside the app frame` still asserts a
+ * marker no other screen and no nav label can produce, and the header is now
+ * four labels rather than five.
  */
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { act, createElement } from 'react'
@@ -34,14 +44,7 @@ import { BUILD_ANY, BUILD_UNSPECIFIED, buildSystemFilter, defaultCatalogSearch }
 import { OVERLAP, catalogOf } from './fixture'
 import { createWorkshopRouter } from './router'
 import type { WorkshopRouter } from './router'
-import {
-  assembliesRoute,
-  builderRoute,
-  catalogRoute,
-  landingRoute,
-  libraryRoute,
-  settingsRoute,
-} from './routeTree'
+import { assembliesRoute, builderRoute, catalogRoute, landingRoute, libraryRoute } from './routeTree'
 import { closeTileDrawer, openTileDrawer, showTileInDrawer } from './tileDrawer'
 
 const ordinal = (n: number) => ManifestOrdinal.parse(n)
@@ -67,7 +70,6 @@ describe('route tree', () => {
     ['/library', '/library'],
     ['/builder', '/builder'],
     ['/assemblies', '/assemblies'],
-    ['/settings', '/settings'],
   ])('routes %s to the %s screen', async (path, expected) => {
     const router = routerAt(path)
     await router.load()
@@ -97,9 +99,10 @@ describe('route tree', () => {
     // neither — `buildLocation({ to: '/assemblies', search: { recipe: 'wall' } })`
     // compiles, and a hand-typed `?recipe=wall` survives into `match.search`.
     //
-    // Measured on this tree: `/library`, `/settings` and `/assemblies` all echo
-    // an unknown param back, so this is the schemaless class's behaviour and not
-    // something mounting C3's screen introduced. It is harmless for the reason
+    // Measured on this tree: `/library` and `/assemblies` both echo an unknown
+    // param back, so this is the schemaless class's behaviour and not something
+    // mounting C3's screen introduced. (`/settings` was the third and row L1
+    // deleted it; the class is unchanged.) It is harmless for the reason
     // that matters, which is what the two assertions below prove: nothing on
     // these screens reads `search`, and `search: { strict: true }` means the
     // param cannot travel — neither *into* an /assemblies link built from a
@@ -135,9 +138,11 @@ describe('lazy or eager, as row X10 measured it', () => {
    * above this one loads every route, so an assertion on it would pass or fail
    * on test order. Identity does not move.
    *
-   * The numbers, from `routeTree.tsx`'s module note: the four lazy routes are
+   * The numbers, from `routeTree.tsx`'s module note: X10's four lazy routes were
    * worth -155,509 B raw / -42,058 B gz / -33,113 B br of eager payload on every
-   * page. `/` and `/catalog` are eager because a lazy route paints **nothing**
+   * page. Row L1 deleted one of the four and that gave **no bytes back** — a
+   * lazy screen was never in the eager bundle — so the figure still describes
+   * what the remaining three hold in place. `/` and `/catalog` are eager because a lazy route paints **nothing**
    * until its chunk lands — no header, no nav — and defers the header's
    * `catalog.json` request behind it, which on the two screens people cold-load
    * costs more than the bytes it saves.
@@ -168,14 +173,15 @@ describe('lazy or eager, as row X10 measured it', () => {
     expect(catalogRoute.options.component).toBe(CatalogScreen)
   })
 
-  it('mounts the four press-reached screens lazily', async () => {
+  it('mounts the three press-reached screens lazily', async () => {
     const lazy = [
       [libraryRoute, (await import('@/screens/library')).LibraryScreen],
       [builderRoute, (await import('@/screens/builder')).BuilderScreen],
-      [settingsRoute, (await import('@/screens/settings')).SettingsScreen],
       [assembliesRoute, (await import('@/screens/assemblies')).AssembliesScreen],
     ] as const
-    expect(lazy).toHaveLength(4)
+    // Four until row L1 deleted `/settings`. The length assertion is what stops
+    // a route quietly leaving this list instead of leaving the tree.
+    expect(lazy).toHaveLength(3)
     for (const [route, screen] of lazy) {
       expect(typeof route.options.component).toBe('function')
       expect(route.options.component).not.toBe(screen)
@@ -400,14 +406,15 @@ describe('mounting', () => {
    * Every marker here is a string **only that screen can produce**, and that is
    * a correction rather than a style.
    *
-   * `Catalog`, `Library`, `Builder`, `Assemblies` and `Settings` are the
-   * header's five nav labels, so the frame renders all five of them on every
-   * route — measured, by dumping `container.textContent` for each path. Three of
-   * this block's markers used to be exactly those words, which means the three
-   * cases that mattered most passed against a route rendering nothing at all.
-   * The replacements are a search field's label, an empty-library sentence, the
-   * builder's own index-failure copy, C3's headline and the settings screen's
-   * `<h2>`.
+   * `Catalog`, `Library`, `Builder` and `Assemblies` are the header's four nav
+   * labels, so the frame renders all four of them on every route — measured, by
+   * dumping `container.textContent` for each path. Three of this block's markers
+   * used to be exactly those words, which means the three cases that mattered
+   * most passed against a route rendering nothing at all. The replacements are a
+   * search field's label, an empty-library sentence, the builder's own
+   * index-failure copy and C3's headline. (There were five labels and five
+   * markers until row L1 deleted `/settings`; its marker was the screen's own
+   * `<h2>`.)
    *
    * The builder's is a pattern rather than a string on purpose: jsdom's `fetch`
    * of `/catalog/catalog.json` fails, so a mounted builder shows either its
@@ -427,9 +434,6 @@ describe('mounting', () => {
     // an unreachable component and an unbundled one. A route entry that resolved
     // but rendered nothing would pass the `routes to` case above and fail here.
     ['/assemblies', 'Guided assemblies'],
-    // Never covered here until row X10 made it lazy, which is the point at
-    // which "does this screen still render" stopped being obvious.
-    ['/settings', 'Lock system'],
   ])('renders %s inside the app frame', async (path, marker) => {
     const { text, unmount } = await mount(routerAt(path))
     expect(text).toContain('OPENFORGE')
@@ -440,6 +444,29 @@ describe('mounting', () => {
   it('renders the not-found boundary instead of a blank page', async () => {
     const { text, unmount } = await mount(routerAt('/tiles/does-not-exist'))
     expect(text).toContain('Not found')
+    unmount()
+  })
+
+  /**
+   * A bookmarked `/settings` after row L1 deleted it.
+   *
+   * The route was in this tree for the whole of v1 and v2 and had a nav tab, so
+   * it is the one deleted path somebody plausibly has in their history. This
+   * asserts the deletion in the only two ways that are observable: the tree no
+   * longer matches the path, and what the visitor gets is the boundary with the
+   * header still on it rather than a blank document.
+   *
+   * **It can fail, and the failure it is for is a re-add.** Restoring
+   * `settingsRoute` — the one-line convenience the `lazy or eager` block above
+   * exists to catch the other half of — makes the leaf id `/settings` again and
+   * turns this red. Removing the boundary instead turns it red the other way.
+   */
+  it('answers a bookmarked /settings with the boundary, not a blank page', async () => {
+    const router = routerAt('/settings')
+    const { text, unmount } = await mount(router)
+    expect(leafRouteId(router)).not.toBe('/settings')
+    expect(text).toContain('Not found')
+    expect(text).toContain('OPENFORGE')
     unmount()
   })
 

@@ -49,9 +49,89 @@
 }
 
 /* ── The stage ───────────────────────────────────────────────────────────────
-   The canvas fills it; the toolbar and the two corner plates float over it. The
-   stage is the positioning context for all three, so none of them needs to know
-   the layout's dimensions.
+   The canvas fills it; the toolbar and the corner plates float over it. The
+   stage is the positioning context for all of them, so none needs to know the
+   layout's dimensions.
+
+   ## The top band, and the gutter that makes it safe
+
+   Three overlays share one 12px band across the top of one stacking context:
+   row S4's generator plate (top-left, `z-index: 3`), the toolbar slot — which
+   holds `PlanToolbar` *and* row L1's lock toggle (top-centre, `z-index: 2`) —
+   and row G2's 3D plate (top-right, `z-index: 3`). Each was sized by its own content
+   and none was aware of the others, so the centred slot grew straight under
+   both side plates and the plates — higher in the stacking order — were painted
+   **and hit-tested** over it.
+
+   **Row X10 measured that and could not fix it: no Chrome in its environment.
+   Row L1 had one (Chrome for Testing 148), and the defect was worse than
+   reported.** At 1295 x 955, hit-testing every pixel column across each control
+   at its vertical centre:
+
+     stage          x 272 .. 993   (721 px)
+     generator      x 284 .. 477   (193 px)
+     toolbar slot   x 386 .. 879   (492 px, centred on the stage)
+     3D plate       x 847 .. 981   (134 px)
+
+     Place          60 of 60 px dead  (100%)   under the generator plate
+     Erase          15 of 61 px dead  (24.6%)  under the generator plate
+     snap 0.5       13 of 87 px dead  (14.9%)  under the 3D plate
+
+   X10 reported the 14.9% on `snap 0.5` and predicted a second collision on the
+   generator side. The second collision is **total**: `Place`, the builder's
+   primary tool, could not be pressed at all at that viewport, and nothing in the
+   repository would have said so.
+
+   ## Why a gutter and not a grid
+
+   X10 wrote three candidate fixes into `../../builder/three/builder3d.css`.
+   Lowering the 3D plate's `z-index` only moves the dead columns onto the 3D
+   button. Laying the band out as one `auto 1fr auto` grid is the structural
+   answer and is still not available: both side plates are the *same element* as
+   their opened states — `inset: 0` for the 3D room, a 442px right-edge drawer
+   for the generator — and those resolve against whatever positioned ancestor
+   they have, so wrapping them in a positioned band breaks both. Fixing that
+   means moving two rows' open states, which is a row of its own.
+
+   So: the gutter, which X10 ranked second and left because choosing the number
+   needed a browser. Each side plate is capped at the gutter less its 12px
+   inset, and the slot's `max-width` gives up `2 x` the gutter. **Overlap then
+   cannot happen by arithmetic rather than by luck**, at any width and for any
+   number of controls in the band — which is the property that made it safe to
+   add the lock toggle at all.
+
+   `min(208px, 34%)` rather than a constant: 208 is 12 + 196, and 196 clears
+   today's widest side plate (the generator's 193). The 34% is the floor that
+   keeps the guarantee from inverting — the centre always keeps 100% - 2 x 34% =
+   32% of the stage, so a narrow stage shrinks the plates (which wrap their own
+   text) instead of producing a negative `max-width` and a collision again.
+
+   Each plate gives up `gutter - 16px` rather than `gutter - 12px`, and the extra
+   4px is not padding for taste. With the cap at exactly `gutter - 12px` the
+   plate's outer edge lands on the slot's edge, and at a stage width where the
+   34% floor is fractional the two round onto the **same pixel column**: measured
+   at a 1080px viewport, 1 dead column, which is the whole defect back again in
+   miniature. 4px of declared clearance makes the boundary unambiguous at every
+   width the sweep covers.
+
+   **Measured after the fix: 0 dead columns on every control in the band, at
+   every viewport from 820px to 1920px.** For comparison, the same sweep on the
+   tree this row started from: 88 dead columns at 1295px, 231 at 1079px, 208 at
+   1000px and 251 at 901px.
+
+   The cost is height, and it is paid in stages rather than all at once. What the
+   band does as the stage narrows, measured:
+
+     stage >= 1126   one row      toolbar and the lock toggle side by side
+     stage >= 926    two rows     the lock toggle drops below the toolbar
+     stage >= 866    three rows   the toolbar itself wraps to two lines
+     stage >= 626    four rows
+     stage <= 600    the slot leaves the band (see the container query below)
+
+   So §2.4's single centred row survives to a 1700px viewport and degrades from
+   there. That is a real regression against the contract and it is the better
+   half of the trade: a wrapped toolbar is legible and clickable, and a
+   100%-dead `Place` button is neither.
    ──────────────────────────────────────────────────────────────────────────── */
 
 .of-builder-stage {
@@ -59,6 +139,19 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+
+  /* Queried below, so the band can change shape on the stage's own width rather
+     than on the viewport's. The stage is two fixed columns narrower than the
+     viewport at one breakpoint and one column narrower at the next, so a
+     viewport media query would be asking the wrong question — and it is the
+     stage's width that decides whether three overlays fit in one band. Layout
+     containment is implied and harmless here: this element is already the
+     positioning context and already sizes from its grid track, not from its
+     contents. */
+  container-type: inline-size;
+
+  /* Read by the two side plates' closed states, in their own stylesheets. */
+  --of-stage-gutter: min(208px, 34%);
 }
 
 .of-builder-canvas {
@@ -68,16 +161,58 @@
 
 /* §2.4: "a floating toolbar, centred at the top". A wrapper rather than absolute
    positioning on the toolbar itself, so the toolbar component stays a plain
-   flex row and this screen owns where it sits. */
+   flex row and this screen owns where it sits.
+
+   It holds two children now — `PlanToolbar` and the lock toggle — so it is a
+   flex row of its own that wraps. The lock toggle is **not** inside
+   `PlanToolbar`: every control in that component writes `PlanTools`, and row R4
+   deletes the plan view it belongs to. A sibling in the slot survives that. */
 .of-builder-toolbar-slot {
   position: absolute;
   top: 12px;
   left: 50%;
   translate: -50% 0;
   z-index: 2;
-  /* The slot is the full width the toolbar may use; the toolbar itself is
-     `inline-flex` and sizes to its contents. */
-  max-width: calc(100% - 24px);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 8px;
+  /* `max-content` and not shrink-to-fit, which is load-bearing rather than
+     equivalent. An absolutely-positioned flex container sizes to its preferred
+     width, and `PlanToolbar`'s own `max-width: 100%` makes that computation
+     cyclic: Chrome returned **673px against a 674.4px content row** at a 1920px
+     viewport, so the lock toggle wrapped to a second line with 256px of unused
+     band beside it. `max-content` asks the direct question and the `max-width`
+     below still clamps it. */
+  width: max-content;
+  /* The band's gutter, given up on both sides. See the stage's note: this is
+     what makes overlap with the two side plates impossible by arithmetic
+     instead of by luck. */
+  max-width: calc(100% - 2 * var(--of-stage-gutter));
+}
+
+/* Below about a 600px stage the band cannot hold the toolbar between the two
+   plates however the gutter is divided, because `PlanToolbar`'s `Place / Erase /
+   Move` toggle is a segmented control that will not shrink below its own text.
+   Measured on the gutter alone, with the slot still centred in the band: 1 dead
+   column at a 1060px viewport rising to **50 at 901px**, all of it the toggle
+   spilling out of the slot and under the generator plate. So at that size the
+   slot stops sharing the band and drops below both plates instead, where it has
+   the full width and the guarantee is trivial rather than arithmetic.
+
+   92px clears the tallest closed plate: the generator's wraps to three 11px mono
+   lines at its narrowest cap, measured at 65px tall on a 12px inset, and the
+   3D plate is 42px. It is a number rather than a `calc()` because neither plate
+   publishes its height, and erring long costs a few pixels of drawing where
+   erring short costs a dead control.
+
+   Verified across 820-1920px: 0 dead columns at every width sampled. */
+@container (max-width: 600px) {
+  .of-builder-toolbar-slot {
+    top: 92px;
+    max-width: calc(100% - 24px);
+  }
 }
 
 /* ── The corner plates ───────────────────────────────────────────────────────

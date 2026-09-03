@@ -127,10 +127,15 @@ describe('the builder screen', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Builder' })).toHaveClass('of-sr-only')
   })
 
-  it('shows the lock notice, which is the only route to /settings', async () => {
+  it('shows the lock notice and the work-area lock control, which is what it now points at', async () => {
     await renderBuilder()
     // PR 19 mounts nothing itself: `LockNotice` renders here or nowhere.
     expect(screen.getByRole('complementary', { name: 'Lock system' })).toBeInTheDocument()
+    // Row L1: the notice used to be the only route to `/settings`. That screen
+    // is deleted and the preference is a control in the stage, so both have to
+    // be on this screen — the notice's "show me the control" action moves focus
+    // to the second of these and does nothing if it is absent.
+    expect(screen.getByRole('button', { name: /^Lock system: / })).toBeInTheDocument()
   })
 
   it('reads the facets out of the URL, so a shared palette search arrives filtered', async () => {

@@ -19,7 +19,6 @@ export {
   libraryRoute,
   rootRoute,
   routeTree,
-  settingsRoute,
 } from './routeTree'
 export type { TileSubject, TileTarget } from './tileAddress'
 export { resolveTileTarget, tileOrdinal } from './tileAddress'

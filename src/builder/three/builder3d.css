@@ -27,62 +27,50 @@
 
 /* Closed: a plate in the stage's top-right.
 
-   **It is NOT clear of the floating toolbar, and this comment used to say it
-   was.** Row X10 was handed a live measurement from a real Chrome on the
-   production build — the first in this series — and the claim is false at the
-   viewport it was taken at. At 1295 x 955, hit-testing every pixel column across
-   the `snap 0.5` button at its vertical centre:
+   **It was NOT clear of the floating toolbar, and this comment twice said the
+   wrong thing about it.** Row X10 was handed a live measurement from a real
+   Chrome on the production build — the first in this series — and recorded that
+   at 1295 x 955, hit-testing every pixel column across the `snap 0.5` button at
+   its vertical centre:
 
      snap 0.5 button      x 772 .. 860   (88 px wide)
      View in 3D plate     x 847 .. 981   (134 px wide)
      dead columns         14 of 88 = 15.9%, from 75 px into the button
 
-   So the last 14 px of `snap 0.5` cannot be pressed. The cause is in this file
-   and in `screens/builder/builder.css`, and it is three declarations:
-
-     .of-builder-toolbar-slot   top: 12px; left: 50%; translate: -50% 0;
-                                max-width: calc(100% - 24px);  z-index: 2
-     .of-b3d-launch[open=false] top: 12px; right: 12px;         z-index: 3
-
-   Two absolutely-positioned overlays in one band of one stacking context
-   (`.of-builder-stage`), each sized by its own content and neither aware of the
-   other, with the plate winning the stacking order. The toolbar is centred and
-   allowed to grow to the full stage width less 24 px, so it grows straight under
-   this plate; the plate is painted and hit-tested over it. There is a third
-   overlay in the same band — row S4's generator plate, top-left — so the
-   collision has two chances rather than one.
+   **Row L1 reproduced that (13 of 87, 14.9%, from 74 px — the same finding,
+   off by rounding) and found the collision X10 predicted on the other side was
+   the more serious one: row S4's generator plate covered `Place` completely,
+   60 of 60 px, and 24.6% of `Erase`.** The builder's primary tool could not be
+   pressed at that viewport.
 
    `elementFromPoint` names `.of-b3d-toggle-note` at those columns, which is a
    red herring twice over: the note is a **child** of `.of-b3d-toggle`, so
    `pointer-events: none` on it would hand the hit to the button rather than to
    the snap toggle; and being a flex-column child with `align-items: flex-end`,
    it cannot spill outside its parent — it *sets* the plate's 134 px width, being
-   the longest line in it. The overlap is plate-over-toolbar, and the note is
+   the longest line in it. The overlap was plate-over-toolbar, and the note was
    merely the innermost element at those pixels.
 
-   **Not fixed here, and deliberately.** Every candidate fix trades one dead zone
-   for another or moves a visible control, and choosing between them needs the
-   stage width at several viewports:
+   **Fixed in row L1, with X10's second candidate: the gutter.**
+   `screens/builder/builder.css` publishes `--of-stage-gutter` on the stage and
+   gives up `2 x` it from the toolbar slot's `max-width`; each side plate is
+   capped inside the same gutter, below. Overlap is then impossible by
+   arithmetic at any width and for any number of controls in the band, which is
+   what made it safe for L1 to put a fourth control there. The cap is above this
+   plate's natural 134 px, so **the View in 3D button is not narrowed** — X10's
+   one constraint on a fix — and the cost is a toolbar that wraps to two lines on
+   a stage narrower than about 1030 px. The stage's own note carries the numbers
+   and the reasoning, including why X10's third candidate (one `auto 1fr auto`
+   grid) is still not available: this element is both the corner plate and, at
+   `[data-open='true']`, the full-stage overlay, so it cannot become a grid item
+   without moving the open state too.
 
-     - Lowering this plate's `z-index` below 2 (and raising the open state's
-       above it) makes the snap toggle win the overlap — and takes those same
-       14 px away from the View in 3D button, which is currently whole.
-     - Reserving a gutter — cap each side plate at `--of-stage-gutter` and take
-       `2 x` that off the toolbar slot's `max-width` — makes overlap impossible
-       by arithmetic, and the toolbar already wraps rather than overflows, so it
-       degrades correctly. It needs one number, and whether that number makes the
-       toolbar wrap to two lines at 1295 px is a measurement this row could not
-       take: there is no Chrome or Chromium in its environment, only Firefox.
-     - Laying the band out as one `auto 1fr auto` grid is the structural answer
-       and cannot be done from here, because this element is both the corner
-       plate and, at `[data-open='true']`, the full-stage overlay.
-
-   The View in 3D button itself is whole — six sample points across it all hit
-   it — so a fix must not narrow it. Owner: the builder stage's top band, across
-   `screens/builder/builder.css` and this file. */
+   Scoped to the closed state, for that same reason: a `max-width` on
+   `[data-open='true']` would clamp the room to a corner. */
 .of-b3d-launch[data-open='false'] {
   top: 12px;
   right: 12px;
+  max-width: calc(var(--of-stage-gutter, 208px) - 16px);
 }
 
 /* Open: the whole stage. `inset: 0` rather than a width/height pair so it tracks

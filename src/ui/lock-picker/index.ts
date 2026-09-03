@@ -3,13 +3,21 @@
  *
  * Four things, in the order a caller is likely to want them:
  *
+ *   - **`LockToggle`** — the control, in the builder's work area. No props: the
+ *     preference is global and the figures come from the emitted index. It is a
+ *     trigger stating what is in effect and what it can build, over a modal disclosure
+ *     holding `LockPicker` and the disclosure. `LockToggle.tsx` carries the
+ *     argument for it, **including the documented decision it overrules** — the
+ *     deleted `/settings` screen rejected exactly this shape — and the list of
+ *     what the disclosure dropped relative to that screen.
  *   - **`LockNotice`** — the one-time banner. No props, renders `null` once the
  *     user has answered. Mount it where the preference changes what the user
  *     gets: the builder, and anything on the download path. Not on the landing
- *     page. `LockNotice.tsx` carries the banner-not-modal reasoning.
- *   - **`LockPicker`** — the picker itself, controlled. `@/screens/settings`
- *     mounts it under a heading; a toolbar or dialog can mount the same
- *     component with its own `name`.
+ *     page. `LockNotice.tsx` carries the banner-not-modal reasoning, and why it
+ *     survived the screen it used to link to.
+ *   - **`LockPicker`** — the picker itself, controlled. `LockToggle`'s disclosure
+ *     mounts it under a title; a second host can mount the same component with
+ *     its own `name`, which is what that prop is for.
  *   - **`useLockBuild`** / **`deriveLockBuild`** — the measured comparison, both
  *     readings in one object. Use the hook to get it from the emitted index; use
  *     the function when you already hold a parsed `CatalogFile`, which is what
@@ -36,6 +44,8 @@ export type { LockBuild, LockBuildEntry, UnbuildableDesigns } from './build'
 export { buildOf, deriveLockBuild } from './build'
 
 export { LockNotice } from './LockNotice'
+
+export { LOCK_TOGGLE_ID, LockToggle } from './LockToggle'
 
 export type { LockPickerProps } from './LockPicker'
 export { LockPicker } from './LockPicker'

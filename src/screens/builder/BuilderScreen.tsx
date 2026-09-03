@@ -58,6 +58,15 @@
  * are two projections of one store rather than two scenes to keep in step, and
  * this screen gains no state for it.
  *
+ * **The lock preference is the same shape.** `<LockToggle>` (row L1) is in the
+ * stage's top band beside the toolbar, and it takes no props at all: the
+ * preference is global, it reads it from the store itself and its figures come
+ * from the emitted index through `useLockBuild`. A prop here would be a second
+ * copy of a value this screen already reads for the bill, and two copies of one
+ * preference is how a control comes to disagree with what it controls. The
+ * screen that used to hold it — `/settings` — is deleted; `LockToggle.tsx`
+ * carries the argument, including the one it overrules.
+ *
  * It renders a `<section>`, not a `<main>`: `AppFrame` owns the document's one
  * `<main>`. The `<h1>` is clipped — the contract opens this screen on the palette
  * and the drawing, not on a title, and a visible heading would cost the canvas a
@@ -88,7 +97,7 @@ import {
   useLockSystem,
   usePlacements,
 } from '@/store'
-import { LockNotice } from '@/ui/lock-picker'
+import { LockNotice, LockToggle } from '@/ui/lock-picker'
 import { Button, Eyebrow } from '@/ui/primitives'
 
 import './builder.css'
@@ -294,6 +303,25 @@ function Builder({ index }: { index: CatalogIndex }) {
             placed={bill.placements}
             onClear={clearPlacements}
           />
+          {/*
+            Row L1. The lock preference used to be a screen at `/settings`; the
+            owner asked for it in the work area, so it is here, beside the
+            toolbar rather than inside it.
+
+            **Beside, not inside, and that is the durable half of the decision.**
+            Every control in `PlanToolbar` writes `PlanTools`, and row R4 deletes
+            the plan view those tools drive. The lock system is neither a plan
+            tool nor a thing R4 removes — it decides which base is matched under
+            every topper in the bill and which STL the download resolves to — so
+            it is a sibling in the slot and comes through that row untouched.
+
+            The slot is a wrapping flex row for this, and `builder.css` now
+            reserves a gutter on both sides of the band so that neither this
+            control nor the toolbar can be painted over by the generator or 3D
+            plates. That collision was real and measured before this landed:
+            `Place` was 100% unclickable at 1295px.
+          */}
+          <LockToggle />
         </div>
 
         {/* §2.4's two corner plates. Pointer-transparent, so a click near the
