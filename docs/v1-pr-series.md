@@ -39,11 +39,11 @@ rather than by the UI.
 
 | # | Title | Goal | Owns | Depends on | Neutral? |
 | --- | --- | --- | --- | --- | --- |
-| 7 | Facet and search engine | `Uint32Array` bitset facet index with disjunctive counts + MiniSearch text layer. Tokenised matching, size-token synthesis, word boundaries | `src/search/**` (except `searchSchema.ts`) | 3, 6 | yes (inert) |
+| 7 | Facet and search engine | `Uint32Array` bitset facet index with disjunctive counts + a hand-rolled CSR inverted index for text (no MiniSearch — fuzzy conflates `2x2` with `2x1`). Tokenised matching, size-token synthesis, word boundaries | `src/search/**` (except `searchSchema.ts`) | 3, 6 | yes (inert) |
 | 8 | Material registry | `resolveMaterial(tags)` over 16 families / 38 roots, with the ΔE00 separation asserted in a test | `src/materials/**` | 3 | yes (inert) |
 | 9 | Assembly resolution | Base↔topper matching on shape + `size|openlock` code; the `connection\|openforge` base auto-insert rule; bill-of-tiles roll-up with md5 dedupe | `src/assembly/**` | 3 | yes (inert) |
 | 10 | Share-link codec | Columnar JSON → `CompressionStream('deflate-raw')` → base64url, with manifest-version checking and round-trip tests | `src/share/**` | 3, 5 | yes (inert) |
-| 11 | Zip download | `client-zip` + `native-file-system-adapter`, md5 dedupe, filename disambiguation, `predictLength` from fixture sizes, `ATTRIBUTION.csv` + `LICENSE.txt` entries | `src/download/**`, `vendor/client-zip/**` | 3, 9 | yes (inert) |
+| 11 | Zip download | vendored `client-zip` (no `native-file-system-adapter` — its service-worker fallback truncates unobservably), md5 dedupe, filename disambiguation, `predictLength` from the index's `bytes` field, `ATTRIBUTION.csv` + `LICENSE.txt` entries | `src/download/**`, `vendor/client-zip/**` | 3, 9 | yes (inert) |
 
 ---
 
@@ -67,7 +67,7 @@ Row 12 is a seam: three screens need the same app frame, so it lands alone first
 | --- | --- | --- | --- | --- | --- |
 | 17 | Plan-view canvas | Top-down builder: grid, snap at 0.5 units, per-tile rotation step, place/erase, RECT + WALL_SEG rendering from footprints and family colours | `src/builder/canvas/**` | 8, 9, 12 | no |
 | 18 | Builder shell | Three-column layout, palette with catalog search, floating toolbar, bill-of-tiles panel with size warning surface, download action | `src/builder/panels/**`, `src/screens/builder/**` | 11, 17 | no |
-| 19 | Lock preference UI | One-time lock system picker showing reachable-design counts (openlock 100%, dragonlock 70.2%, magnetic 67.5%) | `src/screens/settings/**`, `src/ui/lock-picker/**` | 5, 12 | no |
+| 19 | Lock preference UI | One-time lock system picker showing reachable-design counts (openlock 99.9%, dragonlock 74.7%, magnetic 59.7%) | `src/screens/settings/**`, `src/ui/lock-picker/**` | 5, 12 | no |
 
 ---
 
@@ -100,8 +100,13 @@ production** without them. Build them, hold the execution.
 ## Running it
 
 - Every branch is `pr/NN-slug`, branched from `epic/v1`. Flat, never stacked.
-- Two or three agents at a time on disjoint `Owns` sets, each in its own worktree with
-  distinct scratch names.
+- Two or three agents at a time on disjoint `Owns` sets.
+- **Do not give agents their own git worktree.** This repo is nested inside
+  `openforge-catalog`, which is a *different* git repo, so worktree isolation provisions a
+  worktree of the outer repo and then refuses every git command targeting a path beneath it —
+  including this one. Agents write files only; branch, commit and merge are done from the
+  main checkout. Disjoint `Owns` sets make concurrent file writes safe, and serialising the
+  git operations avoids two agents fighting over `HEAD` in one working tree.
 - Each agent brief states: goal, `Owns`, **what it must not touch and which PR owns that
   instead**, how to verify, how to finish.
 - A PR is ready only when the agent has finished, CI is green, and review comments are

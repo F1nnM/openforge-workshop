@@ -1,0 +1,5 @@
+# The incremental result log. Rebuildable from the bucket, and the *sidecar*
+# assembled from it (`measurements.json`) is the artefact that belongs in git —
+# this is the append-only working state that makes an interrupted 11.05 GB run
+# resumable rather than repeated.
+.cache/

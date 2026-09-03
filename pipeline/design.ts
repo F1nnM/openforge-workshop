@@ -1,0 +1,60 @@
+/**
+ * Design identity — one tile collapsed across its connection variants.
+ *
+ * §7's rule is "place designs, not files": the user places a design and the
+ * concrete STL resolves at download time from their lock preference. There are
+ * **3,822 distinct designs** at 2.28 files each, and the definition is the
+ * verify script's `design_key(collapse=("connection",))` — the sorted tag set
+ * with the whole `connection|` namespace removed.
+ *
+ * The id is a hash of that tag set rather than a counter, for two reasons.
+ * A counter would depend on iteration order, and it would make the id of every
+ * design after an inserted one shift when the corpus grows. A content hash is a
+ * pure function of the design, so two builds agree and an unrelated addition
+ * changes nothing.
+ *
+ * Collision is a real failure mode at 48 bits, not a theoretical one, so
+ * {@link buildDesignIndex} checks for it and throws rather than silently
+ * merging two designs into one placement.
+ */
+import { createHash } from 'node:crypto'
+
+/** The collapsed tag set that defines a design: sorted, `connection|` removed. */
+export function designKey(tags: readonly string[]): string {
+  return [...tags]
+    .filter((tag) => !tag.startsWith('connection|'))
+    .sort()
+    .join('\u0000')
+}
+
+/** Twelve hex characters of SHA-256 over the design key, prefixed so it reads as an id. */
+export function designId(tags: readonly string[]): string {
+  return `d${createHash('sha256').update(designKey(tags)).digest('hex').slice(0, 12)}`
+}
+
+/**
+ * Design id per tile id, with a collision check across the whole corpus.
+ *
+ * @throws if two distinct design keys hash to the same id — the one case where
+ *   a shortened hash would quietly merge two different designs.
+ */
+export function buildDesignIndex(tiles: readonly { id: string; tags: readonly string[] }[]): {
+  designOf: ReadonlyMap<string, string>
+  designs: number
+} {
+  const designOf = new Map<string, string>()
+  const keyOf = new Map<string, string>()
+
+  for (const tile of tiles) {
+    const key = designKey(tile.tags)
+    const id = designId(tile.tags)
+    const existing = keyOf.get(id)
+    if (existing !== undefined && existing !== key) {
+      throw new Error(`design id collision on ${id}; widen the hash in designId()`)
+    }
+    keyOf.set(id, key)
+    designOf.set(tile.id, id)
+  }
+
+  return { designOf, designs: keyOf.size }
+}

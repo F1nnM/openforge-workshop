@@ -1,0 +1,377 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the builder screen's layout.
+
+   design-contract.md §2.4: three columns, `calc(100vh - 60px)`, no page scroll.
+   The 60px is not restated — `../../ui/shell/shell.css` publishes the header's
+   height as `--of-header-h` for exactly this, so a change to the header cannot
+   silently push the builder past the viewport.
+
+   `100dvh`, not `100vh`: on mobile Safari `100vh` is the *largest* viewport
+   height, so a page sized to it is scrollable by the height of the collapsing
+   toolbar — which is precisely the page scroll this screen is specified not to
+   have.
+
+   ## Why the whole screen is a grid and every column a scroll container
+
+   "No page scroll" is a structural requirement, not a `overflow: hidden` on the
+   body. Three things have to hold at once: the drawing must fill the height it is
+   given and never move, either sidebar must be able to hold a hundred rows, and
+   the bill's download action must stay on screen when it does. A grid with fixed
+   outer tracks and `minmax(0, 1fr)` in the middle gives all three — the `0`
+   minimum is what stops a long tile name in the palette from widening its track
+   and pushing the canvas out of the viewport, which is the default behaviour of
+   a grid item and the single commonest way a layout like this breaks.
+
+   Hand-written rather than Tailwind utilities, for the reason at the top of
+   `../../ui/shell/shell.css`. The panel styling lives with the panels, in
+   `../../builder/panels/panels.css`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* ── The three columns ───────────────────────────────────────────────────── */
+
+.of-builder {
+  /* The positioning context of last resort. A `position: absolute` descendant
+     with no positioned ancestor resolves against the *initial* containing block
+     and is therefore not clipped by the `overflow: hidden` below — which is how a
+     screenful of clipped `VisuallyHidden` spans turned into 2,809px of page
+     scroll before this line existed. Each scroll container declares its own too;
+     this is the backstop for anything added later. */
+  position: relative;
+  display: grid;
+  /* §2.4's widths. The middle track takes what is left. */
+  grid-template-columns: 272px minmax(0, 1fr) 302px;
+  height: calc(100dvh - var(--of-header-h));
+  /* A grid child's default `min-height: auto` would let a tall column grow the
+     row past the viewport, which is the page scroll this layout forbids. */
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── The stage ───────────────────────────────────────────────────────────────
+   The canvas fills it; the toolbar and the corner plates float over it. The
+   stage is the positioning context for all of them, so none needs to know the
+   layout's dimensions.
+
+   ## The top band, and the gutter that makes it safe
+
+   Three overlays used to share one 12px band across the top of one stacking
+   context: row S4's generator plate (top-left, `z-index: 3`), the toolbar slot —
+   which holds `PlanToolbar` *and* row L1's lock toggle (top-centre,
+   `z-index: 2`) — and row G2's 3D plate (top-right, `z-index: 3`). Each was
+   sized by its own content and none was aware of the others, so the centred slot
+   grew straight under both side plates and the plates — higher in the stacking
+   order — were painted **and hit-tested** over it.
+
+   **Row R4 removed the third of them, and the gutter stays symmetric anyway.**
+   The 3D surface has no closed state left to be a corner plate in, so the band's
+   top-right is empty and only the generator plate is left to collide with. The
+   obvious tidy-up is to give up one gutter instead of two and hand the reclaimed
+   width back to the toolbar. **It re-opens L1's defect, and that is measured
+   rather than argued.** The slot is centred with `translate: -50%`, so a
+   `max-width` of `100% - gutter` puts `(100% - gutter)/2` of it on *each* side of
+   centre and its left edge back under the generator plate: the guarantee only
+   holds for a centred element if the gutter is given up on both sides. Injected
+   as a one-line `!important` override into the shipping build and swept in Chrome
+   for Testing 148:
+
+     one-sided cap    1080px  0 dead
+                      1280px  81 dead   Place 60 of 60, Erase 21 of 62
+                      1295px  73 dead   Place 60 of 60, Erase 13 of 61
+                      1440px   4 dead   Place  4 of 60
+                      1920px  0 dead
+
+   `Place` 60 of 60 is L1's defect back verbatim. Two gutters, the shipping
+   arithmetic, swept the same way after the deletion: **0 dead columns on every
+   control in the band at 820, 900, 1000, 1030, 1080, 1280, 1295, 1440 and
+   1920px**, identical to the same sweep on the pre-R4 build. What R4 did buy is
+   one fewer element that can ever claim the right-hand gutter, and the reason the
+   band cannot grow to use it.
+
+   **Row X10 measured that and could not fix it: no Chrome in its environment.
+   Row L1 had one (Chrome for Testing 148), and the defect was worse than
+   reported.** At 1295 x 955, hit-testing every pixel column across each control
+   at its vertical centre:
+
+     stage          x 272 .. 993   (721 px)
+     generator      x 284 .. 477   (193 px)
+     toolbar slot   x 386 .. 879   (492 px, centred on the stage)
+     3D plate       x 847 .. 981   (134 px)   — deleted in row R4
+
+     Place          60 of 60 px dead  (100%)   under the generator plate
+     Erase          15 of 61 px dead  (24.6%)  under the generator plate
+     snap 0.5       13 of 87 px dead  (14.9%)  under the 3D plate
+
+   X10 reported the 14.9% on `snap 0.5` and predicted a second collision on the
+   generator side. The second collision is **total**: `Place`, the builder's
+   primary tool, could not be pressed at all at that viewport, and nothing in the
+   repository would have said so.
+
+   ## Why a gutter and not a grid
+
+   X10 wrote three candidate fixes into `../../builder/three/builder3d.css`.
+   Lowering the 3D plate's `z-index` only moves the dead columns onto the 3D
+   button. Laying the band out as one `auto 1fr auto` grid is the structural
+   answer and is still not available: both side plates are the *same element* as
+   their opened states — `inset: 0` for the 3D room, a 442px right-edge drawer
+   for the generator — and those resolve against whatever positioned ancestor
+   they have, so wrapping them in a positioned band breaks both. Fixing that
+   means moving two rows' open states, which is a row of its own.
+
+   So: the gutter, which X10 ranked second and left because choosing the number
+   needed a browser. Each side plate is capped at the gutter less its 12px
+   inset, and the slot's `max-width` gives up `2 x` the gutter. **Overlap then
+   cannot happen by arithmetic rather than by luck**, at any width and for any
+   number of controls in the band — which is the property that made it safe to
+   add the lock toggle at all.
+
+   `min(208px, 34%)` rather than a constant: 208 is 12 + 196, and 196 clears
+   today's widest side plate (the generator's 193, which after row R4 is also the
+   only one). The 34% is the floor that keeps the guarantee from inverting — the
+   centre always keeps 100% - 2 x 34% = 32% of the stage, so a narrow stage
+   shrinks the plate (which wraps its own text) instead of producing a negative
+   `max-width` and a collision again.
+
+   The plate gives up `gutter - 16px` rather than `gutter - 12px`, and the extra
+   4px is not padding for taste. With the cap at exactly `gutter - 12px` the
+   plate's outer edge lands on the slot's edge, and at a stage width where the
+   34% floor is fractional the two round onto the **same pixel column**: measured
+   at a 1080px viewport, 1 dead column, which is the whole defect back again in
+   miniature. 4px of declared clearance makes the boundary unambiguous at every
+   width the sweep covers.
+
+   **Measured after the fix: 0 dead columns on every control in the band, at
+   every viewport from 820px to 1920px.** For comparison, the same sweep on the
+   tree this row started from: 88 dead columns at 1295px, 231 at 1079px, 208 at
+   1000px and 251 at 901px.
+
+   The cost is height, and it is paid in stages rather than all at once. What the
+   band does as the stage narrows, measured:
+
+     stage >= 1126   one row      toolbar and the lock toggle side by side
+     stage >= 926    two rows     the lock toggle drops below the toolbar
+     stage >= 866    three rows   the toolbar itself wraps to two lines
+     stage >= 626    four rows
+     stage <= 600    the slot leaves the band (see the container query below)
+
+   So §2.4's single centred row survives to a 1700px viewport and degrades from
+   there. That is a real regression against the contract and it is the better
+   half of the trade: a wrapped toolbar is legible and clickable, and a
+   100%-dead `Place` button is neither.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-builder-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+
+  /* Queried below, so the band can change shape on the stage's own width rather
+     than on the viewport's. The stage is two fixed columns narrower than the
+     viewport at one breakpoint and one column narrower at the next, so a
+     viewport media query would be asking the wrong question — and it is the
+     stage's width that decides whether three overlays fit in one band. Layout
+     containment is implied and harmless here: this element is already the
+     positioning context and already sizes from its grid track, not from its
+     contents. */
+  container-type: inline-size;
+
+  /* Read by the generator plate's closed state, in its own stylesheet, and by
+     the toolbar slot below. It was read by two plates; row R4 deleted the 3D
+     one's closed state along with the plan view it was a way back to. */
+  --of-stage-gutter: min(208px, 34%);
+}
+
+/* §2.4: "a floating toolbar, centred at the top". A wrapper rather than absolute
+   positioning on the toolbar itself, so the toolbar component stays a plain
+   flex row and this screen owns where it sits.
+
+   It holds two children now — `PlanToolbar` and the lock toggle — so it is a
+   flex row of its own that wraps. The lock toggle is **not** inside
+   `PlanToolbar`: every control in that component writes `PlanTools`, which row
+   R4 left driving the 3D surface. A sibling in the slot survived that. */
+.of-builder-toolbar-slot {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 8px;
+  /* `max-content` and not shrink-to-fit, which is load-bearing rather than
+     equivalent. An absolutely-positioned flex container sizes to its preferred
+     width, and `PlanToolbar`'s own `max-width: 100%` makes that computation
+     cyclic: Chrome returned **673px against a 674.4px content row** at a 1920px
+     viewport, so the lock toggle wrapped to a second line with 256px of unused
+     band beside it. `max-content` asks the direct question and the `max-width`
+     below still clamps it. */
+  width: max-content;
+  /* The band's gutter, given up on both sides. See the stage's note: this is
+     what makes overlap with the two side plates impossible by arithmetic
+     instead of by luck. */
+  max-width: calc(100% - 2 * var(--of-stage-gutter));
+}
+
+/* Below about a 600px stage the band cannot hold the toolbar between the two
+   plates however the gutter is divided, because `PlanToolbar`'s `Place / Erase /
+   Move` toggle is a segmented control that will not shrink below its own text.
+   Measured on the gutter alone, with the slot still centred in the band: 1 dead
+   column at a 1060px viewport rising to **50 at 901px**, all of it the toggle
+   spilling out of the slot and under the generator plate. So at that size the
+   slot stops sharing the band and drops below both plates instead, where it has
+   the full width and the guarantee is trivial rather than arithmetic.
+
+   92px clears the tallest closed plate: the generator's wraps to three 11px mono
+   lines at its narrowest cap, measured at 65px tall on a 12px inset. (The 3D
+   plate was 42px and is gone as of row R4, so the generator is now the only
+   term.) It is a number rather than a `calc()` because the plate does not publish
+   its height, and erring long costs a few pixels of drawing where erring short
+   costs a dead control.
+
+   Verified across 820-1920px: 0 dead columns at every width sampled. */
+@container (max-width: 600px) {
+  .of-builder-toolbar-slot {
+    top: 92px;
+    max-width: calc(100% - 24px);
+  }
+}
+
+/* ── The corner plates ───────────────────────────────────────────────────────
+   §2.4's contextual hint (bottom left) and armed-tile name (bottom right), on
+   translucent plates and pointer-transparent so a click near the bottom of the
+   drawing still places a tile.
+
+   This screen draws them, and until row R4 that was a decision rather than the
+   only option: `PlanCanvas` could draw its own, and its armed plate carried the
+   `snap` readout as well, which the contract puts in the toolbar — two of them on
+   screen would have been a designer's bug report. With the plan view deleted the
+   alternative is gone and `chrome={false}` with it. The ~14 lines below are the
+   plate treatment `builder3d.css` also carries for the surface's own two plates;
+   if a third surface ever wants a plate, it belongs in `../../ui/primitives/`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-build-plate {
+  position: absolute;
+  bottom: 12px;
+  z-index: 1;
+  max-width: 44%;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg2) 88%, transparent);
+  color: var(--mut);
+  font-size: 12.5px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.of-build-hint {
+  left: 12px;
+}
+
+.of-build-armed {
+  right: 12px;
+  color: var(--ink);
+  text-align: right;
+}
+
+.of-build-at {
+  display: block;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* ── The bill column ─────────────────────────────────────────────────────────
+   A column rather than the panel directly, because the lock notice sits above
+   it: the preference decides which base is matched under every openforge topper
+   in the bill, so that is where it belongs. The notice renders `null` once
+   answered, and this track then collapses to the panel alone.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-builder-bill {
+  display: grid;
+  /* The notice takes what it needs; the panel takes the rest and does its own
+     three-band scrolling inside. */
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg2);
+  border-left: 1px solid var(--line);
+}
+
+/* The panel's own left border would double this column's. */
+.of-builder-bill > .of-bill {
+  border-left: none;
+}
+
+.of-builder-lock {
+  margin: 10px 12px 0;
+}
+
+/* ── Waiting and failing ─────────────────────────────────────────────────────
+   Deliberately not a three-column skeleton. The catalog screen shows one because
+   its sidebar and grid arrive at different times and the grid would jump 264px;
+   here every column depends on the same 5.6 MB index, so there is nothing to
+   reserve space for — a whole shimmering builder would be a picture of an
+   application that does not exist yet.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-builder-wait {
+  display: grid;
+  place-items: center;
+  height: calc(100dvh - var(--of-header-h));
+  padding: 24px;
+}
+
+.of-builder-loading {
+  margin: 0;
+}
+
+.of-builder-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: 56ch;
+}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────────
+   The contract's screens are desktop-first and this one is the most desktop of
+   them: a 272px palette, a drawing and a 302px bill do not fit beside each other
+   below about 900px. Rather than invent a phone builder the contract does not
+   specify, the two side columns narrow to their minimum and then the bill drops
+   below the stage — one column of drawing over parts list, which is still a
+   builder, and still no page scroll because the whole thing stays a grid at the
+   viewport's height.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  .of-builder {
+    grid-template-columns: 236px minmax(0, 1fr) 268px;
+  }
+}
+
+@media (max-width: 900px) {
+  .of-builder {
+    grid-template-columns: 236px minmax(0, 1fr);
+    /* The stage keeps two thirds of the height; the bill takes the rest and
+       scrolls inside itself as it always did. */
+    grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
+  }
+
+  .of-palette {
+    /* Down the left of both rows, so the palette is still beside the drawing. */
+    grid-row: 1 / span 2;
+  }
+
+  .of-builder-bill {
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+}

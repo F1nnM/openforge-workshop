@@ -1,0 +1,594 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — tile detail drawer.
+
+   Geometry transcribed from the mock's own drawer markup (design/
+   OpenForge-Studio.dc.html, the `hasDetail` block): 20/24/30px padding, a 288px
+   preview well over `radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg))`,
+   a 27px serif title, a hairline-gridded 2×2 spec table, and the storage address
+   in `--acc2` on a recessed `--bg3` plate.
+
+   The panel itself — 442px, the scrim, the slide — is `.of-drawer` in
+   ../../ui/primitives/primitives.css and is not restated here. Neither are the
+   chips or the eyebrows: those are `Chip` and `Eyebrow`, so this file styles
+   only what is specific to this screen.
+
+   Unlayered, matching the rest of the app's CSS.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* The mock's drawer padding, applied to the primitive's two regions so the
+   eyebrow row and the body share one gutter. */
+.of-detail .of-overlay-head {
+  align-items: center;
+  padding: 20px 24px 14px;
+  border-bottom: none;
+}
+
+.of-detail .of-overlay-body {
+  padding: 0 24px 30px;
+}
+
+/* The eyebrow rides in the primitive's description slot: `{texture set} ·
+   {component}`, in the accent, which is where the mock puts it. */
+.of-detail .of-overlay-description {
+  margin: 0;
+}
+
+/* ── Preview ─────────────────────────────────────────────────────────────── */
+
+.of-detail-well {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 288px;
+  background: radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg));
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.of-detail-frame {
+  width: 288px;
+  height: 288px;
+  max-width: 100%;
+  cursor: grab;
+  /* The drag is a rotation, so the browser must not also read it as a pan. */
+  touch-action: none;
+  user-select: none;
+}
+
+/* The sheet, and the one filtered element in the well.
+   Separate from `.of-detail-frame` because that element is the `role="slider"`
+   and a CSS filter would take the app's accent focus ring with it — see
+   `SpriteRotator.tsx`. Inert: pointer events belong to the slider, which is its
+   parent, so they reach it by bubbling and need nothing here. */
+.of-detail-sheet {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+}
+
+.of-detail-frame[data-dragging] {
+  cursor: grabbing;
+}
+
+.of-detail-frame:focus-visible {
+  outline-offset: -4px;
+}
+
+/* Pending sheet: the contract's shimmer device (`.of-shimmer`, ../../ui/shell),
+   over the well's own ground rather than instead of it. */
+.of-detail-pending {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, var(--bg2) 50%, transparent 80%);
+  pointer-events: none;
+}
+
+/* No sheet at all, or a sheet that 404ed. Stated, not left blank. */
+.of-detail-noshot {
+  max-width: 26ch;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.of-detail-noshot p {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+
+.of-detail-caption {
+  margin: 6px 0 0;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--mut);
+}
+
+.of-detail-caption kbd {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ── Angle pad ───────────────────────────────────────────────────────────────
+   Ten explicit frames, because neither the drag nor the arrow keys should be the
+   only way to reach one. The ring is one row, the two poles the next.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-detail-pad {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.of-detail-pad-row {
+  display: flex;
+  gap: 4px;
+}
+
+.of-detail-pad-key {
+  min-width: 34px;
+  padding: 3px 6px;
+  background: var(--bg3);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.of-detail-pad-key:hover {
+  color: var(--ink);
+  border-color: var(--acc);
+}
+
+.of-detail-pad-key[aria-pressed='true'] {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--accink);
+}
+
+/* ── Title ───────────────────────────────────────────────────────────────── */
+
+.of-detail-title {
+  margin: 16px 0 4px;
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 27px;
+  line-height: 1.12;
+}
+
+.of-detail-family {
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: var(--mut);
+}
+
+.of-detail-family code {
+  font-family: var(--face-mono);
+  font-size: 12.5px;
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────────── */
+
+.of-detail-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.of-detail-action {
+  flex: 1;
+  padding: 11px 0;
+  border: 1px solid var(--acc);
+  border-radius: 4px;
+  background: var(--acc);
+  color: var(--accink);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.of-detail-action:hover {
+  filter: brightness(1.12);
+}
+
+/* In the library: the secondary accent, which is the palette's "confirmed"
+   colour (design-contract.md §1) — the same green the header's saved count
+   uses. */
+.of-detail-action[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--acc2) 15%, transparent);
+  border-color: var(--acc2);
+  color: var(--acc2);
+}
+
+.of-detail-action[data-variant='ghost'] {
+  background: none;
+  border-color: var(--acc);
+  color: var(--acc);
+  font-weight: 600;
+}
+
+.of-detail-action[data-variant='ghost']:hover {
+  background: color-mix(in srgb, var(--acc) 10%, transparent);
+  filter: none;
+}
+
+/* ── Spec grid ───────────────────────────────────────────────────────────────
+   The hairlines are the 1px gap of a `--line`-coloured grid showing through, so
+   the four cells read as one table rather than as four boxes.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-detail-specs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  margin: 0 0 20px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.of-detail-spec {
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--bg2);
+}
+
+.of-detail-spec dt {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+
+.of-detail-spec dd {
+  margin: 3px 0 0;
+  font-family: var(--face-mono);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+/* A value that is a refusal rather than a measurement — "Not recorded", "Size
+   not specified". Muted and italic so it cannot be misread as data, and still
+   in mono because it occupies a measured fact's slot. */
+.of-detail-spec dd[data-empty] {
+  color: var(--mut);
+  font-style: italic;
+  font-size: 12.5px;
+}
+
+/* The unit after a footprint. The separating space is in the markup, not here, so
+   a screen reader says "1 × 1 in" rather than "1 × 1in". */
+.of-detail-unit {
+  font-size: 11px;
+  color: var(--mut);
+}
+
+/* ── Storage address ─────────────────────────────────────────────────────── */
+
+.of-detail-section {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.of-detail-address {
+  display: block;
+  margin-bottom: 20px;
+  padding: 9px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--acc2);
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  word-break: break-all;
+  text-decoration: none;
+}
+
+.of-detail-address:hover {
+  border-color: var(--acc2);
+  text-decoration: underline;
+}
+
+/* ── Tags ────────────────────────────────────────────────────────────────── */
+
+.of-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 22px;
+}
+
+/* ── Variants table (row A5) ─────────────────────────────────────────────────
+
+   Every variant is disclosed, so this table has no collapsed state to style and
+   no max-height. The largest aggregate in the corpus holds 20 files and the
+   drawer body scrolls; a `max-height` here would be the accordion the row exists
+   to remove.
+
+   Three columns because the panel is 442px wide with a 24px gutter each side.
+   `table-layout: fixed` so a long filename cannot widen the size column off the
+   panel — the file cell wraps on its own separators instead.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-detail-vartable {
+  width: 100%;
+  margin: 0 0 6px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.of-detail-vartable caption {
+  margin-bottom: 10px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.of-detail-vartable thead th {
+  padding: 0 8px 5px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+/* Widths: the file cell takes what is left, the size column is a fixed mono
+   figure, and the middle column carries the systems and option chips. */
+.of-detail-vartable thead th:nth-child(1) {
+  width: 42%;
+}
+
+.of-detail-vartable thead th:nth-child(3) {
+  width: 62px;
+  text-align: right;
+}
+
+.of-detail-vartable tbody th,
+.of-detail-vartable tbody td {
+  padding: 7px 8px 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.of-detail-vartable tbody td:last-child {
+  padding-right: 0;
+}
+
+/* The shown row. An accent rule on the leading edge rather than a fill, so the
+   marker survives at any row count and does not fight the option chips. */
+.of-detail-vartable tbody tr[aria-current] {
+  background: var(--bg3);
+}
+
+.of-detail-vartable tbody tr[aria-current] .of-detail-varparts {
+  color: var(--acc);
+}
+
+/* ── A variant row's cells ──────────────────────────────────────────────── */
+
+/* The row's control. A button styled as text, because 20 of them in a 442px
+   panel is a list to read down and not a row of 20 controls to look at. Its
+   accessible name is set in the markup and carries the whole row. */
+.of-detail-varpick {
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.of-detail-varparts {
+  display: block;
+  color: var(--ink);
+  font-family: var(--face-mono);
+  font-size: 12px;
+}
+
+.of-detail-varpick:hover .of-detail-varparts,
+.of-detail-varpick:focus-visible .of-detail-varparts {
+  color: var(--acc);
+  text-decoration: underline;
+}
+
+.of-detail-varfile {
+  display: block;
+  margin-top: 2px;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1.35;
+  /* A corpus filename carries `#`, `%`, `+` and `,` as separators, so wrapping
+     anywhere is what keeps a 60-character name inside a 42% column. */
+  word-break: break-all;
+}
+
+.of-detail-varjoins {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-detail-varjoin {
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* Which face carries the system. The distinction is the point of the cell — an
+   underside system means the print meets the table on its own — so it is a word
+   and not a colour. */
+.of-detail-varface {
+  color: var(--mut);
+  font-size: 10.5px;
+}
+
+.of-detail-varjoin[data-face='underside'] .of-detail-varface {
+  color: var(--acc2);
+}
+
+/* An explicit statement, not a blank cell: 119 integral files and 285 inserts
+   declare no system at all. */
+.of-detail-varnone {
+  color: var(--mut);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.of-detail-varopts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.of-detail-varsize {
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ── The single-variant case ─────────────────────────────────────────────────
+
+   2,117 of 3,822 items (55.4%) have exactly one variant. No table, so nothing
+   here inherits the table's chrome.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-detail-onlyvar {
+  margin-bottom: 20px;
+  padding: 11px 13px;
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.of-detail-onlyvar-head {
+  margin: 0 0 5px;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.of-detail-onlyvar-head strong {
+  font-family: var(--face-mono);
+  font-weight: 500;
+}
+
+.of-detail-onlyvar-note {
+  margin: 0 0 8px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.of-detail-onlyvar .of-detail-varopts {
+  margin-top: 6px;
+}
+
+.of-detail-onlyvar .of-detail-varfile {
+  margin-top: 8px;
+}
+
+/* ── The choice note, and the slot note ──────────────────────────────────── */
+
+.of-detail-varnote {
+  margin: 0 0 12px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* ── Accessory slots ─────────────────────────────────────────────────────── */
+
+.of-detail-slots {
+  margin: 0 0 12px;
+}
+
+.of-detail-slot {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.of-detail-slot dt {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+}
+
+.of-detail-slot dt code {
+  color: var(--ink);
+  font-family: var(--face-mono);
+  font-size: 12px;
+}
+
+.of-detail-slotopt {
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.of-detail-slot dd {
+  margin: 3px 0 0;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* Provenance names files, which are long and mono. */
+.of-detail-slot dd code {
+  color: var(--acc2);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  word-break: break-all;
+}
+
+/* ── States ──────────────────────────────────────────────────────────────── */
+
+.of-detail-state {
+  padding: 28px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+
+.of-detail-state p {
+  margin: 8px 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of-detail-action,
+  .of-detail-pad-key,
+  .of-detail-address {
+    transition: none;
+  }
+}

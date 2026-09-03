@@ -1,0 +1,8 @@
+# Fetched sprite sheets. Content-addressed and re-fetchable; 8,702 of them is
+# 4.5 GB, which is not something git should ever be asked to hold.
+.cache/
+
+# The derived thumbnails and the upload manifest. Reproducible from the index
+# plus the bucket, and staged here only until a human with R2 write credentials
+# uploads them.
+out/

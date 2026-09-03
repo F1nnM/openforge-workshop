@@ -1,0 +1,273 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the instanced 3D builder (rows G2, R2, R4).
+
+   **One state, since row R4.** This stylesheet used to carry two, because they
+   were one component: a small pill in the corner of `.of-builder-stage`, and the
+   same element expanded to cover that stage when the room was open. The pill was
+   the way back to the plan view; R4 deleted the plan view, so the pill, its
+   button (`.of-b3d-toggle`), its note (`.of-b3d-toggle-note`) and the
+   `[data-open]` attribute they were selected on are all gone, and the surface is
+   simply the stage. What the deleted block is remembered for is below the
+   stacking-order note, because that plate is where row X10 and row L1 measured
+   the band collision and the arithmetic that fixed it is still live.
+
+   The well's geometry is transcribed from `../../three/three.css` rather than
+   invented: the same `radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg))`
+   ground, the same 1px `--line` border. That matters beyond tidiness — `Stage`
+   draws with a transparent buffer, so this gradient *is* the background of the
+   3D scene and the AO contour is tuned against it.
+
+   Unlayered, matching the rest of the app's CSS.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* The whole stage, under the whole band — rows R2 and R4.
+
+   `inset: 0` rather than a width/height pair so it tracks a resized panel without
+   a resize observer.
+
+   The surface is the *work* surface and not an overlay somebody glances at, so
+   the floating toolbar (`z-index: 2`), the lock toggle beside it and the two
+   corner plates (`z-index: 1`) have to stay above it and stay clickable: every
+   control in `PlanToolbar` writes `PlanTools`, and `PlanTools` is exactly what
+   this surface reads. At `z-index: 3` — which is what this element carried while
+   it was also a corner pill — the room covered them, and `Place`, `Erase`,
+   `Rotate`, `Clear` and the snap toggle would all have been unreachable.
+
+   `z-index: 0` rather than `auto` on purpose. This is a positioned element, so
+   `auto` would leave it in the parent's stacking order where a later sibling
+   could interleave with its children; a stacking context of its own at 0 is
+   below the whole band, which is what is wanted. R4 removed the in-flow plan
+   canvas this used to have to paint *over* as well, so 0 is now the floor of the
+   stage rather than the middle of a sandwich — the value is unchanged because the
+   half that still matters is the band above it. */
+.of-b3d-launch {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* ── The plate that used to be here, and why its measurement outlives it ─────
+   This element had a closed state — `[data-open='false']`, a 134 px pill in the
+   stage's top-right — and it is where the band collision in this builder was
+   found. Row R4 deleted it with the plan view it was a way back to. The numbers
+   are kept because the *fix* is still live, in a different file, and a reader who
+   meets `--of-stage-gutter` in `screens/builder/builder.css` needs to know what
+   it is defending against.
+
+   Row X10 was handed a live measurement from a real Chrome on the production
+   build — the first in this series — and recorded that at 1295 x 955, hit-testing
+   every pixel column across the `snap 0.5` button at its vertical centre:
+
+     snap 0.5 button      x 772 .. 860   (88 px wide)
+     View in 3D plate     x 847 .. 981   (134 px wide)
+     dead columns         14 of 88 = 15.9%, from 75 px into the button
+
+   **Row L1 reproduced that (13 of 87, 14.9%, from 74 px — the same finding,
+   off by rounding) and found the collision X10 predicted on the other side was
+   the more serious one: row S4's generator plate covered `Place` completely,
+   60 of 60 px, and 24.6% of `Erase`.** The builder's primary tool could not be
+   pressed at that viewport.
+
+   `elementFromPoint` named `.of-b3d-toggle-note` at those columns, which was a
+   red herring twice over: the note was a **child** of `.of-b3d-toggle`, so
+   `pointer-events: none` on it would have handed the hit to the button rather
+   than to the snap toggle; and being a flex-column child with
+   `align-items: flex-end`, it could not spill outside its parent — it *set* the
+   plate's 134 px width, being the longest line in it. The overlap was
+   plate-over-toolbar, and the note was merely the innermost element at those
+   pixels.
+
+   **Fixed in row L1, with X10's second candidate: the gutter, and that fix is
+   untouched.** `screens/builder/builder.css` publishes `--of-stage-gutter` on the
+   stage and gives up `2 x` it from the toolbar slot's `max-width`; the generator
+   plate is capped inside the same gutter, in its own stylesheet. Overlap is then
+   impossible by arithmetic at any width and for any number of controls in the
+   band. **What R4 changed is the population, not the arithmetic**: this element
+   no longer competes for the band at all, so only one side plate is left, and
+   `builder.css` records why the slot still gives up the gutter on *both* sides —
+   the slot is centred, so a one-sided cap would put half of the reclaimed width
+   back under the generator plate. Re-measured with a browser after the deletion:
+   0 dead columns on every control in the band from 820px to 1920px.
+
+   X10's third candidate — laying the band out as one `auto 1fr auto` grid — is
+   now *closer* than it was. The objection was that this element was both the
+   corner plate and the full-stage overlay, so it could not become a grid item
+   without moving its open state too; it has no corner state left. The generator
+   plate is still both, so the candidate is still not available, and it is a row
+   of its own.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* ── The open room ───────────────────────────────────────────────────────── */
+
+.of-b3d {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* The canvas's own positioning context, so the notice and the hint plate sit on
+   the drawing rather than under the readout. `min-height: 0` because a grid item
+   in a `minmax(0, 1fr)` track still needs it to let a canvas shrink. */
+.of-b3d-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.of-b3d-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.of-b3d-canvas,
+.of-b3d-well {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg));
+}
+
+/* The canvas is the tab stop and takes the arrow keys — `RoomSurface.tsx` sets
+   `tabIndex` and `role="application"` on the `<canvas>` itself, because that is
+   the element the pointer listeners are on and r3f puts unknown props on its
+   wrapper `<div>`. So the focus ring has to be drawn here rather than inherited
+   from a button: a keyboard user needs to know the plan has the keys. */
+.of-b3d-canvas canvas:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+}
+
+/* ── The plates over the drawing ─────────────────────────────────────────────
+   §2.4's contextual hint, and the one notice the canvas cannot draw for itself.
+
+   Pointer-transparent, for `builder.css`'s reason: a click near the bottom of
+   the drawing must still reach the surface and place a tile. That matters more
+   here than on the plan, because the primary gesture *is* a click on the
+   drawing. */
+.of-b3d-plate {
+  position: absolute;
+  z-index: 1;
+  max-width: min(46ch, calc(100% - 24px));
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg2) 90%, transparent);
+  color: var(--mut);
+  font-family: var(--face-body);
+  font-size: 12.5px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+/* Bottom-left, matching the plan view's hint exactly, so the sentence does not
+   move when the surface opens. */
+.of-b3d-hint {
+  bottom: 12px;
+  left: 12px;
+}
+
+/* The notice sits bottom-*right* and not top-centre: the top band is the
+   toolbar's, the generator's plate and the lock toggle's, and row L1 measured
+   what happens when a fourth thing is put there. */
+.of-b3d-plate[role='status'],
+.of-b3d-plate[role='alert'] {
+  right: 12px;
+  bottom: 12px;
+  left: auto;
+}
+
+.of-b3d-alert {
+  border-color: var(--acc);
+  color: var(--ink);
+}
+
+.of-b3d-loading {
+  font-family: var(--face-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* ── The key map and the live region ─────────────────────────────────────────
+   Clipped rather than `display: none`, which would take them out of the
+   accessibility tree as well as out of the layout — and being in it is the whole
+   point. The key map is what the canvas's `aria-describedby` names, so it has to
+   be real text in the document. */
+.of-b3d-keys,
+.of-b3d-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.of-b3d-well {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+}
+
+/* `.of-b3d-detail` stood here — a mono line for the well's second sentence — and
+   **nothing has rendered it since row R2**, which made the canvas unconditional
+   and turned every well of prose into an overlay with one `.of-b3d-note` in it.
+   Row R4 swept it: it was six declarations selecting nothing, and this row's own
+   deletion is what prompted looking. */
+
+.of-b3d-note {
+  max-width: 46ch;
+  margin: 0;
+  color: var(--mut);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* ── The readout ─────────────────────────────────────────────────────────────
+   Instances against draw calls is the whole claim of this row, so it is on
+   screen rather than in a devtools panel. `auto-fit` so it reflows to one column
+   in a narrow stage instead of overflowing it — D6's lesson: a clipped child
+   that escapes its container costs the page a scrollbar. */
+.of-b3d-readout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 2px 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+}
+
+.of-b3d-readout > div {
+  min-width: 0;
+}
+
+.of-b3d-wide {
+  grid-column: 1 / -1;
+}
+
+.of-b3d-readout dt {
+  color: var(--mut);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.of-b3d-readout dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+}

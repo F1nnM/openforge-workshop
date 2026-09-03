@@ -1,0 +1,45 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the shared canvas (row G3).
+
+   Two rules, and both of them are load-bearing rather than decorative.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* ── The host ────────────────────────────────────────────────────────────────
+   The one live WebGL canvas. It is never seen: every frame it draws is copied
+   into a slot canvas by `drawImage`.
+
+   `position: fixed` with a large negative offset, and **not `display: none`**.
+   r3f measures its container to size the drawing buffer, and a display-none
+   element measures 0 × 0 — which gives the renderer a zero-sized buffer and, on
+   some drivers, no context at all. Off-screen keeps it laid out and measurable
+   while it paints nothing the compositor has to composite. `pointer-events: none`
+   because the drag is handled on the slots, which are where the pointer is. */
+.of-3d-host {
+  position: fixed;
+  top: 0;
+  left: -20000px;
+  pointer-events: none;
+}
+
+/* ── A slot ─────────────────────────────────────────────────────────────────
+   The destination canvas in a card. Transparent until the shared canvas paints
+   it, so the card's own ground shows through — the same parchment well the AO
+   contour is tuned against (`Stage.tsx`).
+
+   `touch-action: none` for the same reason `.of-3d-canvas` has it: the drag is
+   an orbit and the browser must not also read it as a scroll gesture. It is
+   scoped to an interactive slot, so a decorative preview inside a scrolling grid
+   still scrolls the grid. */
+.of-3d-slot {
+  display: block;
+  background: transparent;
+}
+
+.of-3d-slot[data-interactive='true'] {
+  touch-action: none;
+  cursor: grab;
+}
+
+.of-3d-slot[data-interactive='true']:active {
+  cursor: grabbing;
+}

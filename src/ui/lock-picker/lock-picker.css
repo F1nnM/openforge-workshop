@@ -1,0 +1,639 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the lock picker.
+
+   Hand-written CSS on the Parchment tokens, following `../shell/shell.css` and
+   `../primitives/primitives.css`. Unlayered, for the reason set out at the top
+   of that shell file. Light only: Parchment is the committed direction and
+   `../../tokens/tokens.css` has no dark block to mirror.
+
+   ## The one rule this file exists to serve
+
+   Three options must not *look* like a neutral three-way choice, and one number
+   must not look like the whole answer. Each row carries two readings — 88.3 /
+   81.6 / 78.7 buildable and 99.9 / 74.7 / 59.7 in the archive — and everything
+   below is in service of keeping those distinguishable at a glance:
+
+     - Every option gets the same full-width track, so the three fills are
+       directly comparable rather than each scaled to itself.
+     - **The thick bar is buildability**, split at the point where a design stops
+       needing a separate base: solid accent for the one-part designs, a washed
+       accent for the ones that need a base under them. Two products of one
+       choice, drawn as two segments of one measurement.
+     - The distance from an option's buildability to the best option's is drawn
+       as a **hatched** region, not left as empty track. Empty space reads as
+       "nothing there"; a hatch reads as "something removed".
+     - A dashed line sits at the best option's buildability, crossing all three
+       bars at the same x. That is what turns three widths into one measurement.
+     - **The hairline bar under it is reachability.** A second stacked bar rather
+       than a second vertical marker on the same track: the track already carries
+       four encodings, and a fifth in a different meaning-space is where a chart
+       stops being readable. Stacked, the hairline visibly overshoots the top
+       row's bar and falls short of the bottom row's, which is the one thing about
+       the two figures worth seeing rather than reading.
+     - Selection is expressed structurally — border, inset rule, ground — and not
+       with colour alone, so it cannot compete with the cost figure, which is the
+       only thing on the row printed in the accent.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-picker {
+  /* Ink for the hatch and the reference line. Derived from `--line`'s own
+     rgb so the device sits in the same family as every other rule in the app. */
+  --of-lock-hatch: rgba(80, 60, 30, 0.34);
+  --of-lock-void: rgba(80, 60, 30, 0.1);
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── The group ───────────────────────────────────────────────────────────── */
+
+.of-lock-options {
+  /* A fieldset carries a UA border, padding and min-inline-size, all three of
+     which fight a grid. Reset explicitly rather than relying on Preflight. */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+  border: 0;
+}
+
+/* ── One option ──────────────────────────────────────────────────────────── */
+
+.of-lock-option {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  grid-template-areas:
+    'radio head'
+    'blank tracks'
+    'blank figures'
+    'blank note';
+  align-items: center;
+  gap: 7px 11px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.of-lock-option:hover {
+  border-color: color-mix(in srgb, var(--acc) 45%, var(--line));
+}
+
+.of-lock-option[data-selected] {
+  background: var(--bg2);
+  border-color: var(--acc);
+  /* The same inset-accent device as the header's active nav tab and the tab
+     strip's indicator, so "this one is in effect" reads as one idea across the
+     app. */
+  box-shadow: inset 3px 0 0 0 var(--acc);
+}
+
+/* The ring goes on the row, not on the 15px radio: the whole card is the click
+   target, so the whole card should be the focus target visually. */
+.of-lock-option:has(.of-lock-radio:focus-visible) {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.of-lock-radio {
+  grid-area: radio;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  /* The UA radio, tinted. Re-implementing it as a styled span would cost the
+     platform's own high-contrast and forced-colours handling for a dot. */
+  accent-color: var(--acc);
+  cursor: pointer;
+}
+
+/* ── Head: name, default chip, share ─────────────────────────────────────── */
+
+.of-lock-head {
+  grid-area: head;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+
+.of-lock-name {
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: 19px;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.of-lock-share {
+  margin-left: auto;
+  font-family: var(--face-mono);
+  font-size: 17px;
+  /* Digits must not shift width between 99.9% and 74.7%, or the three figures
+     stop lining up and the comparison stops being one. */
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* ── The tracks ──────────────────────────────────────────────────────────── */
+
+/* Two bars, stacked and sharing one x-axis. The gap is 3px so they read as one
+   figure with a primary and a secondary line, not as two unrelated charts. */
+.of-lock-tracks {
+  grid-area: tracks;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.of-lock-track {
+  position: relative;
+  height: 14px;
+  background: var(--of-lock-void);
+  border-radius: 2px;
+}
+
+/**
+ * Buildable and needing no separate base — print one part and you are done.
+ *
+ * The solid segment, because it is the strongest claim on the row. It runs the
+ * other way from buildability itself (openlock 1,497, magnetic 255), so a single
+ * flat fill would hide the sharpest real difference between the three systems.
+ */
+.of-lock-fill-one {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: var(--of-lock-one, 0%);
+  background: var(--acc);
+  border-radius: 2px 0 0 2px;
+}
+
+/**
+ * Buildable, with a base under it.
+ *
+ * Washed rather than a second hue: it is the *same* claim — you can build this —
+ * at a lower confidence about how much printing it takes. A contrasting colour
+ * would read as a different kind of thing.
+ */
+.of-lock-fill-base {
+  position: absolute;
+  inset-block: 0;
+  left: var(--of-lock-one, 0%);
+  width: calc(var(--of-lock-build, 0%) - var(--of-lock-one, 0%));
+  background: color-mix(in srgb, var(--acc) 34%, transparent);
+}
+
+/**
+ * What this option cannot build.
+ *
+ * `calc()` over two percentages resolves against the same containing block, so
+ * this is exactly the shortfall. It is zero-width on the best option, where the
+ * two custom properties are equal — no special case needed.
+ */
+.of-lock-gap {
+  position: absolute;
+  inset-block: 0;
+  left: var(--of-lock-build, 0%);
+  width: calc(var(--of-lock-best, 0%) - var(--of-lock-build, 0%));
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 3px,
+    var(--of-lock-hatch) 3px 4px
+  );
+}
+
+/** The best option's buildability, at the same x on all three bars. */
+.of-lock-mark {
+  position: absolute;
+  inset-block: -3px;
+  left: var(--of-lock-best, 0%);
+  width: 0;
+  border-left: 1px dashed var(--ink);
+}
+
+/**
+ * The archive reading — same axis, a fifth of the weight.
+ *
+ * No hatch and no reference line: it is context for the bar above it, not a
+ * second decision. Its whole job is that it overshoots on the top row and falls
+ * short on the bottom one.
+ */
+.of-lock-subtrack {
+  position: relative;
+  height: 4px;
+  background: var(--of-lock-void);
+  border-radius: 2px;
+}
+
+.of-lock-named {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: var(--of-lock-named, 0%);
+  background: var(--of-lock-hatch);
+  border-radius: 2px;
+}
+
+/* ── Figures ─────────────────────────────────────────────────────────────── */
+
+/* Two lines, one per reading, in the order the two bars sit in. */
+.of-lock-figures {
+  grid-area: figures;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.of-lock-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 12px;
+}
+
+.of-lock-line[data-tone='quiet'] {
+  font-size: 11px;
+  opacity: 0.82;
+}
+
+/**
+ * Which reading a line is, and the only label either one gets on the row.
+ *
+ * The definitions live once in the legend below the group. Repeating them per
+ * option would put the same 40 words on screen three times and make the figures
+ * harder to compare, which is the opposite of what this screen is for.
+ */
+.of-lock-key {
+  flex: 0 0 auto;
+  min-width: 7.5em;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  font-size: 9.5px;
+  color: var(--mut);
+}
+
+.of-lock-count {
+  color: var(--mut);
+}
+
+/**
+ * The cost, and the only accent-coloured text on the row.
+ *
+ * Absent entirely when nothing is out of reach, because a cost line that is
+ * always present stops being read. Muted on the best option, which on the real
+ * corpus still cannot build 447 designs: that number is worth stating and is not
+ * worth flagging, since no other choice does better.
+ */
+.of-lock-cost {
+  color: var(--acc);
+}
+
+.of-lock-option[data-best] .of-lock-cost {
+  color: var(--mut);
+}
+
+/* ── Note ────────────────────────────────────────────────────────────────── */
+
+.of-lock-note {
+  grid-area: note;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--mut);
+}
+
+/* ── Spread ──────────────────────────────────────────────────────────────── */
+
+.of-lock-spread {
+  margin: 0;
+  padding: 10px 13px;
+  background: var(--bg3);
+  border-radius: 5px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+
+.of-lock-spread-value {
+  font-family: var(--face-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.of-lock-spread-note::before {
+  content: ' ';
+}
+
+.of-lock-spread-unknown {
+  color: var(--ink);
+}
+
+/* ── Legend ──────────────────────────────────────────────────────────────────
+   The two readings, defined once. It sits below the group rather than above it
+   because the bars are legible before the definitions are needed: a reader who
+   only wants the headline percentage never has to read this, and a reader who
+   wonders why the hairline overshoots finds the answer immediately below the
+   thing that prompted the question.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  max-width: 82ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+
+/* The keys line up with the row labels above, so "buildable" in the legend and
+   "buildable" on an option read as the same word rather than two. */
+.of-lock-legend-line .of-lock-key {
+  display: inline-block;
+  margin-right: 6px;
+  font-family: var(--face-mono);
+  vertical-align: 1px;
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .of-lock-option {
+    transition: none;
+  }
+}
+
+/* ── The one-time notice ─────────────────────────────────────────────────────
+   A banner, not a modal — `LockNotice.tsx` carries the reasoning. It is styled
+   as a bordered aside with an accent rule down its leading edge, the same device
+   the selected option uses, so "the app is telling you about the lock system"
+   and "this lock system is in effect" read as one family.
+
+   Deliberately not alarming: no warning colour, no icon. The default builds
+   further than either alternative and the whole spread is 9.6 points, so
+   dressing the notice as a problem would push people into changing a setting
+   most of them should leave alone.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 0 var(--acc);
+}
+
+.of-lock-notice-body {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.of-lock-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  margin: 3px 0 0;
+}
+
+.of-lock-notice-link,
+.of-lock-notice-dismiss {
+  padding: 0;
+  background: none;
+  border: 0;
+  font-family: var(--face-mono);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.of-lock-notice-link {
+  color: var(--acc);
+  text-decoration: none;
+  border-bottom: 1px solid currentcolor;
+}
+
+.of-lock-notice-link:hover {
+  color: var(--ink);
+}
+
+/* Secondary by weight, not by being hidden: "keep what I have" is a real answer
+   and must not read as the way to close the thing without answering. */
+.of-lock-notice-dismiss {
+  color: var(--mut);
+}
+
+.of-lock-notice-dismiss:hover {
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of-lock-notice-link,
+  .of-lock-notice-dismiss {
+    transition: none;
+  }
+}
+
+/* ── The work-area toggle and its disclosure ─────────────────────────────────
+   Row L1. The lock preference moved out of `/settings` and into the builder
+   stage's top band, so the picker above now has two hosts: this popover, and
+   the catalog's own — see `LockToggle.tsx` for why the screen went.
+
+   ## The trigger is a plate, because the stage's language is plates
+
+   §2.4 puts translucent bordered plates in the stage's corners and row S4 and
+   row G2 both launch from one. A fourth device in the same band would read as a
+   fourth kind of thing; this is the same treatment at the same 12px radius
+   family, sized down to sit in a row with `PlanToolbar`'s buttons.
+
+   ## The figure is mono and the system name is not
+
+   The design's rule, and the reason it is worth keeping here: mono means
+   measured. `88.3%` is read off the emitted index every session, so it is mono;
+   `OpenLOCK` is a proper noun and is not.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-toggle {
+  display: inline-flex;
+  /* Wrap and shrink rather than overflow. An `inline-flex` at its content width
+     will not shrink below it, and the builder's toolbar slot is capped by the
+     stage's gutter — so on a narrow stage this control used to spill out of the
+     slot and straight under the 3D plate. Measured at a 1000px viewport: 14 of
+     its 174px unclickable, which is the same class of defect the gutter exists
+     to remove, arriving from inside the band instead of outside it. */
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  /* Matches `.of-build-toolbar`'s ground rather than the corner plates' 88%
+     wash: this sits in a row with the toolbar's own buttons and a second
+     translucency in that row would look like a rendering fault. */
+  background: var(--bg2);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.of-lock-toggle:hover,
+.of-lock-toggle[data-popup-open] {
+  border-color: var(--acc);
+}
+
+.of-lock-toggle-key {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+
+.of-lock-toggle-name {
+  font-weight: 500;
+}
+
+.of-lock-toggle-share {
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--acc);
+}
+
+/* The `(i)`. A ring rather than a glyph from an icon set: the app ships no icon
+   font and a single inline SVG for one character would be the start of one. */
+.of-lock-toggle-info {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  font-style: italic;
+  line-height: 1;
+  color: var(--mut);
+}
+
+.of-lock-toggle:hover .of-lock-toggle-info,
+.of-lock-toggle[data-popup-open] .of-lock-toggle-info {
+  border-color: var(--acc);
+  color: var(--acc);
+}
+
+/* ── The disclosure ──────────────────────────────────────────────────────────
+   `@/ui/primitives`' `Dialog`, widened. Its default is 420px and the picker
+   wants a little more: the bars are percentages of the track, so a narrow track
+   compresses a 9.6-point spread into something a reader cannot see, which would
+   undo the one thing the picker is for. 468px is where the three cost lines
+   ("5 out of reach · 80.0 pp behind OpenLOCK") stop wrapping.
+
+   `--of-dialog-width` rather than a `width` of our own, which is the override
+   `Overlay.tsx` documents; the popup already scrolls internally and already caps
+   at the viewport, so nothing else here is geometry.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-dialog {
+  --of-dialog-width: 468px;
+}
+
+.of-lock-pop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The facts that survived the screen. `LockToggle.tsx` names the one that did
+   not, and why. */
+.of-lock-pop-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.of-lock-pop-fact {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.of-lock-pop-fact strong {
+  font-weight: 600;
+}
+
+/* Two tones, and the difference is whether there is a scene to disturb — the
+   settings screen's rule, kept. With an empty grid it is a muted line; with
+   tiles placed it becomes the accent-inset block the selected option and the
+   one-time notice both use, because all three mean "this concerns the lock
+   system". */
+.of-lock-pop-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--mut);
+}
+
+.of-lock-pop-note[data-tone='warn'] {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 0 var(--acc);
+  color: var(--ink);
+}
+
+.of-lock-pop-note-lead,
+.of-lock-pop-note-body {
+  margin: 0;
+}
+
+.of-lock-pop-note-body {
+  color: var(--mut);
+}
+
+/* Mono is measured — and `base-lock-mismatch` and `lock-unavailable` are literal
+   strings the bill of tiles prints, so a reader should recognise them there from
+   having read them here. */
+.of-lock-pop-mono {
+  font-family: var(--face-mono);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of-lock-toggle {
+    transition: none;
+  }
+}

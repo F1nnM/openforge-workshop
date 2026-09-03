@@ -1,0 +1,55 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    // vite/client declares the asset-suffix modules (`?url`, `?raw`, `?worker`).
+    // The generator imports its WASM binary and its .scad sources that way, and
+    // without this every such import is an unresolved-module error.
+    "types": ["vitest/globals", "vite/client"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+
+    "skipLibCheck": true,
+    "noEmit": true,
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": [
+    "src",
+    "vitest.setup.ts",
+    // Row X10's shared static-import walker, which the four `boundary.test.ts`
+    // files under `src/` import. It is the mirror image of the `src/` entries in
+    // `tsconfig.node.json`, and it is here because the alternatives are all
+    // closed:
+    //
+    //   - It cannot live under `src/`. `src/screens/assemblies/corpus.test.ts`
+    //     asserts that `fixtures.ts` is the *only* non-test file under `src/`
+    //     importing a `node:` module, and the walker reads files.
+    //   - It cannot live in a `*.test.ts`. Importing one test file's helper from
+    //     another registers the first file's `describe`s in the second's suite.
+    //   - It cannot live in `tools/` unlisted: a composite project rejects an
+    //     import of a file outside its own file list, so every one of the four
+    //     tests failed with TS6307. Measured, not assumed — that is the error
+    //     this entry removes.
+    //
+    // `tsconfig.node.json` includes it too, through its `tools` entry, and
+    // `tsc -b` is content with both. Nothing under `src/` imports it outside a
+    // test, so it is in no bundle.
+    "tools/boundary"
+  ]
+}

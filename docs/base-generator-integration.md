@@ -331,42 +331,152 @@ Three layers, outermost first:
 2. **Empty output.** Inline error strip in the drawer carrying the echoed stderr line
    verbatim in mono, on `--bg3`. Last-good mesh stays on screen.
 3. **Watchdog.** 45 s hard timeout → `worker.terminate()`, keep the last-good mesh, and
-   offer two buttons: `Try again` and `Simplify` (drop magnets, or step the size down one)
-   — because those are the two levers that actually move render time. Magnets roughly
-   double triangle count; each is a `$fn=100` cylinder pair per connector.
+   offer `Try again`.
+
+   **The `Simplify` button this section used to specify is withdrawn, because row S2
+   measured both of its levers and neither one is one.** It offered "drop magnets, or
+   step the size down one — because those are the two levers that actually move render
+   time", on the reasoning that "magnets roughly double triangle count; each is a
+   `$fn=100` cylinder pair per connector". Measured (§3.5):
+
+   - **Stepping the size down barely helps.** 1×1 to 8×8 is a **53× triangle range for
+     6× the time**, and the per-1,000-triangle cost *falls* from 45 ms to 5 ms across it.
+     The cost is the fixed CSG tree, not the output size.
+   - **"Roughly double" understates magnets** for openlock (**5.3×** triangles), triplex
+     (**8.0×**) and `none` (**142×**) — and it is **backwards for dragonlock**, where
+     turning magnets *off* yields *more* triangles (12,304 against 10,976) and a slower
+     render. Dropping magnets does not help dragonlock at all.
+
+   So a `Simplify` button would press two levers, one of which is nearly flat and one of
+   which is a different multiple per lock system and inverted for one of them — it would
+   often make the render slower while telling the user it was making it faster. The
+   honest control is the parameters themselves, which the form already exposes.
+
+   The watchdog stays, and the reason has moved: nothing in the sweep came within 2.5× of
+   3 s, so a timeout is no longer the expected end of a slow render. It is there for the
+   memory case below, which has no other symptom.
 
 **Memory exhaustion is the nastiest failure and needs naming.** The WASM heap max is
 4 GiB − 64 KiB, but iOS Safari caps far lower, and `emscripten_resize_heap` **returns
 `false` rather than throwing** — so exhaustion surfaces as an opaque OpenSCAD abort with no
 message. The watchdog is what turns that into a user-visible outcome rather than a hang.
 
-### 3.5 Latency, honestly
+### 3.5 Latency, honestly — measured
 
-`openscad` was not installed on the recon machine, so **no render was timed.** What we have
-is exact output geometry, derived from catalog STL sizes (`triangles = (bytes − 84) / 50`),
-because those files *are* this generator's offline output:
+**This section used to say "no render was timed".** It now is. Row S2 (PR #48)
+installed both builds and benchmarked them, and
+the three things this section got wrong are worth more than the one it got right.
 
-| Configuration | Triangles | Estimated WASM |
-| --- | --- | --- |
-| `bases-square` 2×2 openlock + flex magnets | 10,807 | 1–4 s |
-| `bases-square` 4×4 openlock + flex magnets | 23,671 | 3–8 s |
-| `bases-square` 8×8 grid + dragonlock + magnets | 86,144 | 12–40 s |
-| `risers_square` 4×4 high dragonlock | 180,100 | 25–60 s |
-| `bases-wall-primary` dungeon_stone A | 116,062 | 60–180 s **(not shipped in v1)** |
+| | |
+| --- | --- |
+| **WASM** (what ships) | `2026.01.02.wasm30347`, `-WebAssembly-node` snapshot under Node 22.23.2 |
+| **Native** (reference only) | `2026.01.02.ai30348`, AppImage extracted — same day's adjacent CI build, so the comparison is controlled |
+| Machine | AMD Ryzen 5 7640U, 12 threads, 65 GB, Linux 7.0.11 |
+| Method | 21 renders per configuration, 51 configurations, one process each, sequential |
+| Reproduce | `npm run scad-bench -- --repeats 21 --json out/wasm.json` |
 
-These are estimates anchored on measured geometry, not benchmarks. **Every UX number in
-§3.3 is conditional on the 4×4 case landing under ~3 s.** The v0 spike (§8.0) exists to
-find out before we commit to auto-preview-on-by-default.
+#### The verdict: auto-preview, debounced. No Generate button.
 
-Two flags are mandatory, not optional:
+A 4×4 square base is **437 ms median / 481 ms p95** against the ~3 s threshold — **7×
+under**. Nothing in the sweep came within 2.5× of 3 s; the slowest shippable configuration
+is a `risers_square` 4×4 high dragonlock at **933 ms median / 1.16 s p95** (49,386
+triangles). So every UX number in §3.3 stands, and the §8.0 spike it was conditional on has
+happened.
 
-- `--backend=manifold` (or `--enable=manifold` on older builds). Manifold became OpenSCAD's
-  default on 2025-08-17, but the published 2025-03-25 WASM zip predates that and its CLI
-  help still reads `'CGAL' (old/slow) [default]`. **Pass it explicitly** or silently get the
-  slow kernel. Treat CGAL as non-viable in a browser.
+**Debounced rather than live**, and that is the one qualification: **15 of 46
+configurations exceed a 250 ms live-interaction budget on geometry alone.** Risers and
+8×8-grid dragonlock spend 400–900 ms in geometry and need §3.3's commit-on-release; a
+1×1 to 4×4 square is 60–150 ms and is genuinely live.
+
+**One hard condition: `--backend=manifold` is mandatory.** WASM CGAL is **7.8 s at 2×2 and
+16.0 s at 4×4** — 19× and 35× slower, and **5× *over* the threshold**. Dropping that one
+flag turns this verdict into a Generate button.
+
+#### The estimate table was 1–2 orders out, and the formula was not
+
+The extrapolation had two halves and they did not fail together. `triangles = (bytes − 84)
+/ 50` **reproduced the STL header count on 48 of 48 meshes** — exact. The *magnitudes* were
+not: every row below overstates triangles by a consistent **3.46–3.68×**, and the
+triangles-to-seconds mapping was one to two orders out.
+
+| Configuration | Est. tris | **Real** | Est. WASM | **Measured (WASM)** | |
+| --- | ---: | ---: | --- | ---: | --- |
+| `bases-square` 2×2 openlock + flex | 10,807 | **3,120** | 1–4 s | **429 ms** | 2× fast |
+| `bases-square` 4×4 openlock + flex | 23,671 | **6,440** | 3–8 s | **437 ms** | 7× fast |
+| `bases-square` 8×8 grid + dragonlock | 86,144 | **23,980** | 12–40 s | **705 ms** | 17× fast |
+| `risers_square` 4×4 high dragonlock | 180,100 | **49,386** | 25–60 s | **893 ms** | 28× fast |
+| `bases-wall-primary` dungeon_stone A | 116,062 | *not vendored* | 60–180 s | *unmeasured* | — |
+
+**The consistent 3.6× is the more interesting finding of the two**: it suggests the
+catalogued STLs those byte counts came from were generated by an older CGAL-era OpenSCAD,
+so the archive's meshes are not what this generator now produces. The fifth row has no
+measured counterpart because S1 did not vendor `bases-wall-primary.scad`; its estimate
+stays an estimate, and §8's v3 is where it is excluded for good.
+
+#### What actually dominates, ranked
+
+1. **Backend / kernel — 19–35×.** Dwarfs everything else combined.
+2. **Entry point — up to 7×.** `risers_square` 906 ms against `bases-square` 4×4's ~430 ms.
+   `bases-curved-radial` is the priciest curve.
+3. **Lock — ~1.4×.** dragonlock dearest, `none` cheapest.
+4. **Magnets — 1.3–2.6×.**
+5. **Size — almost flat.** See §3.4: 53× the triangles for 6× the time.
+
+**`$fn` is not a lever at all.** The plan flagged 89 `$fn=200` across the vendored set as
+the likely cost driver. `-D '$fn=50'`, `200` and `400` produce **byte-identical output**,
+because every `$fn` in the set is a *call-site argument* (`cylinder(..., $fn=200)`) rather
+than a top-level assignment. It cannot be tuned from outside without editing the vendored
+files, so "reduce tessellation to go faster" does not exist here.
+
+#### The startup floor is the real split
+
+`cube(0.01)` through the same flags:
+
+| | Floor |
+| --- | ---: |
+| WASM | **281 ms** |
+| native | **28 ms** |
+
+That is **65–80% of a small WASM render**, and a browser worker holding a compiled
+`WebAssembly.Module` pays it **once** — so §3.3's "warm on open" is not an optimisation,
+it is most of the budget. Every figure above is decomposed into floor plus geometry in the
+report. Native against WASM: **6.7× median total wall clock** (min 3.2×, max 13.6×, over
+46 manifold configurations), **4.6× on geometry alone**, **10× on the floor**.
+
+#### Two facts the panel has to respect
+
+- **The two builds do not produce identical meshes.** 45 of 48 match, but `bases-curved`
+  4×4 differs by **+26 triangles (+0.67%)** and two openlock rows by −2. So a
+  browser-generated base is **not** byte-identical to the catalogued STL of the same
+  parameters, and the UI must not claim "this is the archive's file". §5.2's resolver
+  looks a recipe up in the catalog and that is still right; what it must not say is that
+  the two are the same bytes.
+- **`connectors.scad` at the pinned commit emits `Ignoring unknown variable "DUAL"` on 48
+  of 48 configurations.** An ignored variable is a branch not taken, so that is part of
+  what the default geometry *is* rather than a warning to silence.
+
+#### Two flags are mandatory, not optional
+
+- `--backend=manifold`. Treat CGAL as non-viable in a browser — the 7.8 s / 16.0 s above.
+  **2026.01.02 defaults to Manifold**, so the note this section used to carry — that the
+  CLI help reads `'CGAL' (old/slow) [default]` — is stale for current builds; it was true
+  of the published 2025-03-25 zip, and a pinned older build still defaults to CGAL. Pass
+  it explicitly either way.
 - `--export-format=binstl`. `export.cc:102` aliases the `stl` suffix to **`asciistl`**, so
   the openscad-wasm README's own example (`-o cube.stl`) produces ASCII STL — roughly 5×
   the bytes and ~3× the parse cost. Anyone writing this from the README inherits the bug.
+
+And one trap in the probe itself: **the WASM build exits 7 on `--version`** while printing
+to stderr, so a probe that trusts the exit code silently decides WASM is absent and falls
+through to native. S2's first attempt did exactly that.
+
+#### Still unmeasured, and named rather than assumed
+
+- **A real browser.** Everything above is V8 in Node, with no worker boundary and no
+  compositor competing. **iOS Safari's much lower WASM heap cap is untested**, and
+  `emscripten_resize_heap` returns `false` rather than throwing (§3.4) — iOS is the risk.
+- **8×8 through CGAL** (`npm run scad-bench -- --heavy --suite backend`).
+- **Textured primary walls**, for the vendoring reason above.
 
 ---
 
@@ -824,20 +934,25 @@ is an honest estimate and the justification is stated.
 
 ## 8. Phasing
 
-### v0 — Spike (before any of the below is designed further)
+### v0 — Spike — **done, question 3 answered by row S2**
 
-Three questions, an afternoon each, and **every latency number in §3 is conditional on
-them**:
+Three questions, an afternoon each, on which **every latency number in §3 was
+conditional**:
 
 1. Build `openscad-wasm` from the Docker `Makefile` and confirm `--export-format=param`
    works in the WASM build (only `openscad-playground` proves it works at all).
 2. Confirm `--enable=predictible-output` exists in that build.
-3. **Time** `bases-square x=4 y=4 LOCK=openlock MAGNETS=flex_magnetic` and
-   `x=8 y=8 CENTER=grid` with `--backend=manifold`, on a mid-range laptop and an iPad.
+3. ~~**Time** `bases-square x=4 y=4 LOCK=openlock MAGNETS=flex_magnetic` and
+   `x=8 y=8 CENTER=grid` with `--backend=manifold`, on a mid-range laptop and an
+   iPad.~~ — **measured.** §3.5: 4×4 is **437 ms median / 481 ms p95**, 8×8 grid +
+   dragonlock is **705 ms**, both on the shipped WASM build with `--backend=manifold`. So
+   **auto-preview is on by default and there is no Generate button.** The laptop half is
+   done (AMD Ryzen 5 7640U, Node 22); the **iPad half is not**, and it is the one that
+   still carries risk — iOS Safari's WASM heap cap is much lower and
+   `emscripten_resize_heap` returns `false` rather than throwing.
 
-If the 4×4 case does not land under ~3 s, auto-preview goes off by default and the flow
-becomes explicitly render-on-demand. That is a UX change, not an architecture change — but
-it must be decided from a measurement, not a guess.
+The conditional this section set is therefore discharged for the desktop case and open for
+iOS. It was decided from a measurement rather than a guess, which is what it asked for.
 
 ### v1 — Minimum credible tight integration
 
@@ -956,8 +1071,12 @@ not fit. The three non-inch grids are the generator's single biggest exclusive c
 so this should be v2 — but as a builder change, not a generator one.
 
 **9.9 — Auto-preview on or off by default?**
-→ **Default: on, if the v0 spike shows 4×4 under ~3 s; off otherwise.** Either way the
-toggle ships, because every comparable tool has one.
+→ **Settled: on.** The v0 spike ran (row S2) and 4×4 is **437 ms median / 481 ms p95**
+against the ~3 s threshold — 7× under, so the "off otherwise" arm never applies on
+desktop. **Debounced rather than live**, because 15 of 46 configurations exceed a 250 ms
+live-interaction budget on geometry alone; §3.3's commit-on-release is what carries that.
+The toggle still ships, because every comparable tool has one. Open only for iOS, where
+the heap cap is untested (§3.5).
 
 ---
 

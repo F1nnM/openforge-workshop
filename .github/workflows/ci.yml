@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'epic/**']
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Row X4. Every brotli figure this project quotes used to carry a caveat:
+      # `version.built` is a clock reading, and the timestamp alone moves the
+      # index's brotli size across a 655 B range (364,934 B to 365,589 B over
+      # the same 8,702 records). Four rows worked around it by hand.
+      #
+      # Pinning `SOURCE_DATE_EPOCH` — the reproducible-builds convention, which
+      # `pipeline/version.ts#buildTimestamp` and all three tool manifests
+      # already honour — makes one tree build to the same bytes every time, so a
+      # rerun, a cache and two runs of the same commit are comparable.
+      #
+      # It deliberately does NOT make two branches comparable: two commits carry
+      # two timestamps. That is what `PAYLOAD_EPOCH` is for, and every payload
+      # figure is measured there instead. Both, or neither works.
+      - name: Pin the build clock
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - uses: jdx/mise-action@v3
+
+      - run: npm ci
+
+      # The corpus suites — pipeline, materials, assembly, search — are the ones
+      # that verify claims against real data rather than handcrafted fixtures.
+      # Without this they skip, and a green board that ran 9 of 33 tests is
+      # worse than a red one.
+      - name: Fetch catalog fixtures
+        id: fixtures
+        run: |
+          set -euo pipefail
+          . .github/fixtures.env
+          DEST="${RUNNER_TEMP}/openforge-catalog"
+          git clone --quiet --filter=blob:none --no-checkout --sparse \
+            "https://github.com/${OPENFORGE_CATALOG_REPO}.git" "$DEST"
+          git -C "$DEST" sparse-checkout set --no-cone "${OPENFORGE_FIXTURES_PATH}"
+          git -C "$DEST" checkout --quiet "${OPENFORGE_CATALOG_SHA}"
+          FIXTURES="${DEST}/${OPENFORGE_FIXTURES_PATH}"
+          test -d "$FIXTURES"
+          echo "count=$(find "$FIXTURES" -name '*.json' | wc -l)" >> "$GITHUB_OUTPUT"
+          echo "OPENFORGE_FIXTURES=${FIXTURES}" >> "$GITHUB_ENV"
+          # Row X4. `resolveFixturesRef` would otherwise read this clone's
+          # detached HEAD to learn the snapshot, which is correct but indirect:
+          # the derivation lock is keyed on the snapshot, so the number it
+          # compares against should be the pin itself rather than an inference
+          # about how a sparse clone leaves its HEAD.
+          echo "OPENFORGE_FIXTURES_COMMIT=${OPENFORGE_CATALOG_SHA}" >> "$GITHUB_ENV"
+
+      # Row X4: the one step. It replaces `npm run import:catalog` — same
+      # `buildCatalog`, same two output files, same budget assertion — and adds
+      # the four checks that make one stamp cover five artefacts:
+      #
+      #   1. **regenerates** the catalog index and the share manifest, the only
+      #      two of the five that are derivable without the network, and
+      #      round-trips all 8,702 ordinals through the rebuilt share manifest;
+      #   2. **joins by md5** the three that are not — W1's measurement sidecar,
+      #      the thumbnail set and the LOD store — to the index it just built,
+      #      because a re-exported mesh changes its md5, every derivative is
+      #      content-addressed on that md5, and no version field can see it;
+      #   3. **checks the derivation lock**, which holds `PIPELINE_VERSION`'s
+      #      rule as a biconditional rather than as a docblock convention;
+      #   4. **writes `public/catalog/stamp.json`**, the machine-readable form of
+      #      all of the above, next to the index.
+      #
+      # The thumbnail set and the LOD store are advisory here: both are
+      # gitignored local staging directories, and X1 has not run because
+      # blockers B1 and B2 are open. `--require thumbs,lod` promotes them, and
+      # adding it is the whole of what X1 and X6 owe this step.
+      - name: Regenerate and stamp the derived artefacts
+        run: npm run stamp -- --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Row S4's gate, run before the whole suite so a generator failure is
+      # attributable rather than one red line among 2,700.
+      #
+      # Two things must fail the build here, and both are silent otherwise:
+      #
+      #   1. **A `.scad` default changed.** The panel paints from parameter
+      #      exports committed under `src/generator/panel/schemas/`, and the
+      #      resolver's canonical form fills every unset parameter from them —
+      #      so a moved default silently changes what a stored recipe means and
+      #      stops the archive's tuples matching. `engine.test.ts` re-runs
+      #      OpenSCAD's own `--export-format=param` on all five offered entry
+      #      points and compares the whole export, option sets included.
+      #   2. **A base filename stopped parsing.** `corpus.test.ts` classifies
+      #      every one of the archive's 1,963 bases into one of five classes on
+      #      evidence in its own name, cross-checked against the size code the
+      #      pipeline derived from the tags, and throws on a name it cannot
+      #      place. It runs against the index the stamp step above rebuilt, so
+      #      it sees the pinned fixtures rather than a stale artefact.
+      #
+      # The gate belongs inside `buildCatalog`, and one line of another row's
+      # file stands in the way: `tsconfig.node.json` would have to list
+      # `src/generator/panel/resolve.ts` and `sweep.ts` in its `include`, as it
+      # already lists `src/catalog` and `src/composition` for rows C1 and W7.
+      # Until then this step is the gate.
+      - name: Generator gate
+        run: npx vitest run src/generator
+
+      # Fails if a suite that should have run against the corpus was skipped
+      # instead — the failure mode this whole job exists to prevent.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify catalog facts
+        run: python3 docs/verify-catalog-facts.py "$OPENFORGE_FIXTURES"
+
+      - name: Summary
+        if: always()
+        run: |
+          . .github/fixtures.env
+          {
+            echo "### Corpus"
+            echo ""
+            echo "- fixtures: \`${OPENFORGE_CATALOG_REPO}@${OPENFORGE_CATALOG_SHA:0:12}\`"
+            echo "- fixture files: ${{ steps.fixtures.outputs.count }}"
+          } >> "$GITHUB_STEP_SUMMARY"

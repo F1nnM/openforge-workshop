@@ -1,0 +1,166 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the composition picker, in the tile drawer.
+
+   Row C2. An inline item grid per accessory slot, inside the 442px drawer
+   `screens/detail/detail.css` sizes. Hand-written rather than Tailwind
+   utilities, following `../detail.css` and the note at the top of
+   `../../../ui/shell/shell.css`. Unlayered, same as the rest of the app's CSS.
+
+   ## Why this file no longer imports the catalog's
+
+   It used to, for the thumbnail's rules — `.of-thumb`, `.of-thumb-frame` and
+   the `max-width: none` on `.of-thumb-sheet` without which Tailwind's Preflight
+   squeezes all ten camera angles into the well. Row P3 moved those to
+   `../../../ui/thumb/thumb.css`, which `TileThumb.tsx` imports itself, so they
+   now arrive with the component. Audited against every class this directory
+   actually references, the thumbnail's three were the *only* ones it took from
+   `catalog.css` — which is why this is the one of the three importers whose
+   `@import` could go. `library.css` and `panels.css` also take
+   `.of-empty-title` and `.of-search-input` respectively, and keep theirs.
+
+   ## The grid is three columns, because the largest one in the corpus is eight
+
+   Measured over all 1,244 accessory slot declarations: median 1 item, mean 1.8,
+   max 8. Three columns puts the worst case in three rows inside a 442px drawer
+   and the common case on one line, so there is nothing here to virtualise and
+   no scroll container of its own. `slotPicker.ts` carries the measurement.
+
+   Light only. Parchment is the committed direction; see `tokens.css`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-slotfills {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.of-slotfill {
+  padding: 9px 10px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg2);
+}
+
+.of-slotfill-head {
+  margin: 0;
+  color: var(--ink);
+}
+
+.of-slotfill-note {
+  margin: 4px 0 0;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* ── The closed state ─────────────────────────────────────────────────────────
+   Every slot past the open one renders its label and this button and no images.
+   A three-slot parent therefore decodes one grid of sprite sheets rather than
+   three, which is the only lever available until the 256px derivative lands
+   (blocker B2).
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-slotfill-open,
+.of-slotfill-clear {
+  margin-top: 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.of-slotfill-open:hover,
+.of-slotfill-clear:hover {
+  border-color: var(--acc);
+  color: var(--acc);
+}
+
+/* ── The grid ────────────────────────────────────────────────────────────── */
+
+.of-slotfill-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-slotfill-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--face-body);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.of-slotfill-card:hover {
+  border-color: var(--acc);
+}
+
+.of-slotfill-card[aria-pressed='true'] {
+  border-color: var(--acc);
+  box-shadow: inset 0 0 0 1px var(--acc);
+}
+
+.of-slotfill-cardname {
+  line-height: 1.25;
+  /* Two lines, then clipped: the drawer is 442px across three columns, and an
+     item name in this corpus runs to five words. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* ── The dead end ─────────────────────────────────────────────────────────────
+   `aria-disabled`, never `disabled`: the card stays focusable so the reason it
+   is greyed is reachable. `SlotFills.tsx` has the argument. The reason is
+   rendered as well as put in the accessible name, because a sighted user needs
+   it too and a tooltip would hide the row's whole point behind a hover.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-slotfill-card[data-dead] {
+  cursor: not-allowed;
+  background: var(--bg3);
+  border-style: dashed;
+}
+
+.of-slotfill-card[data-dead]:hover {
+  border-color: var(--line);
+}
+
+.of-slotfill-card[data-dead] .of-thumb {
+  /* Desaturated rather than dimmed. `opacity` on the well would show the
+     drawer's background through the gradient and read as a loading state. */
+  filter: grayscale(1);
+}
+
+.of-slotfill-card[data-dead] .of-slotfill-cardname {
+  color: var(--mut);
+}
+
+.of-slotfill-why {
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
+.of-slotfill-why[data-tone='open'] {
+  color: var(--acc2);
+}

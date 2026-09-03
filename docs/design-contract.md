@@ -92,10 +92,86 @@ Facets are **single-select toggles** in the mock (clicking the active one clears
 There is no deny/exclude state and no hierarchy.
 
 **Grid** — search input (max 520px) + live result count; cards at
-`repeat(auto-fill, minmax(215px, 1fr))`, 16px gap. Each card:
-4:3 thumbnail well, title, a mono size chip, texture set name, mono file size,
-optional tag chips (behind a `showTags` prop, default off), and a full-width
-"+ Add to library" / "✓ In library" toggle button.
+`repeat(auto-fill, minmax(215px, 1fr))`, 16px gap. Each card, **top to bottom as
+`TileCard.tsx` renders it**:
+
+1. a 4:3 thumbnail well and the title, both inside one `?tile=` link;
+2. a texture-set line, with a material swatch dot ahead of the set name
+   (`aria-hidden` — the name is beside it, so the colour carries nothing alone);
+3. a mono meta line: the size chip, the filename's variant token (empty on 40
+   aggregates, and then nothing is drawn), and a **file-size range** rather than
+   one size, because a card is one item over 2.28 files;
+4. the **availability strip** — described below, and absent from this section
+   until row X10 wrote it down;
+5. the tag row;
+6. a full-width "+ Add to library" / "✓ In library" toggle button.
+
+**The availability strip** (`.of-avail-strip`, `availability.ts` +
+`TileCard.tsx#AvailabilityStrip`, row A3) is a `<ul>` of at most four mono chips,
+and it answers the two questions a browsing user actually has: *how many parts do
+I print*, and *will this join the build I have chosen*. Every chip is **derived
+from the aggregate**, never printed from a tag — `CatalogRecord.conn` throws the
+position segment away, and 1,283 of 4,363 toppers carry a lock on their side and
+none underneath, so a card reading `conn` advertised joinery 1,283 tiles do not
+have where it matters.
+
+Three sources, always in this order:
+
+| # | chip | values | count |
+| - | ---- | ------ | ----- |
+| 1 | **base requirement** — always present | `Needs a base` · `No base needed` · `Base optional` | exactly 1 |
+| 2 | **lock systems**, in self-sufficiency order (openlock, dragonlock, magnetic — 1,497 / 359 / 255) | `OpenLOCK` · `DragonLock` · `Magnetic`, each either **filled** (locks on its own underside) or **outlined** with ` sides` appended (joins its neighbours, meets the table on something else) | 0 to 3 |
+| 3 | **joinery verdict**, where there is no lock to state | `Insert` · `Joinery untagged` | 0 or 1 |
+
+- **`Base optional` is a third state, not a hedge.** 931 aggregates offer both a
+  one-part print and a topper for a separate base; the chip says the choice
+  exists and the variants table (§2.5) is where it is made.
+- **Magnetic has no `sides` state, and that is the corpus and not the layout.**
+  Zero aggregates carry `connection|side|magnetic` — magnets are glued into a
+  pocket in the base of a piece and nothing here mounts one on a side wall — so a
+  symmetrical two-row grid of six chips would ship a cell that can never light,
+  which reads as "this tile does not do magnetic sides" rather than "no tile
+  does". `underside` wins where a system is on both faces: 555 aggregates for
+  openlock, never for the other two.
+- **The strip is never empty, and the partition is exhaustive rather than lucky.**
+  2,027 aggregates (53.0%) offer no lock chip at all; 1,878 of those are
+  `Needs a base`, and the remaining 149 split exactly 93 insert-only + 56
+  joinery-untagged with nothing left over — which is why the verdict has those two
+  values and no `none`.
+- **`Joinery untagged` means unknown, not incompatible.** 33 of the underlying
+  records name a lock in the filename only, 18 of those a magnet size that is
+  nowhere in the tag vocabulary.
+- **`connection|side|filament` is deliberately not a fourth chip.** It is the side
+  system on 114 records — a printed-in-place hinge, not a lock — and a fourth chip
+  would invent a build option the builder cannot be set to. All 114 are
+  `Needs a base`, so none loses its only chip to the omission.
+- **Fixed two-line box, 41px** (`2 × 19px + 3px`), because `VirtuosoGrid` needs a
+  uniform card height. The measured worst case over all 3,822 aggregates is
+  **4 chips / 60 characters** — `No base needed · OpenLOCK sides · DragonLock
+  sides · Joinery untagged`, 15 aggregates — costing 365px of a 394px box.
+  `availability.ts#CHIP_BUDGET` carries the arithmetic and
+  `availability.test.ts` fails the build when a relabel exceeds it, because
+  overflowing clips a chip out of sight rather than visibly breaking the layout.
+- **Each chip's accessible name is its label plus a clipped sentence** ("Base
+  optional" alone does not say optional between what), and the filled/outlined
+  distinction is not available to a reader who cannot see it.
+- **A legend sits above the grid** — `filled locks underneath · outlined joins at
+  the sides only`, with live chip samples rather than prose. `aria-hidden`,
+  because every word of it is already on the first card, and rendered **only
+  above a non-empty grid**: above the empty state it is a key to nothing.
+
+**The tag row ships, and it has no `showTags` prop** (row X2). This section specified one,
+defaulting off; it is deliberately not implemented. `TileCard` has exactly one call site,
+which would always pass it, and defaulting it off would ship the indistinguishable cards
+the row exists to fix — with the row on, row A3's last **21** name-collision groups (45
+items) close to **0**, because every discriminator left is a 3- or 4-segment `interface|`
+or `shape|` tag against a 2-segment neighbour. The row draws on **79** labels corpus-wide
+and is **always rendered**, empty on 1,044 of 3,822 items, because `VirtuosoGrid` assumes a
+uniform item height; it carries no `aria-label` when empty. Chips are leaves only, never `size|` or `connection|`, and never a
+label the title, texture line or size chip already says — X2 measured that without that last
+rule the commonest chip in the corpus is `shape|wall` reading "Wall" beside 1,489 titles
+that already contain "Wall". The 1,044, the 21→0 and the 79 labels are asserted in
+`src/screens/catalog/corpus.test.ts`; the 1,489 is X2's measurement, not a live invariant.
 
 Empty state: *"Nothing in the organized archive matches."* with a note that untagged
 tiles exist in storage but are not yet reachable.
@@ -140,8 +216,23 @@ and a caption stating the demo downloads a manifest while production bundles a z
 - A 2×2 spec grid: **Footprint**, **Height**, **Build system**, **File** (STL · MB).
 - **Storage address** in mono, shown in the secondary accent — the design deliberately
   surfaces the raw archive URL.
-- Tag chips.
-- "Other sizes in this family" — variant buttons that swap the drawer's subject.
+- Tag chips. **Implemented — and they always were, here.** The drawer renders *every* tag the
+  catalog resolves for the shown variant, as `.of-detail-tags` chips, and has since row 13.
+  What was unimplemented were §2.2's chips, on the *card*: that is where A3's measurement
+  applied (a tag chip is the only field left that separates the final 21 name-collision
+  groups, 45 items, because texture and the size chip separate **nothing** — the display name
+  is synthesised from those very tags), and row X2 closed it to 0 there. This drawer list is
+  the unfiltered fallback behind the card's three-rule selection: full paths, no width budget,
+  nothing suppressed.
+- ~~"Other sizes in this family" — variant buttons that swap the drawer's subject.~~
+  **Superseded, and deliberately not reimplemented.** This was built in v1 as `familyVariants`,
+  grouping by `record.family` across 1,130 folders. Row A4 established that the drawer resolves
+  through the *aggregate*, and row A5 retired the module: an item's own variants are now a table
+  that discloses all of them, so "other sizes in this family" no longer names a real relation
+  from the drawer's subject.
+  A post-aggregation equivalent would list **aggregates** in the same folder rather than
+  records, which is a different feature with a different information architecture. **It is
+  unowned.** Reschedule it deliberately or drop it deliberately, but it is not simply pending.
 
 ---
 
@@ -218,9 +309,21 @@ must solve the tension that physically-correct stone albedos are all near-identi
 desaturated greys, which would defeat the purpose. Resolved mapping, shading recipe and
 fallback rules live in `texture-materials.md` / `texture-materials.draft.ts`.
 
-Note the knock-on: catalog grid cards are served by pre-rendered **greyscale sprite
-sheets** already in the bucket, while the live 3D views would be coloured. That
-inconsistency needs an explicit decision.
+Note the knock-on: catalog grid cards are served by pre-rendered sprite sheets already in
+the bucket, while the live 3D views are coloured. **Those sheets are not greyscale — they
+are blue.** `stl-thumb` renders in a default blue Phong material (ambient `#002142`,
+diffuse peaking `#3375c8`), and 99.8% of opaque pixels are non-neutral over 2,105,442
+decoded from 69 live sheets.
+
+**The decision this asked for has been taken, and the inconsistency is closed rather than
+accepted.** Row P1 tints the existing sheets in the browser: every opaque pixel is
+`ambient + s·diffuse + k·specular` with a white specular, the two terms un-mix exactly, and
+re-mixing them with the family's own Phong triple composes to one `feColorMatrix` per
+material — the same renderer, re-lit, not a wash over a render. Grid cards and 3D views are
+now drawn from the same sixteen families; every card already goes through a tint matrix,
+and which family it asks for is row P3's remaining wiring. See architecture-plan.md §8 for
+the pipeline half of the answer (a desaturated `/thumbs/` derivative) and
+`src/materials/tint.ts` for the display half.
 
 ---
 
