@@ -245,14 +245,25 @@ export function oracleAddresses(oracle: Oracle, search: FacetSearch): number[] {
  * Matching items by **preview tile id**, in display order — what
  * `SearchResult.ids` holds.
  *
- * A1's rule re-derived rather than imported: the first variant carrying a
- * sprite, else the first. It exists for exactly one aggregate corpus-wide, and
- * that is precisely why it is worth restating here — a rule with one witness is
- * one that a refactor can drop without any other test noticing.
+ * A1's rule re-derived rather than imported, in row V5's three ordered tiers: a
+ * sprite-carrying **topper** first, then any sprite-carrying record, then the
+ * lowest ordinal. `doc.records` is in ascending ordinal, so "first" means the
+ * same thing here as it does in `pickPreview`.
+ *
+ * This restatement earned its keep. Before V5 the rule was *"the first record
+ * carrying a sprite, else the first"* and this docblock argued that **a rule
+ * with one witness is one a refactor can drop without any other test
+ * noticing** — and then V5 changed the rule, and these two suites were the only
+ * ones in 154 files that failed. The witness count is now 3,068 aggregates whose
+ * preview must be a topper rather than one aggregate whose preview must have a
+ * sprite, so the restatement is stronger than it was, not weaker.
  */
 export function oracleIds(oracle: Oracle, search: FacetSearch): TileId[] {
   return oracleHits(oracle, search).map((doc) => {
-    const preview = doc.records.find((record) => record.sprite) ?? doc.records[0]
+    const preview =
+      doc.records.find((record) => record.layer === 'topper' && record.sprite) ??
+      doc.records.find((record) => record.sprite) ??
+      doc.records[0]
     return preview?.id ?? ('' as TileId)
   })
 }

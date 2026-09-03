@@ -311,13 +311,14 @@ export interface TileAggregate {
   readonly variantClass: AggregateClass
 
   /**
-   * Which variant a card should show.
+   * Which variant a card should show — see {@link pickPreview} for the rule and
+   * for the two things it declines to claim.
    *
-   * The first variant carrying a sprite, else the first. It exists for exactly
-   * one aggregate — `d4c2a57740b65`, an `aztlan col+T` column whose openlock
-   * variant has a sprite sheet and whose dragonlock variant does not — and that
-   * is the aggregate whose card would otherwise render blank while a sibling had
-   * a picture. 8,701 of 8,702 records have a sprite; this is the one.
+   * A sprite-carrying **topper** first, then any sprite-carrying variant, then
+   * the head. Row V5 made that an ordered rule; before it, the field read *"the
+   * first variant carrying a sprite, else the first"* and landed on the topper
+   * in 925 of the 931 mixed aggregates **by ordering luck**, because the lowest
+   * ordinal in a group usually happens to be the `openforge` file.
    */
   readonly preview: TileId
 
@@ -612,6 +613,84 @@ function baseRequirement(layers: ReadonlySet<Layer>): BaseRequirement {
   return layers.size === 1 ? 'always' : 'either'
 }
 
+/* -------------------------------------------------------------------- preview */
+
+/**
+ * Which variant's picture *is* the item, in three ordered tiers:
+ *
+ *   1. the first variant with `layer === 'topper'` **that carries a sprite**;
+ *   2. else the first variant carrying a sprite;
+ *   3. else the head — `variants[0]`, the address holder.
+ *
+ * ## Why the topper, stated in terms of `layer`
+ *
+ * The owner's rule is that *the aggregated tile is always the thing the user
+ * sees* — the piece itself, not the way it is joined to the table. `layer` is
+ * what the data carries for that, and `layer === 'topper'` is exactly
+ * `connection|openforge`, which **is** the declaration that the joinery lives on
+ * a separately printed base. So a topper's mesh is the tile and nothing else,
+ * while every other layer folds something that is not the tile into the same
+ * mesh: an `integral` carries its lock system underneath, a `base` is the
+ * joinery with no tile on it at all, and an `insert` is a piece fitted into
+ * another piece. Prefer the topper and the card shows the stairs; take the
+ * ordering's word for it and 6 of 931 mixed aggregates show a `dragonlock`
+ * underside instead. `pipeline/aggregate.test.ts` names those 6.
+ *
+ * ## What this deliberately does not claim
+ *
+ * **Not "the file to print".** That is {@link selectVariant}, and it answers the
+ * *opposite* way on purpose — *prefer one part over two*, so a self-sufficient
+ * variant beats a topper. Measured over the emitted index, `selectVariant()`
+ * with no preference disagrees with this rule on **1,598 of 3,822** aggregates,
+ * including all 931 mixed ones. The two do not conflict, because they are
+ * not the same question: this one picks the *picture of the item*, that one picks
+ * the *bill of materials*. See {@link variantsByPreference} for why the orders
+ * stay separate rather than one being derived from the other.
+ *
+ * **Not "the one without an integrated base".** {@link TileVariant.needsBase}'s
+ * docblock is careful here and this rule inherits the care: *"integrated base"
+ * over-claims for two thirds of the cases* — for a wall or a column,
+ * self-sufficiency means the OpenLOCK footer is part of *this* mesh, and for a
+ * roof panel that it clips to what is under it. The claim is only the narrow
+ * one `layer` supports: a topper's mesh is the tile alone.
+ *
+ * **Not a judgement about the render.** Nothing here reads geometry, triangle
+ * count or sheet quality. A topper that happens to photograph worse than its
+ * `integral` sibling still wins, because the rule is about *what the picture is
+ * of*, not how good it is.
+ *
+ * **Not an address.** The catalog URL is `variants[0].ord`, which no tier moves
+ * — `src/routes/tileAddress.test.ts` pins that a change to the preview rule
+ * cannot move anybody's link.
+ *
+ * ## The sprite condition, and why the corpus cannot prove it
+ *
+ * Tier 1 requires the topper to carry a sprite so a spriteless topper cannot
+ * blank a card that had a sibling with a picture — the failure tier 2 was
+ * originally added for. **On today's corpus that condition never fires**: all
+ * 3,068 topper-carrying aggregates hold at least one sprite-carrying topper, so
+ * tier 1 collapses to "the first topper", and tier 3 is unreachable outright
+ * because 0 of 3,822 aggregates lack a sprite everywhere. A corpus census
+ * therefore agrees with several weaker rules than this one, which is why the
+ * tiers are proved on hand-countable fixtures in `aggregate.test.ts` as well.
+ *
+ * Tier 2 is the one live case: `d4c2a57740b65`, an `aztlan col+T` column whose
+ * openlock variant has a sprite sheet and whose dragonlock variant does not, and
+ * whose dragonlock variant is the head. It has no topper, so tier 1 passes it
+ * over and tier 2 keeps its card from rendering blank. 8,701 of 8,702 records
+ * carry a sprite; that is the one.
+ *
+ * Total, and deterministic: `variants` is a non-empty tuple ordered by ordinal,
+ * so tier 3 always yields and two runs cannot disagree.
+ */
+function pickPreview(variants: readonly [TileVariant, ...TileVariant[]]): TileId {
+  const topper = variants.find((variant) => variant.layer === 'topper' && variant.sprite)
+  if (topper !== undefined) return topper.id
+  const sprited = variants.find((variant) => variant.sprite)
+  if (sprited !== undefined) return sprited.id
+  return variants[0].id
+}
+
 /**
  * Derive the aggregate layer from a parsed catalog.
  *
@@ -736,6 +815,9 @@ export function buildAggregateIndex(file: CatalogFile): AggregateIndex {
 
     const [head, ...tail] = variants
     if (head === undefined) throw new Error(`aggregate ${design} produced no variants`)
+    // One non-empty tuple, built once and used for both the emitted `variants`
+    // and the preview rule, so the two cannot be reading different orders.
+    const ordered: readonly [TileVariant, ...TileVariant[]] = [head, ...tail]
 
     // Sorted, because a slot list is a *set* — two variants that declare the
     // same two slots in opposite order have the same composition, and reporting
@@ -769,9 +851,9 @@ export function buildAggregateIndex(file: CatalogFile): AggregateIndex {
       foot: first.foot,
       sizeCode: first.sizeCode,
       rotStep: first.rotStep,
-      variants: [head, ...tail],
+      variants: ordered,
       variantClass,
-      preview: (variants.find((variant) => variant.sprite) ?? head).id,
+      preview: pickPreview(ordered),
       needsBase,
       selfSufficientConn: [...selfSufficientConn].sort(),
       sideConn: [...sideConn].sort(),
@@ -948,6 +1030,39 @@ function compareRanks(a: readonly number[], b: readonly number[]): number {
  * unique by `CatalogFile`'s own parse check, so the order is a pure function of
  * the aggregate and the preference — two calls cannot disagree about which
  * variant a card shows.
+ *
+ * ## This is not where {@link TileAggregate.preview} comes from, and must not be
+ *
+ * Row V5 asked the question directly, because a second ordering that disagreed
+ * with this one would be a trap and one that duplicated it would be debt. It is
+ * **neither**: the two orders answer different questions and disagree by
+ * construction rather than by accident.
+ *
+ * This order exists to pick *the file to print*, and its first criterion is
+ * §5.2's — **prefer one part over two**, so a self-sufficient `integral` beats a
+ * `topper`. {@link pickPreview} exists to pick *the picture of the item*, and its
+ * first tier is the exact opposite — the `topper`, because that is the mesh that
+ * is the tile and nothing else. Measured over the emitted index:
+ *
+ *   - `selectVariant()` with no preference names a different file from `preview`
+ *     on **1,598 of 3,822** aggregates, including **all 931** that hold both an
+ *     `integral` and a `topper`;
+ *   - with `bottom` stated it is 1,612 (openlock), 697 (dragonlock), 1,056
+ *     (magnetic);
+ *   - `variantsByPreference()[0]` alone differs on **1,153**.
+ *
+ * Of those 1,598, the 931 are the deliberate inversion and the remaining 667
+ * come from this order's `bytes`-ascending tie-break, which a preview must not
+ * inherit at all: the smallest file in a group is routinely the `topless` print,
+ * and a card that showed the topless variant of every tile would be answering a
+ * print-option question nobody asked it.
+ *
+ * Expressing one through the other would therefore mean adding a "prefer the
+ * topper" preference that reverses this function's headline criterion, and no
+ * caller wants it — the only consumer is the card, which needs no ranking, no
+ * option vocabulary and no tie disclosure, just one id. So the preview stays a
+ * three-tier rule of its own, and the disagreement is a documented property of
+ * the pair rather than a bug in either.
  */
 export function variantsByPreference(
   aggregate: TileAggregate,
