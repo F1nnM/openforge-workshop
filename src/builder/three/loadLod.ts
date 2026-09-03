@@ -29,12 +29,33 @@
  * That widening is not a cost this module chose: `float32` positions are what
  * `lod.ts`'s memory budget is computed against.
  *
- * ## The absences are the normal case
+ * ## The absences are the normal case, and row R1 answers them
  *
  * Blocker **B2** is open, nothing is uploaded, and G1's handover note says a 404
  * on `/lod/` must be treated as expected. So {@link LodAbsentError} is a distinct
  * type from {@link LodLoadError}: one is "the backfill has not happened", which
  * the panel reports as a state, and the other is a fault worth a retry.
+ *
+ * **`/lod/` being empty is not a reason for the builder to draw nothing.** Row
+ * R1 converts the source STL in the browser when an item joins the library and
+ * caches the result in IndexedDB (`src/mesh/`), so there is a second place a
+ * mesh can come from. {@link loadMeshGeometry} is the seam: it asks `/lod/`
+ * first — one 21 kB GLB against a 10.77 MB STL, so the store is strictly cheaper
+ * whenever it answers — and reads the converted cache when `/lod/` says 404.
+ *
+ * The order matters and is not arbitrary. The day **B7** runs, every mesh starts
+ * arriving from `/lod/` and the fallback stops firing on its own, with no line
+ * changed and nothing to clean up. Until then the fallback is the only path that
+ * produces geometry at all.
+ *
+ * ### What a consumer may know
+ *
+ * `LodGeometry.source` names where the geometry came from, for the readout and
+ * for the tests. Nothing else may branch on it: an `InstancedMesh` cannot tell,
+ * because both paths hand back the same thing — positions in **millimetres**, in
+ * the store's Z-up axes, indexed, no normals — and `place.ts` stands either one
+ * up with the same matrix. Rows R2 and R3 take a `BufferGeometry` per md5 and
+ * must not ask which store it came out of.
  *
  * A 200 is not trusted on its own either. A CDN error page is served with a 200
  * and an HTML body, and `GLTFLoader.parse` on HTML fails somewhere deep with a
@@ -47,6 +68,8 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import type { Group, Mesh } from 'three'
 
 import type { BlobId, CatalogAssets } from '@/catalog'
+import type { MeshCache, MeshRecord } from '@/mesh'
+import { MESH_CACHE_VERSION } from '@/mesh'
 
 import { footprintDelta } from './place'
 import { lodGlbUrl } from './lod'
@@ -95,9 +118,14 @@ export class LodLoadError extends Error {
   }
 }
 
-/** One loaded store object, ready to instance. */
+/** Where a geometry came from. See the module note on what may branch on it. */
+export type LodSource = 'lod' | 'converted'
+
+/** One loaded object, ready to instance. Identical whichever store it came from. */
 export interface LodGeometry {
   readonly blob: BlobId
+  /** `'lod'` for a `/lod/` GLB, `'converted'` for an R1 in-browser conversion. */
+  readonly source: LodSource
   /**
    * Positions in **millimetres**, in the store's Z-up axes, indexed, no normals.
    *
@@ -246,6 +274,7 @@ export async function parseLodGlb(blob: BlobId, buffer: ArrayBuffer, url = `lod:
 
   return {
     blob,
+    source: 'lod',
     geometry,
     bounds,
     triangles,
@@ -325,4 +354,110 @@ function disposeLoaded(scene: Group): void {
     if (Array.isArray(material)) for (const one of material) one.dispose()
     else material.dispose()
   })
+}
+
+/* ------------------------------------------------- the converted-mesh source */
+
+/**
+ * A cached conversion → the same `LodGeometry` the GLB path yields.
+ *
+ * Nothing is baked and nothing is denormalised here, which is the whole
+ * difference between the two paths: `src/mesh/convert.ts` writes `float32`
+ * positions in millimetres with an identity transform, because it has no
+ * container to quantise for. So this function is a wrap, not a decode — the
+ * arrays come out of IndexedDB through the structured clone algorithm as typed
+ * arrays and go straight onto a `BufferGeometry`. That is why a cache hit is
+ * milliseconds against the 1.4 s the download it replaces takes.
+ *
+ * No `computeVertexNormals()`, for `bakeWorldMatrix`'s three reasons: the app's
+ * material sets `flatShading: true`, glTF says a primitive with no `NORMAL`
+ * renders flat, and a normal attribute is 12 bytes a vertex to be compiled out
+ * of the shader.
+ */
+export function geometryFromRecord(record: MeshRecord): LodGeometry {
+  const geometry = new BufferGeometry()
+  // Copied rather than adopted. The record's arrays are the ones IndexedDB
+  // handed back and a caller may hold the record for its readout fields; a
+  // `BufferGeometry.dispose()` that detached a buffer somebody else is reading
+  // is the kind of bug that shows up as a black mesh three interactions later.
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(record.positions), 3))
+  geometry.setIndex(
+    record.indices instanceof Uint16Array
+      ? new BufferAttribute(new Uint16Array(record.indices), 1)
+      : new BufferAttribute(new Uint32Array(record.indices), 1),
+  )
+  geometry.computeBoundingBox()
+  geometry.computeBoundingSphere()
+
+  const bounds = geometry.boundingBox ?? new Box3()
+  const index = geometry.getIndex()
+  const position = geometry.getAttribute('position')
+
+  return {
+    blob: record.blob as BlobId,
+    source: 'converted',
+    geometry,
+    bounds,
+    triangles: record.triangles,
+    vertices: record.vertices,
+    // What the source STL cost to fetch, so the readout can say what the
+    // conversion saved. There were no GLB bytes over the wire on this path.
+    bytes: record.sourceBytes,
+    decodedBytes:
+      position.count * 3 * 4 + (index === null ? 0 : index.count * index.array.BYTES_PER_ELEMENT),
+    // No node transform to undo: the conversion emits millimetres directly.
+    nodeScale: 1,
+    footprintDelta: (extent) => footprintDelta(bounds, extent),
+    dispose: () => {
+      geometry.dispose()
+    },
+  }
+}
+
+export interface LoadMeshOptions extends LoadLodOptions {
+  /**
+   * The converted-mesh cache, or `undefined` for "there is none".
+   *
+   * A `Promise` because opening IndexedDB is asynchronous and `useLodStore`
+   * must be able to start a load without having awaited it. It resolves to
+   * `null` — and `undefined` is allowed too — where there is no usable
+   * IndexedDB, which is Node, jsdom and Firefox in private browsing. Either
+   * degrades to exactly this module's behaviour before row R1: `/lod/` or
+   * nothing.
+   */
+  readonly cache?: Promise<MeshCache | null> | undefined
+}
+
+/**
+ * One mesh, from whichever store has it. **The seam rows R2 and R3 consume.**
+ *
+ * `/lod/` first, the converted cache second, {@link LodAbsentError} only when
+ * neither has it — which today means "this design was never added to the
+ * library, so nothing converted it". A {@link LodLoadError} from `/lod/` is
+ * *not* covered by the fallback: a corrupt or misconfigured store object is a
+ * fault worth reporting, and quietly converting 10.77 MB of STL to paper over it
+ * would hide the one failure the panel offers a retry for.
+ */
+export async function loadMeshGeometry(blob: BlobId, options: LoadMeshOptions): Promise<LodGeometry> {
+  try {
+    return await loadLodGeometry(blob, options)
+  } catch (cause) {
+    if (!(cause instanceof LodAbsentError)) throw cause
+    if (options.cache === undefined) throw cause
+
+    let record: MeshRecord | undefined
+    try {
+      const cache = await options.cache
+      if (cache === null) throw cause
+      record = await cache.get(blob)
+    } catch {
+      // A cache that cannot be read is the same outcome as a cache that is
+      // empty: there is no geometry for this blob. It is reported as the
+      // absence it is rather than as a load fault, because a retry would fail
+      // the same way.
+      throw cause
+    }
+    if (record === undefined || record.version !== MESH_CACHE_VERSION) throw cause
+    return geometryFromRecord(record)
+  }
 }
