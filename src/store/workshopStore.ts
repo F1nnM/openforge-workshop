@@ -207,7 +207,14 @@ function newPlacementId(): PlacementId {
 }
 
 /**
- * Put a tile on the grid and return its key.
+ * Put an **item** on the grid and return its key.
+ *
+ * The name is kept — `placeTile` is what a user does, and "tile" is the word the
+ * whole app says on screen — while the argument is a design-addressed
+ * {@link Placement} since row V4. Nothing here resolves anything: which file
+ * gets printed is decided when the bill is built, so a scene placed under one
+ * lock preference and downloaded under another is the same room and a different
+ * pack.
  *
  * Parsed on the way in, which is not redundant with the rehydrate check: this
  * catches a bad value at the call that produced it, where the stack still names
@@ -266,10 +273,11 @@ export function clearPlacements(): void {
  * Put a generated base on the grid and return its key.
  *
  * The mirror of {@link placeTile}, and deliberately a *separate* action over a
- * separate map rather than a widened one: `Placement.tileId` is a `TileId` and
- * row S5's whole identity argument rests on a generated base not being able to
- * produce a string in that space. The `PlacementId` space *is* shared, which is
- * what lets one id name a piece on the plan whichever map holds it.
+ * separate map rather than a widened one: row S5's whole identity argument rests
+ * on a generated base being neither a catalog file nor a catalog *item* — it has
+ * no `TileId` and, since row V4 put a `DesignId` in that slot, no design either.
+ * The `PlacementId` space *is* shared, which is what lets one id name a piece on
+ * the plan whichever map holds it.
  *
  * Parsed on the way in for {@link placeTile}'s reason — a bad value fails at the
  * call that produced it, where the stack still names the culprit, rather than at

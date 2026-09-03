@@ -28,7 +28,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { ManifestOrdinal, TileId } from '@/catalog'
+import type { DesignId, ManifestOrdinal, TileId } from '@/catalog'
 import { fileDefaults, recipeKey } from '@/generator/panel/recipe'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
 import { generatedBaseId } from '@/generator/placement/scene'
@@ -37,7 +37,8 @@ import type { Placement } from '@/store'
 import { ByteWriter } from './bytes'
 import { SHARE_URL_BUDGET, buildShareUrl, decodeShareFragment, encodeShareFragment, shareUrlFits } from './link'
 import type { ShareManifest } from './manifest'
-import { buildShareManifest } from './manifest'
+import { buildShareManifest, resolveOrdinals } from './manifest'
+import { encodePayload } from './payload'
 import type { SharedScene } from './scene'
 import { deflateRaw, toBase64Url } from './transport'
 
@@ -68,9 +69,26 @@ function tileId(index: number): TileId {
   return `tiles/fixture/family/fixture#tile.${String(index)}x1.openlock.stl` as TileId
 }
 
+/**
+ * The design of fixture tile `index`.
+ *
+ * **One file per design**, which is what keeps every figure below comparable
+ * with row X10's: a design's address is its own ordinal, so the ordinal column
+ * carries the same integers it carried before row V4 and the *only* thing the
+ * row changed about a link is what those integers mean. The multi-variant case
+ * is measured separately, at the end of this file.
+ */
+function designId(index: number): DesignId {
+  return `d-fixture-${String(index)}` as DesignId
+}
+
 const MANIFEST: ShareManifest = buildShareManifest({
   version: { manifest: 1 },
-  records: Array.from({ length: CORPUS }, (_, index) => ({ id: tileId(index), ord: index as ManifestOrdinal })),
+  records: Array.from({ length: CORPUS }, (_, index) => ({
+    id: tileId(index),
+    ord: index as ManifestOrdinal,
+    design: designId(index),
+  })),
 })
 
 /* ------------------------------------------------------------ build shapes */
@@ -95,7 +113,7 @@ function room(count: number): Placement[] {
     for (let z = 0; z < side && placements.length < count; z += 1) {
       const prop = x % 7 === 3 && z % 5 === 2
       placements.push({
-        tileId: tileId(prop ? (PROPS[(x + z) % PROPS.length] ?? FLOOR) : FLOOR),
+        design: designId(prop ? (PROPS[(x + z) % PROPS.length] ?? FLOOR) : FLOOR),
         x,
         z,
         rotation: prop ? ((x + z) % 4) * 90 : 0,
@@ -103,12 +121,12 @@ function room(count: number): Placement[] {
     }
   }
   for (let x = 0; x < side && placements.length < count; x += 1) {
-    placements.push({ tileId: tileId(WALL), x, z: -0.5, rotation: 0 })
-    if (placements.length < count) placements.push({ tileId: tileId(WALL), x, z: side - 0.5, rotation: 180 })
+    placements.push({ design: designId(WALL), x, z: -0.5, rotation: 0 })
+    if (placements.length < count) placements.push({ design: designId(WALL), x, z: side - 0.5, rotation: 180 })
   }
   for (let z = 0; z < side && placements.length < count; z += 1) {
-    placements.push({ tileId: tileId(WALL), x: -0.5, z, rotation: 90 })
-    if (placements.length < count) placements.push({ tileId: tileId(WALL), x: side - 0.5, z, rotation: 270 })
+    placements.push({ design: designId(WALL), x: -0.5, z, rotation: 90 })
+    if (placements.length < count) placements.push({ design: designId(WALL), x: side - 0.5, z, rotation: 270 })
   }
   const corners: readonly (readonly [number, number])[] = [
     [-0.5, -0.5],
@@ -117,7 +135,7 @@ function room(count: number): Placement[] {
     [side - 0.5, side - 0.5],
   ]
   corners.forEach(([x, z], index) => {
-    if (placements.length < count) placements.push({ tileId: tileId(CORNER), x, z, rotation: index * 90 })
+    if (placements.length < count) placements.push({ design: designId(CORNER), x, z, rotation: index * 90 })
   })
 
   return placements.slice(0, count)
@@ -148,7 +166,7 @@ function scattered(count: number): Placement[] {
     const step = steps[Math.floor(random() * steps.length)] ?? 90
     const turns = Math.floor(random() * (360 / step))
     placements.push({
-      tileId: tileId(ordinal),
+      design: designId(ordinal),
       // `+ 0` folds `-0` to `+0`, which is what `Placement`'s coordinate transform
       // and the codec both do; without it the fixture would not compare equal to
       // its own round trip.
@@ -225,7 +243,7 @@ interface Row {
 
 function rows(scene: SharedScene): Row[] {
   return scene.placements.map((placement) => ({
-    o: MANIFEST.ordinalOf(placement.tileId) ?? 0,
+    o: MANIFEST.ordinalOf(placement.design) ?? 0,
     x: placement.x,
     z: placement.z,
     r: placement.rotation,
@@ -271,7 +289,12 @@ async function rowMajorUrlLength(scene: SharedScene): Promise<number> {
 }
 
 async function urlLength(scene: SharedScene): Promise<number> {
-  const encoded = await encodeShareFragment(scene, MANIFEST)
+  return urlLength2(scene, MANIFEST)
+}
+
+/** The same, against a manifest other than the corpus-shaped one. */
+async function urlLength2(scene: SharedScene, manifest: ShareManifest): Promise<number> {
+  const encoded = await encodeShareFragment(scene, manifest)
   if (!encoded.ok) throw new Error(encoded.message)
   return buildShareUrl(BASE_URL, encoded.fragment).length
 }
@@ -462,6 +485,115 @@ describe('what a generated base costs in a link', () => {
     if (!decoded.ok) return
     expect(decoded.scene).toEqual(scene)
     expect(decoded.dropped).toEqual([])
+  })
+})
+
+describe('what row V4 did to the length of a link', () => {
+  /**
+   * The row's own claim, measured from both ends.
+   *
+   * The brief expected shorter links, on the grounds that a `DesignId` is 13
+   * characters against a `TileId`'s 39–183. **The codec has never written
+   * either**: it writes a manifest ordinal, one or two varint bytes, so there
+   * was nothing to reclaim — and 13 raw characters in that column would have
+   * been 6 to 13 times *worse*. Every figure in the two tables above is
+   * therefore unchanged, to the character, except two rows that moved by +1;
+   * A/B-ing `SHARE_FORMAT_VERSION` between 2 and 3 with nothing else touched
+   * reproduces exactly that ±1, so it is the version *byte's value* perturbing
+   * deflate and not the ordinal column.
+   *
+   * Where a link really does get shorter is a scene holding **two variants of
+   * one item**, which is a scene only the pre-V4 palette could produce: it armed
+   * a concrete file under whatever lock preference was set, so browsing under
+   * openlock, switching to dragonlock and placing again put two ordinals of one
+   * design on the grid. After V4 that scene is not expressible — the placements
+   * are one design — so this compares the ninety-tile room the two builds
+   * produce for the same *user actions*.
+   */
+  it('shortens the one scene it can: two variants of one item collapse to one ordinal', async () => {
+    // A design at ordinals 7000 and 7001. Two files, one item.
+    const manifest = buildShareManifest({
+      version: { manifest: 1 },
+      records: [
+        { id: tileId(7000), ord: 7000 as ManifestOrdinal, design: designId(7000) },
+        { id: tileId(7001), ord: 7001 as ManifestOrdinal, design: designId(7000) },
+      ],
+    })
+
+    // What V4 writes: ninety placements of the item, one distinct ordinal — the
+    // design's address, which is the lower of the two.
+    const collapsed: SharedScene = {
+      lock: 'openlock',
+      placements: Array.from({ length: 90 }, (_unused, index) => ({
+        design: designId(7000),
+        x: index % 10,
+        z: Math.floor(index / 10),
+        rotation: 0,
+      })),
+      generated: [],
+    }
+    const after = await urlLength2(collapsed, manifest)
+
+    // What the pre-V4 store held for the same room: the two files alternating.
+    // Built through `encodePayload` because a `Placement` can no longer name a
+    // file at all, which is itself the point.
+    const before = await urlLengthOf(
+      encodePayload({
+        manifestVersion: 1,
+        lockIndex: 0,
+        digest: resolveOrdinals([7000, 7001], manifest).digest,
+        placements: Array.from({ length: 90 }, (_unused, index) => ({
+          ordinal: index % 2 === 0 ? 7000 : 7001,
+          x: index % 10,
+          z: Math.floor(index / 10),
+          rotation: 0,
+        })),
+        recipes: [],
+        generated: [],
+      }),
+    )
+
+    report([
+      '',
+      'one item placed ninety times, as two variants and as one design',
+      '',
+      `  two ordinals (pre-V4 palette)   ${String(before).padStart(5)} chars`,
+      `  one ordinal  (V4)               ${String(after).padStart(5)} chars`,
+      `  saved                           ${String(before - after).padStart(5)} chars`,
+      '',
+    ])
+
+    // **Two characters of two thousand**, measured. The saving is real and it is
+    // as small as it is possible for a saving to be, because the two ordinals
+    // alternated in a fixed pattern and deflate had already reduced the second
+    // one to almost nothing — the same effect that makes the room-shaped build
+    // hold 29,705 placements. Anyone expecting this row to buy capacity should
+    // read this number: the ordinal column was never the cost.
+    expect(before - after).toBeGreaterThan(0)
+    expect(before - after).toBeLessThan(20)
+    // Both are trivially inside the budget, which is the honest framing: this
+    // row is not a capacity row.
+    expect(before).toBeLessThan(SHARE_URL_BUDGET / 4)
+  })
+
+  it('encodes the design’s address, so two shares of one scene are one link', () => {
+    // The lowest ordinal in the group, and `buildShareManifest` takes a minimum
+    // rather than the first writer so this does not rest on the emission order.
+    const manifest = buildShareManifest({
+      version: { manifest: 1 },
+      records: [
+        // Deliberately out of ordinal order.
+        { id: tileId(7001), ord: 7001 as ManifestOrdinal, design: designId(7000) },
+        { id: tileId(7000), ord: 7000 as ManifestOrdinal, design: designId(7000) },
+      ],
+    })
+    expect(manifest.ordinalOf(designId(7000))).toBe(7000)
+    expect(manifest.designs).toBe(1)
+    expect(manifest.size).toBe(2)
+    // Either variant's ordinal resolves back to the item, which is what makes a
+    // version 2 link readable in principle — see `payload.ts`.
+    expect(manifest.designOf(7000)).toBe(designId(7000))
+    expect(manifest.designOf(7001)).toBe(designId(7000))
   })
 })
 

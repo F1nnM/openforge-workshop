@@ -4,10 +4,20 @@
  * **A row is an item, not a file** — row V3, finishing §7's *"place designs, not
  * files"* on the one surface that still armed a concrete STL. Everything below
  * therefore takes {@link TileAggregate}s and returns rows keyed by
- * {@link DesignId}, and the only place a file appears is
- * {@link PaletteRow.preview} (the picture) and {@link armFile} (the print).
+ * {@link DesignId}, and **the only place a file appears at all is
+ * {@link PaletteRow.preview}, which is a picture.**
  *
- * Four pure functions, and each of them exists because the answer is not
+ * That last sentence is row V4's, and it cost two functions. V3 left an
+ * `armFile`/`armedItem` pair here — the *resolve-to-arm hop* — because
+ * `usePlanTools.selectedTileId` was a `TileId`, because `Placement.tileId` was
+ * one, so the item the user picked had to become a file before the canvas could
+ * place it. V4 made a placement address a design, so the hop had nothing left to
+ * bridge: the click handler is `tools.setSelectedDesign(item.design)` and the
+ * pressed row is `selected === item.design`. Nothing resolves anything in this
+ * module now, which is why `selectVariant` and `PRINT_OPTIONS` are no longer
+ * imported.
+ *
+ * Three pure functions, and each of them exists because the answer is not
  * obvious from the contract:
  *
  *   - **{@link paletteRows}** orders the library so the items that can be placed
@@ -32,10 +42,8 @@
  *     set" with items that actually make a room: floors and walls of one texture,
  *     chosen from the live catalog rather than hard-coded, because a hard-coded
  *     id is a link into a corpus that renames files.
- *   - **{@link armFile}** is the one hop that still names a file, and it is
- *     temporary. See its own note; **row V4 deletes it.**
  *
- * All four take items and return items or designs. Nothing here reads the store,
+ * All three take items and return items or designs. Nothing here reads the store,
  * the URL or the network.
  *
  * ## Why the keys arrive through {@link libraryDesigns} and not through a cast
@@ -65,10 +73,8 @@
  * demonstration, not the hope: the two assignability facts above were checked
  * against the compiler, in both directions, before this shape was chosen.
  */
-import { PRINT_OPTIONS } from '@/assembly'
 import { isPlaceable } from '@/builder/canvas'
-import type { CatalogRecord, DesignId, TileAggregate, TileId } from '@/catalog'
-import { selectVariant } from '@/catalog'
+import type { CatalogRecord, DesignId, TileAggregate } from '@/catalog'
 
 /**
  * One row of the palette: an item, and the file whose picture stands for it.
@@ -334,65 +340,4 @@ function better(
   if (candidate.picks.length !== incumbent.picks.length) return candidate.picks.length > incumbent.picks.length
   if (candidate.total !== incumbent.total) return candidate.total > incumbent.total
   return candidate.texture < incumbent.texture
-}
-
-/* ------------------------------------------------ the resolve-to-arm hop (V4) */
-
-/**
- * The file to arm for an item, under the build's lock preference.
- *
- * **This function is scaffolding and row V4 deletes it, together with
- * {@link armedItem} and both of their call sites in `PalettePanel.tsx`.** The
- * palette now knows an item; `usePlanTools.selectedTileId` is a `TileId` because
- * `Placement.tileId` is, and until a placement addresses a design there has to be
- * one hop from the item the user picked to a file the canvas can place. That hop
- * lives here, named, in one place, rather than inlined in a click handler.
- *
- * **It is `selectVariant`'s answer and not `TileAggregate.preview`'s, and the two
- * disagree by construction.** `variantsByPreference`' own docblock says why, and
- * the disagreement is measured over the emitted index: with no preference the two
- * name a different file on **1,598 of 3,822** items, including **all 931** that
- * hold both an `integral` and a `topper`; with a lock stated it is 1,612 openlock,
- * 697 dragonlock, 1,056 magnetic. Which is right depends entirely on the
- * question, and the palette asks both:
- *
- *   - *what does this item look like* — `preview`, a sprite-carrying topper,
- *     because that mesh is the tile and nothing else. {@link PaletteRow.preview}.
- *   - *what would I place and print* — `selectVariant`, whose first criterion is
- *     §5.2's prefer-one-part-over-two. This.
- *
- * Reversing either would be a bug: arming `preview` would place a topper and let
- * the bill's auto-insert charge for a base the user could have avoided, and
- * showing `selectVariant`'s pick is exactly the *"tile with an integrated base"*
- * the owner sees in the sidebar today.
- *
- * `PRINT_OPTIONS` is passed for the reason `VariantPreference.options` gives:
- * without it the rank falls through to `bytes` ascending, which is the topless
- * print of a base — an undisclosed answer to a print-option question the palette
- * never asked.
- */
-export function armFile(item: TileAggregate, lock: string): TileId {
-  return selectVariant(item, { bottom: lock, options: PRINT_OPTIONS }).variant.id
-}
-
-/**
- * Which item an armed file belongs to, so the row that armed it reads as pressed.
- *
- * The inverse of {@link armFile} and **row V4 deletes it too.** Not
- * `armFile(item, lock) === armed`, deliberately: that comparison is taken under
- * *today's* lock, so switching the lock preference after arming would silently
- * un-press the row and leave the canvas armed. Asking which design the armed file
- * belongs to is a fact about the corpus rather than about a setting, so it
- * survives the switch — and after V4 it collapses into `armed === item.design`.
- *
- * `undefined` from the lookup means the armed file is not in this build, which
- * `usePlanTools` allows (it holds whatever it was handed) and which reads
- * correctly here as "no row is pressed".
- */
-export function armedItem(
-  armed: TileId | null,
-  design: (id: TileId) => DesignId | undefined,
-): DesignId | null {
-  if (armed === null) return null
-  return design(armed) ?? null
 }

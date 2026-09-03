@@ -31,7 +31,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { FIXTURE_IDS, fixtureCatalogFile } from '@/builder/canvas/fixture'
+import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from '@/builder/canvas/fixture'
 import { planCatalogFromFile } from '@/builder/canvas'
 import type { Placement, WorkshopState } from '@/store'
 
@@ -55,7 +55,7 @@ function placements(count: number): WorkshopState['placements'] {
   return Object.fromEntries(
     Array.from({ length: count }, (_unused, i) => [
       `p${String(i)}`,
-      { tileId: FIXTURE_IDS.floor1, x: i, z: 0, rotation: 0 } as Placement,
+      { design: fixtureDesignOf(FIXTURE_IDS.floor1), x: i, z: 0, rotation: 0 } satisfies Placement,
     ]),
   )
 }

@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { GRID_UNIT_MM, TileId } from '@/catalog'
+import { DesignId, GRID_UNIT_MM, TileId } from '@/catalog'
 import { footprintShape, planGeometry } from '@/builder/canvas/geometry'
 import { findConflicts, planBand } from '@/builder/canvas/overlap'
 import type { PlacementId } from '@/store'
@@ -67,6 +67,10 @@ function archiveBase(overrides: Partial<ArchiveBase> = {}): ArchiveBase {
     sprite: true,
     name: 'Plain Square Base 2x2',
     id: 'tiles/bases/plain/openlock,magnetic+flex/plain#base+square.2x2.openlock,magnetic+flex.stl',
+    // The item this archived file is one connection variant of. S4's resolver
+    // carries it (row V4) because a `Placement` names a design, and this is the
+    // one field `placeRecipe` needs that a recipe cannot supply.
+    design: 'd-plain-square-2x2' as ArchiveBase['design'],
     swept: {
       file: 'plain#base+square.2x2.openlock,magnetic+flex.stl',
       entry: SQUARE,
@@ -186,7 +190,7 @@ describe('what a generated placement persists', () => {
     expect(Object.is(parsed.z, 0)).toBe(true)
     // The same value the store's `Placement` produces, so a scene of both
     // compares equal to itself after an export and re-import.
-    const catalogue = PlacementSchema.parse({ tileId: 'tiles/a/b.stl', x: -0, z: -0, rotation: 0 })
+    const catalogue = PlacementSchema.parse({ design: 'd-a-b', x: -0, z: -0, rotation: 0 })
     expect(Object.is(catalogue.x, parsed.x)).toBe(true)
   })
 
@@ -332,8 +336,13 @@ describe('an archived resolution', () => {
     if (placed.kind !== 'archived') return
     // No new placement model at all: the store, the canvas, `resolvePlacement`,
     // the bill and the pack all already handle this.
-    expect(placed.placement).toEqual({ tileId: base.id, x: 3, z: 4, rotation: 0 })
-    expect(TileId.safeParse(placed.placement.tileId).success).toBe(true)
+    expect(placed.placement).toEqual({ design: base.design, x: 3, z: 4, rotation: 0 })
+    // The identity is a design and provably not a file: `TileId` refuses it, so
+    // the archived arm cannot smuggle a `tiles/…` path into the slot the store
+    // now reads as an item. The other direction — a `gen:` id here — is refused
+    // by `migrations.ts#salvageDesign` on the way back out of `localStorage`.
+    expect(TileId.safeParse(placed.placement.design).success).toBe(false)
+    expect(DesignId.safeParse(placed.placement.design).success).toBe(true)
   })
 
   it('never calls the archived file a render of these parameters', () => {

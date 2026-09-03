@@ -24,16 +24,26 @@
  *      different remedies; a panel that folded them into "some warnings" would
  *      hand somebody a wall that cannot stand.
  *
- *   3. **The variant the lock preference chose.** Row A6's rule 0 resolves a
- *      placement to a *different file* of the same item before any base is
- *      considered — for 1,419 of 3,822 items (37.1%) the three lock systems do
- *      not agree on which — and that decision is invisible in a bill that only
- *      lists outcomes. Two things follow. The join below has to go through
- *      `bill.resolved` rather than matching `line.tileIds` against
- *      `placement.tileId`, because those two no longer name the same file and a
- *      substituted placement would otherwise be reported as an orphan. And
+ *   3. **The variant the lock preference chose.** Row A6's rule 0 picks which
+ *      file of the placed item to print before any base is considered — for
+ *      1,419 of 3,822 items (37.1%) the three lock systems do not agree on which
+ *      — and that decision is invisible in a bill that only lists outcomes. Two
+ *      things follow. The join below goes through `bill.resolved` rather than
+ *      matching `line.tileIds` against the placement, because after row V4 a
+ *      placement names no file at all and there is nothing to match it on. And
  *      {@link resolutionSummary} and {@link rowResolutionCopy} are what say out
  *      loud which file you are getting and why.
+ *
+ *      **Row V4 deleted the substitution copy and did not replace it with
+ *      silence.** While a placement froze a file at click time, the honest
+ *      sentence was *"printed instead of X, which is the same tile in another
+ *      system"* — there was an X, the user had (unknowingly) chosen it, and the
+ *      app had overridden them. Now there is no X: the user placed an item and
+ *      the app has always been choosing the file. So what has to be disclosed
+ *      changed from *a substitution* to *a choice*, and the copy says how many
+ *      files the item holds and which one this preference took. 2,117 of 3,822
+ *      items are singletons, so the sentence appears only where a choice was
+ *      really made.
  *
  * Pure, DOM-free and store-free: it takes the bill and a snapshot of the
  * placements map, and returns data.
@@ -102,16 +112,31 @@ export interface BillRow {
 export interface RowResolution {
   /** The distinct verdicts on this row, in {@link VERDICT_ORDER} — worst first. */
   readonly verdicts: readonly PlacementVerdict[]
-  /** Placements whose item resolved to a file other than the one placed. */
-  readonly substituted: number
   /**
-   * The files those substituted placements named, distinct and sorted.
+   * Placements on this row where the preference had a real choice to make —
+   * their item holds more than one file.
    *
-   * The *filename*, not the display name: A1 measures zero aggregates holding
-   * two display names, so the name is identical on both sides of a substitution
-   * and naming it would say nothing. The file is what actually changed.
+   * The successor to `substituted`, and it counts something else: that field
+   * asked *did the app override the file the user placed*, which after row V4 is
+   * not a question anybody can ask, because a placement names an item and the
+   * app has always been choosing. This asks *was there anything to choose*, and
+   * over the corpus it is true for **1,705 of 3,822 items (44.6%)**, against
+   * 2,117 singletons where the resolution is the identity and there is nothing
+   * to say.
    */
-  readonly substitutedFrom: readonly string[]
+  readonly chosen: number
+  /**
+   * The largest number of files any placement on this row chose from, so the
+   * copy can say "of 4" without listing them.
+   *
+   * A count and not a list of the alternatives, which is a change of kind from
+   * `substitutedFrom` and deliberate: that field named the file the user was
+   * *not* getting, because there was one specific file they had asked for.
+   * Naming the other three now would be listing files nobody chose, in a 302px
+   * column, to describe a decision `resolvePlacement`'s note already explains in
+   * terms of the lock.
+   */
+  readonly chosenFrom: number
   /**
    * Placements where two variants tied on every stated criterion and offered
    * **different print options**, so the pick came down to file size.
@@ -147,14 +172,20 @@ export interface BillInventory {
  * `bill.resolved` carries the `Placement` objects but not the store's
  * `PlacementId`, which is the map key — so the two have to be paired on value.
  * All four fields, because a scene is a set of distinct cells: the canvas
- * refuses an overlap, so `tileId`+`x`+`z` is already unique and `rotation` is
+ * refuses an overlap, so `design`+`x`+`z` is already unique and `rotation` is
  * free insurance. Reference identity would work today (`buildBillOfTiles` is
  * handed `Object.values(placements)` and carries each object through untouched)
  * and is exactly the kind of thing that stops being true when a caller maps
  * over the list.
+ *
+ * The first field is a `DesignId` since row V4, and the tuple got *more* unique
+ * rather than less: `ghost.ts` and `move.ts` refuse an identical twin on the
+ * design, so two placements agreeing on all four fields is exactly the case
+ * those two refuse, where before V4 two placements of two variants of one item
+ * could sit in one cell and be told apart here but nowhere the user could see.
  */
 function placementKey(placement: Placement): string {
-  return `${placement.tileId}|${String(placement.x)}|${String(placement.z)}|${String(placement.rotation)}`
+  return `${placement.design}|${String(placement.x)}|${String(placement.z)}|${String(placement.rotation)}`
 }
 
 /**
@@ -162,12 +193,14 @@ function placementKey(placement: Placement): string {
  *
  * **Through `bill.resolved`, not through `line.tileIds`.** Before row A6 those
  * were the same join: a placement named a file, the file was a part, and the
- * part's blob was the line's. Rule 0 broke it — a placement's `tileId` and the
- * file it resolves to are different records for 4,880 of the 8,702 catalog rows
- * — so matching `line.tileIds` against `placement.tileId` would find nothing for
- * every substituted placement and report it as an **orphan**: "this tile is not
- * in this catalog build", offered for removal, about a tile that is in the bill
- * and printing correctly.
+ * part's blob was the line's. Rule 0 broke it — a placement's file and the file
+ * it resolved to were different records for 4,880 of the 8,702 catalog rows — so
+ * matching ids would find nothing for a substituted placement and report it as
+ * an **orphan**: "this tile is not in this catalog build", offered for removal,
+ * about a tile that is in the bill and printing correctly. **Row V4 removed the
+ * option of getting this wrong**: a placement holds a `DesignId` and a bill line
+ * holds `TileId`s, so the two brands cannot be compared at all and the join
+ * through `bill.resolved` is the only one that compiles.
  *
  * A placement is attached to the line for the part it *is* — the one part with
  * `role === 'placed'` — and never to the line for its base. That is the
@@ -248,8 +281,8 @@ const VERDICT_ORDER: readonly PlacementVerdict[] = [
 function rowResolutionOf(line: BillLine, placements: readonly BillPlacement[]): RowResolution | null {
   if (placements.length === 0) return null
   const verdicts = new Set<PlacementVerdict>()
-  const from = new Set<string>()
-  let substituted = 0
+  let chosen = 0
+  let chosenFrom = 0
   let optionTie = 0
   let lock: LockSystem | undefined
   for (const entry of placements) {
@@ -257,25 +290,23 @@ function rowResolutionOf(line: BillLine, placements: readonly BillPlacement[]): 
     verdicts.add(entry.resolution.verdict)
     lock = entry.resolution.lock
     if (entry.resolution.optionTie) optionTie += 1
-    if (!entry.resolution.substituted) continue
-    substituted += 1
-    // The catalog path's last segment: the id is `family + '/' + filename`, and
-    // the family is the part a 302px column has no room for.
-    from.add(entry.resolution.placed.slice(entry.resolution.placed.lastIndexOf('/') + 1))
+    if (entry.resolution.variants <= 1) continue
+    chosen += 1
+    chosenFrom = Math.max(chosenFrom, entry.resolution.variants)
   }
   if (verdicts.size === 0) return null
   const ordered = VERDICT_ORDER.filter((verdict) => verdicts.has(verdict))
-  // Nothing to say: you placed this file, you print this file, and it stands on
-  // its own. Returning `null` rather than a row of reassurance is what keeps the
+  // Nothing to say: this item holds one file, you print it, and it stands on its
+  // own. Returning `null` rather than a row of reassurance is what keeps the
   // marks meaningful — every one of them is then a real decision.
-  const quiet = ordered.length === 1 && ordered[0] === 'self-sufficient' && substituted === 0 && optionTie === 0
+  const quiet = ordered.length === 1 && ordered[0] === 'self-sufficient' && chosen === 0 && optionTie === 0
   if (quiet) return null
-  // Nor for a plain topper-plus-base that resolved to the file that was placed:
-  // the base row's own "added" mark already says it, and `line` is that topper.
-  if (ordered.length === 1 && ordered[0] === 'with-base' && substituted === 0 && optionTie === 0 && line.baseQuantity === 0) {
+  // Nor for a plain topper-plus-base whose item had one file: the base row's own
+  // "added" mark already says it, and `line` is that topper.
+  if (ordered.length === 1 && ordered[0] === 'with-base' && chosen === 0 && optionTie === 0 && line.baseQuantity === 0) {
     return null
   }
-  return { verdicts: ordered, substituted, substitutedFrom: [...from].sort(), optionTie, lock }
+  return { verdicts: ordered, chosen, chosenFrom, optionTie, lock }
 }
 
 function byPlanPosition(a: BillPlacement, b: BillPlacement): number {
@@ -307,8 +338,8 @@ export interface ResolutionSummary {
   readonly onePart: number
   /** Placements that print as a topper plus a base the archive supplies. */
   readonly withBase: number
-  /** Placements whose item resolved to a file other than the one placed. */
-  readonly substituted: number
+  /** Placements whose item holds more than one file, so the preference chose. */
+  readonly chosen: number
   /** One line, count folded in. Never ends in a full stop. */
   readonly headline: string
   readonly detail: string
@@ -319,32 +350,32 @@ export interface ResolutionSummary {
  *
  * The counterpart to the per-row marks and the reason both exist: a user needs
  * to know that the preference is *doing* something before they can be expected
- * to care which rows it moved. Over the live corpus it moves the file for 1,419
- * of 3,822 items (37.1%), and under openlock it turns 1,808 of the 4,363
- * base-needing files into a single print — so for most scenes there is something
- * real to say here.
+ * to care which rows it moved. Over the live corpus the three systems disagree
+ * about the file for 1,419 of 3,822 items (37.1%), and under openlock the
+ * preference turns 1,808 of the 4,363 base-needing files into a single print —
+ * so for most scenes there is something real to say here.
  *
- * `null` for an empty scene, and for a scene where the preference changed
- * nothing and nothing needs a base: the panel already has a warning surface, and
- * a permanent row of reassurance is how a warning surface stops being read.
+ * `null` for an empty scene, and for a scene where every item is a single file
+ * and nothing needs a base: the panel already has a warning surface, and a
+ * permanent row of reassurance is how a warning surface stops being read.
  */
 export function resolutionSummary(bill: BillOfTiles): ResolutionSummary | null {
   let placements = 0
   let onePart = 0
   let withBase = 0
-  let substituted = 0
+  let chosen = 0
   let lock: LockSystem | undefined
   for (const resolved of bill.resolved) {
     const resolution = resolved.resolution
     if (resolution === undefined) continue
     placements += 1
     lock = resolution.lock
-    if (resolution.substituted) substituted += 1
+    if (resolution.variants > 1) chosen += 1
     if (resolution.verdict === 'self-sufficient') onePart += 1
     if (resolution.verdict === 'with-base' || resolution.verdict === 'mismatched') withBase += 1
   }
   if (placements === 0) return null
-  if (substituted === 0 && withBase === 0) return null
+  if (chosen === 0 && withBase === 0) return null
 
   const parts: string[] = []
   if (onePart > 0) {
@@ -363,15 +394,21 @@ export function resolutionSummary(bill: BillOfTiles): ResolutionSummary | null {
     placements,
     onePart,
     withBase,
-    substituted,
+    chosen,
     headline: `Resolved for ${lockLabel(lock)}`,
     detail:
       `${parts.join(', ')}. ` +
-      (substituted === 0
-        ? 'Every row below is the file you picked.'
-        : `${countLabel(substituted)} of ${countLabel(placements)} ${
-            placements === 1 ? 'placement prints' : 'placements print'
-          } a different file of the same tile — the one that fits this system. Those rows are marked.`),
+      (chosen === 0
+        ? 'Each of these tiles is published as one file, so there was nothing to choose.'
+        : // Two agreements, and they run off different numbers — a bug this
+          // sentence inherited, which read "1 of 3 placements **print** a
+          // different file" and pluralised the verb on the total. The *noun*
+          // belongs to the denominator ("of 3 placements") and the *verb* to the
+          // numerator ("1 … is").
+          `${countLabel(chosen)} of ${countLabel(placements)} ${
+            placements === 1 ? 'placement' : 'placements'
+          } ${chosen === 1 ? 'is' : 'are'} published as several files, and this preference picked ` +
+          `one of each. Those rows are marked.`),
   }
 }
 
@@ -403,12 +440,14 @@ export function rowResolutionCopy(row: BillRow): RowResolutionCopy | null {
   const worst = resolution.verdicts[0]
   if (worst === undefined) return null
   const lock = lockLabel(resolution.lock)
+  // "One of 4", not "instead of X". Row V4: there is no X — the user placed an
+  // item, so what has to be disclosed is that a choice was made and how wide it
+  // was, and the verdict beside it already says what the choice achieved.
   const swapped =
-    resolution.substituted === 0
+    resolution.chosen === 0
       ? ''
-      : ` Printed instead of ${resolution.substitutedFrom.join(', ')}, which ${
-          resolution.substitutedFrom.length === 1 ? 'is' : 'are'
-        } the same tile in another system.`
+      : ` This tile is published as ${countLabel(resolution.chosenFrom)} files, one per connection system,` +
+        ` and this is the one that fits ${lock}.`
   // Appended to whatever the verdict says rather than given a mark of its own: a
   // tie is a fact about *how* this file was chosen, not a different outcome, and
   // a second chip on a 302px row wraps the line.

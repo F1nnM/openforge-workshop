@@ -69,7 +69,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { TileId } from '@/catalog'
+import { DesignId, TileId } from '@/catalog'
 import {
   clearPersistedWorkshopState,
   placeTile,
@@ -82,7 +82,7 @@ import { resetCatalogIndexCache } from '@/ui/shell'
 
 /* ------------------------------------------------------------------ fixture */
 
-const TILE_A = 'tiles/cave/floors/floor/openlock/cave#floor.2x2.openlock.stl'
+const TILE_A = TileId.parse('tiles/cave/floors/floor/openlock/cave#floor.2x2.openlock.stl')
 
 /**
  * Five designs across six records, carrying **both** connection forms.
@@ -598,8 +598,10 @@ describe('what changing it does to a build in progress', () => {
 
   it('names the placements and the exact warnings once there are some', async () => {
     act(() => {
-      placeTile({ tileId: TileId.parse(TILE_A), x: 0, z: 0, rotation: 0 })
-      placeTile({ tileId: TileId.parse(TILE_A), x: 1, z: 0, rotation: 0 })
+      // The item, since row V4 — `TILE_A` is one of its files and `d-open` is
+      // the design the fixture gives it.
+      placeTile({ design: DesignId.parse('d-open'), x: 0, z: 0, rotation: 0 })
+      placeTile({ design: DesignId.parse('d-open'), x: 1, z: 0, rotation: 0 })
     })
     await openDisclosure()
 

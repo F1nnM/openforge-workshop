@@ -20,7 +20,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import type { BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import type { CatalogFile } from '@/catalog'
-import { CatalogFile as CatalogFileSchema, MEASURED_SPRITE_SHEET, TileId } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, DesignId, MEASURED_SPRITE_SHEET } from '@/catalog'
 import { ArchiveNamingError } from '@/download/entries'
 import { EmptyArchiveError, GeneratedDigestCollisionError, buildArchivePlan } from '@/download/plan'
 import type { BlobSource } from '@/download/source'
@@ -106,7 +106,8 @@ function catalogOf(rows: readonly { id: string; blob: string; bytes: number }[])
         sprite: true,
         thumb: false,
         family: row.id.slice(0, cut),
-        design: `design-${String(index)}`,
+        // Keyed on the id, so `catalogBill` addresses these records exactly.
+        design: `d${row.id}`,
         name: row.id.slice(cut + 1),
         kinds: ['wall'],
         conn: ['openlock'],
@@ -122,8 +123,10 @@ const CATALOGUED_BLOB = 'a'.repeat(32)
 const CATALOG = catalogOf([{ id: 'tiles/x/wall.stl', blob: CATALOGUED_BLOB, bytes: 4_096 }])
 
 function catalogBill(ids: readonly string[]): BillOfTiles {
+  // A placement names an item (row V4), and `catalogOf` gives every fixture
+  // record its own design keyed on the id, so this bill lists exactly `ids`.
   return buildBillOfTiles(
-    ids.map((id) => ({ tileId: TileId.parse(id), x: 0, z: 0, rotation: 0 })),
+    ids.map((id) => ({ design: DesignId.parse(`d${id}`), x: 0, z: 0, rotation: 0 })),
     buildAssemblyIndex(CATALOG),
   )
 }

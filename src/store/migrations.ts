@@ -29,16 +29,16 @@
  * ## There is no migration ladder any more, and this is the notice that says why
  *
  * Row V1 changed `library` from a map of files to a map of designs and took
- * {@link STORE_VERSION} to 4. It did **not** write a rung that maps a saved
- * `TileId` to its design, and the reason is a decision the project owner made
- * explicitly:
+ * {@link STORE_VERSION} to 4; row V4 changed a `Placement` from a file to a
+ * design and took it to 5. Neither wrote a rung that maps a saved `TileId` to
+ * its design, and the reason is a decision the project owner made explicitly:
  *
  * > *"Still the rule holds true that it's not used live yet, so no data
  * > migration or backwards compatibility needs to be considered. So discarding
  * > an old user library is totally fine if it makes the new library system code
  * > better."*
  *
- * Nothing is deployed. There is no browser holding a version 1, 2 or 3 blob
+ * Nothing is deployed. There is no browser holding a version 1, 2, 3 or 4 blob
  * except a developer's own, so the two rungs that used to climb 1 → 2 → 3 were
  * code that could never run again — kept for a hypothetical, which is exactly
  * the no-op the standing instruction says to clean up. They are gone, and with
@@ -73,10 +73,20 @@
  * as the step that runs afterwards either way. Every rung must take `unknown`
  * and return `unknown` — a typed signature is a lie about data that came from
  * `localStorage`, and it is what makes an author write `input.placements.map(…)`
- * and ship a `TypeError` to every user whose blob was truncated. Two shapes
- * needing a rung are already known: this row's `library` (files → designs, which
- * needs a catalog and therefore cannot run at hydrate — park and drain, or
- * resolve on the library screen's first render) and row V4's `Placement`.
+ * and ship a `TypeError` to every user whose blob was truncated.
+ *
+ * **Both shapes that need a rung now exist, and they need the same rung.** V1's
+ * `library` went from files to designs; V4's `placements[…]` went from `tileId`
+ * to `design`. Neither conversion can run at hydrate: a `TileId` carries no
+ * design, `DesignId` is a hash of a *tag set*, and the tags live in
+ * `catalog.json` — 5.6 MB fetched asynchronously, long after `persist` has run
+ * `migrate` synchronously inside `create(...)`. So the rung a future author
+ * writes is one function, `file id → design id`, applied to a map's keys in one
+ * field and to a scalar field in every entry of another; and it has to be
+ * deferred until a catalog is in hand — park the unresolved ids and drain them
+ * on the first render that has one. That it is *one* rung for both fields is the
+ * only good news in this paragraph, and it is why V4 chose the same identity V1
+ * did rather than a second one.
  *
  * ## What did *not* go
  *
@@ -89,7 +99,7 @@
  * `migrate`.
  */
 import { DesignId, TileId } from '@/catalog'
-import { GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/placement/scene'
+import { GENERATED_ID_PREFIX, GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/placement/scene'
 
 import type { LockSystem, Placement, WorkshopState } from './schema'
 import {
@@ -118,6 +128,7 @@ import {
  * | 2 | adds `lockChosen` |
  * | 3 | adds `generated` — recipes and positions, never meshes |
  * | 4 | `library` is keyed by **design**, not by file (row V1) |
+ * | 5 | a `Placement` holds `design`, not `tileId` (row V4) |
  *
  * **To ship version N+1 while discarding is still allowed:** change the schema in
  * `schema.ts` and bump this. Nothing else. A blob at any other version is
@@ -127,7 +138,7 @@ import {
  * **To ship version N+1 once it is not:** see the expiry note in the module
  * docblock.
  */
-export const STORE_VERSION = 4
+export const STORE_VERSION = 5
 
 /** A state recovered from untrusted input, plus what had to be thrown away. */
 export interface RecoveredState {
@@ -244,6 +255,65 @@ function salvageCoordinate(key: string, axis: 'x' | 'z', value: unknown, dropped
 }
 
 /**
+ * Recover the identity of one placement — a {@link DesignId}, since row V4.
+ *
+ * `DesignId` is `z.string().min(1)`, which accepts far more than a design id, so
+ * the brand alone is not a filter and this function is where the filtering
+ * happens. It is `salvageLibrary`'s policy applied to a scalar field, for the
+ * same reason and against a wider population — a version 1–4 blob put a
+ * {@link TileId} in this slot, and a *hand edit* is the only way anything else
+ * gets here:
+ *
+ *   - **A `TileId`** is the exact shape every blob before version 5 wrote. The
+ *     version gate should already have discarded such a blob wholesale; this
+ *     catches the residue it cannot see, which is real — `persist` sends an
+ *     *unstamped* blob straight to `merge` without consulting the gate at all
+ *     (see {@link readPersistedState}).
+ *   - **A `gen:` id** is a generated base, which lives in the `generated` map
+ *     and has no design. One in this slot would draw nothing, price nothing and
+ *     be unremovable, and the two spaces are not lexically disjoint by schema —
+ *     `src/store/schema.ts#generated` has the whole argument — so this is a
+ *     check and not a formality.
+ *
+ * Both are **named** rather than silently dropped, because a dangling identity
+ * kept here would be a piece of the room that renders nowhere and cannot be
+ * removed through any button in the app, and dropping it in silence is the same
+ * loss with nothing said. Named and dropped is the module's standing policy.
+ *
+ * **Both checks were mutation-tested rather than assumed capable.** Deleting the
+ * `gen:` arm fails **2** tests — `migrations.test.ts`'s version-gate case and
+ * `generated.test.ts`'s id-space case, which places a real base through
+ * `placeRecipe` and puts its id in this slot. Deleting the `TileId` arm fails
+ * **3** — the version-gate case, `workshopStore.test.ts`'s crashed-tab rehydrate,
+ * and `library.test.tsx`'s damaged-import case, which is the surface that shows
+ * the message to a user.
+ */
+function salvageDesign(key: string, source: Record<string, unknown>, dropped: string[]): DesignId | undefined {
+  const value = source.design
+  // The **actual** historical shape, and it deserves its own sentence: every
+  // version 1-4 blob wrote the identity under `tileId`, so `design` is missing
+  // rather than wrong, and "not a design id (undefined)" would describe the
+  // symptom while naming neither the field that is there nor the version that
+  // wrote it.
+  if (value === undefined && TileId.safeParse(source.tileId).success) {
+    dropped.push(`placements.${key}: names a file in the old tileId field — a placement holds an item now`)
+    return undefined
+  }
+  if (TileId.safeParse(value).success) {
+    dropped.push(`placements.${key}: design is a file id, not a design id — a placement holds an item now`)
+    return undefined
+  }
+  if (typeof value === 'string' && value.startsWith(GENERATED_ID_PREFIX)) {
+    dropped.push(`placements.${key}: design is a generated base id, which belongs in the generated map`)
+    return undefined
+  }
+  const design = DesignId.safeParse(value)
+  if (design.success) return design.data
+  dropped.push(`placements.${key}: design is not a design id (${describeValue(value)})`)
+  return undefined
+}
+
+/**
  * Recover one placement.
  *
  * The asymmetry between rotation and position is deliberate. A missing or
@@ -252,6 +322,9 @@ function salvageCoordinate(key: string, axis: 'x' | 'z', value: unknown, dropped
  * unreadable **coordinate** drops the placement, because there is no safe
  * default: falling back to 0 would silently stack every corrupt tile on the
  * origin, which reads as a bug in the builder rather than as recovered data.
+ *
+ * The **identity** is the third kind: there is no default at all, so an
+ * unreadable one drops the placement. See {@link salvageDesign}.
  */
 function salvagePlacement(key: string, value: unknown, dropped: string[]): Placement | undefined {
   const source = asRecord(value)
@@ -259,20 +332,17 @@ function salvagePlacement(key: string, value: unknown, dropped: string[]): Place
     dropped.push(`placements.${key}: expected an object, found ${describeValue(value)}`)
     return undefined
   }
-  const tileId = TileId.safeParse(source.tileId)
-  if (!tileId.success) {
-    dropped.push(`placements.${key}: tileId is not a tile id (${describeValue(source.tileId)})`)
-    return undefined
-  }
+  const design = salvageDesign(key, source, dropped)
+  if (design === undefined) return undefined
   const x = salvageCoordinate(key, 'x', source.x, dropped)
   const z = salvageCoordinate(key, 'z', source.z, dropped)
   if (x === undefined || z === undefined) return undefined
 
   if (source.rotation === undefined || typeof source.rotation === 'number') {
-    return { tileId: tileId.data, x, z, rotation: normalizeRotation(source.rotation ?? 0) }
+    return { design, x, z, rotation: normalizeRotation(source.rotation ?? 0) }
   }
   dropped.push(`placements.${key}: rotation is not a number (${describeValue(source.rotation)}), reset to 0`)
-  return { tileId: tileId.data, x, z, rotation: 0 }
+  return { design, x, z, rotation: 0 }
 }
 
 function salvagePlacements(input: unknown, dropped: string[]): WorkshopState['placements'] {
@@ -429,9 +499,13 @@ export function salvageWorkshopState(input: unknown): RecoveredState {
  * someone's library over a cached bundle is the worse failure. That argument was
  * right and is now moot: with nothing deployed there is no such user, and the
  * shared fields it relied on being "overwhelmingly likely to still be readable"
- * are precisely what row V1 changed underneath — a version 3 library is a map of
- * files, and reading it as a map of items produces entries that name nothing.
- * The day the argument comes back, so must a rung; see the module docblock.
+ * are precisely what rows V1 and V4 changed underneath — a version 3 library is
+ * a map of files and a version 4 placement names one, and reading either as an
+ * item produces entries that name nothing. **V4 is the sharper case**: a stale
+ * library entry is a row the library screen offers to clear, while a stale
+ * placement is a piece of somebody's *room*, and the whole scene would open with
+ * every tile missing and nothing on screen able to say which. The day the
+ * argument comes back, so must a rung; see the module docblock.
  *
  * Total, like everything else here. The salvage that follows a matching stamp is
  * wrapped so that a throw from anywhere inside it costs the scene rather than

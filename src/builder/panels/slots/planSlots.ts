@@ -34,19 +34,40 @@
  * greying is the picker's and is shared rather than reimplemented, from
  * `@/screens/detail/slots`.
  */
+import { selectVariantForLock } from '@/assembly'
 import type { CatalogFile, TileId } from '@/catalog'
 import type { SlotState } from '@/screens/detail/slots'
 import { compositionIndexFor, slotStates } from '@/screens/detail/slots'
-import type { Placement } from '@/store'
+import type { LockSystem, Placement } from '@/store'
 
 /** One placed piece that opens at least one accessory slot. */
 export interface PlanSlotHolder {
   /** The placement's key in `WorkshopState.placements`. */
   readonly id: string
   readonly placement: Placement
-  /** The placed file. The picker resolves against this and not against its item. */
+  /**
+   * The file whose slots these are. The picker resolves against this and not
+   * against its item.
+   *
+   * Row V4 made a placement name an item, so this is now the file the item
+   * *resolves to* under the build's lock preference — and that is not a
+   * convenience, it is the only well-posed answer. `config` is one of the fields
+   * a variant swap changes (`assembly/resolve.ts` lists them), so two variants
+   * of one design can declare different slots, and the slots worth showing are
+   * the ones on the file being printed. Every other field a holder carries —
+   * `name` — is a hoisted facet and would have been the same whichever variant
+   * answered.
+   */
   readonly parent: TileId
-  /** The item's display name, or the raw id for a placement the index has retired. */
+  /**
+   * The item's display name.
+   *
+   * No fallback to a raw id any more, and the reason is that the branch that
+   * needed one is gone: this used to look the *variant* up by file id and then
+   * the aggregate up by the variant's design, so the second lookup could miss
+   * where the first had not. One lookup by design cannot, so a holder either has
+   * a name or is an orphan.
+   */
   readonly name: string
   /** Its accessory slots, resolved with nothing picked. Never empty. */
   readonly slots: readonly SlotState[]
@@ -90,10 +111,15 @@ export interface PlanSlotInventory {
  * Ordered by depth then across — the same plan reading order `billInventory`
  * uses, so a row in this panel and a row in the bill refer to the drawing the
  * same way.
+ *
+ * `lock` is optional and absent means *no preference*, which is
+ * `AssemblyOptions.lock`'s convention: a fixture that states no preference gets
+ * the resolution a preference-free build would print, not `openlock`'s.
  */
 export function planSlots(
   file: CatalogFile,
   placements: Readonly<Record<string, Placement>>,
+  lock?: LockSystem,
 ): PlanSlotInventory {
   const index = compositionIndexFor(file)
   const holders: PlanSlotHolder[] = []
@@ -108,20 +134,22 @@ export function planSlots(
   )
 
   for (const [id, placement] of ordered) {
-    const variant = index.aggregates.byTile.get(placement.tileId)
-    if (variant === undefined) {
+    const aggregate = index.aggregates.byDesign.get(placement.design)
+    if (aggregate === undefined) {
       orphans.push(id)
       continue
     }
-    const states = slotStates(index, placement.tileId)
+    // Rule 0's own function, so the slots shown belong to the file the bill
+    // lists — see {@link PlanSlotHolder.parent}.
+    const parent = selectVariantForLock(aggregate, lock).variant.id
+    const states = slotStates(index, parent)
     if (states.length === 0) continue
 
-    const aggregate = index.aggregates.byDesign.get(variant.design)
     holders.push({
       id,
       placement,
-      parent: placement.tileId,
-      name: aggregate?.name ?? placement.tileId,
+      parent,
+      name: aggregate.name,
       slots: states,
     })
     for (const state of states) {

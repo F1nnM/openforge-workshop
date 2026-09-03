@@ -59,16 +59,29 @@ const PLACEMENT_C = PlacementId.parse('c3d4e5f6-7081-4923-ab4c-5d6e7f809123')
 /** One generated base, through `placeRecipe`. See `fixture.ts`. */
 const GENERATED_BASE = aGeneratedBase({ x: 4, z: 0, rotation: 90 })
 
-/** A scene exactly as **this** version writes it: the library holds designs. */
+/** A scene exactly as **this** version writes it: the library and the placements hold designs. */
 const SCENE = {
   library: { [DESIGN_A]: true, [DESIGN_B]: true },
   placements: {
-    [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 },
-    [PLACEMENT_B]: { tileId: TILE_B, x: 2.5, z: -1.5, rotation: 270 },
+    [PLACEMENT_A]: { design: DESIGN_A, x: 0, z: 0, rotation: 0 },
+    [PLACEMENT_B]: { design: DESIGN_B, x: 2.5, z: -1.5, rotation: 270 },
   },
   generated: { [PLACEMENT_C]: GENERATED_BASE },
   lock: 'magnetic',
   lockChosen: false,
+} as const
+
+/**
+ * The placement map as versions 1-4 wrote it: keyed by **file**.
+ *
+ * Spelled out rather than derived from {@link SCENE}, because it is the shape
+ * the reader must refuse and a derivation would go stale the moment `Placement`
+ * changes again — which is exactly what happened to the version 1-3 entries when
+ * row V4 landed and they silently started carrying designs.
+ */
+const FILE_PLACEMENTS = {
+  [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 },
+  [PLACEMENT_B]: { tileId: TILE_B, x: 2.5, z: -1.5, rotation: 270 },
 } as const
 
 /**
@@ -80,10 +93,14 @@ const SCENE = {
  * need — `migrations.ts`'s history table says what changed at each step, and
  * these are the blobs.
  *
- * The load-bearing detail is `library`. Versions 1 to 3 keyed it by
- * {@link TileId}, so reading one of them as a version 4 state would produce a
- * library full of keys that name no item: they would render nowhere, count
- * towards the header's tally, and be unremovable through any button in the app.
+ * The load-bearing detail is the **identity in every slot**. Versions 1 to 3
+ * keyed `library` by {@link TileId} and versions 1 to 4 put one in every
+ * placement, so reading either as a version 5 state would produce keys and
+ * placements that name no item: they would render nowhere, count towards the
+ * header's tally, and be unremovable through any button in the app. The
+ * placement case is the worse of the two — a stale library row is one the
+ * library screen offers to clear, while a stale placement is a piece of
+ * somebody's *room*.
  */
 const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob: unknown])[] = [
   [
@@ -110,7 +127,18 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
     'a generated base beside the placements, library still keyed by file',
     {
       library: { [TILE_A]: true, [TILE_B]: true },
-      placements: SCENE.placements,
+      placements: FILE_PLACEMENTS,
+      generated: { [PLACEMENT_C]: GENERATED_BASE },
+      lock: 'magnetic',
+      lockChosen: false,
+    },
+  ],
+  [
+    4,
+    'library keyed by design, placements still keyed by file (row V1, before V4)',
+    {
+      library: { [DESIGN_A]: true, [DESIGN_B]: true },
+      placements: FILE_PLACEMENTS,
       generated: { [PLACEMENT_C]: GENERATED_BASE },
       lock: 'magnetic',
       lockChosen: false,
@@ -151,16 +179,38 @@ describe('the version gate', () => {
     expect(readPersistedState(throughJSON(blob), version).state).toEqual(defaultWorkshopState())
   })
 
-  it('does not half-read an old library into the new one', () => {
+  it('does not half-read an old library or an old scene into the new one', () => {
     // The sharpest claim in the file. Every version 1-3 library was a map of
-    // *files*, and `DesignId` is `z.string().min(1)` — so a reader that only
-    // parsed the keys would accept every one of them and hand the app a library
-    // of items that do not exist. The gate is what stops that, and
-    // `salvageLibrary` is the second line if a hand edit gets past it.
+    // *files* and every version 1-4 placement named one, and `DesignId` is
+    // `z.string().min(1)` — so a reader that only parsed the values would accept
+    // every one of them and hand the app a library and a room of items that do
+    // not exist. The gate is what stops that, and `salvageLibrary` /
+    // `salvageDesign` are the second line if a hand edit gets past it.
     for (const [version, , blob] of HISTORICAL_BLOBS) {
-      expect(readPersistedState(blob, version).state.library).toEqual({})
+      const recovered = readPersistedState(blob, version).state
+      expect(recovered.library).toEqual({})
+      expect(recovered.placements).toEqual({})
     }
     expect(salvageWorkshopState({ library: { [TILE_A]: true } }).state.library).toEqual({})
+    expect(salvageWorkshopState({ placements: FILE_PLACEMENTS }).state.placements).toEqual({})
+    // And it names the shape it met, per entry. Three shapes are reachable and
+    // they get three sentences: the historical field name (this), a file id
+    // under the *new* field name (a hand edit that renamed the key and not the
+    // value), and a `gen:` recipe key (a generated base in the catalog map).
+    expect(salvageWorkshopState({ placements: FILE_PLACEMENTS }).dropped).toEqual([
+      `placements.${PLACEMENT_A}: names a file in the old tileId field — a placement holds an item now`,
+      `placements.${PLACEMENT_B}: names a file in the old tileId field — a placement holds an item now`,
+    ])
+    expect(
+      salvageWorkshopState({ placements: { [PLACEMENT_A]: { design: TILE_A, x: 0, z: 0, rotation: 0 } } }).dropped,
+    ).toEqual([`placements.${PLACEMENT_A}: design is a file id, not a design id — a placement holds an item now`])
+    expect(
+      salvageWorkshopState({
+        placements: { [PLACEMENT_A]: { design: 'gen:base-square', x: 0, z: 0, rotation: 0 } },
+      }).dropped,
+    ).toEqual([
+      `placements.${PLACEMENT_A}: design is a generated base id, which belongs in the generated map`,
+    ])
   })
 
   it('reads a payload stamped with the current version', () => {
@@ -260,26 +310,31 @@ const GARBAGE: readonly (readonly [string, unknown])[] = [
   ['undefined', undefined],
   ['an empty object', {}],
   ['an array where the state belongs', []],
-  ['an array of plausible placements', [{ tileId: TILE_A, x: 0, z: 0, rotation: 0 }]],
+  ['an array of plausible placements', [{ design: DESIGN_A, x: 0, z: 0, rotation: 0 }]],
   ['a string', 'openforge'],
   ['a number', 42],
   ['a boolean', true],
   ['a truncated object', { library: { [DESIGN_A]: true } }],
   ['an object with only a lock', { lock: 'magnetic' }],
-  ['a half-written placement', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: 1 } } }],
-  ['an array where placements belong', { placements: [{ tileId: TILE_A, x: 0, z: 0, rotation: 0 }] }],
+  ['a half-written placement', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: 1 } } }],
+  ['an array where placements belong', { placements: [{ design: DESIGN_A, x: 0, z: 0, rotation: 0 }] }],
   ['an array where the library belongs', { library: [DESIGN_A] }],
   ['a string where the library belongs', { library: DESIGN_A }],
   ['a null placement', { placements: { [PLACEMENT_A]: null } }],
-  ['a wrong-typed coordinate', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: '3', z: 0, rotation: 0 } } }],
-  ['a NaN coordinate', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: Number.NaN, z: 0, rotation: 0 } } }],
+  ['a wrong-typed coordinate', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: '3', z: 0, rotation: 0 } } }],
+  ['a NaN coordinate', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: Number.NaN, z: 0, rotation: 0 } } }],
   [
     'an infinite coordinate',
-    { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: Number.POSITIVE_INFINITY, z: 0, rotation: 0 } } },
+    { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: Number.POSITIVE_INFINITY, z: 0, rotation: 0 } } },
   ],
-  ['a null rotation', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: null } } }],
-  ['a numeric tile id', { placements: { [PLACEMENT_A]: { tileId: 42, x: 0, z: 0, rotation: 0 } } }],
-  ['an empty tile id', { placements: { [PLACEMENT_A]: { tileId: '', x: 0, z: 0, rotation: 0 } } }],
+  ['a null rotation', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: 0, z: 0, rotation: null } } }],
+  ['a numeric design id', { placements: { [PLACEMENT_A]: { design: 42, x: 0, z: 0, rotation: 0 } } }],
+  ['an empty design id', { placements: { [PLACEMENT_A]: { design: '', x: 0, z: 0, rotation: 0 } } }],
+  // The shape every version 1-4 blob wrote, and the shape a hand edit still
+  // produces. `DesignId` is `min(1)` and would accept it, so this is the
+  // recognition `salvageDesign` adds.
+  ['a file id where the design goes', { placements: { [PLACEMENT_A]: { design: TILE_A, x: 0, z: 0, rotation: 0 } } }],
+  ['the old field name', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 } } }],
   ['an unknown lock system', { lock: 'openlok' }],
   ['a string where the chosen flag belongs', { lockChosen: 'yes' }],
   ['a numeric chosen flag', { lockChosen: 1 }],
@@ -334,8 +389,8 @@ describe('salvaging keeps what it can', () => {
     const recovered = salvageWorkshopState({
       library: { [DESIGN_A]: true },
       placements: {
-        [PLACEMENT_A]: { tileId: TILE_A, x: 1, z: 2, rotation: 90 },
-        [PLACEMENT_B]: { tileId: TILE_B, x: 'over there', z: 2, rotation: 90 },
+        [PLACEMENT_A]: { design: DESIGN_A, x: 1, z: 2, rotation: 90 },
+        [PLACEMENT_B]: { design: DESIGN_B, x: 'over there', z: 2, rotation: 90 },
       },
       lock: 'magnetic',
     })
@@ -351,17 +406,17 @@ describe('salvaging keeps what it can', () => {
     // tile on the origin — but 0 is a perfectly legal rotation, so a placement
     // is worth keeping when only its angle is lost.
     const recovered = salvageWorkshopState({
-      placements: { [PLACEMENT_A]: { tileId: TILE_A, x: 1, z: 2, rotation: 'sideways' } },
+      placements: { [PLACEMENT_A]: { design: DESIGN_A, x: 1, z: 2, rotation: 'sideways' } },
     })
-    expect(recovered.state.placements[PLACEMENT_A]).toEqual({ tileId: TILE_A, x: 1, z: 2, rotation: 0 })
+    expect(recovered.state.placements[PLACEMENT_A]).toEqual({ design: DESIGN_A, x: 1, z: 2, rotation: 0 })
     expect(recovered.dropped[0]).toContain('rotation')
   })
 
   it('folds an out-of-range rotation into [0, 360)', () => {
     const recovered = salvageWorkshopState({
       placements: {
-        [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 450 },
-        [PLACEMENT_B]: { tileId: TILE_B, x: 0, z: 0, rotation: -90 },
+        [PLACEMENT_A]: { design: DESIGN_A, x: 0, z: 0, rotation: 450 },
+        [PLACEMENT_B]: { design: DESIGN_B, x: 0, z: 0, rotation: -90 },
       },
     })
     expect(recovered.state.placements[PLACEMENT_A]?.rotation).toBe(90)
@@ -371,7 +426,7 @@ describe('salvaging keeps what it can', () => {
 
   it('folds a negative zero coordinate, which does not survive JSON, to positive zero', () => {
     const recovered = salvageWorkshopState({
-      placements: { [PLACEMENT_A]: { tileId: TILE_A, x: -0, z: -0, rotation: -0 } },
+      placements: { [PLACEMENT_A]: { design: DESIGN_A, x: -0, z: -0, rotation: -0 } },
     })
     const placement = recovered.state.placements[PLACEMENT_A]
     expect(Object.is(placement?.x, 0)).toBe(true)
@@ -411,7 +466,7 @@ describe('salvaging keeps what it can', () => {
   it('refuses keys that are not design or placement ids', () => {
     const recovered = salvageWorkshopState({
       library: { '': true },
-      placements: { '': { tileId: TILE_A, x: 0, z: 0, rotation: 0 } },
+      placements: { '': { design: DESIGN_A, x: 0, z: 0, rotation: 0 } },
     })
     expect(recovered.state.library).toEqual({})
     expect(recovered.state.placements).toEqual({})

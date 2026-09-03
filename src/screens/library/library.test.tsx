@@ -59,6 +59,7 @@ import { createWorkshopRouter } from '@/routes'
 import { resetCatalogSearchIndex } from '@/screens/catalog'
 import type { LockSystem } from '@/store'
 import {
+  STORE_VERSION,
   addToLibrary,
   clearPersistedWorkshopState,
   placeTile,
@@ -740,7 +741,7 @@ describe('export and import', () => {
     const urls = stubObjectUrls()
     save(0, 1, 6)
     act(() => {
-      placeTile({ tileId: fixtureId(1), x: 1.5, z: -2, rotation: 90 })
+      placeTile({ design: fixtureDesign(1), x: 1.5, z: -2, rotation: 90 })
     })
     await renderLibrary()
 
@@ -768,7 +769,7 @@ describe('export and import', () => {
       [fixtureDesign(0), fixtureDesign(1), fixtureDesign(6)].sort(),
     )
     expect(Object.values(state.placements)).toEqual([
-      { tileId: fixtureId(1), x: 1.5, z: -2, rotation: 90 },
+      { design: fixtureDesign(1), x: 1.5, z: -2, rotation: 90 },
     ])
     expect(report()).toHaveTextContent('Imported 3 tiles and 1 placement.')
   })
@@ -803,7 +804,10 @@ describe('export and import', () => {
     await importFile(
       JSON.stringify({
         kind: 'openforge-workshop/scene',
-        version: 4,
+        // The current stamp. `importWorkshop` refuses a mismatch outright, so a
+        // stale number here would test the version gate and not the salvage —
+        // and row V4 took it to 5.
+        version: STORE_VERSION,
         state: {
           library: {
             [fixtureDesign(0)]: true,
@@ -817,18 +821,34 @@ describe('export and import', () => {
             // that has to say so.
             [fixtureId(1)]: true,
           },
-          placements: {},
+          placements: {
+            // Row V4's counterpart of the library case: a **file** id where a
+            // design belongs, which is what every placement written before V5
+            // held. Named and dropped rather than kept as a piece of the room
+            // that draws nothing and cannot be removed.
+            '2f8d1e0a-1111-4111-8111-111111111111': {
+              design: fixtureId(1),
+              x: 0,
+              z: 0,
+              rotation: 0,
+            },
+          },
           lock: 'openlock',
         },
       }),
     )
 
     expect(report()).toHaveTextContent('Imported 1 tile and 0 placements.')
-    expect(report()).toHaveTextContent('2 entries could not be read')
+    expect(report()).toHaveTextContent('3 entries could not be read')
     expect(report()).toHaveTextContent('library.d0000badva1ue: expected true, found 5')
     expect(report()).toHaveTextContent(
       `library.${fixtureId(1)}: a file id, not a design id — the library holds items now`,
     )
+    expect(report()).toHaveTextContent(
+      'placements.2f8d1e0a-1111-4111-8111-111111111111: design is a file id, not a design id — a ' +
+        'placement holds an item now',
+    )
+    expect(useWorkshopStore.getState().placements).toEqual({})
     // The readable entry survived, and no phantom key came with it.
     expect(Object.keys(useWorkshopStore.getState().library)).toEqual([fixtureDesign(0)])
   })

@@ -20,7 +20,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { ManifestOrdinal, TileId } from '@/catalog'
+import type { DesignId, ManifestOrdinal, TileId } from '@/catalog'
 import type { LockSystem, Placement } from '@/store'
 import { LockSystem as LockSystemSchema } from '@/store'
 
@@ -44,6 +44,18 @@ function tileId(index: number): TileId {
   return `tiles/fixture/family/fixture#tile.${String(index)}x1.openlock.stl` as TileId
 }
 
+/**
+ * The design of fixture tile `index` — **one file per design here**, so ordinal
+ * `i` addresses design `i` and every figure in this file is unchanged by row V4.
+ *
+ * A separate fixture (`multiVariantManifest`) covers the case that is not
+ * one-to-one, because that is where a design's *address* — the lowest ordinal in
+ * the group — stops being the placed file's own ordinal.
+ */
+function designId(index: number): DesignId {
+  return `d-fixture-${String(index)}` as DesignId
+}
+
 /** A manifest over `count` tiles, ordinal `i` naming tile `i`. */
 function manifestOf(count: number, manifestVersion = 1): ShareManifest {
   const source: ShareManifestSource = {
@@ -51,6 +63,7 @@ function manifestOf(count: number, manifestVersion = 1): ShareManifest {
     records: Array.from({ length: count }, (_, index) => ({
       id: tileId(index),
       ord: index as ManifestOrdinal,
+      design: designId(index),
     })),
   }
   return buildShareManifest(source)
@@ -69,13 +82,14 @@ function shiftedManifestOf(count: number, manifestVersion = 1): ShareManifest {
     records: Array.from({ length: count }, (_, index) => ({
       id: tileId(index),
       ord: ((index + 1) % count) as ManifestOrdinal,
+      design: designId(index),
     })),
   }
   return buildShareManifest(source)
 }
 
 function placement(index: number, x: number, z: number, rotation: number): Placement {
-  return { tileId: tileId(index), x, z, rotation }
+  return { design: designId(index), x, z, rotation }
 }
 
 /** Every lock system, in the enum's own order. */
@@ -183,7 +197,7 @@ describe('manifest drift', () => {
       version: { manifest: 1 },
       records: Array.from({ length: 64 }, (_, index) => {
         const ord = index === 1 ? 63 : index === 63 ? 1 : index
-        return { id: tileId(index), ord: ord as ManifestOrdinal }
+        return { id: tileId(index), ord: ord as ManifestOrdinal, design: designId(index) }
       }),
     })
 
@@ -250,7 +264,7 @@ describe('salvage', () => {
       placements: [
         placement(0, 1, 1, 0),
         placement(99, 2, 2, 0),
-        { tileId: tileId(1), x: Number.NaN, z: 0, rotation: 0 },
+        { design: designId(1), x: Number.NaN, z: 0, rotation: 0 },
       ],
       generated: [],
     }
@@ -314,7 +328,7 @@ describe('salvage', () => {
     const manifest = manifestOf(8)
     const scene: SharedScene = {
       lock: 'openlock',
-      placements: [{ tileId: tileId(1), x: 0, z: 0, rotation: 450 }],
+      placements: [{ design: designId(1), x: 0, z: 0, rotation: 450 }],
       generated: [],
     }
     const decoded = await decodeShareFragment(await fragmentOf(scene, manifest), manifest)

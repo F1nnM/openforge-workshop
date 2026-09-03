@@ -24,14 +24,23 @@
  *     the identity would let two different bases collide onto one silently, so
  *     the handle is used for filenames and bill captions and never for equality.
  *   - **A `GeneratedBaseId` can never be a `TileId`.** `gen:` fails
- *     `TileId`'s `^tiles\/…` pattern, so the two id spaces are provably
- *     disjoint rather than conventionally distinct. That is what makes
- *     {@link generatedPlacementKey} safe beside `billView.ts`'s `placementKey`:
- *     row G4's one refusal is an identical twin and its docblock rests on
- *     `tileId|x|z|rotation` being unique, so a generated base must not be able
- *     to produce a string in that space. It cannot, and `placement.test.ts`
+ *     `TileId`'s `^tiles\/…` pattern, so those two id spaces are provably
+ *     disjoint rather than conventionally distinct, and `placement.test.ts`
  *     asserts it by parsing every generated id through `TileId` and expecting a
  *     failure.
+ *
+ *     **Row V4 introduced a third space and this argument does not cover it.**
+ *     A placement now holds a `DesignId`, and `DesignId` is
+ *     `z.string().min(1)` — no pattern, so nothing in the schemas stops one
+ *     looking like `gen:…` and the disjointness there could only be measured
+ *     over the corpus, not proved. Rather than tighten a brand that 208 fixture
+ *     ids across 28 files depend on, V4 removed the need for the proof at the
+ *     one site that compared the two spaces: `move.ts#identityOf`, behind row
+ *     G4's identical-twin refusal, prefixes the id with its population
+ *     (`'catalog'` / `'generated'`), so X9's false twin is unreachable by
+ *     construction. {@link generatedPlacementKey} and `billView.ts`'s
+ *     `placementKey` were never keys of one map, so their disjointness was only
+ *     ever needed for that comparison.
  *
  * ## The mesh is not here, and the schema is why
  *
@@ -241,16 +250,15 @@ export type GeneratedPlacement = z.infer<typeof GeneratedPlacement>
 /**
  * The scene's generated half, keyed the way the store keys its placements.
  *
- * A **second map beside `placements`**, not a widening of it. `Placement.tileId`
- * is a `TileId` and every reader of that map — the share codec, the migration
- * that runs `TileId.safeParse` over each entry, `billView.ts`'s `placementKey`,
- * `buildBillOfTiles` — is entitled to keep assuming it. A union type in that
- * slot would make all of them conditional. Sharing the `PlacementId` space
- * costs nothing and buys one id namespace across the whole scene, which is what
- * lets {@link generatedPlacementKey} and `findConflicts` mix the two.
- *
- * `src/store/**` is not this row's to edit, so this is the shape the store row
- * adds and not a field that exists yet. Nothing here is persisted today.
+ * A **second map beside `placements`**, not a widening of it. Every reader of
+ * that map — the share codec, the migration that parses each entry,
+ * `billView.ts`'s `placementKey`, `buildBillOfTiles` — is entitled to keep
+ * assuming its identity slot names one item *in the catalog*, and a generated
+ * base is not in the catalog: it has no file and, since row V4 put a `DesignId`
+ * there, no design. A union type in that slot would make all of them
+ * conditional. Sharing the `PlacementId` space costs nothing and buys one id
+ * namespace across the whole scene, which is what lets `findConflicts` mix the
+ * two.
  */
 export type GeneratedScene = Readonly<Record<PlacementId, GeneratedPlacement>>
 
@@ -260,10 +268,12 @@ export type GeneratedScene = Readonly<Record<PlacementId, GeneratedPlacement>>
  *
  * Same four-field tuple, same reason (a scene is a set of distinct cells, and
  * reference identity is the thing that stops being true when a caller maps over
- * the list), and no possible collision with the catalog one: the first field is
- * a `GeneratedBaseId`, which starts `gen:` and can therefore never be a
- * `TileId`. Row G4's move refusal — the identical twin — behaves identically
- * here for identical reasons.
+ * the list). The two are **not** keys of one map and never have been — this one
+ * keys the mesh retain set, that one pairs the bill with the store — so their
+ * disjointness is a property nothing reads; the one place the two populations
+ * really are compared is `move.ts#identityOf`, which qualifies by population
+ * rather than relying on it. Row G4's move refusal — the identical twin —
+ * behaves identically here for identical reasons.
  */
 export function generatedPlacementKey(placement: GeneratedPlacement): string {
   return `${placement.base}|${String(placement.x)}|${String(placement.z)}|${String(placement.rotation)}`

@@ -10,11 +10,14 @@
  * Three failure modes are first-class outputs rather than exceptions, because
  * all three are reachable from a *valid* persisted scene:
  *
- *   - **`unknown`** — the placement names a tile this catalog build does not
- *     hold. `src/catalog/schema.ts` rule 3 retires the ordinal of a tile that
- *     leaves the corpus, so a scene saved last month or a share link can name
- *     one. `src/assembly/resolve.ts` treats this the same way: a note and an
- *     empty part list, never a throw. One dead tile must not take a room down.
+ *   - **`unknown`** — the placement names an item this catalog build does not
+ *     hold, or holds no printable variant of under the current preference. A
+ *     scene saved last month or a share link can name one: an item leaves the
+ *     corpus, or a tag edit moves its files to another design, which is
+ *     `DesignId`'s own instability and the exposure `src/store/schema.ts`
+ *     accepted. `src/assembly/resolve.ts` treats this the same way: a note and
+ *     an empty part list, never a throw. One dead item must not take a room
+ *     down.
  *   - **`undrawable`** — the tile is in the catalog but its footprint is `none`,
  *     the one case of seven with nothing to draw. Unreachable through this
  *     canvas, which refuses it, and reachable through a share link written by a
@@ -55,7 +58,7 @@
  *     single id can name a piece in either list without ambiguity. That is what
  *     lets {@link pieceAt} and `move.ts` take the union.
  */
-import type { CatalogRecord, TileId } from '@/catalog'
+import type { CatalogRecord, DesignId } from '@/catalog'
 import { DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
 import type { GeneratedPiece } from '@/generator/placement/geometry'
 import { generatedPiece } from '@/generator/placement/geometry'
@@ -175,7 +178,16 @@ export type ScenePiece = PlanPiece | GeneratedPlanPiece
 /** A placement that could not be drawn, and why. */
 export interface PlanOmission {
   readonly id: PlacementId
-  readonly tileId: TileId
+  /**
+   * The item the placement names — the only identity there is, since row V4.
+   *
+   * A design id and not a name, because the two cases this type reports are
+   * exactly the two where there is no record to take a name off: the catalog
+   * does not hold the item, or it holds it and cannot draw it. The panel that
+   * renders these offers a Remove button, and the id is what identifies the row
+   * beside it.
+   */
+  readonly design: DesignId
   readonly reason: string
 }
 
@@ -253,12 +265,16 @@ export function buildPlanScene(
 
   for (const [key, placement] of Object.entries(placements)) {
     const id = key as PlacementId
-    const record = catalog.record(placement.tileId)
+    // One call, and it is where a design becomes a record — the variant this
+    // build's lock preference would print. See `catalog.ts`: the footprint,
+    // the kinds and the name are hoisted facets, so every variant of an item
+    // draws the same outline and V4 cannot have moved one.
+    const record = catalog.record(placement.design)
     if (record === undefined) {
       unknown.push({
         id,
-        tileId: placement.tileId,
-        reason: `${placement.tileId} is not in this catalog build; it may have been retired.`,
+        design: placement.design,
+        reason: `${placement.design} is not in this catalog build; it may have been retired.`,
       })
       continue
     }
@@ -266,7 +282,7 @@ export function buildPlanScene(
     if (shape === undefined) {
       undrawable.push({
         id,
-        tileId: placement.tileId,
+        design: placement.design,
         reason: `${record.name} has a ${record.foot.shape} footprint, which the plan view cannot draw.`,
       })
       continue

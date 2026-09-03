@@ -29,8 +29,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
-import type { TileId } from '@/catalog'
+import type { DesignId } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
 import { baseFootprint } from '@/generator/panel/footprint'
 import { PANEL_ENTRIES, panelSchema } from '@/generator/panel/schemas'
 import { GENERATED_ROTATION_STEP_DEG } from '@/generator/placement/placement'
@@ -38,7 +38,7 @@ import type { PlacementId, WorkshopState } from '@/store'
 import { aGeneratedBase } from '@/store/fixture'
 
 import { createStyleResolver, planCatalogFromFile } from './catalog'
-import { FIXTURE_IDS, fixtureCatalogFile } from './fixture'
+import { FIXTURE_CATALOG, FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from './fixture'
 import { beginMove, previewMove } from './move'
 import { buildPlanScene, navigationOrder, pieceAt, pieceName, pieceRotationStep, scenePaintOrder } from './scene'
 import { VACANCY_STEP, freeCellFor } from './vacancy'
@@ -47,11 +47,11 @@ const file = fixtureCatalogFile()
 const catalog = planCatalogFromFile(file)
 const styleOf = createStyleResolver(catalog)
 
-/** Catalog placements from `[key, tileId, x, z, rotation]` tuples. */
+/** Catalog placements from `[key, tileId, x, z, rotation]` tuples, via `fixtureDesignOf`. */
 function tiles(rows: readonly [string, string, number, number, number][]): WorkshopState['placements'] {
   const placements: WorkshopState['placements'] = {}
   for (const [key, tileId, x, z, rotation] of rows) {
-    placements[key as PlacementId] = { tileId: tileId as TileId, x, z, rotation }
+    placements[key as PlacementId] = { design: fixtureDesignOf(tileId), x, z, rotation }
   }
   return placements
 }
@@ -183,7 +183,7 @@ describe('paint order and hit testing', () => {
 
   it('names either population, so one readout serves the erase gesture and the bill', () => {
     const scene = sceneOf(tiles([['t1', FIXTURE_IDS.floor1, 0, 4, 0]]), bases([['g1', 0, 0]]))
-    expect(pieceName(scene.pieces[0]!)).toBe(catalog.record(FIXTURE_IDS.floor1 as TileId)?.name)
+    expect(pieceName(scene.pieces[0]!)).toBe(catalog.record(fixtureDesignOf(FIXTURE_IDS.floor1))?.name)
     expect(pieceName(scene.generated[0]!)).toBe('Generated square base')
   })
 
@@ -258,15 +258,61 @@ describe('moving a generated base', () => {
   })
 
   it('does not confuse a generated base with a catalogued tile when refusing', () => {
-    // The identity comparison is over bare strings across both populations, which
-    // is safe only because the two spaces are disjoint. A false twin here would
-    // be a refused move with no visible cause.
+    // X9's false twin: a refused move with no visible cause. `move.ts#identityOf`
+    // compares the two populations, so the two identities must never collide.
     const scene = sceneOf(tiles([['t1', FIXTURE_IDS.floor2, 0, 0, 0]]), bases([['g1', 8, 0]]))
     const drag = beginMove(scene.generated[0]!, null)
     const preview = previewMove({ ...drag, anchor: [0, 0] }, scene)
 
     expect(preview?.refusal).toBeNull()
     expect(preview?.conflict).toBe(true)
+  })
+
+  it('does not confuse them even when the design id *is* the generated base id', () => {
+    /*
+      **The case row V4 made reachable, and the one the test above cannot see.**
+
+      S5 proved the two spaces disjoint lexically: a `GeneratedBaseId` starts
+      `gen:` and therefore fails `TileId`'s `^tiles/…` pattern. V4 put a
+      `DesignId` in the catalog slot and `DesignId` is `z.string().min(1)` — no
+      pattern — so nothing in the schemas stops a design id from being the exact
+      string a generated base uses. Over the live corpus none is (all 3,822 are
+      `d` plus twelve hex), but that is a measurement, and `move.ts#identityOf`
+      qualifies the id with its population so no measurement is load bearing.
+
+      Verified capable of failing: with `identityOf` returning the bare id, this
+      test refuses the move as a `duplicate` and the previous one still passes.
+      That is exactly X9's symptom — the user drags a tile onto a free cell and
+      the builder refuses, for a reason nothing on screen can express.
+    */
+    const collidingBase = aGeneratedBase({ x: 8, z: 0 })
+    const shadowed = CatalogFileSchema.parse({
+      ...FIXTURE_CATALOG,
+      records: FIXTURE_CATALOG.records.map((record, index) =>
+        index === 0 ? { ...record, design: collidingBase.base } : record,
+      ),
+    })
+    const shadowCatalog = planCatalogFromFile(shadowed)
+    const scene = buildPlanScene(
+      { ['t1' as PlacementId]: { design: collidingBase.base as unknown as DesignId, x: 0, z: 0, rotation: 0 } },
+      shadowCatalog,
+      createStyleResolver(shadowCatalog),
+      { ['g1' as PlacementId]: collidingBase },
+    )
+    // Both populations drew, so the identities really are in play together.
+    expect(scene.pieces).toHaveLength(1)
+    expect(scene.generated).toHaveLength(1)
+
+    // Dropped onto the tile's own cell at the tile's own angle, which is the
+    // only place a false twin can appear: `duplicateRefusal` needs the identity,
+    // the rotation *and* the anchor to agree.
+    const drag = beginMove(scene.generated[0]!, null)
+    const preview = previewMove({ ...drag, anchor: [0, 0] }, scene)
+    expect(preview?.refusal).toBeNull()
+    // An overlap, announced and committable — `move.ts`'s rule for two
+    // populations sharing a cell, which is what a base under a tile *is*.
+    expect(preview?.conflict).toBe(true)
+    expect(preview?.committable).toBe(true)
   })
 
   it('carries no concentric note, because a rect has no centre offset', () => {

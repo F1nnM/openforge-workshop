@@ -275,6 +275,16 @@ export interface ArchiveBase {
   readonly sprite: boolean
   readonly name: string
   readonly id: string
+  /**
+   * The item this file is one connection variant of.
+   *
+   * Carried since row V4 for one caller: `placement/placement.ts` mints an
+   * ordinary `Placement` for an archived base, and a `Placement` names a
+   * `DesignId`. Projected off the record here rather than looked up there,
+   * because the record is in hand at this point and `placeRecipe` holds no
+   * catalog — the alternative was a second index for one field.
+   */
+  readonly design: CatalogRecord['design']
   /** The `-D` set the sweep used, for the drawer's disclosure. */
   readonly swept: SweptBase
 }
@@ -373,6 +383,7 @@ export function buildBaseResolver(records: readonly CatalogRecord[]): BaseResolv
             sprite: record.sprite,
             name: record.name,
             id: record.id,
+            design: record.design,
             swept: classified.swept,
           })
         }

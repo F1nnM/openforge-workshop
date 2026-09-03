@@ -14,15 +14,13 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { TileId } from '@/catalog'
+import type { DesignId } from '@/catalog'
 import { FILL, PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
 import type { Placement } from '@/store'
 import { clearPersistedWorkshopState, resetWorkshop, selectLibrary, useWorkshopStore } from '@/store'
 
 import { planSlots } from './planSlots'
 import { SlotsPanel } from './SlotsPanel'
-
-const tile = (id: string): TileId => id as unknown as TileId
 
 /**
  * The item a fixture file belongs to — what the library holds since row V1.
@@ -40,8 +38,25 @@ const designOf = (id: string): string => {
   return record.design
 }
 
+/** An item this index does not hold — the orphan case, since row V4. */
+const RETIRED_DESIGN = 'd-retired-nothing' as DesignId
+
+/** A placement of {@link RETIRED_DESIGN} at the origin. */
+function atRetired(): Placement {
+  return { design: RETIRED_DESIGN, x: 0, z: 0, rotation: 0 }
+}
+
+/**
+ * A placement of the item a fixture file belongs to.
+ *
+ * Row V4, and it interacts with this file's subject: `FILL.torchStone` and
+ * `FILL.torchStoneFlex` are two files of **one** item, so placing either now
+ * places the same design and the panel resolves the file whose slots it shows
+ * from the lock preference. Every `at(…)` below names a holder, and holders in
+ * this fixture are single-file designs.
+ */
 function at(id: string, x: number, z: number): Placement {
-  return { tileId: tile(id), x, z, rotation: 0 }
+  return { design: designOf(id) as DesignId, x, z, rotation: 0 }
 }
 
 const plan = (entries: Record<string, Placement>) => entries
@@ -104,7 +119,7 @@ describe('planSlots', () => {
   })
 
   it('calls a placement the index has retired an orphan rather than dropping it', () => {
-    const inventory = planSlots(SLOT_CATALOG, plan({ gone: at('tiles/retired/nothing.stl', 0, 0) }))
+    const inventory = planSlots(SLOT_CATALOG, plan({ gone: atRetired() }))
     expect(inventory.orphans).toEqual(['gone'])
     expect(inventory.holders).toEqual([])
   })
@@ -179,11 +194,13 @@ describe('SlotsPanel', () => {
     render(
       <SlotsPanel
         catalog={SLOT_CATALOG}
-        placements={plan({ gone: at('tiles/retired/nothing.stl', 0, 0) })}
+        placements={plan({ gone: atRetired() })}
       />,
     )
     expect(
-      screen.getByText(/1 placement names a file this index no longer holds/),
+      // "an item", not "a file": since row V4 a placement names a design, so an
+      // orphan is an item the index has lost and not a file it has retired.
+      screen.getByText(/1 placement names an item this index no longer holds/),
     ).toBeInTheDocument()
   })
 

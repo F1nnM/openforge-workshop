@@ -191,13 +191,14 @@ export interface AssemblyIndex {
    * with every file in the group as a variant.
    *
    * It rides on this index rather than being a parameter of `resolvePlacement`
-   * because of what the store says a placement *is*: `Placement.tileId`'s own
-   * docblock fixes the concrete file as "a function of the placed tile plus the
-   * global lock preference … resolving it at download time keeps a saved scene
-   * correct when the user later changes that preference". That makes variant
-   * resolution part of resolution, not an option a caller may forget — and a
-   * caller who forgot would silently get the pre-A6 behaviour, which is the one
-   * failure mode there is no symptom for.
+   * because of what the store says a placement *is*, and row V4 turned that
+   * argument from strong into structural. It used to be that `Placement.tileId`
+   * named a file and this layer was what re-resolved it, so a caller who forgot
+   * to pass an aggregate index would silently get the pre-A6 behaviour — a real
+   * answer to the wrong question, with no symptom. Now a placement names a
+   * `DesignId` and **this layer is the only thing that can turn one into a
+   * record at all**: without it `resolvePlacement` has no parts to return, so
+   * forgetting it is not a silent regression but an empty bill.
    *
    * See `resolve.ts#resolveVariant` for what reads it, and
    * {@link buildAssemblyIndex} on why it is still a parameter of the *builder*.

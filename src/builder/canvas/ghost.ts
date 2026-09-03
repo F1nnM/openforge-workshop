@@ -98,7 +98,13 @@ const SAME_PLACE_EPS = 0.05
 function isDuplicate(scene: PlanScene, record: CatalogRecord, anchor: PlanPoint, rotation: number): boolean {
   return scene.pieces.some(
     (piece) =>
-      piece.placement.tileId === record.id &&
+      // The **item**, since row V4 — and `record` is a variant of the armed
+      // item, so `record.design` is that item. Comparing files would have gone
+      // wrong in exactly one direction the day a placement stopped naming one:
+      // two placements of one design under one preference resolve to the same
+      // file anyway, so the test is unchanged in behaviour and now says what it
+      // means.
+      piece.placement.design === record.design &&
       piece.placement.rotation === rotation &&
       Math.abs(piece.placement.x - anchor[0]) < SAME_PLACE_EPS &&
       Math.abs(piece.placement.z - anchor[1]) < SAME_PLACE_EPS,

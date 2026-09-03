@@ -47,7 +47,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createWorkshopRouter } from '@/routes'
 import type { FacetSearch } from '@/search'
-import { FIXTURE_CATALOG, FIXTURE_IDS, FIXTURE_NAMES } from '@/builder/panels/fixture'
+import { FIXTURE_CATALOG, FIXTURE_DESIGNS, FIXTURE_NAMES } from '@/builder/panels/fixture'
 import { resetCatalogSearchIndex } from '@/screens/catalog'
 import { clearPersistedWorkshopState, resetWorkshop, useWorkshopStore } from '@/store'
 import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
@@ -166,9 +166,9 @@ describe('the builder screen', () => {
     act(() => {
       useWorkshopStore.setState({
         placements: {
-          // `PlacementId` and `TileId` are branded strings over the same scene;
-          // the store's own parse is exercised in `panels.test.tsx`.
-          p1: { tileId: FIXTURE_IDS.floor1, x: 0, z: 0, rotation: 0 },
+          // `PlacementId` and `DesignId` are branded strings over the same
+          // scene; the store's own parse is exercised in `panels.test.tsx`.
+          p1: { design: FIXTURE_DESIGNS.floor1, x: 0, z: 0, rotation: 0 },
         } as never,
       })
     })

@@ -67,10 +67,13 @@
  *
  * **This is a change of kind, and row G5's original argument is what changed.**
  * That argument was: an item *"is not something the palette can arm — `PaletteRow`
- * is keyed by `record.id` and `Placement.tileId` is a file"*. Row V3 makes a
- * palette row an aggregate and row V4 makes a placement address a design, so both
+ * is keyed by `record.id` and `Placement.tileId` is a file"*. Row V3 made a
+ * palette row an aggregate and row V4 made a placement address a design, so both
  * premises are gone; what is left is the property G5 actually wanted, and a design
- * has it more completely than a file did.
+ * has it more completely than a file did. **The channel and its reader now speak
+ * the same currency end to end** — `claimPendingDesign` hands a `DesignId` to
+ * `tools.setSelectedDesign`, which hands it to `placeTile` — so nothing between
+ * the catalog drawer and the persisted scene resolves a file.
  *
  * **Nothing here resolves anything, and that is the load-bearing property.** A6's
  * rule 0 resolves a placed item to the variant the build's lock preference wants,

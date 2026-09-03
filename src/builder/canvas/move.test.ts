@@ -21,11 +21,10 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { TileId } from '@/catalog'
 import type { PlacementId, WorkshopState } from '@/store'
 
 import { createStyleResolver, planCatalogFromFile } from './catalog'
-import { FIXTURE_IDS, fixtureCatalogFile } from './fixture'
+import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from './fixture'
 import { SNAP_STEP } from './geometry'
 import {
   beginMove,
@@ -49,17 +48,24 @@ const file = fixtureCatalogFile()
 const catalog = planCatalogFromFile(file)
 const styleOf = createStyleResolver(catalog)
 
+/**
+ * The record a fixture file id names.
+ *
+ * Through `fixtureDesignOf` since row V4: `PlanCatalog.record` is keyed by
+ * design and resolves the variant the build would print, and with one file per
+ * fixture design that is the file asked for.
+ */
 const record = (id: string) => {
-  const found = catalog.record(id as TileId)
+  const found = catalog.record(fixtureDesignOf(id))
   if (found === undefined) throw new Error(`no fixture record ${id}`)
   return found
 }
 
-/** A scene from `[key, tileId, x, z, rotation]` tuples — `plan.test.ts`'s shape. */
+/** A scene from `[key, tileId, x, z, rotation]` tuples — `plan.test.ts`'s shape, `fixtureDesignOf` included. */
 function sceneOf(rows: readonly [string, string, number, number, number][]): PlanScene {
   const placements: WorkshopState['placements'] = {}
   for (const [key, tileId, x, z, rotation] of rows) {
-    placements[key as PlacementId] = { tileId: tileId as TileId, x, z, rotation }
+    placements[key as PlacementId] = { design: fixtureDesignOf(tileId), x, z, rotation }
   }
   return buildPlanScene(placements, catalog, styleOf)
 }

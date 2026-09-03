@@ -59,12 +59,18 @@
  *
  * ## The library is not in the link
  *
- * `WorkshopState` also holds the library — the tiles a user kept. A share link is
+ * `WorkshopState` also holds the library — the items a user kept. A share link is
  * "here is the room I built", not "here is my bookmark list", and the library is
- * the one part of the state that is personal rather than about the artefact. It
- * also costs a full `TileId` per entry, since a library tile has no placement to
- * amortise an ordinal against. JSON export (`src/store/transfer.ts`) is the path
- * that carries everything.
+ * the one part of the state that is personal rather than about the artefact.
+ * **That is now the whole of the reason**, and the second one this docblock used
+ * to give is worth 3× to 14× less than when it was written: it said an entry
+ * *"costs a full `TileId`"*, 39 to 183 characters, since a library entry has no
+ * placement to amortise an ordinal against. Row V1 re-keyed the library to
+ * designs and a `DesignId` is **13 characters flat**, so the cost argument has
+ * mostly evaporated — and it could evaporate entirely, since a library entry
+ * could travel as its design's address ordinal exactly as a placement does. The
+ * decision does not move: it was never about the bytes. JSON export
+ * (`src/store/transfer.ts`) is the path that carries everything.
  *
  * The facet state is likewise absent. `src/search/searchSchema.ts` already encodes
  * that into the **query string**, and this module owns the **fragment**; a link
@@ -152,7 +158,11 @@ export interface SharedScene {
    *
    * A second list beside {@link placements} rather than one heterogeneous list,
    * matching the store's two maps and for the store's stated reason: every
-   * reader of a `Placement` is entitled to keep assuming `tileId` is a `TileId`.
+   * reader of a `Placement` is entitled to keep assuming its identity slot names
+   * one item **in the catalog**. Row V4 changed that slot from a `TileId` to a
+   * `DesignId` and the entitlement is unchanged — a generated base has no design
+   * any more than it has a file, so it is no closer to fitting in that list than
+   * it was.
    */
   readonly generated: readonly GeneratedPlacement[]
 }

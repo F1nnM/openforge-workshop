@@ -4,7 +4,7 @@
  * ```ts
  * // in the drawer, where the resolver already lives
  * const placed = placeRecipe(recipe, resolution, { x, z, rotation })
- * if (placed.kind === 'archived') placeTile(placed.placement.tileId, placed.placement)
+ * if (placed.kind === 'archived') placeTile(placed.placement)
  * else scene[nextId()] = placed.placement
  *
  * // in the plan view

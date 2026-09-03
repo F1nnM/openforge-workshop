@@ -29,11 +29,11 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { TileId } from '@/catalog'
+import { DesignId, TileId } from '@/catalog'
 import { GENERATED_ID_PREFIX, generatedPlacementKey } from '@/generator/placement/scene'
 
 import { A_RECIPE, aBinaryStl, aGeneratedBase } from './fixture'
-import { STORE_VERSION, readPersistedState } from './migrations'
+import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
 import { clearGeneratedMeshes, holdGeneratedMesh, meshFactsOf, useGeneratedMeshStore } from './meshes'
 import { STORAGE_KEY, clearPersistedWorkshopState } from './storage'
 import { exportWorkshop, importWorkshop } from './transfer'
@@ -48,7 +48,15 @@ import {
   useWorkshopStore,
 } from './workshopStore'
 
-const A_TILE = TileId.parse('tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl')
+/**
+ * One catalog placement's identity — a **design**, since row V4.
+ *
+ * `d` plus twelve hex characters, the shape the live corpus's 3,822 all have, so
+ * `migrations.ts` can tell it from a `tiles/…` file id and from a `gen:` recipe
+ * key. That three-way distinction is what this file's id-space assertions are
+ * about.
+ */
+const A_DESIGN = DesignId.parse('d4c2a57740b65')
 
 const state = () => useWorkshopStore.getState()
 const holds = () => useGeneratedMeshStore.getState().holds
@@ -68,7 +76,7 @@ beforeEach(() => {
 
 describe('placing a generated base', () => {
   it('keys it in the same PlacementId space as a catalog placement, without colliding', () => {
-    const tileKey = placeTile({ tileId: A_TILE, x: 0, z: 0, rotation: 0 })
+    const tileKey = placeTile({ design: A_DESIGN, x: 0, z: 0, rotation: 0 })
     const baseKey = placeGeneratedBase(aGeneratedBase({ x: 4, z: 0 }))
 
     // One namespace, two maps. That is what lets one id name a piece on the plan
@@ -80,15 +88,28 @@ describe('placing a generated base', () => {
     expect(Object.keys(state().generated)).toEqual([baseKey])
   })
 
-  it('gives it an identity that can never be a TileId', () => {
-    // Row S5's proof, re-run through the store: this is what makes
-    // `generatedPlacementKey` safe beside `billView.ts`'s `placementKey` and
-    // leaves row G4's identical-twin refusal untouched.
+  it('gives it an identity that can never be a TileId, and is refused in the design slot', () => {
+    // Row S5's proof, re-run through the store. **Row V4 needed the second
+    // half.** S5's argument was lexical — `gen:` fails `TileId`'s `^tiles/…`
+    // pattern — and a placement now holds a `DesignId`, which carries no
+    // pattern at all, so `gen:` against *that* space is not disjoint by schema.
+    // `move.ts#identityOf` no longer relies on it (it qualifies by population)
+    // and `migrations.ts` rejects it by name on the way out of `localStorage`,
+    // which is what this asserts.
     const key = placeGeneratedBase(aGeneratedBase({ x: 0, z: 0 }))
     const base = state().generated[key]?.base
     expect(base).toBeDefined()
     expect(base?.startsWith(GENERATED_ID_PREFIX)).toBe(true)
     expect(TileId.safeParse(base).success).toBe(false)
+    // The gap the schemas leave, and the guard that closes it.
+    expect(DesignId.safeParse(base).success).toBe(true)
+    const recovered = salvageWorkshopState({
+      placements: { '1e6a1f4e-0000-4000-8000-000000000000': { design: base, x: 0, z: 0, rotation: 0 } },
+    })
+    expect(recovered.state.placements).toEqual({})
+    expect(recovered.dropped).toEqual([
+      'placements.1e6a1f4e-0000-4000-8000-000000000000: design is a generated base id, which belongs in the generated map',
+    ])
   })
 
   it('folds -0 and an out-of-range rotation, as the catalog map does', () => {
@@ -135,7 +156,7 @@ describe('move, rotate and remove — exactly as any other placement', () => {
   })
 
   it('removes one, and leaves the catalog half alone', () => {
-    const tileKey = placeTile({ tileId: A_TILE, x: 0, z: 0, rotation: 0 })
+    const tileKey = placeTile({ design: A_DESIGN, x: 0, z: 0, rotation: 0 })
     const key = placeGeneratedBase(aGeneratedBase({ x: 4, z: 0 }))
 
     removeGeneratedPlacement(key)

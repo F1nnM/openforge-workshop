@@ -349,10 +349,20 @@ function anchorKey(x: number, z: number): string {
  *
  * The base's *own* anchor is what is compared, and a base that is itself a topper
  * cannot contribute: only `layer === 'base'` on the **resolved** record counts,
- * because A6's rule 0 may have substituted a sibling and it is the resolved file
- * that gets printed. Bases the *rule* inserted are not in this set either — they
- * have no anchor, being line items rather than pieces — so the note cannot fire
- * on two toppers sharing a cell.
+ * because rule 0 decides which file gets printed and `layer` is one of the
+ * fields that differs between an item's variants. Bases the *rule* inserted are
+ * not in this set either — they have no anchor, being line items rather than
+ * pieces — so the note cannot fire on two toppers sharing a cell.
+ *
+ * **Row V4 firmed this up rather than disturbing it.** `resolved.tile` was
+ * already the resolved record, so not a line of code changed; what changed is
+ * that `layer === 'base'` is now effectively a property of the placed *item*
+ * rather than of a file that might have been substituted from a non-base
+ * sibling. `shape|base` is part of the design key, so a base is always its own
+ * design and **0 of the 3,822 items hold a base variant beside a non-base one**
+ * (`aggregate.ts#AggregateClass`, re-measured by `palette.corpus.test.ts`) — so
+ * a hand-placed base can no longer resolve into something that is not a base, or
+ * the reverse.
  */
 function doubleBaseNotes(
   resolved: readonly ResolvedPlacement[],

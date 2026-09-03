@@ -8,14 +8,20 @@
  * const index = buildAssemblyIndex(catalog)              // once per catalog build
  * const one   = resolvePlacement(placement, index, { lock })
  * const bill  = buildBillOfTiles(Object.values(scene), index, { lock })
- * const which = resolveVariant(tileId, index, { lock })  // rule 0, on its own
+ * const which = resolveVariant(design, index, { lock })  // rule 0, on its own
  * ```
  *
- * Row A6 added the fourth line and a step above the other three: a placement
- * names a file, and the lock preference decides **which file of that item** to
- * print before any base is considered. `resolvePlacement`'s `tile` is therefore
- * the resolved record, and `ResolvedPlacement.resolution` says what was chosen
- * and how complete an assembly it is.
+ * Row A6 added the fourth line and a step above the other three: the lock
+ * preference decides **which file of the placed item** to print before any base
+ * is considered. Row V4 made that step the *only* resolution — a placement names
+ * an item and never a file — so `resolvePlacement`'s `tile` is the resolved
+ * record and there is no other, and `ResolvedPlacement.resolution` says what was
+ * chosen out of how many and how complete an assembly it is.
+ *
+ * {@link selectVariantForLock} is the fifth name, and it is the one the *canvas*
+ * and the slots panel take: rule 0 with no base index, so a room draws and a
+ * composition resolves against the same file the bill lists. `resolve.ts`'s
+ * module docblock names all three callers.
  *
  * Pure throughout — no React, no DOM, no fetch, no renderer, and no state of its
  * own. {@link buildAssemblyIndex} is a deterministic function of the catalog, so
@@ -60,6 +66,13 @@ export type {
  * line item — is still enforced in exactly one place, and that is
  * `resolvePlacement`.
  */
-export { MATCH_WEIGHTS, matchBase, missingBaseNote, resolvePlacement, resolveVariant } from './resolve'
+export {
+  MATCH_WEIGHTS,
+  matchBase,
+  missingBaseNote,
+  resolvePlacement,
+  resolveVariant,
+  selectVariantForLock,
+} from './resolve'
 
 export { SIZE_CODE_WIDTH_UNITS, sizeCodeWidth } from './sizeCode'

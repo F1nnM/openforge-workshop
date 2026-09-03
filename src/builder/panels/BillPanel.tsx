@@ -363,10 +363,13 @@ function PlacementRow({ entry, name }: { entry: BillPlacement; name: string }) {
 /**
  * Placements the catalog can no longer describe.
  *
- * §2's ordinal rule retires the id of a tile that leaves the corpus, so a saved
- * room or an old share link really can name one. It resolves to no parts, so it
- * appears in no bill line — and without this block it would sit in the scene,
- * count towards "tiles placed", and be invisible in the inventory.
+ * A saved room or an old share link really can name one: since row V4 a
+ * placement names an *item*, so what strands it is the whole item leaving the
+ * corpus or a tag edit moving its files to another design — `DesignId`'s own
+ * instability, and the exposure `src/store/schema.ts` accepted as the smaller
+ * one. It resolves to no parts, so it appears in no bill line — and without this
+ * block it would sit in the scene, count towards "tiles placed", and be
+ * invisible in the inventory.
  */
 function OrphanBlock({ orphans }: { orphans: readonly BillPlacement[] }) {
   return (
@@ -379,7 +382,11 @@ function OrphanBlock({ orphans }: { orphans: readonly BillPlacement[] }) {
       <ul className="of-bill-places" role="list">
         {orphans.map((entry) => (
           <li className="of-bill-place" key={entry.id}>
-            <span className="of-bill-at">{entry.placement.tileId}</span>
+            {/* The design id, which is the only identity an orphan has: the
+                catalog holds no record for it, so there is no name, no size and
+                no thumbnail to show. Thirteen characters, where the file path
+                this used to render was 39 to 183 in a 302px column. */}
+            <span className="of-bill-at">{entry.placement.design}</span>
             <button
               type="button"
               className="of-bill-remove"

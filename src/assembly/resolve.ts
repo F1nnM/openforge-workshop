@@ -9,8 +9,8 @@
  *
  * The rule set, in full:
  *
- *   0. **Resolve the item to a file before anything else.** A placement names a
- *      file, but §7 places *designs*, and 1,705 designs hold more than one file.
+ *   0. **Resolve the item to a file before anything else.** A placement names an
+ *      *item* — row V4 — and 1,705 of the 3,822 designs hold more than one file.
  *      So the first thing resolution does is ask row A1's aggregate layer which
  *      variant of the placed item this build's lock preference actually wants —
  *      and for **1,419 of the 3,822 aggregates (37.1%)** the three lock systems
@@ -18,6 +18,13 @@
  *      *fallback*: under openlock, 1,808 of the 4,363 topper files (41.4%)
  *      resolve to a sibling that needs no base at all, so no base is inserted
  *      because none is needed. See {@link resolveVariant}.
+ *
+ *      Before V4 this rule was a *re-*resolution: a placement carried a file, so
+ *      rule 0 could substitute one file for another and the bill had to disclose
+ *      that it had. Now it is **the** resolution, and there is nothing to
+ *      substitute — which removes a whole class of disagreement rather than
+ *      moving it, because a placement can no longer name a file that this build
+ *      would not print.
  *   1. **The one hard rule.** Every `connection|openforge` piece gets a base
  *      line item, auto-inserted. It is enforced by *adding* a part.
  *   2. **Everything else informs.** No condition in this module rejects a
@@ -43,12 +50,29 @@
  *      base handed to a topper with a primitive is congruent to it — so neither
  *      can come back as an optimisation.
  *
- * Resolution is a function of the placed tile and the lock preference only. `x`,
- * `z` and `rotation` do not change what you print, so they are carried through
- * untouched for the canvas and never read here — which is why the variant probe
- * {@link resolveVariant} takes a `TileId` and no placement at all.
+ * Resolution is a function of the placed **item** and the lock preference only.
+ * `x`, `z` and `rotation` do not change what you print, so they are carried
+ * through untouched for the canvas and never read here — which is why the
+ * variant probe {@link resolveVariant} takes a `DesignId` and no placement at
+ * all.
+ *
+ * ## One question, one function, three callers
+ *
+ * *Which file does this item resolve to under this preference* is asked in three
+ * places now, and {@link selectVariantForLock} is the whole of the answer in all
+ * three: here for the bill and the download pack, in
+ * `builder/canvas/catalog.ts` so the canvas and the 3D room draw the mesh the
+ * bill lists, and in `builder/panels/slots/planSlots.ts` because a composition
+ * slot is a property of a *file* (`config` is one of the fields a variant swap
+ * changes) and the file it must ask about is the one being printed. Row V3's
+ * `palette.ts#armFile` was a fourth and V4 deleted it: the palette arms an item
+ * and no longer resolves anything.
+ *
+ * What stays unique to {@link resolvePlacement} is **rule 1** — a base enters a
+ * bill through this module and nowhere else — and the base match behind it. The
+ * three callers above ask which file; only this one adds a part.
  */
-import type { CatalogRecord, TileId, VariantVerdict } from '@/catalog'
+import type { CatalogRecord, DesignId, TileAggregate, TileId, VariantSelection, VariantVerdict } from '@/catalog'
 import { selectVariant } from '@/catalog'
 import type { LockSystem, Placement } from '@/store'
 
@@ -241,24 +265,29 @@ export type PlacementVerdict =
  * Which file a placement resolved to, and how good an answer that is.
  *
  * The reason this is a record and not just a `TileId`: §7 auto-inserts parts the
- * user never placed, and this row adds a second invisible decision on top —
- * *substituting the file itself*. A bill that showed the outcome and not the
- * choice would be two decisions deep with nothing said about either.
+ * user never placed, and row V4 puts a second invisible decision *underneath*
+ * that one — the user places an item and never names a file, so **which file**
+ * is a decision the app makes on their behalf every time the bill is built. A
+ * bill that showed the outcome and not the choice would be two decisions deep
+ * with nothing said about either.
+ *
+ * **`placed` and `substituted` are gone, and their absence is the row.** They
+ * said "you asked for file A and you are getting file B", which was the only
+ * honest thing to say while a placement froze a file at click time; there is no
+ * A any more. What replaces them is {@link variants}: a resolution over one
+ * variant is an identity and needs no sentence, and a resolution over five is a
+ * choice and gets one. See `billView.ts#rowResolutionCopy`.
  */
 export interface VariantResolution {
   readonly verdict: PlacementVerdict
-  /** The file the placement names — `Placement.tileId`. */
-  readonly placed: TileId
-  /**
-   * The file to print. Differs from {@link placed} whenever the lock preference
-   * found a better variant of the same item.
-   */
+  /** The item the placement names — `Placement.design`. */
+  readonly design: DesignId
+  /** The file to print: the variant this preference ranked first. */
   readonly resolved: TileId
-  /** `resolved !== placed`. The bill marks these rows; nothing else is a substitution. */
-  readonly substituted: boolean
   /**
    * Files in the item. `1` means there was nothing to choose and the resolution
-   * is the identity — 2,117 of 3,822 aggregates are singletons.
+   * is the identity — 2,117 of 3,822 aggregates are singletons, so it is the
+   * majority case and the one the bill stays quiet about.
    */
   readonly variants: number
   /**
@@ -279,12 +308,17 @@ export interface ResolvedPlacement {
   /** Carried through unchanged; nothing here reads `x`, `z` or `rotation`. */
   placement: Placement
   /**
-   * The placed tile, or `undefined` when the catalog does not hold that id.
+   * The tile to print, or `undefined` when the catalog does not hold the placed
+   * item at all.
    *
-   * Reachable in normal operation: §2's ordinal rule 3 retires the id of a tile
-   * that leaves the corpus, and a persisted scene or an old share link can
-   * therefore name one. It is a `unknown-tile` note and an empty part list, not
-   * a throw — one dead tile must not take a room down with it.
+   * Reachable in normal operation, and V4 changed *how*. It used to be §2's
+   * ordinal rule 3 — a retired file id in a persisted scene or an old link. A
+   * design id cannot be retired by a file leaving, since the design survives as
+   * long as one variant does; what retires it is the whole item leaving the
+   * corpus, or a **tag edit** on it, which is `DesignId`'s own instability and
+   * the one `src/store/schema.ts` accepted as the smaller exposure. Either way
+   * it is an `unknown-tile` note and an empty part list, not a throw — one dead
+   * item must not take a room down with it.
    */
   tile: CatalogRecord | undefined
   /** The parts to print, placed tile first. Empty only for an unknown tile. */
@@ -295,15 +329,18 @@ export interface ResolvedPlacement {
    * assembly that is. `undefined` only for an unknown tile, alongside the empty
    * part list.
    *
-   * **{@link tile} is the resolved record, not the placed one**, and that is
-   * safe only because of A1's strongest measurement: over all 3,822 aggregates,
-   * the number holding two distinct values of `name`, `kinds`, `texture`,
-   * `build`, `foot`, `sizeCode` or `rotStep` is **zero**. So substituting the
-   * record changes `blob`, `bytes`, `file`, `family`, `conn`, `layer`, `sprite`
-   * and `config` — exactly the connection axis and its consequences — and cannot
-   * change the tile's name, its shape on the grid or its size label. The canvas
-   * therefore needs no notice of this at all; it draws from
-   * `placement.tileId`'s own footprint and gets the same polygon either way.
+   * **{@link tile} is the resolved record, and there is no other kind**, which
+   * is safe for the reason A1's strongest measurement gives: over all 3,822
+   * aggregates, the number holding two distinct values of `name`, `kinds`,
+   * `texture`, `build`, `foot`, `sizeCode` or `rotStep` is **zero**. So the
+   * resolution decides `blob`, `bytes`, `file`, `family`, `conn`, `layer`,
+   * `sprite` and `config` — exactly the connection axis and its consequences —
+   * and cannot decide the tile's name, its shape on the grid or its size label.
+   * That zero is what lets the canvas resolve the same design independently and
+   * still draw the same polygon: `buildPlanScene` asks
+   * `builder/canvas/catalog.ts` for a record and reads only `foot`, `kinds`,
+   * `name` and the tag list off it, so a room drawn from one variant and a bill
+   * built from another would differ in nothing that is on screen.
    */
   resolution: VariantResolution | undefined
 }
@@ -575,20 +612,36 @@ function verdictOf(verdict: VariantVerdict, matched: MatchedBase | undefined): P
 }
 
 /**
+ * Rule 0's preference, in exactly one place.
+ *
+ * Two arguments and both are load-bearing. `bottom` is the lock the build wants
+ * *underneath* the piece, which is the whole question §5.2 ranks on.
+ *
+ * **`PRINT_OPTIONS` is passed, always**, and what omitting it costs is measured:
+ * `VariantPreference.options` is optional, and without it the rank falls through
+ * to `bytes` ascending — which is the tie-break D1 removed from base matching
+ * for cause, because the topless print of a base is its smallest file. There is
+ * exactly one right value for that argument, so it is supplied here rather than
+ * offered as a choice to three call sites.
+ *
+ * Exported because it is the answer to *which file does this item resolve to*
+ * and three parts of the app ask it — see the module docblock. Returning the
+ * whole {@link VariantSelection} rather than just the id is what lets this
+ * module read the verdict and the option tie off the same call the canvas takes
+ * an id from, so a fourth reader cannot appear that resolves differently.
+ */
+export function selectVariantForLock(aggregate: TileAggregate, lock: LockSystem | undefined): VariantSelection {
+  return selectVariant(aggregate, { bottom: lock, options: PRINT_OPTIONS })
+}
+
+/**
  * Rule 0: which file of the placed item this lock preference wants.
  *
- * Two hops and one call. `CatalogRecord.design` is the aggregation key, so
- * `byDesign` reaches the item in one lookup — A4's ordinal→variant→design hop is
- * not needed here because a placement already names a record. Then
- * {@link selectVariant} ranks the item's files, and the verdict it cannot reach
- * without a base index is finished by {@link matchBase}.
- *
- * **`PRINT_OPTIONS` is passed, always.** `VariantPreference.options` is optional
- * and what omitting it costs is measured: the rank falls through to `bytes`
- * ascending, which is the tie-break D1 removed from base matching for cause —
- * the topless print of a base is its smallest file. There is exactly one right
- * value for this argument and it lives one module over, so it is supplied rather
- * than offered as a choice.
+ * One lookup and one call. `Placement.design` *is* the aggregation key, so
+ * `byDesign` reaches the item directly — A4's ordinal→variant→design hop is not
+ * needed and neither is the file→design hop this function used to make. Then
+ * {@link selectVariantForLock} ranks the item's files, and the verdict it cannot
+ * reach without a base index is finished by {@link matchBase}.
  *
  * **The item's topper variants are interchangeable for base matching, and that
  * is a theorem rather than a hope.** 760 aggregates hold two or more toppers, and
@@ -600,19 +653,15 @@ function verdictOf(verdict: VariantVerdict, matched: MatchedBase | undefined): P
  * the day an aggregate does hold two footprints this simplification fails loudly
  * instead of quietly handing out the wrong base.
  */
-function chooseVariant(placed: CatalogRecord, index: AssemblyIndex, lock: LockSystem | undefined): Chosen {
-  const aggregate = index.aggregates.byDesign.get(placed.design)
-  if (aggregate === undefined) return withoutAggregate(placed, index, lock)
-
-  const selection = selectVariant(aggregate, { bottom: lock, options: PRINT_OPTIONS })
-  // `byId` and the aggregate layer are built from the same record array, so the
-  // fallback is unreachable on a matched pair — and it is the honest answer for
-  // the mismatched pair `buildAssemblyIndex`'s optional argument makes possible:
-  // keep the file the user placed rather than one from another catalog.
-  const record = index.byId.get(selection.variant.id) ?? placed
-  // A topper is exactly what `needs-base` selects, and nothing else selects one:
-  // every other branch of `selectVariant` draws from a pool it has filtered
-  // `needsBase` out of, or is reached only when that pool is empty.
+function chooseVariant(aggregate: TileAggregate, index: AssemblyIndex, lock: LockSystem | undefined): Chosen | undefined {
+  const selection = selectVariantForLock(aggregate, lock)
+  // `byId` and the aggregate layer are built from the same record array, so this
+  // is `undefined` only for the mismatched pair `buildAssemblyIndex`'s optional
+  // second argument makes possible — an aggregate index over a *different*
+  // catalog. There is no placed file to fall back to any more, so the honest
+  // answer is the same one an unknown item gets: no parts, and a note.
+  const record = index.byId.get(selection.variant.id)
+  if (record === undefined) return undefined
   const matched = selection.verdict === 'needs-base' ? matchBase(record, index, lock) : undefined
 
   return {
@@ -620,9 +669,8 @@ function chooseVariant(placed: CatalogRecord, index: AssemblyIndex, lock: LockSy
     matched,
     resolution: {
       verdict: verdictOf(selection.verdict, matched),
-      placed: placed.id,
+      design: aggregate.design,
       resolved: record.id,
-      substituted: record.id !== placed.id,
       variants: aggregate.variants.length,
       optionTie: selection.optionTie,
       lock,
@@ -631,65 +679,29 @@ function chooseVariant(placed: CatalogRecord, index: AssemblyIndex, lock: LockSy
 }
 
 /**
- * The degraded path: this record's design is not in the aggregate layer.
- *
- * Reachable only by handing {@link buildAssemblyIndex} an aggregate index built
- * from a *different* catalog, which its optional second argument permits. The
- * response is to make no choice — the placed file is the resolved file — and to
- * claim only the verdicts a lone record can support.
- *
- * It deliberately does **not** guess `wrong-system` or `unknown-joinery`. Both
- * are questions about the *underside*, and `CatalogRecord.conn` is the flattened
- * connection list with the position segment thrown away: 1,283 toppers carry a
- * lock on the side and none underneath, so a `conn`-based answer here would
- * advertise joinery the mesh does not have. Only the aggregate layer holds the
- * positional split, and without it the honest report is "needs no base".
- */
-function withoutAggregate(placed: CatalogRecord, index: AssemblyIndex, lock: LockSystem | undefined): Chosen {
-  const matched = placed.layer === 'topper' ? matchBase(placed, index, lock) : undefined
-  const verdict: PlacementVerdict =
-    placed.layer === 'insert'
-      ? 'insert'
-      : placed.layer === 'topper'
-        ? verdictOf('needs-base', matched)
-        : 'self-sufficient'
-  return {
-    record: placed,
-    matched,
-    resolution: {
-      verdict,
-      placed: placed.id,
-      resolved: placed.id,
-      substituted: false,
-      variants: 1,
-      optionTie: false,
-      lock,
-    },
-  }
-}
-
-/**
  * Which file this item resolves to under this preference — rule 0 on its own.
  *
- * The probe row A7 asked for, and deliberately **not** the exported `matchBase`
- * it offered as the alternative. A7 reads `BaseMatch.lockAgrees` through a
- * synthetic `Placement` to decide whether a design is buildable; this answers
- * that question directly, in one call per *item* rather than one per topper
- * variant, and with no placement to fabricate. What it does not do is hand out
- * the base record, which is what keeps rule 1 — "enforced by adding a part" —
- * with the one function that adds parts.
+ * The probe row A7 asked for, and deliberately **not** the exported
+ * {@link matchBase} it offered as the alternative: this answers "is this item
+ * buildable in that system" in one call per item, with no placement to
+ * fabricate, and hands out no base record — which is what keeps rule 1
+ * ("enforced by adding a part") with the one function that adds parts.
  *
- * `undefined` for an id this catalog does not hold, which is the same condition
- * that gives {@link resolvePlacement} an empty part list.
+ * Takes a {@link DesignId} since row V4, which is the same change the store
+ * made: it used to take a `TileId` and hop to the design, and the hop was only
+ * ever there because a placement held a file.
+ *
+ * `undefined` for an item this catalog does not hold, which is the same
+ * condition that gives {@link resolvePlacement} an empty part list.
  */
 export function resolveVariant(
-  tileId: TileId,
+  design: DesignId,
   index: AssemblyIndex,
   options: AssemblyOptions = {},
 ): VariantResolution | undefined {
-  const placed = index.byId.get(tileId)
-  if (placed === undefined) return undefined
-  return chooseVariant(placed, index, options.lock).resolution
+  const aggregate = index.aggregates.byDesign.get(design)
+  if (aggregate === undefined) return undefined
+  return chooseVariant(aggregate, index, options.lock)?.resolution
 }
 
 /* ----------------------------------------------------------------- resolution */
@@ -713,16 +725,20 @@ export function resolvePlacement(
   index: AssemblyIndex,
   options: AssemblyOptions = {},
 ): ResolvedPlacement {
-  const placed = index.byId.get(placement.tileId)
+  const aggregate = index.aggregates.byDesign.get(placement.design)
   const notes: Note[] = []
+  const chosen = aggregate === undefined ? undefined : chooseVariant(aggregate, index, options.lock)
 
-  if (placed === undefined) {
-    const message = `${placement.tileId} is not in this catalog build; it may have been retired.`
-    notes.push(note('unknown-tile', message, placement.tileId))
+  if (chosen === undefined) {
+    // No `tileId` argument for the note's subject any more, and none is
+    // fabricated: `Note.tileId` names a *file* the reader can look up, and the
+    // one thing known here is that this build holds no file for the item. The
+    // message carries the design id, which is the only identity there is.
+    const message = `${placement.design} is not in this catalog build; it may have been retired.`
+    notes.push(note('unknown-tile', message))
     return { placement, tile: undefined, parts: [], notes, resolution: undefined }
   }
 
-  const chosen = chooseVariant(placed, index, options.lock)
   const tile = chosen.record
   const parts: AssemblyPart[] = [{ role: 'placed', record: tile }]
 

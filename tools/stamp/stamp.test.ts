@@ -158,7 +158,9 @@ describe('shareReport', () => {
     }
     const report = shareReport(collided, manifest, { added: [], retired: [] })
     expect(report.roundTrip).toBe(2)
-    expect(report.violations.join('\n')).toContain('decodes to a different tile')
+    // "item", not "tile": since row V4 a link's ordinal names a design's
+    // address, so drift makes it decode to a different *item*.
+    expect(report.violations.join('\n')).toContain('decodes to a different item')
   })
 
   it('fails when the published manifest version and the ordinal file disagree', () => {
