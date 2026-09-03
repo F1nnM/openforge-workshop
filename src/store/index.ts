@@ -7,7 +7,10 @@
  * codec.
  *
  * Nothing here reads the network or the catalog file. The store holds ids; the
- * records they name are looked up by the caller.
+ * records they name are looked up by the caller. Since row V1 the library's ids
+ * are **designs** rather than files, which is the one contract change a reader of
+ * this barrel has to know about: see `schema.ts`'s `library` field for the key
+ * argument and `workshopStore.ts`'s `addToLibrary` for what a caller now passes.
  *
  * **Three stores, not one.** `workshopStore.ts` is the persisted one;
  * `selection.ts` is the un-persisted selection channel row G5 added; `meshes.ts`
@@ -23,18 +26,10 @@
  * brings back the base and not its bytes, which row S5 already modelled as a
  * `warn` bill row and a refused download rather than as an error.
  */
-export {
-  DEFAULT_LOCK_SYSTEM,
-  LockSystem,
-  Placement,
-  PlacementId,
-  WorkshopState,
-  defaultWorkshopState,
-  normalizeRotation,
-} from './schema'
+export { DEFAULT_LOCK_SYSTEM, LockSystem, Placement, PlacementId, WorkshopState, defaultWorkshopState, libraryDesigns, normalizeRotation } from './schema'
 
-export type { MigrationStep, RecoveredState } from './migrations'
-export { MIGRATION_STEPS, STORE_VERSION, migrateWorkshopState, salvageWorkshopState } from './migrations'
+export type { RecoveredState } from './migrations'
+export { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
 
 export { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 
@@ -89,11 +84,11 @@ export {
 
 export type { SelectionState } from './selection'
 export {
-  claimPendingTile,
-  clearPendingTile,
-  selectPendingTile,
-  sendTileToBuilder,
-  usePendingTile,
+  claimPendingDesign,
+  clearPendingDesign,
+  selectPendingDesign,
+  sendDesignToBuilder,
+  usePendingDesign,
   useSelectionStore,
 } from './selection'
 

@@ -23,41 +23,50 @@
  *     catalog card (`/catalog?tile={ord}`), which `src/routes/tileDrawer.ts`
  *     explicitly anticipates being linked to from another screen: Back returns
  *     to the library, because that is where the user came from.
- *   - **The availability chips**, which are new in row A3 and are the same
- *     `AvailabilityStrip` the catalog card renders. Both screens showing the same
- *     chips is the point of deriving them once: the library is where a user
- *     decides what to print, and "does this need a base" is the question that
- *     decides it. Unlike the catalog's, this strip is **not** height-capped —
- *     `library.css` releases it, because the library is a plain CSS grid and has
- *     no virtualiser to keep honest.
+ *   - **The availability chips**, which are the same `AvailabilityStrip` the
+ *     catalog card renders. Both screens showing the same chips is the point of
+ *     deriving them once: the library is where a user decides what to print, and
+ *     "does this need a base" is the question that decides it. Unlike the
+ *     catalog's, this strip is **not** height-capped — `library.css` releases it,
+ *     because the library is a plain CSS grid and has no virtualiser to keep
+ *     honest.
  *
- * ## The card is an item, and its byte figure is the files the user saved
+ * ## The card is the item, and it names the file the item downloads as
  *
- * Row A3. The store holds files and this screen lists items, so a card can stand
- * for one saved file or several — 44.6% of items have more than one variant to
- * save. What that changes:
+ * Row V2. An entry is a design, so a card no longer stands for a set of saved
+ * files and there is no set to disclose. What replaced that disclosure is one
+ * line, and the reason it is one line is a measurement: `selectVariant` is
+ * single-valued, so under the build's current lock **every** item resolves to
+ * exactly one file. What changed on the card:
  *
- *   - **The size is the deduped total across the saved variants**, not the
- *     aggregate's `bytesRange`. The catalog card states a range because a
- *     browsing user has not chosen yet; a library card states a total because
- *     these are the files in the download.
- *   - **Two or more saved files get a row each**, with its own remove. That is
- *     where the per-file rows this screen used to be made of went. A card holding
- *     one file shows no such list, so the common case is unchanged.
- *   - **"Remove" becomes "Remove all"** when there is more than one, because a
- *     button that removed four files while saying "Remove" beside a "2 files"
- *     count would be lying about its own blast radius.
+ *   - **The byte figure is the resolved file's size**, not the aggregate's
+ *     `bytesRange` and not the picture's. The catalog card states a range because
+ *     a browsing user has not chosen a lock preference to resolve under; this one
+ *     has one, so it states the number that preference implies.
+ *   - **The resolved file is named**, because it is not the file in the picture.
+ *     `TileAggregate.preview` prefers a topper (the tile alone) and
+ *     `selectVariant` prefers one part over two, so they disagree on **1,611 of
+ *     3,822 items under openlock (42.2%)**, 609 under dragonlock and 1,055 under
+ *     magnetic — and in every one of those cases the two files are different
+ *     sizes. A card that showed one file and sized another is the defect row V1
+ *     removed from the store; naming the file is what keeps it out of the card.
+ *   - **"+ a base"** when the resolution is a topper. Not a restatement of the
+ *     strip's chip: for the 931 items whose `needsBase` is `'either'` the chip
+ *     can only say "Base optional", and this line is which side of that
+ *     optionality the user's own lock landed on.
+ *   - **"Remove" is one call and never "Remove all"**, because one entry is one
+ *     item. The per-file rows, their own remove buttons and the plural label all
+ *     went with the saved set.
  *
  * Unlike the catalog card this one has **no fixed-height requirement** — the
  * library is a plain CSS grid, not `VirtuosoGrid`, so nothing extrapolates one
- * card's height to a scrollbar. That is what makes the variant rows affordable
- * here and not there. The title is still clamped to two lines, for the ordinary
- * reason that a 51-character filename-derived name would otherwise set the
- * height of its whole row.
+ * card's height to a scrollbar. The title is still clamped to two lines, for the
+ * ordinary reason that a 51-character filename-derived name would otherwise set
+ * the height of its whole row.
  */
 import { Link } from '@tanstack/react-router'
 
-import type { CatalogAssets, SpriteSheet, TileVariant } from '@/catalog'
+import type { CatalogAssets, SpriteSheet } from '@/catalog'
 import type { MaterialId } from '@/materials'
 import { AvailabilityStrip, fileSizeLabel, sizeLabel, variantTokenLabel } from '@/screens/catalog'
 import { removeFromLibrary } from '@/store'
@@ -77,7 +86,7 @@ export interface LibraryCardProps {
    * this file needed a second look. What this card drops relative to the
    * catalog's is the material **swatch**: an explicit dot and a texture-set name,
    * which is disclosure the library does not need because the user already chose
-   * these files. The tint is not that. It is the picture of the tile, and the
+   * these items. The tint is not that. It is the picture of the tile, and the
    * same mesh appearing stone here and stone there is the point of resolving it
    * once — a card that showed a grey model beside a catalog card showing a
    * sandstone one would read as a different tile, not as less information.
@@ -86,8 +95,7 @@ export interface LibraryCardProps {
 }
 
 export function LibraryCard({ entry, assets, sheet, material }: LibraryCardProps) {
-  const { item, saved, preview, bytes } = entry
-  const several = saved.length > 1
+  const { item, preview, resolved, verdict } = entry
 
   return (
     <article className="of-lib-card">
@@ -105,12 +113,12 @@ export function LibraryCard({ entry, assets, sheet, material }: LibraryCardProps
 
       <p className="of-lib-card-meta">
         <Chip tone="size">{sizeLabel(item.foot, item.sizeCode)}</Chip>
-        <span className="of-lib-card-bytes">{fileSizeLabel(bytes)}</span>
+        <span className="of-lib-card-bytes">{fileSizeLabel(resolved.bytes)}</span>
       </p>
 
       <AvailabilityStrip item={item} />
 
-      {several ? <SavedVariants item={item.name} saved={saved} /> : null}
+      <ResolvedFile file={resolved.file} needsBase={verdict === 'needs-base'} />
 
       {/*
         The tile's name rides in the accessible name after the visible word, so a
@@ -124,69 +132,44 @@ export function LibraryCard({ entry, assets, sheet, material }: LibraryCardProps
         type="button"
         className="of-lib-remove"
         onClick={() => {
-          for (const variant of saved) removeFromLibrary(variant.id)
+          removeFromLibrary(item.design)
         }}
       >
         <span aria-hidden="true">✕</span>
-        <span>{several ? 'Remove all' : 'Remove'}</span> <VisuallyHidden>{item.name}</VisuallyHidden>
+        <span>Remove</span> <VisuallyHidden>{item.name}</VisuallyHidden>
       </button>
     </article>
   )
 }
 
-/* --------------------------------------------------------- saved variant rows */
+/* --------------------------------------------------------- the resolved file */
 
 /**
- * The per-file rows, for a card holding more than one saved variant.
+ * Which file this item downloads as, and whether that is the whole print.
  *
- * Each row names the file by its own filename token, carries its own byte figure,
- * and removes only itself. Without this, an item-level card would make a
- * two-variant save unpickable: the user could see "2 files" and 30 MB and have no
- * way to drop one of them short of clearing the item and re-adding the one they
- * wanted.
- *
- * The label is `variantTokenLabel` and **not** the `fileTokenLabel` on the
+ * Named by the filename's **variant** token and not the `fileTokenLabel` on the
  * catalog card, which is the one place the two must differ: that one strips the
- * connection segments so it names the design, and two variants of one design
- * differ in exactly those segments. It would label both of these rows `2x`.
+ * connection segments so it names the design, and the connection segments are
+ * precisely what distinguishes one way of printing an item from another. It
+ * would label the openlock and the openforge print of a wall `2x` alike.
  *
- * A `<ul>` with a real heading-free label, because it is a list of files rather
- * than prose. The count is in the label rather than in a chip beside it: the
- * whole block only renders when the count is 2 or more, so the number is the
- * reason the block exists and belongs in its one sentence.
+ * Prose in a `<p>` rather than a chip or a list. It is a sentence about a
+ * consequence — *given your lock, this is the file* — and the two facts in it are
+ * a name and a qualifier rather than two independent values; a list of one row
+ * was what this replaced.
  *
- * The row's remove button repeats the token in its accessible name and not the
- * item's — the item's name is on the card's own remove button, and two buttons
- * with the same accessible name inside one card is exactly the confusion the
- * clipped suffixes exist to avoid.
+ * Falls back to the whole filename when the token is empty, which happens for a
+ * filename with no dot before the extension: a line that named nothing could not
+ * be told from the card above it, which is the one thing it exists to do.
  */
-function SavedVariants({ item, saved }: { item: string; saved: readonly TileVariant[] }) {
+function ResolvedFile({ file, needsBase }: { file: string; needsBase: boolean }) {
+  const token = variantTokenLabel(file)
+
   return (
-    <div className="of-lib-variants">
-      <p className="of-lib-variants-label">{saved.length} files saved</p>
-      <ul className="of-lib-variant-list">
-        {saved.map((variant) => {
-          const token = variantTokenLabel(variant.file)
-          return (
-            <li className="of-lib-variant" key={variant.id}>
-              <span className="of-lib-variant-token">{token === '' ? variant.file : token}</span>
-              <span className="of-lib-variant-bytes">{fileSizeLabel(variant.bytes)}</span>
-              <button
-                type="button"
-                className="of-lib-variant-remove"
-                onClick={() => {
-                  removeFromLibrary(variant.id)
-                }}
-              >
-                <span aria-hidden="true">✕</span>
-                <VisuallyHidden>
-                  Remove {token === '' ? variant.file : token} of {item}
-                </VisuallyHidden>
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-    </div>
+    <p className="of-lib-card-resolved">
+      <span className="of-lib-resolved-label">Prints as</span>{' '}
+      <span className="of-lib-resolved-token">{token === '' ? file : token}</span>
+      {needsBase ? <span className="of-lib-resolved-base"> + a base</span> : null}
+    </p>
   )
 }

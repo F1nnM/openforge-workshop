@@ -14,21 +14,44 @@
  * ```json
  * {
  *   "kind": "openforge-workshop/scene",
- *   "version": 1,
+ *   "version": 4,
  *   "exportedAt": "2026-08-29T18:00:00.000Z",
- *   "state": { "library": {}, "placements": {}, "lock": "openlock" }
+ *   "state": { "library": {}, "placements": {}, "generated": {}, "lock": "openlock", "lockChosen": false }
  * }
  * ```
  *
  * `kind` exists so importing the wrong file says so instead of silently
- * producing an empty room; `version` is the store version, so a file exported
- * today still opens after a future schema change — it walks the same migration
- * ladder as a blob out of `localStorage`, through the same total functions, with
- * the same salvaging behaviour. There is deliberately no second recovery path.
+ * producing an empty room; `version` is the store version, and a file whose
+ * version is not this build's is **refused with a message**. It goes through the
+ * same reader as a blob out of `localStorage` — the same total functions, the
+ * same salvaging, the same version gate. There is deliberately no second
+ * recovery path, and that is what makes this paragraph short: whatever
+ * `migrations.ts` decides about a foreign version, an imported file gets the
+ * same decision.
+ *
+ * ## Why a foreign version is refused rather than read
+ *
+ * Row V1 changed `library` from a map of files to a map of designs, and the
+ * project owner's decision was that nothing is deployed so nothing has to
+ * migrate — see `migrations.ts`. A file is a slightly different case from a
+ * `localStorage` blob, though, and it is worth saying why the answer is the
+ * same. A blob is *this browser's* state and discarding it costs a session; a
+ * file is something a person deliberately kept, and reading it wrongly is worse
+ * than refusing it, because a room that comes back with an empty library and no
+ * message looks like the file was fine. So the refusal is explicit, names the
+ * version it found, and changes nothing — the current state is left exactly as
+ * it was, which is the same guarantee the "not our file" path already gave.
+ *
+ * **This does not close row X10's `GeneratedPlacement` hole**, and the version
+ * gate cannot: a `base` that disagrees with the `recipe` beside it is a
+ * disagreement *within* one version, so no check on the stamp can see it. It is
+ * not widened either — the payload still goes through exactly the one reader —
+ * and `migrations.ts`'s `salvageGenerated` docblock records what closing it
+ * would cost and why the boundary that prevents it is deliberate.
  */
 import { z } from 'zod'
 
-import { STORE_VERSION, migrateWorkshopState } from './migrations'
+import { STORE_VERSION, readPersistedState } from './migrations'
 import { WorkshopState } from './schema'
 import { useWorkshopStore } from './workshopStore'
 
@@ -49,10 +72,15 @@ export type WorkshopExport = z.infer<typeof WorkshopExport>
  *
  * `state` is intentionally not validated here. Rejecting the whole file because
  * one placement has a bad coordinate would throw away thirty good ones, so the
- * payload goes to {@link migrateWorkshopState}, which salvages per entry. Only
- * `kind` is a hard requirement, because it is the one field that distinguishes
- * "this file is not ours" — worth an error message — from "this file is ours and
- * partly damaged" — worth a repair.
+ * payload goes to {@link readPersistedState}, which salvages per entry. Only
+ * `kind` is a hard requirement *of the parse*, because it is the one field that
+ * distinguishes "this file is not ours" — worth an error message — from "this
+ * file is ours and partly damaged" — worth a repair.
+ *
+ * `version` stays optional here and is checked by {@link importWorkshop} instead,
+ * so that a file missing it gets the same "which version did you write this at?"
+ * message as a file carrying an old one rather than a parse failure that says
+ * the file is not ours. It is ours; it is just not readable by this build.
  */
 const ReadableEnvelope = z.looseObject({
   kind: z.literal(WORKSHOP_EXPORT_KIND),
@@ -93,8 +121,17 @@ export function exportWorkshop(): string {
  * asserts and the one a person expects from "load my file". A user who wants
  * both scenes exports the first one before importing the second.
  *
- * A file whose `state` is partly unreadable imports the readable part and names
- * the rest in `dropped`. A file that is not ours changes nothing at all.
+ * Three outcomes, and the middle one is new in row V1:
+ *
+ *   - **Not ours, or not JSON.** Nothing changes at all.
+ *   - **Ours, at a version this build does not read.** Nothing changes, and the
+ *     message names the version. See the module docblock for why refusing beats
+ *     reading it.
+ *   - **Ours, at this version.** The readable part is imported and everything
+ *     unreadable is named in `dropped`.
+ *
+ * The store is written **only** on the third outcome, which is what makes the
+ * first two safe to retry with a different file.
  */
 export function importWorkshop(json: string): ImportResult {
   let raw: unknown
@@ -109,7 +146,23 @@ export function importWorkshop(json: string): ImportResult {
     return { ok: false, reason: 'That file is not an OpenForge Workshop export.' }
   }
 
-  const recovered = migrateWorkshopState(envelope.data.state, envelope.data.version ?? STORE_VERSION)
+  const version = envelope.data.version
+  if (version !== STORE_VERSION) {
+    return {
+      ok: false,
+      reason:
+        `That file was exported at version ${version === undefined ? 'unknown' : String(version)}, ` +
+        `and this build reads version ${String(STORE_VERSION)}. Nothing was changed.`,
+    }
+  }
+
+  // Through the same reader a `localStorage` blob goes through, version and
+  // all. The check above has already established the version matches, so the
+  // reader's own gate cannot fire here — that redundancy is the point rather
+  // than something to tidy away: it is what keeps "there is deliberately no
+  // second recovery path" literally true, so a change to the reader's policy
+  // cannot leave the import path behind.
+  const recovered = readPersistedState(envelope.data.state, version)
   useWorkshopStore.setState(recovered.state, true)
   return { ok: true, dropped: recovered.dropped }
 }

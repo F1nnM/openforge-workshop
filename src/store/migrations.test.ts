@@ -1,32 +1,35 @@
 /**
- * The migration harness.
+ * The reader's harness.
  *
- * This suite is the deliverable, not a check on one. `migrate()` is the only
- * function in the app whose input is genuinely arbitrary — it reads whatever
- * happens to be under a `localStorage` key — and the failure it guards against
- * is not a wrong answer but a **throw during hydration**, which white-screens
- * the app with the poison still in storage so that every reload reproduces it.
+ * This suite is the deliverable, not a check on one. {@link readPersistedState}
+ * is the only function in the app whose input is genuinely arbitrary — it reads
+ * whatever happens to be under a `localStorage` key — and the failure it guards
+ * against is not a wrong answer but a **throw during hydration**, which
+ * white-screens the app with the poison still in storage so that every reload
+ * reproduces it.
  *
- * Three groups, in order of how much they matter:
+ * Four groups, in order of how much they matter:
  *
- *   1. **Harness completeness.** Bumping `STORE_VERSION` without adding a
- *      migration step or a fixture fails here. That is what makes adding
- *      version 2 a matter of filling in two blanks rather than remembering an
- *      unwritten procedure.
- *   2. **Every prior version migrates to current**, and every version's blob
- *      round-trips through JSON on the way.
+ *   1. **The version gate.** Row V1 deleted the migration ladder — see
+ *      `migrations.ts` for the owner decision that licensed it — so the first
+ *      obligation is that every shape that ever shipped is *discarded*, wholly
+ *      and audibly, rather than half-read into the current shape.
+ *   2. **The expiry.** The licence to discard is a fact about deployment, and it
+ *      will pass silently. One guard here is the closest in-repo proxy for it.
  *   3. **Garbage.** Every input below reached this list because it is something
  *      a browser can actually hand back. None may throw; all must produce a
  *      valid state.
+ *   4. **Salvage detail.** What a *current-version* blob keeps and loses, which
+ *      is the part of this module the ladder's removal did not touch.
  */
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
-import { TileId } from '@/catalog'
+import { DesignId, TileId } from '@/catalog'
 
 import { aGeneratedBase } from './fixture'
-import type { MigrationStep } from './migrations'
-import { MIGRATION_STEPS, STORE_VERSION, migrateWorkshopState, salvageWorkshopState } from './migrations'
-import type { WorkshopState } from './schema'
+import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
 import {
   DEFAULT_LOCK_SYSTEM,
   PlacementId,
@@ -38,251 +41,210 @@ import {
 
 const TILE_A = TileId.parse('tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl')
 const TILE_B = TileId.parse('tiles/cave/thick_wall/wall/corner/openlock/cave%aggregate+2#corner.IL.openlock.stl')
+
+/**
+ * Two items, spelled the way `pipeline/design.ts` mints one — `d` plus twelve
+ * hex characters, and `d4c2a57740b65` is a real one (the `aztlan col+T` column
+ * whose openlock variant owns the sprite sheet). The shape matters: it is what
+ * makes a design id and a tile id lexically disjoint, which is the whole basis
+ * of `salvageLibrary`'s ability to recognise a file id sitting in the library.
+ */
+const DESIGN_A = DesignId.parse('d4c2a57740b65')
+const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
+
 const PLACEMENT_A = PlacementId.parse('9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f')
 const PLACEMENT_B = PlacementId.parse('b2c3d4e5-6f70-4812-9a3b-4c5d6e7f8091')
 const PLACEMENT_C = PlacementId.parse('c3d4e5f6-7081-4923-ab4c-5d6e7f809123')
 
-/**
- * One shipped version's persisted payload, and what it must become.
- *
- * **Adding version N:** add an `N:` entry whose `blob` is a scene exactly as
- * version N writes it, update every `expected` to the version N shape, and add
- * the `N:` step to `MIGRATION_STEPS`. The completeness tests below fail until
- * all three exist, and the migration tests then cover (N-1)→N and N→N for free.
- * That is exactly what version 2 did, and the two `expected` shapes below are
- * the receipt: the version 1 blob's `lock: 'dragonlock'` is what makes its
- * `lockChosen` come out `true`.
- */
-interface VersionFixture {
-  /** A payload byte-for-byte as that version wrote it. */
-  readonly blob: unknown
-  /** What migrating it to {@link STORE_VERSION} must produce. */
-  readonly expected: WorkshopState
-}
+/** One generated base, through `placeRecipe`. See `fixture.ts`. */
+const GENERATED_BASE = aGeneratedBase({ x: 4, z: 0, rotation: 90 })
 
+/** A scene exactly as **this** version writes it: the library holds designs. */
 const SCENE = {
-  library: { [TILE_A]: true, [TILE_B]: true },
+  library: { [DESIGN_A]: true, [DESIGN_B]: true },
   placements: {
     [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 },
     [PLACEMENT_B]: { tileId: TILE_B, x: 2.5, z: -1.5, rotation: 270 },
   },
+  generated: { [PLACEMENT_C]: GENERATED_BASE },
+  lock: 'magnetic',
+  lockChosen: false,
 } as const
 
-/** One generated base, through `placeRecipe`. See `fixture.ts`. */
-const GENERATED_BASE = aGeneratedBase({ x: 4, z: 0, rotation: 90 })
-
-const VERSION_FIXTURES: Readonly<Record<number, VersionFixture>> = {
-  1: {
-    // No `lockChosen` and no `generated`: version 1 had neither field.
-    // `lock: 'dragonlock'` is not the default, so version 1 can only have
-    // written it through `setLockSystem` — a deliberate change — and the rung
-    // infers `true`. The absent `generated` becomes an empty map, because a
-    // build that could not place a generated base had none.
-    blob: { ...SCENE, lock: 'dragonlock' },
-    expected: WorkshopStateSchema.parse({ ...SCENE, generated: {}, lock: 'dragonlock', lockChosen: true }),
-  },
-  2: {
-    // As version 2 writes it: the flag is explicit, and `false` beside a
-    // non-default lock is a shape only version 2 can produce (an import of
-    // someone else's exported scene). It must survive, not be re-inferred.
-    blob: { ...SCENE, lock: 'magnetic', lockChosen: false },
-    expected: WorkshopStateSchema.parse({ ...SCENE, generated: {}, lock: 'magnetic', lockChosen: false }),
-  },
-  3: {
-    // As version 3 writes it: a generated base beside the placements, in the
-    // same `PlacementId` space, holding the recipe and the position and no
-    // mesh. It must survive the rung rather than be replaced by an empty map —
-    // which is the case a rung that only relied on salvaging absence would get
-    // wrong for a preview build that wrote a version 3 shape under an older
-    // stamp.
-    blob: { ...SCENE, generated: { [PLACEMENT_C]: GENERATED_BASE }, lock: 'magnetic', lockChosen: false },
-    expected: WorkshopStateSchema.parse({
-      ...SCENE,
+/**
+ * Every persisted shape that has ever existed, as that version wrote it.
+ *
+ * **This table used to be the fixture set a migration ladder was verified
+ * against, and it is kept for the opposite purpose:** each entry is now a shape
+ * the reader must *refuse*, and it is also the record a future rung author will
+ * need — `migrations.ts`'s history table says what changed at each step, and
+ * these are the blobs.
+ *
+ * The load-bearing detail is `library`. Versions 1 to 3 keyed it by
+ * {@link TileId}, so reading one of them as a version 4 state would produce a
+ * library full of keys that name no item: they would render nowhere, count
+ * towards the header's tally, and be unremovable through any button in the app.
+ */
+const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob: unknown])[] = [
+  [
+    1,
+    'no lockChosen and no generated',
+    {
+      library: { [TILE_A]: true, [TILE_B]: true },
+      placements: SCENE.placements,
+      lock: 'dragonlock',
+    },
+  ],
+  [
+    2,
+    'lockChosen, still no generated',
+    {
+      library: { [TILE_A]: true, [TILE_B]: true },
+      placements: SCENE.placements,
+      lock: 'magnetic',
+      lockChosen: false,
+    },
+  ],
+  [
+    3,
+    'a generated base beside the placements, library still keyed by file',
+    {
+      library: { [TILE_A]: true, [TILE_B]: true },
+      placements: SCENE.placements,
       generated: { [PLACEMENT_C]: GENERATED_BASE },
       lock: 'magnetic',
       lockChosen: false,
-    }),
-  },
-}
-
-const shippedVersions = Object.keys(VERSION_FIXTURES)
-  .map(Number)
-  .sort((a, b) => a - b)
+    },
+  ],
+]
 
 /** Deep clone through JSON, the way `localStorage` round-trips a payload. */
 function throughJSON(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value)) as unknown
 }
 
-/* --------------------------------------------------------------- completeness */
+/* --------------------------------------------------------------- the version gate */
 
-describe('migration harness', () => {
-  it('has a fixture for every version that has ever shipped', () => {
-    const expected = Array.from({ length: STORE_VERSION }, (_, index) => index + 1)
-    expect(shippedVersions).toEqual(expected)
+describe('the version gate', () => {
+  it('has a historical blob for every version below the current one', () => {
+    // The table is the record a future rung author reads. If a version ships
+    // without an entry here, the shape it wrote is undocumented and the ladder
+    // that has to climb it one day cannot be written.
+    expect(HISTORICAL_BLOBS.map(([version]) => version)).toEqual(
+      Array.from({ length: STORE_VERSION - 1 }, (_, index) => index + 1),
+    )
   })
 
-  it('has a migration step for every version above the first', () => {
-    for (let version = 2; version <= STORE_VERSION; version += 1) {
-      expect(MIGRATION_STEPS[version], `no migration step produces version ${String(version)}`).toBeTypeOf('function')
+  it.each(HISTORICAL_BLOBS)('discards a version %i payload (%s) and says so', (version, _label, blob) => {
+    const recovered = readPersistedState(blob, version)
+
+    expect(recovered.state).toEqual(defaultWorkshopState())
+    // Audibly: `workshopStore.ts` turns `dropped` into one console warning per
+    // hydration, and a discard that said nothing would be indistinguishable
+    // from a browser that had never stored anything.
+    expect(recovered.dropped).toHaveLength(1)
+    expect(recovered.dropped[0]).toContain(`version ${String(version)}`)
+    expect(recovered.dropped[0]).toContain('discarded')
+  })
+
+  it.each(HISTORICAL_BLOBS)('discards a version %i payload (%s) through JSON too', (version, _label, blob) => {
+    expect(readPersistedState(throughJSON(blob), version).state).toEqual(defaultWorkshopState())
+  })
+
+  it('does not half-read an old library into the new one', () => {
+    // The sharpest claim in the file. Every version 1-3 library was a map of
+    // *files*, and `DesignId` is `z.string().min(1)` — so a reader that only
+    // parsed the keys would accept every one of them and hand the app a library
+    // of items that do not exist. The gate is what stops that, and
+    // `salvageLibrary` is the second line if a hand edit gets past it.
+    for (const [version, , blob] of HISTORICAL_BLOBS) {
+      expect(readPersistedState(blob, version).state.library).toEqual({})
     }
+    expect(salvageWorkshopState({ library: { [TILE_A]: true } }).state.library).toEqual({})
   })
 
-  it('declares no step for a version that does not exist yet', () => {
-    for (const key of Object.keys(MIGRATION_STEPS).map(Number)) {
-      expect(key).toBeLessThanOrEqual(STORE_VERSION)
-      expect(key).toBeGreaterThan(1)
-    }
+  it('reads a payload stamped with the current version', () => {
+    const recovered = readPersistedState(SCENE, STORE_VERSION)
+    expect(recovered.dropped).toEqual([])
+    expect(recovered.state).toEqual(WorkshopStateSchema.parse(SCENE))
   })
 
-  it('recovers rather than propagating a throw from a step', () => {
-    // Installed on the ladder for the duration of one test, then removed. This
-    // exercises the real catch in `migrateWorkshopState` — the alternative is a
-    // production seam that exists only for tests.
-    const steps = MIGRATION_STEPS as Record<number, MigrationStep>
-    steps[1] = () => {
-      throw new Error('boom')
-    }
-    try {
-      const recovered = migrateWorkshopState(VERSION_FIXTURES[1]?.blob, 0)
-      expect(recovered.state).toEqual(defaultWorkshopState())
-      expect(recovered.dropped.join(' ')).toContain('threw')
-    } finally {
-      delete steps[1]
-    }
-    expect(MIGRATION_STEPS[1]).toBeUndefined()
-  })
-})
-
-/* ----------------------------------------------------------------- migrations */
-
-describe('migrating every prior version to current', () => {
-  for (const version of shippedVersions) {
-    const fixture = VERSION_FIXTURES[version]
-    if (fixture === undefined) throw new Error(`missing fixture for version ${String(version)}`)
-
-    it(`migrates a version ${String(version)} payload`, () => {
-      const recovered = migrateWorkshopState(fixture.blob, version)
-      expect(recovered.dropped).toEqual([])
-      expect(recovered.state).toEqual(fixture.expected)
-      expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
-    })
-
-    it(`round-trips a version ${String(version)} payload through JSON`, () => {
-      const recovered = migrateWorkshopState(throughJSON(fixture.blob), version)
-      expect(recovered.state).toEqual(fixture.expected)
-    })
-  }
-
-  it('treats a payload with no version stamp as pre-versioning and walks the whole ladder', () => {
-    const fixture = VERSION_FIXTURES[1]
-    expect(migrateWorkshopState(fixture?.blob, undefined).state).toEqual(fixture?.expected)
-    expect(migrateWorkshopState(fixture?.blob, 0).state).toEqual(fixture?.expected)
-  })
-
-  it('reads a payload from a future version best-effort instead of discarding it', () => {
-    // The **current** version's fixture, not version 1's: a future blob climbs
-    // no rungs, so it is read exactly as a current-shaped one would be.
-    const fixture = VERSION_FIXTURES[STORE_VERSION]
-    const recovered = migrateWorkshopState(fixture?.blob, STORE_VERSION + 5)
-    // A stale tab or a rolled-back deploy is the common cause, and emptying
-    // someone's library over it is worse than showing them a scene that is
-    // missing whatever the newer version had added.
-    expect(recovered.state).toEqual(fixture?.expected)
-    expect(recovered.dropped.join(' ')).toContain('newer than')
+  it('round-trips the current shape through JSON', () => {
+    expect(readPersistedState(throughJSON(SCENE), STORE_VERSION).state).toEqual(WorkshopStateSchema.parse(SCENE))
   })
 
   it.each([
+    ['a future version', STORE_VERSION + 5],
+    ['no version stamp at all', undefined],
+    ['zero', 0],
     ['a string version', 'one'],
     ['a fractional version', 1.5],
     ['NaN', Number.NaN],
     ['a negative version', -3],
     ['null', null],
-  ])('survives %s in the version slot', (_label, version) => {
-    const recovered = migrateWorkshopState(VERSION_FIXTURES[1]?.blob, version)
+    ['a version-shaped object', { version: STORE_VERSION }],
+    ['a stringified current version', String(STORE_VERSION)],
+  ])('discards %s rather than guessing', (_label, version) => {
+    // Symmetric on purpose: a gate with a direction has a wrong side, and the
+    // wrong side of a shape mismatch is a screen full of items that resolve to
+    // nothing. The previous reader read a *newer* blob best-effort, which was
+    // right while the shared fields were stable and is not right across the
+    // change row V1 made to `library`.
+    const recovered = readPersistedState(SCENE, version)
+    expect(recovered.state).toEqual(defaultWorkshopState())
     expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
+    expect(recovered.dropped).toHaveLength(1)
+  })
+
+  it('reports the version it found, whatever it was', () => {
+    // The message is the only thing the user or a bug report will ever see, so
+    // it has to distinguish "written by an older build" from "unreadable".
+    expect(readPersistedState(SCENE, 3).dropped[0]).toContain('version 3')
+    expect(readPersistedState(SCENE, 'one').dropped[0]).toContain('"one"')
+    expect(readPersistedState(SCENE, undefined).dropped[0]).toContain('undefined')
   })
 })
 
-/* ------------------------------------------------------- the 1 -> 2 rung */
+/* ------------------------------------------------------------------ the expiry */
 
 /**
- * The rung that added `lockChosen`, tested on its own.
+ * The licence to discard, and the guard that makes its expiry arrive.
  *
- * Two separate obligations, and the fixture table above only covers the first:
+ * `migrations.ts` says plainly when discarding stops being allowed: **the moment
+ * a build is served to a user who is not a developer.** That is a fact about
+ * deployment and nothing in the process can observe it, so this guard uses the
+ * closest in-repo proxy — a pre-1.0 version number — and its failure message,
+ * not its assertion, is the deliverable.
  *
- *   1. **It upgrades a well-formed version 1 blob**, inferring the flag from
- *      `lock` — the fixtures do that.
- *   2. **It tolerates garbage stamped version 1.** A step is reached with
- *      whatever `localStorage` held, and a step that reads `input.lock` off a
- *      `null` throws a `TypeError` that white-screens the app on its own home
- *      page. The rung is called directly here rather than through
- *      `migrateWorkshopState`, because that function catches a throw and would
- *      report the bug as a successful reset.
+ * **What makes it capable of failing:** it reads `package.json` off disk and
+ * asserts the major version is 0. Editing `"version": "0.1.0"` to `"1.0.0"`
+ * turns it red, which was checked rather than assumed. What it cannot prove is
+ * the thing it stands in for: a deploy from a 0.x tree is entirely possible, and
+ * this test would pass through it. It is a reminder with teeth, not a gate.
  */
-describe('the lockChosen rung', () => {
-  const step = MIGRATION_STEPS[2]
+describe('the licence to discard persisted state', () => {
+  it('is still valid, because this repo has not called itself 1.0.0', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { version?: unknown; private?: unknown }
+    expect(typeof manifest.version).toBe('string')
+    const major = Number.parseInt(String(manifest.version).split('.')[0] ?? '', 10)
 
-  it('exists', () => {
-    expect(step).toBeTypeOf('function')
+    expect(
+      major,
+      'package.json has left 0.x, which means this is about to ship or has shipped. ' +
+        'Discarding a user\'s saved library and room is no longer allowed: read the ' +
+        '"When this licence expires" section of src/store/migrations.ts and write a ' +
+        'migration rung before bumping STORE_VERSION again.',
+    ).toBe(0)
   })
 
-  it.each([
-    ['openlock, which is the default', 'openlock', false],
-    ['dragonlock', 'dragonlock', true],
-    ['magnetic', 'magnetic', true],
-  ])('reads a version 1 lock of %s as chosen=%s', (_label, lock, chosen) => {
-    const recovered = migrateWorkshopState({ ...SCENE, lock }, 1)
-    expect(recovered.state.lock).toBe(lock)
-    expect(recovered.state.lockChosen).toBe(chosen)
-    expect(recovered.dropped).toEqual([])
-  })
-
-  it.each([
-    ['no lock field at all', {}],
-    ['an unreadable lock', { lock: 'padlock' }],
-    ['a numeric lock', { lock: 3 }],
-    ['a null lock', { lock: null }],
-  ])('treats a version 1 blob with %s as not yet chosen', (_label, blob) => {
-    // Not `true`: an unreadable lock resolves to openlock, and pretending the
-    // user picked openlock would hide the choice from someone who never made it.
-    expect(migrateWorkshopState(blob, 1).state.lockChosen).toBe(false)
-  })
-
-  it('keeps a flag the blob already carries rather than re-inferring it', () => {
-    // A preview build on the same origin can write a version 2 shape under a
-    // version 1 stamp. Re-inferring would flip an explicit `false` beside a
-    // non-default lock to `true`.
-    expect(migrateWorkshopState({ lock: 'magnetic', lockChosen: false }, 1).state.lockChosen).toBe(false)
-    expect(migrateWorkshopState({ lock: 'openlock', lockChosen: true }, 1).state.lockChosen).toBe(true)
-  })
-
-  it.each([
-    ['null', null],
-    ['undefined', undefined],
-    ['an array', []],
-    ['an array of placements', [{ tileId: TILE_A, x: 0, z: 0, rotation: 0 }]],
-    ['a string', 'openforge'],
-    ['a number', 42],
-    ['a boolean', false],
-    ['a wrong-typed flag', { lockChosen: 'yes' }],
-    ['a numeric flag', { lockChosen: 1 }],
-    ['a function-valued lock', { lock: () => 'magnetic' }],
-    ['a prototype payload', JSON.parse('{"__proto__":{"polluted":true},"lock":"magnetic"}') as unknown],
-  ])('does not throw on %s, and the result still salvages', (_label, input) => {
-    expect(() => step?.(input)).not.toThrow()
-    const recovered = salvageWorkshopState(step?.(input))
-    expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
-    const probe: Record<string, unknown> = {}
-    expect(probe.polluted).toBeUndefined()
-  })
-
-  it('leaves a non-object blob for the salvage pass rather than inventing one', () => {
-    // The rung is not the place to decide what an unreadable blob becomes —
-    // `salvageWorkshopState` owns that, and duplicating the decision here is how
-    // the two drift apart.
-    expect(step?.(null)).toBeNull()
-    expect(step?.('nonsense')).toBe('nonsense')
+  it('is recorded where the code that relies on it lives', () => {
+    // Not a spelling check on a docblock: the expiry cannot be enforced, so the
+    // sentence *is* the mechanism, and a refactor that dropped it would leave
+    // the next author with a discard and no idea it was conditional. Asserted on
+    // the source text because there is nowhere else for it to be.
+    const source = readFileSync('src/store/migrations.ts', 'utf8')
+    expect(source).toContain('When this licence expires')
+    expect(source).toContain('served to a user who is not a developer')
   })
 })
 
@@ -302,12 +264,12 @@ const GARBAGE: readonly (readonly [string, unknown])[] = [
   ['a string', 'openforge'],
   ['a number', 42],
   ['a boolean', true],
-  ['a truncated object', { library: { [TILE_A]: true } }],
+  ['a truncated object', { library: { [DESIGN_A]: true } }],
   ['an object with only a lock', { lock: 'magnetic' }],
   ['a half-written placement', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: 1 } } }],
   ['an array where placements belong', { placements: [{ tileId: TILE_A, x: 0, z: 0, rotation: 0 }] }],
-  ['an array where the library belongs', { library: [TILE_A] }],
-  ['a string where the library belongs', { library: TILE_A }],
+  ['an array where the library belongs', { library: [DESIGN_A] }],
+  ['a string where the library belongs', { library: DESIGN_A }],
   ['a null placement', { placements: { [PLACEMENT_A]: null } }],
   ['a wrong-typed coordinate', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: '3', z: 0, rotation: 0 } } }],
   ['a NaN coordinate', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: Number.NaN, z: 0, rotation: 0 } } }],
@@ -323,10 +285,11 @@ const GARBAGE: readonly (readonly [string, unknown])[] = [
   ['a numeric chosen flag', { lockChosen: 1 }],
   ['a null chosen flag', { lockChosen: null }],
   ['a numeric lock system', { lock: 3 }],
-  ['a library value that is not true', { library: { [TILE_A]: 1 } }],
+  ['a library value that is not true', { library: { [DESIGN_A]: 1 } }],
+  ['a library keyed by file, which is what every version 1-3 blob held', { library: { [TILE_A]: true } }],
   ['a nested prototype payload', { library: JSON.parse(`{"__proto__":{"polluted":true}}`) as unknown }],
   ['a state-level prototype payload', JSON.parse(`{"__proto__":{"polluted":true},"lock":"magnetic"}`) as unknown],
-  ['a very long key', { library: { [`tiles/${'x'.repeat(5000)}`]: true } }],
+  ['a very long key', { library: { [`d${'f'.repeat(5000)}`]: true } }],
   ['a function-valued field', { placements: { [PLACEMENT_A]: () => null } }],
 ]
 
@@ -336,9 +299,9 @@ describe('garbage input', () => {
     expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
   })
 
-  it.each(GARBAGE)('migrates %s without throwing', (_label, input) => {
-    for (const version of [0, 1, STORE_VERSION, STORE_VERSION + 1, undefined]) {
-      const recovered = migrateWorkshopState(input, version)
+  it.each(GARBAGE)('reads %s without throwing, at every version stamp', (_label, input) => {
+    for (const version of [0, 1, 3, STORE_VERSION, STORE_VERSION + 1, undefined, 'four']) {
+      const recovered = readPersistedState(input, version)
       expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
     }
   })
@@ -369,7 +332,7 @@ describe('garbage input', () => {
 describe('salvaging keeps what it can', () => {
   it('drops only the corrupt placement, not the whole scene', () => {
     const recovered = salvageWorkshopState({
-      library: { [TILE_A]: true },
+      library: { [DESIGN_A]: true },
       placements: {
         [PLACEMENT_A]: { tileId: TILE_A, x: 1, z: 2, rotation: 90 },
         [PLACEMENT_B]: { tileId: TILE_B, x: 'over there', z: 2, rotation: 90 },
@@ -377,7 +340,7 @@ describe('salvaging keeps what it can', () => {
       lock: 'magnetic',
     })
     expect(Object.keys(recovered.state.placements)).toEqual([PLACEMENT_A])
-    expect(recovered.state.library).toEqual({ [TILE_A]: true })
+    expect(recovered.state.library).toEqual({ [DESIGN_A]: true })
     expect(recovered.state.lock).toBe('magnetic')
     expect(recovered.dropped).toHaveLength(1)
     expect(recovered.dropped[0]).toContain(PLACEMENT_B)
@@ -418,22 +381,22 @@ describe('salvaging keeps what it can', () => {
   })
 
   it('reads a library entry of false as absence, not as corruption', () => {
-    const recovered = salvageWorkshopState({ library: { [TILE_A]: true, [TILE_B]: false } })
-    expect(recovered.state.library).toEqual({ [TILE_A]: true })
+    const recovered = salvageWorkshopState({ library: { [DESIGN_A]: true, [DESIGN_B]: false } })
+    expect(recovered.state.library).toEqual({ [DESIGN_A]: true })
     expect(recovered.dropped).toEqual([])
   })
 
   it('resets an unreadable lock system to the default rather than dropping the scene', () => {
-    const recovered = salvageWorkshopState({ library: { [TILE_A]: true }, lock: 'padlock' })
+    const recovered = salvageWorkshopState({ library: { [DESIGN_A]: true }, lock: 'padlock' })
     expect(recovered.state.lock).toBe(DEFAULT_LOCK_SYSTEM)
-    expect(recovered.state.library).toEqual({ [TILE_A]: true })
+    expect(recovered.state.library).toEqual({ [DESIGN_A]: true })
     expect(recovered.dropped[0]).toContain('lock')
   })
 
   it('reads an absent chosen flag as not chosen, silently', () => {
     // Absence is the normal case for every blob written before version 2, so it
     // is not corruption and must not be reported as such.
-    const recovered = salvageWorkshopState({ library: { [TILE_A]: true }, lock: 'openlock' })
+    const recovered = salvageWorkshopState({ library: { [DESIGN_A]: true }, lock: 'openlock' })
     expect(recovered.state.lockChosen).toBe(false)
     expect(recovered.dropped).toEqual([])
   })
@@ -445,7 +408,7 @@ describe('salvaging keeps what it can', () => {
     expect(recovered.dropped[0]).toContain('lockChosen')
   })
 
-  it('refuses keys that are not tile or placement ids', () => {
+  it('refuses keys that are not design or placement ids', () => {
     const recovered = salvageWorkshopState({
       library: { '': true },
       placements: { '': { tileId: TILE_A, x: 0, z: 0, rotation: 0 } },
@@ -455,8 +418,22 @@ describe('salvaging keeps what it can', () => {
     expect(recovered.dropped).toHaveLength(2)
   })
 
-  it('is idempotent, so validating twice on the migrate path reports nothing twice', () => {
-    const once = salvageWorkshopState(VERSION_FIXTURES[1]?.blob)
+  it('names a file id in the library rather than keeping it or dropping it silently', () => {
+    // The one corruption row V1 made possible, and the reason `salvageLibrary`
+    // checks `TileId` before `DesignId` rather than after: a catalog path passes
+    // `DesignId`'s `min(1)`, so parse order is the whole defence. Keeping it
+    // would put an unremovable phantom in the library; dropping it without a
+    // word would be the same loss with no message.
+    const recovered = salvageWorkshopState({
+      library: { [DESIGN_A]: true, [TILE_A]: true, [TILE_B]: true },
+    })
+    expect(recovered.state.library).toEqual({ [DESIGN_A]: true })
+    expect(recovered.dropped).toHaveLength(2)
+    expect(recovered.dropped[0]).toContain('a file id, not a design id')
+  })
+
+  it('is idempotent, so validating twice on the read path reports nothing twice', () => {
+    const once = salvageWorkshopState(SCENE)
     const twice = salvageWorkshopState(once.state)
     expect(twice.state).toEqual(once.state)
     expect(twice.dropped).toEqual([])

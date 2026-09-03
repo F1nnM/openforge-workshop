@@ -43,8 +43,8 @@ export type {
   GeneratedDownload,
 } from './useArchiveDownload'
 
-export { MAX_SEARCH_ROWS, paletteRows, searchRows, starterSet } from './palette'
-export type { PaletteRow } from './palette'
+export { MAX_SEARCH_ROWS, armFile, armedItem, paletteRows, searchRows, starterSet } from './palette'
+export type { PaletteLookup, PaletteRow, PaletteSource } from './palette'
 
 export { billInventory, noteCopy, resolutionSummary, rowResolutionCopy, thresholdLabel, verdictCopy } from './billView'
 export type {

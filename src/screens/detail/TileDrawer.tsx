@@ -103,24 +103,27 @@
  * ## "Use in builder"
  *
  * The contract's third clause — "pre-selects the tile" — now has a channel. Row
- * G5 added `@/store`'s {@link sendTileToBuilder}, an un-persisted one-shot
- * mailbox the builder's palette claims on mount, so the action does all four of
- * the things the clause asks for: it adds the **shown variant** to the library,
- * asks the builder to arm that same file, navigates, and seeds the palette's
- * search with the item's name.
+ * G5 added `@/store`'s `sendDesignToBuilder`, an un-persisted one-shot mailbox
+ * the builder's palette claims on mount, so the action does all four of the
+ * things the clause asks for: it saves the **item** to the library, asks the
+ * builder to arm that same item, navigates, and seeds the palette's search with
+ * the item's name.
  *
  * The order is load-bearing. The library write comes first because the palette
- * lists the library, and it refuses to arm a file it holds no placeable row for
- * — so arming before filing would be a handoff the reader is right to drop. The
- * navigation comes last because the claim happens when the palette mounts.
+ * lists the library, and it refuses to arm something it holds no placeable row
+ * for — so arming before filing would be a handoff the reader is right to drop.
+ * The navigation comes last because the claim happens when the palette mounts.
  *
- * **The variant travels, not the address holder, and not a resolution.** The user
- * is looking at a specific print and that is the file they meant, so that exact
- * `TileId` is what goes over. No lock preference is applied on the way: A6's rule
- * 0 re-picks the variant at bill time and the three locks disagree on the answer
- * for 37.1% of items, so a channel that pre-resolved would hand the palette a
- * file the drawer never showed. What the user selected and what the bill prints
- * are two facts, and only the first one is this action's business.
+ * **The item travels, not the shown variant and not a resolution.** Row V1
+ * turned both the library and this channel over to designs, which reverses what
+ * G5 decided here for the reason G5 gave: A6's rule 0 re-picks the variant at
+ * bill time and the three locks disagree on the answer for **37.1% of items**,
+ * so the file on screen is one of several prints of the thing the user chose and
+ * not the choice itself. Sending the file froze which print the builder armed
+ * according to whatever lock happened to be set when the button was pressed;
+ * sending the design has nothing in it to freeze. The drawer still *shows* a
+ * specific variant, and `/catalog?tile=…` still addresses one — this is about
+ * what the builder is handed, not about what the drawer displays.
  */
 import { getRouteApi, useRouter } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
@@ -131,7 +134,7 @@ import { buildAggregateIndex, resolveTags, selectVariant } from '@/catalog'
 import { closeTileDrawer, resolveTileTarget } from '@/routes'
 import { resolveMaterial } from '@/materials'
 import { MAX_QUERY_LENGTH } from '@/search'
-import { addToLibrary, sendTileToBuilder, toggleLibrary, useIsInLibrary, useLockChosen, useLockSystem } from '@/store'
+import { addToLibrary, sendDesignToBuilder, toggleLibrary, useIsInLibrary, useLockChosen, useLockSystem } from '@/store'
 import { Tile3DPanel } from '@/three'
 import { Chip, Drawer, Eyebrow } from '@/ui/primitives'
 import { loadCatalogIndex } from '@/ui/shell'
@@ -331,7 +334,7 @@ function TileDetail({
 }) {
   const router = useRouter()
   const { shown, choice } = useShownVariant(aggregate, urlVariant, canonical)
-  const inLibrary = useIsInLibrary(shown.id)
+  const inLibrary = useIsInLibrary(aggregate.design)
 
   const record = useMemo(() => recordOf(catalog, shown.id), [catalog, shown.id])
   const tags = useMemo(() => (record === undefined ? [] : resolveTags(catalog, record)), [catalog, record])
@@ -391,7 +394,7 @@ function TileDetail({
           className="of-detail-action"
           aria-pressed={inLibrary}
           onClick={() => {
-            toggleLibrary(shown.id)
+            toggleLibrary(aggregate.design)
           }}
         >
           {inLibrary ? '✓ In library' : '+ Add to library'}
@@ -401,8 +404,8 @@ function TileDetail({
           className="of-detail-action"
           data-variant="ghost"
           onClick={() => {
-            addToLibrary(shown.id)
-            sendTileToBuilder(shown.id)
+            addToLibrary(aggregate.design)
+            sendDesignToBuilder(aggregate.design)
             void router.navigate({
               to: '/builder',
               search: { q: aggregate.name.slice(0, MAX_QUERY_LENGTH) },

@@ -31,8 +31,8 @@ import type { AssemblyIndex, BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import type { PlanStatus } from '@/builder/canvas'
 import { usePlanTools } from '@/builder/canvas'
-import type { CatalogFile, TileId } from '@/catalog'
-import { CatalogFile as CatalogFileSchema, resolveTags } from '@/catalog'
+import type { CatalogFile, DesignId, TileId } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, resolveTags, selectVariant } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
 import { BlobFetchError, PreviewMeshRefusedError } from '@/download'
 import { createSearchEngine, defaultFacetSearch } from '@/search'
@@ -40,18 +40,27 @@ import { resolveMaterial } from '@/materials'
 import type { CatalogIndex } from '@/screens/catalog'
 import type { LockSystem, Placement } from '@/store'
 import {
-  clearPendingTile,
+  clearPendingDesign,
   clearPersistedWorkshopState,
   placeTile,
   resetWorkshop,
-  sendTileToBuilder,
+  sendDesignToBuilder,
+  setLockSystem,
   usePlacements,
   useSelectionStore,
   useWorkshopStore,
 } from '@/store'
 
 import { BillPanel } from './BillPanel'
-import { FIXTURE_CATALOG, FIXTURE_IDS, FIXTURE_NAMES, fixtureCatalogFile } from './fixture'
+import {
+  FIXTURE_CATALOG,
+  FIXTURE_DESIGNS,
+  FIXTURE_IDS,
+  FIXTURE_NAMES,
+  MIXED_INTEGRAL,
+  fixtureCatalogFile,
+  mixedCatalogFile,
+} from './fixture'
 import { PalettePanel } from './PalettePanel'
 import { PlanToolbar } from './PlanToolbar'
 import { useArchiveDownload } from './useArchiveDownload'
@@ -61,6 +70,15 @@ import { DownloadAction } from './DownloadAction'
 /* ------------------------------------------------------------------ scaffold */
 
 const id = (key: keyof typeof FIXTURE_IDS): TileId => FIXTURE_IDS[key] as TileId
+/**
+ * The design behind a fixture key.
+ *
+ * The library and the selection channel are design-keyed since row V1 and a
+ * palette row is an item since row V3, so most of what used to be `id(…)` in
+ * this file is now `design(…)`. Both helpers exist because both units are still
+ * real: a *placement* names a file until row V4.
+ */
+const design = (key: keyof typeof FIXTURE_DESIGNS): DesignId => FIXTURE_DESIGNS[key] as DesignId
 
 let file: CatalogFile
 let index: CatalogIndex
@@ -123,7 +141,7 @@ describe('the palette', () => {
   it('greys the tiles the plan view cannot place, and offers no control for them', () => {
     for (const key of ['floor1', 'arc', 'slab'] as const) {
       act(() => {
-        useWorkshopStore.setState((state) => ({ library: { ...state.library, [id(key)]: true } }))
+        useWorkshopStore.setState((state) => ({ library: { ...state.library, [design(key)]: true } }))
       })
     }
     render(<PaletteHarness />)
@@ -151,7 +169,7 @@ describe('the palette', () => {
   it('sinks the unplaceable tiles to the end of the list rather than interleaving them', () => {
     act(() => {
       useWorkshopStore.setState({
-        library: { [id('slab')]: true, [id('floor2')]: true, [id('floor1')]: true },
+        library: { [design('slab')]: true, [design('floor2')]: true, [design('floor1')]: true },
       })
     })
     render(<PaletteHarness />)
@@ -164,7 +182,7 @@ describe('the palette', () => {
 
   it('arms the canvas when a row is selected, and forces place mode', () => {
     act(() => {
-      useWorkshopStore.setState({ library: { [id('floor1')]: true } })
+      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
     })
     render(<PaletteHarness />)
 
@@ -184,7 +202,7 @@ describe('the palette', () => {
 
   it('disarms when the armed row is selected again', () => {
     act(() => {
-      useWorkshopStore.setState({ library: { [id('floor1')]: true } })
+      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
     })
     render(<PaletteHarness />)
     const row = () => screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })
@@ -196,7 +214,7 @@ describe('the palette', () => {
 
   it('searches the whole catalog and offers "+ add" only for tiles not saved', () => {
     act(() => {
-      useWorkshopStore.setState({ library: { [id('floor1')]: true } })
+      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
     })
     render(<PaletteHarness query="dungeon stone floor" />)
 
@@ -209,7 +227,7 @@ describe('the palette', () => {
 
     const twinAdd = screen.getByRole('button', { name: new RegExp(`add ${FIXTURE_NAMES.twin} to the library`) })
     fireEvent.click(twinAdd)
-    expect(library()).toContain(FIXTURE_IDS.twin)
+    expect(library()).toContain(FIXTURE_DESIGNS.twin)
   })
 
   it('offers a starter set when the library is empty, and the set is one texture of floors and walls', () => {
@@ -217,17 +235,45 @@ describe('the palette', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Add a starter set/ }))
 
-    // The fixture's only textured, placeable, non-base tiles are the two
+    // The fixture's only textured, placeable, non-base items are the two
     // dungeon_stone floors and the twin; the cave wall is a topper and placeable
-    // too. What matters is that a base is never offered and every id is real.
+    // too. What matters is that a base is never offered and every key is a design
+    // this catalog holds — the starter set returns designs since row V3, so a key
+    // that did not resolve would be a library entry with no row and no way to
+    // remove it from here.
     const saved = library()
     expect(saved.length).toBeGreaterThan(0)
-    for (const saved_id of saved) {
-      const record = index.engine.record(saved_id as TileId)
-      expect(record).toBeDefined()
-      expect(record?.layer).not.toBe('base')
-      expect(record?.foot.shape === 'rect' || record?.foot.shape === 'wall').toBe(true)
+    for (const key of saved) {
+      const item = index.engine.aggregates.byDesign.get(key as DesignId)
+      expect(item, key).toBeDefined()
+      expect(item?.variantClass).not.toBe('base-only')
+      expect(item?.foot.shape === 'rect' || item?.foot.shape === 'wall').toBe(true)
     }
+  })
+
+  /**
+   * The defect row V3 closes, at the surface that showed it.
+   *
+   * `PalettePanel` called `paletteRows(Object.keys(library) as TileId[], …)`. The
+   * assertion made it compile after row V1 re-keyed the library to designs, and
+   * every lookup then missed — the library block rendered **empty** for every
+   * saved item, with no error anywhere. So this asserts the count rather than the
+   * content: an empty list is what the bug looked like.
+   */
+  it('lists every saved item, which the file-keyed cast rendered as an empty block', () => {
+    act(() => {
+      useWorkshopStore.setState({
+        library: {
+          [design('floor1')]: true,
+          [design('floor2')]: true,
+          [design('wallNoBase')]: true,
+        },
+      })
+    })
+    render(<PaletteHarness />)
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(3)
+    expect(screen.getByRole('heading', { name: /Library 3/ })).toBeInTheDocument()
   })
 })
 
@@ -243,16 +289,17 @@ describe('the palette', () => {
  */
 describe('the pre-selection handoff', () => {
   beforeEach(() => {
-    clearPendingTile()
+    clearPendingDesign()
   })
 
   afterEach(() => {
-    clearPendingTile()
+    clearPendingDesign()
   })
 
-  function fileTile(key: keyof typeof FIXTURE_IDS): void {
+  /** File the item, which is what `TileDrawer` does before it posts. */
+  function saveItem(key: keyof typeof FIXTURE_DESIGNS): void {
     act(() => {
-      useWorkshopStore.setState((state) => ({ library: { ...state.library, [id(key)]: true } }))
+      useWorkshopStore.setState((state) => ({ library: { ...state.library, [design(key)]: true } }))
     })
   }
 
@@ -272,12 +319,12 @@ describe('the pre-selection handoff', () => {
     return view
   }
 
-  it('arms the file the catalog drawer sent, and forces place mode', () => {
+  it('arms the item the catalog drawer sent, and forces place mode', () => {
     // Exactly what `TileDrawer`'s action does, in its order: file it, then post
     // it, then navigate — the navigation being this render.
-    fileTile('floor1')
+    saveItem('floor1')
     act(() => {
-      sendTileToBuilder(id('floor1'))
+      sendDesignToBuilder(design('floor1'))
     })
 
     mountPalette()
@@ -292,9 +339,9 @@ describe('the pre-selection handoff', () => {
   })
 
   it('claims the handoff once, so a re-mount does not re-arm a tile the user disarmed', () => {
-    fileTile('floor1')
+    saveItem('floor1')
     act(() => {
-      sendTileToBuilder(id('floor1'))
+      sendDesignToBuilder(design('floor1'))
     })
 
     const first = mountPalette()
@@ -308,24 +355,25 @@ describe('the pre-selection handoff', () => {
   })
 
   it('takes the second press when two arrive with no claim between them', () => {
-    fileTile('floor1')
-    fileTile('floor2')
+    saveItem('floor1')
+    saveItem('floor2')
     act(() => {
-      sendTileToBuilder(id('floor1'))
-      sendTileToBuilder(id('floor2'))
+      sendDesignToBuilder(design('floor1'))
+      sendDesignToBuilder(design('floor2'))
     })
 
     mountPalette()
     expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_IDS.floor2)
   })
 
-  it('arms nothing for a file the plan view cannot place, and the library note says why', () => {
-    // The `none` footprint: 726 of 8,702 records. Arming it would give the user
+  it('arms nothing for an item the plan view cannot place, and the library note says why', () => {
+    // The `none` footprint: 370 of 3,822 items, 726 of 8,702 files. Arming it
+    // would give the user
     // an armed tile every click of which the canvas correctly refuses, which is
     // the failure the greyed rows exist to avoid.
-    fileTile('slab')
+    saveItem('slab')
     act(() => {
-      sendTileToBuilder(id('slab'))
+      sendDesignToBuilder(design('slab'))
     })
 
     mountPalette()
@@ -340,9 +388,9 @@ describe('the pre-selection handoff', () => {
     expect(useSelectionStore.getState().pending).toBeNull()
   })
 
-  it('arms nothing for a file this catalog build does not hold', () => {
+  it('arms nothing for a design this catalog build does not hold', () => {
     act(() => {
-      sendTileToBuilder('tiles/gone/retired.stl' as TileId)
+      sendDesignToBuilder('d-retired-and-gone' as DesignId)
     })
 
     mountPalette()
@@ -350,14 +398,16 @@ describe('the pre-selection handoff', () => {
     expect(useSelectionStore.getState().pending).toBeNull()
   })
 
-  it('carries the file the user chose, not the file the bill will print', () => {
+  it('carries the item, and the bill still resolves the print', () => {
     // The channel is a selection, never a resolution. `floor2` is a
-    // `connection|openforge` topper, so the bill it produces is two parts and
-    // the resolver owns that decision; what the palette arms is the one file the
-    // drawer was showing.
-    fileTile('floor2')
+    // `connection|openforge` topper and its design has one variant here, so the
+    // arming resolves to that file — and the bill it produces is still two
+    // parts, because the auto-inserted base is the resolver's decision and not
+    // the palette's. `the two-sided item` below is where the arming has a real
+    // choice to make.
+    saveItem('floor2')
     act(() => {
-      sendTileToBuilder(id('floor2'))
+      sendDesignToBuilder(design('floor2'))
     })
 
     mountPalette()
@@ -371,6 +421,139 @@ describe('the pre-selection handoff', () => {
     expect([...bill.lines.map((line) => line.tile.id)].sort()).toEqual(
       [FIXTURE_IDS.base2, FIXTURE_IDS.floor2].sort(),
     )
+  })
+})
+
+/* -------------------------------------------------------- the two-sided item */
+
+/**
+ * The bug the owner reported, on the one item shape that can express it.
+ *
+ * `MIXED_INTEGRAL` joins `floor2`'s design, so `d-floor-2` becomes the corpus's
+ * `both` class: a `topper` that needs a base, and an `integral` that does not.
+ * **931 live items (24.4%) are this shape and on all 931 the two rules disagree**
+ * — `TileAggregate.preview` names the topper and `selectVariant` names the
+ * integral. The palette asks both questions and this block pins each answer to
+ * the right one:
+ *
+ *   - the **thumb** renders the topper, because that mesh is the tile;
+ *   - the **armed id** is the integral, because that is what this build prints.
+ *
+ * Reversed, the row shows a tile welded to a base — which is what the owner
+ * described seeing — or arms a topper and lets the bill charge for a base the
+ * user could have skipped. Both are asserted, so neither can be reintroduced by
+ * "simplifying" the two calls into one.
+ *
+ * The index is swapped in this block's own `beforeEach`, which runs after the
+ * file's: the outer one restores the nine-record fixture for every other block.
+ */
+describe('the two-sided item', () => {
+  let mixedAssembly: AssemblyIndex
+
+  beforeEach(() => {
+    const mixedFile = mixedCatalogFile()
+    const engine = createSearchEngine(mixedFile)
+    index = {
+      file: mixedFile,
+      engine,
+      tagsFor: (record) => resolveTags(mixedFile, record),
+      materialOf: (record) => resolveMaterial(resolveTags(mixedFile, record), record.file).material,
+    }
+    mixedAssembly = buildAssemblyIndex(mixedFile)
+    act(() => {
+      useWorkshopStore.setState({ library: { [design('floor2')]: true } })
+    })
+  })
+
+  /** The item really is two-sided, so the two assertions below are not vacuous. */
+  it('is one item over two variants, previewing the topper', () => {
+    const item = index.engine.aggregates.byDesign.get(design('floor2'))
+    expect(item?.variantClass).toBe('both')
+    expect(item?.variants.map((variant) => variant.id).sort()).toEqual(
+      [FIXTURE_IDS.floor2, MIXED_INTEGRAL.id].sort(),
+    )
+    expect(item?.preview).toBe(FIXTURE_IDS.floor2)
+    // And the resolver disagrees, which is the premise of the whole block.
+    expect(selectVariant(item!, { bottom: 'openlock' }).variant.id).toBe(MIXED_INTEGRAL.id)
+  })
+
+  it('renders the topper in the row, not the file the resolver would print', () => {
+    render(<PaletteHarness />)
+
+    const row = screen.getAllByRole('listitem')[0] as HTMLElement
+    const image = within(row).getByRole('presentation', { hidden: true })
+    // The sprite URL is content-addressed, so the blob in it names the file the
+    // thumb is showing. `2…` is the topper's md5, `9…` the integral's.
+    expect(image).toHaveAttribute('src', expect.stringContaining('2'.repeat(32)))
+    expect(image.getAttribute('src')).not.toContain('9'.repeat(32))
+  })
+
+  /**
+   * What arming the *other* file would actually cost, measured rather than assumed.
+   *
+   * The obvious claim — "arming the topper puts a base in the bill" — **is
+   * false, and this test asserts that it is.** A6's rule 0 re-resolves every
+   * placement at bill time, so placing the topper and placing the integral
+   * produce the same one part; the bill was never the broken surface.
+   *
+   * What arming the topper costs is the **substitution mark**: `resolved !==
+   * placed` on every one of the 931 two-sided items, so the bill would tell the
+   * user it printed a file they did not place, every time, for nothing. Arming
+   * `selectVariant`'s answer is what makes the palette and the bill agree — which
+   * is the honest version of the reason, and the reason the arming rule is
+   * `selectVariant`'s rather than `preview`'s.
+   */
+  it('arms the integral, so the bill prints what the palette armed', () => {
+    render(<PaletteHarness />)
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor2) }))
+
+    const armed = screen.getByTestId('armed').textContent ?? ''
+    expect(armed).toBe(MIXED_INTEGRAL.id)
+
+    const bill = buildBillOfTiles([{ tileId: armed as TileId, x: 0, z: 0, rotation: 0 }], mixedAssembly, {
+      lock: 'openlock',
+    })
+    expect(bill.parts).toBe(1)
+    expect(bill.lines.map((line) => line.tile.id)).toEqual([MIXED_INTEGRAL.id])
+    expect(bill.resolved[0]?.resolution?.substituted).toBe(false)
+
+    // The same scene with the preview armed instead: the same single part, and a
+    // substitution the user has to be told about.
+    const asTopper = buildBillOfTiles(
+      [{ tileId: id('floor2'), x: 0, z: 0, rotation: 0 }],
+      mixedAssembly,
+      { lock: 'openlock' },
+    )
+    expect(asTopper.parts).toBe(1)
+    expect(asTopper.resolved[0]?.resolution?.substituted).toBe(true)
+    expect(asTopper.resolved[0]?.resolution?.resolved).toBe(MIXED_INTEGRAL.id)
+  })
+
+  /**
+   * The pressed row is decided by the item, not by re-resolving under the lock.
+   *
+   * `armFile` is taken once, at the press. Deciding the pressed state by
+   * comparing `armFile(item, lock)` to the armed id would un-press the row the
+   * moment the lock preference changed, leaving the canvas armed with nothing
+   * highlighted — the three locks disagree about the file for **37.1%** of items,
+   * so this is a common state and not a corner. `armedItem` asks the corpus which
+   * design a file belongs to instead, which no setting can change.
+   */
+  it('keeps the row pressed when the lock preference changes under it', () => {
+    render(<PaletteHarness />)
+    const row = () => screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor2) })
+
+    fireEvent.click(row())
+    expect(row()).toHaveAttribute('aria-pressed', 'true')
+    const armed = screen.getByTestId('armed').textContent
+
+    act(() => {
+      setLockSystem('dragonlock')
+    })
+
+    expect(row()).toHaveAttribute('aria-pressed', 'true')
+    // Nothing re-armed either: the canvas still holds the file it was given.
+    expect(screen.getByTestId('armed')).toHaveTextContent(armed ?? '')
   })
 })
 
@@ -1526,7 +1709,7 @@ describe('the library block', () => {
   it('drops ids the catalog no longer holds rather than rendering a nameless row', () => {
     act(() => {
       useWorkshopStore.setState({
-        library: { [id('floor1')]: true, ['tiles/retired/gone.stl' as TileId]: true },
+        library: { [design('floor1')]: true, ['d-retired-and-gone' as DesignId]: true },
       })
     })
     render(<PaletteHarness />)

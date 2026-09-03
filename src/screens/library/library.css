@@ -258,70 +258,42 @@
   overflow: visible;
 }
 
-/* ── Saved variant rows ──────────────────────────────────────────────────── */
+/* ── The resolved file ───────────────────────────────────────────────────── */
 
-/* Where the per-file rows went. Only rendered for a card holding two or more
-   saved files, so the common single-file card is unchanged. */
-.of-lib-variants {
+/* One line, always present: which file this item downloads as under the build's
+   lock. What used to be here was a list of the user's saved files, and it went
+   with the saved set — `selectVariant` is single-valued, so a list would have had
+   exactly one row for every item in the corpus. `LibraryCard.tsx` carries the
+   measurement. */
+.of-lib-card-resolved {
+  margin: 0;
   padding-top: 6px;
   border-top: 1px solid var(--line);
-}
-
-.of-lib-variants-label {
-  margin: 0 0 4px;
-  font-family: var(--face-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1.6px;
-  color: var(--mut);
-}
-
-.of-lib-variant-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.of-lib-variant {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
   font-family: var(--face-mono);
   font-size: 10.5px;
+  line-height: 1.4;
   color: var(--mut);
+  /* The token is the longest thing on the card — 38 characters at the corpus
+     maximum — and it is a filename, so it breaks nowhere on its own. Wrapping is
+     right here rather than clipping: the point of the line is the name, and half
+     a name with an ellipsis cannot be told from its sibling. The card has no
+     fixed height to protect. */
+  overflow-wrap: anywhere;
 }
 
-.of-lib-variant-token {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
+.of-lib-resolved-label {
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+}
+
+.of-lib-resolved-token {
   color: var(--ink);
+}
+
+/* The qualifier must not be broken across lines by the `overflow-wrap: anywhere`
+   above, which is there for the filename and would happily split "base". */
+.of-lib-resolved-base {
   white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.of-lib-variant-bytes {
-  flex: none;
-}
-
-.of-lib-variant-remove {
-  flex: none;
-  padding: 0 3px;
-  background: none;
-  border: 0;
-  color: var(--mut);
-  font: inherit;
-  line-height: 1;
-  cursor: pointer;
-  transition: color 110ms ease;
-}
-
-.of-lib-variant-remove:hover {
-  color: var(--acc);
 }
 
 .of-lib-card-bytes {

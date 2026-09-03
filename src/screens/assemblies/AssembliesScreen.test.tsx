@@ -456,7 +456,7 @@ describe('dead ends', () => {
 })
 
 describe('finishing', () => {
-  it('reports progress, bills the files, and writes them to the store', async () => {
+  it('reports progress, bills the files, and writes their items to the store', async () => {
     await renderScreen()
     await openRecipe()
     pick('wall', 'Torch Wall 2')
@@ -474,11 +474,12 @@ describe('finishing', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Add all to library' }))
     })
 
-    expect(Object.keys(useWorkshopStore.getState().library).sort()).toEqual([
-      'tiles/fix/base-2.stl',
-      'tiles/fix/floor-2.stl',
-      'tiles/fix/wall-2.stl',
-    ])
+    // Designs, not files: row V1's library holds items. The three parts of this
+    // recipe are three separate items, so the button's two counts agree and the
+    // note above it stays a bare "3 files to print." — the panel only splits the
+    // two figures when a recipe names two prints of one item, which no fixture
+    // template does.
+    expect(Object.keys(useWorkshopStore.getState().library).sort()).toEqual(['base-2', 'floor-2', 'wall-2'])
     expect(screen.getByRole('button', { name: 'Added to your library' })).toBeTruthy()
   })
 

@@ -10,13 +10,22 @@
  *
  * ## What it can honestly do with a pick
  *
- * It adds the chosen file to the **library**, and says so in the panel. That is
- * the whole of the available channel: `WorkshopState` holds a library and
+ * It saves the chosen file's **item** to the library, and says so in the panel.
+ * That is the whole of the available channel: `WorkshopState` holds a library and
  * placements, the bill is built from placements, and row **G5** owns the
  * selection channel. So a slot fill cannot yet appear as a bill line, and this
  * panel does not pretend otherwise — it states the count of required slots the
- * plan has open, and the library is where the files land. `addToLibrary` is an
+ * plan has open, and the library is where the picks land. `addToLibrary` is an
  * existing store action; nothing here writes a new field.
+ *
+ * **The pick is a file and the library holds designs (row V1), so one hop is
+ * needed.** `SlotFills` resolves a concrete `TileId` — dead-end greying is the
+ * whole point of reusing it, and that is a per-file question — and
+ * {@link designIndex} carries it to the item that file is one print of. The map is
+ * built once per catalog rather than per pick: `TileDrawer` answers the same
+ * question with `catalog.records.find(…)`, which is a linear scan over 8,702
+ * records and is fine for one lookup on a drawer open, but this callback fires
+ * per pick on a panel that re-renders on every store write.
  *
  * ## Why the whole picker is reused rather than reimplemented
  *
@@ -37,7 +46,7 @@
 import { useMemo } from 'react'
 
 import { describeCell } from '@/builder/canvas'
-import type { CatalogFile } from '@/catalog'
+import type { CatalogFile, DesignId, TileId } from '@/catalog'
 import { SlotFills } from '@/screens/detail/slots'
 import type { Placement } from '@/store'
 import { addToLibrary } from '@/store'
@@ -53,7 +62,20 @@ export interface SlotsPanelProps {
   readonly placements: Readonly<Record<string, Placement>>
 }
 
+/**
+ * Every file's design, in one pass over the index.
+ *
+ * A plain function rather than a hook so the memo below owns the lifetime, and a
+ * `Map` rather than a `find` per call for the reason the module docblock gives.
+ */
+function designIndex(catalog: CatalogFile): ReadonlyMap<TileId, DesignId> {
+  const out = new Map<TileId, DesignId>()
+  for (const record of catalog.records) out.set(record.id, record.design)
+  return out
+}
+
 export function SlotsPanel({ catalog, placements }: SlotsPanelProps) {
+  const designOf = useMemo(() => designIndex(catalog), [catalog])
   // One resolution per placed file that declares a slot, and the panel re-renders
   // on every store change — 0.09 ms each is cheap and 50 of them on every
   // library toggle is not, so it is memoised on the placements it read.
@@ -84,7 +106,7 @@ export function SlotsPanel({ catalog, placements }: SlotsPanelProps) {
             {`${String(inventory.holders.length)} ${
               inventory.holders.length === 1 ? 'piece' : 'pieces'
             }, ${String(inventory.required)} of them required. `}
-            Picking one adds its file to your library. The bill above counts placed tiles, so a
+            Picking one adds its item to your library. The bill above counts placed tiles, so a
             slot fill is not a line in it.
           </p>
 
@@ -107,10 +129,17 @@ export function SlotsPanel({ catalog, placements }: SlotsPanelProps) {
                 <SlotFills
                   catalog={catalog}
                   onPick={(_slot, tile) => {
-                    // Cleared picks are left in the library: removing a file the
+                    // Cleared picks are left in the library: removing an item the
                     // user may have added deliberately, because they changed one
                     // slot, would be the panel undoing a decision it did not make.
-                    if (tile !== undefined) addToLibrary(tile)
+                    if (tile === undefined) return
+                    const design = designOf.get(tile)
+                    // A pick the index does not hold cannot happen — `SlotFills`
+                    // resolves against this same catalog — and silently saving
+                    // nothing is the right answer if it ever does, because the
+                    // alternative is putting a key in the library that resolves
+                    // to no record and cannot be removed through any button.
+                    if (design !== undefined) addToLibrary(design)
                   }}
                   parent={holder.parent}
                 />

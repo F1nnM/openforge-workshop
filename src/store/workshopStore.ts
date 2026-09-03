@@ -28,13 +28,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-import type { TileId } from '@/catalog'
+import type { DesignId } from '@/catalog'
 import type { GeneratedBaseId, GeneratedPlacement } from '@/generator/placement/scene'
 import { GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/placement/scene'
 
 import { clearGeneratedMeshes, retainGeneratedMeshes } from './meshes'
 import type { RecoveredState } from './migrations'
-import { STORE_VERSION, migrateWorkshopState, salvageWorkshopState } from './migrations'
+import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
 import type { LockSystem, Placement, PlacementId, WorkshopState } from './schema'
 import { Placement as PlacementSchema, PlacementId as PlacementIdSchema, defaultWorkshopState, normalizeRotation } from './schema'
 import { STORAGE_KEY, clearPersistedWorkshopState, workshopStorage } from './storage'
@@ -62,7 +62,13 @@ function reportRecovery(recovered: RecoveredState, phase: string): WorkshopState
  *
  * `version`/`migrate` are set from the first commit rather than added when first
  * needed, because by then every user's browser already holds an unstamped blob
- * and the migration has to guess at its shape.
+ * and the reader has to guess at its shape.
+ *
+ * `migrate` is `persist`'s name for the hook, not a claim about what happens
+ * there: row V1 deleted the migration ladder, so the hook is
+ * {@link readPersistedState}, a version gate that discards anything not stamped
+ * {@link STORE_VERSION}. `migrations.ts` states why, and states the moment that
+ * licence expires.
  *
  * Validation is wired into **both** hydration paths, which is not the same as
  * wiring it into one:
@@ -74,15 +80,17 @@ function reportRecovery(recovered: RecoveredState, phase: string): WorkshopState
  *     killed mid-write, or a hand edit.
  *
  * Validating only in `migrate` would leave that second case unchecked, which is
- * the one most likely to occur. The two do not double-report: `migrate` returns
- * an already-valid state, so the `merge` that follows it salvages nothing.
+ * the one most likely to occur — and it is the case the version gate can say
+ * nothing about, since the stamp matches. The two do not double-report:
+ * `migrate` returns an already-valid state, so the `merge` that follows it
+ * salvages nothing.
  */
 export const useWorkshopStore = create<WorkshopState>()(
   persist(() => defaultWorkshopState(), {
     name: STORAGE_KEY,
     version: STORE_VERSION,
     storage: workshopStorage,
-    migrate: (persisted, version) => reportRecovery(migrateWorkshopState(persisted, version), 'migration'),
+    migrate: (persisted, version) => reportRecovery(readPersistedState(persisted, version), 'version check'),
     merge: (persisted, current) =>
       persisted === undefined ? current : reportRecovery(salvageWorkshopState(persisted), 'rehydration'),
     onRehydrateStorage: () => (state, error) => {
@@ -102,31 +110,73 @@ export const useWorkshopStore = create<WorkshopState>()(
 /* ------------------------------------------------------------------- library */
 
 /**
- * Add a tile to the library. Idempotent, and a no-op returns the identical state
- * object so subscribers are not woken for a click that changed nothing.
+ * Save an item — a **design**, never a file. Idempotent, and a no-op returns the
+ * identical state object so subscribers are not woken for a click that changed
+ * nothing.
+ *
+ * The parameter is a {@link DesignId} because `library` is keyed by one; see
+ * `schema.ts` for why that key and not `AggregateAddress`. Every caller has a
+ * design in hand already — `TileAggregate.design`, `TileVariant.design` and
+ * `CatalogRecord.design` are all the same field — so nothing has to resolve
+ * anything, and the two brands being mutually unassignable means a call that
+ * used to save a file is a compile error rather than a key that resolves to no
+ * record.
+ *
+ * **Returns whether it inserted**, which is not decoration. It is the hook row
+ * R1 asked for: R1 warms an aggregate's meshes in the browser at the moment it
+ * is saved, and it needs somewhere to attach that does not fire on a second
+ * press of an already-saved item. Two attachment points, both open, neither
+ * needing a change here:
+ *
+ *   - **At the call site**, on this return value:
+ *     `if (addToLibrary(item.design)) void warmDesign(item.design)`. Five call
+ *     sites exist today.
+ *   - **On the store**, as a diff:
+ *     `useWorkshopStore.subscribe((now, before) => …)` over `now.library`. The
+ *     design key is what makes that diff answerable — one new key is exactly one
+ *     item and therefore exactly one mesh set to warm. Under the old file key
+ *     the same diff could not say what to warm: one item is 2.28 files on
+ *     average and up to 20, and which of them the user would eventually print
+ *     was a function of a lock preference they had not yet chosen.
+ *
+ * A listener registry was considered and not built. It would be speculative
+ * machinery for a consumer that does not exist yet, in the same row that deleted
+ * a migration ladder for being kept against a hypothetical.
  */
-export function addToLibrary(id: TileId): void {
-  useWorkshopStore.setState((state) =>
-    state.library[id] === true ? state : { library: { ...state.library, [id]: true } },
-  )
+export function addToLibrary(design: DesignId): boolean {
+  let inserted = false
+  useWorkshopStore.setState((state) => {
+    if (state.library[design] === true) return state
+    inserted = true
+    return { library: { ...state.library, [design]: true } }
+  })
+  return inserted
 }
 
-/** Remove a tile from the library. No-op if it was never there. */
-export function removeFromLibrary(id: TileId): void {
+/** Drop a saved item. No-op if it was never there. */
+export function removeFromLibrary(design: DesignId): void {
   useWorkshopStore.setState((state) => {
-    if (state.library[id] === undefined) return state
+    if (state.library[design] === undefined) return state
     const library = { ...state.library }
-    delete library[id]
+    delete library[design]
     return { library }
   })
 }
 
-/** Add or remove, whichever the tile is not. */
-export function toggleLibrary(id: TileId): void {
+/**
+ * Add or remove, whichever the item is not.
+ *
+ * The whole toggle is now expressible, which it was not before: a file-keyed
+ * library made "is this item saved?" a question about up to 20 keys and "unsave
+ * it" a loop over all of them, and `TileCard` carried both plus a docblock
+ * explaining that removing had to clear every variant or the button's own label
+ * would not change. One key, one press, no loop.
+ */
+export function toggleLibrary(design: DesignId): void {
   useWorkshopStore.setState((state) => {
-    if (state.library[id] === undefined) return { library: { ...state.library, [id]: true } }
+    if (state.library[design] === undefined) return { library: { ...state.library, [design]: true } }
     const library = { ...state.library }
-    delete library[id]
+    delete library[design]
     return { library }
   })
 }
@@ -346,23 +396,35 @@ export function resetWorkshop(): void {
 
 /* ----------------------------------------------------------------- selectors */
 
-/** The library as a keyed set. Stable identity until the library changes. */
+/**
+ * The library as a keyed set of {@link DesignId}s. Stable identity until the
+ * library changes.
+ *
+ * **The key type changed in row V1 and the value's meaning changed with it.** A
+ * reader that indexes this map with a `TileId` no longer compiles, which is the
+ * intended outcome: the answer it wanted — "is this file saved?" — is not a
+ * question the library can answer any more, because the library does not hold
+ * files. The question to ask instead is `library[record.design] === true`, and
+ * every record, variant and aggregate carries that field.
+ */
 export const selectLibrary = (state: WorkshopState): WorkshopState['library'] => state.library
 
-/** How many tiles are in the library. A number, so equal counts do not re-render. */
+/** How many items are in the library. A number, so equal counts do not re-render. */
 export const selectLibraryCount = (state: WorkshopState): number => Object.keys(state.library).length
 
 /**
- * Membership for one tile.
+ * Membership for one item.
  *
- * Curried so the tile id is bound once: the resulting selector returns a
- * boolean, which is what keeps eight thousand catalog cards out of the
- * re-render path when an unrelated tile is added.
+ * Curried so the design is bound once: the resulting selector returns a boolean,
+ * which is what keeps 3,822 catalog cards out of the re-render path when an
+ * unrelated item is added. It also narrows further than it used to — the
+ * file-keyed version made a card's membership a `some()` over its variants, so
+ * the card re-rendered whenever *any* of them changed.
  */
 export const selectIsInLibrary =
-  (id: TileId) =>
+  (design: DesignId) =>
   (state: WorkshopState): boolean =>
-    state.library[id] === true
+    state.library[design] === true
 
 /** The whole scene. Changes on every placement — subscribe from the canvas only. */
 export const selectPlacements = (state: WorkshopState): WorkshopState['placements'] => state.placements
@@ -418,8 +480,8 @@ export function useLibraryCount(): number {
 }
 
 /** @see selectIsInLibrary */
-export function useIsInLibrary(id: TileId): boolean {
-  return useWorkshopStore((state) => state.library[id] === true)
+export function useIsInLibrary(design: DesignId): boolean {
+  return useWorkshopStore((state) => state.library[design] === true)
 }
 
 /** @see selectPlacements */
