@@ -23,6 +23,27 @@
  * that does not exist yet is a self-inflicted load test. A real failure is
  * retried by the user, through the panel.
  *
+ * **No conversion.** This hook reads; it does not fetch a 10.77 MB STL and
+ * decimate it. Row R1 converts on **add-to-library** — a deliberate action with
+ * somewhere to put a progress bar — and this hook sees only the result, through
+ * `loadMeshGeometry`. Converting here instead would put a 64 MB download behind
+ * the moment the 3D view opens, which is the design the owner replaced: a stall
+ * with no explanation, paid again by every viewer of a shared link.
+ *
+ * ## Two stores, one map
+ *
+ * {@link LodStoreState.geometries} is keyed by content address and says nothing
+ * about provenance, because its consumers must not care: `instances.ts` groups
+ * by md5 and `place.ts` stands up whatever it is handed. `/lod/` is preferred
+ * when it answers — 21 kB against 10.77 MB — and the IndexedDB cache answers
+ * when it does not. {@link LodStoreState.converted} counts the second kind for
+ * the readout only.
+ *
+ * `absent` therefore means **neither store has it**, which for a blob is now a
+ * real statement about the user's library rather than a restatement of B2: a
+ * design nobody added was never converted. `BuilderRoom` already renders that
+ * count as "not in the store" and the sentence stays true.
+ *
  * ## Concurrency
  *
  * {@link LOD_FETCH_CONCURRENCY} at a time. The objects are ~21 kB on average
@@ -34,9 +55,11 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import type { BlobId, CatalogAssets } from '@/catalog'
+import type { MeshCache } from '@/mesh'
+import { sharedMeshCache } from '@/mesh'
 
 import type { LodGeometry } from './loadLod'
-import { LodAbsentError, loadLodGeometry } from './loadLod'
+import { LodAbsentError, loadMeshGeometry } from './loadLod'
 
 /** In-flight requests to one hostname. Six is Chrome's per-host HTTP/1.1 limit. */
 export const LOD_FETCH_CONCURRENCY = 6
@@ -44,8 +67,16 @@ export const LOD_FETCH_CONCURRENCY = 6
 export interface LodStoreState {
   /** Loaded objects by content address. Grows as they arrive. */
   readonly geometries: ReadonlyMap<string, LodGeometry>
-  /** Addresses the store answered 404/403 for. Expected today — blocker B2. */
+  /**
+   * Addresses **neither** store could supply.
+   *
+   * `/lod/` answered 404/403 — expected today, blocker B2 — and the converted
+   * cache had no record either, which means the design was never added to the
+   * library and so nothing ever converted it.
+   */
   readonly absent: ReadonlySet<string>
+  /** How many of {@link geometries} came from the R1 conversion cache. */
+  readonly converted: number
   /** Addresses that failed for another reason, with the reason. */
   readonly failed: ReadonlyMap<string, string>
   /** Still in flight. */
@@ -58,6 +89,7 @@ export interface LodStoreState {
 
 const EMPTY: LodStoreState = {
   geometries: new Map(),
+  converted: 0,
   absent: new Set(),
   failed: new Map(),
   pending: 0,
@@ -72,6 +104,16 @@ export interface UseLodStoreOptions {
   /** `false` parks the hook: nothing is fetched and everything loaded is released. */
   readonly enabled: boolean
   readonly fetchImpl?: typeof fetch
+  /**
+   * The R1 converted-mesh cache, consulted when `/lod/` answers 404.
+   *
+   * Omit it and the hook uses `sharedMeshCache()`, the origin's one handle —
+   * which is what makes this row work without `BuilderRoom.tsx` changing a
+   * line, and keeps row R2's rebase of the renderer clean. Pass `null` for
+   * `/lod/`-only, which is what a test asserting the store's own behaviour
+   * wants, and what a browser with no IndexedDB gets anyway.
+   */
+  readonly cache?: Promise<MeshCache | null> | null | undefined
 }
 
 /**
@@ -82,8 +124,12 @@ export interface UseLodStoreOptions {
  * blob list inline hands a new array every render, and an effect keyed on it
  * re-fetches the whole room on every keystroke.
  */
-export function useLodStore({ blobs, assets, enabled, fetchImpl }: UseLodStoreOptions): LodStoreState {
+export function useLodStore({ blobs, assets, enabled, fetchImpl, cache }: UseLodStoreOptions): LodStoreState {
   const wanted = useMemo(() => [...new Set(blobs)].sort(), [blobs.join('\u0000')])
+  // `undefined` means "use the origin's cache"; `null` means "there is none".
+  // Resolved here rather than in the effect so the effect's dependency is a
+  // stable promise identity and not a fresh one per render.
+  const store = cache === undefined ? sharedMeshCache() : cache
   const key = wanted.join('\u0000')
   const base = assets.lod
 
@@ -108,8 +154,11 @@ export function useLodStore({ blobs, assets, enabled, fetchImpl }: UseLodStoreOp
 
     const publish = () => {
       if (!alive) return
+      let converted = 0
+      for (const lod of geometries.values()) if (lod.source === 'converted') converted += 1
       setState({
         geometries: new Map(geometries),
+        converted,
         absent: new Set(absent),
         failed: new Map(failed),
         pending,
@@ -120,6 +169,7 @@ export function useLodStore({ blobs, assets, enabled, fetchImpl }: UseLodStoreOp
 
     setState({
       geometries: new Map(),
+      converted: 0,
       absent: new Set(),
       failed: new Map(),
       pending: wanted.length,
@@ -135,10 +185,11 @@ export function useLodStore({ blobs, assets, enabled, fetchImpl }: UseLodStoreOp
         if (blob === undefined) return
 
         try {
-          const lod = await loadLodGeometry(blob, {
+          const lod = await loadMeshGeometry(blob, {
             assets: { lod: base },
             signal: controller.signal,
             ...(fetchImpl === undefined ? {} : { fetchImpl }),
+            ...(store === null ? {} : { cache: store }),
           })
           if (!alive) {
             lod.dispose()
@@ -165,7 +216,7 @@ export function useLodStore({ blobs, assets, enabled, fetchImpl }: UseLodStoreOp
       for (const lod of geometries.values()) lod.dispose()
       geometries.clear()
     }
-  }, [key, base, enabled, fetchImpl])
+  }, [key, base, enabled, fetchImpl, store])
 
   return state
 }
