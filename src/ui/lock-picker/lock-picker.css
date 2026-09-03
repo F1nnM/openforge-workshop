@@ -451,3 +451,189 @@
     transition: none;
   }
 }
+
+/* ── The work-area toggle and its disclosure ─────────────────────────────────
+   Row L1. The lock preference moved out of `/settings` and into the builder
+   stage's top band, so the picker above now has two hosts: this popover, and
+   the catalog's own — see `LockToggle.tsx` for why the screen went.
+
+   ## The trigger is a plate, because the stage's language is plates
+
+   §2.4 puts translucent bordered plates in the stage's corners and row S4 and
+   row G2 both launch from one. A fourth device in the same band would read as a
+   fourth kind of thing; this is the same treatment at the same 12px radius
+   family, sized down to sit in a row with `PlanToolbar`'s buttons.
+
+   ## The figure is mono and the system name is not
+
+   The design's rule, and the reason it is worth keeping here: mono means
+   measured. `88.3%` is read off the emitted index every session, so it is mono;
+   `OpenLOCK` is a proper noun and is not.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-toggle {
+  display: inline-flex;
+  /* Wrap and shrink rather than overflow. An `inline-flex` at its content width
+     will not shrink below it, and the builder's toolbar slot is capped by the
+     stage's gutter — so on a narrow stage this control used to spill out of the
+     slot and straight under the 3D plate. Measured at a 1000px viewport: 14 of
+     its 174px unclickable, which is the same class of defect the gutter exists
+     to remove, arriving from inside the band instead of outside it. */
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  /* Matches `.of-build-toolbar`'s ground rather than the corner plates' 88%
+     wash: this sits in a row with the toolbar's own buttons and a second
+     translucency in that row would look like a rendering fault. */
+  background: var(--bg2);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.of-lock-toggle:hover,
+.of-lock-toggle[data-popup-open] {
+  border-color: var(--acc);
+}
+
+.of-lock-toggle-key {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+
+.of-lock-toggle-name {
+  font-weight: 500;
+}
+
+.of-lock-toggle-share {
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--acc);
+}
+
+/* The `(i)`. A ring rather than a glyph from an icon set: the app ships no icon
+   font and a single inline SVG for one character would be the start of one. */
+.of-lock-toggle-info {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  font-style: italic;
+  line-height: 1;
+  color: var(--mut);
+}
+
+.of-lock-toggle:hover .of-lock-toggle-info,
+.of-lock-toggle[data-popup-open] .of-lock-toggle-info {
+  border-color: var(--acc);
+  color: var(--acc);
+}
+
+/* ── The disclosure ──────────────────────────────────────────────────────────
+   `@/ui/primitives`' `Dialog`, widened. Its default is 420px and the picker
+   wants a little more: the bars are percentages of the track, so a narrow track
+   compresses a 9.6-point spread into something a reader cannot see, which would
+   undo the one thing the picker is for. 468px is where the three cost lines
+   ("5 out of reach · 80.0 pp behind OpenLOCK") stop wrapping.
+
+   `--of-dialog-width` rather than a `width` of our own, which is the override
+   `Overlay.tsx` documents; the popup already scrolls internally and already caps
+   at the viewport, so nothing else here is geometry.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-lock-dialog {
+  --of-dialog-width: 468px;
+}
+
+.of-lock-pop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The facts that survived the screen. `LockToggle.tsx` names the one that did
+   not, and why. */
+.of-lock-pop-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.of-lock-pop-fact {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.of-lock-pop-fact strong {
+  font-weight: 600;
+}
+
+/* Two tones, and the difference is whether there is a scene to disturb — the
+   settings screen's rule, kept. With an empty grid it is a muted line; with
+   tiles placed it becomes the accent-inset block the selected option and the
+   one-time notice both use, because all three mean "this concerns the lock
+   system". */
+.of-lock-pop-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--mut);
+}
+
+.of-lock-pop-note[data-tone='warn'] {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 0 var(--acc);
+  color: var(--ink);
+}
+
+.of-lock-pop-note-lead,
+.of-lock-pop-note-body {
+  margin: 0;
+}
+
+.of-lock-pop-note-body {
+  color: var(--mut);
+}
+
+/* Mono is measured — and `base-lock-mismatch` and `lock-unavailable` are literal
+   strings the bill of tiles prints, so a reader should recognise them there from
+   having read them here. */
+.of-lock-pop-mono {
+  font-family: var(--face-mono);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of-lock-toggle {
+    transition: none;
+  }
+}

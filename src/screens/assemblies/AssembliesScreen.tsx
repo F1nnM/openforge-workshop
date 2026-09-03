@@ -63,8 +63,9 @@
  * argument that a link must not freeze a preference applies exactly, and a
  * half-finished pick set in a URL is a preference of the worst kind.
  *
- * `/settings` shipped in the same position and it is called out in this row's
- * report the same way.
+ * The deleted `/settings` route shipped in the same position and was called out
+ * in that row's report the same way. (Row X9 mounted this screen; row L1 deleted
+ * `/settings`, so the precedent survives only as a note.)
  */
 import { useMemo, useState } from 'react'
 

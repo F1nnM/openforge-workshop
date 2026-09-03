@@ -81,16 +81,18 @@ describe('AppFrame', () => {
       'href',
       '/',
     )
-    // Catalog, Library, Builder, Assemblies, Settings — in that order. Asserted
-    // by name rather than by count, so adding a tab is a deliberate edit here
-    // instead of a bare number to bump. Row X9 added Assemblies, because row
-    // C3's screen had no entrance at all until its route was mounted.
+    // Catalog, Library, Builder, Assemblies — in that order. Asserted by name
+    // rather than by count, so adding or removing a tab is a deliberate edit
+    // here instead of a bare number to bump. Row X9 added Assemblies, because
+    // row C3's screen had no entrance at all until its route was mounted; row L1
+    // removed Settings, because it deleted the route that tab existed to reach.
+    // `toEqual` on the whole list is what makes the removal assertable in both
+    // directions: a re-added tab fails here as loudly as a missing one.
     expect(within(sectionNav()).getAllByRole('link').map((link) => link.textContent)).toEqual([
       expect.stringContaining('Catalog'),
       expect.stringContaining('Library'),
       expect.stringContaining('Builder'),
       expect.stringContaining('Assemblies'),
-      expect.stringContaining('Settings'),
     ])
 
     // The count is the index's, and the archive is named by host — the

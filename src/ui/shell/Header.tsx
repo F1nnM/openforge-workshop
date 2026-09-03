@@ -13,12 +13,22 @@
  * reader user can jump to it, and named because a document with more than one
  * `<nav>` (row 16's footer may add one) needs them distinguishable.
  *
- * Five tabs now, not three. The mock had three and the contract's §2.0
- * transcription is otherwise exact; the two additions are both routes that would
- * otherwise be reachable only by typing a URL — `/settings`, whose only other
- * entrance is a notice the user can dismiss, and `/assemblies`, which had no
- * entrance at all until row X9 mounted it. A permanent nav slot is a real cost
- * and the alternative in both cases was a screen nobody could find.
+ * Four tabs now, not three. The mock had three and the contract's §2.0
+ * transcription is otherwise exact; the addition is `/assemblies`, which had no
+ * entrance at all until row X9 mounted it and would otherwise be reachable only
+ * by typing a URL. A permanent nav slot is a real cost and the alternative was a
+ * screen nobody could find.
+ *
+ * **It was five, and the fifth is gone with its route.** A `Settings` tab was
+ * added because `/settings` had one other entrance — the builder's dismissible
+ * `LockNotice` — so a dismissed notice stranded the route. Row L1 deleted that
+ * route and put the lock preference in the builder's work area as a permanent
+ * control, and **the argument for the tab went with the route rather than
+ * surviving it**: there is no longer a screen to strand, and the preference is
+ * now visible on the surface where it changes what the user gets instead of
+ * behind a nav press. That is worth recording, because "a route needs a nav
+ * slot" was the reasoning for two of these tabs and it only ever applied to
+ * routes.
  *
  * **Active is programmatic, not just visual.** TanStack Router stamps
  * `data-status="active"` on a matching `Link`, which is what draws the accent
@@ -73,7 +83,7 @@ function Wordmark() {
 }
 
 interface NavTabProps {
-  to: '/catalog' | '/library' | '/builder' | '/assemblies' | '/settings'
+  to: '/catalog' | '/library' | '/builder' | '/assemblies'
   label: string
   /** Omitted for Catalog, which has no count. */
   count?: { value: number; singular: string; plural: string }
@@ -162,15 +172,12 @@ export function Header() {
           count={{ value: placementCount, singular: 'tile placed', plural: 'tiles placed' }}
         />
         {/* Row C3's screen, mounted by row X9. A route nothing navigates to is
-            reachable only by typing a URL, which is the same gap `/settings`
-            had and closed here — so it is closed the same way rather than
-            invented a second time. It sits after Builder because it is a
-            building tool and before Settings because Settings is the tail. No
-            count chip: there is nothing on that screen to count. */}
+            reachable only by typing a URL, and this is the tab that closes that
+            gap. It sits after Builder because it is a building tool, and it is
+            now the tail — row L1 deleted the `Settings` tab along with the
+            route behind it. No count chip: there is nothing on that screen to
+            count. */}
         <NavTab to="/assemblies" label="Assemblies" />
-        {/* Without this the lock picker is reachable only through the builder's
-            dismissible notice, so a dismissed notice strands the route. */}
-        <NavTab to="/settings" label="Settings" />
       </nav>
       <ArchiveStat />
     </header>
