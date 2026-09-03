@@ -100,6 +100,10 @@ const RENDERER_MODULES = [
   'builder/three/BuilderRoom.tsx',
   'builder/three/InstancedTiles.tsx',
   'builder/three/RoomSurface.tsx',
+  // Row R3. It carries no renderer of its own, but it reads a mesh's height and
+  // a plate's thickness — `surface.ts` and `markers.ts` — so it reaches three
+  // transitively, and the list is the one a row adds to rather than discovers.
+  'builder/three/bases.ts',
   'builder/three/instances.ts',
   'builder/three/loadLod.ts',
   'builder/three/markers.ts',
