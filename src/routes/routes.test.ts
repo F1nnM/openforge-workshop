@@ -18,19 +18,26 @@
  * those three cases passed against exactly the blank screen the block exists to
  * catch. Every marker is now a string only the screen can produce. The
  * `lazy or eager` block below is the other half: mounting proves a lazy route
- * resolves, and that block proves the three that are lazy still are, because
+ * resolves, and that block proves the two that are lazy still are, because
  * re-inflating the eager bundle by 42 kB gzipped is one convenient `import` away
  * and nothing else in the repo would notice.
  *
- * **Row L1 deleted `/settings`, which X10 had just covered for the first time.**
- * That case is gone rather than relocated, and the coverage it stood for did not
- * evaporate with it: the screen's subject — the lock preference and its two
- * measured figures — is now a control in the builder, and the whole of that
- * screen's test suite moved to `src/ui/lock-picker/lockToggle.test.tsx`, fixture
- * and all. What this file loses is one route; what it must not lose is the
- * property X10 established, so `renders %s inside the app frame` still asserts a
- * marker no other screen and no nav label can produce, and the header is now
- * four labels rather than five.
+ * **Two routes have since been deleted, and neither case was relocated.**
+ *
+ *   - **Row L1 deleted `/settings`**, which X10 had just covered for the first
+ *     time. The coverage it stood for did not evaporate with it: the screen's
+ *     subject — the lock preference and its two measured figures — is now a
+ *     control in the builder, and the whole of that screen's test suite moved to
+ *     `src/ui/lock-picker/lockToggle.test.tsx`, fixture and all.
+ *   - **Row A0 deleted `/library`.** Its subject was the library itself, which
+ *     A0 also deleted, so there is nothing for the case to be relocated *to* —
+ *     unlike `/settings`, whose subject survived the screen. The one surface on
+ *     it that was not about the library, the JSON export/import, moved to
+ *     `@/builder/panels/BackupPanel.tsx` with its tests.
+ *
+ * What this file loses is two routes; what it must not lose is the property X10
+ * established, so `renders %s inside the app frame` still asserts a marker no
+ * other screen and no nav label can produce, and the header is now three labels.
  */
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { act, createElement } from 'react'
@@ -44,7 +51,7 @@ import { BUILD_ANY, BUILD_UNSPECIFIED, buildSystemFilter, defaultCatalogSearch }
 import { OVERLAP, catalogOf } from './fixture'
 import { createWorkshopRouter } from './router'
 import type { WorkshopRouter } from './router'
-import { assembliesRoute, builderRoute, catalogRoute, landingRoute, libraryRoute } from './routeTree'
+import { assembliesRoute, builderRoute, catalogRoute, landingRoute } from './routeTree'
 import { closeTileDrawer, openTileDrawer, showTileInDrawer } from './tileDrawer'
 
 const ordinal = (n: number) => ManifestOrdinal.parse(n)
@@ -67,7 +74,6 @@ describe('route tree', () => {
   it.each([
     ['/', '/'],
     ['/catalog', '/catalog'],
-    ['/library', '/library'],
     ['/builder', '/builder'],
     ['/assemblies', '/assemblies'],
   ])('routes %s to the %s screen', async (path, expected) => {
@@ -77,7 +83,8 @@ describe('route tree', () => {
   })
 
   it('gives /assemblies no search params, so a link cannot freeze a half-made pick set', async () => {
-    // Row C3's argument, and `/library`'s before it. `search: { strict: true }`
+    // Row C3's argument, and the deleted `/library`'s before it.
+    // `search: { strict: true }`
     // on the router means a navigation carries only what the destination
     // declares, so this is the assertion that a filtered catalog — or, worse, a
     // recipient's inherited mid-walk choice — cannot ride along into an
@@ -99,10 +106,11 @@ describe('route tree', () => {
     // neither — `buildLocation({ to: '/assemblies', search: { recipe: 'wall' } })`
     // compiles, and a hand-typed `?recipe=wall` survives into `match.search`.
     //
-    // Measured on this tree: `/library` and `/assemblies` both echo an unknown
+    // Measured on this tree: `/library` and `/assemblies` both echoed an unknown
     // param back, so this is the schemaless class's behaviour and not something
-    // mounting C3's screen introduced. (`/settings` was the third and row L1
-    // deleted it; the class is unchanged.) It is harmless for the reason
+    // mounting C3's screen introduced. (`/settings` was the third. Row L1 deleted
+    // it and row A0 deleted `/library`; the class is unchanged, and `/assemblies`
+    // is now the only member left in the tree.) It is harmless for the reason
     // that matters, which is what the two assertions below prove: nothing on
     // these screens reads `search`, and `search: { strict: true }` means the
     // param cannot travel — neither *into* an /assemblies link built from a
@@ -173,15 +181,15 @@ describe('lazy or eager, as row X10 measured it', () => {
     expect(catalogRoute.options.component).toBe(CatalogScreen)
   })
 
-  it('mounts the three press-reached screens lazily', async () => {
+  it('mounts the two press-reached screens lazily', async () => {
     const lazy = [
-      [libraryRoute, (await import('@/screens/library')).LibraryScreen],
       [builderRoute, (await import('@/screens/builder')).BuilderScreen],
       [assembliesRoute, (await import('@/screens/assemblies')).AssembliesScreen],
     ] as const
-    // Four until row L1 deleted `/settings`. The length assertion is what stops
-    // a route quietly leaving this list instead of leaving the tree.
-    expect(lazy).toHaveLength(3)
+    // Four until row L1 deleted `/settings` and row A0 deleted `/library`. The
+    // length assertion is what stops a route quietly leaving this list instead
+    // of leaving the tree.
+    expect(lazy).toHaveLength(2)
     for (const [route, screen] of lazy) {
       expect(typeof route.options.component).toBe('function')
       expect(route.options.component).not.toBe(screen)
@@ -298,7 +306,9 @@ describe('detail drawer, back and forward', () => {
     // The bug this guards: if closing pushed, Back would re-open the drawer the
     // user just dismissed, and every open/close cycle would grow the stack by
     // two.
-    const router = routerAt('/library')
+    // Opened from another screen, so Back has somewhere to land that is not the
+    // drawer's own entry. `/library` was that screen until row A0 deleted it.
+    const router = routerAt('/assemblies')
     await router.load()
     await router.navigate({ to: '/catalog', search: { q: 'cave' } })
     await openTileDrawer(router, ordinal(4821))
@@ -310,7 +320,7 @@ describe('detail drawer, back and forward', () => {
     expect(router.history.length).toBe(depth)
 
     router.history.back()
-    expect(href(router)).toBe('/library')
+    expect(href(router)).toBe('/assemblies')
   })
 
   it('swapping to a family variant replaces, so one Back still leaves the drawer', async () => {
@@ -406,15 +416,15 @@ describe('mounting', () => {
    * Every marker here is a string **only that screen can produce**, and that is
    * a correction rather than a style.
    *
-   * `Catalog`, `Library`, `Builder` and `Assemblies` are the header's four nav
-   * labels, so the frame renders all four of them on every route — measured, by
-   * dumping `container.textContent` for each path. Three of this block's markers
-   * used to be exactly those words, which means the three cases that mattered
-   * most passed against a route rendering nothing at all. The replacements are a
-   * search field's label, an empty-library sentence, the builder's own
-   * index-failure copy and C3's headline. (There were five labels and five
-   * markers until row L1 deleted `/settings`; its marker was the screen's own
-   * `<h2>`.)
+   * `Catalog`, `Builder` and `Assemblies` are the header's three nav labels, so
+   * the frame renders all three of them on every route — measured, by dumping
+   * `container.textContent` for each path. Three of this block's markers used to
+   * be exactly those words, which means the three cases that mattered most
+   * passed against a route rendering nothing at all. The replacements are a
+   * search field's label, the builder's own index-failure copy and C3's
+   * headline. (There were five labels and five markers until row L1 deleted
+   * `/settings` — its marker was the screen's own `<h2>` — and row A0 deleted
+   * `/library`, whose marker was its empty-state sentence.)
    *
    * The builder's is a pattern rather than a string on purpose: jsdom's `fetch`
    * of `/catalog/catalog.json` fails, so a mounted builder shows either its
@@ -427,7 +437,6 @@ describe('mounting', () => {
     // marker is a phrase from its headline rather than the placeholder's title.
     ['/', 'Every tile in the archive'],
     ['/catalog', 'Search the catalog'],
-    ['/library', 'Your library is empty.'],
     ['/builder', /Loading the archive index|The catalog index could not be loaded\./],
     // Row C3's screen. This case is the whole point of mounting it: C3 verified
     // that `dist/` contained none of its files, because an unmounted route means

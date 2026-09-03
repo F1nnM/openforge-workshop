@@ -1,19 +1,30 @@
 /**
  * OpenForge Workshop — the route tree.
  *
- * Five routes: landing, catalog, library and builder — architecture-plan.md
- * §14's v1 scope and design-contract.md §2's screen inventory — plus
- * `/assemblies`, which row C3 built and could not mount because this file was
- * not its to edit.
+ * Four routes: landing, catalog and builder — architecture-plan.md §14's v1
+ * scope and design-contract.md §2's screen inventory — plus `/assemblies`, which
+ * row C3 built and could not mount because this file was not its to edit.
  *
- * **It was six.** `/settings` existed because the lock preference had no home in
- * the contract's inventory (§2's 40.2-point lock spread gave it one). Row L1
- * moved that preference into the builder's work area, where the owner asked for
- * it, and deleted the screen; `src/ui/lock-picker/LockToggle.tsx` carries the
- * argument and the documented decision it overrules. Nothing else lived on that
- * screen — its own docblock called it *"the only screen whose whole subject is a
- * single preference"*, and that was accurate: it imported the store, the lock
- * picker and one primitive, and no other module imported it.
+ * **It was six.** Two routes have been deleted rather than reshaped, and both
+ * for the same kind of reason: what the screen was *for* moved somewhere the user
+ * already was.
+ *
+ *   - **`/settings`** existed because the lock preference had no home in the
+ *     contract's inventory (§2's 40.2-point lock spread gave it one). Row L1
+ *     moved that preference into the builder's work area, where the owner asked
+ *     for it; `src/ui/lock-picker/LockToggle.tsx` carries the argument and the
+ *     documented decision it overrules. Nothing else lived there — its own
+ *     docblock called it *"the only screen whose whole subject is a single
+ *     preference"*, and that was accurate.
+ *   - **`/library`** existed because the user kept a set of saved items and
+ *     needed a screen to see it on. Row **A0** deleted the library: the templates
+ *     plan makes a template the only placement unit, so there is no set of saved
+ *     tiles for a screen to be about. One thing on it was not about the library
+ *     and had to move first — the JSON export/import, which
+ *     architecture-plan.md §13 makes the app's only defence against Safari's
+ *     seven-day `localStorage` eviction. It is now `@/builder/panels`'
+ *     `BackupPanel`, at the foot of the builder's bill column, because what the
+ *     envelope carries is the room.
  * The mock made all four client-side *state*, which is why nothing in it was
  * linkable — no filtered view, no open tile, no shared build. This module is the
  * fix, and the point of it is that the URL is the app's state.
@@ -59,22 +70,22 @@
  * named. The route declaration is unchanged by it — the schema, the middleware
  * and the close semantics all still describe a single optional number.
  *
- * ## Why `/library` and `/` carry no search params
+ * ## Why `/` carries no search params
  *
- * The library is grouped by kind and shows everything the user saved
- * (design-contract.md §2.3); it has no facets to filter and no state worth
- * linking. Declaring the facet schema there would put filters in the URL that
- * nothing reads.
+ * There is nothing on the landing page worth linking to but the page itself.
+ * Declaring the facet schema there would put filters in the URL that nothing
+ * reads. `/library` had no params for the same reason before row A0 deleted it.
  *
- * ## Which three routes are lazy, and why `/` and `/catalog` are not
+ * ## Which two routes are lazy, and why `/` and `/catalog` are not
  *
  * Row X9 made `/assemblies` lazy, measured it, and left the other five with its
  * figures as the argument for doing each of them properly. Row X10 was that row,
  * and **two of the five did not survive the measurement.** Row L1 then deleted
- * one of the four it shipped, so three remain lazy: `/library`, `/builder` and
- * `/assemblies`. The table below is X10's, kept intact because the deltas are
- * what a future row needs and re-deriving them without the `/settings` row would
- * hide how the `@/ui/lock-picker` sharing worked.
+ * one of the four it shipped and row A0 a second, so two remain lazy:
+ * `/builder` and `/assemblies`. The table below is X10's, kept intact because the
+ * deltas are what a future row needs and re-deriving them without the
+ * `/settings` and `/library` rows would hide both how the `@/ui/lock-picker`
+ * sharing worked and what a lazy screen's own stylesheet is worth.
  *
  * Method is X9's: A/B `vite build`s of one tree at
  * `SOURCE_DATE_EPOCH=1700000000`, summing **every file `dist/index.html`
@@ -104,8 +115,8 @@
  * reason: **a screen is only lazy if nothing eager still imports it.**
  *
  *   - **`/catalog` alone emits no chunk at all.** `@/screens/catalog`'s barrel is
- *     a static dependency of the library screen (`TileCard`, `availability`,
- *     `format`) and of the builder's palette (`loadCatalogSearchIndex`), so
+ *     a static dependency of the builder's palette (`loadCatalogSearchIndex`,
+ *     `format`) — and was of the library screen too until row A0 — so
  *     `CatalogScreen` is in the eager graph however this route mounts. The lazy
  *     mount adds the wrapper and the dynamic entry and nothing leaves: **+996 B
  *     raw.**
@@ -129,12 +140,22 @@
  * | + `/library` lazy | 682,289 | 209,541 | 182,200 |
  * | + `/settings` lazy — **shipped by X10** | **660,471** | **205,708** | **180,226** |
  *
- * **Row L1 then deleted the route, and the saving is not where you would look
- * for it.** A lazy route's screen was never in the eager bundle, so removing the
- * route can only return the declaration and the `import()` wrapper — about 340
- * raw bytes. Measured against L1's own baseline of **661,438 / 205,802 /
- * 180,593** over **7** preloaded files, the whole row comes to **661,098 /
- * 204,122 / 177,876** over **4**: **-340 raw / -1,680 gz / -2,717 br**.
+ * **Row L1 then deleted the `/settings` route, and the saving is not where you
+ * would look for it.** A lazy route's screen was never in the eager bundle, so
+ * removing the route can only return the declaration and the `import()` wrapper —
+ * about 340 raw bytes. Measured against L1's own baseline of **661,438 /
+ * 205,802 / 180,593** over **7** preloaded files, the whole row comes to
+ * **661,098 / 204,122 / 177,876** over **4**: **-340 raw / -1,680 gz / -2,717
+ * br**.
+ *
+ * **Row A0 deleted `/library` the same way, and the same caveat applies twice
+ * over**: the declaration and the wrapper come back, the 23,236 B on-demand
+ * chunk and its stylesheet are simply no longer emitted, and whatever else moves
+ * is the chunk graph re-forming around one fewer lazy importer of
+ * `@/screens/catalog`. The row deliberately does **not** re-quote a figure for
+ * it: A0 also moves a component into `@/builder/panels`, which is inside the
+ * `builder` chunk, so an A/B of this file alone would attribute that relocation
+ * to the route deletion.
  *
  * Almost all of that is the *chunk graph*, not the deleted code. With
  * `/settings` gone, `@/ui/primitives` had one eager importer and one lazy one
@@ -157,7 +178,8 @@
  * beside it, `library` 23,236 (6,667 gz), `settings` 8,008 (2,773 gz) with the
  * shared `lock-picker` 14,528, and X9's `assemblies` 48,464 (5,858 gz). After
  * row L1 there is no `settings` pair and no shared `lock-picker`; the picker is
- * inside `builder`.
+ * inside `builder`. After row **A0** there is no `library` pair either, so the
+ * on-demand set is `builder` (with `download` beside it) and `assemblies`.
  *
  * **One line of X10's method had gone stale, and the count is the part to
  * distrust.** Its baseline is quoted "over the four preloaded files"; the tree
@@ -268,18 +290,6 @@ export const catalogRoute = createRoute({
 })
 
 /**
- * The library. Lazy since row X10: **-3,604 B gz off every other page in the
- * app**, and 23,236 B (6,667 gz) — the screen and its stylesheet, which is the
- * bigger half — on the nav press. Reached by a press, never cold, which is the
- * condition the module note measured.
- */
-export const libraryRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/library',
-  component: lazyRouteComponent(() => import('@/screens/library'), 'LibraryScreen'),
-})
-
-/**
  * The builder. Carries the facets because design-contract.md §2.4 gives the
  * palette a search box over the whole catalog, and that search deserves to be
  * linkable for the same reason the catalog's does.
@@ -322,10 +332,11 @@ export const builderRoute = createRoute({
  * unfinished decisions, and `search: { strict: true }` on the router means it
  * would then ride along into the next link they copied.
  *
- * There is also nothing to *link*. `/library` has no params for the same reason —
- * "there is nothing on this screen worth linking to but the screen itself" — and
- * the one durable thing a finished walk produces already has a home: it puts its
- * files in the library, which is persisted.
+ * There is also nothing to *link*. `/` has no params for the same reason — "there
+ * is nothing on this screen worth linking to but the screen itself" — and the
+ * deleted `/library` had none for it either. What a finished walk produces has no
+ * durable home at all since row A0 took the library away; row **C3** gives it
+ * one, by making the finished recipe placeable.
  *
  * ## It was the tree's first lazy route, and that was measured rather than chosen
  *
@@ -364,7 +375,7 @@ export const builderRoute = createRoute({
  * them lost**: `/library` and `/builder` are lazy for the same reason this route
  * is, `/` and `/catalog` are not, and the module docblock carries the table and
  * the cold-load measurement that decided it. X10 also made `/settings` lazy; row
- * L1 deleted that route outright.
+ * L1 deleted that route outright, and row A0 deleted `/library`.
  */
 export const assembliesRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -375,7 +386,6 @@ export const assembliesRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   landingRoute,
   catalogRoute,
-  libraryRoute,
   builderRoute,
   assembliesRoute,
 ])

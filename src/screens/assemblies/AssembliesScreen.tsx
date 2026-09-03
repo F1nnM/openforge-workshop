@@ -44,22 +44,28 @@
  * offsets, and a scrolling grid cell is the last place to discover what that does
  * to a clipped span.
  *
- * ## The choice is component state, and the completed assembly goes to the library
+ * ## The choice is component state, and a finished recipe has no destination yet
  *
  * `@/store`'s docblock is explicit that everything in `WorkshopState` is
  * persisted and that ephemeral UI state belongs in a component, so the choice
- * lives here, keyed by {@link assemblyStepKey}. What a *finished* recipe can
- * honestly do is put its files in the library — the same destination C2's builder
- * panel uses for the same reason, and the one place in this app where "these are
- * the tiles I am going to print" is already modelled.
+ * lives here, keyed by {@link assemblyStepKey}.
+ *
+ * What a *finished* recipe could honestly do was put its files in the library —
+ * the same destination C2's builder panel used, and the one place in this app
+ * where "these are the tiles I am going to print" was modelled. Row **A0**
+ * deleted the library, so it has nowhere to go, and **row C3 is what gives it
+ * one**: under the templates plan a recipe *is* a template, so a finished walk
+ * becomes a placed instance rather than a list of files to save. See
+ * {@link Finished} and contract dependency **C-e** in
+ * `docs/templates-plan.md` §8.
  *
  * ## It has no route yet, and that is one line in a file this row does not own
  *
  * `src/routes/**` is row A4's. The route this screen needs is
  * `createRoute({ getParentRoute: () => rootRoute, path: '/assemblies', component: AssembliesScreen })`
- * plus its name in `routeTree.addChildren`, and no search params — for
- * `/library`'s reason, that there is nothing on this screen worth linking but the
- * screen itself. The selected recipe is deliberately *not* a search param: A4's
+ * plus its name in `routeTree.addChildren`, and no search params — for the
+ * deleted `/library`'s reason, that there is nothing on this screen worth linking
+ * but the screen itself. The selected recipe is deliberately *not* a search param: A4's
  * argument that a link must not freeze a preference applies exactly, and a
  * half-finished pick set in a URL is a preference of the worst kind.
  *
@@ -69,11 +75,10 @@
  */
 import { useMemo, useState } from 'react'
 
-import type { CatalogFile, DesignId, TileId } from '@/catalog'
+import type { CatalogFile, TileId } from '@/catalog'
 import type { MaterialId } from '@/materials'
 import { useCatalogIndex } from '@/screens/catalog'
 import { SlotFills, compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
-import { addToLibrary } from '@/store'
 import { Button, Chip, Eyebrow } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
@@ -305,7 +310,7 @@ function Recipe({
             />
           ))}
 
-          {state.complete ? <Finished catalog={catalog} tiles={state.tiles} /> : null}
+          {state.complete ? <Finished tiles={state.tiles} /> : null}
         </>
       )}
     </div>
@@ -491,65 +496,45 @@ function cardLabel(option: AssemblyOption, reason: string, narrowing: string): s
 /* ----------------------------------------------------------------- the finish */
 
 /**
- * What a finished recipe offers.
+ * What a finished recipe offers: the files, and no action.
  *
- * The library and nothing else, for C2's reason: `WorkshopState` holds a library
- * and placements, the bill of tiles is built from placements, and row G5 owns the
- * selection channel. A recipe is a set of files to print, which is exactly what
- * the library is for.
+ * It offered "Add all to library", which wrote the recipe's **items** to
+ * `WorkshopState.library` — for C2's reason, that the bill of tiles is built from
+ * placements and row G5 owns the selection channel, so the library was the only
+ * destination a set of files to print could honestly have.
  *
- * **The two counts can differ, and both are shown.** A recipe names *files* —
- * that is what a composition resolves to and what the list below prints — while
- * row V1 made the library a set of *items*. Two parts of one recipe can be two
- * prints of the same design, so "5 files to print" can be four items saved, and
- * a button that said "add all" while quietly saving fewer keys than the list has
- * rows would be lying about what it did. The saved count is therefore stated
- * rather than assumed, and it is the same collapse the whole V row exists for.
+ * **Row A0 deleted the library, and the action is absent rather than inert.** A
+ * disabled button reads as "not yet, for you" — a permission or a missing pick —
+ * and neither is true: nothing about this recipe is incomplete, and the
+ * destination is what has gone. So the panel states the files and says, in one
+ * sentence, that placing them is not something this build can do. **Row C3 is
+ * what replaces it**, and with a different verb: under the templates plan a recipe *is* a template, so a
+ * finished walk becomes a placed instance with its slots filled rather than a
+ * list of items saved. Contract dependency **C-e** records the pair.
  *
- * `catalog` may be `undefined` — the screen renders the template list before the
- * 5.6 MB index lands — but not here: a recipe cannot *complete* without the
- * index it was resolved against. The guard is a type obligation rather than a
- * reachable state, and it disables the button instead of saving nothing, because
- * a press that silently did nothing is the one outcome with no honest label.
+ * Two things went with the button. **The `designs` derivation** — one pass over
+ * the index collapsing files to items — because nothing reads it; C3 needs the
+ * same collapse and will build it against a `SlotFill`, which is a file, so
+ * keeping this one would be keeping the wrong shape. And **the two-count copy**:
+ * "5 files to print, 4 items to save" was honest about what the press did and
+ * says nothing about what the list *is*. The `catalog` prop went with the
+ * derivation for the same reason — the recipe's files are already resolved by the
+ * time this renders, so the index was only ever needed to collapse them.
  */
-function Finished({ catalog, tiles }: { catalog: CatalogFile | undefined; tiles: readonly TileId[] }) {
-  const [added, setAdded] = useState(false)
-
-  // One pass over the index per completed recipe, keyed on the two inputs, so
-  // pressing the button twice does not re-derive and neither does a re-render.
-  const designs = useMemo(() => {
-    if (catalog === undefined) return null
-    const wanted = new Set<string>(tiles)
-    const out = new Set<DesignId>()
-    for (const record of catalog.records) if (wanted.has(record.id)) out.add(record.design)
-    return [...out]
-  }, [catalog, tiles])
-
+function Finished({ tiles }: { tiles: readonly TileId[] }) {
   return (
     <div className="of-asm-done">
       <Chip>Complete</Chip>
       <p className="of-asm-note">
-        {`${String(tiles.length)} ${tiles.length === 1 ? 'file' : 'files'} to print`}
-        {designs === null || designs.length === tiles.length
-          ? '.'
-          : `, ${String(designs.length)} ${designs.length === 1 ? 'item' : 'items'} to save.`}
+        {`${String(tiles.length)} ${tiles.length === 1 ? 'file' : 'files'} to print. `}
+        Nothing in this build places a finished assembly — the builder&rsquo;s placement unit is
+        changing, and a recipe becomes one of its units rather than a list to save.
       </p>
       <ul className="of-asm-bill">
         {tiles.map((tile) => (
           <li key={tile}>{tile}</li>
         ))}
       </ul>
-      <Button
-        disabled={designs === null}
-        onClick={() => {
-          if (designs === null) return
-          for (const design of designs) addToLibrary(design)
-          setAdded(true)
-        }}
-        tone="primary"
-      >
-        {added ? 'Added to your library' : 'Add all to library'}
-      </Button>
     </div>
   )
 }

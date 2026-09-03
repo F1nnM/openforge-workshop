@@ -9,6 +9,11 @@
  * rather than leaking a `!` into the sidebar, an item's byte figure is a range
  * only where the data supports one, and the filename token skips the connection
  * segment so it names a design rather than one of its files.
+ *
+ * Row **A0** adds two more, relocated with their tests from the deleted library
+ * screen's `grouping.ts`: the kind-precedence rule `kindLabel` labels the answer
+ * of, and the total-byte label the builder's bill reads. `corpus.test.ts` carries
+ * the two assertions of the same rule that need all 8,702 records.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -16,6 +21,7 @@ import { Footprint } from '@/catalog'
 import { BUILD_UNSPECIFIED, KIND_OTHER } from '@/search'
 
 import {
+  KIND_PRECEDENCE,
   TAG_CHIP_BUDGET,
   buildLabel,
   bytesRangeLabel,
@@ -24,10 +30,12 @@ import {
   countLabel,
   fileSizeLabel,
   fileTokenLabel,
+  groupKindOf,
   humaniseSegment,
   kindLabel,
   sizeLabel,
   tagChipRowWidth,
+  totalBytesLabel,
   variantTokenLabel,
 } from './format'
 
@@ -358,5 +366,80 @@ describe('tagChipRowWidth', () => {
     expect(TAG_CHIP_BUDGET.widthPx).toBe(215 - 2 * 9 - 2 * 1)
     // IBM Plex Mono advances 0.6em, and the tag chip is 9.5px.
     expect(TAG_CHIP_BUDGET.characterPx).toBeCloseTo(9.5 * 0.6, 5)
+  })
+})
+
+/* --------------------------------------------------------- kind precedence */
+
+describe('groupKindOf', () => {
+  it.each([
+    [['base', 'wall'], 'base'],
+    [['base', 'floor'], 'base'],
+    [['base', 'riser'], 'base'],
+    [['angled', 'base'], 'base'],
+    [['floor', 'wall'], 'wall'],
+    [['angled', 'wall'], 'angled'],
+    [['angled', 'floor'], 'angled'],
+    [['column', 'wall'], 'column'],
+    [['stairs', 'wall'], 'stairs'],
+    [['angled', 'column', 'floor', 'wall'], 'angled'],
+    [['wall'], 'wall'],
+    [['floor'], 'floor'],
+  ])('puts %j in %s', (kinds, expected) => {
+    expect(groupKindOf(kinds)).toBe(expected)
+  })
+
+  it('puts a tile with no kinds in the sentinel bucket the facet index already uses', () => {
+    expect(groupKindOf([])).toBe(KIND_OTHER)
+  })
+
+  it('is order-independent — the array is a set, and the importer may emit it either way', () => {
+    expect(groupKindOf(['wall', 'base'])).toBe('base')
+    expect(groupKindOf(['base', 'wall'])).toBe('base')
+  })
+
+  it('ranks a kind the importer adds later after every known one, without folding it into floor', () => {
+    expect(groupKindOf(['floor', 'balcony'])).toBe('floor')
+    expect(groupKindOf(['balcony'])).toBe('balcony')
+  })
+
+  it('breaks a tie between two unranked kinds deterministically', () => {
+    expect(groupKindOf(['gantry', 'balcony'])).toBe('balcony')
+    expect(groupKindOf(['balcony', 'gantry'])).toBe('balcony')
+  })
+
+  it('ranks every documented kind, so no known bucket relies on the unknown fallback', () => {
+    expect([...KIND_PRECEDENCE].sort()).toEqual(
+      ['angled', 'base', 'column', 'floor', 'riser', 'stairs', 'wall'].sort(),
+    )
+  })
+
+  it('labels every ranked kind, so no group prints a humanised fallback', () => {
+    // The pair is the point of the relocation: this rule chooses the bucket and
+    // `kindLabel` names it, so a kind that ranks but has no label would print
+    // `Angled` by accident rather than by decision.
+    for (const kind of KIND_PRECEDENCE) expect(kindLabel(kind)).not.toBe(kind)
+  })
+})
+
+/* --------------------------------------------------------------- byte totals */
+
+describe('totalBytesLabel', () => {
+  it.each([
+    [45_284, '45 kB'],
+    [999_999, '1000 kB'],
+    [10_360_000, '10.4 MB'],
+    [518_000_000, '518.0 MB'],
+    [1_640_000_000, '1.6 GB'],
+  ])('formats %i as %s', (bytes, expected) => {
+    expect(totalBytesLabel(bytes)).toBe(expected)
+  })
+
+  it('crosses to GB where fileSizeLabel would keep counting megabytes', () => {
+    // The reason both exist. A single STL never reaches a gigabyte, so the card's
+    // label is right to stop at MB; a room's whole download does, and the bill
+    // warns at exactly this figure.
+    expect(fileSizeLabel(2_100_000_000)).toBe('2100.0 MB')
+    expect(totalBytesLabel(2_100_000_000)).toBe('2.1 GB')
   })
 })

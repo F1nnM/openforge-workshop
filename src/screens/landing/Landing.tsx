@@ -48,8 +48,8 @@
  * <meta property="og:site_name" content="OpenForge Catalog & Workshop" />
  * <meta property="og:title" content="OpenForge Catalog & Workshop" />
  * <meta property="og:description" content="Search 8,700 3D-printable OpenForge
- *   dungeon tiles, keep a library of the ones you print with, and lay out a room
- *   on the workbench." />
+ *   dungeon tiles, pick the build system you print for, and lay out a room on the
+ *   workbench." />
  * <meta property="og:url" content="https://openforge.tools/" />
  * <meta name="twitter:card" content="summary_large_image" />
  * ```
@@ -92,12 +92,22 @@ import { usePrefersReducedMotion } from './useReducedMotion'
 const HEADLINE = 'Every tile in the archive, ready for your next dungeon.'
 
 const LEDE =
-  'Search the OpenForge catalog, curate a library of the tiles you actually print with, ' +
+  'Search the OpenForge catalog, pick the build system you actually print for, ' +
   'then lay out a full room on the workbench — and download exactly the STL files it needs.'
 
 /**
  * The three steps. `numeral` is spelled out rather than generated from the
  * index, because `III` is a label a reader recognises and not a count.
+ *
+ * **Step II was `Curate` / "Build your library" and row A0 replaced it**, because
+ * the library it described no longer exists — the templates plan makes a template
+ * the only placement unit, so there is nothing for a user to curate between
+ * finding a tile and laying it out. What is in that slot instead is the choice the
+ * app really does ask between those two: **which build system you print for**. It
+ * is not a placeholder for row C1's template palette — it is a real step, and a
+ * measured one: the three lock systems disagree about which file to print for
+ * 1,419 of 3,822 items (37.1%), so the answer changes the STLs the download hands
+ * over. `src/ui/lock-picker/LockToggle.tsx` is the control it names.
  */
 const STEPS = [
   {
@@ -108,9 +118,9 @@ const STEPS = [
   },
   {
     numeral: 'II',
-    stage: 'Curate',
-    title: 'Build your library',
-    body: 'Keep the tiles you actually print in one place. Your library is the palette you build rooms from, and it survives a reload.',
+    stage: 'Choose',
+    title: 'Pick your build system',
+    body: 'OpenLOCK, DragonLock or magnets — the three disagree about which file to print for more than a third of the archive. Choose once and every part the builder hands you follows it.',
   },
   {
     numeral: 'III',

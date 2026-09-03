@@ -1,7 +1,7 @@
 /**
- * Export and import the workshop as a JSON file.
+ * Export and import the workshop as a JSON file — the app's only backup path.
  *
- * ## Why this exists, and why it is on this screen
+ * ## Why this exists
  *
  * architecture-plan.md §13: **Safari evicts `localStorage` after seven days
  * without a visit.** For a tool opened between game sessions that is not an edge
@@ -11,11 +11,39 @@
  * reason; this component is the surface they were written for. Without it the
  * feature exists and no user can reach it.
  *
- * The library is its natural home: it is the screen that shows what the saved
- * state *is*, so it is where "keep a copy of this" and "put a copy back" belong.
- * Both controls are rendered whether or not the library holds anything, because
- * the visit where import matters most is precisely the one that opens on an empty
- * library after an eviction.
+ * ## Why it is here, at the foot of the builder's right-hand column
+ *
+ * It was `screens/library/LibraryTransfer.tsx`, and row **A0** deleted that
+ * screen. Deleting the route without moving this first would have removed the
+ * only way to get a room off the machine, which is why the templates plan makes
+ * the move a hard sequencing constraint (§3.4.1) rather than a tidy-up.
+ *
+ * Three homes were possible and this is the one the panels actually support:
+ *
+ *   - **`/settings` is gone** — row L1 deleted the route and put the lock
+ *     preference in the builder's work area, so there is no preferences screen to
+ *     be the natural drawer of a preferences-shaped control.
+ *   - **`PlanToolbar` is a floating plate** over the 3D stage, and row L1
+ *     measured a real collision in that band: `Place` was 100% unclickable at
+ *     1295px before the gutter was reserved. Two more controls in a horizontal
+ *     strip that tight would re-create that.
+ *   - **The bill column is what a backup is *of*.** What the JSON carries is the
+ *     room — `WorkshopState.placements`, the generated bases and the lock
+ *     preference — and this column is already everything about the room that is
+ *     not the surface: the lock notice, the parts list, the download, the
+ *     accessory slots. "Take this room away as files" and "take this room away as
+ *     a save file" are the same question one step apart, so they are one column
+ *     apart and not one screen apart.
+ *
+ * It is the column's last child and it is deliberately compact — a heading, one
+ * sentence, two controls — because `.of-builder-bill` is a fixed-height grid
+ * whose `1fr` row is the bill, and every pixel this takes is a pixel of parts
+ * list. The import report is the one thing that can grow, and it only exists
+ * after a press.
+ *
+ * Both controls render whether or not anything is placed, because the visit where
+ * import matters most is precisely the one that opens on an empty room after an
+ * eviction.
  *
  * ## Import reports; it never silently succeeds
  *
@@ -24,8 +52,8 @@
  * one it dropped. All three outcomes are surfaced:
  *
  *   - **not ours / not JSON** — the reason, in an `alert`. Nothing changed.
- *   - **imported, nothing dropped** — the new counts, in a `status`.
- *   - **imported, something dropped** — the counts *and* every discarded entry,
+ *   - **imported, nothing dropped** — the new count, in a `status`.
+ *   - **imported, something dropped** — the count *and* every discarded entry,
  *     listed. A recovery that quietly returns a room one tile short is
  *     indistinguishable, to the person who built it, from having mis-remembered
  *     placing it.
@@ -40,15 +68,17 @@ import { useId, useState } from 'react'
 import { exportWorkshop, importWorkshop, useWorkshopStore } from '@/store'
 import { Button, Eyebrow, buttonProps } from '@/ui/primitives'
 
+import './panels.css'
+
 /** What the last import did. `null` until the user runs one. */
 type ImportReport =
-  | { readonly ok: true; readonly tiles: number; readonly placements: number; readonly dropped: readonly string[] }
+  | { readonly ok: true; readonly placements: number; readonly dropped: readonly string[] }
   | { readonly ok: false; readonly reason: string }
 
 /** Discarded entries listed in full before the tail is summarised. */
 const DROPPED_SHOWN = 6
 
-export function LibraryTransfer() {
+export function BackupPanel() {
   const headingId = useId()
   const [report, setReport] = useState<ImportReport | null>(null)
 
@@ -84,29 +114,32 @@ export function LibraryTransfer() {
 
     // Counted from the store rather than from the file: what the user needs
     // confirmed is what they now have, and salvage means the two can differ.
+    //
+    // One count, not two. It read the saved-tile count beside it until row A0
+    // deleted the library the count came from; the room is what the envelope is
+    // for and it is now the whole of what it can report.
     const state = useWorkshopStore.getState()
     setReport({
       ok: true,
-      tiles: Object.keys(state.library).length,
       placements: Object.keys(state.placements).length,
       dropped: result.dropped,
     })
   }
 
   return (
-    <section className="of-lib-transfer" aria-labelledby={headingId}>
-      <h2 className="of-lib-transfer-heading" id={headingId}>
+    <section className="of-backup" aria-labelledby={headingId}>
+      <h3 className="of-backup-heading" id={headingId}>
         <Eyebrow>Backup</Eyebrow>
-      </h2>
+      </h3>
 
-      <p className="of-lib-transfer-note">
-        Your library and your build live in this browser, and browsers do clear
-        that storage — Safari after a week without a visit. Keep a JSON copy
-        between sessions. Importing <strong>replaces</strong> what is here.
+      <p className="of-backup-note">
+        Your build lives in this browser, and browsers do clear that storage — Safari after a week
+        without a visit. Keep a JSON copy between sessions. Importing <strong>replaces</strong> what
+        is here.
       </p>
 
-      <div className="of-lib-transfer-actions">
-        <Button tone="secondary" onClick={onExport}>
+      <div className="of-backup-actions">
+        <Button size="sm" tone="secondary" onClick={onExport}>
           Export JSON
         </Button>
 
@@ -119,7 +152,7 @@ export function LibraryTransfer() {
           nested, so the CSS can put the focus ring on the label the user can
           actually see.
         */}
-        <label {...buttonProps({ tone: 'secondary' })}>
+        <label {...buttonProps({ tone: 'secondary', size: 'sm' })}>
           <span>Import JSON</span>
           <input
             className="of-sr-only"
@@ -142,7 +175,7 @@ export function LibraryTransfer() {
 function ImportOutcome({ report }: { report: ImportReport }) {
   if (!report.ok) {
     return (
-      <p className="of-lib-transfer-report" data-tone="error" role="alert">
+      <p className="of-backup-report" data-tone="error" role="alert">
         {report.reason} Nothing was changed.
       </p>
     )
@@ -152,19 +185,18 @@ function ImportOutcome({ report }: { report: ImportReport }) {
   const hidden = report.dropped.length - shown.length
 
   return (
-    <div className="of-lib-transfer-report" data-tone={report.dropped.length > 0 ? 'warn' : 'ok'} role="status">
-      <p className="of-lib-transfer-report-line">
-        Imported {report.tiles} {report.tiles === 1 ? 'tile' : 'tiles'} and {report.placements}{' '}
-        {report.placements === 1 ? 'placement' : 'placements'}.
+    <div className="of-backup-report" data-tone={report.dropped.length > 0 ? 'warn' : 'ok'} role="status">
+      <p className="of-backup-report-line">
+        Imported {report.placements} {report.placements === 1 ? 'placement' : 'placements'}.
       </p>
 
       {report.dropped.length > 0 ? (
         <>
-          <p className="of-lib-transfer-report-line">
-            {report.dropped.length} {report.dropped.length === 1 ? 'entry' : 'entries'} could not be read and{' '}
-            {report.dropped.length === 1 ? 'was' : 'were'} discarded:
+          <p className="of-backup-report-line">
+            {report.dropped.length} {report.dropped.length === 1 ? 'entry' : 'entries'} could not be
+            read and {report.dropped.length === 1 ? 'was' : 'were'} discarded:
           </p>
-          <ul className="of-lib-dropped">
+          <ul className="of-backup-dropped">
             {shown.map((entry) => (
               <li key={entry}>{entry}</li>
             ))}

@@ -14,7 +14,7 @@
  * | root frame | *landed*              | PR 12 — `src/ui/shell/AppFrame.tsx`    |
  * | `/`        | `LandingPlaceholder`  | PR 16 — `src/screens/landing/`         |
  * | `/catalog` | *landed*              | PR 13 — `src/screens/catalog/` (+ PR 15's drawer) |
- * | `/library` | *landed*              | PR 14 — `src/screens/library/`         |
+ * | `/library` | *landed, then deleted* | PR 14 — `src/screens/library/`, removed by row A0 |
  * | `/builder` | *landed*              | PR 18 — `src/screens/builder/`         |
  *
  * Each of those changes exactly one `component:` reference in `routeTree.tsx`.
