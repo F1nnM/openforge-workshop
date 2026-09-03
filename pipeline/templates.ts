@@ -72,8 +72,8 @@
  *
  * | | raw | brotli | of budget |
  * | --- | ---: | ---: | ---: |
- * | `catalog.json` as merged | 5,858,260 B | 365,603 B | 71.4% |
- * | with a `templates` key | 5,897,727 B | 366,863 B | 71.7% |
+ * | `catalog.json` as merged | 5,907,360 B | 366,768 B | 71.6% |
+ * | with a `templates` key | 5,946,827 B | 368,028 B | 71.9% |
  * | **the 40 would add** | **+39,467 B** | **+1,260 B** | **+0.25 pt** |
  * | the same 40 alone | 39,454 B | 1,452 B | — |
  *

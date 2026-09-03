@@ -227,9 +227,9 @@ const EMPTY: readonly string[] = []
  * Every namespace prefix each tag contributes to the texture facet.
  *
  * `texture|towne|stucco` yields `towne` and `towne|stucco`, so one map lookup
- * answers a filter at either depth. Computed once over the 915-entry intern
- * table rather than per record: the corpus holds 84,023 tag references, so
- * re-splitting per reference would be 92× the work for the same answer.
+ * answers a filter at either depth. Computed once over the 930-entry intern
+ * table rather than per record: the corpus holds 101,427 tag references, so
+ * re-splitting per reference would be 109× the work for the same answer.
  *
  * Non-texture tags map to `undefined`, which the caller reads as "contributes
  * nothing" — a sparse array indexed by `TagId` beats a `Map` here because the

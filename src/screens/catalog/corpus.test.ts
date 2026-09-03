@@ -391,7 +391,10 @@ describeCorpus('a card can be told from its neighbour', () => {
     expect(lengths[Math.floor(lengths.length / 2)]).toBe(1)
     expect(lengths[lengths.length - 1]).toBe(4)
     // 79 labels over 3,822 cards, which is what makes the row readable rather
-    // than a dump of the 915-value tag vocabulary.
+    // than a dump of the 930-value tag vocabulary. Still 79 after row B1, and
+    // deliberately: `role|` and `form|` are in `CARD_CONTROLLED_ROOTS`, because
+    // a derived predicate is not vocabulary a card should advertise. Left
+    // eligible they would have taken the empty-row count below from 1,044 to 78.
     expect(new Set(rows.flat()).size).toBe(79)
   })
 

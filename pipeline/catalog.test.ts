@@ -44,6 +44,8 @@ import { CONNECTION_POSITIONS, classifyLayer, connectionSystems, connectionsByPo
 import type { FixtureRow } from './fixtures'
 import { fixturesDir, liveRows, loadFixtureRows } from './fixtures'
 import { TAG_ALIASES, normaliseTags } from './normalise'
+import { FORMS, ROLES } from './role'
+import { hasTagPrefix, hasTagSegment } from './tags'
 import { emptyManifest } from './ordinals'
 import { CURVED_INTERFACE_TAG, radiusIsFeature } from './footprint'
 import {
@@ -177,18 +179,66 @@ describeCorpus(title, () => {
     expect(wrong.map((record) => record.id)).toEqual([])
   })
 
-  it('interns every tag and de-interns back to the normalised list', () => {
+  it('interns every tag and de-interns back to the normalised list plus the two derived axes', () => {
     // `normaliseTags` is applied on the way in, so the round trip is against the
     // canonical list rather than the raw fixture one. Comparing to the raw list
     // was right until tag drift was collapsed, and would now report the two
     // `foundations` tiles as corruption.
+    //
+    // **Row B1 appended two derived tags rather than rewriting any**, and this
+    // assertion is where that is pinned exactly: the scanned tags in their
+    // original order, then `role|<x>`, then `form|<x>`, and nothing else. It is
+    // the guard on the one thing the position of the role step inside
+    // `buildCatalog` could get wrong — a derived tag reaching a derivation that
+    // reads the tag list. If it did, this comparison would drift from
+    // `normaliseTags(raw)` on the left and no other test would notice.
     const bySource = new Map(live.map((row) => [row.file_metadata.full_name, row]))
-    const wrong = result.file.records.filter(
-      (record) =>
-        record.tags.map((id) => result.file.tags[id]).join('\u0000') !==
-        normaliseTags(bySource.get(record.id)?.tags ?? []).join('\u0000'),
-    )
+    const wrong = result.file.records.filter((record) => {
+      const emitted = record.tags.map((id) => result.file.tags[id] ?? '')
+      const scanned = normaliseTags(bySource.get(record.id)?.tags ?? [])
+      const derived = emitted.slice(scanned.length)
+      return (
+        emitted.slice(0, scanned.length).join('\u0000') !== scanned.join('\u0000') ||
+        derived.length !== 2 ||
+        !(derived[0] ?? '').startsWith('role|') ||
+        !(derived[1] ?? '').startsWith('form|')
+      )
+    })
     expect(wrong.map((record) => record.id)).toEqual([])
+  })
+
+  it('reads the tag tree the same way whether the match is a prefix or a segment', () => {
+    // `pipeline/role.ts` uses `hasTagSegment` where `classifyLayer` and
+    // `hasCurveMarker` use `hasTagPrefix`, and this is the claim that makes both
+    // choices safe: over the whole corpus, at every path either function is
+    // called with, **the two return the same answer on all 8,702 records**. So
+    // the segment match is not a bug fix and the prefix match is not a latent
+    // bug — but the day a `shape|wallpaper` or a `partition|` enters the scan,
+    // this test names which functions have to be looked at.
+    const paths = [
+      'part',
+      'scatter',
+      'decoration',
+      'interface',
+      'shape',
+      'shape|base',
+      'shape|wall',
+      'shape|floor',
+      'shape|column',
+      'shape|riser',
+      'shape|stairs',
+      'shape|corner',
+      'shape|curved',
+      'shape|hex',
+      'connection|openforge',
+    ]
+    const disagreeing = result.file.records.flatMap((record) => {
+      const tags = record.tags.map((id) => result.file.tags[id] ?? '')
+      return paths
+        .filter((path) => hasTagSegment(tags, path) !== hasTagPrefix(tags, path))
+        .map((path) => `${record.id} @ ${path}`)
+    })
+    expect(disagreeing).toEqual([])
   })
 
   it('normalises exactly the records the alias table names, and no others', () => {
@@ -1001,6 +1051,22 @@ describeCorpus(title, () => {
   })
 
   /* ------------------------------------------------------------- properties */
+
+  it('reports the two derived axes as a closed, total tally', () => {
+    // The emitted distribution is asserted in `role.test.ts`, off the tags. This
+    // is the *reported* one, and it exists so the build's own summary cannot go
+    // quiet: a ninth role key means the ladder produced `unknown`, and
+    // `roleConfidence.none` above 0 means it ran out of rungs. Both are seeded,
+    // so either reads as a number rather than as an absent key.
+    expect(Object.keys(result.stats.roles).sort()).toEqual([...ROLES].sort())
+    expect(Object.keys(result.stats.forms).sort()).toEqual([...FORMS].sort())
+    expect(Object.values(result.stats.roles).reduce((a, b) => a + b, 0)).toBe(8702)
+    expect(Object.values(result.stats.forms).reduce((a, b) => a + b, 0)).toBe(8702)
+    expect(result.stats.roleConfidence).toEqual({ high: 7413, medium: 1246, low: 43, none: 0 })
+    // Two derived references per record, on top of the 84,023 the scan produced.
+    expect(result.stats.tags).toBe(930)
+    expect(result.stats.tagReferences).toBe(101_427)
+  })
 
   it('classifies every tile into exactly one layer, on disjoint signals', () => {
     // The three positive signals must stay mutually exclusive. If they ever

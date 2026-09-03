@@ -314,7 +314,7 @@ export interface RecipeIndex {
  * Build the recipe index over a parsed catalog.
  *
  * `composition` is a parameter because C2's `compositionIndexFor` has very
- * likely already built one — a 339,756-byte inverted index and 10.7 ms of work —
+ * likely already built one — a 409,432-byte inverted index and 10.7 ms of work —
  * and a second copy would buy nothing.
  */
 export function createRecipeIndex(

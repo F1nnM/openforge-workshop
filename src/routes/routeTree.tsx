@@ -203,7 +203,7 @@
  *     gz / -37,695 br** — the largest number in this file — because by then
  *     nothing eager imports the barrel any more. It is still declined: it would
  *     put a round trip in front of an empty page **and** in front of the
- *     5,860,932 B (365,640 B brotli) `catalog.json` that the header requests on
+ *     5,907,360 B (366,768 B brotli at the payload epoch) `catalog.json` that the header requests on
  *     mount and the grid cannot render without.
  *
  * That 44,289 B is not lost, it is *conditional on the fetch being started

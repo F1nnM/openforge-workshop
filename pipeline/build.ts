@@ -25,6 +25,14 @@
  * invariant rather than shipping an index whose cards would hoist a field that
  * is not constant.
  *
+ * Row B1 added one step *inside* the pipeline rather than beside it, and the
+ * position is the whole of what is interesting about it. `role|<x>` and
+ * `form|<x>` are emitted as **ordinary interned tags**, so the ladder in
+ * `pipeline/role.ts` has to run before the intern table is built — which makes
+ * it the one derivation whose output another derivation (the table's
+ * frequency ordering) depends on. Everything else still reads the row's own
+ * tags, so the augmented list reaches `record.tags` and nothing else.
+ *
  * Row C1 added the same shape of thing for compositions, and for the same
  * reason: `src/composition/` resolves `constrain` in the browser and emits
  * nothing, so the one property it cannot check for itself is checked here.
@@ -69,6 +77,8 @@ import { displayName } from './naming'
 import { normaliseTag, normaliseTags } from './normalise'
 import type { OrdinalManifest } from './ordinals'
 import { assignOrdinals } from './ordinals'
+import type { Confidence } from './role'
+import { FORMS, ROLES, inferRole, roleTags } from './role'
 import { buildTagTable } from './tags'
 import { ASSET_BASES, PIPELINE_VERSION, buildTimestamp } from './version'
 
@@ -111,6 +121,34 @@ export interface BuildStats {
   families: number
   footprints: Record<string, number>
   layers: Record<string, number>
+  /**
+   * The derived slot kind — **wall 5,381 · floor 2,162 · riser 319 · insert 285
+   * · column 223 · stair 206 · roof 100 · decor 26**, summing to all 8,702.
+   *
+   * Seeded from {@link ROLES}, so a role that empties out reads as `0` rather
+   * than vanishing, and a ninth key means the ladder produced `unknown` — which
+   * is 0 of 8,702 today and is the one outcome that would silently change what
+   * every generated template admits. `pipeline/catalog.test.ts` asserts the
+   * distribution exactly and asserts the key set is exactly these eight.
+   */
+  roles: Record<string, number>
+  /**
+   * The derived slot geometry — **straight 5,707 · curve 1,989 · corner 720 ·
+   * diagonal 163 · hex 56 · internal_corner 39 · octagon 28**.
+   */
+  forms: Record<string, number>
+  /**
+   * Which rung the role came from, folded to its trust level — **high 7,413
+   * (85.2%) · medium 1,246 · low 43 · none 0**.
+   *
+   * Reported rather than asserted as a floor, because the two directions read
+   * differently. `none` rising above 0 is a classification failure. `low` rising
+   * is a corpus that has grown a shape the ladder cannot read, which is
+   * information rather than an error — the 43 today are 40 bare thick-wall
+   * bases, 2 yawning-portal bases and 1 facade wall, all named in
+   * `pipeline/role.ts`'s residual table.
+   */
+  roleConfidence: Record<string, number>
   withConfig: number
   distinctNames: number
   newOrdinals: number
@@ -201,16 +239,43 @@ export function buildCatalog(options: BuildOptions): BuildResult {
   const { designOf, designs } = buildDesignIndex(
     live.map((row) => ({ id: row.file_metadata.full_name, tags: row.tags })),
   )
-  const { table, idOf } = buildTagTable(live.map((row) => row.tags))
-
-  const records = live.map((row) => {
+  /**
+   * Row B1's one new step, and it has to sit **here** rather than inside the
+   * record map: `role|x` and `form|x` are emitted as ordinary interned tags, so
+   * the ladder has to run before {@link buildTagTable} sees a tag list.
+   *
+   * Everything else still derives from the row's **own** tags, not from these.
+   * The design index, `kindBuckets`, `textureRoot`, `displayName` and the
+   * footprint all read `row.tags`; only `record.tags` carries the augmented
+   * list. That asymmetry is deliberate — a derived tag that fed a second
+   * derivation would make the pipeline's order of operations load-bearing in a
+   * way no test could see — and `catalog.test.ts` pins it by de-interning every
+   * record and comparing against `[...normaliseTags(raw), role, form]` exactly.
+   *
+   * `pipeline/role.ts` carries the taxonomy, the measurements behind every rung
+   * and the price of the encoding.
+   */
+  const derived = live.map((row) => {
     const id = row.file_metadata.full_name
+    const foot = resolveFootprint(row.tags)
+    const build = buildSystem(row.tags)
+    const inferred = inferRole({
+      tags: row.tags,
+      foot,
+      family: dirname(id),
+      file: basename(id),
+      ...(build === undefined ? {} : { build }),
+    })
+    return { row, id, foot, build, inferred, tags: [...row.tags, ...roleTags(inferred)] }
+  })
+
+  const { table, idOf } = buildTagTable(derived.map((entry) => entry.tags))
+
+  const records = derived.map(({ row, id, foot, build, tags }) => {
     const ord = ordinalOf.get(id)
     const design = designOf.get(id)
     if (ord === undefined || design === undefined) throw new Error(`no ordinal or design for ${id}`)
 
-    const foot = resolveFootprint(row.tags)
-    const build = buildSystem(row.tags)
     const texture = textureRoot(row.tags)
     const rotStep = rotationStep(row.tags)
     const sizeCode = openlockSizeCode(row.tags)
@@ -235,7 +300,7 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       ...(build === undefined ? {} : { build }),
       layer: classifyLayer(row.tags),
       ...(texture === undefined ? {} : { texture }),
-      tags: row.tags.map((tag) => {
+      tags: tags.map((tag) => {
         const tagId = idOf.get(tag)
         if (tagId === undefined) throw new Error(`tag ${tag} missing from the intern table`)
         return tagId
@@ -284,6 +349,18 @@ export function buildCatalog(options: BuildOptions): BuildResult {
         FOOTPRINT_ORDER,
       ),
       layers: tally(records.map((record) => record.layer)),
+      roles: tally(
+        derived.map((entry) => entry.inferred.role),
+        ROLES,
+      ),
+      forms: tally(
+        derived.map((entry) => entry.inferred.form),
+        FORMS,
+      ),
+      roleConfidence: tally(
+        derived.map((entry) => entry.inferred.confidence),
+        CONFIDENCE_ORDER,
+      ),
       withConfig: records.filter((record) => record.config !== undefined).length,
       withThumb: records.filter((record) => record.thumb).length,
       distinctNames: new Set(records.map((record) => record.name)).size,
@@ -441,6 +518,16 @@ const FOOTPRINT_ORDER: readonly Footprint['shape'][] = [
   'tri',
   'none',
 ]
+
+/**
+ * The four trust levels, seeded for the same reason {@link FOOTPRINT_ORDER} is.
+ *
+ * `none` is deliberately in the list even though it is `0` on every corpus this
+ * has run against: it is the key that means *the ladder ran out of rungs*, and a
+ * seeded `0` is the difference between "nothing failed to classify" and "nobody
+ * looked".
+ */
+const CONFIDENCE_ORDER: readonly Confidence[] = ['high', 'medium', 'low', 'none']
 
 /**
  * Count occurrences, seeding the keys from `order` where one is given.

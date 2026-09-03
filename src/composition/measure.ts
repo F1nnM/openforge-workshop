@@ -36,8 +36,9 @@
  *
  *   - **Brotli eats these sets alive.** The plan feared 9.4 MB; the fat encoding
  *     is indeed **15,107,263 B raw**, but it is **37,542 B** compressed, and the
- *     index this row built measures 365,603 B against a 512,000 B budget (P3's
- *     `thumb` flag took it up 200 B), so there are 146,397 B free and the
+ *     index this row built measures 366,768 B against a 512,000 B budget (P3's
+ *     `thumb` flag took it up 200 B and B1's role and form axes 1,165 B more),
+ *     so there are 145,232 B free and the
  *     fattest encoding on the table would fit
  *     three times over. **Payload was never the binding constraint here.** Saying
  *     otherwise would have been a number chosen because it argued for the answer.
@@ -48,7 +49,7 @@
  *     reading, 513 B — is cheap and stale in a different way: it is not the set
  *     the user is owed, since it ignores the parent the slot is attached to.
  *
- * So: **0 bytes emitted**, one 339,756 B inverted index built at run time
+ * So: **0 bytes emitted**, one 409,432 B inverted index built at run time
  * (`candidates.ts`), and the record shape untouched — `SCHEMA_VERSION` stays 3
  * and `PIPELINE_VERSION` stays 1, for the reason `pipeline/version.ts` records.
  *
@@ -124,7 +125,7 @@ export interface CompositionReport {
   readonly unsatisfiable: readonly UnsatisfiableSlot[]
   /** Inherited tags that empty a slot on their own, by tag. */
   readonly deadEndBlame: Readonly<Record<string, number>>
-  /** The run-time cost of the inverted index, exact. 339,756 B — 336,092 + 3,664. */
+  /** The run-time cost of the inverted index, exact. 409,432 B — 405,708 + 3,724. */
   readonly postingsBytes: number
 }
 

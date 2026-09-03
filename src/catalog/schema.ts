@@ -216,9 +216,12 @@ export type DesignId = z.infer<typeof DesignId>
 /**
  * An index into `CatalogFile.tags`.
  *
- * The live corpus holds **84,023 tag references over 915 distinct tag strings**
- * (9.7 tags per tile), so the intern table replaces ~92 repetitions of each
- * string with one. Branding keeps a tag id from being passed where a manifest
+ * The live corpus holds **101,427 tag references over 930 distinct tag strings**
+ * (11.7 tags per tile), so the intern table replaces ~109 repetitions of each
+ * string with one. 17,404 of those references and 15 of those strings are row
+ * B1's derived `role|<x>` and `form|<x>` axes — two per record, emitted as
+ * ordinary tags so a template slot can predicate on them with no new grammar;
+ * the scanned corpus itself is 84,023 references over 915 strings. Branding keeps a tag id from being passed where a manifest
  * ordinal is expected — both are small non-negative integers over the same
  * records, and confusing them would be silent.
  */

@@ -46,13 +46,39 @@ export function hasTagPrefix(tags: readonly string[], prefix: string): boolean {
   return tags.some((tag) => tag.startsWith(prefix))
 }
 
+/**
+ * Whether any tag **is** `path`, or is a descendant of it at a segment boundary.
+ *
+ * The distinction from {@link hasTagPrefix} is the boundary, and it is what a
+ * ladder over the shape vocabulary needs: `hasTagPrefix(tags, 'part')` also
+ * matches a hypothetical `partition|`, and `hasTagPrefix(tags, 'shape|base')`
+ * also matches `shape|baseboard`. Neither string exists in the corpus today —
+ * the two functions return the same answer on all 8,702 records for every prefix
+ * either is called with, and `derive.test.ts` pins that — so this is not a bug
+ * fix. It is the difference between a rule that is right and a rule that is
+ * right by luck, and `pipeline/role.ts` reads the tag tree at eleven prefixes
+ * across eight namespaces, which is more luck than one derivation should need.
+ *
+ * `hasTagPrefix` stays as it is: `classifyLayer` and `hasCurveMarker` were both
+ * measured against it, and re-pointing them would be a derivation change for no
+ * observable difference.
+ */
+export function hasTagSegment(tags: readonly string[], path: string): boolean {
+  const head = `${path}|`
+  return tags.some((tag) => tag === path || tag.startsWith(head))
+}
+
 /* ------------------------------------------------------------------ interning */
 
 /**
  * The tag intern table.
  *
- * 84,023 tag references over 915 distinct strings — 92 repetitions of each
- * string on average. Ids are assigned **by descending frequency**, so the tags
+ * 101,427 tag references over 930 distinct strings — 109 repetitions of each
+ * string on average. 84,023 references over 915 strings come off the scan; the
+ * remaining 17,404 over 15 strings are row B1's derived `role|<x>` and
+ * `form|<x>` axes, which `build.ts` appends to each row's list **before** this
+ * function sees it, precisely so that they are ordered by frequency along with
+ * everything else. Ids are assigned **by descending frequency**, so the tags
  * that appear tens of thousands of times get one- and two-digit ids: the
  * reference arrays are the single largest repeated structure in the payload and
  * their digit count is most of their cost.
