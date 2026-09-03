@@ -33,7 +33,7 @@ import { TileId } from '@/catalog'
 import { GENERATED_ID_PREFIX, generatedPlacementKey } from '@/generator/placement/scene'
 
 import { A_RECIPE, aBinaryStl, aGeneratedBase } from './fixture'
-import { STORE_VERSION, migrateWorkshopState } from './migrations'
+import { STORE_VERSION, readPersistedState } from './migrations'
 import { clearGeneratedMeshes, holdGeneratedMesh, meshFactsOf, useGeneratedMeshStore } from './meshes'
 import { STORAGE_KEY, clearPersistedWorkshopState } from './storage'
 import { exportWorkshop, importWorkshop } from './transfer'
@@ -203,7 +203,7 @@ describe('what persists, and what does not', () => {
     resetWorkshop()
     clearGeneratedMeshes()
     localStorage.setItem(STORAGE_KEY, saved ?? '')
-    const recovered = migrateWorkshopState(storedState(), STORE_VERSION)
+    const recovered = readPersistedState(storedState(), STORE_VERSION)
 
     expect(Object.values(recovered.state.generated)).toHaveLength(1)
     expect(Object.values(recovered.state.generated)[0]?.recipe.entry).toBe('bases-square.scad')
@@ -233,7 +233,7 @@ describe('what persists, and what does not', () => {
     // There is no partial reading of a recipe — a missing `-D` is a different
     // base — so the entry goes and the report says which.
     const good = aGeneratedBase({ x: 0, z: 0 })
-    const recovered = migrateWorkshopState(
+    const recovered = readPersistedState(
       {
         generated: {
           '9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f': good,

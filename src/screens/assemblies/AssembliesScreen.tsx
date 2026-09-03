@@ -69,7 +69,7 @@
  */
 import { useMemo, useState } from 'react'
 
-import type { CatalogFile, TileId } from '@/catalog'
+import type { CatalogFile, DesignId, TileId } from '@/catalog'
 import type { MaterialId } from '@/materials'
 import { useCatalogIndex } from '@/screens/catalog'
 import { SlotFills, compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
@@ -305,7 +305,7 @@ function Recipe({
             />
           ))}
 
-          {state.complete ? <Finished tiles={state.tiles} /> : null}
+          {state.complete ? <Finished catalog={catalog} tiles={state.tiles} /> : null}
         </>
       )}
     </div>
@@ -497,15 +497,42 @@ function cardLabel(option: AssemblyOption, reason: string, narrowing: string): s
  * and placements, the bill of tiles is built from placements, and row G5 owns the
  * selection channel. A recipe is a set of files to print, which is exactly what
  * the library is for.
+ *
+ * **The two counts can differ, and both are shown.** A recipe names *files* —
+ * that is what a composition resolves to and what the list below prints — while
+ * row V1 made the library a set of *items*. Two parts of one recipe can be two
+ * prints of the same design, so "5 files to print" can be four items saved, and
+ * a button that said "add all" while quietly saving fewer keys than the list has
+ * rows would be lying about what it did. The saved count is therefore stated
+ * rather than assumed, and it is the same collapse the whole V row exists for.
+ *
+ * `catalog` may be `undefined` — the screen renders the template list before the
+ * 5.6 MB index lands — but not here: a recipe cannot *complete* without the
+ * index it was resolved against. The guard is a type obligation rather than a
+ * reachable state, and it disables the button instead of saving nothing, because
+ * a press that silently did nothing is the one outcome with no honest label.
  */
-function Finished({ tiles }: { tiles: readonly TileId[] }) {
+function Finished({ catalog, tiles }: { catalog: CatalogFile | undefined; tiles: readonly TileId[] }) {
   const [added, setAdded] = useState(false)
+
+  // One pass over the index per completed recipe, keyed on the two inputs, so
+  // pressing the button twice does not re-derive and neither does a re-render.
+  const designs = useMemo(() => {
+    if (catalog === undefined) return null
+    const wanted = new Set<string>(tiles)
+    const out = new Set<DesignId>()
+    for (const record of catalog.records) if (wanted.has(record.id)) out.add(record.design)
+    return [...out]
+  }, [catalog, tiles])
 
   return (
     <div className="of-asm-done">
       <Chip>Complete</Chip>
       <p className="of-asm-note">
-        {`${String(tiles.length)} ${tiles.length === 1 ? 'file' : 'files'} to print.`}
+        {`${String(tiles.length)} ${tiles.length === 1 ? 'file' : 'files'} to print`}
+        {designs === null || designs.length === tiles.length
+          ? '.'
+          : `, ${String(designs.length)} ${designs.length === 1 ? 'item' : 'items'} to save.`}
       </p>
       <ul className="of-asm-bill">
         {tiles.map((tile) => (
@@ -513,8 +540,10 @@ function Finished({ tiles }: { tiles: readonly TileId[] }) {
         ))}
       </ul>
       <Button
+        disabled={designs === null}
         onClick={() => {
-          for (const tile of tiles) addToLibrary(tile)
+          if (designs === null) return
+          for (const design of designs) addToLibrary(design)
           setAdded(true)
         }}
         tone="primary"

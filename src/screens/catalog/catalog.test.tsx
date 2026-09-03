@@ -31,7 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createWorkshopRouter } from '@/routes'
 import type { CatalogSearch } from '@/search'
-import { TileId } from '@/catalog'
+import { DesignId } from '@/catalog'
 import { clearPersistedWorkshopState, resetWorkshop, useWorkshopStore } from '@/store'
 import { CatalogStatsProvider } from '@/ui/shell'
 import { resetCatalogIndexCache } from '@/ui/shell'
@@ -157,8 +157,18 @@ function facet(groupName: string, label: string): HTMLInputElement {
  * Parsed rather than cast: the store keys on a branded id, and a cast would let a
  * typo in the fixture pass here and fail as a silent lookup miss.
  */
-function fixtureId(ordinal: number): TileId {
-  return TileId.parse(FIXTURE_CATALOG.records[ordinal]?.id)
+/**
+ * The design a fixture record belongs to — what the library is keyed by since
+ * row V1.
+ *
+ * The card's toggle saves this and not `fixtureId`, and that is the bug the row
+ * fixed: the old call site saved `selectVariant(item, { bottom: lock })`, which
+ * names a different file from the one the card *renders* on 1,598 of the 3,822
+ * live aggregates (row V5's measurement), so the library and the palette showed
+ * the integrated-base variant of an item whose card showed the topper.
+ */
+function fixtureDesign(ordinal: number): DesignId {
+  return DesignId.parse(FIXTURE_CATALOG.records[ordinal]?.design)
 }
 
 /** The live count rendered beside a facet's label. */
@@ -733,34 +743,52 @@ describe('the detail drawer', () => {
 /* -------------------------------------------------------------- library toggle */
 
 describe('the library toggle', () => {
-  it('writes the tile to the store and names it', async () => {
+  it('writes the item to the store and names it', async () => {
     await renderCatalog('/catalog?kinds=base')
 
     const toggle = screen.getByRole('button', { name: `Add to library ${FIXTURE_NAMES[5]}` })
     fireEvent.click(toggle)
 
-    const id = fixtureId(5)
+    const design = fixtureDesign(5)
     await waitFor(() => {
-      expect(useWorkshopStore.getState().library[id]).toBe(true)
+      expect(useWorkshopStore.getState().library[design]).toBe(true)
     })
+    // And not a file, which is what the press used to store.
+    expect(Object.keys(useWorkshopStore.getState().library)).toEqual([design])
     expect(
       screen.getByRole('button', { name: `In library ${FIXTURE_NAMES[5]}` }),
     ).toBeInTheDocument()
   })
 
-  it('removes the tile on a second press', async () => {
+  it('removes the item on a second press', async () => {
     await renderCatalog('/catalog?kinds=base')
 
-    const id = fixtureId(5)
+    const design = fixtureDesign(5)
     fireEvent.click(screen.getByRole('button', { name: `Add to library ${FIXTURE_NAMES[5]}` }))
     await waitFor(() => {
-      expect(useWorkshopStore.getState().library[id]).toBe(true)
+      expect(useWorkshopStore.getState().library[design]).toBe(true)
     })
 
     fireEvent.click(screen.getByRole('button', { name: `In library ${FIXTURE_NAMES[5]}` }))
     await waitFor(() => {
-      expect(useWorkshopStore.getState().library[id]).toBeUndefined()
+      expect(useWorkshopStore.getState().library[design]).toBeUndefined()
     })
+  })
+
+  it('saves one entry for a card that stands for two files', async () => {
+    // The fixture's ord 1 and ord 6 are one design and therefore one card — see
+    // the module docblock. Under the old file key, pressing Add here stored
+    // whichever of the two `selectVariant` preferred, so the same item could be
+    // stored twice by changing the lock and pressing again. There is no longer a
+    // press that can do it.
+    await renderCatalog('/catalog')
+
+    fireEvent.click(screen.getByRole('button', { name: `Add to library ${FIXTURE_NAMES[1]}` }))
+    await waitFor(() => {
+      expect(Object.keys(useWorkshopStore.getState().library)).toHaveLength(1)
+    })
+    expect(useWorkshopStore.getState().library[fixtureDesign(1)]).toBe(true)
+    expect(fixtureDesign(6)).toBe(fixtureDesign(1))
   })
 })
 

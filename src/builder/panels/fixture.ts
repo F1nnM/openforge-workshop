@@ -70,6 +70,26 @@ export const FIXTURE_IDS = {
   huge: 'tiles/mines/floors/floor/openforge/mine#floor.4x4.openforge.stl',
 } as const
 
+/**
+ * Every design the tests name, keyed the same way as {@link FIXTURE_IDS}.
+ *
+ * Row V1 made the library and the selection channel design-keyed and row V3 made
+ * a palette row an item, so a test that files a tile or arms one now spells a
+ * design rather than a path. Nine records, nine designs, and the mapping is
+ * one-to-one **except** for {@link MIXED_INTEGRAL}, which joins `floor2`'s.
+ */
+export const FIXTURE_DESIGNS = {
+  floor1: 'd-floor-1',
+  floor2: 'd-floor-2',
+  base2: 'd-base-2',
+  wallNoBase: 'd-wall-zz',
+  arc: 'd-arc',
+  slab: 'd-slab',
+  twin: 'd-floor-twin',
+  big: 'd-big',
+  huge: 'd-huge',
+} as const
+
 /** The display names, so an assertion can name a row without repeating a string. */
 export const FIXTURE_NAMES = {
   floor1: 'Dungeon Stone Floor 1x1',
@@ -290,4 +310,64 @@ export const FIXTURE_CATALOG = {
 /** The fixture, through the real parse. */
 export function fixtureCatalogFile(): CatalogFile {
   return CatalogFileSchema.parse(FIXTURE_CATALOG)
+}
+
+/* -------------------------------------------------- the two-sided item (V3) */
+
+/**
+ * A second variant of `FLOOR_2X2`'s design: the same tile, printed as one part.
+ *
+ * **The nine records above cannot express the bug row V3 fixes.** Every one of
+ * them is its own design, so `TileAggregate.preview` and `selectVariant` can only
+ * ever name the same file, and a palette that showed the wrong one would still
+ * pass. The live corpus has **931 items (24.4%)** carrying both an `integral` and
+ * a `topper`, and on **all 931** those two functions disagree — that is the whole
+ * of what the owner saw as *"a tile with an integrated base"* in the sidebar.
+ *
+ * So this record joins `d-floor-2`, making it the corpus's `both` class:
+ *
+ *   - `preview` is the **topper** (`FIXTURE_IDS.floor2`), by row V5's rule — a
+ *     sprite-carrying topper first;
+ *   - `selectVariant({ bottom: 'openlock' })` is **this** record, by §5.2's rule
+ *     — prefer one part over two.
+ *
+ * Every hoisted facet is copied from `floor2` deliberately rather than left to
+ * drift: `pipeline/aggregate.ts` fails the build when an aggregate holds two
+ * names, footprints, textures, size codes, builds or kind lists, and a fixture
+ * that broke A1's invariant would be testing an item the importer cannot emit.
+ * What differs is exactly the connection axis and its consequences — `layer`,
+ * `conn`, `blob`, `bytes`, `file`, `family`, `id`, `ord`.
+ *
+ * It is a **separate** export rather than a tenth entry in `FIXTURE_CATALOG`,
+ * because that object is shared with `generated.test.tsx`, `builder.test.tsx` and
+ * the canvas suites, and a tenth record would change bill totals, search counts
+ * and the starter set in three files that are not asking about aggregation.
+ */
+export const MIXED_INTEGRAL = {
+  id: 'tiles/dungeon_stone/floors/floor/openlock/dungeon_stone#floor.2x2.openlock.stl',
+  ord: 9,
+  blob: blob(9),
+  file: 'dungeon_stone#floor.2x2.openlock.stl',
+  bytes: 9_000_000,
+  sprite: true,
+  thumb: false,
+  family: 'tiles/dungeon_stone/floors/floor/openlock',
+  design: FIXTURE_DESIGNS.floor2,
+  name: FIXTURE_NAMES.floor2,
+  kinds: ['floor'],
+  conn: ['openlock'],
+  layer: 'integral',
+  build: 'separate wall',
+  texture: 'dungeon_stone',
+  tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+  foot: { shape: 'rect', w: 2, d: 2 },
+  sizeCode: 'A',
+}
+
+/** The nine records plus {@link MIXED_INTEGRAL}, through the real parse. */
+export function mixedCatalogFile(): CatalogFile {
+  return CatalogFileSchema.parse({
+    ...FIXTURE_CATALOG,
+    records: [...FIXTURE_CATALOG.records, MIXED_INTEGRAL],
+  })
 }

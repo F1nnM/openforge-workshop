@@ -15,7 +15,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { TileId } from '@/catalog'
+import { DesignId, TileId } from '@/catalog'
 
 import { STORE_VERSION } from './migrations'
 import type { Placement, PlacementId } from './schema'
@@ -44,6 +44,15 @@ import {
 
 const TILE_A = TileId.parse('tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl')
 const TILE_B = TileId.parse('tiles/cave/thick_wall/wall/corner/openlock/cave%corner.IL.openlock.stl')
+
+/**
+ * Two designs, spelled the way `pipeline/design.ts` mints one — `d` plus twelve
+ * hex characters. Not shortened to `d1`, because the shape is what
+ * `migrations.ts` relies on to tell an item from a file, and a fixture that
+ * cheated on it would let a regression through.
+ */
+const DESIGN_A = DesignId.parse('d4c2a57740b65')
+const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
 
 const state = () => useWorkshopStore.getState()
 
@@ -80,38 +89,38 @@ afterEach(() => {
 /* ------------------------------------------------------------------- library */
 
 describe('library', () => {
-  it('adds and removes tiles', () => {
-    addToLibrary(TILE_A)
-    addToLibrary(TILE_B)
-    expect(state().library).toEqual({ [TILE_A]: true, [TILE_B]: true })
+  it('adds and removes items', () => {
+    addToLibrary(DESIGN_A)
+    addToLibrary(DESIGN_B)
+    expect(state().library).toEqual({ [DESIGN_A]: true, [DESIGN_B]: true })
 
-    removeFromLibrary(TILE_A)
-    expect(state().library).toEqual({ [TILE_B]: true })
+    removeFromLibrary(DESIGN_A)
+    expect(state().library).toEqual({ [DESIGN_B]: true })
   })
 
   it('is a set: adding twice changes nothing and wakes no subscriber', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     const before = state().library
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     expect(state().library).toBe(before)
   })
 
   it('ignores a removal of a tile that was never there', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     const before = state().library
-    removeFromLibrary(TILE_B)
+    removeFromLibrary(DESIGN_B)
     expect(state().library).toBe(before)
   })
 
   it('toggles', () => {
-    toggleLibrary(TILE_A)
-    expect(selectIsInLibrary(TILE_A)(state())).toBe(true)
-    toggleLibrary(TILE_A)
-    expect(selectIsInLibrary(TILE_A)(state())).toBe(false)
+    toggleLibrary(DESIGN_A)
+    expect(selectIsInLibrary(DESIGN_A)(state())).toBe(true)
+    toggleLibrary(DESIGN_A)
+    expect(selectIsInLibrary(DESIGN_A)(state())).toBe(false)
   })
 
   it('clears without touching placements or the lock preference', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     placeTile(aPlacement())
     setLockSystem('magnetic')
 
@@ -122,9 +131,32 @@ describe('library', () => {
   })
 
   it('preserves insertion order, which is what the library screen lists by', () => {
-    addToLibrary(TILE_B)
-    addToLibrary(TILE_A)
-    expect(Object.keys(state().library)).toEqual([TILE_B, TILE_A])
+    addToLibrary(DESIGN_B)
+    addToLibrary(DESIGN_A)
+    expect(Object.keys(state().library)).toEqual([DESIGN_B, DESIGN_A])
+  })
+
+  it('reports whether the add inserted — the hook row R1 attaches to', () => {
+    // The one press that means "this item is new to the library", which is the
+    // moment R1 warms its meshes. A second press of the same item must not
+    // report one, or the warm-up runs again for bytes the browser already has.
+    expect(addToLibrary(DESIGN_A)).toBe(true)
+    expect(addToLibrary(DESIGN_A)).toBe(false)
+
+    removeFromLibrary(DESIGN_A)
+    expect(addToLibrary(DESIGN_A)).toBe(true)
+  })
+
+  it('carries one key per item, whatever the file count behind it', () => {
+    // Not a tautology about the map: it is the property the row exists for. The
+    // three lock systems pick two or more distinct *files* for 1,419 of the
+    // 3,822 items (see `corpus.test.ts`), so under the old file key these two
+    // presses — the same item, saved under two preferences — left two entries
+    // and the library screen had to explain them. Nothing here can express the
+    // difference, which is the point.
+    expect(addToLibrary(DESIGN_A)).toBe(true)
+    expect(addToLibrary(DESIGN_A)).toBe(false)
+    expect(selectLibraryCount(state())).toBe(1)
   })
 })
 
@@ -185,7 +217,7 @@ describe('placements', () => {
   })
 
   it('clears the scene without touching the library', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     placeTile(aPlacement())
     clearPlacements()
     expect(state().placements).toEqual({})
@@ -261,9 +293,9 @@ describe('lock preference', () => {
 
 describe('selector granularity', () => {
   it('does not disturb library subscribers when a tile is placed', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     const libraryBefore = state().library
-    const membershipBefore = selectIsInLibrary(TILE_A)(state())
+    const membershipBefore = selectIsInLibrary(DESIGN_A)(state())
 
     placeTile(aPlacement())
     placeTile(aPlacement({ x: 1 }))
@@ -271,21 +303,21 @@ describe('selector granularity', () => {
     // Same object identity and the same boolean, so a catalog card subscribed
     // through `useIsInLibrary` re-renders for neither placement.
     expect(state().library).toBe(libraryBefore)
-    expect(selectIsInLibrary(TILE_A)(state())).toBe(membershipBefore)
+    expect(selectIsInLibrary(DESIGN_A)(state())).toBe(membershipBefore)
   })
 
   it('does not disturb scene subscribers when a tile is filed', () => {
     const id = placeTile(aPlacement())
     const placementsBefore = state().placements
-    addToLibrary(TILE_B)
+    addToLibrary(DESIGN_B)
     expect(state().placements).toBe(placementsBefore)
     expect(state().placements[id]).toBe(placementsBefore[id])
   })
 
   it('reports counts as numbers, so an unchanged count is not a re-render', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     expect(selectLibraryCount(state())).toBe(1)
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     expect(selectLibraryCount(state())).toBe(1)
   })
 })
@@ -294,7 +326,7 @@ describe('selector granularity', () => {
 
 describe('persistence', () => {
   it('writes synchronously, with the version stamped from the first commit', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     // No await: an async storage adapter would make this line flaky and every
     // rapid placement a lost-update race.
     const payload = storedPayload()
@@ -320,7 +352,7 @@ describe('persistence', () => {
     const placed: PlacementId[] = []
     for (let index = 0; index < 250; index += 1) {
       placed.push(placeTile(aPlacement({ x: index * 0.5, z: 0, rotation: (index * 90) % 360 })))
-      addToLibrary(TileId.parse(`tiles/dungeon_stone/floor/1x1/openlock/tile-${String(index)}.stl`))
+      addToLibrary(DesignId.parse(`d${index.toString(16).padStart(12, '0')}`))
     }
 
     expect(new Set(placed).size).toBe(250)
@@ -335,7 +367,7 @@ describe('persistence', () => {
   })
 
   it('resets state and storage together', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     placeTile(aPlacement())
     setLockSystem('dragonlock')
 
@@ -351,7 +383,7 @@ describe('persistence', () => {
   })
 
   it('clears the persisted copy on request', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull()
     clearPersistedWorkshopState()
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
@@ -362,7 +394,7 @@ describe('persistence', () => {
 
 describe('rehydrating', () => {
   it('reads back a payload it wrote', async () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     const id = placeTile(aPlacement({ x: 2, z: 2, rotation: 180 }))
     setLockSystem('magnetic')
     const written = state()
@@ -380,7 +412,12 @@ describe('rehydrating', () => {
     writeStored({
       version: STORE_VERSION,
       state: {
-        library: { [TILE_A]: true, [TILE_B]: 'yes', '': true },
+        // A file id among the keys is the one corruption row V1 introduced the
+        // possibility of: it is what every version 1–3 library was made of, so a
+        // hand edit or a stale preview build can put one here under the current
+        // stamp. It must be refused rather than kept as a key that resolves to
+        // no record.
+        library: { [DESIGN_A]: true, [DESIGN_B]: 'yes', '': true, [TILE_A]: true },
         placements: {
           good: { tileId: TILE_A, x: 1, z: 1, rotation: 0 },
           bad: { tileId: TILE_B, x: null, z: 1, rotation: 0 },
@@ -392,22 +429,59 @@ describe('rehydrating', () => {
 
     // The version matches, so `migrate` never runs; only `merge` stands between
     // this payload and the app.
-    expect(state().library).toEqual({ [TILE_A]: true })
+    expect(state().library).toEqual({ [DESIGN_A]: true })
     expect(Object.keys(state().placements)).toEqual(['good'])
     expect(state().lock).toBe(DEFAULT_LOCK_SYSTEM)
     expect(console.warn).toHaveBeenCalledOnce()
   })
 
-  it('migrates a payload stamped with an older version and rewrites it', async () => {
+  it.each([
+    ['version 1 — a library of files, no lockChosen, no generated', 1],
+    ['version 2 — lockChosen but no generated', 2],
+    ['version 3 — the shape before the library held designs', 3],
+    ['a version from the future', STORE_VERSION + 3],
+  ])('discards a payload stamped %s and rewrites storage at the current version', async (_label, version) => {
+    silenceWarnings()
+    // Written the way version 1–3 wrote it: the library is a map of *files*.
+    // Nothing about it is readable as a version 4 state, and the owner's
+    // decision is that nothing is deployed so nothing has to be — see
+    // `migrations.ts`.
     writeStored({
-      version: 0,
+      ...(version === undefined ? {} : { version }),
       state: { library: { [TILE_A]: true }, placements: {}, lock: 'dragonlock' },
     })
     await useWorkshopStore.persist.rehydrate()
 
-    expect(state().library).toEqual({ [TILE_A]: true })
-    expect(state().lock).toBe('dragonlock')
+    expect(state()).toEqual({
+      library: {},
+      placements: {},
+      generated: {},
+      lock: DEFAULT_LOCK_SYSTEM,
+      lockChosen: false,
+    })
+    // Rewritten at the current version, so the next load is a clean read rather
+    // than a second discard.
     expect(storedPayload()?.version).toBe(STORE_VERSION)
+    expect(console.warn).toHaveBeenCalledOnce()
+  })
+
+  it('never reaches the version gate for a blob whose stamp is not a number', async () => {
+    silenceWarnings()
+    // Measured against `zustand/middleware`, not assumed: `persist` calls
+    // `migrate` only when `typeof value.version === 'number'`, so an unstamped
+    // blob — or one stamped `"3"` — bypasses the gate entirely and is read by
+    // `merge`, which is `salvageWorkshopState`. That is why `salvageLibrary`
+    // rejects a file id in the library rather than trusting the gate to have
+    // discarded the shape first: on this path it is the only reader there is.
+    writeStored({ state: { library: { [TILE_A]: true }, placements: {}, lock: 'dragonlock' } })
+    await useWorkshopStore.persist.rehydrate()
+
+    // The library is empty because every key was a file id, named and dropped.
+    expect(state().library).toEqual({})
+    // And the rest of the blob survived, because salvage keeps what it can — so
+    // the lock is the one the blob carried, not the default a discard produces.
+    expect(state().lock).toBe('dragonlock')
+    expect(console.warn).toHaveBeenCalledOnce()
   })
 
   it('starts fresh and throws the poison away when the payload is not even JSON', async () => {
@@ -433,7 +507,7 @@ describe('rehydrating', () => {
     ['an array state', { state: [], version: STORE_VERSION }],
     ['a missing state', { version: STORE_VERSION }],
     ['a future version', { state: { lock: 'magnetic' }, version: STORE_VERSION + 3 }],
-    ['no envelope at all', { library: { [TILE_A]: true } }],
+    ['no envelope at all', { library: { [DESIGN_A]: true } }],
   ])('survives %s in storage', async (_label, payload) => {
     silenceWarnings()
     writeStored(payload)
@@ -446,8 +520,8 @@ describe('rehydrating', () => {
 
 describe('export and import', () => {
   it('round-trips to identical state', () => {
-    addToLibrary(TILE_A)
-    addToLibrary(TILE_B)
+    addToLibrary(DESIGN_A)
+    addToLibrary(DESIGN_B)
     placeTile(aPlacement({ x: 1.5, z: -2, rotation: 22.5 }))
     placeTile(aPlacement({ tileId: TILE_B, x: 0, z: 0, rotation: 270 }))
     setLockSystem('dragonlock')
@@ -463,7 +537,7 @@ describe('export and import', () => {
   })
 
   it('writes an envelope that identifies itself and carries the version', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     const parsed = WorkshopExport.parse(JSON.parse(exportWorkshop()))
     expect(parsed.kind).toBe(WORKSHOP_EXPORT_KIND)
     expect(parsed.version).toBe(STORE_VERSION)
@@ -472,7 +546,7 @@ describe('export and import', () => {
   })
 
   it('persists what it imported', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     const file = exportWorkshop()
     resetWorkshop()
     importWorkshop(file)
@@ -480,14 +554,14 @@ describe('export and import', () => {
   })
 
   it('replaces rather than merging, so the result is exactly the file', () => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     const file = exportWorkshop()
     resetWorkshop()
-    addToLibrary(TILE_B)
+    addToLibrary(DESIGN_B)
     placeTile(aPlacement({ tileId: TILE_B }))
 
     importWorkshop(file)
-    expect(state().library).toEqual({ [TILE_A]: true })
+    expect(state().library).toEqual({ [DESIGN_A]: true })
     expect(state().placements).toEqual({})
   })
 
@@ -499,7 +573,7 @@ describe('export and import', () => {
     ['a bare state with no envelope', '{"library":{},"placements":{},"lock":"magnetic"}'],
     ['the wrong kind', '{"kind":"something-else","version":1,"state":{}}'],
   ])('changes nothing when given %s', (_label, file) => {
-    addToLibrary(TILE_A)
+    addToLibrary(DESIGN_A)
     const before = state()
     const result = importWorkshop(file)
     expect(result.ok).toBe(false)
@@ -512,7 +586,7 @@ describe('export and import', () => {
         kind: WORKSHOP_EXPORT_KIND,
         version: STORE_VERSION,
         state: {
-          library: { [TILE_A]: true },
+          library: { [DESIGN_A]: true },
           placements: {
             keep: { tileId: TILE_A, x: 0, z: 0, rotation: 90 },
             lose: { tileId: TILE_B, x: 'somewhere', z: 0, rotation: 0 },
@@ -527,16 +601,30 @@ describe('export and import', () => {
     expect(state().lock).toBe('magnetic')
   })
 
-  it('walks the migration ladder for a file exported by an older version', () => {
+  it.each([
+    ['an older version', 3],
+    ['a newer version', STORE_VERSION + 1],
+    ['no version at all', undefined],
+  ])('refuses a file exported at %s, and says which', (_label, version) => {
+    addToLibrary(DESIGN_A)
+    const before = state()
     const result = importWorkshop(
       JSON.stringify({
         kind: WORKSHOP_EXPORT_KIND,
-        version: 0,
-        state: { library: { [TILE_A]: true }, placements: {}, lock: 'openlock' },
+        ...(version === undefined ? {} : { version }),
+        state: { library: { [TILE_B]: true }, placements: {}, lock: 'magnetic' },
       }),
     )
-    expect(result.ok).toBe(true)
-    expect(state().library).toEqual({ [TILE_A]: true })
+
+    expect(result.ok).toBe(false)
+    // The message has to name the version, because "that file does not work" is
+    // indistinguishable to the user from "that file is corrupt" — and the two
+    // have different answers, one of which is "keep it, a later build will read
+    // it".
+    expect(result.ok || result.reason).toMatch(/version/)
+    // Refusing changes nothing at all, which is what makes it safe to try the
+    // next file.
+    expect(state()).toBe(before)
   })
 })
 

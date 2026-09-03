@@ -5,32 +5,50 @@
  * Both are here rather than in the screen because both are answers to questions
  * the data makes non-obvious, and both are checkable without a DOM.
  *
- * ## The library lists items and stores files, and both numbers are real
+ * ## One entry is one item, so there is nothing left to reconcile
  *
- * Row A3. The store holds `TileId`s, because a library entry is a *file* someone
- * downloads and prints — nothing about aggregation changes that, and it should
- * not: 8,702 files is what the archive contains and `client-zip` puts files in a
- * zip. What changes is the **unit the screen lists**, which is now the item, the
- * same unit the catalog grid shows.
+ * Row V2, on top of V1. This module used to open with an argument titled *"the
+ * library lists items and stores files, and both numbers are real"*, and the
+ * whole of it is gone: `WorkshopState.library` is keyed by {@link DesignId}, so
+ * the unit the store holds and the unit the screen lists are the same thing. The
+ * two counts it reconciled — cards against saved files — cannot disagree, because
+ * there is no saved file. What each entry now needs is not a *set* of files but
+ * an answer to one question: **which file will this item actually download?**
  *
- * So a saved library has two honest sizes and this module reports both:
+ * That question has an answer, and it is `selectVariant` under the build's lock
+ * preference — the same function `resolvePlacement` resolves a placement with, so
+ * the library and the builder cannot name different files for one item. The
+ * preference arrives as a parameter ({@link CollectLibraryOptions.preference})
+ * rather than being read from the store here, which is what keeps this module
+ * pure and lets `grouping.test.ts` re-derive every figure below per lock.
  *
- *   - {@link LibraryContents.items} — the cards on screen, and what the group
- *     counts sum to.
- *   - {@link LibraryContents.tiles} — the saved files behind them.
+ * ## The picture and the download are different files, and that is measured
  *
- * They differ whenever a user saves two variants of one design, which 1,705 of
- * the 3,822 aggregates (44.6%) allow. That is not an edge case to smooth over: a
- * user who saved the topless *and* the unsupported print of a base has two files
- * to print and deliberately said so. Collapsing them to one card without saying
- * "2 files" would under-report the download, and the byte total is the number
- * this screen exists to warn about.
+ * {@link LibraryItem.preview} is `TileAggregate.preview` — a sprite-carrying
+ * **topper** by row V5's rule, because a topper's mesh is the tile and nothing
+ * else. {@link LibraryItem.resolved} is `selectVariant`'s pick, whose first
+ * criterion is the opposite one — *prefer one part over two*, so a
+ * self-sufficient `integral` beats a topper. They therefore disagree, often:
  *
- * **What happened to the per-file rows:** they moved inside the card. One saved
- * variant renders exactly the card it always did. Two or more render that card
- * plus a row per saved file, each with its own remove — see
- * {@link LibraryItem.saved}. Nothing is hidden and nothing became unreachable;
- * the library is one card per item and still one row per file underneath.
+ * | lock | resolution ≠ preview | median byte ratio | p90 | max |
+ * | --- | ---: | ---: | ---: | ---: |
+ * | openlock   | **1,611** of 3,822 (42.2%) | 1.09 | 2.86 | 146× |
+ * | dragonlock | 609 (15.9%) | 1.03 | 1.65 | 39,401× |
+ * | magnetic   | 1,055 (27.6%) | 1.04 | 2.85 | 39,401× |
+ *
+ * Every one of those disagreements is also a **byte** disagreement — the counts
+ * are identical, so there is not one item where the two files happen to be the
+ * same size. That is the whole reason {@link LibraryItem.resolved} exists as a
+ * field instead of the card sizing its own picture: a card that printed
+ * `preview.bytes` would be out by 2.86× on a tenth of an openlock library and by
+ * four orders of magnitude in the worst case. It is also the same defect row V1
+ * fixed one level down — *render one file, act on another* — so this module
+ * declines to reintroduce it in the byte figure.
+ *
+ * The corpus-wide totals hide it completely: 54.60 GB of preview against 54.56 /
+ * 54.39 / 53.68 GB of resolution. **A total that is right to 0.1% over a
+ * per-item error of 42.2% is exactly the kind of green nobody should trust**, and
+ * it is why `grouping.test.ts` asserts the per-item counts and not only the sum.
  *
  * ## 1. `kinds` is an array, so "grouped by component kind" needs a rule
  *
@@ -63,7 +81,8 @@
  * the group counts sum to more than the library — a summary that says "12 items"
  * above groups adding to 15 is a bug the user can see. So **exactly one group per
  * item**, chosen by {@link KIND_PRECEDENCE}, and {@link collectLibrary} asserts
- * the sum by construction: every id lands in exactly one bucket or in `missing`.
+ * the sum by construction: every design lands in exactly one bucket or in
+ * `missing`.
  *
  * The rule reads `kinds` off the **aggregate**, and that costs nothing: A1
  * measured that the number of aggregates holding two distinct values of `kinds`
@@ -96,32 +115,77 @@
  *     group**, for the same reason the facet sidebar gives it a visible row:
  *     without one, an eighth of anything the user can save is displayed nowhere.
  *
- * ## 2. The byte total dedupes by md5, and now has two reasons to
+ * ## 2. The byte total still dedupes by md5, and it is still not a no-op
  *
  * 171 md5s are shared by 520 catalog rows — the same physical STL filed under
- * two paths, which is correct data modelling and fatal to summing over tile ids.
+ * two paths, which is correct data modelling and fatal to summing per item.
+ * Aggregation used to add a second source of the same collision (two saved
+ * variants of one item on one blob); that source is gone with the saved set, and
+ * what is left is the original one, **measured through the resolution rather than
+ * over every file**: with the whole corpus saved, two or more items resolve to a
+ * single md5 for **28 blobs across 64 designs under openlock** (24/56 dragonlock,
+ * 26/60 magnetic), so 36 of 3,822 rows are a second path to a file already
+ * counted.
  *
- * Aggregation adds a second source of the same collision: **66 of the 1,705
- * multi-variant aggregates hold two variants sharing one blob**, and 25 hold
- * variants that are *all* one blob. So a user who saves two variants of one of
- * those items has saved one file twice. `blob` is the dedupe key for both cases
- * and one pass over it settles them together.
+ * That is 0.94% rather than the 4.0% the file-keyed version deduped, and it is
+ * still worth doing: `blob` is one `Set` over a list the module already walks,
+ * the alternative overstates a figure the screen exists to warn about, and
+ * {@link LibraryContents.files} is what lets `LibraryNotes` explain why a
+ * twelve-card library reports eleven files. The dedupe is **global**, not
+ * per-card: one card resolves to one file, so a per-card dedupe would be a no-op
+ * and this module no longer has one.
  *
- * `src/assembly/bill.ts` records the same fact and the same conclusion for a
- * *scene*; a library is not a scene (no placements, no auto-inserted bases, no
- * quantities), so `buildBillOfTiles` is the wrong shape here and only its two
- * transferable pieces are reused: the dedupe key (`blob`) and
- * {@link downloadSize}, so the library warns at exactly the byte counts the
- * builder's bill warns at instead of inventing a second pair of thresholds.
+ * ## 3. What the byte total leaves out, said rather than hidden
+ *
+ * The figure is **one file per item** — the tile, not the assembly. For an item
+ * whose resolution is a topper the print is two parts, and measured per lock the
+ * majority of items are exactly that: **2,137 of 3,822 (55.9%) under openlock,
+ * 3,062 (80.1%) under dragonlock, 3,068 (80.3%) under magnetic.**
+ *
+ * The old field could stay quiet about this, because it summed files the user had
+ * *chosen*: the library made no claim to know what a complete print was. This one
+ * does make that claim, so the omission became a claim too, and
+ * {@link LibraryContents.needsBase} carries it to `LibraryNotes` for one note on
+ * the screen rather than a caveat on 80% of the cards.
+ *
+ * **The count is the bill's own base-insertion predicate.** `resolvePlacement`
+ * runs `selectVariant(aggregate, { bottom: lock, options: PRINT_OPTIONS })` — the
+ * same call, with the same preference — and inserts a base part on exactly
+ * `selection.verdict === 'needs-base'` (`src/assembly/resolve.ts`). So the note
+ * is not an estimate of what the builder would do; under the same lock it is the
+ * same expression evaluated over a library instead of over a scene.
+ *
+ * Row V3 corrected a neighbouring claim that is worth not repeating: *arming* a
+ * topper in the palette does **not** put a base in the bill, because rule 0
+ * re-resolves the item and may pick the one-part print instead. What earns a base
+ * is the *resolution* being a topper, which is what this field counts — not the
+ * user having placed one.
+ *
+ * **Not filled in here**: which base an item gets is `matchBase`'s answer, it
+ * needs the base index in `src/assembly/resolve.ts`, and it is only answerable
+ * for 88.3 / 81.6 / 78.7% of designs — so counting it would swap a stated
+ * omission for a silently partial total. The builder's bill of tiles is where a
+ * base becomes a line item, and that is the screen with a download button on it.
+ *
+ * `src/assembly/bill.ts` records the same md5 conclusion for a *scene*; a library
+ * is not a scene (no placements, no auto-inserted bases, no quantities), so
+ * `buildBillOfTiles` is the wrong shape here and only its two transferable pieces
+ * are reused: the dedupe key (`blob`) and {@link downloadSize}, so the library
+ * warns at exactly the byte counts the builder's bill warns at instead of
+ * inventing a second pair of thresholds.
  */
 import type {
   AggregateIndex,
   BlobId,
   CatalogRecord,
+  DesignId,
   TileAggregate,
   TileId,
   TileVariant,
+  VariantPreference,
+  VariantVerdict,
 } from '@/catalog'
+import { selectVariant } from '@/catalog'
 import type { DownloadSize } from '@/assembly'
 import { downloadSize } from '@/assembly'
 import { KIND_OTHER } from '@/search'
@@ -181,32 +245,54 @@ export function groupKindOf(kinds: readonly string[]): string {
 
 /* ------------------------------------------------------------------ grouping */
 
-/** One card on the screen: an item, and the files of it the user saved. */
+/** One card on the screen: an item, its picture, and the file it downloads as. */
 export interface LibraryItem {
   readonly item: TileAggregate
   /**
-   * The saved variants, in {@link TileAggregate.variants} order. Never empty —
-   * an item is in this list because at least one of its files is saved.
+   * The record behind {@link TileAggregate.preview} — thumbnail, blob, sprite
+   * sheet, and the manifest ordinal the card's link carries.
    *
-   * This is the per-file detail the card discloses. Its length is 1 for a user
-   * who saved one way of printing the item and more for one who saved several,
-   * which 44.6% of items allow.
-   */
-  readonly saved: readonly [TileVariant, ...TileVariant[]]
-  /**
-   * The record the card renders — thumbnail, blob, sprite sheet.
+   * **`TileAggregate.preview` and nothing else.** This field used to be derived
+   * here, from the saved set, under a docblock arguing that the aggregate's own
+   * preview was the wrong picture because *"this card is showing what the user
+   * actually has"*. There is no saved set to be faithful to any more: the user
+   * has the item. Row V5 additionally made the aggregate's rule prefer a
+   * sprite-carrying **topper**, which is the picture of the tile alone, so the
+   * derivation this module used to run would now be a worse answer as well as an
+   * unmotivated one. It is deleted rather than repointed — see the module
+   * docblock's disagreement table for what it was deriving.
    *
-   * The first **saved** variant carrying a sprite, else the first saved variant.
-   * Deliberately not {@link TileAggregate.preview}: that is the best-looking
-   * variant of the whole item, and this card is showing what the user actually
-   * has. The sprite preference is A1's rule scoped to the saved set, and it
-   * matters for the one record of 8,702 that has no sheet — if that is the file
-   * the user saved, the card says "no render", which is the truth about their
-   * file rather than a picture of a sibling's.
+   * A `CatalogRecord` and not the {@link TileVariant}, because
+   * `CatalogIndex.materialOf` takes a record: the tint must be the same
+   * resolution the catalog grid uses, or one mesh reads as stone on one screen
+   * and grey on the other.
    */
   readonly preview: CatalogRecord
-  /** Deduped bytes across {@link saved} — what this card costs to download. */
-  readonly bytes: number
+  /**
+   * The file this item downloads as under {@link CollectLibraryOptions.preference}
+   * — `selectVariant`'s pick, and the card's byte figure.
+   *
+   * **Singular, and that is the measurement that killed the list.** The plan for
+   * this row suggested the old per-file rows become *"what this will resolve to"*
+   * under the current lock. `selectVariant` is single-valued, so under one lock
+   * that list has exactly one row for **3,822 of 3,822 items** — it is a line,
+   * not a list, and it is rendered as one. The 1,419 items (37.1%) that resolve
+   * to two or more distinct files do so *across the three locks*, which is a
+   * question no single render of this card asks; `src/store/corpus.test.ts` owns
+   * that figure, as the argument for the key rather than for a card.
+   *
+   * Not the same file as {@link preview} for up to 42.2% of items, which is why
+   * the card names it instead of only sizing it.
+   */
+  readonly resolved: TileVariant
+  /**
+   * How complete a print {@link resolved} is — `selectVariant`'s verdict.
+   *
+   * Read for one thing: `'needs-base'` means the byte figure is one file of two.
+   * See the module docblock for the per-lock shares and for why the base is not
+   * added to the total.
+   */
+  readonly verdict: VariantVerdict
 }
 
 /** One rule-and-cards block on the screen. Never empty. */
@@ -217,47 +303,86 @@ export interface LibraryGroup {
   readonly items: readonly LibraryItem[]
 }
 
-/** Everything the screen renders, derived once per library or catalog change. */
+/** Everything the screen renders, derived once per library, catalog or lock change. */
 export interface LibraryContents {
   /** Groups in display order; only non-empty ones. Item counts sum to {@link items}. */
   readonly groups: readonly LibraryGroup[]
   /** Items on screen — the cards, and the summary's headline count. */
   readonly items: number
-  /** Saved files resolved against the catalog. `>= items`; equal for most libraries. */
-  readonly tiles: number
   /**
-   * Distinct files behind those tiles — `tiles` minus the shared-md5 duplicates.
-   * Equal to `tiles` for almost every library; see the module docblock.
+   * Distinct files behind those items — `items` minus the shared-md5 duplicates.
+   *
+   * `<= items`, and equal for almost every library: the collision needs two
+   * *different* items to resolve to one md5, which the whole corpus does 28 times
+   * over 64 designs. It is the number `LibraryNotes` explains the byte total
+   * with.
    */
   readonly files: number
   /** Deduped byte total, with the builder's own download verdict. */
   readonly size: DownloadSize
   /**
-   * Saved ids the current catalog does not contain, sorted.
+   * Items whose {@link LibraryItem.verdict} is `'needs-base'` — the ones
+   * {@link size} counts one file of two for.
    *
-   * A real state rather than a defensive branch: an imported file (or a link
-   * shared by someone on an older build) can name a tile a later import
-   * renamed or dropped, and the store holds ids the catalog is free to change
-   * out from under. Reported so the user can clear them, because a saved tile
-   * that renders nowhere and cannot be removed is unremovable for ever.
+   * A majority under every lock (55.9 / 80.1 / 80.3%), so it is a note on the
+   * screen and not a badge on each card.
    */
-  readonly missing: readonly TileId[]
+  readonly needsBase: number
+  /**
+   * Saved designs the current catalog does not contain, sorted.
+   *
+   * A real state rather than a defensive branch, and the reasons changed with the
+   * key. A `DesignId` is a content hash of the design's tag set, so it stops
+   * resolving when someone **edits a tag on the item the user saved** — the
+   * design hash's own instability, which `src/store/schema.ts` accepts as the
+   * smaller exposure precisely because it fails closed *here*. An export written
+   * on an older catalog can also name an item a later import dropped.
+   *
+   * Reported so the user can clear them, because a saved item that renders
+   * nowhere and cannot be removed is unremovable for ever. It is also the bucket
+   * a **wrong key** lands in silently: a library still keyed by file id resolves
+   * to no design at all, so every entry arrives here and the screen says so — see
+   * `grouping.test.ts`, which constructs exactly that.
+   */
+  readonly missing: readonly DesignId[]
 }
 
+
 export interface CollectLibraryOptions {
-  /** The saved ids, in any order. */
-  readonly ids: Iterable<TileId>
-  /** Catalog lookup — `SearchEngine.record`. */
+  /**
+   * The saved designs, in any order — pass {@link libraryDesigns}`(library)`.
+   *
+   * An `Iterable` of a branded id and **not** the library map, because the brand
+   * survives here and does not survive there; {@link libraryDesigns} carries the
+   * measurement. Duplicates collapse: the store's keys cannot repeat, but this
+   * parameter is an iterable and an array can.
+   */
+  readonly ids: Iterable<DesignId>
+  /**
+   * Catalog lookup — `SearchEngine.record`. Called once per item, for
+   * {@link TileAggregate.preview}.
+   */
   readonly record: (id: TileId) => CatalogRecord | undefined
   /**
    * The aggregate layer — `SearchEngine.aggregates`.
    *
-   * Read for `byTile` (a saved id to its variant, then to its design) and
-   * `byDesign` (that design's item). Both are maps A1 built once for the whole
-   * session, so grouping a sixty-tile library is sixty map lookups rather than a
-   * scan.
+   * Read for `byDesign` alone now: one hop from a saved key to its item, against
+   * the two hops (`byTile`, then `byDesign`) a file-keyed library needed. It is a
+   * map A1 builds once for the whole session, so grouping a sixty-item library is
+   * sixty lookups rather than a scan.
    */
   readonly aggregates: AggregateIndex
+  /**
+   * Which file each item resolves to — pass
+   * `{ bottom: lock, options: PRINT_OPTIONS }`.
+   *
+   * A parameter and not a store read, so this module stays pure and the tests can
+   * re-derive the per-lock figures in its docblock. `options` matters: without it
+   * `selectVariant`'s rank stops at "fewest options" and falls through to `bytes`
+   * ascending on 121 variant tuples covering 297 records, every one a base — so
+   * omitting it would let the smallest *print* of a base decide the card.
+   */
+  readonly preference: VariantPreference
   /**
    * Group display order, as a list of kinds — pass `engine.vocabulary.kinds`.
    *
@@ -280,69 +405,56 @@ export interface CollectLibraryOptions {
   readonly kindOrder: readonly string[]
 }
 
-/**
- * What one item accumulates while the saved ids are walked.
- *
- * Both lists are typed **non-empty**, which is not decoration: an entry is
- * created with one variant and only ever appended to, so emptiness is
- * unreachable — and typing it this way is what lets {@link buildItem} pick a
- * first element and a fallback record without a cast or a fabricated stand-in
- * for a case that cannot happen. The same argument A1 makes for
- * `TileAggregate.variants`.
- */
-interface Pending {
-  readonly item: TileAggregate
-  readonly saved: [TileVariant, ...TileVariant[]]
-  readonly records: [CatalogRecord, ...CatalogRecord[]]
-}
-
 export function collectLibrary({
   ids,
   record,
   aggregates,
+  preference,
   kindOrder,
 }: CollectLibraryOptions): LibraryContents {
-  const pending = new Map<string, Pending>()
-  const missing: TileId[] = []
-  let tiles = 0
+  const buckets = new Map<string, LibraryItem[]>()
+  const seenDesign = new Set<DesignId>()
+  const missing = new Set<DesignId>()
+  const blobs = new Set<BlobId>()
+  let bytes = 0
+  let items = 0
+  let needsBase = 0
 
-  for (const id of ids) {
-    const found = record(id)
-    const variant = aggregates.byTile.get(id)
-    const item = variant === undefined ? undefined : aggregates.byDesign.get(variant.design)
-    // All three come from one `CatalogFile`, so a resolved record always has a
-    // variant and an item. A saved id from an older build resolves to none of
-    // them and is reported rather than dropped; treating a partial resolution as
-    // missing too is the only honest option, since a card needs all three.
-    if (found === undefined || variant === undefined || item === undefined) {
-      missing.push(id)
+  for (const design of ids) {
+    if (seenDesign.has(design)) continue
+    seenDesign.add(design)
+
+    const item = aggregates.byDesign.get(design)
+    // `preview` names a file of the same `CatalogFile` the index was built from,
+    // so a resolved item always has a preview record **when both parameters come
+    // from one engine** — which the screen guarantees and this function cannot.
+    // They are two independent arguments; a caller that mixes an index with
+    // another catalog's lookup gets the item reported rather than a card with no
+    // picture, and `grouping.test.ts` builds exactly that pair.
+    const preview = item === undefined ? undefined : record(item.preview)
+    if (item === undefined || preview === undefined) {
+      missing.add(design)
       continue
     }
 
-    tiles += 1
-    const existing = pending.get(item.design)
-    if (existing === undefined) {
-      pending.set(item.design, { item, saved: [variant], records: [found] })
-    } else {
-      existing.saved.push(variant)
-      existing.records.push(found)
+    const selection = selectVariant(item, preference)
+    items += 1
+    if (selection.verdict === 'needs-base') needsBase += 1
+    // One copy per md5 across the whole library. Two *different* items resolving
+    // to one file is the surviving collision — 28 blobs over 64 designs corpus
+    // wide — and a card cannot see it, so the dedupe is here and nowhere else.
+    if (!blobs.has(selection.variant.blob)) {
+      blobs.add(selection.variant.blob)
+      bytes += selection.variant.bytes
     }
-  }
 
-  const buckets = new Map<string, LibraryItem[]>()
-  const blobs = new Set<BlobId>()
-  let bytes = 0
-
-  for (const entry of pending.values()) {
-    const built = buildItem(entry)
-    // One copy per md5 across the whole library, whatever the number of catalog
-    // rows or sibling variants pointing at it.
-    for (const variant of entry.saved) {
-      if (blobs.has(variant.blob)) continue
-      blobs.add(variant.blob)
-      bytes += variant.bytes
+    const kind = groupKindOf(item.kinds)
+    const built: LibraryItem = {
+      item,
+      preview,
+      resolved: selection.variant,
+      verdict: selection.verdict,
     }
-    const kind = groupKindOf(entry.item.kinds)
     const bucket = buckets.get(kind)
     if (bucket === undefined) buckets.set(kind, [built])
     else bucket.push(built)
@@ -352,55 +464,14 @@ export function collectLibrary({
 
   return {
     groups: [...buckets.entries()]
-      .map(([kind, items]) => ({ kind, items }))
+      .map(([kind, group]) => ({ kind, items: group }))
       .sort((a, b) => displayRank(a.kind, kindOrder) - displayRank(b.kind, kindOrder)),
-    items: pending.size,
-    tiles,
+    items,
     files: blobs.size,
     size: downloadSize(bytes),
-    missing: missing.sort(compareIds),
+    needsBase,
+    missing: [...missing].sort(compareIds),
   }
-}
-
-/**
- * One card, from what the walk accumulated.
- *
- * The saved variants are re-sorted into the aggregate's own order rather than
- * kept in `Object.keys` order: the store's key order is an artefact of insertion
- * and would make the same library render its variant rows differently after an
- * export and re-import.
- */
-function buildItem({ item, saved, records }: Pending): LibraryItem {
-  const order = new Map(item.variants.map((variant, at) => [variant.id, at]))
-  // Copied as a tuple and sorted in place, so the non-emptiness survives the
-  // sort — `[...saved].sort()` would widen it to an array and cost a cast.
-  const sorted: [TileVariant, ...TileVariant[]] = [saved[0], ...saved.slice(1)]
-  sorted.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
-
-  const byId = new Map(records.map((found) => [found.id, found]))
-  const withSprite = sorted.find((variant) => variant.sprite) ?? sorted[0]
-
-  return {
-    item,
-    saved: sorted,
-    // `records` is appended in lockstep with `saved`, so it holds the record for
-    // every saved variant; `records[0]` is the unreachable branch's answer and is
-    // a real record rather than a fabrication.
-    preview: byId.get(withSprite.id) ?? records[0],
-    bytes: dedupedBytes(sorted),
-  }
-}
-
-/** Bytes across one card's saved variants, counting a shared md5 once. */
-function dedupedBytes(variants: readonly TileVariant[]): number {
-  const seen = new Set<BlobId>()
-  let total = 0
-  for (const variant of variants) {
-    if (seen.has(variant.blob)) continue
-    seen.add(variant.blob)
-    total += variant.bytes
-  }
-  return total
 }
 
 /**
@@ -424,7 +495,7 @@ function compareItems(a: LibraryItem, b: LibraryItem): number {
   return a.item.design < b.item.design ? -1 : a.item.design > b.item.design ? 1 : 0
 }
 
-function compareIds(a: TileId, b: TileId): number {
+function compareIds(a: DesignId, b: DesignId): number {
   if (a === b) return 0
   return a < b ? -1 : 1
 }

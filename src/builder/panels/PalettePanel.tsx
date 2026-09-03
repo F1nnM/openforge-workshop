@@ -1,53 +1,94 @@
 /**
  * The builder's left column — design-contract.md §2.4's palette.
  *
- * A search box over the *whole* catalog offering "+ add" rows for tiles that are
+ * A search box over the *whole* catalog offering "+ add" rows for items that are
  * not saved yet, and under it the library as a selectable list with small
  * thumbnails. Selecting a row arms the canvas.
  *
- * ## The unplaceable tiles are marked, and they are not buttons
+ * ## A row is an item
  *
- * `isPlaceable` is false for the `none` footprint — 726 tiles, 8.3% of the
- * corpus — and the plan view refuses them visibly rather than silently. Curves
- * are **not** among them: row W6 made annular sectors placeable, so the copy
- * beside the library block names the missing footprint and nothing else.
+ * Row V3. The panel used to render `PaletteRow.record` — a concrete file, and for
+ * the 931 items that carry both an `integral` and a `topper` variant it was
+ * whichever file the library happened to hold. That is the defect the owner
+ * reported as *"a tile with an integrated base"* in the sidebar: the catalog card
+ * showed the topper and the palette showed the integral, for the same tile.
  *
- * Offering a row that arms a tile the canvas will then refuse would make a
+ * Now a row is a {@link TileAggregate}: the name, the size and the placeability
+ * come off the item, and the thumbnail renders `item.preview`, which since row V5
+ * is a sprite-carrying **topper** wherever the item has one. `palette.ts` carries
+ * the argument for each field.
+ *
+ * ## The unplaceable items are marked, and they are not buttons
+ *
+ * `isPlaceable` is false for the `none` footprint — **370 items, 9.7% of the
+ * corpus** (726 files, 8.3% of them) — and the plan view refuses them visibly
+ * rather than silently. Curves are **not** among them: row W6 made annular
+ * sectors placeable, so the copy beside the library block names the missing
+ * footprint and nothing else.
+ *
+ * Offering a row that arms an item the canvas will then refuse would make a
  * correct refusal look like a broken palette, so those rows render as static
- * text with the reason beside them instead of as a control. Not a `disabled` button: a disabled button
- * is out of the tab order, and a keyboard user would then meet a row they cannot
- * reach and cannot read the reason from. Static text is read by every screen
- * reader and skipped by Tab, which is exactly the intent.
+ * text with the reason beside them instead of as a control. Not a `disabled`
+ * button: a disabled button is out of the tab order, and a keyboard user would
+ * then meet a row they cannot reach and cannot read the reason from. Static text
+ * is read by every screen reader and skipped by Tab, which is exactly the intent.
  *
  * They keep their "+ add" action, though. Saving one to the library is a
  * perfectly good thing to do — it just cannot be laid out in plan view yet.
  *
+ * **Refusing at item level is not an approximation.** `foot` is a hoisted facet:
+ * over the emitted index, the number of items whose variants disagree about
+ * `isPlaceable` is **0**, and the 370 refused items hold exactly the 726 refused
+ * files. So a refusal is a property of the tile rather than of the print, which
+ * is also why a variant swap cannot rescue one — there is no sibling with a
+ * footprint to swap to. `palette.corpus.test.ts` re-measures both figures.
+ *
+ * ## Arming: an item is picked, a file is armed, and V4 removes the difference
+ *
+ * `usePlanTools.selectedTileId` is a `TileId` because `Placement.tileId` is one,
+ * so until row V4 makes a placement address a design there has to be one hop from
+ * the item the user picked to a file the canvas can place. That hop is
+ * `palette.ts#armFile` — `selectVariant` under the build's lock preference, the
+ * same function the bill resolves with — and its inverse `armedItem` is what
+ * decides which row reads as pressed. **Both, and their call sites here, are what
+ * V4 deletes**; nothing else in this file knows a file id.
+ *
+ * The two directions deliberately use different rules and the pair is measured:
+ * `selectVariant` names a file other than `preview` on **1,598 of 3,822** items.
+ * The thumb answers *what is this*, the armed id answers *what would I print*.
+ * `variantsByPreference`' docblock is the long version.
+ *
  * ## The handoff from "Use in builder"
  *
- * Row G5. The catalog drawer's third action posts a file into `@/store`'s
+ * Row G5. The catalog drawer's third action posts an **item** into `@/store`'s
  * un-persisted selection channel and navigates here; this panel **claims** it
  * once, on mount, and arms it. That is the whole of the row's reader side, and it
  * is here rather than in the builder screen because this panel is already the one
  * component that writes the selection — a second writer would be two palettes.
  *
- * The claim is guarded, and the guard is the same doctrine as the paragraph above:
- * **an armed tile the canvas will refuse is worse than no armed tile.** So the
- * handoff arms a file only when this palette holds a *placeable* row for it, and
- * the two ways it can fail both resolve correctly without a word of new UI:
+ * V1 renamed the channel's five functions when it changed the box's kind, so
+ * {@link claimPendingDesign} is the name this reader claims through; a reader
+ * still compiling against `claimPendingTile` would be treating a design as a
+ * file.
  *
- *   - **The file is not in the current catalog build.** There is no row, nothing
- *     is armed, and the library screen is the surface that reports a retired id.
- *   - **The file has the `none` footprint** — 726 of 8,702 records, 8.3%. Nothing
- *     is armed, and the note under the library block is already on screen saying
- *     why, because the drawer put the tile in the library on its way here. A
- *     variant swap cannot rescue this case and must not be attempted: **no design
- *     in the corpus mixes placeable and unplaceable files**, so if the file the
- *     user chose has no plan shape, neither does any sibling.
+ * The claim is guarded, and the guard is the same doctrine as the paragraph
+ * above: **an armed item the canvas will refuse is worse than no armed item.** So
+ * the handoff arms an item only when this palette holds a *placeable* row for it,
+ * and the two ways it can fail both resolve correctly without a word of new UI:
  *
- * What arrives is a file and never a resolution. A6's rule 0 re-picks the variant
- * when the bill is built, and the three locks disagree for 37.1% of items, so the
- * armed row is "the print the user was looking at" while the bill's line may be a
- * sibling — marked as substituted there, by the module that made the choice.
+ *   - **The design is not in the current catalog build.** There is no row,
+ *     nothing is armed, and the library screen is the surface that reports a
+ *     retired id.
+ *   - **The item has the `none` footprint** — 370 of 3,822. Nothing is armed, and
+ *     the note under the library block is already on screen saying why, because
+ *     the drawer put the item in the library on its way here. A variant swap
+ *     cannot rescue this case and must not be attempted, for the reason measured
+ *     above: **no design in the corpus mixes placeable and unplaceable files.**
+ *
+ * What arrives is an item and never a resolution. A6's rule 0 re-picks the
+ * variant when the bill is built, and the three locks disagree for 37.1% of
+ * items, so the armed file is "what this build would print" while the row above
+ * it is the tile itself.
  *
  * ## Where the search comes from
  *
@@ -65,22 +106,29 @@
  * it, which is not this 272px column; the debounce logic is what is shared, and it
  * is thirty lines.
  */
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { placementRefusal } from '@/builder/canvas'
 import type { PlanTools } from '@/builder/canvas'
-import type { CatalogAssets, SpriteSheet, TileId } from '@/catalog'
+import type { CatalogAssets, DesignId, SpriteSheet, TileAggregate } from '@/catalog'
 import type { MaterialId } from '@/materials'
 import type { FacetSearch } from '@/search'
 import { MAX_QUERY_LENGTH } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
 import { countLabel, sizeLabel } from '@/screens/catalog'
-import { addToLibrary, claimPendingTile, useLibrary, usePendingTile } from '@/store'
+import { addToLibrary, claimPendingDesign, libraryDesigns, useLibrary, useLockSystem, usePendingDesign } from '@/store'
 import { Button, Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
-import type { PaletteRow } from './palette'
-import { MAX_SEARCH_ROWS, paletteRows, searchRows, starterSet } from './palette'
+import type { PaletteLookup, PaletteRow } from './palette'
+import {
+  MAX_SEARCH_ROWS,
+  armFile,
+  armedItem,
+  paletteRows,
+  searchRows,
+  starterSet,
+} from './palette'
 
 import './panels.css'
 
@@ -98,40 +146,76 @@ export interface PalettePanelProps {
 
 export function PalettePanel({ index, tools, search, onQueryChange }: PalettePanelProps) {
   const library = useLibrary()
+  const lock = useLockSystem()
   const searchId = useId()
   const libraryId = useId()
 
   const result = useMemo(() => index.engine.search(search), [index, search])
 
-  const rows = useMemo(
-    () => paletteRows(Object.keys(library) as TileId[], (id) => index.engine.record(id)),
-    [index, library],
-  )
+  /**
+   * One resolver for both blocks, built over the one index this panel holds.
+   *
+   * The `undefined` on the preview record is folded into the same drop as a
+   * retired design deliberately: `item.preview` is one of the item's own variant
+   * ids and the aggregate layer is derived from the same `CatalogFile` the engine
+   * indexes, so that half cannot miss. One drop rule, one reachable cause.
+   */
+  const lookup = useMemo<PaletteLookup>(() => {
+    const { byDesign } = index.engine.aggregates
+    return (design) => {
+      const item = byDesign.get(design)
+      if (item === undefined) return undefined
+      const preview = index.engine.record(item.preview)
+      return preview === undefined ? undefined : { item, preview }
+    }
+  }, [index])
+
+  // `libraryDesigns(library)` and never `Object.keys(library) as …`: the helper
+  // reads the key type off the store's own field, so the day the library is
+  // re-keyed again this line stops compiling instead of quietly resolving
+  // nothing. `palette.ts` has the compiler measurement behind that choice.
+  const rows = useMemo(() => paletteRows(libraryDesigns(library), lookup), [library, lookup])
 
   const hits = useMemo(
-    () =>
-      searchRows(
-        result.ids,
-        (id) => index.engine.record(id),
-        (id) => library[id] === true,
-      ),
-    [result, index, library],
+    () => searchRows(result.items, lookup, (design) => library[design] === true),
+    [result, lookup, library],
+  )
+
+  /**
+   * Which item is armed, whatever file is armed for it.
+   *
+   * Row V4 deletes this hop; see `palette.ts#armedItem` for why it is a lookup
+   * rather than a re-resolution under the current lock.
+   */
+  const armed = useMemo(
+    () => armedItem(tools.selectedTileId, (id) => index.engine.aggregates.byTile.get(id)?.design),
+    [tools.selectedTileId, index],
+  )
+
+  const arm = useCallback(
+    (item: TileAggregate) => {
+      tools.setSelectedTileId(armFile(item, lock))
+      // §3: arming forces place mode. Selecting a tile while the eraser is up
+      // otherwise looks like the palette ignored the click.
+      tools.setTool('place')
+    },
+    [tools, lock],
   )
 
   // Row G5's one call site. Claiming is read-and-clear, so this is a one-shot
   // handoff and not a piece of state two screens have to keep in step: a second
   // run of this effect — a re-mount, or React's development double-invoke —
-  // claims `null` and does nothing, and a tile the user has since disarmed is not
-  // re-armed behind their back. See the module note for the guard.
-  const pending = usePendingTile()
+  // claims `null` and does nothing, and an item the user has since disarmed is
+  // not re-armed behind their back. See the module note for the guard.
+  const pending = usePendingDesign()
   useEffect(() => {
     if (pending === null) return
-    const claimed = claimPendingTile()
+    const claimed = claimPendingDesign()
     if (claimed === null) return
-    if (!rows.some((row) => row.record.id === claimed && row.placeable)) return
-    tools.setSelectedTileId(claimed)
-    tools.setTool('place')
-  }, [pending, rows, tools])
+    const row = rows.find((candidate) => candidate.item.design === claimed)
+    if (row === undefined || !row.placeable) return
+    arm(row.item)
+  }, [pending, rows, arm])
 
   const searching = search.q.trim() !== ''
   const unplaceable = rows.filter((row) => !row.placeable).length
@@ -152,7 +236,7 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
               reachable from here yet.
             </p>
           ) : (
-            <PaletteList rows={hits} index={index} tools={tools} />
+            <PaletteList rows={hits} index={index} armed={armed} tools={tools} arm={arm} />
           )}
 
           {result.total > hits.length ? (
@@ -173,10 +257,10 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
           <PaletteEmpty index={index} />
         ) : (
           <>
-            <PaletteList rows={rows} index={index} tools={tools} />
+            <PaletteList rows={rows} index={index} armed={armed} tools={tools} arm={arm} />
             {unplaceable > 0 ? (
               <p className="of-pal-note">
-                {countLabel(unplaceable)} saved {unplaceable === 1 ? 'tile' : 'tiles'} at the end of
+                {countLabel(unplaceable)} saved {unplaceable === 1 ? 'item' : 'items'} at the end of
                 the list cannot be laid out in plan view: the archive does not state a footprint for{' '}
                 {unplaceable === 1 ? 'it' : 'them'}. {unplaceable === 1 ? 'It is' : 'They are'} still
                 in your library, and still printable.
@@ -194,33 +278,35 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
 function PaletteList({
   rows,
   index,
+  armed,
   tools,
+  arm,
 }: {
   rows: readonly PaletteRow[]
   index: CatalogIndex
+  /** The armed item, from `armedItem`. Row V4 turns this into `tools.selectedDesign`. */
+  armed: DesignId | null
   tools: PlanTools
+  arm: (item: TileAggregate) => void
 }) {
   return (
     <ul className="of-pal-list" role="list">
       {rows.map((row) => (
         <PaletteRowView
-          key={row.record.id}
+          key={row.item.design}
           row={row}
           assets={index.file.assets}
           sheet={index.file.sprite}
-          material={index.materialOf(row.record)}
-          selected={tools.selectedTileId === row.record.id}
+          material={index.materialOf(row.preview)}
+          selected={armed === row.item.design}
           onSelect={() => {
             // Re-selecting the armed row disarms it, which is what `aria-pressed`
-            // promises. Arming also forces place mode (§3): selecting a tile
-            // while the eraser is up otherwise looks like the palette ignored the
-            // click.
-            if (tools.selectedTileId === row.record.id) {
+            // promises.
+            if (armed === row.item.design) {
               tools.setSelectedTileId(null)
               return
             }
-            tools.setSelectedTileId(row.record.id)
-            tools.setTool('place')
+            arm(row.item)
           }}
         />
       ))}
@@ -240,7 +326,7 @@ function PaletteRowView({
   assets: CatalogAssets
   sheet: SpriteSheet
   /**
-   * The tint, from `CatalogIndex.materialOf`. Row P3.
+   * The tint, from `CatalogIndex.materialOf` over the **preview** record. Row P3.
    *
    * A palette row is a tile the user is about to place, and the material is what
    * distinguishes two rows whose names and sizes are identical — this panel is
@@ -251,22 +337,22 @@ function PaletteRowView({
   selected: boolean
   onSelect: () => void
 }) {
-  const { record, placeable, inLibrary } = row
+  const { item, preview, placeable, inLibrary } = row
 
   const body = (
     <>
       <TileThumb
-        blob={record.blob}
-        sprite={record.sprite}
-        thumb={record.thumb}
+        blob={preview.blob}
+        sprite={preview.sprite}
+        thumb={preview.thumb}
         assets={assets}
         sheet={sheet}
         material={material}
         className="of-pal-thumb"
       />
-      <span className="of-pal-name">{record.name}</span>
+      <span className="of-pal-name">{item.name}</span>
       <span className="of-pal-size">
-        {placeable ? sizeLabel(record.foot, record.sizeCode) : REFUSAL_LABEL}
+        {placeable ? sizeLabel(item.foot, item.sizeCode) : REFUSAL_LABEL}
       </span>
     </>
   )
@@ -282,8 +368,10 @@ function PaletteRowView({
           {body}
           {/* The short mono marker is what fits the column; the full sentence is
               the canvas's own refusal text, so the palette and the canvas cannot
-              disagree about why. */}
-          <VisuallyHidden>{placementRefusal(record)?.message ?? ''}</VisuallyHidden>
+              disagree about why. The canvas asks it of a record and this asks it
+              of the item, and the answer is the same on all 3,822: `foot` and
+              `name` are both hoisted facets. */}
+          <VisuallyHidden>{placementRefusal(item)?.message ?? ''}</VisuallyHidden>
         </div>
       )}
 
@@ -292,7 +380,7 @@ function PaletteRowView({
           size="sm"
           className="of-pal-add"
           onClick={() => {
-            addToLibrary(record.id)
+            addToLibrary(item.design)
           }}
         >
           <span aria-hidden="true">+</span>
@@ -304,7 +392,7 @@ function PaletteRowView({
             `../../screens/library/LibraryScreen.tsx` spaces its count chips for
             the same reason.
           */}
-          <VisuallyHidden>{record.name} to the library</VisuallyHidden>
+          <VisuallyHidden>{item.name} to the library</VisuallyHidden>
         </Button>
       )}
     </li>
@@ -385,6 +473,10 @@ function PaletteSearch({
           keystroke, and an assertive region would interrupt the typing that
           caused it. */}
       <p className="of-pal-count" role="status">
+        {/* "tiles", not "items", and the count is a count of items either way:
+            `../../screens/catalog/SearchField.tsx` renders the same figure with
+            the same word, and two search fields over one engine disagreeing
+            about the noun would read as two different result sets. */}
         {query.trim() === '' ? '' : `${countLabel(total)} ${total === 1 ? 'tile' : 'tiles'} match`}
       </p>
     </div>
@@ -399,9 +491,13 @@ function PaletteSearch({
  * The set is derived from the live index rather than hard-coded — see
  * `palette.ts#starterSet` — so it cannot rot when the corpus renames a file, and
  * it is one texture set so the first room looks like a room.
+ *
+ * Six **designs** since row V3, straight from `starterSet`. There is no file-to-
+ * design hop here because there was never a per-file question in the choice: every
+ * field it turns on is a hoisted facet of the item.
  */
 function PaletteEmpty({ index }: { index: CatalogIndex }) {
-  const starter = useMemo(() => starterSet(index.file.records), [index])
+  const starter = useMemo(() => starterSet(index.engine.aggregates.aggregates), [index])
 
   return (
     <div className="of-pal-empty">
@@ -414,7 +510,7 @@ function PaletteEmpty({ index }: { index: CatalogIndex }) {
         size="sm"
         disabled={starter.length === 0}
         onClick={() => {
-          for (const id of starter) addToLibrary(id)
+          for (const design of starter) addToLibrary(design)
         }}
       >
         Add a starter set{' '}

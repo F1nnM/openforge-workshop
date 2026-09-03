@@ -63,11 +63,9 @@
  */
 import { Link } from '@tanstack/react-router'
 
-import { PRINT_OPTIONS } from '@/assembly'
 import type { CatalogAssets, CatalogRecord, SpriteSheet, TileAggregate } from '@/catalog'
-import { selectVariant } from '@/catalog'
 import { MATERIALS, resolveMaterial } from '@/materials'
-import { addToLibrary, removeFromLibrary, useLockSystem, useWorkshopStore } from '@/store'
+import { toggleLibrary, useIsInLibrary } from '@/store'
 import { Chip, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
@@ -276,33 +274,29 @@ function TagChipItem({ chip }: { chip: CardTagChip }) {
  * replaces the accessible name outright, so the visible words would stop being
  * part of it (WCAG 2.5.3) and voice control would lose the phrase on screen.
  *
- * ## The button is item-level and the store is file-level, so both directions
- * have to be decided
+ * ## The button is item-level and so is the store, since row V1
  *
- * The library holds `TileId`s, because a library entry is a file somebody
- * downloads and prints, and 2.28 files hide behind this button.
+ * This block used to carry three paragraphs reconciling an item-level button
+ * with a file-level library, and every one of them is gone. The library holds
+ * designs now — the owner's *"the user should be saving aggregates not
+ * individual tiles"* — so the button's unit and the store's unit are the same
+ * thing and there is nothing left to decide.
  *
- * **Adding** saves the one variant {@link selectVariant} picks under the build's
- * current lock preference — the same function row A6 resolves a *placement*
- * with, so the file the library gets is the file the builder would have used.
- * Saving all of an item's variants would put up to 20 files and 100 MB into the
- * library on one press; saving `preview` would save whichever variant happens to
- * own the sprite sheet, which is a rendering choice and not a printing one.
+ * What the reconciliation used to cost, recorded because it is the case for the
+ * change: **adding** ran `selectVariant` under the build's current lock
+ * preference, so the file saved depended on a setting the user may never have
+ * opened, and the three lock systems disagree on that file for **1,419 of the
+ * 3,822 items (37.1%)** — press Add under openlock, switch to dragonlock, press
+ * Add on the same card again and the library held the item twice. **Removing**
+ * had to loop over every variant, because an "In library" press that left a
+ * sibling behind would not have changed the button's own label. And membership
+ * was a `some()` over up to 20 keys, so a card re-rendered whenever any of its
+ * variants changed rather than when its own item did.
  *
- * **Removing** clears *every* variant, not just the selected one. An item-level
- * button whose "In library" press left a sibling variant behind would not change
- * its own label, which is the one thing a toggle must always do.
- *
- * Membership is a **boolean selector over the item's variants**, so the
- * subscription still narrows to a boolean: a card re-renders when its own item
- * enters or leaves the library and not when any other tile is added. That was a
- * deliberate property of the per-file version and it survives.
+ * One key, one press, one boolean.
  */
 export function LibraryToggle({ item }: { item: TileAggregate }) {
-  const lock = useLockSystem()
-  const inLibrary = useWorkshopStore((state) =>
-    item.variants.some((variant) => state.library[variant.id] === true),
-  )
+  const inLibrary = useIsInLibrary(item.design)
 
   return (
     <button
@@ -310,11 +304,7 @@ export function LibraryToggle({ item }: { item: TileAggregate }) {
       className="of-card-add"
       data-in-library={inLibrary ? '' : undefined}
       onClick={() => {
-        if (inLibrary) {
-          for (const variant of item.variants) removeFromLibrary(variant.id)
-          return
-        }
-        addToLibrary(selectVariant(item, { bottom: lock, options: PRINT_OPTIONS }).variant.id)
+        toggleLibrary(item.design)
       }}
     >
       <span aria-hidden="true">{inLibrary ? '✓' : '+'}</span>

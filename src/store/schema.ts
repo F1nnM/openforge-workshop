@@ -1,7 +1,7 @@
 /**
  * OpenForge Workshop — the shape of the persisted client state.
  *
- * Five things survive a reload: the **library** (tiles the user kept), the
+ * Five things survive a reload: the **library** (the items the user kept), the
  * **placements** (the builder scene), the **generated bases** on that scene as
  * recipes rather than meshes, the **lock preference** and whether the user has
  * ever chosen that preference. Nothing else.
@@ -16,13 +16,14 @@
  * cannot leave a stale type behind. Identities come from the catalog contract —
  * this module never invents its own `TileId`.
  *
- * This file describes the *current* shape only. Migration from older shapes
- * lives in `migrations.ts`, and the reason the two are separate is that a
- * migration must read shapes this file no longer describes.
+ * This file describes the *current* shape only, and — for as long as nothing is
+ * deployed — the *only* shape the app will read. `migrations.ts` holds the
+ * version gate that discards every other one, and its docblock states the
+ * moment that licence expires.
  */
 import { z } from 'zod'
 
-import { TileId } from '@/catalog'
+import { DesignId, TileId } from '@/catalog'
 import { GeneratedPlacement } from '@/generator/placement/scene'
 
 /* --------------------------------------------------------------- lock system */
@@ -158,17 +159,84 @@ export function normalizeRotation(deg: number): number {
  * state (hover, drag-in-progress, panel open) belongs in component state or in a
  * separate un-persisted store.
  *
- * `library` is a set of {@link TileId}s held as a keyed map whose value slot
- * carries no information. A JSON object is the only shape that survives
- * `JSON.stringify` as a set without a custom replacer — and a custom replacer is
- * exactly the kind of asymmetry that breaks a migration years later. The map
- * also gives O(1) membership, which is what lets a catalog card ask "am I in the
- * library?" without scanning, and preserves insertion order (every `TileId`
- * starts `tiles/`, so no key is integer-like and V8's ordering rules keep them
- * in the order they were added).
+ * `library` is a set held as a keyed map whose value slot carries no
+ * information. A JSON object is the only shape that survives `JSON.stringify`
+ * as a set without a custom replacer — and a custom replacer is exactly the kind
+ * of asymmetry that breaks a reader years later. The map also gives O(1)
+ * membership, which is what lets a catalog card ask "am I in the library?"
+ * without scanning, and it preserves insertion order: a {@link DesignId} is
+ * `d` followed by twelve hex characters (verified: **all 3,822** in the live
+ * corpus), so no key is integer-like and V8's ordering rules keep them in the
+ * order they were added.
  */
 export const WorkshopState = z.object({
-  library: z.record(TileId, z.literal(true)),
+  /**
+   * The items the user kept, keyed by **design**.
+   *
+   * The owner's requirement, twice over: *"I want this aggregation to be done
+   * correctly everywhere. The aggregated tile is always the thing the user
+   * sees"*, and then *"the user should be saving aggregates not individual
+   * tiles."* §7 of `docs/architecture-plan.md` already said it — *"place
+   * designs, not files"* — and the catalog screen honoured it while this field
+   * did not: it held a {@link TileId}, so saving an item saved **one way of
+   * printing it**, chosen by whatever lock preference happened to be set at the
+   * moment of the click.
+   *
+   * ## Why {@link DesignId} and not {@link AggregateAddress}
+   *
+   * Both name an item. Only one of them survives a catalog reimport, and this
+   * map is persisted, so that is the whole question.
+   *
+   *   - A `DesignId` is `pipeline/design.ts`'s **content hash of the design**:
+   *     twelve hex characters of SHA-256 over the tag set with the whole
+   *     `connection|` namespace removed. It is a pure function of the design, so
+   *     two builds agree and an unrelated addition to the corpus changes
+   *     nothing.
+   *   - An `AggregateAddress` is the **lowest {@link ManifestOrdinal} in the
+   *     group**, and its own docblock in `src/catalog/schema.ts` says it is
+   *     *"NOT stable under retirement"*: if the lowest-ordinal file leaves the
+   *     corpus the address changes even though the group only shrank, and
+   *     **1,705 of 3,822 aggregates (44.6%)** hold two or more files and are
+   *     exposed to exactly that. Row A1 also gave it no inverse, on purpose —
+   *     `aggregateAddress(ord)` is the only conversion and there is no path back
+   *     — so a stale address in storage could not even be diagnosed, only
+   *     dropped.
+   *
+   * A1 accepted that instability *"only because this number never enters a share
+   * link"*, contrasting a stale catalog URL ("that item moved", a normal web
+   * outcome) with a share link decoding to a different room. A persisted library
+   * is the second kind of object, not the first: it is read back weeks later, on
+   * a newer index, with no user present to notice that entry 40 became entry 41.
+   *
+   * The design hash's own instability is a **tag edit** — add a tag to a file and
+   * it leaves its design for another. That is a real exposure and it is the
+   * smaller one: it is caused by an edit to the very thing the user saved, it
+   * cannot be caused by an unrelated file retiring, and it fails *closed* (the
+   * key resolves to nothing and the library screen already reports and offers to
+   * clear an entry the catalog no longer holds).
+   *
+   * ## Not a `TileId`, and the type system is what keeps it that way
+   *
+   * `DesignId` and `TileId` are separate Zod brands, so neither is assignable to
+   * the other and a call that used to save a file is a compile error rather than
+   * a key that silently resolves to nothing. They are also **lexically
+   * disjoint**: a `TileId` matches `^tiles/…` (row X5) and no design id in the
+   * corpus starts `tiles/` — 0 of 3,822, asserted in `corpus.test.ts` — which is
+   * what lets `migrations.ts` recognise a file id sitting in this map and say so
+   * instead of keeping a dangling key. It is the same disjointness argument row
+   * S5 made for `gen:` against `tiles/`, one level up.
+   *
+   * ## What the collapse buys, measured
+   *
+   * At 2.28 files per design, saving every file in the corpus is **8,702 entries
+   * under the old key and 3,822 under this one, 56.1% fewer**. The number that
+   * matters more is how often two saves of *one* item used to produce two
+   * entries: the three lock systems pick **two or more distinct files for 1,419
+   * of the 3,822 items (37.1%)**, so browsing under openlock, switching to
+   * dragonlock and pressing Add again used to leave a duplicate — and the
+   * library screen had to explain it. There is nothing left to explain.
+   */
+  library: z.record(DesignId, z.literal(true)),
   placements: z.record(PlacementId, Placement),
   /**
    * Generated bases on the grid — a **second map beside {@link placements}**, in
@@ -232,6 +300,36 @@ export const WorkshopState = z.object({
   lockChosen: z.boolean(),
 })
 export type WorkshopState = z.infer<typeof WorkshopState>
+
+/**
+ * The saved designs, as an array whose element type is the library's own key.
+ *
+ * Generic on purpose, and the reason is a hole row V3 found with `tsc`:
+ * `Readonly<Record<TileId, true>>` **is** assignable to
+ * `Readonly<Record<DesignId, true>>`, because a branded string is not a literal
+ * union, so `Record` produces an index signature and the brand is dropped from
+ * the key position. `readonly TileId[]` is **not** assignable to
+ * `readonly DesignId[]`. **The array is the safe position; the map is not.**
+ *
+ * So the derivations take arrays, and this is the one place that turns the map
+ * into one. Reading `K` off the caller's own field means a library keyed by
+ * file yields `TileId[]`, which every consumer then refuses — where
+ * `Object.keys(library) as DesignId[]` names the brand instead of deriving it
+ * and would keep compiling the day the key changes again, handing every entry
+ * to a lookup that cannot resolve it and rendering an empty list in silence.
+ *
+ * It lives here, beside the field it exists for, rather than in either
+ * derivation: `screens/library/grouping.ts` and `builder/panels/palette.ts` are
+ * both store-free, and importing `@/store` into them to share three lines would
+ * cost more than the duplication did. Both *call sites* are components that
+ * already read the store.
+ *
+ * `Partial` is load-bearing rather than politeness: `Record<K, true>` demands
+ * every member of `K`, and a library holds a handful of 3,822.
+ */
+export function libraryDesigns<K extends string>(library: Readonly<Partial<Record<K, true>>>): K[] {
+  return Object.keys(library) as K[]
+}
 
 /**
  * A fresh empty state.

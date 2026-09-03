@@ -1,10 +1,10 @@
 /**
  * OpenForge Workshop — reading persisted state that may be anything at all.
  *
- * `migrate()` is the one function in the app whose input is genuinely arbitrary.
- * Everything else reads either the build-time catalog (validated once by CI) or
- * data the app itself just produced. This reads whatever is sitting under a
- * `localStorage` key, which can be:
+ * {@link readPersistedState} is the one function in the app whose input is
+ * genuinely arbitrary. Everything else reads either the build-time catalog
+ * (validated once by CI) or data the app itself just produced. This reads
+ * whatever is sitting under a `localStorage` key, which can be:
  *
  *   - a scene written by a version that shipped months ago;
  *   - a scene written by a version that **never** shipped, because a preview
@@ -14,19 +14,81 @@
  *   - something hand-edited in devtools;
  *   - a JSON document that has nothing to do with this app.
  *
- * A migration that assumes well-formed input throws during hydration, and a
- * throw during hydration is a white screen on the app's own home page with the
- * poison still in storage — every reload reproduces it. So the contract for
- * everything in this file is: **total function, never throws, always returns a
- * valid {@link WorkshopState}.** `migrations.test.ts` is the proof, and it is
- * the point of this module rather than an accessory to it.
+ * A reader that assumes well-formed input throws during hydration, and a throw
+ * during hydration is a white screen on the app's own home page with the poison
+ * still in storage — every reload reproduces it. So the contract for everything
+ * in this file is: **total function, never throws, always returns a valid
+ * {@link WorkshopState}.** `migrations.test.ts` is the proof, and it is the point
+ * of this module rather than an accessory to it.
  *
  * Recovery is *salvaging*, not all-or-nothing. One placement with a corrupt
  * coordinate drops that placement and keeps the other forty; it does not empty
  * the room. `RecoveredState.dropped` names everything discarded so the caller
  * can say so out loud instead of silently losing a tile.
+ *
+ * ## There is no migration ladder any more, and this is the notice that says why
+ *
+ * Row V1 changed `library` from a map of files to a map of designs and took
+ * {@link STORE_VERSION} to 4. It did **not** write a rung that maps a saved
+ * `TileId` to its design, and the reason is a decision the project owner made
+ * explicitly:
+ *
+ * > *"Still the rule holds true that it's not used live yet, so no data
+ * > migration or backwards compatibility needs to be considered. So discarding
+ * > an old user library is totally fine if it makes the new library system code
+ * > better."*
+ *
+ * Nothing is deployed. There is no browser holding a version 1, 2 or 3 blob
+ * except a developer's own, so the two rungs that used to climb 1 → 2 → 3 were
+ * code that could never run again — kept for a hypothetical, which is exactly
+ * the no-op the standing instruction says to clean up. They are gone, and with
+ * them `MigrationStep`, `MIGRATION_STEPS` and the loop that walked them.
+ *
+ * **A second reason to delete rather than keep.** The rung V1 was asked for could
+ * not have been written at all: a `TileId` carries no design, `DesignId` is a
+ * hash of a *tag set*, and the tags live in `catalog.json` — 5.6 MB fetched
+ * asynchronously, long after `persist` has already run `migrate` synchronously
+ * inside `create(...)`. A rung has no catalog and can never get one. So the
+ * choice was never "map or discard"; it was "discard, or invent a second
+ * persisted field to park unresolved files in and a second policy for draining
+ * it". Discarding is the honest half of that pair.
+ *
+ * ### When this licence expires — read this before shipping
+ *
+ * **The moment a build of this app is served to a user who is not a developer,
+ * discarding stops being allowed.** A real user's saved room and library are not
+ * disposable, and there is no way to tell from inside the process whether the
+ * blob under `STORAGE_KEY` belongs to a colleague or a stranger. So the
+ * expiry is a fact about deployment, not about the code, and it will pass
+ * silently unless someone remembers this paragraph. `migrations.test.ts` carries
+ * the closest in-repo proxy for it — a guard on `package.json`'s major version,
+ * which fails the day this repo calls itself 1.0.0 — and that guard exists to
+ * make the reminder arrive by itself rather than to prove anything.
+ *
+ * **What to do when it expires**, so the next author does not have to rediscover
+ * it: reintroduce `MIGRATION_STEPS` as `Readonly<Record<number, (input:
+ * unknown) => unknown>>` keyed by the version each rung *produces*, walk it from
+ * the stored version to {@link STORE_VERSION} inside the `try` that
+ * {@link readPersistedState} already has, and keep {@link salvageWorkshopState}
+ * as the step that runs afterwards either way. Every rung must take `unknown`
+ * and return `unknown` — a typed signature is a lie about data that came from
+ * `localStorage`, and it is what makes an author write `input.placements.map(…)`
+ * and ship a `TypeError` to every user whose blob was truncated. Two shapes
+ * needing a rung are already known: this row's `library` (files → designs, which
+ * needs a catalog and therefore cannot run at hydrate — park and drain, or
+ * resolve on the library screen's first render) and row V4's `Placement`.
+ *
+ * ## What did *not* go
+ *
+ * {@link salvageWorkshopState} stays, entire. It is not backwards compatibility:
+ * it defends against a **current-version** blob that is corrupt anyway — a tab
+ * killed mid-write, a hand edit, a `__proto__` key out of `JSON.parse` — and it
+ * runs on every rehydrate rather than only on a version change. Deleting it
+ * would leave the most likely corruption case completely unchecked, which is the
+ * argument `workshopStore.ts` makes for wiring it into `merge` as well as into
+ * `migrate`.
  */
-import { TileId } from '@/catalog'
+import { DesignId, TileId } from '@/catalog'
 import { GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/placement/scene'
 
 import type { LockSystem, Placement, WorkshopState } from './schema'
@@ -41,112 +103,31 @@ import {
 /**
  * Version of the persisted shape.
  *
- * Set from the first commit, together with {@link migrateWorkshopState}, because
+ * Set from the first commit, together with the reader beside it, because
  * retrofitting a version stamp is far harder than starting with one: without it,
  * the first breaking change has to guess at the shape of every blob already in
- * every user's browser.
+ * every user's browser. That reasoning is unchanged by the ladder's removal —
+ * the stamp is what makes a foreign shape *recognisable*, and recognising it is
+ * the whole of {@link readPersistedState}'s job.
  *
- * **To ship version N+1:** change the schema in `schema.ts`, bump this, add a
- * step under `N+1` in {@link MIGRATION_STEPS} that maps an N-shaped blob to an
- * (N+1)-shaped one, and add an N entry to the fixture table in
- * `migrations.test.ts`. The suite fails if any of the three is missing.
+ * **History, kept because a future rung author will need to know what shipped:**
+ *
+ * | version | shape |
+ * | ------: | --- |
+ * | 1 | `library` (files), `placements`, `lock` |
+ * | 2 | adds `lockChosen` |
+ * | 3 | adds `generated` — recipes and positions, never meshes |
+ * | 4 | `library` is keyed by **design**, not by file (row V1) |
+ *
+ * **To ship version N+1 while discarding is still allowed:** change the schema in
+ * `schema.ts` and bump this. Nothing else. A blob at any other version is
+ * discarded by the gate below, and `migrations.test.ts` asserts that every
+ * version in the table above is in fact discarded rather than half-read.
+ *
+ * **To ship version N+1 once it is not:** see the expiry note in the module
+ * docblock.
  */
-export const STORE_VERSION = 3
-
-/**
- * One rung of the migration ladder: given a blob in version `N-1`'s shape,
- * return one in version `N`'s.
- *
- * `unknown` in and `unknown` out, not `StateVN-1` in and `StateVN` out, and this
- * is the load-bearing decision of the module. A typed signature is a lie about
- * data that came from `localStorage`: it tells the author the input is
- * well-formed, and the author then writes `input.placements.map(...)` and ships
- * a `TypeError` for every user whose blob was truncated. Untyped input forces
- * every step to look before it reads.
- *
- * A step is free to throw despite that — {@link migrateWorkshopState} catches
- * and falls back to defaults — but a step that throws loses the user's whole
- * scene, whereas one that returns a partially readable blob loses only the parts
- * that were unreadable, because {@link salvageWorkshopState} runs afterwards
- * either way.
- */
-export type MigrationStep = (input: unknown) => unknown
-
-/**
- * The ladder, keyed by the version each rung produces.
- *
- * Two rungs. Each is keyed by the version it *produces*, so the step under `2`
- * reads a version 1 blob and returns a version 2 one.
- */
-export const MIGRATION_STEPS: Readonly<Record<number, MigrationStep>> = {
-  /**
-   * 1 → 2: add `lockChosen`.
-   *
-   * Version 2 records whether the user has ever decided the lock system, which
-   * version 1 could not express. The interesting part is what to infer for a
-   * blob written before the flag existed, and the answer follows from the
-   * default being openlock:
-   *
-   *   - **`lock` is a lock system other than openlock.** Version 1 only ever
-   *     wrote that through `setLockSystem`, which nothing but a deliberate
-   *     change called — so this user chose. `lockChosen: true`, and they are not
-   *     asked again.
-   *   - **`lock` is openlock, missing, or unreadable.** Indistinguishable from
-   *     "never touched it", so `lockChosen: false` and the notice appears once.
-   *     Being asked once more is the cheap error here; silently locking someone
-   *     out of the choice is the expensive one.
-   *
-   * `unknown` in, `unknown` out (see {@link MigrationStep}), so every read is
-   * guarded: a blob that is not a plain object is returned untouched for
-   * {@link salvageWorkshopState} to reduce to defaults, and a blob that already
-   * carries a boolean `lockChosen` is passed through — a preview build on the
-   * same origin can have written a version 2 shape under a version 1 stamp.
-   *
-   * Spread rather than assignment, deliberately: object spread defines own data
-   * properties, so a `__proto__` key surviving from `JSON.parse` is copied as
-   * data rather than invoking the prototype setter. `salvage*` then drops it.
-   */
-  2: (input) => {
-    if (typeof input !== 'object' || input === null || Array.isArray(input)) return input
-    const source = input as Record<string, unknown>
-    if (typeof source.lockChosen === 'boolean') return source
-    const chosen = LockSystemSchema.safeParse(source.lock)
-    return { ...source, lockChosen: chosen.success && chosen.data !== DEFAULT_LOCK_SYSTEM }
-  },
-
-  /**
-   * 2 → 3: add `generated`.
-   *
-   * Version 3 holds generated bases beside the placements — the recipe and the
-   * position, never the mesh (see `schema.ts`). A version 2 blob has no such
-   * key, and there is nothing to infer: absence is an empty map, because a build
-   * written before the generator could place anything had no generated bases in
-   * it. So this rung is a *shape* claim rather than a conversion, and it is
-   * written out anyway for two reasons.
-   *
-   * The first is that {@link salvageWorkshopState} would already produce `{}`
-   * from an absent key, and a rung that only relied on that would leave the
-   * version stamp unexplained — the harness in `migrations.test.ts` exists so a
-   * future breaking change can see what every shipped shape was, and "version 3
-   * is version 2 plus this key" is the fact it needs.
-   *
-   * The second is the preview-build case the `lockChosen` rung already had to
-   * handle: a build on the same origin can have written a version 3 shape under
-   * a version 2 stamp, so a blob that already carries a plain-object `generated`
-   * is passed through untouched rather than overwritten with an empty map. That
-   * is the difference between "read best-effort" and "silently empty somebody's
-   * bases", and it is the same asymmetry the rung above resolves the same way.
-   *
-   * Spread rather than assignment, for the `__proto__` reason the rung above
-   * gives.
-   */
-  3: (input) => {
-    if (typeof input !== 'object' || input === null || Array.isArray(input)) return input
-    const source = input as Record<string, unknown>
-    if (asRecord(source.generated) !== undefined) return source
-    return { ...source, generated: {} }
-  },
-}
+export const STORE_VERSION = 4
 
 /** A state recovered from untrusted input, plus what had to be thrown away. */
 export interface RecoveredState {
@@ -168,8 +149,8 @@ export interface RecoveredState {
  * `JSON.parse('{"__proto__":{"x":1}}')` produces an object with `__proto__` as
  * an *own* property, and copying that key into an object literal with `obj[key]
  * = value` invokes the prototype setter instead of defining a property. No
- * legitimate key is affected: a `TileId` always starts `tiles/` and a
- * `PlacementId` is a UUID.
+ * legitimate key is affected: a `DesignId` is `d` plus twelve hex characters, a
+ * `TileId` always starts `tiles/` and a `PlacementId` is a UUID.
  */
 const UNSAFE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
 
@@ -196,6 +177,26 @@ function describeValue(value: unknown): string {
   return typeof value
 }
 
+/**
+ * Recover the library — a set of {@link DesignId}s.
+ *
+ * `DesignId` is `z.string().min(1)`, which accepts far more than a design id: it
+ * would accept a `TileId`, and a `TileId` in this map is not a hypothetical but
+ * the *exact* shape every version 1–3 blob had. So a key that parses as a tile
+ * id is rejected here and named, and the check is capable rather than decorative
+ * because the two spaces are lexically disjoint — `^tiles/…` against `d` plus
+ * twelve hex characters, 0 of the corpus's 3,822 design ids starting `tiles/`
+ * (`corpus.test.ts`).
+ *
+ * The version gate should already have discarded any such blob wholesale; this
+ * catches the residue it cannot see — a hand edit, or a preview build that wrote
+ * an old library under the current stamp. **Rejecting is the point.** A dangling
+ * file id kept in this map would resolve to no record, so it would render
+ * nowhere, count towards the header's tally, and be unremovable through any
+ * button in the app; dropping it *silently* would be the same loss without the
+ * message. Named and dropped is the module's standing policy for a datum it
+ * cannot read, and this is that policy applied one level down.
+ */
 function salvageLibrary(input: unknown, dropped: string[]): WorkshopState['library'] {
   const out: WorkshopState['library'] = {}
   if (input === undefined) return out
@@ -209,9 +210,13 @@ function salvageLibrary(input: unknown, dropped: string[]): WorkshopState['libra
       dropped.push(`library.${key}: unsafe key`)
       continue
     }
-    const tileId = TileId.safeParse(key)
-    if (!tileId.success) {
-      dropped.push(`library.${key}: not a tile id`)
+    if (TileId.safeParse(key).success) {
+      dropped.push(`library.${key}: a file id, not a design id — the library holds items now`)
+      continue
+    }
+    const design = DesignId.safeParse(key)
+    if (!design.success) {
+      dropped.push(`library.${key}: not a design id`)
       continue
     }
     // `false` is not corruption — it is the absence of a membership, which a
@@ -221,7 +226,7 @@ function salvageLibrary(input: unknown, dropped: string[]): WorkshopState['libra
       dropped.push(`library.${key}: expected true, found ${describeValue(value)}`)
       continue
     }
-    out[tileId.data] = true
+    out[design.data] = true
   }
   return out
 }
@@ -300,16 +305,28 @@ function salvagePlacements(input: unknown, dropped: string[]): WorkshopState['pl
  * Delegated to row S5's own schema rather than field-checked here, and the
  * asymmetry with {@link salvagePlacement} is deliberate. A `Placement` is four
  * scalars, so this module can salvage it *partially* — a bad rotation falls back
- * to 0 and keeps the tile where it is. A {@link GeneratedPlacement} carries a
- * whole parameter set, and there is no partial reading of one: a recipe missing
- * a `-D` is a different base, and a recipe naming an entry point this panel does
- * not offer has no footprint rule and nothing to draw. Filling either from a
- * default would put a base on the grid that nobody asked for and then print it.
+ * to 0 and keeps the tile where it is. A `GeneratedPlacement` carries a whole
+ * parameter set, and there is no partial reading of one: a recipe missing a `-D`
+ * is a different base, and a recipe naming an entry point this panel does not
+ * offer has no footprint rule and nothing to draw. Filling either from a default
+ * would put a base on the grid that nobody asked for and then print it.
  *
  * So each entry is all-or-nothing, and every drop is named — which is the same
  * contract, applied at the granularity the datum actually has. `safeParse`
  * rather than `parse` keeps the function total; the schema itself normalises
  * `-0` and folds nothing else.
+ *
+ * **What this deliberately does not check**, because row X10 found it and it is
+ * still true: `GeneratedPlacement` does not cross-check `base` against `recipe`,
+ * so a blob whose `base` names a different recipe than the one beside it parses
+ * clean. It cannot be checked here. Proving the pair consistent needs
+ * `recipeKey`, which needs `@/generator/panel/schemas` and its 25 KB of pinned
+ * parameter JSON — a measured 20,168 B added to this module's file closure, and
+ * `src/generator/placement/scene.ts`'s docblock and `boundary.test.ts` hold that
+ * line on purpose. So the hole stays exactly the size X10 measured: not widened,
+ * not closed, and named here so the next reader does not mistake it for an
+ * oversight. Version 4's discard does not touch it — the disagreement is
+ * expressible *within* one version, so no gate on the version stamp can see it.
  */
 function salvageGenerated(input: unknown, dropped: string[]): WorkshopState['generated'] {
   const out: WorkshopState['generated'] = {}
@@ -367,11 +384,11 @@ function salvageLock(input: unknown, dropped: string[]): LockSystem {
  * readable and reporting everything discarded.
  *
  * This runs on **every** rehydrate, not only on a version change — it is wired
- * as `persist`'s `merge`, because `migrate` is called only when the stored
- * version differs from the current one. A blob that is corrupt but correctly
- * stamped `version: 1` never reaches `migrate`, so validating only there would
- * leave the most likely corruption case (a crashed tab at the current version)
- * completely unchecked.
+ * as `persist`'s `merge`, because the version gate is called only when the
+ * stored version differs from the current one. A blob that is corrupt but
+ * correctly stamped `version: 4` never reaches the gate, so validating only
+ * there would leave the most likely corruption case (a crashed tab at the
+ * current version) completely unchecked.
  */
 export function salvageWorkshopState(input: unknown): RecoveredState {
   const dropped: string[] = []
@@ -394,52 +411,86 @@ export function salvageWorkshopState(input: unknown): RecoveredState {
   }
 }
 
-/* ------------------------------------------------------------------ migrating */
+/* --------------------------------------------------------------- version gate */
 
 /**
- * Climb a persisted blob from the version it was written at to
- * {@link STORE_VERSION}, then salvage whatever comes out.
+ * Read a persisted blob that claims to be at `storedVersion`.
  *
- * Three cases the caller does not have to think about:
+ * One branch, and it is symmetric: **the stamp is {@link STORE_VERSION} or the
+ * blob is discarded.** Older, newer, absent, `NaN`, a string, a float — all the
+ * same answer, a fresh state and one line in `dropped` naming what the stamp
+ * said. Symmetry is the reason it is written this way rather than as three cases:
+ * a gate with a direction has a wrong side, and the wrong side of a shape
+ * mismatch is a screen full of items that resolve to nothing.
  *
- *   - **No usable version** (absent, `NaN`, a string, a float). Treated as 0, so
- *     the blob walks the whole ladder. A blob with no version stamp predates the
- *     stamp, which means it is at most version 1's shape.
+ * **What this costs, stated rather than buried.** The reader it replaced
+ * salvaged a *newer* blob best-effort, arguing that a downgrade is nearly always
+ * the same user on a stale tab or a rolled-back deploy and that emptying
+ * someone's library over a cached bundle is the worse failure. That argument was
+ * right and is now moot: with nothing deployed there is no such user, and the
+ * shared fields it relied on being "overwhelmingly likely to still be readable"
+ * are precisely what row V1 changed underneath — a version 3 library is a map of
+ * files, and reading it as a map of items produces entries that name nothing.
+ * The day the argument comes back, so must a rung; see the module docblock.
  *
- *   - **A version from the future.** The blob is salvaged as if it were current
- *     rather than discarded. A downgrade is nearly always the same user on a
- *     stale tab or a rolled-back deploy, the shared fields are overwhelmingly
- *     likely to still be readable, and emptying someone's library because their
- *     browser cached yesterday's bundle is a worse failure than showing them a
- *     scene missing whatever version N+1 had added. Salvaging cannot produce an
- *     invalid state — every field is checked on the way through — so the floor
- *     is the same in both cases.
+ * Total, like everything else here. The salvage that follows a matching stamp is
+ * wrapped so that a throw from anywhere inside it costs the scene rather than
+ * the app: a `RangeError` out of a pathological `Object.entries`, say. Nothing in
+ * `salvage*` is expected to throw and nothing in the suite makes it — the `try`
+ * is there because the alternative to a caught throw here is a white screen with
+ * the poison still in storage.
  *
- *   - **A step that throws.** Caught, and the whole blob falls back to defaults.
- *     This is the one path that loses data, which is why the steps themselves are
- *     written to tolerate garbage rather than relying on it.
+ * ## What this function is never called with, and it is not what the old
+ * docblock claimed
+ *
+ * The reader this replaced documented three cases it handled, one of them *"no
+ * usable version (absent, `NaN`, a string, a float) — treated as 0, so the blob
+ * walks the whole ladder"*. **On the `localStorage` path that case was
+ * unreachable, and had been since the first commit.** `zustand/middleware`'s
+ * `persist` guards the call:
+ *
+ * ```js
+ * if (typeof deserializedStorageValue.version === 'number' && deserializedStorageValue.version !== options.version)
+ * ```
+ *
+ * so a blob whose stamp is absent, a string, `null` or `NaN` never reaches
+ * `migrate` at all — it goes straight to `merge`, which is
+ * {@link salvageWorkshopState}, and is read as though it were current. A
+ * *fractional* stamp does reach it, being a number.
+ *
+ * Two consequences, both real:
+ *
+ *   1. **{@link salvageWorkshopState} is the only defence for an unstamped
+ *      blob**, which is why `salvageLibrary` rejects a `TileId` key rather than
+ *      trusting this gate to have caught the shape first. That check is not
+ *      belt-and-braces; it is the sole reader of the one path the gate cannot
+ *      see. `migrations.test.ts` asserts both halves.
+ *   2. **The only caller that exercises the non-numeric cases is
+ *      `transfer.ts`**, where the version comes out of a file rather than out of
+ *      `persist` — and that caller now refuses a mismatch before calling this at
+ *      all.
+ *
+ * Nothing here tries to defeat the guard: no blob this app has ever written is
+ * unstamped (the stamp was set in the first commit), so an unstamped blob is a
+ * hand edit or foreign JSON, and reading it best-effort with every unreadable
+ * field named is the right answer for both.
  */
-export function migrateWorkshopState(input: unknown, fromVersion: unknown): RecoveredState {
-  const from = typeof fromVersion === 'number' && Number.isInteger(fromVersion) ? fromVersion : 0
-  const start = Math.max(from, 0)
-  let blob = input
-  for (let version = start + 1; version <= STORE_VERSION; version += 1) {
-    const step = MIGRATION_STEPS[version]
-    if (step === undefined) continue
-    try {
-      blob = step(blob)
-    } catch (error) {
-      return {
-        state: defaultWorkshopState(),
-        dropped: [`migration to version ${String(version)} threw (${String(error)}); state reset`],
-      }
+export function readPersistedState(input: unknown, storedVersion: unknown): RecoveredState {
+  if (storedVersion !== STORE_VERSION) {
+    return {
+      state: defaultWorkshopState(),
+      dropped: [
+        `state was written at version ${describeValue(storedVersion)}, and this build reads only ` +
+          `${String(STORE_VERSION)}; discarded and started fresh`,
+      ],
     }
   }
-  const recovered = salvageWorkshopState(blob)
-  if (from > STORE_VERSION) {
-    recovered.dropped.push(
-      `state was written by version ${String(from)}, newer than ${String(STORE_VERSION)}; read best-effort`,
-    )
+  try {
+    return salvageWorkshopState(input)
+  } catch (error) {
+    return {
+      state: defaultWorkshopState(),
+      dropped: [`reading version ${String(STORE_VERSION)} state threw (${String(error)}); discarded`],
+    }
   }
-  return recovered
 }

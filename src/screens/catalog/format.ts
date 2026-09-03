@@ -161,19 +161,20 @@ export function fileTokenLabel(file: string): string {
  *
  *   - on an item's card they are noise, and worse than noise — they would print
  *     one arbitrary variant's string on something that stands for all of them.
- *   - on a **row naming one saved file** they are the only thing there is. Two
- *     variants of one design differ in the connection axis and nothing else, so
- *     `fileTokenLabel` gives both of them `2x` and tells the user nothing about
- *     which row is which.
+ *   - on a line naming **one concrete file of that item** they are the only thing
+ *     there is. Two variants of one design differ in the connection axis and
+ *     nothing else, so `fileTokenLabel` gives both of them `2x` and tells the
+ *     user nothing about which file they are looking at.
  *
- * Used by the library card's saved-file rows, where the whole point of the row is
- * that it is one file out of several. Longer than the design token — 38
+ * Used by the library card's "prints as" line (row V2), where the whole point is
+ * that it names one file out of the item's several — and, for up to 42.2% of
+ * items, not the one in the picture above it. Longer than the design token — 38
  * characters at the corpus maximum against 14 — and affordable there because the
  * library is a plain CSS grid with no fixed card height.
  *
  * Empty for a filename with no dot before the extension, and then the caller
- * shows the filename instead: a row that named nothing could not be told from
- * its neighbour, which is the one thing it exists to do.
+ * shows the filename instead: a line that named nothing could not be told from
+ * the card above it, which is the one thing it exists to do.
  */
 export function variantTokenLabel(file: string): string {
   const base = file.slice(file.lastIndexOf('/') + 1)

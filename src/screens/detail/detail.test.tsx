@@ -40,8 +40,8 @@ import { openTileDrawer } from '@/routes'
 import { TINT_FILTER_SHEET_ID } from '@/ui/thumb'
 import { parseCompactSearch, stringifyCompactSearch, validateCatalogSearch, validateFacetSearch } from '@/search'
 import {
-  claimPendingTile,
-  clearPendingTile,
+  claimPendingDesign,
+  clearPendingDesign,
   clearPersistedWorkshopState,
   resetWorkshop,
   setLockSystem,
@@ -359,13 +359,13 @@ beforeEach(() => {
   clearPersistedWorkshopState()
   // Row G5's channel is not part of `WorkshopState`, so `resetWorkshop` does not
   // reach it and a handoff left in the box would leak between tests.
-  clearPendingTile()
+  clearPendingDesign()
 })
 
 afterEach(() => {
   resetWorkshop()
   clearPersistedWorkshopState()
-  clearPendingTile()
+  clearPendingDesign()
 })
 
 /* ----------------------------------------------------------------- the URL */
@@ -775,7 +775,7 @@ describe('the actions', () => {
     expect(screen.getByText('library 1')).toBeInTheDocument()
   })
 
-  it('sends the tile to the builder, adding it to the library on the way', async () => {
+  it('sends the item to the builder, adding it to the library on the way', async () => {
     const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
 
     await act(async () => {
@@ -788,16 +788,20 @@ describe('the actions', () => {
     expect(screen.getByText('Builder screen')).toBeInTheDocument()
     // Row G5. Before the channel existed this action could file a tile, navigate
     // and seed a query, and then had nowhere to say "and arm this one" — which is
-    // PR #23's defect. It now posts the file, and the builder's palette claims it.
-    expect(claimPendingTile()).toBe('tiles/cave/floors/floor/cave%floor.1x1.stl')
+    // PR #23's defect. It now posts the **item**, and the builder's palette
+    // claims it. Row V1 changed the currency from a file to a design, for the
+    // reason G5 itself gave: the file on screen is one of several prints of the
+    // thing the user chose, so sending it froze a lock preference into a handoff.
+    expect(claimPendingDesign()).toBe('d-floor-1x1')
+    expect(Object.keys(useWorkshopStore.getState().library)).toEqual(['d-floor-1x1'])
   })
 
-  it('sends the file the drawer is showing, which is not the file the link named', async () => {
+  it('sends the item, and still shows the variant the preference picked', async () => {
     // `?tile=30` is canonical, and with no lock chosen A1's rank shows the plain
     // openlock integral rather than the address holder — the case the tests above
-    // assert. So the pre-selection has to be that file: the user is looking at a
-    // specific print, and a channel that sent `variants[0]` would arm a row the
-    // drawer never showed.
+    // assert, and it is unchanged: the drawer's *display* is still per-variant.
+    // What travels is the item, so the two questions have come apart, which is
+    // the whole of row V1's change to this channel.
     await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
     expect(
       within(drawer())
@@ -810,28 +814,32 @@ describe('the actions', () => {
       await Promise.resolve()
     })
 
-    const shown = 'tiles/cave/arches/arch/openlock/cave%arch.2x.openlock.stl'
-    expect(claimPendingTile()).toBe(shown)
-    // And the same file is filed, so the palette has a row to arm.
-    expect(Object.keys(useWorkshopStore.getState().library)).toEqual([shown])
+    expect(claimPendingDesign()).toBe('d-arch')
+    // And the same item is filed, so the palette has a row to arm.
+    expect(Object.keys(useWorkshopStore.getState().library)).toEqual(['d-arch'])
   })
 
-  it('sends the file a non-canonical link named, with no preference applied', async () => {
-    // `?tile=32` asked for this print. A dragonlock preference would rank it last
-    // and the drawer still shows it, so the handoff must carry it too — otherwise
-    // following a link to a specific file and pressing the action would put a
-    // different file in the builder.
+  it.each([
+    ['a dragonlock preference and the topless variant', 'dragonlock', ORD.archTopless] as const,
+    ['no preference and the topper variant', 'openlock', ORD.archTopper] as const,
+  ])('sends the same item under %s', async (_label, lock, ord) => {
+    // `?tile=32` asked for a specific print and the drawer still shows it. Under
+    // the old file-carrying channel this case existed because the handoff had to
+    // carry *that* file, or following a link and pressing the action would arm a
+    // different one — a lock preference leaking into a handoff. A design cannot
+    // leak, so the claim is the same item from either variant under either lock,
+    // and the assertion is an *invariance* rather than an identity.
     act(() => {
-      setLockSystem('dragonlock')
+      setLockSystem(lock)
     })
-    await renderAt(`/catalog?tile=${String(ORD.archTopless)}`)
+    await renderAt(`/catalog?tile=${String(ord)}`)
 
     await act(async () => {
       fireEvent.click(within(drawer()).getByRole('button', { name: /Use in builder/ }))
       await Promise.resolve()
     })
 
-    expect(claimPendingTile()).toBe('tiles/cave/arches/arch/openlock/cave%arch.2x.openlock.topless.stl')
+    expect(claimPendingDesign()).toBe('d-arch')
   })
 })
 

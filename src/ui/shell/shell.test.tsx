@@ -20,7 +20,7 @@ import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { TileId } from '@/catalog'
+import { DesignId, TileId } from '@/catalog'
 import { createWorkshopRouter } from '@/routes'
 import { addToLibrary, clearPersistedWorkshopState, placeTile, resetWorkshop } from '@/store'
 
@@ -32,7 +32,9 @@ const STATS: CatalogStats = { tileCount: 8702, archiveHost: 'objects.openforge.t
 const TILE_A = TileId.parse(
   'tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl',
 )
-const TILE_B = TileId.parse('tiles/cave/thick_wall/wall/corner/openlock/cave%corner.openlock.stl')
+/** Two items. The library counts items, not files, since row V1. */
+const DESIGN_A = DesignId.parse('d4c2a57740b65')
+const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
 
 async function renderApp(path = '/', stats: CatalogStats | null = STATS) {
   // The router resets scroll after a navigation. jsdom 30 defines `scrollTo` as a
@@ -145,8 +147,8 @@ describe('nav', () => {
   })
 
   it('names the counts rather than showing bare numbers', async () => {
-    addToLibrary(TILE_A)
-    addToLibrary(TILE_B)
+    addToLibrary(DESIGN_A)
+    addToLibrary(DESIGN_B)
     placeTile({ tileId: TILE_A, x: 0, z: 0, rotation: 0 })
 
     await renderApp('/catalog')
@@ -162,7 +164,7 @@ describe('nav', () => {
     expect(screen.getByRole('link', { name: LIBRARY(0) })).toBeInTheDocument()
 
     act(() => {
-      addToLibrary(TILE_A)
+      addToLibrary(DESIGN_A)
     })
 
     expect(screen.getByRole('link', { name: LIBRARY(1) })).toBeInTheDocument()

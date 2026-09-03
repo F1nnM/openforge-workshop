@@ -24,6 +24,22 @@ import { SlotsPanel } from './SlotsPanel'
 
 const tile = (id: string): TileId => id as unknown as TileId
 
+/**
+ * The item a fixture file belongs to — what the library holds since row V1.
+ *
+ * Read off the fixture catalog rather than written out, because the point of
+ * these two assertions is the *hop*: `SlotFills` resolves a file (dead-end
+ * greying is a per-file question) and the panel saves the design that file is one
+ * print of. `FILL.torchStone` and `FILL.torchStoneFlex` are deliberately two
+ * files of one item in the fixture, so a panel that saved files could put two
+ * entries in the library for one pick and a panel that saves items cannot.
+ */
+const designOf = (id: string): string => {
+  const record = SLOT_CATALOG.records.find((candidate) => candidate.id === id)
+  if (record === undefined) throw new Error(`no fixture record for ${id}`)
+  return record.design
+}
+
 function at(id: string, x: number, z: number): Placement {
   return { tileId: tile(id), x, z, rotation: 0 }
 }
@@ -110,7 +126,7 @@ describe('SlotsPanel', () => {
       />,
     )
     expect(screen.getByText(/2 slots open on 2 pieces, 1 of them required/)).toBeInTheDocument()
-    expect(screen.getByText(/adds its file to your library/)).toBeInTheDocument()
+    expect(screen.getByText(/adds its item to your library/)).toBeInTheDocument()
     // And it does not claim the bill will show it, because the bill is built
     // from placements and row G5 owns the channel that would change that.
     expect(screen.getByText(/not a line in it/)).toBeInTheDocument()
@@ -137,20 +153,23 @@ describe('SlotsPanel', () => {
     )
   })
 
-  it('adds a picked file to the library, and leaves it there when the slot is cleared', () => {
+  it('adds a picked file’s item to the library, and leaves it there when the slot is cleared', () => {
     render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.wallTowne, 0, 0) })} />)
 
     const card = () => screen.getByRole('button', { name: /Dungeon Stone Torch/ })
     fireEvent.click(card())
-    expect(Object.keys(selectLibrary(useWorkshopStore.getState()))).toEqual([FILL.torchStone])
+    expect(Object.keys(selectLibrary(useWorkshopStore.getState()))).toEqual([designOf(FILL.torchStone)])
+    // The same item as the flex variant, so a second pick of either cannot add a
+    // second entry.
+    expect(designOf(FILL.torchStoneFlex)).toBe(designOf(FILL.torchStone))
 
-    // Clearing the slot does not un-add the file: the panel would be undoing a
+    // Clearing the slot does not un-add it: the panel would be undoing a
     // decision it did not make, and the library is a list of things to print.
     fireEvent.click(card())
-    expect(Object.keys(selectLibrary(useWorkshopStore.getState()))).toEqual([FILL.torchStone])
+    expect(Object.keys(selectLibrary(useWorkshopStore.getState()))).toEqual([designOf(FILL.torchStone)])
   })
 
-  it('does not add a file for a pick it refused', () => {
+  it('does not add anything for a pick it refused', () => {
     render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.wallTowne, 0, 0) })} />)
     fireEvent.click(screen.getByRole('button', { name: /Towne Torch/ }))
     expect(Object.keys(selectLibrary(useWorkshopStore.getState()))).toEqual([])
