@@ -45,8 +45,6 @@ import {
   clearPersistedWorkshopState,
   resetWorkshop,
   setLockSystem,
-  useLibraryCount,
-  useWorkshopStore,
 } from '@/store'
 
 import { SpriteRotator } from './SpriteRotator'
@@ -283,13 +281,16 @@ const CATALOG = CatalogFile.parse({
 /**
  * The catalog stand-in: a focusable control to prove focus restoration, plus the
  * drawer under test.
+ *
+ * It rendered `useLibraryCount()` beside them until row A0, so a test could see
+ * the drawer's toggle write through to the store. The toggle and the library are
+ * both gone; the drawer's one remaining action is observed through the router and
+ * the selection channel instead.
  */
 function CatalogStub() {
-  const count = useLibraryCount()
   return (
     <div>
       <button type="button">a card</button>
-      <output>library {count}</output>
       <TileDrawer catalog={CATALOG} />
     </div>
   )
@@ -759,23 +760,23 @@ describe('the storage address', () => {
 /* ------------------------------------------------------------------ actions */
 
 describe('the actions', () => {
-  it('toggles the tile in and out of the library', async () => {
+  it('offers one action, the library toggle having gone with the library', async () => {
+    // Row A0. §2.5 gave the drawer two actions and the first wrote to a store
+    // field that no longer exists. Asserted rather than left implicit, because
+    // **row C3 puts an action back in that slot** — "place this instance" — and
+    // this is the assertion that tells C3 the slot is empty rather than filled
+    // with something that half-works.
     await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
 
-    const toggle = within(drawer()).getByRole('button', { name: '+ Add to library' })
-    expect(toggle).toHaveAttribute('aria-pressed', 'false')
-
-    act(() => {
-      fireEvent.click(toggle)
-    })
-    expect(within(drawer()).getByRole('button', { name: '✓ In library' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
-    expect(screen.getByText('library 1')).toBeInTheDocument()
+    const actions = within(drawer())
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('of-detail-action'))
+    expect(actions).toHaveLength(1)
+    expect(actions[0]).toHaveTextContent('Use in builder')
+    expect(within(drawer()).queryByRole('button', { name: /Add to library/ })).toBeNull()
   })
 
-  it('sends the item to the builder, adding it to the library on the way', async () => {
+  it('sends the item to the builder', async () => {
     const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
 
     await act(async () => {
@@ -792,8 +793,11 @@ describe('the actions', () => {
     // claims it. Row V1 changed the currency from a file to a design, for the
     // reason G5 itself gave: the file on screen is one of several prints of the
     // thing the user chose, so sending it froze a lock preference into a handoff.
+    //
+    // It filed the item in the library on the way too, until row A0 deleted the
+    // library. The channel is the whole of the handoff now, which is what the
+    // palette's own claim guard reads.
     expect(claimPendingDesign()).toBe('d-floor-1x1')
-    expect(Object.keys(useWorkshopStore.getState().library)).toEqual(['d-floor-1x1'])
   })
 
   it('sends the item, and still shows the variant the preference picked', async () => {
@@ -815,8 +819,6 @@ describe('the actions', () => {
     })
 
     expect(claimPendingDesign()).toBe('d-arch')
-    // And the same item is filed, so the palette has a row to arm.
-    expect(Object.keys(useWorkshopStore.getState().library)).toEqual(['d-arch'])
   })
 
   it.each([

@@ -104,15 +104,16 @@
  *
  * The contract's third clause — "pre-selects the tile" — now has a channel. Row
  * G5 added `@/store`'s `sendDesignToBuilder`, an un-persisted one-shot mailbox
- * the builder's palette claims on mount, so the action does all four of the
- * things the clause asks for: it saves the **item** to the library, asks the
- * builder to arm that same item, navigates, and seeds the palette's search with
- * the item's name.
+ * the builder's palette claims on mount, so the action asks the builder to arm
+ * the **item**, navigates, and seeds the palette's search with the item's name.
  *
- * The order is load-bearing. The library write comes first because the palette
- * lists the library, and it refuses to arm something it holds no placeable row
- * for — so arming before filing would be a handoff the reader is right to drop.
- * The navigation comes last because the claim happens when the palette mounts.
+ * It was three writes and row **A0** removed the first: `addToLibrary`, which
+ * came before the others because the palette listed the library and refused to
+ * arm something it held no placeable row for. With the library gone the palette
+ * lists the archive search instead, and the search this action seeds is what puts
+ * the item in front of the claim — so the ordering constraint is satisfied by the
+ * same navigation rather than by a store write. The navigation still comes last,
+ * because the claim happens when the palette mounts.
  *
  * **The item travels, not the shown variant and not a resolution.** Row V1
  * turned both the library and this channel over to designs, which reverses what
@@ -134,7 +135,7 @@ import { buildAggregateIndex, resolveTags, selectVariant } from '@/catalog'
 import { closeTileDrawer, resolveTileTarget } from '@/routes'
 import { resolveMaterial } from '@/materials'
 import { MAX_QUERY_LENGTH } from '@/search'
-import { addToLibrary, sendDesignToBuilder, toggleLibrary, useIsInLibrary, useLockChosen, useLockSystem } from '@/store'
+import { sendDesignToBuilder, useLockChosen, useLockSystem } from '@/store'
 import { Tile3DPanel } from '@/three'
 import { Chip, Drawer, Eyebrow } from '@/ui/primitives'
 import { loadCatalogIndex } from '@/ui/shell'
@@ -334,7 +335,6 @@ function TileDetail({
 }) {
   const router = useRouter()
   const { shown, choice } = useShownVariant(aggregate, urlVariant, canonical)
-  const inLibrary = useIsInLibrary(aggregate.design)
 
   const record = useMemo(() => recordOf(catalog, shown.id), [catalog, shown.id])
   const tags = useMemo(() => (record === undefined ? [] : resolveTags(catalog, record)), [catalog, record])
@@ -389,22 +389,20 @@ function TileDetail({
       </p>
 
       <div className="of-detail-actions">
-        <button
-          type="button"
-          className="of-detail-action"
-          aria-pressed={inLibrary}
-          onClick={() => {
-            toggleLibrary(aggregate.design)
-          }}
-        >
-          {inLibrary ? '✓ In library' : '+ Add to library'}
-        </button>
+        {/*
+          §2.5's first action was "+ Add to library" / "✓ In library" and row
+          **A0** removed it with the library it wrote to. **Row C3 owns what
+          takes its place** — "place this instance", the same action the catalog
+          card is waiting for — so the slot is deliberately empty rather than
+          filled with something that half-works: an action here that armed the
+          builder without navigating would be a second, quieter "Use in builder"
+          beside the real one.
+        */}
         <button
           type="button"
           className="of-detail-action"
           data-variant="ghost"
           onClick={() => {
-            addToLibrary(aggregate.design)
             sendDesignToBuilder(aggregate.design)
             void router.navigate({
               to: '/builder',

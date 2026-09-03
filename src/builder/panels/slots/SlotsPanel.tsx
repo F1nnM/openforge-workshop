@@ -8,27 +8,30 @@
  * and it sits under the bill because it is the same question one step further in
  * — *and what goes in the holes*.
  *
- * ## What it can honestly do with a pick
+ * ## A pick currently goes nowhere, and that is row C3's
  *
- * It saves the chosen file's **item** to the library, and says so in the panel.
- * That is the whole of the available channel: `WorkshopState` holds a library and
- * placements, the bill is built from placements, and row **G5** owns the
- * selection channel. So a slot fill cannot yet appear as a bill line, and this
- * panel does not pretend otherwise — it states the count of required slots the
- * plan has open, and the library is where the picks land. `addToLibrary` is an
- * existing store action; nothing here writes a new field.
+ * It used to save the chosen file's **item** to the library and say so in the
+ * panel. That was the whole of the available channel: `WorkshopState` held a
+ * library and placements, the bill is built from placements, and row **G5** owns
+ * the selection channel — so a slot fill could not appear as a bill line, and the
+ * library was where the picks landed.
  *
- * **The pick is a file and the library holds designs (row V1), so one hop is
- * needed** — in this direction only. The plan side no longer needs one: row V4
- * made a placement name a design, so `planSlots` resolves *outwards* to the file
- * whose slots are open, and {@link designIndex} is still what carries a chosen
- * fill *inwards* to the item it is one print of. `SlotFills` resolves a concrete `TileId` — dead-end greying is the
- * whole point of reusing it, and that is a per-file question — and
- * {@link designIndex} carries it to the item that file is one print of. The map is
- * built once per catalog rather than per pick: `TileDrawer` answers the same
- * question with `catalog.records.find(…)`, which is a linear scan over 8,702
- * records and is fine for one lookup on a drawer open, but this callback fires
- * per pick on a panel that re-renders on every store write.
+ * Row **A0** deleted the library, and this pick therefore has **no destination
+ * at all** in the meantime. **Row C3 is what gives it one** — the right-click slot
+ * editor, where a pick becomes a `SlotFill` on a placed template instance and is
+ * the whole point of the templates plan. The `onPick` callback is kept and left
+ * inert rather than removed, because C3 rewires exactly this seam; contract
+ * dependency **C-e** in `docs/templates-plan.md` §8 records the pair. The panel
+ * says so on screen rather than accepting a press that quietly does nothing.
+ *
+ * The `TileId` to `DesignId` hop went with the write. `SlotFills` resolves a
+ * concrete `TileId` — dead-end greying is the whole point of reusing it, and that
+ * is a per-file question — and {@link designIndex} carried it to the item that
+ * file is one print of. It is kept, because C3 needs the same hop for the same
+ * reason and the map is built once per catalog rather than per pick: `TileDrawer`
+ * answers the same question with `catalog.records.find(…)`, which is a linear
+ * scan over 8,702 records and is fine for one lookup on a drawer open, but this
+ * callback fires per pick on a panel that re-renders on every store write.
  *
  * ## Why the whole picker is reused rather than reimplemented
  *
@@ -52,7 +55,6 @@ import { describeCell } from '@/builder/canvas'
 import type { CatalogFile, DesignId, TileId } from '@/catalog'
 import { SlotFills } from '@/screens/detail/slots'
 import type { LockSystem, Placement } from '@/store'
-import { addToLibrary } from '@/store'
 import { Eyebrow } from '@/ui/primitives'
 
 import { planSlots } from './planSlots'
@@ -91,8 +93,8 @@ function designIndex(catalog: CatalogFile): ReadonlyMap<TileId, DesignId> {
 export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
   const designOf = useMemo(() => designIndex(catalog), [catalog])
   // One resolution per placed file that declares a slot, and the panel re-renders
-  // on every store change — 0.09 ms each is cheap and 50 of them on every
-  // library toggle is not, so it is memoised on the placements it read.
+  // on every store change — 0.09 ms each is cheap and 50 of them on every store
+  // write is not, so it is memoised on the placements it read.
   const inventory = useMemo(() => planSlots(catalog, placements, lock), [catalog, placements, lock])
 
   return (
@@ -120,8 +122,8 @@ export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
             {`${String(inventory.holders.length)} ${
               inventory.holders.length === 1 ? 'piece' : 'pieces'
             }, ${String(inventory.required)} of them required. `}
-            Picking one adds its item to your library. The bill above counts placed tiles, so a
-            slot fill is not a line in it.
+            Choosing a fill is not yet something this build can keep: the bill above counts placed
+            tiles, and a slot fill is not one. The picker below shows what each slot will take.
           </p>
 
           {inventory.unfillable === 0 ? null : (
@@ -143,17 +145,15 @@ export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
                 <SlotFills
                   catalog={catalog}
                   onPick={(_slot, tile) => {
-                    // Cleared picks are left in the library: removing an item the
-                    // user may have added deliberately, because they changed one
-                    // slot, would be the panel undoing a decision it did not make.
+                    // **Row C3's seam, deliberately inert.** It wrote the chosen
+                    // file's item to the library; row A0 deleted the library, and
+                    // C3 replaces the destination rather than the pick — a fill
+                    // becomes a `SlotFill` on a placed template instance. The
+                    // `TileId` to `DesignId` hop stays because C3 needs it: a
+                    // pick is a file and a template slot is filled by one, but
+                    // the greying walk and the bill both group by design.
                     if (tile === undefined) return
-                    const design = designOf.get(tile)
-                    // A pick the index does not hold cannot happen — `SlotFills`
-                    // resolves against this same catalog — and silently saving
-                    // nothing is the right answer if it ever does, because the
-                    // alternative is putting a key in the library that resolves
-                    // to no record and cannot be removed through any button.
-                    if (design !== undefined) addToLibrary(design)
+                    void designOf.get(tile)
                   }}
                   parent={holder.parent}
                 />

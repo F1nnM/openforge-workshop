@@ -2,10 +2,17 @@
  * One catalog card.
  *
  * design-contract.md §2.2: a 4:3 thumbnail well, the title, a mono size chip,
- * the texture set name, the mono file size, and a full-width library toggle. The
- * well itself is `@/ui/thumb`, which row 14's lighter card, the builder's bill and
- * the builder's palette all render too; row P0 moved it out of this file so the
- * four of them, and P1's tint filters, have one owner.
+ * the texture set name and the mono file size. The well itself is `@/ui/thumb`,
+ * which the builder's bill and the builder's palette render too; row P0 moved it
+ * out of this file so all three of them, and P1's tint filters, have one owner.
+ *
+ * **§2.2's full-width library toggle is gone, and nothing replaces it yet.** Row
+ * **A0** deleted the library, so "+ Add to library" had nowhere to add to; row
+ * **C3** gives the card its action back, and it is a different action — placing
+ * the item, or filling a slot with it, rather than saving it. The card is the
+ * catalog's, not the builder's, so it holds no store write at all in between: the
+ * only way into the builder from here is the drawer's "Use in builder", which
+ * posts to the un-persisted selection channel row G5 owns.
  *
  * ## A card is one aggregate, not one file — 3,822 cards over 8,702 files
  *
@@ -65,7 +72,6 @@ import { Link } from '@tanstack/react-router'
 
 import type { CatalogAssets, CatalogRecord, SpriteSheet, TileAggregate } from '@/catalog'
 import { MATERIALS, resolveMaterial } from '@/materials'
-import { toggleLibrary, useIsInLibrary } from '@/store'
 import { Chip, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
@@ -164,13 +170,12 @@ export function TileCard({ item, preview, tags, assets, sheet }: TileCardProps) 
       <AvailabilityStrip item={item} />
 
       {/*
-        The design contract's tag chips, last before the toggle as §2.2 lists
-        them. What the card has already said is passed in rather than re-derived,
-        so the suppression rule is measured against the exact strings above.
+        The design contract's tag chips. They were last *before* the toggle as
+        §2.2 lists them and are simply last since row A0. What the card has
+        already said is passed in rather than re-derived, so the suppression rule
+        is measured against the exact strings above.
       */}
       <TagStrip tags={tags} said={[item.name, texture, size]} />
-
-      <LibraryToggle item={item} />
     </article>
   )
 }
@@ -184,10 +189,9 @@ export function TileCard({ item, preview, tags, assets, sheet }: TileCardProps) 
  * A `<ul>`, because it is a list of independent claims about one item rather
  * than a sentence; a screen reader announces "list, 3 items" and can step
  * through them. Each chip's accessible name is its visible label plus a clipped
- * sentence, for the same reason the library toggle carries the tile's name: "Base
- * optional" alone does not say optional between what, and the fill difference
- * that distinguishes `underside` from `sides` is not available to a reader who
- * cannot see it.
+ * sentence: "Base optional" alone does not say optional between what, and the
+ * fill difference that distinguishes `underside` from `sides` is not available to
+ * a reader who cannot see it.
  *
  * `data-kind` and `data-state` rather than composed class names, so every colour
  * and fill lives in `catalog.css` and this component holds none.
@@ -255,61 +259,5 @@ function TagChipItem({ chip }: { chip: CardTagChip }) {
         {chip.hint === '' ? null : <VisuallyHidden> — {chip.hint}</VisuallyHidden>}
       </Chip>
     </li>
-  )
-}
-
-/* ------------------------------------------------------------ library toggle */
-
-/**
- * "+ Add to library" / "✓ In library".
- *
- * §2.2 changes the visible label with the state, so the accessible name changes
- * with it and there is **no `aria-pressed`**: a button that announces "In
- * library" *and* "pressed" says the same thing twice, and WAI's guidance is to
- * pick one. The state is the name.
- *
- * The name also carries the tile, in clipped text after the label, so forty
- * cards do not present forty identically-named buttons to a screen reader's
- * element list. `aria-label` would have been shorter and is wrong here: it
- * replaces the accessible name outright, so the visible words would stop being
- * part of it (WCAG 2.5.3) and voice control would lose the phrase on screen.
- *
- * ## The button is item-level and so is the store, since row V1
- *
- * This block used to carry three paragraphs reconciling an item-level button
- * with a file-level library, and every one of them is gone. The library holds
- * designs now — the owner's *"the user should be saving aggregates not
- * individual tiles"* — so the button's unit and the store's unit are the same
- * thing and there is nothing left to decide.
- *
- * What the reconciliation used to cost, recorded because it is the case for the
- * change: **adding** ran `selectVariant` under the build's current lock
- * preference, so the file saved depended on a setting the user may never have
- * opened, and the three lock systems disagree on that file for **1,419 of the
- * 3,822 items (37.1%)** — press Add under openlock, switch to dragonlock, press
- * Add on the same card again and the library held the item twice. **Removing**
- * had to loop over every variant, because an "In library" press that left a
- * sibling behind would not have changed the button's own label. And membership
- * was a `some()` over up to 20 keys, so a card re-rendered whenever any of its
- * variants changed rather than when its own item did.
- *
- * One key, one press, one boolean.
- */
-export function LibraryToggle({ item }: { item: TileAggregate }) {
-  const inLibrary = useIsInLibrary(item.design)
-
-  return (
-    <button
-      type="button"
-      className="of-card-add"
-      data-in-library={inLibrary ? '' : undefined}
-      onClick={() => {
-        toggleLibrary(item.design)
-      }}
-    >
-      <span aria-hidden="true">{inLibrary ? '✓' : '+'}</span>
-      <span>{inLibrary ? 'In library' : 'Add to library'}</span>{' '}
-      <VisuallyHidden>{item.name}</VisuallyHidden>
-    </button>
   )
 }

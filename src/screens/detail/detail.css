@@ -204,15 +204,6 @@
   filter: brightness(1.12);
 }
 
-/* In the library: the secondary accent, which is the palette's "confirmed"
-   colour (design-contract.md §1) — the same green the header's saved count
-   uses. */
-.of-detail-action[aria-pressed='true'] {
-  background: color-mix(in srgb, var(--acc2) 15%, transparent);
-  border-color: var(--acc2);
-  color: var(--acc2);
-}
-
 .of-detail-action[data-variant='ghost'] {
   background: none;
   border-color: var(--acc);

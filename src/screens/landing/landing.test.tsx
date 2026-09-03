@@ -345,12 +345,12 @@ describe('Landing', () => {
     const items = within(steps as HTMLElement).getAllByRole('listitem')
     expect(items.map((item) => item.querySelector('.of-step-numeral')?.textContent)).toEqual([
       'I · Search',
-      'II · Curate',
+      'II · Choose',
       'III · Construct',
     ])
     expect(items.map((item) => item.querySelector('h2')?.textContent)).toEqual([
       'Find the right tile',
-      'Build your library',
+      'Pick your build system',
       'Lay out the room',
     ])
   })

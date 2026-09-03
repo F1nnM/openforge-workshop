@@ -63,6 +63,11 @@
  * `tools` this screen already holds. It is the work surface rather than a view of
  * a drawing made elsewhere, and this screen gains no state for it.
  *
+ * **And the backup is a panel, not a screen.** Row A0 deleted `/library`, which
+ * was the only mount of `exportWorkshop` / `importWorkshop`; `<BackupPanel>` is
+ * the foot of the bill column now, because what the JSON envelope carries is this
+ * screen's room. It takes no props for the same reason `<LockToggle>` does not.
+ *
  * **The lock preference is the same shape.** `<LockToggle>` (row L1) is in the
  * stage's top band beside the toolbar, and it takes no props at all: the
  * preference is global, it reads it from the store itself and its figures come
@@ -82,7 +87,7 @@ import { useCallback, useMemo, useState } from 'react'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { buildPlanScene, createStyleResolver, describeCell, freeCellFor, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
-import { BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
+import { BackupPanel, BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 import type { SurfaceStatus } from '@/builder/three'
@@ -454,6 +459,19 @@ function Builder({ index }: { index: CatalogIndex }) {
           in a wall's `torch` slot nor can.
         */}
         <SlotsPanel catalog={index.file} placements={placements} lock={lock} />
+        {/*
+          Row A0. The app's only backup path, and it was the library screen's
+          until that screen was deleted — architecture-plan.md §13 (Safari evicts
+          `localStorage` after seven days) is why it must exist somewhere, and
+          `BackupPanel.tsx` carries the argument for why that somewhere is the
+          foot of this column rather than the toolbar band or a settings screen
+          that no longer exists.
+
+          The fourth child of a two-row grid, for the reason the third is: the
+          bill keeps the `1fr` and this lands in an implicit `auto` row beneath
+          the slots.
+        */}
+        <BackupPanel />
       </div>
     </section>
   )

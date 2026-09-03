@@ -24,6 +24,11 @@
  *   5. **The tag row fits its fixed single line.** The same shape as (2), against
  *      `format.ts#TAG_CHIP_BUDGET`: the widest row the corpus produces is
  *      measured, so a relabel that would clip a chip fails the build.
+ *   6. **`groupKindOf` is well posed at item level.** Row **A0** relocated the
+ *      rule here with `format.ts`, and these two assertions came with it from the
+ *      deleted library screen's `grouping.test.ts`: the corpus shares that make a
+ *      single `groupBy(kind)` wrong, and the agreement between an item's kinds
+ *      and every one of its files'.
  *
  * The corpus is the emitted `public/catalog/catalog.json` (`npm run
  * import:catalog`), matching the convention in `../detail/corpus.test.ts`. When
@@ -43,6 +48,7 @@ import {
   bytesRangeLabel,
   cardTagChips,
   fileTokenLabel,
+  groupKindOf,
   humaniseSegment,
   sizeLabel,
   tagChipRowWidth,
@@ -494,5 +500,35 @@ describeCorpus('the two per-item figures the card states', () => {
       (item) => new Set(item.variants.map((variant) => fileTokenLabel(variant.file))).size > 1,
     )
     expect(varying).toHaveLength(22)
+  })
+})
+
+/* --------------------------------------------------------- kind precedence */
+
+describeCorpus('the kind-precedence rule over every item', () => {
+  it('re-derives the multi-kind and no-kind shares the rule exists for', () => {
+    const multi = records.filter((record) => record.kinds.length > 1).length
+    const none = records.filter((record) => record.kinds.length === 0).length
+
+    expect(multi).toBe(1693)
+    expect(none).toBe(1032)
+    // 19.5% in two or more, 11.9% in none — the two facts that make a single
+    // `groupBy(kind)` wrong and `groupKindOf` a rule rather than a field read.
+    expect(multi / records.length).toBeCloseTo(0.195, 3)
+    expect(none / records.length).toBeCloseTo(0.119, 3)
+  })
+
+  it('groups an item by the same kind as every one of its files', () => {
+    // The rule reads `kinds` off the aggregate, which is only sound because A1
+    // measured that no aggregate holds two distinct values of it. Asserted here
+    // rather than assumed, because a caller would otherwise file 1,705
+    // multi-variant items by one arbitrary member's kinds.
+    for (const item of items) {
+      const byItem = groupKindOf(item.kinds)
+      for (const variant of item.variants) {
+        const record = records[variant.ord as unknown as number]
+        expect(groupKindOf(record?.kinds ?? [])).toBe(byItem)
+      }
+    }
   })
 })

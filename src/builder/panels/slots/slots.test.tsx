@@ -10,27 +10,30 @@
  *
  * The fixture is row C2's, shared with the drawer's picker rather than copied:
  * the dead-end case is delicate enough that two versions of it would drift.
+ *
+ * Row **A0** removed the two assertions about where a pick *lands*. They proved
+ * the `TileId` to `DesignId` hop — that two files of one item could not put two
+ * entries in the library for one pick — and the library they landed in is gone.
+ * **Row C3 gives the pick a destination** (a `SlotFill` on a placed template
+ * instance) and owns the assertions that go with it; what is left here is that
+ * the press is inert and the panel says so.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { DesignId } from '@/catalog'
-import { FILL, PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
+import { PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
 import type { Placement } from '@/store'
-import { clearPersistedWorkshopState, resetWorkshop, selectLibrary, useWorkshopStore } from '@/store'
+import { clearPersistedWorkshopState, resetWorkshop } from '@/store'
 
 import { planSlots } from './planSlots'
 import { SlotsPanel } from './SlotsPanel'
 
 /**
- * The item a fixture file belongs to — what the library holds since row V1.
+ * The design a fixture file belongs to.
  *
- * Read off the fixture catalog rather than written out, because the point of
- * these two assertions is the *hop*: `SlotFills` resolves a file (dead-end
- * greying is a per-file question) and the panel saves the design that file is one
- * print of. `FILL.torchStone` and `FILL.torchStoneFlex` are deliberately two
- * files of one item in the fixture, so a panel that saved files could put two
- * entries in the library for one pick and a panel that saves items cannot.
+ * Read off the fixture catalog rather than written out, because a placement names
+ * a design (row V4) and every holder below is named by one of its files.
  */
 const designOf = (id: string): string => {
   const record = SLOT_CATALOG.records.find((candidate) => candidate.id === id)
@@ -133,7 +136,7 @@ describe('SlotsPanel', () => {
     expect(screen.getByText(/1,005 of the archive’s 8,702 files declare a slot/)).toBeInTheDocument()
   })
 
-  it('leads with the required count and says where a pick goes', () => {
+  it('leads with the required count and says a pick has nowhere to go yet', () => {
     render(
       <SlotsPanel
         catalog={SLOT_CATALOG}
@@ -141,10 +144,11 @@ describe('SlotsPanel', () => {
       />,
     )
     expect(screen.getByText(/2 slots open on 2 pieces, 1 of them required/)).toBeInTheDocument()
-    expect(screen.getByText(/adds its item to your library/)).toBeInTheDocument()
-    // And it does not claim the bill will show it, because the bill is built
-    // from placements and row G5 owns the channel that would change that.
-    expect(screen.getByText(/not a line in it/)).toBeInTheDocument()
+    // Row A0: it said "adds its item to your library" until the library was
+    // deleted. It does not claim the bill will show a fill either, because the
+    // bill is built from placements and a slot fill is not one until row C3.
+    expect(screen.getByText(/not yet something this build can keep/)).toBeInTheDocument()
+    expect(screen.getByText(/a slot fill is not one/)).toBeInTheDocument()
   })
 
   it('names each holder with its grid position', () => {
@@ -168,26 +172,20 @@ describe('SlotsPanel', () => {
     )
   })
 
-  it('adds a picked file’s item to the library, and leaves it there when the slot is cleared', () => {
+  it('accepts a pick and keeps nothing, because the destination is row C3’s', () => {
+    // Row A0. The pick used to write the chosen file's item to the library; the
+    // library is gone and **row C3** replaces the destination with a `SlotFill`
+    // on a placed template instance. What must stay true in between is that the
+    // press is harmless and the panel says so, rather than the panel offering a
+    // control that throws or silently mutates something else.
     render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.wallTowne, 0, 0) })} />)
 
     const card = () => screen.getByRole('button', { name: /Dungeon Stone Torch/ })
     fireEvent.click(card())
-    expect(Object.keys(selectLibrary(useWorkshopStore.getState()))).toEqual([designOf(FILL.torchStone)])
-    // The same item as the flex variant, so a second pick of either cannot add a
-    // second entry.
-    expect(designOf(FILL.torchStoneFlex)).toBe(designOf(FILL.torchStone))
-
-    // Clearing the slot does not un-add it: the panel would be undoing a
-    // decision it did not make, and the library is a list of things to print.
     fireEvent.click(card())
-    expect(Object.keys(selectLibrary(useWorkshopStore.getState()))).toEqual([designOf(FILL.torchStone)])
-  })
 
-  it('does not add anything for a pick it refused', () => {
-    render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.wallTowne, 0, 0) })} />)
-    fireEvent.click(screen.getByRole('button', { name: /Towne Torch/ }))
-    expect(Object.keys(selectLibrary(useWorkshopStore.getState()))).toEqual([])
+    expect(screen.getByText(/not yet something this build can keep/)).toBeInTheDocument()
+    expect(card()).toBeInTheDocument()
   })
 
   it('says how many placements it cannot describe', () => {
