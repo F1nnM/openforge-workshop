@@ -25,6 +25,26 @@
   z-index: 3;
 }
 
+/* Open, the stacking order changes — row R2.
+
+   The open surface is now the *work* surface rather than an overlay somebody
+   glances at, so the floating toolbar (`z-index: 2`), the lock toggle beside it
+   and the two corner plates (`z-index: 1`) have to stay above it and stay
+   clickable: every control in `PlanToolbar` writes `PlanTools`, and `PlanTools`
+   is exactly what this surface reads. At `z-index: 3` the room covered them, and
+   `Place`, `Erase`, `Rotate`, `Clear` and the snap toggle would all have been
+   unreachable the moment the surface opened — the same class of defect row L1
+   measured on the closed plate, and worse.
+
+   `z-index: 0` rather than `auto` on purpose: this is a positioned element, so
+   `auto` would still paint it over the in-flow plan canvas *and* leave it in the
+   parent's stacking order where a later sibling could interleave with its
+   children. A stacking context of its own at 0 is below the whole band and above
+   the plan canvas, which is the exact sandwich wanted. */
+.of-b3d-launch[data-open='true'] {
+  z-index: 0;
+}
+
 /* Closed: a plate in the stage's top-right.
 
    **It was NOT clear of the floating toolbar, and this comment twice said the
@@ -127,6 +147,15 @@
   background: var(--bg);
 }
 
+/* The canvas's own positioning context, so the notice and the hint plate sit on
+   the drawing rather than under the readout. `min-height: 0` because a grid item
+   in a `minmax(0, 1fr)` track still needs it to let a canvas shrink. */
+.of-b3d-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
 .of-b3d-head {
   display: flex;
   align-items: center;
@@ -138,8 +167,89 @@
 
 .of-b3d-canvas,
 .of-b3d-well {
+  width: 100%;
+  height: 100%;
   min-height: 0;
   background: radial-gradient(ellipse at 50% 42%, var(--bg3), var(--bg));
+}
+
+/* The canvas is the tab stop and takes the arrow keys — `RoomSurface.tsx` sets
+   `tabIndex` and `role="application"` on the `<canvas>` itself, because that is
+   the element the pointer listeners are on and r3f puts unknown props on its
+   wrapper `<div>`. So the focus ring has to be drawn here rather than inherited
+   from a button: a keyboard user needs to know the plan has the keys. */
+.of-b3d-canvas canvas:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+}
+
+/* ── The plates over the drawing ─────────────────────────────────────────────
+   §2.4's contextual hint, and the one notice the canvas cannot draw for itself.
+
+   Pointer-transparent, for `builder.css`'s reason: a click near the bottom of
+   the drawing must still reach the surface and place a tile. That matters more
+   here than on the plan, because the primary gesture *is* a click on the
+   drawing. */
+.of-b3d-plate {
+  position: absolute;
+  z-index: 1;
+  max-width: min(46ch, calc(100% - 24px));
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg2) 90%, transparent);
+  color: var(--mut);
+  font-family: var(--face-body);
+  font-size: 12.5px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+/* Bottom-left, matching the plan view's hint exactly, so the sentence does not
+   move when the surface opens. */
+.of-b3d-hint {
+  bottom: 12px;
+  left: 12px;
+}
+
+/* The notice sits bottom-*right* and not top-centre: the top band is the
+   toolbar's, the generator's plate and the lock toggle's, and row L1 measured
+   what happens when a fourth thing is put there. */
+.of-b3d-plate[role='status'],
+.of-b3d-plate[role='alert'] {
+  right: 12px;
+  bottom: 12px;
+  left: auto;
+}
+
+.of-b3d-alert {
+  border-color: var(--acc);
+  color: var(--ink);
+}
+
+.of-b3d-loading {
+  font-family: var(--face-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* ── The key map and the live region ─────────────────────────────────────────
+   Clipped rather than `display: none`, which would take them out of the
+   accessibility tree as well as out of the layout — and being in it is the whole
+   point. The key map is what the canvas's `aria-describedby` names, so it has to
+   be real text in the document. */
+.of-b3d-keys,
+.of-b3d-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .of-b3d-well {

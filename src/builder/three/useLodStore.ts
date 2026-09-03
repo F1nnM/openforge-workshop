@@ -114,6 +114,36 @@ export interface UseLodStoreOptions {
    * wants, and what a browser with no IndexedDB gets anyway.
    */
   readonly cache?: Promise<MeshCache | null> | null | undefined
+  /**
+   * A monotone counter the caller bumps when the converted cache has changed.
+   *
+   * **Row R2 needed this and the reason is a change of timing, not of design.**
+   * This hook reads the cache once per blob and treats a miss as `absent`; it
+   * does not subscribe. That was correct while the 3D view was a panel behind a
+   * press — the user placed tiles first and pressed afterwards, so a conversion
+   * begun at add-to-library had normally finished, and a press remounted the
+   * hook anyway. R2 opens the surface **with the screen**, so a conversion can
+   * now complete *after* this hook has already recorded the blob as absent, and
+   * without a nudge the mesh would never appear at all: the effect's other
+   * dependencies are the blob list and the asset base, and neither changes when
+   * a worker finishes.
+   *
+   * The window is narrower than it first looks and it is real. `wanted` is a
+   * **set**, so placing a second copy of an already-armed tile changes nothing,
+   * and arming a tile that is mid-conversion is exactly the sequence a user
+   * performs: add to the library, arm it, place it. Measured in Chrome with the
+   * epoch pinned to `0`, that sequence leaves the room reporting *"0 of 1
+   * loaded, 1 not in the store"* and three outlined tiles **indefinitely**; with
+   * the epoch live the same sequence reports *"3 in 1 instanced mesh"*.
+   *
+   * `BuilderRoom` supplies `@/mesh`'s own queue state — the count of tasks that
+   * have reached `ready` — so the re-read happens exactly when a conversion
+   * lands and not on a timer. The cost is that the whole room's geometry is
+   * disposed and re-read on each bump; those reads are IndexedDB and not
+   * network, and there is at most one bump per distinct mesh in the user's
+   * library, only while conversions are in flight.
+   */
+  readonly epoch?: number
 }
 
 /**
@@ -124,7 +154,7 @@ export interface UseLodStoreOptions {
  * blob list inline hands a new array every render, and an effect keyed on it
  * re-fetches the whole room on every keystroke.
  */
-export function useLodStore({ blobs, assets, enabled, fetchImpl, cache }: UseLodStoreOptions): LodStoreState {
+export function useLodStore({ blobs, assets, enabled, fetchImpl, cache, epoch = 0 }: UseLodStoreOptions): LodStoreState {
   const wanted = useMemo(() => [...new Set(blobs)].sort(), [blobs.join('\u0000')])
   // `undefined` means "use the origin's cache"; `null` means "there is none".
   // Resolved here rather than in the effect so the effect's dependency is a
@@ -216,7 +246,7 @@ export function useLodStore({ blobs, assets, enabled, fetchImpl, cache }: UseLod
       for (const lod of geometries.values()) lod.dispose()
       geometries.clear()
     }
-  }, [key, base, enabled, fetchImpl, store])
+  }, [key, base, enabled, fetchImpl, store, epoch])
 
   return state
 }

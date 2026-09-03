@@ -4,7 +4,7 @@
  * ```tsx
  * import { Builder3DPanel } from '@/builder/three'
  * …
- * <Builder3DPanel catalog={planCatalog} placements={placements} assets={index.file.assets} />
+ * <Builder3DPanel catalog={planCatalog} scene={scene} tools={tools} assets={index.file.assets} />
  * ```
  *
  * ## This barrel must never re-export the renderer
@@ -20,44 +20,70 @@
  * from that one `lazy` call, never from here.
  *
  * `boundary.test.ts` asserts it by parsing this file's own imports, exactly as
- * `src/three/boundary.test.ts` does for the detail viewer. That test reads the
- * source; the **bundle** can only be measured by a build, so it was — an A/B, the
- * directory present and then moved aside with the one call site removed,
- * comparing the entry chunk (`vite build`, this branch):
+ * `src/three/boundary.test.ts` does for the detail viewer — and since row R2 it
+ * does so through `tools/boundary/closure.ts` rather than through a private
+ * fifth copy of the same walker. That test reads the source; the **bundle** can
+ * only be measured by a build, so it was — an A/B, the directory present and
+ * then moved aside with the one call site in `BuilderScreen.tsx` removed
+ * (`npx vite build`, this branch, re-measured on row R2):
  *
- * | | entry JS raw | entry JS gzip | entry CSS raw | entry CSS gzip |
- * | --- | --- | --- | --- | --- |
- * | without `src/builder/three/` | 620.14 kB | 196.25 kB | 56.97 kB | 11.15 kB |
- * | with it | 623.56 kB | 197.57 kB | 58.73 kB | 11.44 kB |
- * | **this row's eager cost** | **3.42 kB** | **1.32 kB** | **1.76 kB** | **0.29 kB** |
+ * | chunk | without `src/builder/three/` | with it | this row's cost |
+ * | --- | ---: | ---: | ---: |
+ * | entry JS `index-*.js` | 506,098 / **162,314** | 506,225 / **162,399** | +127 / **+85 B** |
+ * | entry CSS `index-*.css` | 44,870 / **9,337** | 45,082 / **9,354** | +212 / **+17 B** |
+ * | `/builder` route JS | 96,129 / **30,715** | 98,442 / **31,537** | +2,313 / **+822 B** |
+ * | `/builder` route CSS | 31,495 / **6,147** | 34,221 / **6,511** | +2,726 / **+364 B** |
  *
- * The two builds were run back to back on one tree, which is what makes the
- * *difference* trustworthy; the absolute figures drift by a few hundred bytes as
- * sibling rows land shared code, so re-measure the pair rather than comparing one
- * of these numbers against a later build.
+ * Raw / gzip, bytes. The two builds were run back to back on one tree, which is
+ * what makes the *difference* trustworthy; the absolute figures drift as sibling
+ * rows land shared code, so re-measure the pair rather than comparing one of
+ * these numbers against a later build. `npx vite build` rather than
+ * `npm run build`, because `tsc -b` fails on the deleted module — the bundle is
+ * the measurement and vite does not typecheck.
  *
- * **1.61 kB gzipped, JS and CSS together.** The other side of the line:
+ * **102 B gzipped in the entry chunk and 1.19 kB in the `/builder` route
+ * chunk**, for a row that added a whole interaction layer. Two things about that
+ * table are worth stating rather than leaving to be discovered:
+ *
+ *   - **`/builder` is itself a lazy route**, which is why the entry cost is
+ *     102 B and not the 1.6 kB the row before this one measured: that
+ *     measurement predates the route split, so the "entry chunk" it named is now
+ *     two chunks. The number that matters for a catalog visitor is the entry
+ *     row; the number that matters for a builder visitor is the route row.
+ *   - **The eager cost is mostly CSS.** `builder3d.css` grew 2.7 kB raw for the
+ *     plates, the stacking order and the canvas focus ring, against 2.3 kB of JS
+ *     for the panel and its types. Every kilobyte of the interaction layer
+ *     proper is behind `lazy`.
+ *
+ * ## The other side of the line, and the shared-chunk question, answered
  *
  * | chunk | raw | gzip |
- * | --- | --- | --- |
- * | `BuilderRoom` — three + r3f + drei + postprocessing + n8ao + `GLTFLoader` + meshopt | 1,267.53 kB | **411.11 kB** |
+ * | --- | ---: | ---: |
+ * | `material-*.js` — three + r3f + drei + `postprocessing` + n8ao, shared | 1,187,824 | **385,092** |
+ * | `BuilderRoom-*.js` — this row's 3D code + `GLTFLoader` + meshopt | 108,359 | **33,981** |
+ * | `Viewer-*.js` — the detail viewer's own shim over the shared chunk | 5,911 | 2,580 |
  *
- * So the cost of shipping this row to somebody who plans a room in 2D and never
- * asks for the 3D view is 1.61 kB gzipped, and the 411 kB is paid by the person
- * who pressed the button. Two things about that second table are worth stating
- * rather than leaving to be discovered:
+ * **The row before this one left an open question and this A/B settles it.** It
+ * predicted that *"when X2 lands, the shared renderer should be one chunk both
+ * lazy imports pull, not two — which is a thing to check on that row rather than
+ * assume"*. Checked here, and it already is: with this directory removed the
+ * whole renderer collapses back into the detail viewer's chunk
+ * (`Viewer-*.js`, **1,192,995 / 387,129**), and with it present rolldown hoists
+ * the shared part into `material-*.js` and leaves each feature a small chunk of
+ * its own. The renderer is therefore paid for **once** across both 3D surfaces,
+ * and this row's own 3D code is the 33.98 kB gzipped in `BuilderRoom`.
  *
- *   - **Before this row three.js was not in the shipped bundle at all.** Build A
- *     emits one JS chunk and one stylesheet, full stop — `Tile3DPanel` is not yet
- *     mounted anywhere (row **X2** puts it in the drawer), so its 420 kB
- *     `Viewer` chunk has never been reachable from an entry. This is the first PR
- *     to put a three chunk in `dist/`.
- *   - **The two features will share it, because they share `Stage`.** 411 kB here
- *     against the 419.70 kB `src/three/index.ts` measured for `Viewer` in
- *     isolation: this chunk carries `GLTFLoader` and the meshopt decoder that one
- *     does not, and lacks the STL worker path and the viewer's own UI. When X2
- *     lands, the shared renderer should be one chunk both lazy imports pull, not
- *     two — which is a thing to check on that row rather than assume.
+ * **Row R2 changed who pays it, and it is now everybody who opens `/builder`.**
+ * The surface is open on arrival, because the owner asked for the 3D view to
+ * *be* the builder rather than a panel behind a gate, so there is no press left
+ * to withhold the chunk behind: arriving at `/builder` requests 31.54 kB
+ * (route) + 33.98 kB (`BuilderRoom`) + 385.09 kB (shared renderer) gzipped. The
+ * `lazy` boundary is still the right structure and `Builder3DPanel.tsx` says
+ * why: the same bytes in the entry chunk would block first paint on **every**
+ * screen, the catalog included, where behind `lazy` they are a parallel request
+ * that resolves while the 5.6 MB catalog index this screen already waits on is
+ * in flight. Blocker **B7** is what would make the *mesh* half of that arrival
+ * cheap; this half is code, and is `immutable`-cached at the edge.
  *
  * ## Type-only exports are safe and are used
  *
@@ -93,7 +119,10 @@ export {
   lodObjectBudget,
 } from './lod'
 
+export type { SurfaceEdit, SurfaceStatus } from './edits'
 export type { FootprintDisagreement, LodGap, LodInstanceGroup, Room3D } from './instances'
+export type { RoomSurfaceProps } from './RoomSurface'
+export type { Ndc, SurfaceFit, SurfacePick } from './surface'
 export type { LodGeometry } from './loadLod'
 export type { MeshBounds, RoomFit } from './place'
 export type { LodStoreState } from './useLodStore'
