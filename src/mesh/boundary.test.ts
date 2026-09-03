@@ -33,11 +33,12 @@
  * in the PR: the entry chunk was measured with and without the one `@/mesh`
  * import, back to back on one tree.
  */
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { SRC_DIR, staticClosure } from '../../tools/boundary/closure'
+import { SRC_DIR, staticClosure, staticImports } from '../../tools/boundary/closure'
 
 const HERE = join(SRC_DIR, 'mesh')
 
@@ -150,5 +151,52 @@ describe('the eager surface of @/builder/three, after this row', () => {
       FORBIDDEN_PACKAGES.some((pkg) => specifier === pkg || specifier.startsWith(`${pkg}/`)),
     )
     expect(offenders).toEqual([])
+  })
+})
+
+/**
+ * Row **R3** wired the conversion, and the wiring is the one thing that could
+ * have moved this whole directory into the entry chunk.
+ *
+ * R1 assumed the call would land in four eager screens, and it would have been
+ * survivable — this directory is light by design and that is what the block
+ * above proves. R3 put it in `src/App.tsx` instead, which is mounted for every
+ * screen including the landing one, so a **static** import there would put
+ * `@/mesh`, `@/assembly` and the aggregate builder in front of the first paint
+ * of a screen where nothing has been saved and there is nothing to warm.
+ *
+ * The mechanism is a dynamic `import()`, which the walker cannot see — that is
+ * what a lazy boundary *is*, the same reason `Builder3DPanel`'s `lazy` call is
+ * asserted by reading the source next door. So both halves are checked: the
+ * source really does defer it, and `App.tsx`'s static graph really does not
+ * reach this directory.
+ */
+describe('the warming call site', () => {
+  const app = join(SRC_DIR, 'App.tsx')
+  const source = readFileSync(app, 'utf8')
+
+  it('is a dynamic import, not a static one', () => {
+    expect(source).toContain("import('./mesh/warm')")
+    expect(staticImports(source)).not.toContain('./mesh/warm')
+  })
+
+  it('leaves @/mesh out of the app’s own static graph', () => {
+    const files = staticClosure(app, SRC_DIR).files.map(relative)
+    expect(files.filter((file) => file.startsWith('mesh/'))).toEqual([])
+  })
+
+  it('finds a real graph, so the assertion above is not vacuous', () => {
+    // `App.tsx` does reach the router, so the walk happened.
+    const files = staticClosure(app, SRC_DIR).files.map(relative)
+    expect(files).toContain('routes/index.ts')
+  })
+
+  it('keeps the warmer and its context off the barrel, so nothing pulls them by accident', () => {
+    // They are reached by deep path only — `App.tsx` for the subscription and
+    // `BuilderRoom.tsx` for the assembly index — because the barrel is imported
+    // by the lazy 3D chunk and a re-export here would be an easy accident.
+    const barrel = staticClosure(join(HERE, 'index.ts')).files.map(relative)
+    expect(barrel).not.toContain('mesh/warm.ts')
+    expect(barrel).not.toContain('mesh/context.ts')
   })
 })

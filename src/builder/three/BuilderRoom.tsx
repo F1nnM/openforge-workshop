@@ -84,19 +84,24 @@
  * is in the hint line and the readout. Nothing in the gesture path consults the
  * mesh store, so a missing mesh cannot change what may be placed where.
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import type { AssemblyIndex } from '@/assembly'
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
 import { createStyleResolver } from '@/builder/canvas'
 import { useAnnouncer } from '@/builder/canvas/hooks'
 import type { CatalogAssets, CatalogRecord } from '@/catalog'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
+import type { MeshTask } from '@/mesh'
 import { meshQueue, useMeshQueue } from '@/mesh'
+import { meshContext } from '@/mesh/context'
+import { useLockSystem } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
 import { AO_RADIUS, Stage } from '@/three/Stage'
 import { Eyebrow } from '@/ui/primitives'
 
+import { designBase, sceneBases } from './bases'
 import type { SurfaceStatus } from './edits'
 import { describeSurface } from './edits'
 import type { Room3D } from './instances'
@@ -173,18 +178,88 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
   const armed = tools.selectedDesign === null ? undefined : catalog.record(tools.selectedDesign)
 
   /**
-   * The objects to load: every placed piece's, **plus the armed tile's**.
+   * The lock preference, read from the store rather than taken as a prop.
+   *
+   * One source of truth, and the reason it is not a prop is not convenience: two
+   * copies of one preference is how a control comes to disagree with what it
+   * controls, which is the argument `BuilderScreen.tsx` makes for `<LockToggle>`
+   * taking none either. `catalog` is already memoised on this same value by the
+   * screen, so the record the room draws and the base it stands on are resolved
+   * under one preference by construction.
+   */
+  const lock = useLockSystem()
+
+  /**
+   * Rule 1's index, resolved once per session — row **R3**.
+   *
+   * `@/mesh/context.ts` says why it is read here instead of arriving as a prop:
+   * `Builder3DPanel.tsx` and `BuilderScreen.tsx` belong to row **R4**, which is
+   * deleting the plan view as this row lands, so a new prop would have to be
+   * threaded through two files this row must not touch — and the same derivation
+   * is needed by `warm.ts`, which is a store subscription with no component to
+   * hang a `useMemo` on. So one module-scope memo serves both and **R4 has
+   * nothing to reconcile.**
+   *
+   * `null` until it resolves, which is one render in which the room draws
+   * exactly what it drew before this row: every topper on the plan, no bases. The
+   * seam worth naming for R4: once `BuilderScreen` collapses onto this surface it
+   * already holds an assembly index over the same file and can pass it down,
+   * making this the non-React caller's fallback alone.
+   */
+  const [assembly, setAssembly] = useState<AssemblyIndex | null>(null)
+  useEffect(() => {
+    let alive = true
+    void meshContext().then(
+      (context) => {
+        if (alive) setAssembly(context.assembly)
+      },
+      (cause: unknown) => {
+        // The room is entirely usable without it: every tile still draws, and
+        // what is lost is the base *under* each topper. A throw here would take
+        // the surface down for a network blip on a screen the user is working in.
+        console.warn('[openforge-workshop] the base index could not be built; bases will not be drawn', cause)
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  /** The base under each placed piece, and the one the armed item would get. */
+  const bases = useMemo(
+    () => (assembly === null ? undefined : sceneBases(scene, assembly, lock)),
+    [scene, assembly, lock],
+  )
+  const armedBase = useMemo(
+    () =>
+      assembly === null || tools.selectedDesign === null
+        ? undefined
+        : designBase(tools.selectedDesign, assembly, lock),
+    [assembly, tools.selectedDesign, lock],
+  )
+
+  /**
+   * The objects to load: every placed piece's, **plus the armed tile's**, plus
+   * **every auto-inserted base's** — row R3.
    *
    * The armed tile is not in the scene — that is what "armed" means — so a store
    * driven by the scene alone would give the ghost no geometry until after the
    * first placement, and the user would place their first tile blind. One extra
    * address, requested the moment a palette row is chosen.
+   *
+   * The bases add very few addresses however large the room: the whole corpus
+   * reaches **84** distinct base blobs under openlock, and the median base is
+   * 0.91 MB against the median tile's 10.77 MB. They are requested even for a
+   * `duplicate`, which is not drawn — its *height* is still what lifts the topper
+   * standing on it, and a height is a measurement of a mesh.
    */
   const blobs = useMemo(() => {
     const wanted = new Set(scene.pieces.map((piece) => piece.record.blob))
     if (armed !== undefined) wanted.add(armed.blob)
+    if (bases !== undefined) for (const base of bases.values()) wanted.add(base.record.blob)
+    if (armedBase !== undefined) wanted.add(armedBase.record.blob)
     return [...wanted]
-  }, [scene, armed])
+  }, [scene, armed, bases, armedBase])
 
   /*
      Every store object is `EXT_meshopt_compression`-encoded, so without the WASM
@@ -220,6 +295,33 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
     [meshes.tasks],
   )
 
+  /**
+   * Conversions that ended somewhere other than the cache — row **R3**.
+   *
+   * **A gap this row found in a browser rather than in a test.** `@/mesh`'s queue
+   * names four terminal states and three of them are not `ready`: `missing` (the
+   * source STL 404s, so the index and the archive disagree), `failed` (the
+   * conversion itself refused) and `uncached` (converted, and the browser would
+   * not store it — so it re-downloads every reload). Until this row nothing was
+   * ever queued, so none of them had a call site; the moment `warm.ts` wired the
+   * conversion, one of them started firing and the *only* thing on screen was an
+   * outlined tile with the same sentence as a tile nobody had converted yet.
+   *
+   * Those are different states with different answers, and R1's own docblock
+   * says so state by state. Read off the tasks rather than off
+   * `MeshQueueState.failed`, which carries blobs and no reasons — and includes
+   * `uncached` here, which `failed` deliberately does not, because a conversion
+   * the browser refused to keep is exactly the failure that otherwise reports as
+   * success.
+   */
+  const stalled = useMemo(
+    () =>
+      [...meshes.tasks.values()].filter(
+        (task) => task.state === 'missing' || task.state === 'failed' || task.state === 'uncached',
+      ),
+    [meshes.tasks],
+  )
+
   const store = useLodStore({
     blobs,
     assets,
@@ -231,8 +333,14 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
   const styleOf = useMemo(() => createStyleResolver(catalog), [catalog])
   const resolve = useMemo(() => memoisedResolutions(catalog), [catalog])
   const room = useMemo(
-    () => buildRoom3D(scene, { geometries: store.geometries, resolve, viewRadius: VIEW_RADIUS }),
-    [scene, store.geometries, resolve],
+    () =>
+      buildRoom3D(scene, {
+        geometries: store.geometries,
+        resolve,
+        viewRadius: VIEW_RADIUS,
+        ...(bases === undefined ? {} : { bases }),
+      }),
+    [scene, store.geometries, resolve, bases],
   )
 
   // Constant for the life of the view. See the module note.
@@ -251,6 +359,9 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
 
   const waiting = scene.pieces.filter((piece) => !store.geometries.has(piece.record.blob)).length + scene.generated.length
   const label = describeSurface(scene, waiting)
+  // Toppers whose base the bill lists and no store holds — the plate state, per
+  // topper rather than per blob, because that is what the user is looking at.
+  const basesWaiting = room.absentBases.reduce((sum, gap) => sum + gap.placements.length, 0)
 
   return (
     <div className="of-b3d" data-status={roomStatus(room, store.settled)}>
@@ -286,6 +397,8 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
               fit={fit}
               tools={tools}
               armed={armed}
+              {...(bases === undefined ? {} : { bases })}
+              armedBase={armedBase}
               styleOf={styleOf}
               onStatus={publish}
               announce={announce}
@@ -303,13 +416,15 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
           room={room}
           store={store}
           converting={meshes.eagerPending + meshes.backgroundPending}
+          stalled={stalled}
           waiting={waiting}
+          basesWaiting={basesWaiting}
           total={scene.pieces.length + scene.generated.length}
         />
         <p className="of-b3d-plate of-b3d-hint">{status?.hint ?? 'Pick a tile from the palette to start.'}</p>
       </div>
 
-      <RoomReadout room={room} store={store} waiting={waiting} />
+      <RoomReadout room={room} store={store} waiting={waiting} basesWaiting={basesWaiting} />
 
       <p className="of-b3d-keys" id={KEY_HELP_ID}>
         Drag to orbit, drag with the middle button or with Ctrl to pan across the plan, and scroll to zoom. Click the
@@ -360,15 +475,21 @@ function SurfaceNotice({
   room,
   store,
   converting,
+  stalled,
   waiting,
+  basesWaiting,
   total,
 }: {
   room: Room3D
   store: LodStoreState
   /** Meshes `@/mesh`'s queue is still fetching or decimating. */
   converting: number
+  /** Conversions that reached a terminal state other than the cache. Row R3. */
+  stalled: readonly MeshTask[]
   /** Placed pieces drawn as a plate because no mesh has arrived for them. */
   waiting: number
+  /** Toppers whose auto-inserted base is drawn as a plate. Row R3. */
+  basesWaiting: number
   /** Placed pieces altogether, both populations. */
   total: number
 }) {
@@ -389,6 +510,41 @@ function SurfaceNotice({
       <p className="of-b3d-plate of-b3d-loading" role="status">
         Converting {String(converting)} {converting === 1 ? 'mesh' : 'meshes'}… the tiles are drawn as outlines
         until {converting === 1 ? 'it lands' : 'they land'}.
+      </p>
+    )
+  }
+
+  /*
+     A conversion that ended somewhere other than the cache, ahead of the
+     absence it causes and ahead of `/lod/`'s own failures.
+
+     **Found in a browser, not in a test.** Before this row nothing was ever
+     queued, so R1's three non-`ready` terminal states had no call site and no
+     UI; the moment `warm.ts` wired the conversion, a real archive mesh landed in
+     one of them and the only thing on screen was the same "no mesh in the store
+     yet" sentence a tile that had never been asked for gets. That sentence is
+     false about a conversion that has already finished and failed, and it is
+     false in the direction that makes a user wait for something that is not
+     coming.
+
+     The three are named separately because R1's own docblock gives them three
+     different answers: `missing` is the index and the archive disagreeing and
+     nothing local will fix it, `failed` is worth a retry, and `uncached` draws
+     this session and silently re-downloads on every reload.
+  */
+  if (stalled.length > 0) {
+    const first = stalled[0]
+    const missing = stalled.filter((task) => task.state === 'missing').length
+    const uncached = stalled.filter((task) => task.state === 'uncached').length
+    return (
+      <p className="of-b3d-plate of-b3d-alert" role="alert">
+        {stalled.length === 1 ? 'One mesh' : `${String(stalled.length)} meshes`} could not be converted, so{' '}
+        {stalled.length === 1 ? 'that piece is' : 'those pieces are'} drawn as an outline.{' '}
+        {missing === stalled.length
+          ? 'The source file is not in the archive; the index and the archive disagree about it.'
+          : uncached === stalled.length
+            ? 'They converted, but this browser would not store them, so they are re-downloaded every reload.'
+            : (first?.error ?? '')}
       </p>
     )
   }
@@ -421,6 +577,39 @@ function SurfaceNotice({
     )
   }
 
+  /*
+     Row R3, and it is last because it is the least alarming of the five: every
+     tile is drawn and only the part *underneath* is an outline. It is a real and
+     common state — under openlock 1,878 of 3,822 items get a base, and a base is
+     a separate design that a per-aggregate conversion does not cover until
+     `warm.ts` asks for it — so it gets a sentence of its own rather than being
+     folded into the count above, which is about the tiles the user placed.
+  */
+  if (basesWaiting > 0) {
+    return (
+      <p className="of-b3d-plate" role="status">
+        {basesWaiting === 1 ? 'One tile is' : `${String(basesWaiting)} tiles are`} standing on a base whose mesh has
+        not arrived, so the base is an outline. It is in the bill and in the download either way.
+      </p>
+    )
+  }
+
+  /*
+     X10's `base-already-on-plan`, said out loud. Not suppressed and not merged
+     into the base above: the bill lists two bases for this cell and the room
+     draws one, and the ring is the only thing on screen that can say so.
+  */
+  if (room.duplicateBases.length > 0) {
+    const count = room.duplicateBases.length
+    return (
+      <p className="of-b3d-plate" role="status">
+        {count === 1 ? 'One tile' : `${String(count)} tiles`} already {count === 1 ? 'stands' : 'stand'} on a base you
+        placed, and the bill adds another underneath. The ring marks{' '}
+        {count === 1 ? 'it' : 'them'}; remove the base you placed if you did not mean to print two.
+      </p>
+    )
+  }
+
   return null
 }
 
@@ -435,7 +624,17 @@ function SurfaceNotice({
  * project where the tagged footprint and the real mesh are both in memory at
  * once.
  */
-function RoomReadout({ room, store, waiting }: { room: Room3D; store: LodStoreState; waiting: number }) {
+function RoomReadout({
+  room,
+  store,
+  waiting,
+  basesWaiting,
+}: {
+  room: Room3D
+  store: LodStoreState
+  waiting: number
+  basesWaiting: number
+}) {
   return (
     <dl className="of-b3d-readout">
       <div>
@@ -446,6 +645,25 @@ function RoomReadout({ room, store, waiting }: { room: Room3D; store: LodStoreSt
           {waiting === 0 ? '' : `, ${String(waiting)} outlined`}
         </dd>
       </div>
+      {/*
+        Row R3's own line, and it earns its place for the reason the row exists:
+        the bases are the half of the assembly that was a bill line and never
+        geometry, and this is the only readout in the app where the count drawn,
+        the count outlined and the count already on the plan can be compared.
+        `baseGroups.length` against `baseInstances` is also where instancing pays
+        best — 84 distinct base blobs serve the whole corpus under openlock.
+      */}
+      {room.baseInstances === 0 && basesWaiting === 0 && room.duplicateBases.length === 0 ? null : (
+        <div>
+          <dt>Bases</dt>
+          <dd>
+            {String(room.baseInstances)} in {String(room.baseGroups.length)}{' '}
+            {room.baseGroups.length === 1 ? 'draw' : 'draws'}
+            {basesWaiting === 0 ? '' : `, ${String(basesWaiting)} outlined`}
+            {room.duplicateBases.length === 0 ? '' : `, ${String(room.duplicateBases.length)} already on the plan`}
+          </dd>
+        </div>
+      )}
       <div>
         <dt>Triangles</dt>
         <dd>{room.triangles.toLocaleString('en-GB')}</dd>

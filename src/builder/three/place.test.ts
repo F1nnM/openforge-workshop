@@ -42,6 +42,7 @@ import {
   Z_UP_TO_Y_UP_RADIANS,
   fitRoom,
   footprintDelta,
+  liftMatrix,
   meshFootprintUnits,
   placedBounds,
   roomBounds,
@@ -249,6 +250,63 @@ describe('the base rests on the ground', () => {
       // The p95 tile is 45.01 mm tall; height survives the placement untouched.
       expect(box.max.y).toBeCloseTo(45.01, 6)
     }
+  })
+})
+
+describe('liftMatrix', () => {
+  it('raises the placed box by exactly the elevation and moves it nowhere else', () => {
+    const foot: Footprint = { shape: 'rect', w: 2, d: 1 }
+    const geometry = geometryFor(foot, 0, 3, -2)
+    const mesh = meshFor(geometry.shape.extent, 4.5)
+
+    const grounded = placedBounds(mesh, tileMatrix(mesh, geometry))
+    const lifted = placedBounds(mesh, liftMatrix(tileMatrix(mesh, geometry), 6.002))
+
+    // 6.002 mm is the median auto-inserted base measured over 193 real ones.
+    expect(lifted.min.y).toBeCloseTo(grounded.min.y + 6.002, 6)
+    expect(lifted.max.y).toBeCloseTo(grounded.max.y + 6.002, 6)
+    expect(lifted.min.x).toBeCloseTo(grounded.min.x, 6)
+    expect(lifted.min.z).toBeCloseTo(grounded.min.z, 6)
+    expect(lifted.max.x).toBeCloseTo(grounded.max.x, 6)
+    expect(lifted.max.z).toBeCloseTo(grounded.max.z, 6)
+  })
+
+  it('lifts a turned tile upwards and not sideways, which post-multiplying would not', () => {
+    // The one thing this function is capable of getting wrong. `tileMatrix`
+    // ends with `R_x(-90°)`, so in the mesh's own pre-rotation frame `+y` is the
+    // STL's `-z` — post-multiplying a y-translation would send a 90° wall
+    // sideways along the plan instead of up. Asserted on a 4 x 0.5 wall at 90°,
+    // the same case that catches a mirrored yaw.
+    const foot: Footprint = { shape: 'rect', w: 4, d: 0.5 }
+    const geometry = geometryFor(foot, 90, 0, 0)
+    const mesh = meshFor({ w: 4, d: 0.5 }, 63.5)
+
+    const grounded = placedBounds(mesh, tileMatrix(mesh, geometry))
+    const lifted = placedBounds(mesh, liftMatrix(tileMatrix(mesh, geometry), 6))
+    const wrong = placedBounds(
+      mesh,
+      tileMatrix(mesh, geometry).multiply(new Matrix4().makeTranslation(0, 6, 0)),
+    )
+
+    expect(lifted.min.y).toBeCloseTo(grounded.min.y + 6, 6)
+    expect(lifted.min.x).toBeCloseTo(grounded.min.x, 6)
+    expect(lifted.min.z).toBeCloseTo(grounded.min.z, 6)
+
+    // The wrong composition leaves the height untouched and slides the tile
+    // across the plan by the whole 6 mm instead. At this yaw the displacement
+    // lands in `x`; the direction is a function of the angle, which is why the
+    // assertion is on the horizontal distance rather than on one axis.
+    expect(wrong.min.y).toBeCloseTo(grounded.min.y, 6)
+    expect(Math.hypot(wrong.min.x - grounded.min.x, wrong.min.z - grounded.min.z)).toBeCloseTo(6, 6)
+  })
+
+  it('is the identity at zero, so nothing the plan view ever drew moves', () => {
+    const foot: Footprint = { shape: 'rect', w: 1, d: 1 }
+    const geometry = geometryFor(foot, 0, 0, 0)
+    const mesh = meshFor(geometry.shape.extent)
+    const plain = tileMatrix(mesh, geometry)
+
+    expect(liftMatrix(tileMatrix(mesh, geometry), 0).elements).toEqual(plain.elements)
   })
 })
 

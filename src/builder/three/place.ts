@@ -46,6 +46,19 @@
  * millimetres and is *centred* on the plan's box, with its lowest point resting
  * on `y = 0`. {@link footprintDelta} is how a caller finds out by how much the
  * two disagree instead of having the answer hidden from it.
+ *
+ * ## `y = 0` is the plan, not the floor of the assembly — row R3
+ *
+ * {@link tileMatrix} still rests every mesh it is handed on `y = 0`, unchanged,
+ * and that is what makes it usable for a **base** as well as a tile. What row R3
+ * added is one composable step on top of it, {@link liftMatrix}, for the case the
+ * corpus makes the majority of: 1,878 of 3,822 items resolve under openlock to a
+ * topper *plus* an auto-inserted base, the base is a median **6.00 mm** tall and
+ * the median floor tile is 4.50 mm, so a topper left on `y = 0` would be entirely
+ * inside the base it is meant to be standing on. The base takes `y = 0`; the
+ * topper is lifted by the base's own measured height. Nothing about the
+ * placement's stored shape changes — `bases.ts` says why the elevation is a
+ * derivation rather than a field.
  */
 import { Box3, Matrix4, Vector3 } from 'three'
 
@@ -113,6 +126,34 @@ export function tileMatrix(bounds: MeshBounds, geometry: PlanGeometry, target = 
   const toPlan = new Matrix4().makeTranslation(centre.x * GRID_UNIT_MM, 0, centre.z * GRID_UNIT_MM)
 
   return target.copy(toPlan).multiply(turn).multiply(toOrigin).multiply(stand)
+}
+
+/**
+ * Raise an instance matrix by `elevationMm`. `M' = T(0, e, 0) · M`.
+ *
+ * **Pre**-multiplied, which is the whole content of the function: the elevation
+ * is a translation in the *world* frame, applied after everything
+ * {@link tileMatrix} did, so it does not turn with the tile's yaw and does not
+ * scale with anything. Post-multiplying would put the offset in the mesh's own
+ * pre-rotation frame — where `+y` is the STL's `−z` — and a 90° placement would
+ * send the tile sideways instead of upwards.
+ *
+ * Mutates and returns its argument, because every caller has just built the
+ * matrix and a room of instances must not allocate a second one per frame. `0`
+ * is the identity and is the common case: 1,497 of 3,822 items are
+ * `self-sufficient` under openlock and stand on nothing.
+ *
+ * This is row **R3**'s answer to row R2's hand-off. R2 computed a stacking
+ * elevation and declined to apply it, because *"an elevated ghost would sit where
+ * the tile will not land"* — true while the elevation came from a piece the user
+ * had placed, since `Placement` has no `y` to put it in. The auto-inserted base
+ * is different in kind: it is derived from `(design, lock)` rather than chosen,
+ * so the number is the same for the ghost, the instance, the pick and the plate,
+ * and `bases.ts` computes it in one place for all four.
+ */
+export function liftMatrix(matrix: Matrix4, elevationMm: number): Matrix4 {
+  if (elevationMm === 0) return matrix
+  return matrix.premultiply(new Matrix4().makeTranslation(0, elevationMm, 0))
 }
 
 /**

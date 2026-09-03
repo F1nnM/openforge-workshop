@@ -26,17 +26,20 @@
  *      the placed instance will use. When the mesh has not arrived the ghost
  *      falls back to a footprint plate — `markers.ts` — which is the footprint
  *      the catalog tagged and not a guess at the tile.
- *   3. **The ghost does not rise onto what it stands on.** The mockup lifts a
- *      wall 0.25 units when a floor is under it, and it can, because it stores a
- *      `y` with every placement. This app's placement has no `y`: `place.ts`'s
- *      `tileMatrix` rests every mesh's lowest point on `y = 0`, so a ghost drawn
- *      at a stacking elevation would sit where the tile will *not* land — which
- *      is exactly the disagreement `ghost.ts` was made pure to prevent. So the
- *      elevation is *computed* ({@link SurfacePick.elevationMm}, which is what
- *      makes the pick correct over a wall) and deliberately not applied to the
- *      ghost. Row **R3** owns the base geometry and is the row that can make
- *      stacking real; this row leaves it a correct number rather than a
- *      plausible picture.
+ *   3. **The ghost rises onto its own base, and onto nothing else.** The mockup
+ *      lifts a wall 0.25 units when a floor is under it, and it can, because it
+ *      stores a `y` with every placement. This app's placement has no `y`, so a
+ *      ghost drawn at a *user-directed* stacking elevation would sit where the
+ *      tile will not land — the disagreement `ghost.ts` was made pure to prevent.
+ *      `SurfacePick.elevationMm` is therefore still computed and still not
+ *      applied.
+ *
+ *      Row **R3** made the one elevation that *is* answerable real: the base rule
+ *      1 auto-inserts. It is not a placement and needs no stored `y` — it is a
+ *      derivation of `(design, lock)`, so the ghost, the instance, the plate and
+ *      the pick all read the same number out of `bases.ts` and cannot disagree.
+ *      A median base is 6.00 mm and a median floor tile 4.50 mm, so this is the
+ *      difference between a tile standing on its base and a tile buried in it.
  *
  * ## Why the drag has to fight for the pointer, and how it wins cleanly
  *
@@ -69,6 +72,7 @@ import { Raycaster } from 'three'
 import type {
   MoveDrag,
   PlanPart,
+  PlanPiece,
   PlanPoint,
   PlanScene,
   PlanStyle,
@@ -87,6 +91,7 @@ import {
   previewMove,
   snapTo,
 } from '@/builder/canvas'
+import type { AssemblyPart } from '@/assembly'
 import type { CatalogRecord } from '@/catalog'
 import { GRID_UNIT_MM } from '@/catalog'
 import type { PlacementId } from '@/store'
@@ -111,11 +116,13 @@ import {
   planTurn,
   removalOf,
 } from './edits'
+import type { PieceBase } from './bases'
+import { baseElevationMm } from './bases'
 import { InstancedTiles } from './InstancedTiles'
 import type { LodInstanceGroup, Room3D } from './instances'
 import type { LodGeometry } from './loadLod'
 import { PLATE_HEIGHT_MM, caretGeometry, plateEdgeGeometry, plateGeometry } from './markers'
-import { tileMatrix } from './place'
+import { liftMatrix, tileMatrix } from './place'
 import type { SurfaceFit, SurfacePick } from './surface'
 import {
   SURFACE_GRID_DROP_MM,
@@ -146,6 +153,25 @@ export interface RoomSurfaceProps {
   readonly tools: PlanTools
   /** The armed tile, resolved by the caller from `tools.selectedTileId`. */
   readonly armed: CatalogRecord | undefined
+  /**
+   * The auto-inserted base under each placed piece — row **R3**.
+   *
+   * Read here for three things the instance matrices cannot carry: the plate a
+   * base with no mesh is drawn as, the **height** every piece is picked and
+   * plated at, and the ring over a base X10's note says is already on the plan.
+   * Defaults to empty, so a caller with no assembly index in hand gets the pre-R3
+   * surface exactly.
+   */
+  readonly bases?: ReadonlyMap<PlacementId, PieceBase>
+  /**
+   * The base the *armed* item would get, for the ghost.
+   *
+   * Separate from {@link bases} because the ghost is not a placement: it has no
+   * `PlacementId` to look one up by. Without it the ghost would sit 6 mm below
+   * where the tile lands, which is precisely the disagreement row R2 refused to
+   * introduce when it left this row a correct elevation and no picture.
+   */
+  readonly armedBase?: AssemblyPart | undefined
   /** For the ghost alone: every placed piece carries its own resolved style. */
   readonly styleOf: (record: CatalogRecord) => PlanStyle
   readonly onStatus: (status: SurfaceStatus) => void
@@ -162,6 +188,8 @@ export function RoomSurface({
   fit,
   tools,
   armed,
+  bases = NO_BASES,
+  armedBase,
   styleOf,
   onStatus,
   announce,
@@ -180,6 +208,20 @@ export function RoomSurface({
   cursorRef.current = cursor
 
   /**
+   * How far above the plan a piece's **underside** sits, in millimetres.
+   *
+   * Zero for everything the plan view ever drew, and the base's own height for
+   * the 1,878 items in 3,822 that rule 1 stands on one — row **R3**. One
+   * function, `bases.ts`'s, shared with the instance matrices, so a tile cannot
+   * be drawn at one height and picked at another.
+   */
+  const elevationOf = useCallback(
+    (piece: ScenePiece): number =>
+      piece.kind !== 'catalog' ? 0 : baseElevationMm(bases.get(piece.id), geometries),
+    [bases, geometries],
+  )
+
+  /**
    * A piece's height above the plan, in millimetres.
    *
    * The one place the pick consults the mesh store, and it is asking a question
@@ -187,14 +229,19 @@ export function RoomSurface({
    * marker drawn for it, so it is pickable at the height it appears at. Nothing
    * else in the gesture path reads `geometries` at all — which is why a missing
    * mesh cannot make a cell behave as though it were empty.
+   *
+   * Since R3 it is the **top** of the assembly: the base lifts the tile, so a
+   * pointer over a based floor tile is 6 mm further up than one over an integral
+   * floor and `pickSurface` has to be told, or clicking a based tile would fall
+   * through to the plane below it.
    */
   const heightOf = useCallback(
     (piece: ScenePiece): number => {
       if (piece.kind !== 'catalog') return PLATE_HEIGHT_MM
       const lod = geometries.get(piece.record.blob)
-      return lod === undefined ? PLATE_HEIGHT_MM : meshHeightMm(lod.bounds)
+      return elevationOf(piece) + (lod === undefined ? PLATE_HEIGHT_MM : meshHeightMm(lod.bounds))
     },
-    [geometries],
+    [geometries, elevationOf],
   )
 
   /* --------------------------------------------------------------- derivations */
@@ -220,6 +267,30 @@ export function RoomSurface({
       ...scene.pieces.filter((piece) => !geometries.has(piece.record.blob)),
     ],
     [scene, geometries],
+  )
+
+  /**
+   * Bases the bill lists and neither store holds a mesh for — row **R3**.
+   *
+   * The same answer a mesh-less *tile* gets, deliberately reusing R2's plate
+   * rather than inventing a second absent-geometry state: the footprint the
+   * catalog tagged, flat, in the base's own material tint. Drawn on the plan at
+   * `PLATE_HEIGHT_MM` with the topper lifted to `ABSENT_BASE_ELEVATION_MM` above
+   * it, so the ring stays visible under the tile instead of being buried in it.
+   *
+   * Under openlock this is the state **every** based tile is in until R1's
+   * conversion has run and, before this row wired it, the state they were all in
+   * permanently.
+   */
+  const basePlates = useMemo(
+    () =>
+      scene.pieces
+        .map((piece) => ({ piece, base: bases.get(piece.id) }))
+        .filter(
+          (entry): entry is { piece: PlanPiece; base: PieceBase } =>
+            entry.base !== undefined && !entry.base.duplicate && !geometries.has(entry.base.record.blob),
+        ),
+    [scene, bases, geometries],
   )
 
   /* ------------------------------------------------------------- the mutations */
@@ -658,18 +729,63 @@ export function RoomSurface({
   const ghostLod = ghost === null ? undefined : geometries.get(ghost.record.blob)
   const movingLod =
     moving === undefined || moving.piece.kind !== 'catalog' ? undefined : geometries.get(moving.piece.record.blob)
+  // The ghost stands on the base the bill will list for it, exactly as the
+  // placed tile will — `armedBase` is the same `resolvePlacement` answer, asked
+  // about a design instead of a placement.
+  const ghostLift = baseElevationMm(armedBase, geometries)
+  const ghostBaseLod = armedBase === undefined ? undefined : geometries.get(armedBase.record.blob)
+  const movingLift = moving === undefined ? 0 : baseElevationMm(bases.get(moving.piece.id), geometries)
 
   return (
     <group scale={fit.scale}>
       <Lattice />
 
+      {/* Bases first, and that is what a base *is* rather than a tie-break —
+          `scene.ts#scenePaintOrder` makes the same argument about the generated
+          ones. */}
+      {room.baseGroups.map((group: LodInstanceGroup) => (
+        <InstancedTiles key={`base:${group.key}`} group={group} />
+      ))}
+
       {room.groups.map((group: LodInstanceGroup) => (
         <InstancedTiles key={group.key} group={group} />
       ))}
 
-      {plated.map((piece) => (
-        <FootprintPlate key={piece.id} piece={piece} highlighted={piece.id === under?.id && tools.tool === 'erase'} />
+      {basePlates.map(({ piece, base }) => (
+        <FootprintPlate
+          key={`base:${piece.id}`}
+          parts={piece.parts}
+          tint={styleOf(base.record).tint}
+          edge={styleOf(base.record).edge}
+          heightMm={PLATE_HEIGHT_MM}
+        />
       ))}
+
+      {plated.map((piece) => (
+        <FootprintPlate
+          key={piece.id}
+          parts={piece.parts}
+          tint={piece.style.tint}
+          edge={piece.id === under?.id && tools.tool === 'erase' ? ACCENT : piece.style.edge}
+          heightMm={elevationOf(piece) + PLATE_HEIGHT_MM}
+        />
+      ))}
+
+      {/* X10's `base-already-on-plan`, drawn. The bill still lists the second
+          base; a second solid in the same cell at the same height would read as
+          the one already there, so it is a ring at the topper's underside
+          instead. `BuilderRoom`'s notice carries the sentence. */}
+      {room.duplicateBases.map((id) => {
+        const piece = scene.pieces.find((candidate) => candidate.id === id)
+        return piece === undefined ? null : (
+          <PlateOutline
+            key={`dup:${id}`}
+            parts={piece.parts}
+            colour={ACCENT}
+            heightMm={elevationOf(piece) + PLATE_HEIGHT_MM / 2}
+          />
+        )
+      })}
 
       {/* The piece under the pointer in erase mode, ringed at its own height, so
           "click to remove that" names a piece the user can see is named. */}
@@ -678,12 +794,29 @@ export function RoomSurface({
       )}
 
       {ghost === null ? null : (
-        <Ghost
-          parts={ghost.parts}
-          matrix={ghostLod === undefined ? null : tileMatrix(ghostLod.bounds, ghost)}
-          geometry={ghostLod?.geometry}
-          tint={ghost.duplicate || ghost.conflict || ghost.refusal !== null ? ACCENT : styleOf(ghost.record).tint}
-        />
+        <>
+          {/* The ghost's own base, translucent, on the plan. Drawn because the
+              alternative is a tile floating over an empty cell with the reason
+              off screen — the base is the half of the assembly the owner asked
+              this row to make visible, and it is as true of a tile about to be
+              placed as of one already there. */}
+          {ghostBaseLod === undefined ? null : (
+            <Ghost
+              parts={ghost.parts}
+              matrix={tileMatrix(ghostBaseLod.bounds, ghost)}
+              geometry={ghostBaseLod.geometry}
+              tint={styleOf(ghost.record).tint}
+              plateHeightMm={PLATE_HEIGHT_MM}
+            />
+          )}
+          <Ghost
+            parts={ghost.parts}
+            matrix={ghostLod === undefined ? null : liftMatrix(tileMatrix(ghostLod.bounds, ghost), ghostLift)}
+            geometry={ghostLod?.geometry}
+            tint={ghost.duplicate || ghost.conflict || ghost.refusal !== null ? ACCENT : styleOf(ghost.record).tint}
+            plateHeightMm={ghostLift + PLATE_HEIGHT_MM * 2}
+          />
+        </>
       )}
 
       {moving === undefined ? null : (
@@ -692,17 +825,21 @@ export function RoomSurface({
           matrix={
             movingLod === undefined
               ? null
-              : tileMatrix(movingLod.bounds, {
-                  shape: moving.piece.shape,
-                  rotation: moving.piece.placement.rotation,
-                  angle: moving.angle,
-                  box: moving.box,
-                  parts: moving.parts,
-                  axisAligned: moving.axisAligned,
-                })
+              : liftMatrix(
+                  tileMatrix(movingLod.bounds, {
+                    shape: moving.piece.shape,
+                    rotation: moving.piece.placement.rotation,
+                    angle: moving.angle,
+                    box: moving.box,
+                    parts: moving.parts,
+                    axisAligned: moving.axisAligned,
+                  }),
+                  movingLift,
+                )
           }
           geometry={movingLod?.geometry}
           tint={moving.refusal !== null || moving.conflict ? ACCENT : moving.piece.style.tint}
+          plateHeightMm={movingLift + PLATE_HEIGHT_MM * 2}
         />
       )}
 
@@ -710,6 +847,9 @@ export function RoomSurface({
     </group>
   )
 }
+
+/** No bases resolved. A module constant, so the default prop is one identity. */
+const NO_BASES: ReadonlyMap<PlacementId, PieceBase> = new Map()
 
 /** One raycaster for the life of the module. A pointer move must not allocate. */
 const CASTER = new Raycaster()
@@ -742,31 +882,40 @@ function Lattice() {
 }
 
 /**
- * A placed piece with no mesh: its tagged footprint, filled and ringed.
+ * A piece with no mesh: its tagged footprint, filled and ringed.
  *
  * Flat, 0.6 mm of it, in the piece's own material tint with a bright contour —
  * `markers.ts` sets out why that cannot be read as the tile and why it must not
  * be omitted. The geometry is built from the piece's convex parts and disposed
  * explicitly on unmount rather than left to the reconciler, which disposes what
  * it constructed and not what it was handed.
+ *
+ * Takes `parts` and two colours rather than a `ScenePiece` since row **R3**, for
+ * one reason: an auto-inserted **base** with no mesh gets the same plate, and it
+ * is not a `ScenePiece` — it has no placement, and its tint is its own record's
+ * rather than the topper's. `heightMm` because a plate for a based tile has to be
+ * drawn above the plate for the base underneath it.
  */
-function FootprintPlate({ piece, highlighted }: { piece: ScenePiece; highlighted: boolean }) {
-  const geometry = useMemo(() => plateGeometry(piece.parts), [piece.parts])
+function FootprintPlate({
+  parts,
+  tint,
+  edge,
+  heightMm,
+}: {
+  parts: readonly PlanPart[]
+  tint: string
+  edge: string
+  heightMm: number
+}) {
+  const geometry = useMemo(() => plateGeometry(parts, heightMm), [parts, heightMm])
   useEffect(() => () => { geometry.dispose() }, [geometry])
 
   return (
     <>
       <mesh geometry={geometry} dispose={null}>
-        <meshStandardMaterial
-          color={piece.style.tint}
-          flatShading
-          transparent
-          opacity={0.72}
-          roughness={0.95}
-          metalness={0}
-        />
+        <meshStandardMaterial color={tint} flatShading transparent opacity={0.72} roughness={0.95} metalness={0} />
       </mesh>
-      <PlateOutline parts={piece.parts} colour={highlighted ? ACCENT : piece.style.edge} heightMm={PLATE_HEIGHT_MM} />
+      <PlateOutline parts={parts} colour={edge} heightMm={heightMm} />
     </>
   )
 }
@@ -809,11 +958,20 @@ function Ghost({
   matrix,
   geometry,
   tint,
+  plateHeightMm = PLATE_HEIGHT_MM * 2,
 }: {
   parts: readonly PlanPart[]
   matrix: Matrix4 | null
   geometry: BufferGeometry | undefined
   tint: string
+  /**
+   * Where the fallback ring is drawn when there is no mesh.
+   *
+   * A parameter since row R3 rather than the constant it was, because a ghost
+   * that will land on a base has to ring the cell at the height it will land at
+   * — the same reason the matrix is lifted.
+   */
+  plateHeightMm?: number
 }) {
   const ref = useRef<Mesh>(null)
   useEffect(() => {
@@ -825,7 +983,7 @@ function Ghost({
   }, [matrix])
 
   if (geometry === undefined || matrix === null) {
-    return <PlateOutline parts={parts} colour={tint} heightMm={PLATE_HEIGHT_MM * 2} />
+    return <PlateOutline parts={parts} colour={tint} heightMm={plateHeightMm} />
   }
 
   return (
