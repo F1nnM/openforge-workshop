@@ -30,8 +30,8 @@
  * ## The index
  *
  * One inverted index over the tag table, in CSR layout: `offsets` (one Int32 per
- * tag plus one) and `docs` (one Int32 per tag reference, **84,023** of them over
- * 8,702 records and 915 tags — 336,092 B and 3,664 B respectively, both exact
+ * tag plus one) and `docs` (one Int32 per tag reference, **101,427** of them over
+ * 8,702 records and 930 tags — 405,708 B and 3,724 B respectively, both exact
  * and both allocated once). Postings are in record order, and records are sorted by
  * `id`, so every posting list is ascending and every intersection is a
  * two-pointer walk. Slot candidate sets are small — median 14 under the ported
@@ -42,8 +42,8 @@
  * A tag-string index rather than the bitsets `src/search/bitset.ts` uses. Two
  * reasons and neither is taste: `@/search`'s barrel does not export the bitset
  * primitives, so using them would mean reaching past a seam row A2 deliberately
- * drew; and a bitset over 8,702 records is 1,088 B per tag, so the 915-tag index
- * would be **995,520 B against this one's measured 339,756 B** — bitsets win on
+ * drew; and a bitset over 8,702 records is 1,088 B per tag, so the 930-tag index
+ * would be **1,011,840 B against this one's measured 409,432 B** — bitsets win on
  * wide facet queries and lose on 14-element intersections.
  */
 import type {

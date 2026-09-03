@@ -461,7 +461,7 @@ openforge-catalog fixtures (pinned commit + recorded SHA)
 The contingency this plan originally named — moving tags and configs to a lazily-fetched
 second asset — turned out to be the wrong lever, and it was worth measuring rather than
 assuming. Dropping every config saves 5.4 KB brotli; every tag array, 19.7 KB; both, 24.8 KB
-(7%). They are enormous raw and nearly free compressed because there are only 915 distinct
+(7%). They are enormous raw and nearly free compressed because there are only 930 distinct
 tags and 104 distinct config refs. **The payload is the 8,702 catalog paths themselves.** At
 41.8 bytes per record the budget is reached at roughly 12,200 records — 40% corpus growth —
 and the fix at that point is shortening ids, not shedding fields.
@@ -488,7 +488,7 @@ absorbs three times over. Measured, per reading:
 **Payload was never the binding constraint. Correctness is.** `constrain` reads *sibling
 selections*, which are runtime state, so every precomputed row above is stale after one click
 — and 535 tiles carry two or more slots. So C1 emits **0 bytes** and derives at selection time,
-for 1,438 B brotli of JavaScript and a 339,756 B in-memory index.
+for 1,438 B brotli of JavaScript and a 409,432 B in-memory index.
 
 The plan's "thousands versus twelve" reproduces exactly — wide median **1,868**, ported median
 **14**, a 133.4× narrowing — because `parent` defaults to true, so a slot is narrowed *before

@@ -42,7 +42,7 @@ import type { FacetKey } from './facets'
 import { BUILD_UNSPECIFIED, readBuildFilter } from './searchSchema'
 import type { FacetSearch } from './searchSchema'
 import { stripExtension, tokenise, tokeniseQuery } from './text'
-import { FIELD_WEIGHT } from './textIndex'
+import { DERIVED_TAG_NAMESPACES, FIELD_WEIGHT } from './textIndex'
 
 /** One item: a design's records, with everything searchable unioned over them. */
 interface Grouped {
@@ -106,6 +106,15 @@ export function buildOracle(file: CatalogFile): Oracle {
     for (const record of records) {
       for (const id of record.tags) {
         const tag = file.tags[id] ?? ''
+        // The derived-namespace skip is **imported**, not restated, and that is
+        // the one exception this file makes to writing the semantics twice. It
+        // belongs with `tokenise` and `FIELD_WEIGHT` on the shared side of the
+        // line: it says what counts as a search *term*, which is tokenisation,
+        // rather than what a facet *means*, which is what the nested loop below
+        // exists to state independently. Restated it would be a denylist in two
+        // places, and the oracle would go on agreeing with the engine right up
+        // until somebody added a third derived namespace to one of them.
+        if (DERIVED_TAG_NAMESPACES.some((namespace) => tag.startsWith(namespace))) continue
         for (const token of tokenise(tag)) bump(token, FIELD_WEIGHT.tag)
         if (!tag.startsWith('texture|')) continue
         const segments = tag.split('|').slice(1)

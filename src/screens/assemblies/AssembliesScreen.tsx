@@ -237,7 +237,7 @@ function Recipe({
 }) {
   /* C2's `compositionIndexFor` rather than a second `createCompositionIndex`:
      it is a `WeakMap` on the parsed file, so this screen and the tile drawer
-     share one 339,756-byte inverted index and one 10.7 ms build. */
+     share one 409,432-byte inverted index and one 10.7 ms build. */
   const recipes = useMemo(
     () => (catalog === undefined ? undefined : createRecipeIndex(catalog, compositionIndexFor(catalog))),
     [catalog],
