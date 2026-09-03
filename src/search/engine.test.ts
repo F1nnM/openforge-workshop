@@ -251,10 +251,36 @@ describe('the fixture covers the corners it claims to', () => {
     expect([...byName.values()].reduce((sum, count) => sum + count, 0)).toBe(ITEMS)
   })
 
-  it('has one aggregate whose preview is not its address variant', () => {
+  /**
+   * Row V5 turned this fixture from a corner case into the main case, and the
+   * count moved 1 → 216 as a **correct** failure rather than a regression.
+   *
+   * The synthetic corpus orders every pair `integral` then `topper` — see the
+   * assertion above — which is the exact shape of the six real aggregates the
+   * old rule got wrong. So under *"prefer the topper"* all 216 pairs preview
+   * their second variant, and `SearchResult.ids` stops being "usually the
+   * address variant". Which is worth stating loudly: the preview is not an
+   * address, and `src/routes/tileAddress.test.ts` is where that is pinned.
+   */
+  it('previews the second variant on all 216 pairs, because the topper is second', () => {
     const odd = engine.aggregates.aggregates.filter((item) => item.preview !== item.variants[0].id)
-    expect(odd).toHaveLength(1)
-    expect(odd[0]?.variants[0].sprite).toBe(false)
+    expect(odd).toHaveLength(216)
+    for (const item of odd) {
+      expect(item.variants).toHaveLength(2)
+      expect(item.preview).toBe(item.variants[1]?.id)
+      expect(item.variants[1]?.layer).toBe('topper')
+    }
+    // The pre-V5 witness is still in the set and still the only one of its
+    // kind: one pair whose head carries no sprite sheet at all.
+    expect(odd.filter((item) => !item.variants[0].sprite)).toHaveLength(1)
+  })
+
+  it('previews the address variant everywhere a topper does not head the group', () => {
+    // The complement, so the two counts have to add up rather than merely both
+    // be plausible: 648 singletons, none of which can move.
+    const same = engine.aggregates.aggregates.filter((item) => item.preview === item.variants[0].id)
+    expect(same).toHaveLength(ITEMS - 216)
+    for (const item of same) expect(item.variants).toHaveLength(1)
   })
 })
 

@@ -383,8 +383,84 @@ describe('the config union with provenance', () => {
   })
 })
 
-describe('the card fields', () => {
-  it('prefers a variant with a sprite for the preview', () => {
+/**
+ * The three tiers of `TileAggregate.preview`, on inputs small enough to count.
+ *
+ * The corpus totals live in `pipeline/aggregate.test.ts`, and on their own they
+ * are **not enough**: 3,816 of 3,822 previews are unchanged by row V5, all 3,068
+ * topper-carrying aggregates happen to hold a sprite-carrying topper, and no
+ * aggregate at all lacks a sprite everywhere — so a corpus census agrees with
+ * several rules weaker than the one shipped. Two of the tiers are unreachable
+ * from the corpus and can only be stated here.
+ *
+ * Ordinals are load-bearing in every fixture below, because the rule this row
+ * replaced was *variant order* and the only way to show a preference is real is
+ * to put the preferred variant second.
+ */
+describe('the preview rule', () => {
+  /**
+   * The bug, at fixture scale: an `integral` at the lower ordinal, so it heads
+   * the group and the old rule — *first sprite-carrying variant in variant
+   * order* — picked it over the `topper`. Six real aggregates have exactly this
+   * shape, every one a `dragonlock` integral shadowing an `openforge` topper.
+   *
+   * This is the discriminating fixture. Under the old rule the expectation is
+   * the other id, so reverting the preference to variant order fails here.
+   */
+  const INTEGRAL_FIRST: readonly Draft[] = [
+    {
+      id: 'tiles/x/dragonlock/a.dragonlock.stl',
+      ord: 4,
+      design: 'd1',
+      tags: ['connection|dragonlock'],
+      layer: 'integral',
+    },
+    { id: 'tiles/x/openforge/a.openforge.stl', ord: 9, design: 'd1', tags: ['connection|openforge'], layer: 'topper' },
+  ]
+
+  it('prefers the topper over an integral that sorts ahead of it', () => {
+    const aggregate = only(catalog(INTEGRAL_FIRST))
+    // The head *is* the integral and it *does* carry a sprite, so this is the
+    // case the old rule got wrong rather than one it never reached.
+    expect(aggregate.variants[0].id).toBe('tiles/x/dragonlock/a.dragonlock.stl')
+    expect(aggregate.variants[0].sprite).toBe(true)
+    expect(aggregate.preview).toBe('tiles/x/openforge/a.openforge.stl')
+  })
+
+  it('prefers the topper when it already heads the group, which is the other 925', () => {
+    expect(only(catalog(PAIR)).preview).toBe('tiles/x/openforge/a.openforge.stl')
+  })
+
+  it('takes the first topper in ordinal order when an aggregate holds several', () => {
+    // 459 of the 931 mixed aggregates hold more than one topper and the largest
+    // holds 8, so "the topper" needs a tie-break and ordinal order is it.
+    const aggregate = only(
+      catalog([
+        { ...(PAIR[1] as Draft), ord: 2 },
+        { id: 'tiles/x/openforge/b.openforge.stl', ord: 6, design: 'd1', tags: ['connection|openforge'], layer: 'topper' },
+        { id: 'tiles/x/openforge/c.openforge.stl', ord: 7, design: 'd1', tags: ['connection|openforge'], layer: 'topper' },
+      ]),
+    )
+    expect(aggregate.preview).toBe('tiles/x/openforge/b.openforge.stl')
+  })
+
+  it('skips a spriteless topper for a later topper that has one', () => {
+    // Tier 1 requires the sprite as well as the layer. Unreachable from the
+    // corpus: all 3,068 topper-carrying aggregates hold a sprite-carrying
+    // topper, so only a fixture can say what happens when one does not.
+    const aggregate = only(
+      catalog([
+        { ...(PAIR[0] as Draft), ord: 4, sprite: false },
+        { id: 'tiles/x/openforge/b.openforge.stl', ord: 6, design: 'd1', tags: ['connection|openforge'], layer: 'topper' },
+      ]),
+    )
+    expect(aggregate.preview).toBe('tiles/x/openforge/b.openforge.stl')
+  })
+
+  it('falls through to any sprite-carrying variant when no topper has one', () => {
+    // Tier 2, and the one tier the corpus exercises: `d4c2a57740b65`, whose
+    // head has no sprite sheet. Here the spriteless variant is the topper, so
+    // the card shows a picture instead of the layer it would rather show.
     const aggregate = only(
       catalog([
         { ...(PAIR[0] as Draft), sprite: false },
@@ -394,6 +470,55 @@ describe('the card fields', () => {
     expect(aggregate.preview).toBe('tiles/x/openlock/a.openlock.stl')
   })
 
+  it('falls through to the head when nothing carries a sprite at all', () => {
+    // Tier 3, unreachable from the corpus: 0 of 3,822 aggregates lack a sprite
+    // on every variant. It exists so the rule is total rather than partial.
+    const aggregate = only(
+      catalog([
+        { ...(INTEGRAL_FIRST[0] as Draft), sprite: false },
+        { ...(INTEGRAL_FIRST[1] as Draft), sprite: false },
+      ]),
+    )
+    expect(aggregate.preview).toBe('tiles/x/dragonlock/a.dragonlock.stl')
+    expect(aggregate.preview).toBe(aggregate.variants[0].id)
+  })
+
+  /**
+   * The no-op half of the row, at fixture scale: 754 real aggregates hold no
+   * topper — 340 `base`, 320 `integral`, 94 `insert` — and none of their
+   * previews may move. Tier 1 cannot fire without a `topper`, so each of the
+   * three lands on tier 2 and picks what the old rule picked.
+   */
+  it.each([
+    ['base-only', 'base'],
+    ['integrated-only', 'integral'],
+    ['insert-only', 'insert'],
+  ] as const)('leaves a %s aggregate on the variant the old rule picked', (variantClass, layer) => {
+    const aggregate = only(
+      catalog([
+        { id: 'tiles/x/one/a.one.stl', ord: 4, design: 'd1', tags: ['connection|openlock'], layer },
+        { id: 'tiles/x/two/a.two.stl', ord: 9, design: 'd1', tags: ['connection|openlock'], layer },
+      ]),
+    )
+    expect(aggregate.variantClass).toBe(variantClass)
+    // Both the old rule and the new one: the first sprite-carrying variant.
+    expect(aggregate.preview).toBe('tiles/x/one/a.one.stl')
+    expect(aggregate.preview).toBe(aggregate.variants.find((variant) => variant.sprite)?.id)
+  })
+
+  it('picks the picture, not the file to print — the two disagree by design', () => {
+    // `selectVariant` prefers one part over two, so it names the *integral*
+    // where the preview names the topper. On the corpus the pair disagrees on
+    // 1,598 of 3,822 aggregates, including all 931 mixed ones; this is that
+    // disagreement in two records, and it is a property rather than a defect.
+    const aggregate = only(catalog(INTEGRAL_FIRST))
+    expect(selectVariant(aggregate).variant.id).toBe('tiles/x/dragonlock/a.dragonlock.stl')
+    expect(aggregate.preview).toBe('tiles/x/openforge/a.openforge.stl')
+    expect(selectVariant(aggregate).variant.id).not.toBe(aggregate.preview)
+  })
+})
+
+describe('the card fields', () => {
   it('carries a byte range rather than one figure', () => {
     const aggregate = only(
       catalog([

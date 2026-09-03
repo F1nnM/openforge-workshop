@@ -133,8 +133,147 @@ describeCorpus(title, () => {
       (aggregate) => new Set(aggregate.variants.map((variant) => variant.sprite)).size > 1,
     )
     expect(varying?.variants.some((variant) => !variant.sprite)).toBe(true)
-    // The card shows the variant that has a picture, not the first one.
+    // The card shows a variant that has a picture, not simply the first one.
+    // This aggregate holds no topper, so row V5's tier 1 passes it over and
+    // tier 2 is what saves its card — see the V5 block below.
     expect(varying?.variants.find((variant) => variant.id === varying.preview)?.sprite).toBe(true)
+    expect(varying?.variants.some((variant) => variant.layer === 'topper')).toBe(false)
+  })
+
+  /* --------------------------------------------------- row V5: the preview rule */
+
+  /**
+   * What the preview rule was before row V5 — *the first sprite-carrying variant
+   * in variant order* — kept here so the change can be measured as a difference
+   * rather than asserted as a total. A total agrees with several rules; a
+   * per-aggregate diff against the rule it replaced agrees with one.
+   */
+  const previewBeforeV5 = (aggregate: TileAggregate): string =>
+    (aggregate.variants.find((variant) => variant.sprite) ?? aggregate.variants[0]).id
+
+  const layersOf = (aggregate: TileAggregate): Set<string> =>
+    new Set(aggregate.variants.map((variant) => variant.layer))
+
+  const variantOf = (aggregate: TileAggregate, id: string) =>
+    aggregate.variants.find((variant) => variant.id === id)
+
+  it('moves exactly 6 previews of 3,822, and leaves 3,816 where they were', () => {
+    // The whole scope of the row, stated as the number it must not exceed. A
+    // change that moved more than six previews would be a different change: the
+    // preference is meant to *formalise* an ordering that was already right in
+    // 925 of 931 mixed cases, not to re-pick the corpus.
+    const moved = index.aggregates.filter((aggregate) => aggregate.preview !== previewBeforeV5(aggregate))
+    expect(moved).toHaveLength(6)
+    expect(index.aggregates.length - moved.length).toBe(3816)
+  })
+
+  it('names the 6 aggregates that previewed a dragonlock integral over an openforge topper', () => {
+    const moved = index.aggregates
+      .filter((aggregate) => aggregate.preview !== previewBeforeV5(aggregate))
+      .map((aggregate) => {
+        const was = variantOf(aggregate, previewBeforeV5(aggregate))
+        const now = variantOf(aggregate, aggregate.preview)
+        return `${aggregate.name} :: ${was?.file ?? '?'} -> ${now?.file ?? '?'}`
+      })
+      .sort()
+
+    expect(moved).toEqual([
+      'Brick A Foundation Wall Edge Stairs 1.5x BA :: brick#foundation,stairs+edge,a.BA.dragonlock.stl -> brick#foundation,stairs+edge,a.BA.openforge,side.stl',
+      'Brick B Foundation Wall Edge Stairs 1.5x BA :: brick#foundation,stairs+edge,b.BA.dragonlock.stl -> brick#foundation,stairs+edge,b.BA.openforge,side.stl',
+      'Brick Foundation Stairs 1x1 :: brick#foundation,stairs.I.dragonlock.stl -> brick#foundation,stairs.I.openforge.stl',
+      'Brick Foundation Stairs 2x1 :: brick#foundation,stairs.S.dragonlock.stl -> brick#foundation,stairs.S.openforge.stl',
+      'Cave Entrance 6x2 :: cave#cave_entrance.6x2.dragonlock.stl -> cave#cave_entrance.6x2.openforge.stl',
+      'Cave Squares Entrance 6x2 :: cave#cave_entrance+squares.6x2.dragonlock.stl -> cave#cave_entrance+squares.6x2.openforge.stl',
+    ])
+
+    // Every one is the same shape: the group's lowest ordinal is a `dragonlock`
+    // integral, so it headed the variant list and the old rule stopped there.
+    for (const aggregate of index.aggregates.filter(
+      (candidate) => candidate.preview !== previewBeforeV5(candidate),
+    )) {
+      expect(aggregate.variantClass).toBe('both')
+      expect(aggregate.variants[0].layer).toBe('integral')
+      expect(aggregate.variants[0].sprite).toBe(true)
+      expect(variantOf(aggregate, aggregate.preview)?.layer).toBe('topper')
+    }
+  })
+
+  it('previews a topper on every one of the 3,068 aggregates that hold one', () => {
+    // The rule, stated as a property rather than a diff: if a sprite-carrying
+    // topper exists, the card shows it. 925 of the 931 mixed aggregates already
+    // satisfied this before the row and 6 did not.
+    const withTopper = index.aggregates.filter((aggregate) => layersOf(aggregate).has('topper'))
+    expect(withTopper).toHaveLength(3068)
+    for (const aggregate of withTopper) {
+      expect(variantOf(aggregate, aggregate.preview)?.layer, aggregate.name).toBe('topper')
+    }
+
+    const already = withTopper.filter(
+      (aggregate) => layersOf(aggregate).has('integral') && previewBeforeV5(aggregate) === aggregate.preview,
+    )
+    expect(already).toHaveLength(925)
+  })
+
+  it('cannot move the 754 aggregates that hold no topper', () => {
+    // The no-op half. Tier 1 needs a `topper` to fire, so a `base`, an
+    // `integral`-only or an `insert` item falls to tier 2 and picks exactly what
+    // the old rule picked. This is where "more than six moved" would surface.
+    const byClass = { base: 0, integral: 0, insert: 0 }
+    for (const aggregate of index.aggregates) {
+      const layers = layersOf(aggregate)
+      if (layers.has('topper')) continue
+      expect(aggregate.preview, aggregate.name).toBe(previewBeforeV5(aggregate))
+      expect(layers.size).toBe(1)
+      for (const layer of layers) byClass[layer as keyof typeof byClass] += 1
+    }
+    expect(byClass).toEqual({ base: 340, integral: 320, insert: 94 })
+  })
+
+  it('reaches tier 1 on all 3,068 and tier 2 on the rest — so the corpus proves neither the sprite clause nor the fallback', () => {
+    // Named as a limit rather than left implicit. Tier 1's `&& sprite` never
+    // fires here because every topper-carrying aggregate has a sprite-carrying
+    // topper, and tier 3 is unreachable because no aggregate lacks a sprite
+    // everywhere. Both are proved on fixtures in `src/catalog/aggregate.test.ts`;
+    // this test exists to say that these totals cannot.
+    const spritelessTopperAggregates = index.aggregates.filter(
+      (aggregate) =>
+        layersOf(aggregate).has('topper') &&
+        !aggregate.variants.some((variant) => variant.layer === 'topper' && variant.sprite),
+    )
+    expect(spritelessTopperAggregates).toHaveLength(0)
+    expect(index.aggregates.filter((aggregate) => aggregate.variants.every((variant) => !variant.sprite))).toHaveLength(0)
+    expect(index.aggregates.filter((aggregate) => aggregate.variants.some((variant) => variant.sprite))).toHaveLength(3822)
+  })
+
+  it('disagrees with `selectVariant` on 1,598 aggregates, and that is the point of both', () => {
+    // The preview picks the picture of the item; `selectVariant` picks the file
+    // to print, and its first criterion is the opposite one — prefer one part
+    // over two. If these two ever agreed everywhere, one of them would have
+    // stopped answering its own question.
+    const disagree = index.aggregates.filter((aggregate) => selectVariant(aggregate).variant.id !== aggregate.preview)
+    expect(disagree).toHaveLength(1598)
+
+    // All 931 mixed aggregates are in it, by construction rather than by count.
+    const mixed = index.aggregates.filter(
+      (aggregate) => layersOf(aggregate).has('topper') && layersOf(aggregate).has('integral'),
+    )
+    expect(mixed).toHaveLength(931)
+    for (const aggregate of mixed) {
+      expect(selectVariant(aggregate).variant.needsBase, aggregate.name).toBe(false)
+      expect(variantOf(aggregate, aggregate.preview)?.needsBase, aggregate.name).toBe(true)
+    }
+  })
+
+  it('leaves every catalog URL where it was, even on the six that moved', () => {
+    // `variants[0].ord` is the catalog address and no tier touches it. The six
+    // that moved are the proof: each still addresses the integral it no longer
+    // shows.
+    for (const aggregate of index.aggregates.filter(
+      (candidate) => candidate.preview !== previewBeforeV5(candidate),
+    )) {
+      expect(Number(aggregate.address)).toBe(Number(aggregate.variants[0].ord))
+      expect(aggregate.variants[0].id).not.toBe(aggregate.preview)
+    }
   })
 
   it('varies `config` on 828 aggregates, which is why the slots are a union', () => {

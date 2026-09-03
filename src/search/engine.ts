@@ -87,9 +87,13 @@ export interface SearchResult {
    *
    * The seam row A3 consumes. A grid renders a *file*: it needs a sprite sheet,
    * a byte count and a material, and `preview` is A1's answer to which variant
-   * supplies them (the first with a sprite, which matters for exactly one
-   * aggregate corpus-wide). Every id here resolves through {@link
-   * SearchEngine.record}.
+   * supplies them — since row V5, a sprite-carrying **topper** first, then any
+   * sprite-carrying variant, then the head. Every id here resolves through
+   * {@link SearchEngine.record}.
+   *
+   * That rule is *not* `selectVariant`'s, which prefers one part over two and so
+   * names a different file on 1,598 of 3,822 aggregates. These ids are what to
+   * *show*, never what to print or download.
    *
    * It is **not** an addressing scheme. A drawer link is row A4's, and A4 types
    * `?tile=` as a `ManifestOrdinal` resolved through `AggregateIndex.byOrdinal`
