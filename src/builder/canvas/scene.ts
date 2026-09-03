@@ -122,7 +122,10 @@ export interface PlanPiece {
  * Row S5's {@link GeneratedPiece} plus the two fields a *scene* adds to a piece
  * — the conflict flag and the `caveat` slot the renderer branches on. Nothing
  * else is added and nothing is renamed: the field names are `PlanPiece`'s
- * deliberately, so `PlanPieces.tsx` draws both from one component.
+ * deliberately, so one renderer draws both populations. That was
+ * `PlanPieces.tsx` until row **R4** deleted it, and it is `three/instances.ts`
+ * now — the shared field names are why the second population cost that module
+ * nothing.
  *
  * `caveat` is `null` and it is the type rather than a value that says so. A
  * caveat is *"the outline rests on an unmeasured band rule"*, which applies to
@@ -283,7 +286,7 @@ export function buildPlanScene(
       undrawable.push({
         id,
         design: placement.design,
-        reason: `${record.name} has a ${record.foot.shape} footprint, which the plan view cannot draw.`,
+        reason: `${record.name} has a ${record.foot.shape} footprint, which cannot be drawn on the plan.`,
       })
       continue
     }
@@ -407,9 +410,14 @@ export function pieceRotationStep(piece: ScenePiece): number {
  * interleave with floors by insertion order and a base placed after a floor
  * would be drawn over the floor standing on it.
  *
- * `PlanPieces.tsx` renders the two lists as two `<g>`s in this order, so the
- * DOM's paint order and this function's are the same statement — which is what
- * makes {@link pieceAt}'s "last wins" agree with what the user can see.
+ * `PlanPieces.tsx` rendered the two lists as two `<g>`s in this order, so the
+ * DOM's paint order and this function's were the same statement — which is what
+ * makes {@link pieceAt}'s "last wins" agree with what the user can see. Row
+ * **R4** deleted that renderer and the property survives it differently: in 3D
+ * there is no paint order to agree with, because a pick is a raycast and the
+ * nearest hit wins by geometry. This function is what `three/edits.ts` resolves a
+ * pick *through*, so it is now the only statement of the order rather than one of
+ * two that had to match.
  */
 export function scenePaintOrder(scene: PlanScene): readonly ScenePiece[] {
   return scene.generated.length === 0 ? scene.pieces : [...scene.generated, ...scene.pieces]

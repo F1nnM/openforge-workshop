@@ -22,7 +22,7 @@
  * {@link CatalogRecord} — a mesh has to come from somewhere. Putting that hop
  * *here*, behind a method whose name did not change, is what keeps the change
  * invisible above: `buildPlanScene`'s signature, `PlanScene`, `PlanPiece` and
- * every consumer of them — the plan canvas, row R2's 3D interaction, the landing
+ * every consumer of them — row R2's 3D interaction, the landing
  * hero — are untouched, and the one thing they all read, `piece.record`, is
  * still a record. The alternative was a `lock` parameter threaded through
  * `buildPlanScene` into three call sites, one of them in a directory this row

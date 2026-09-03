@@ -1,10 +1,17 @@
 /**
- * Geometry and camera tests. Headless — no DOM, no React.
+ * Geometry tests. Headless — no DOM, no React.
  *
  * The properties asserted here are the ones a wrong answer would make *look*
  * right: a snap that lands a quarter unit off is invisible at a glance and
  * unbuildable in resin, and a rotation that drifts by 6e-17 makes two tiles look
  * flush and compare unequal.
+ *
+ * The `camera` suite that used to close this file went with row **R4**: it
+ * tested `viewport.ts` — `clampScale`, `toWorld`, `viewBox`, `zoomAt`,
+ * `panByPixels`, `ensureVisible`, `fitBoxes`, `usableSize` — which was the SVG
+ * renderer's pan/zoom camera and had no other caller. The 3D surface's camera is
+ * an orbit control over a perspective projection and shares not one function
+ * with it; `three/surface.test.ts` covers that one.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -38,20 +45,6 @@ import {
   snapTo,
   unitsToMm,
 } from './geometry'
-import {
-  DEFAULT_SCALE,
-  MAX_SCALE,
-  MIN_SCALE,
-  clampScale,
-  defaultViewport,
-  ensureVisible,
-  fitBoxes,
-  panByPixels,
-  toWorld,
-  usableSize,
-  viewBox,
-  zoomAt,
-} from './viewport'
 
 const catalog = fixtureCatalogFile()
 const record = (id: string) => {
@@ -389,63 +382,3 @@ describe('readouts', () => {
   })
 })
 
-describe('camera', () => {
-  const size = { width: 800, height: 600 }
-
-  it('clamps the scale and falls back on a non-finite one', () => {
-    expect(clampScale(1)).toBe(MIN_SCALE)
-    expect(clampScale(10_000)).toBe(MAX_SCALE)
-    expect(clampScale(Number.NaN)).toBe(DEFAULT_SCALE)
-  })
-
-  it('substitutes a usable size for an element that has not been laid out', () => {
-    expect(usableSize(null).width).toBeGreaterThan(0)
-    expect(usableSize({ width: 0, height: 0 }).width).toBeGreaterThan(0)
-    expect(usableSize(size)).toEqual(size)
-  })
-
-  it('maps pixels to grid units through the viewBox', () => {
-    const view = { x: 2, z: 3, scale: 40 }
-    expect(toWorld(view, 0, 0)).toEqual([2, 3])
-    expect(toWorld(view, 40, 80)).toEqual([3, 5])
-    const frame = viewBox(view, size)
-    expect(frame).toEqual({ x: 2, z: 3, w: 20, d: 15 })
-  })
-
-  it('keeps the world point under the cursor fixed while zooming', () => {
-    const view = { x: 0, z: 0, scale: 40 }
-    const before = toWorld(view, 300, 200)
-    const zoomed = zoomAt(view, 2, 300, 200)
-    const after = toWorld(zoomed, 300, 200)
-    expect(after[0]).toBeCloseTo(before[0], 10)
-    expect(after[1]).toBeCloseTo(before[1], 10)
-    expect(zoomed.scale).toBe(80)
-  })
-
-  it('refuses to drift when the zoom is already at its limit', () => {
-    const view = { x: 1, z: 1, scale: MAX_SCALE }
-    expect(zoomAt(view, 2, 100, 100)).toBe(view)
-  })
-
-  it('pans in pixels regardless of scale', () => {
-    expect(panByPixels({ x: 0, z: 0, scale: 50 }, 100, -50)).toEqual({ x: 2, z: -1, scale: 50 })
-  })
-
-  it('scrolls only as far as it must to reveal a box', () => {
-    const view = { x: 0, z: 0, scale: 40 }
-    expect(ensureVisible(view, size, { x: 5, z: 5, w: 1, d: 1 })).toBe(view)
-    // The box sits left of the frame and hard against its top edge, so both
-    // axes move — the margin is clear space, not a tolerance.
-    const scrolled = ensureVisible(view, size, { x: -3, z: 0, w: 1, d: 1 }, 1)
-    expect(scrolled.x).toBe(-4)
-    expect(scrolled.z).toBe(-1)
-  })
-
-  it('frames every box when fitting, and falls back to the default view for none', () => {
-    const fitted = fitBoxes([{ x: 0, z: 0, w: 10, d: 10 }], size)
-    const frame = viewBox(fitted, size)
-    expect(frame.x).toBeLessThan(0)
-    expect(frame.x + frame.w).toBeGreaterThan(10)
-    expect(fitBoxes([], size)).toEqual(defaultViewport())
-  })
-})

@@ -34,7 +34,7 @@
  * is read by every screen reader and skipped by Tab, which is exactly the intent.
  *
  * They keep their "+ add" action, though. Saving one to the library is a
- * perfectly good thing to do — it just cannot be laid out in plan view yet.
+ * perfectly good thing to do — it just cannot be laid out on the plan yet.
  *
  * **Refusing at item level is not an approximation.** `foot` is a hoisted facet:
  * over the emitted index, the number of items whose variants disagree about
@@ -258,7 +258,7 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
             {unplaceable > 0 ? (
               <p className="of-pal-note">
                 {countLabel(unplaceable)} saved {unplaceable === 1 ? 'item' : 'items'} at the end of
-                the list cannot be laid out in plan view: the archive does not state a footprint for{' '}
+                the list cannot be laid out on the plan: the archive does not state a footprint for{' '}
                 {unplaceable === 1 ? 'it' : 'them'}. {unplaceable === 1 ? 'It is' : 'They are'} still
                 in your library, and still printable.
               </p>
@@ -397,10 +397,12 @@ function PaletteRowView({
 }
 
 /**
- * The one footprint the plan view cannot draw, in a dozen characters.
+ * The one footprint that cannot be drawn on the plan, in a dozen characters.
  *
  * Was a two-case function while `arc` was refused; row W6 made all six drawable
- * cases placeable, so `none` is the whole of it.
+ * cases placeable, so `none` is the whole of it. The label itself is unchanged by
+ * row R4 and reads correctly without the 2D renderer: a tile with no plan shape
+ * has nowhere to stand in the 3D room either, for the same arithmetic reason.
  */
 const REFUSAL_LABEL = 'no plan shape'
 

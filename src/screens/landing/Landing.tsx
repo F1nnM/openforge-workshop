@@ -116,7 +116,7 @@ const STEPS = [
     numeral: 'III',
     stage: 'Construct',
     title: 'Lay out the room',
-    body: 'Snap tiles to the workbench grid in plan view, watch the bill of tiles add up, and take away one zip holding exactly the files your build needs.',
+    body: 'Snap tiles to the workbench grid in 3D, watch the bill of tiles add up, and take away one zip holding exactly the files your build needs.',
   },
 ] as const
 

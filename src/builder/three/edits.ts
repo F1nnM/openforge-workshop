@@ -2,13 +2,15 @@
  * What a gesture on the 3D surface *means* — resolved as a value, before
  * anything is written.
  *
- * `PlanCanvas.tsx` computes the same four verdicts inside four `useCallback`s
- * and writes to the store from inside them, which is why nothing in this project
- * has ever been able to test "clicking there places that": the decision and the
- * side effect are the same statement. This module separates them. Every function
- * here is pure — a scene in, a {@link SurfaceEdit} out — and the component's job
+ * `PlanCanvas.tsx` computed the same four verdicts inside four `useCallback`s
+ * and wrote to the store from inside them, which is why nothing in this project
+ * was ever able to test "clicking there places that": the decision and the side
+ * effect were the same statement. This module separates them. Every function here
+ * is pure — a scene in, a {@link SurfaceEdit} out — and the component's job
  * shrinks to reading the verdict, making one store call, and saying the
- * `message`.
+ * `message`. Row **R4** deleted that component, so the entangled version is gone
+ * and this is the only implementation; the argument is kept because it is why
+ * this module is shaped the way it is.
  *
  * That matters more here than it did in 2D, because jsdom has no WebGL context:
  * **no test in this repo can mount the 3D surface.** The verdicts can still be
@@ -26,12 +28,12 @@
  * API `move.ts` already exposes, and identity comes from `CatalogRecord.id`.
  * V4's change is therefore invisible to this file.
  *
- * ## The refusals are the plan view's, unchanged
+ * ## The refusals came from the plan view, unchanged
  *
  * Every one of them comes out of `ghost.ts` or `move.ts` and is re-worded, never
  * re-decided: a `none` footprint cannot be placed, an identical tile at
  * identical coordinates and an identical angle is refused (it would be invisible
- * on the plan and would double a line in the bill), and an overlap **informs and
+ * in the room and would double a line in the bill), and an overlap **informs and
  * commits** — `overlap.ts` is emphatic about that, and the reason applies twice
  * over in 3D, where a sector's convex parts are an outward bound and can report
  * a contact the meshes do not have.
@@ -242,7 +244,7 @@ export function describeAbandon(drag: MoveDrag, scene: PlanScene): string {
  * What `R` turns: the piece in the air, else the sticky target, else the piece
  * under the cursor, else the armed tile.
  *
- * The precedence is `PlanCanvas`'s and each step of it is a behaviour somebody
+ * The precedence was `PlanCanvas`'s and each step of it is a behaviour somebody
  * would otherwise lose. A piece being carried outranks the cursor because `R`
  * mid-move must turn what is held. The sticky target outranks the cursor because
  * turning a 2 × 0.5 wall by 60° moves it out from under the point that was
@@ -291,13 +293,14 @@ export function planTurn(
 /**
  * What the surface knows that its surroundings show.
  *
- * Structurally `PlanStatus`, deliberately and by field-for-field intent, so
- * `PlanToolbar` and `BuilderScreen`'s two corner plates take it with no change
- * at all: the toolbar's `Rotate` step, its conflict count and its `moving` tail
- * are the same four facts whichever renderer produced them. It is declared here
- * rather than imported because `PlanStatus` lives in `PlanCanvas.tsx`, which row
- * **R4** deletes — so the type that outlives that deletion has to be on this
- * side of the line.
+ * **The one type in this row that was written to outlive a deletion, and it
+ * did.** It was declared here as a field-for-field copy of `PlanStatus` rather
+ * than imported, because `PlanStatus` lived in `PlanCanvas.tsx` and row **R4**
+ * was going to delete it. R4 has: the plan view is gone, `PlanToolbar.status` and
+ * `BuilderScreen`'s two corner plates take this type, and there is one readout
+ * shape with one implementation instead of two identical ones. The duplication
+ * cost one row of two structurally equal interfaces and bought a deletion with no
+ * type surgery in it.
  */
 export interface SurfaceStatus {
   readonly cursor: PlanPoint
@@ -327,7 +330,7 @@ export interface SurfaceHintInput {
 /**
  * The contextual line, §2.4's bottom-left, in the 3D surface's own vocabulary.
  *
- * The precedence is `PlanCanvas`'s `buildHint` and the wording is not: this
+ * The precedence was `PlanCanvas`'s `buildHint` and the wording was not: this
  * surface's primary gesture is **click**, its drag is the orbit, and it has no
  * drag-paint to describe. The one thing that is genuinely new is `waiting` — a
  * placed tile whose mesh has not arrived is drawn as a marker rather than as

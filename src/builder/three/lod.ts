@@ -213,8 +213,18 @@ export function lodGlbUrl(assets: Pick<CatalogAssets, 'lod'>, blob: BlobId): str
  * treat a 404 on /lod/ as expected and fall back to the plan view, exactly as
  * /thumbs/ falls back to the sprite sheet"*.
  *
- * This constant is read by the panel to choose its copy. Flip it when the
- * backfill lands and a 404 becomes a real gap worth reporting.
+ * **Nothing reads this in production as of row R4**, and that is worth stating
+ * rather than leaving to be discovered. Its one reader was the note under the
+ * "Build in 3D" plate — the copy that told a user *before* they pressed that an
+ * empty room was expected — and R4 deleted the plate with the plan view it was a
+ * way back to. The disclosure did not go with it: `BuilderRoom`'s
+ * `SurfaceNotice` and `edits.ts`'s `waiting` count now say the same thing per
+ * tile and inside the room, which is a better place for it.
+ *
+ * It survives as the written-down answer to *"is a 404 on `/lod/` a bug?"*, which
+ * `loadLod.ts` relies on and which `lod.test.ts` asserts so that the day blocker
+ * **B7** is run, flipping it is a one-line change with a test pointing at it.
+ * Delete it only when that flip has happened and a 404 has become a real gap.
  */
 export const LOD_ABSENT_IS_EXPECTED = true
 
@@ -285,12 +295,30 @@ export function lodObjectBudget(
   return Math.max(1, Math.floor(budgetBytes / perObject))
 }
 
-/** How the panel explains a room the budget refuses. */
+/**
+ * How the room explains a plan the budget refuses.
+ *
+ * **The last sentence changed in row R4 and the change is a correction, not
+ * wording.** It used to read *"The plan view draws every piece"*, which was a
+ * true and useful thing to say while there were two renderers: a refused room
+ * left the 2D drawing underneath it and the user carried on building there. R4
+ * deleted the plan view, so that sentence became a promise of a fallback that
+ * does not exist — and this is the one string in the row where the deletion could
+ * have shipped as a lie rather than as an absence.
+ *
+ * What is true instead is what `BuilderRoom`'s `NO_DECODER` already says about
+ * the other refusal, plus the way out: the placements are real, they are in the
+ * bill, the download resolves them, and taking a few distinct designs off the
+ * plan brings the room back under the budget. That last clause is worth saying
+ * because the axis is **distinct meshes**, not placements — a fiftieth copy of a
+ * floor tile costs one 4x4 matrix — so "remove some tiles" would send a user to
+ * delete the wrong ones.
+ */
 export function lodBudgetRefusal(objects: number, budget: number = lodObjectBudget()): string {
   return (
     `This room needs ${String(objects)} different meshes and the 3D view loads at most ` +
     `${String(budget)} — that is ${String(Math.round(lodGeometryBytes() / 1024))} kB of geometry each, ` +
-    'against the same memory ceiling the detail viewer applies to a single mesh. The plan view draws ' +
-    'every piece.'
+    'against the same memory ceiling the detail viewer applies to a single mesh. Every tile you placed is ' +
+    'still real and still in the bill; taking a few different designs off the plan brings the room back.'
   )
 }

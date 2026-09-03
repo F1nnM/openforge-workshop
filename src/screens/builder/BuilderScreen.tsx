@@ -3,30 +3,27 @@
  * reachable at all.
  *
  * Three columns at `calc(100dvh - var(--of-header-h))` with no page scroll: a
- * 272px palette, a flexible canvas, a 302px bill of tiles. This component owns
+ * 272px palette, a flexible stage, a 302px bill of tiles. This component owns
  * the layout, the URL, and the three derivations everything else reads from —
- * and nothing else. Every panel, the canvas, the bill and the download are
+ * and nothing else. Every panel, the 3D surface, the bill and the download are
  * already-landed modules that are *called* here rather than reimplemented.
  *
- * ## The five things this screen actually decides
+ * ## The four things this screen actually decides
  *
  *   1. **`usePlanTools()` is called once.** Mode, snap, pending rotation and the
  *      palette selection are one object shared by the palette, the toolbar and
- *      the canvas — all three write to it. Two hooks would be two builders.
+ *      the surface — all three write to it. Two hooks would be two builders.
  *   2. **The bill is a projection of the store, not a copy.** `usePlacements()`
- *      feeds `buildBillOfTiles`, and the canvas reads the same map. Neither holds
- *      state of its own, so the drawing and the parts list cannot disagree.
+ *      feeds `buildBillOfTiles`, and the surface reads the same map through the
+ *      same scene. Neither holds state of its own, so the room and the parts list
+ *      cannot disagree.
  *   3. **The three expensive indexes are memoised on the catalog file.** The
  *      search engine comes from `useCatalogIndex` (module-scope memo, 45 ms), and
  *      `buildAssemblyIndex` and `planCatalogFromFile` are memoised here on
  *      `index.file` — both are deterministic functions of a versioned build
  *      artefact, so that is the correct lifetime rather than a cache with an
  *      invalidation problem.
- *   4. **`chrome={false}`.** The canvas can draw §2.4's two corner plates itself;
- *      this screen draws them, because the contract puts the `snap {value}`
- *      readout in the floating toolbar and the canvas's own plate carries it too —
- *      one of the two has to go, and the toolbar is the one the contract names.
- *   5. **Where a generated base lands, and nothing else about one.** Row S4's
+ *   4. **Where a generated base lands, and nothing else about one.** Row S4's
  *      drawer decides *what* — it holds the recipe and the resolution the strip is
  *      showing — and calls row S5's `placeRecipe` itself; this screen answers
  *      *where*, because that is a question about the whole plan. See
@@ -34,6 +31,14 @@
  *      the first for the same reason there are two store maps: a catalog line is
  *      one per md5 and names a `CatalogRecord`, a generated line is one per recipe
  *      and names no published file at all.
+ *
+ * There were five. **`chrome={false}` was the fourth and row R4 removed the
+ * decision by removing the alternative.** `PlanCanvas` could draw §2.4's two
+ * corner plates itself, and this screen drew them instead because the canvas's
+ * own armed plate carried the `snap {value}` readout that the contract puts in
+ * the floating toolbar — two of them on screen would have been a designer's bug
+ * report. With the plan view deleted there is one drawer of the plates and it is
+ * this screen. The plates themselves are unchanged; the choice is gone.
  *
  * ## Why the bill is rebuilt on every placement rather than diffed
  *
@@ -46,17 +51,17 @@
  * ## What is not here
  *
  * **The share link.** PR 10 owns the codec and reads `location.hash`; nothing in
- * this screen touches it. **A move operation.** Row 17 is explicit that the canvas
- * has none, and adding one from the shell would mean owning drag state the canvas
- * does not publish; the bill panel's remove-and-replace is the honest interim,
- * and it is reachable from the keyboard, which a drag is not.
+ * this screen touches it. **A move operation.** Row R2 gave the surface one —
+ * drag, `Shift`-drag and the arrow keys — and it is the surface's, not the
+ * shell's: the drag is ephemeral renderer state and the store sees one
+ * `movePlacement` write on the drop. The bill panel's remove-and-replace is still
+ * there and is still the keyboard-only path to the same edit.
  *
- * **And the 3D view is one element, not a fifth decision.** `<Builder3DPanel>`
- * (row G2) is mounted inside the stage and owns its own open state, its own
- * lazy chunk and its own empty states, over the same `planCatalog` and the same
- * `placements` map this screen already holds. So the 2D drawing and the 3D room
- * are two projections of one store rather than two scenes to keep in step, and
- * this screen gains no state for it.
+ * **And the 3D surface is one element, not a fifth decision.** `<Builder3DPanel>`
+ * (rows G2, R2 and R4) fills the stage and owns its own lazy chunk and its own
+ * empty states, over the same `planCatalog`, the same `scene` and the same
+ * `tools` this screen already holds. It is the work surface rather than a view of
+ * a drawing made elsewhere, and this screen gains no state for it.
  *
  * **The lock preference is the same shape.** `<LockToggle>` (row L1) is in the
  * stage's top band beside the toolbar, and it takes no props at all: the
@@ -69,15 +74,14 @@
  *
  * It renders a `<section>`, not a `<main>`: `AppFrame` owns the document's one
  * `<main>`. The `<h1>` is clipped — the contract opens this screen on the palette
- * and the drawing, not on a title, and a visible heading would cost the canvas a
+ * and the room, not on a title, and a visible heading would cost the stage a
  * line of height it cannot spare.
  */
 import { getRouteApi } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
-import { PlanCanvas, buildPlanScene, createStyleResolver, describeCell, freeCellFor, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
-import type { PlanStatus } from '@/builder/canvas'
+import { buildPlanScene, createStyleResolver, describeCell, freeCellFor, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
 import { BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
@@ -154,19 +158,20 @@ function Builder({ index }: { index: CatalogIndex }) {
   const generatedMeshes = useGeneratedMeshes()
   const generatedHoldings = useGeneratedHoldings()
   const lock = useLockSystem()
-  const [status, setStatus] = useState<PlanStatus | null>(null)
   /**
-   * The 3D surface's readout, which outranks the plan view's while it is open.
+   * The surface's readout — one state, one writer, since row **R4**.
    *
-   * Two states rather than one, because both renderers are mounted until row
-   * **R4** deletes the plan view and both publish a readout — one writer would
-   * mean the last render to fire won, which thrashes on every pointer move.
-   * `SurfaceStatus` is `PlanStatus` field for field on purpose (see
-   * `builder/three/edits.ts`), so the toolbar and the two corner plates take
-   * either without a branch, and R4 collapses this to one line.
+   * It was two, `status` from `PlanCanvas` and `surfaceStatus` from the 3D room,
+   * with `surfaceStatus ?? status` deciding which the toolbar and the two corner
+   * plates showed. Two renderers were mounted at once and both published on
+   * every pointer move, so a single state would have thrashed on whichever
+   * render fired last. R4 deleted the plan view, so there is one publisher and
+   * the `??` had nothing left on its right-hand side.
+   *
+   * `null` until the surface has reported once, which is what the fallback
+   * sentence in the hint plate below is for.
    */
-  const [surfaceStatus, setSurfaceStatus] = useState<SurfaceStatus | null>(null)
-  const plate: PlanStatus | SurfaceStatus | null = surfaceStatus ?? status
+  const [status, setStatus] = useState<SurfaceStatus | null>(null)
 
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
@@ -256,17 +261,13 @@ function Builder({ index }: { index: CatalogIndex }) {
    * Row **R2** made it the 3D surface's scene as well, which is the better
    * architecture and not merely convenient: `BuilderRoom` used to project its
    * own, so a third projection of the same two store maps existed for no reason
-   * other than that nobody had passed one down. **One scene, two renderers, and
-   * after row R4 one renderer.** It also insulates the whole 3D row from row
-   * **V4**: a placement's shape is changing, and a consumer that takes a
-   * `PlanScene` never reads a `Placement` field.
+   * other than that nobody had passed one down. **One scene, and since row R4
+   * one renderer of it.** It also insulates the whole 3D row from row **V4**: a
+   * placement's shape is changing, and a consumer that takes a `PlanScene` never
+   * reads a `Placement` field.
    *
-   * `PlanCanvas` still holds its own and will until R4 deletes it — the canvas
-   * subscribes to the store directly and publishes no scene, and lifting its
-   * projection out would make its viewport and this screen's render cycle the
-   * same thing. Both are pure functions of the same two maps, so they cannot
-   * disagree; they are memoised on those maps, so each costs one projection per
-   * placement rather than one per render.
+   * Memoised on the two store maps, so it costs one projection per placement
+   * rather than one per render.
    *
    * `styleOf` is memoised beside it rather than constructed inline in the
    * projection, which it was: `createStyleResolver` is a *memoising* resolver
@@ -332,18 +333,10 @@ function Builder({ index }: { index: CatalogIndex }) {
       />
 
       <div className="of-builder-stage">
-        <PlanCanvas
-          catalog={planCatalog}
-          tools={tools}
-          onStatus={setStatus}
-          chrome={false}
-          className="of-builder-canvas"
-        />
-
         <div className="of-builder-toolbar-slot">
           <PlanToolbar
             tools={tools}
-            status={plate}
+            status={status}
             armed={armed}
             placed={bill.placements}
             onClear={clearPlacements}
@@ -354,11 +347,12 @@ function Builder({ index }: { index: CatalogIndex }) {
             toolbar rather than inside it.
 
             **Beside, not inside, and that is the durable half of the decision.**
-            Every control in `PlanToolbar` writes `PlanTools`, and row R4 deletes
-            the plan view those tools drive. The lock system is neither a plan
-            tool nor a thing R4 removes — it decides which base is matched under
-            every topper in the bill and which STL the download resolves to — so
-            it is a sibling in the slot and comes through that row untouched.
+            Every control in `PlanToolbar` writes `PlanTools`, and row R4 deleted
+            the plan view those tools were written for — they drive the 3D surface
+            now. The lock system is neither a plan tool nor a thing R4 removed —
+            it decides which base is matched under every topper in the bill and
+            which STL the download resolves to — so it is a sibling in the slot
+            and came through that row untouched.
 
             The slot is a wrapping flex row for this, and `builder.css` now
             reserves a gutter on both sides of the band so that neither this
@@ -370,39 +364,37 @@ function Builder({ index }: { index: CatalogIndex }) {
         </div>
 
         {/* §2.4's two corner plates. Pointer-transparent, so a click near the
-            bottom of the drawing still reaches the canvas. */}
-        <p className="of-build-plate of-build-hint">{plate?.hint ?? 'Pick a tile from the palette to start.'}</p>
+            bottom of the room still reaches the surface — which matters more now
+            than it did on the plan, because the primary gesture *is* a click on
+            the drawing. */}
+        <p className="of-build-plate of-build-hint">{status?.hint ?? 'Pick a tile from the palette to start.'}</p>
         <p className="of-build-plate of-build-armed">
           {armed === undefined ? 'No tile armed' : armed.name}
-          {plate === null ? null : (
-            <span className="of-build-at">{describeCell(plate.cursor[0], plate.cursor[1])}</span>
+          {status === null ? null : (
+            <span className="of-build-at">{describeCell(status.cursor[0], status.cursor[1])}</span>
           )}
         </p>
 
         {/*
-          Rows G2 and R2. **Open on arrival**, because the owner asked for the 3D
-          view to *be* the builder rather than a panel behind a gate — and the old
-          gate was worse than a gate: its button was disabled until a tile had
-          been placed, so the 3D view could not be reached until the 2D view had
-          been used first.
+          Rows G2, R2 and R4. **The stage**, and no longer a panel: R2 opened it
+          with the screen because the owner asked for the 3D view to *be* the
+          builder rather than a view behind a gate, and R4 deleted the plan
+          canvas it used to cover, so there is nothing left for an open/closed
+          pair of states to mean.
 
-          It covers the plan canvas and, from row R2, sits *below* the toolbar
-          band and the two corner plates in the stacking order — `builder3d.css`
-          carries that arithmetic. Every control in `PlanToolbar` writes
-          `PlanTools`, and `PlanTools` is precisely what the 3D surface reads, so
-          the existing toolbar is the 3D surface's toolbar with no new UI at all.
-
-          It still covers rather than replaces the canvas: `PlanCanvas` holds its
-          viewport — zoom, pan, cursor — outside the store, so swapping it out
-          would reset the drawing every time somebody dropped back to the plan.
-          Row R4 deletes the thing being covered, and this becomes the stage.
+          It sits *below* the toolbar band and the two corner plates in the
+          stacking order — `builder3d.css` carries that arithmetic, and row L1's
+          measurement of what happens when it does not. Every control in
+          `PlanToolbar` writes `PlanTools`, and `PlanTools` is precisely what
+          this surface reads, so the existing toolbar is its toolbar with no new
+          UI at all.
         */}
         <Builder3DPanel
           catalog={planCatalog}
           scene={scene}
           tools={tools}
           assets={index.file.assets}
-          onStatus={setSurfaceStatus}
+          onStatus={setStatus}
         />
 
         {/*

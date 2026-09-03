@@ -8,11 +8,14 @@
  * ## The third mode
  *
  * §2.4's toggle names two modes. `Move` is the third, and it is here because
- * PR #29's objection to a move was a *gesture* objection — the primary button is
- * already drag-paint — which a mode answers without arbitrating anything. The
- * canvas also takes `Shift` with the primary button as a move in any mode, so
- * this control is the discoverable path rather than the only one; `M` is its
- * shortcut, beside the existing `P` and `E`.
+ * PR #29's objection to a move was a *gesture* objection — on the plan view the
+ * primary button was already drag-paint — which a mode answers without
+ * arbitrating anything. The surface also takes `Shift` with the primary button as
+ * a move in any mode, so this control is the discoverable path rather than the
+ * only one; `M` is its shortcut, beside the existing `P` and `E`. (Row **R4**
+ * deleted the drag-paint renderer that raised the objection. The mode is the
+ * better answer either way, and the 3D surface has no drag-paint at all — its
+ * drag is the orbit, which `three/surface.ts` sets out.)
  *
  * A `Shift`-drag move leaves this toggle showing `Place`, which is why the
  * readout below reports `status.moving`: a piece in the air with no mode to show
@@ -45,16 +48,26 @@
  * `E`, `G`) is the fast path for anyone who wants one.
  */
 import type { CatalogRecord } from '@/catalog'
-import type { PlanStatus, PlanTools } from '@/builder/canvas'
+import type { PlanTools } from '@/builder/canvas'
 import { formatUnits, rotationStepFor } from '@/builder/canvas'
+import type { SurfaceStatus } from '@/builder/three'
 import { Button, ToggleGroup, ToggleItem, VisuallyHidden } from '@/ui/primitives'
 
 import './panels.css'
 
 export interface PlanToolbarProps {
   readonly tools: PlanTools
-  /** The canvas's readout. `null` until the canvas has reported once. */
-  readonly status: PlanStatus | null
+  /**
+   * The work surface's readout. `null` until it has reported once.
+   *
+   * It was `PlanStatus`, which lived in `PlanCanvas.tsx`. Row **R4** deleted that
+   * renderer, and `SurfaceStatus` — declared in `builder/three/edits.ts`, field
+   * for field identical to `PlanStatus` and deliberately so, precisely to survive
+   * this deletion — is the type now. `import type`, so it is erased at build time
+   * and no value edge to `@/builder/three` exists in the bundle; the panels'
+   * `boundary.test.ts` walks value imports only, for the same reason.
+   */
+  readonly status: SurfaceStatus | null
   /** The armed tile, for its rotation step. */
   readonly armed: CatalogRecord | undefined
   readonly placed: number
@@ -127,8 +140,8 @@ export function PlanToolbar({ tools, status, armed, placed, onClear }: PlanToolb
       {/*
         The mono status tail. Only ever shows what is true: the piece currently in
         the air, a pending rotation the user has to be able to see (it applies to
-        the *next* placement, so nothing on the drawing carries it yet) and the
-        overlap count, which is the canvas's own conflict hatch counted up.
+        the *next* placement, so nothing in the room carries it yet) and the
+        overlap count, which is the surface's own conflict marking counted up.
       */}
       <p className="of-build-readout">
         {status?.moving == null ? null : (

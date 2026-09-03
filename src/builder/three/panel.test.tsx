@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * The mount point: the boundary, and the gate that is gone.
+ * The mount point: the boundary, and both of the states that are gone.
  *
  * `./BuilderRoom` is mocked, and the mock is the point rather than a
  * convenience. The real module pulls three.js, r3f, drei, `postprocessing`, n8ao
@@ -11,15 +11,26 @@
  * does the surface arrive with the screen"**. A stub standing in for the whole
  * chunk answers both.
  *
- * ## What row R2 changed, and what these tests now assert
+ * ## Three rows have now taken something away from this file
  *
- * The panel used to be a *gate*: a plate in the corner whose button was
+ * The panel started as a *gate*: a plate in the corner whose button was
  * **disabled until a tile had been placed**, so the 3D view could not be reached
- * until the 2D view had been used first. The owner asked for the opposite — the
- * 3D view *is* the builder — so the surface is open on arrival and the empty
- * room is a usable work surface rather than a locked door. The old "offers the
- * control but does not arm it" test asserted the gate and has been replaced by
- * its inverse.
+ * until the 2D view had been used first. Row **R2** inverted that — the owner
+ * asked for the 3D view to *be* the builder — and the surface opened with the
+ * screen, leaving the plate behind as a way *back* to the plan. Row **R4**
+ * deleted the plan view, so there is nowhere back to go: the plate, `open`,
+ * `initiallyOpen`, `onOpenChange` and `BuilderRoom`'s `onClose` are all gone and
+ * this component holds no state.
+ *
+ * **Two suites went with them, and both were about to become vacuous rather than
+ * merely redundant.** "The closed plate, which is now a way back rather than a
+ * gate" mounted the panel with `initiallyOpen={false}`; delete that prop and the
+ * suite either fails to compile or silently asserts against the *open* surface,
+ * where `getByRole('button', { name: /build in 3d/i })` finds nothing. "Closing"
+ * pressed the room stub's own "Back to the plan" button — a button the mock
+ * defined, so it would have gone on passing against a production component that
+ * could no longer close at all. That second one is the shape of vacuous guard
+ * this series keeps finding: the test's subject lived in the test.
  *
  * ## What these tests prove
  *
@@ -33,9 +44,9 @@
  *     placement possible at all.
  *   - The scene and the shared tool state reach the room, so the palette and the
  *     toolbar drive the 3D surface.
- *   - Closing unmounts the room — which aborts the fetches and disposes the
- *     geometries — and retracts the surface's readout so the corner plates do not
- *     keep quoting a pointer that has gone.
+ *   - **No control offers to leave it.** Asserted as an absence, which is worth
+ *     one line: it is the whole of what R4 did to this component's markup, and a
+ *     re-added toggle would otherwise be caught by nothing here.
  *
  * ## What they cannot prove
  *
@@ -43,9 +54,11 @@
  * instanced draw. Every one of those needs a GPU. The surface's *own* logic —
  * the pick, the verdicts, the plate geometry — is tested without React in
  * `surface.test.ts`, `edits.test.ts` and `markers.test.ts`, which is where it
- * can be tested honestly.
+ * can be tested honestly. The band's clickability needs a real browser and is
+ * measured there; `builder3d.css` and `screens/builder/builder.css` carry the
+ * numbers.
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { planCatalogFromFile } from '@/builder/canvas'
@@ -56,21 +69,10 @@ import { Builder3DPanel } from './Builder3DPanel'
 import { planTools, sceneOf } from './fixture'
 
 vi.mock('./BuilderRoom', () => ({
-  default: ({
-    onClose,
-    scene,
-    tools,
-  }: {
-    onClose: () => void
-    scene: PlanScene
-    tools: PlanTools
-  }) => (
+  default: ({ scene, tools }: { scene: PlanScene; tools: PlanTools }) => (
     <div data-testid="room">
       <span>room of {scene.pieces.length}</span>
       <span data-testid="armed">{tools.selectedDesign ?? 'nothing'}</span>
-      <button type="button" onClick={onClose}>
-        Back to the plan
-      </button>
     </div>
   ),
 }))
@@ -143,92 +145,23 @@ describe('what reaches the room', () => {
   })
 })
 
-describe('the closed plate, which is now a way back rather than a gate', () => {
-  it('is offered with no placements at all', () => {
-    render(
-      <Builder3DPanel
-        catalog={CATALOG}
-        scene={scene(0)}
-        tools={planTools()}
-        assets={ASSETS}
-        initiallyOpen={false}
-      />,
-    )
-    // Enabled, unlike the gate it replaces: there is nothing to withhold now
-    // that the surface is where a room is built.
-    expect(screen.getByRole('button', { name: /build in 3d/i })).toBeEnabled()
-  })
+describe('what row R4 took away', () => {
+  it('offers no control that leaves the surface, because there is nowhere to go', async () => {
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} />)
+    await screen.findByTestId('room')
 
-  /**
-   * The one structural fact behind row X10's item 8, asserted where a pixel
-   * measurement cannot reach.
-   *
-   * A live Chrome found the right 14 px of the toolbar's `snap 0.5` button
-   * unclickable, with `elementFromPoint` naming `.of-b3d-toggle-note` at those
-   * columns, and the proposed one-line fix was `pointer-events: none` on the
-   * note. **It would not work, and this is why:** the note is a child of the
-   * button, so declining hits on it hands them to `.of-b3d-toggle` — still not
-   * to the snap toggle underneath. And a flex-column child cannot spill outside
-   * its parent, so the note is not overlapping anything; it *sets* the plate's
-   * width, being its longest line.
-   *
-   * jsdom reports every element as 0 × 0 and so can say nothing about the
-   * overlap itself. It can say this, which is the half that refutes the fix, and
-   * it fails the day someone lifts the note out of the button — at which point
-   * the `pointer-events` fix becomes available and this test is the prompt to
-   * reconsider it. `builder3d.css` carries the measurement and the candidate
-   * designs.
-   */
-  it('keeps the note inside the button, which is why pointer-events cannot fix the overlap', () => {
-    render(
-      <Builder3DPanel
-        catalog={CATALOG}
-        scene={scene(3)}
-        tools={planTools()}
-        assets={ASSETS}
-        initiallyOpen={false}
-      />,
-    )
-
-    const button = screen.getByRole('button', { name: /build in 3d/i })
-    const note = document.querySelector('.of-b3d-toggle-note')
-    expect(note).not.toBeNull()
-    expect(note?.closest('.of-b3d-toggle')).toBe(button)
-    // Blocker B2: `/lod/` is empty, so the label discloses that the meshes come
-    // from a per-user conversion rather than from a published store. It is also
-    // the longest line in the plate, so the plate's width is the note's.
-    expect(note?.textContent).toBe('preview meshes, not yet published')
-    expect(button.textContent).toContain('Build in 3D')
-  })
-})
-
-describe('closing', () => {
-  it('unmounts the room and retracts the readout with it', async () => {
-    const opened: boolean[] = []
-    const readouts: unknown[] = []
-    render(
-      <Builder3DPanel
-        catalog={CATALOG}
-        scene={scene(2)}
-        tools={planTools()}
-        assets={ASSETS}
-        onOpenChange={(open) => opened.push(open)}
-        onStatus={(next) => readouts.push(next)}
-      />,
-    )
-
-    fireEvent.click(await screen.findByRole('button', { name: /back to the plan/i }))
-
-    expect(opened).toEqual([false])
-    // Gone from the tree: `useLodStore`'s effect cleanup is the only thing that
-    // aborts an in-flight request and disposes what arrived, so this is the
-    // assertion that dropping back to the plan costs nothing beyond what had
-    // already landed.
-    expect(screen.queryByTestId('room')).toBe(null)
-    // And the surface's readout is withdrawn, so `BuilderScreen`'s corner plates
-    // fall back to the plan view's rather than holding a sentence about a
-    // pointer that is no longer over anything.
-    expect(readouts).toEqual([null])
-    expect(screen.getByRole('button', { name: /build in 3d/i })).toBeEnabled()
+    // The three names the retired plate and its button went by. Queried rather
+    // than reasoned about, so re-adding any of them fails here — and asserted
+    // after the room has arrived, so this is the *open* surface's markup and not
+    // a Suspense frame that happens to contain no buttons.
+    expect(screen.queryByRole('button', { name: /build in 3d/i })).toBe(null)
+    expect(screen.queryByRole('button', { name: /back to the plan/i })).toBe(null)
+    expect(document.querySelector('.of-b3d-toggle')).toBe(null)
+    // And the surface is the stage rather than a plate in a corner of it: the
+    // `[data-open]` attribute both `builder3d.css` rules used to select on is
+    // gone, so a stylesheet that still carried them would style nothing.
+    const launch = document.querySelector('.of-b3d-launch')
+    expect(launch).not.toBeNull()
+    expect(launch?.hasAttribute('data-open')).toBe(false)
   })
 })

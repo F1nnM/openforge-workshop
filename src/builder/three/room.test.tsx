@@ -196,7 +196,6 @@ describe('the room with an empty store — today’s real state', () => {
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.wall2])}
         tools={planTools()}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={notFound}
       />,
     )
@@ -223,7 +222,6 @@ describe('the room with an empty store — today’s real state', () => {
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={notFound}
       />,
     )
@@ -242,7 +240,6 @@ describe('the room with an empty store — today’s real state', () => {
         scene={scene([])}
         tools={planTools()}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={fetchImpl as unknown as typeof fetch}
       />,
     )
@@ -269,7 +266,6 @@ describe('the armed tile', () => {
         scene={scene([])}
         tools={planTools({ selectedDesign: fixtureDesignOf(FIXTURE_IDS.floor1) })}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={fetchImpl as unknown as typeof fetch}
       />,
     )
@@ -294,7 +290,6 @@ describe('when an object is there and broken', () => {
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={broken as unknown as typeof fetch}
       />,
     )
@@ -324,8 +319,7 @@ describe('when the browser cannot decode meshopt', () => {
           scene={scene([FIXTURE_IDS.floor1])}
           tools={planTools()}
           assets={ASSETS}
-          onClose={() => undefined}
-          fetchImpl={fetchImpl as unknown as typeof fetch}
+            fetchImpl={fetchImpl as unknown as typeof fetch}
         />,
       )
       await waitFor(() => {
@@ -350,7 +344,6 @@ describe('the room with a store object', () => {
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor1, FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={glbResponder()}
       />,
     )
@@ -406,7 +399,6 @@ describe('the room with a store object', () => {
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={glbResponder()}
       />,
     )
@@ -423,7 +415,6 @@ describe('the room with a store object', () => {
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2, FIXTURE_IDS.wall2, FIXTURE_IDS.angled])}
         tools={planTools()}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={glbResponder()}
       />,
     )
@@ -446,7 +437,6 @@ describe('the keyboard path exists in the document', () => {
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
-        onClose={() => undefined}
         fetchImpl={notFound}
       />,
     )

@@ -205,12 +205,26 @@ describe('the bill panel’s generated section', () => {
     expect(reached).not.toContain('generator/placement/bill.ts')
   })
 
-  it('does not reach the plan canvas component, only its geometry helpers', () => {
-    // `describeCell` and `formatUnits` come from `@/builder/canvas`, whose barrel
-    // does re-export `PlanCanvas` — so this asserts the *resolved* graph rather
-    // than the specifier, and it is the assertion that would catch the barrel
-    // growing a component the bill does not need.
-    const reached = closureOf(join(SRC, 'builder/panels/GeneratedBillSection.tsx')).files
-    expect(reached).toContain('builder/canvas/geometry.ts')
-  })
+  /*
+   * **A third `it` stood here and row R4 removed it, because its subject was
+   * deleted and it would otherwise have been the next vacuous guard in this
+   * series.**
+   *
+   * It was called "does not reach the plan canvas component, only its geometry
+   * helpers", and its whole argument was that `@/builder/canvas`'s barrel
+   * re-exported `PlanCanvas` — a React component with an SVG renderer behind it —
+   * so a bill section importing `describeCell` from the barrel had to be checked
+   * against the *resolved* graph rather than the specifier. R4 deleted
+   * `PlanCanvas.tsx` and every other component in that directory; the barrel now
+   * re-exports pure functions only, so there is no component for the assertion to
+   * be about. Its one surviving line, `expect(reached).toContain(
+   * 'builder/canvas/geometry.ts')`, asserted a positive that the block above
+   * already covers by path — it would have gone on passing for ever while its
+   * name claimed a negative it no longer tested.
+   *
+   * What would make it real again is a component reappearing under
+   * `builder/canvas/`. Nothing is stopping that, and the honest guard for it is
+   * the one this file already uses for everything else: add the module to
+   * `FORBIDDEN` on the day there is one.
+   */
 })

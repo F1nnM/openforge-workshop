@@ -37,7 +37,7 @@ import { scenePaintOrder } from './scene'
 /**
  * How far out the search goes, in grid units.
  *
- * 64 units is a 64-inch room, which is larger than anything the plan view is
+ * 64 units is a 64-inch room, which is larger than anything the builder is
  * usable at — and the bound matters because the alternative is an unbounded loop
  * on a pathological scene. Past it, {@link freeCellFor} falls back to a cell
  * that is free by construction rather than by search: just clear of the scene's
@@ -54,7 +54,7 @@ export const VACANCY_STEP = 1
  * `rotation` is 0: a generated base is a rect and there is nothing to align it
  * with yet. Turning it is one press of `R` once it is on the plan.
  *
- * Total. A footprint the plan view cannot draw — which no generated base has,
+ * Total. A footprint that cannot be drawn on the plan — which no generated base has,
  * every shape the panel offers being a rect — falls straight through to the
  * fallback rather than throwing, because a placement action that threw would take
  * the builder down over a shape the *bill* would have listed happily.

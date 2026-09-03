@@ -19,7 +19,7 @@
  * const tools = usePlanTools()
  * <Palette onSelect={tools.setSelectedDesign} selected={tools.selectedDesign} />
  * <Toolbar tools={tools} onClear={clearPlacements} />
- * <PlanCanvas catalog={catalog} tools={tools} />
+ * <Builder3DPanel catalog={catalog} scene={scene} tools={tools} />
  * ```
  */
 import { useCallback, useMemo, useState } from 'react'

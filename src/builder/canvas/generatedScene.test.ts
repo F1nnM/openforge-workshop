@@ -13,19 +13,25 @@
  *   2. **One `PlacementId` space.** `pieceAt`, `previewMove` and `beginMove` take
  *      the union, and they are safe doing so only because row S5 proved a
  *      `GeneratedBaseId` can never be a `TileId`.
- *   3. **One paint order.** The DOM order in `PlanCanvas` and the arithmetic in
- *      `scenePaintOrder` have to be the same statement, or `pieceAt` returns a
- *      piece the user cannot see.
+ *   3. **One paint order.** `scenePaintOrder` and whatever draws the scene have
+ *      to be the same statement, or `pieceAt` returns a piece the user cannot
+ *      see. The renderer that had to agree with it was `PlanCanvas`, whose DOM
+ *      order was the paint order; row **R4** deleted it and `three/edits.ts` is
+ *      the consumer now — the 3D surface resolves a pick through the same
+ *      function, so the claim is unchanged and its second party is not.
  *
  * ## What these tests cannot prove
  *
  * **Nothing here renders and nothing is measured.** These are polygon
  * coordinates, string contents and store writes. jsdom rasterises nothing and
  * measures no layout, so no test in this file — or in row S5's, which says the
- * same thing — says anything about how a generated base *looks*: not its colour
- * against the parchment well, not its contour weight, not whether the dashed
- * off-grid stroke is visible at the zoom a user is at. `canvas.test.tsx`'s own
- * limits apply unchanged.
+ * same thing — says anything about how a generated base *looks*. That gap got
+ * wider in row **R4**: the drawing this file's coordinates were written for was
+ * an SVG one whose fills, contour weights and dashed off-grid strokes at least
+ * had a rendered test beside them in `canvas.test.tsx`, and R4 deleted both. The
+ * geometry is now consumed by a GPU renderer that no test in this repository can
+ * rasterise at all, so **everything visual about a generated base is verified in
+ * a browser or not verified.**
  */
 import { describe, expect, it } from 'vitest'
 

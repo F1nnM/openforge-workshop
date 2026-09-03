@@ -154,7 +154,7 @@ export type NoteCode =
   | 'base-texture-mismatch'
   /** The placed tile carries lock systems, none of them the preferred one. */
   | 'lock-unavailable'
-  /** `Footprint` is `none`: the tile is in the bill but cannot be drawn in plan view. */
+  /** `Footprint` is `none`: the tile is in the bill but cannot be drawn on the plan. */
   | 'no-footprint'
   /** A `part|` insert was placed on the grid rather than fitted into a slot. */
   | 'insert-on-grid'

@@ -521,7 +521,7 @@ export function nextRotation(rotation: number, step: number, direction: 1 | -1 =
 
 /* ------------------------------------------------------------------- refusal */
 
-/** Why a tile cannot be drawn in plan. One case, and it is permanent. */
+/** Why a tile cannot be drawn on the plan. One case, and it is permanent. */
 export type RefusalCode = 'no-footprint'
 
 export interface Refusal {
@@ -548,17 +548,24 @@ export function footprintRefusal(foot: Footprint): RefusalCode | undefined {
 }
 
 /**
- * Whether this tile can be drawn in plan, and why not when it cannot.
+ * Whether this tile can be drawn on the plan, and why not when it cannot.
  *
- * The canvas draws a refused tile as a hatched marker with a cross rather than
- * silently doing nothing, because a palette selection that produces no ghost and
- * no error is indistinguishable from a broken canvas.
+ * The renderer draws a refused tile as a marker rather than silently doing
+ * nothing, because a palette selection that produces no ghost and no error is
+ * indistinguishable from a broken builder. That was a hatched cross in the plan
+ * view; row **R4** deleted it and `three/markers.ts` carries the 3D equivalent,
+ * which is the same argument in a different medium.
+ *
+ * The message says "on the plan" and not "in plan view", which R4 changed
+ * throughout: the plan is the lattice a room is built on and is still there; the
+ * *view* was the SVG renderer and is not. See `canvas/index.ts` on what "plan"
+ * now means.
  */
 export function placementRefusal(record: Pick<CatalogRecord, 'foot' | 'name'>): Refusal | undefined {
   if (footprintRefusal(record.foot) === undefined) return undefined
   return {
     code: 'no-footprint',
-    message: `${record.name} has no derivable footprint, so it cannot be drawn in plan view.`,
+    message: `${record.name} has no derivable footprint, so it cannot be placed on the plan.`,
   }
 }
 
