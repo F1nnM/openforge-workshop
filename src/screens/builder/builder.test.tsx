@@ -45,12 +45,35 @@ import { fileURLToPath } from 'node:url'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type * as BuilderThree from '@/builder/three'
 import { createWorkshopRouter } from '@/routes'
 import type { FacetSearch } from '@/search'
 import { FIXTURE_CATALOG, FIXTURE_DESIGNS, FIXTURE_NAMES } from '@/builder/panels/fixture'
 import { resetCatalogSearchIndex } from '@/screens/catalog'
 import { clearPersistedWorkshopState, resetWorkshop, useWorkshopStore } from '@/store'
 import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
+
+/**
+ * The 3D surface, stubbed — and row R2 is what makes this necessary.
+ *
+ * The surface is now open on arrival, because the owner asked for the 3D view to
+ * *be* the builder rather than a panel behind a gate. So mounting this screen
+ * mounts `<Canvas>`, and jsdom has no WebGL context and no `ResizeObserver`:
+ * r3f throws at mount, the route's `CatchBoundary` catches it, and the whole
+ * screen is replaced by an error — which is what happened when this mock was not
+ * here, and it took the palette with it.
+ *
+ * `importActual` keeps `@/builder/three`'s module real, so the barrel's own
+ * boundary is still exercised by the import; only the element is swapped. What
+ * this screen's tests are about — three columns, no page scroll, the bill driven
+ * from the store, the query in the URL — is entirely unaffected by which
+ * renderer draws the plan, and the surface's own behaviour is tested in
+ * `src/builder/three/**` where it can be tested honestly.
+ */
+vi.mock('@/builder/three', async () => {
+  const actual = await vi.importActual<typeof BuilderThree>('@/builder/three')
+  return { ...actual, Builder3DPanel: () => <div data-testid="builder-3d" /> }
+})
 
 /* ------------------------------------------------------------------ scaffold */
 

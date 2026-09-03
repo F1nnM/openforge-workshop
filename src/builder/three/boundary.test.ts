@@ -12,16 +12,44 @@
  * the type system.
  *
  * The failure mode is silent. The app keeps working; the entry chunk grows by
- * ~480 kB gzipped and every visitor to `/builder` pays for it whether or not
- * they press the button. So the static import graph is walked here from
- * `index.ts` and checked, and a convenience import added to the panel's side of
- * the line fails this test, which is the only place it would be noticed.
+ * ~400 kB gzipped and every visitor to **every** screen pays for it, the catalog
+ * included. So the static import graph is walked here from `index.ts` and
+ * checked, and a convenience import added to the panel's side of the line fails
+ * this test, which is the only place it would be noticed.
+ *
+ * ## Row R2 changed what the boundary is for, and it did not stop mattering
+ *
+ * The 3D surface is now open on arrival — the owner asked for the 3D view to
+ * *be* the builder — so every `/builder` visitor does download the 3D chunk.
+ * That does not make the line pointless, and `Builder3DPanel.tsx` sets out why:
+ * a static import would put the same bytes in the **entry** chunk, which blocks
+ * first paint on every screen, where behind `lazy` they are a parallel request
+ * that resolves while the 5.6 MB catalog index this screen already waits on is
+ * in flight. Same bytes, off the critical path — and off the catalog's path
+ * entirely.
+ *
+ * ## The walker is `tools/boundary/closure.ts`, and this was the fifth copy
+ *
+ * Row X10 collapsed four near-identical static-import walkers into one module
+ * and recorded what the four had each got differently — an `EISDIR` on a
+ * directory shadowing a module, a bare `import './x'` that three of them could
+ * not see at all, and a walker regex-scanning an Apache licence for imports.
+ * **It missed this file**, which carried its own private copy, and row R1 left
+ * that copy alone deliberately *"so R2's rebase of that directory stays clean"*
+ * while calling it *"the copy that will diverge next"*. This row is that rebase,
+ * so the copy is gone: `closure.ts` is imported, and its 13 tests cover the
+ * walker itself.
+ *
+ * The two behavioural differences the shared walker brings here are both
+ * improvements, and both are latent rather than active today: this directory has
+ * no bare side-effect import other than a stylesheet, and no specifier that
+ * resolves to a directory shadowing a module. Neither was true by design.
  *
  * ## What this proves, and what it cannot
  *
  * It proves the **static** graph. A dynamic `import()` is invisible to it by
  * design — that is the mechanism, not a hole — and so is a heavy transitive
- * import that arrives through a module this walker considers light. The walker
+ * import that arrives through a module the walker cannot follow. The walker
  * therefore follows relative and `@/`-aliased in-repo imports as far as it can
  * and reports package specifiers it cannot follow, so a heavy package pulled in
  * two files deep is still caught.
@@ -30,13 +58,14 @@
  * `index.ts`'s docblock as an A/B: build with this directory present, build with
  * it moved aside, compare the entry chunk.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { SRC_DIR, staticClosure, staticImports } from '../../../tools/boundary/closure'
+
 const HERE = resolve(process.cwd(), 'src', 'builder', 'three')
-const SRC_DIR = resolve(process.cwd(), 'src')
 
 /** Packages that pull a renderer, a shader compiler or a mesh decoder. */
 const FORBIDDEN_PACKAGES = [
@@ -51,89 +80,49 @@ const FORBIDDEN_PACKAGES = [
 /**
  * In-repo modules the entry surface must not reach.
  *
- * `three/` is `src/three/**` — every module in it except `gate.ts` imports the
- * renderer, and `gate.ts` is the one this row does import, deliberately and by
- * deep path, because the memory budget is derived from it. `download/` vendors
- * the zip writer and has no business in the chunk a builder visitor downloads.
+ * `download/` vendors the zip writer and has no business in the chunk every
+ * visitor downloads.
  */
 const FORBIDDEN_FILES = ['download/']
 
 /** `src/three` modules the entry surface may reach. Only the one. */
 const ALLOWED_THREE_MODULES = ['three/gate']
 
-/** Static `import`/`export … from` specifiers, excluding type-only ones. */
-function staticImports(source: string): string[] {
-  const found: string[] = []
-  const pattern = /^\s*(?:import|export)\s+(?!type\s)([^;]*?)\s*from\s*'([^']+)'/gm
+/**
+ * This row's own modules that carry a renderer, by name.
+ *
+ * The package assertion above would catch any of them leaking, but it would say
+ * `three ← builder/three/index.ts` and leave the reader to find which import did
+ * it. Naming them makes the failure say so directly, and it is also the list a
+ * future row adds to rather than discovering by accident.
+ */
+const RENDERER_MODULES = [
+  'builder/three/BuilderRoom.tsx',
+  'builder/three/InstancedTiles.tsx',
+  'builder/three/RoomSurface.tsx',
+  'builder/three/instances.ts',
+  'builder/three/loadLod.ts',
+  'builder/three/markers.ts',
+  'builder/three/place.ts',
+  'builder/three/surface.ts',
+  'builder/three/useLodStore.ts',
+]
 
-  for (const match of source.matchAll(pattern)) {
-    const clause = match[1] ?? ''
-    const specifier = match[2] ?? ''
-    // `import { type A, type B }` is erased too; only a value import counts.
-    const values = clause
-      .replace(/^\{|\}$/g, '')
-      .split(',')
-      .map((part) => part.trim())
-      .filter((part) => part !== '' && !part.startsWith('type '))
-    if (clause.startsWith('{') && values.length === 0) continue
-    found.push(specifier)
+/**
+ * The walk, from `tools/boundary/closure.ts` — one copy for the boundary tests.
+ *
+ * The local adapter reports paths relative to `src` and drops the entry, which
+ * is this test's own framing: it asks "what else does `index.ts` reach", not
+ * "what is in this chunk". `closure.ts`'s docblock records that two of the four
+ * original copies made that choice differently, which is why it leaves it to the
+ * caller.
+ */
+function closureOf(entry: string): { files: string[]; packages: string[] } {
+  const closure = staticClosure(entry, SRC_DIR)
+  return {
+    files: closure.files.filter((file) => file !== entry).map((file) => relative(SRC_DIR, file)),
+    packages: [...closure.packages.keys()],
   }
-  return found
-}
-
-function resolveModule(from: string, specifier: string): string | null {
-  const base = specifier.startsWith('@/')
-    ? join(SRC_DIR, specifier.slice(2))
-    : specifier.startsWith('.')
-      ? resolve(dirname(from), specifier)
-      : null
-  if (base === null) return null
-
-  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')]) {
-    if (existsSync(candidate) && !candidate.endsWith('/')) {
-      try {
-        if (readFileSync(candidate, 'utf8').length >= 0) return candidate
-      } catch {
-        continue
-      }
-    }
-  }
-  return null
-}
-
-interface Closure {
-  /** Every in-repo file reachable by static import from the entry. */
-  files: string[]
-  /** Every package specifier reached, deduped. */
-  packages: string[]
-}
-
-/** Walk the static graph from one entry, following in-repo modules only. */
-function closureOf(entry: string): Closure {
-  const files = new Set<string>()
-  const packages = new Set<string>()
-  const queue = [entry]
-
-  while (queue.length > 0) {
-    const file = queue.pop()
-    if (file === undefined || files.has(file)) continue
-    files.add(file)
-
-    for (const specifier of staticImports(readFileSync(file, 'utf8'))) {
-      // A stylesheet import has no graph of its own.
-      if (specifier.endsWith('.css')) continue
-      const resolved = resolveModule(file, specifier)
-      if (resolved === null) packages.add(specifier)
-      else queue.push(resolved)
-    }
-  }
-
-  files.delete(entry)
-  return { files: [...files], packages: [...packages] }
-}
-
-function relativeToSrc(file: string): string {
-  return file.slice(SRC_DIR.length + 1)
 }
 
 describe('the eager surface of @/builder/three', () => {
@@ -147,15 +136,18 @@ describe('the eager surface of @/builder/three', () => {
   })
 
   it('reaches no module that owns one', () => {
-    const offenders = closure.files
-      .map(relativeToSrc)
-      .filter((file) => FORBIDDEN_FILES.some((prefix) => file.startsWith(prefix)))
+    const offenders = closure.files.filter((file) => FORBIDDEN_FILES.some((prefix) => file.startsWith(prefix)))
     expect(offenders).toEqual([])
+  })
+
+  it('reaches none of this row’s own renderer modules', () => {
+    // Named, so a leak says which import caused it. Every one of these
+    // value-imports three, r3f or the glTF loader.
+    expect(closure.files.filter((file) => RENDERER_MODULES.includes(file))).toEqual([])
   })
 
   it('reaches src/three only through gate.ts', () => {
     const reached = closure.files
-      .map(relativeToSrc)
       .filter((file) => file.startsWith('three/'))
       .map((file) => file.replace(/\.tsx?$/, ''))
     // `gate.ts` imports a type and nothing else, and this row derives its memory
@@ -171,13 +163,14 @@ describe('the eager surface of @/builder/three', () => {
     // import of the same module.
     expect(panel).toContain("lazy(() => import('./BuilderRoom'))")
     expect(staticImports(panel)).not.toContain('./BuilderRoom')
-    expect(closure.files.map(relativeToSrc)).not.toContain('builder/three/BuilderRoom.tsx')
+    expect(closure.files).not.toContain('builder/three/BuilderRoom.tsx')
   })
 
   it('finds a real graph, so a broken walker cannot pass vacuously', () => {
     // The walker must actually have reached something: `lod.ts`, which reaches
     // `@/catalog` and `@/three/gate`.
-    expect(closure.files.map(relativeToSrc)).toContain('builder/three/lod.ts')
+    expect(closure.files).toContain('builder/three/lod.ts')
+    expect(closure.files).toContain('three/gate.ts')
     expect(closure.files.length).toBeGreaterThan(2)
     expect(closure.packages).toContain('react')
   })
@@ -185,11 +178,16 @@ describe('the eager surface of @/builder/three', () => {
   it('puts every heavy import behind the room, where a build can see it', () => {
     // The other side of the line, checked so that "the panel is light" cannot be
     // true because the feature is empty: the room really does import three, r3f,
-    // the glTF loader and the decoder.
+    // the glTF loader and the decoder, and the surface really does import three.
     const room = readFileSync(join(HERE, 'BuilderRoom.tsx'), 'utf8')
     const loader = readFileSync(join(HERE, 'loadLod.ts'), 'utf8')
+    const surface = readFileSync(join(HERE, 'RoomSurface.tsx'), 'utf8')
     expect(room).toContain("from '@/three/Stage'")
     expect(loader).toContain("from 'three/examples/jsm/loaders/GLTFLoader.js'")
     expect(loader).toContain("from 'three/examples/jsm/libs/meshopt_decoder.module.js'")
+    expect(surface).toContain("from '@react-three/fiber'")
+    // And the interaction layer is reachable from the room, not from the panel —
+    // which is what makes row R2's whole addition land behind the same line.
+    expect(staticImports(room)).toContain('./RoomSurface')
   })
 })

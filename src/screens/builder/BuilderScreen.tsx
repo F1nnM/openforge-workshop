@@ -81,6 +81,7 @@ import type { PlanStatus } from '@/builder/canvas'
 import { BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
+import type { SurfaceStatus } from '@/builder/three'
 import { GeneratorPanel } from '@/generator/panel'
 import type { GeneratorPlaceHandler } from '@/generator/panel'
 import { buildGeneratedBill } from '@/generator/placement/bill'
@@ -154,6 +155,18 @@ function Builder({ index }: { index: CatalogIndex }) {
   const generatedHoldings = useGeneratedHoldings()
   const lock = useLockSystem()
   const [status, setStatus] = useState<PlanStatus | null>(null)
+  /**
+   * The 3D surface's readout, which outranks the plan view's while it is open.
+   *
+   * Two states rather than one, because both renderers are mounted until row
+   * **R4** deletes the plan view and both publish a readout — one writer would
+   * mean the last render to fire won, which thrashes on every pointer move.
+   * `SurfaceStatus` is `PlanStatus` field for field on purpose (see
+   * `builder/three/edits.ts`), so the toolbar and the two corner plates take
+   * either without a branch, and R4 collapses this to one line.
+   */
+  const [surfaceStatus, setSurfaceStatus] = useState<SurfaceStatus | null>(null)
+  const plate: PlanStatus | SurfaceStatus | null = surfaceStatus ?? status
 
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
@@ -232,26 +245,38 @@ function Builder({ index }: { index: CatalogIndex }) {
   })
 
   /**
-   * Where a generated base goes, and the one thing this screen has to decide
-   * about it.
+   * **One scene, and now two consumers of it** — the sixth derivation, promoted.
    *
-   * The drawer decides *what* — it holds the recipe and the resolution — and this
-   * decides *where*, because "is that cell free" is a question about the whole
-   * plan and the drawer holds no scene. `freeCellFor` uses the scene's own
-   * collision predicate, so a base it places is never one `buildPlanScene` then
-   * marks in conflict.
+   * It was `vacancyScene`, built for `freeCellFor` alone: the generator drawer
+   * decides *what* to place and this screen decides *where*, because "is that
+   * cell free" is a question about the whole plan and the drawer holds no scene.
+   * `freeCellFor` uses the scene's own collision predicate, so a base it places
+   * is never one `buildPlanScene` then marks in conflict.
    *
-   * The scene is rebuilt here rather than shared with `PlanCanvas`, which holds
-   * its own: the canvas subscribes to the store directly and publishes no scene,
-   * and a scene lifted into this screen to be passed down would make the canvas's
-   * viewport and this screen's render cycle the same thing. Both projections are
-   * pure functions of the same two store maps, so they cannot disagree — which is
-   * the property the module docblock's point 2 is about. It is memoised on those
-   * maps, so it costs one projection per placement rather than one per render.
+   * Row **R2** made it the 3D surface's scene as well, which is the better
+   * architecture and not merely convenient: `BuilderRoom` used to project its
+   * own, so a third projection of the same two store maps existed for no reason
+   * other than that nobody had passed one down. **One scene, two renderers, and
+   * after row R4 one renderer.** It also insulates the whole 3D row from row
+   * **V4**: a placement's shape is changing, and a consumer that takes a
+   * `PlanScene` never reads a `Placement` field.
+   *
+   * `PlanCanvas` still holds its own and will until R4 deletes it — the canvas
+   * subscribes to the store directly and publishes no scene, and lifting its
+   * projection out would make its viewport and this screen's render cycle the
+   * same thing. Both are pure functions of the same two maps, so they cannot
+   * disagree; they are memoised on those maps, so each costs one projection per
+   * placement rather than one per render.
+   *
+   * `styleOf` is memoised beside it rather than constructed inline in the
+   * projection, which it was: `createStyleResolver` is a *memoising* resolver
+   * keyed on the tile id, and rebuilding it on every placement threw that cache
+   * away every time — 200 material resolutions per placement instead of 200 once.
    */
-  const vacancyScene = useMemo(
-    () => buildPlanScene(placements, planCatalog, createStyleResolver(planCatalog), generatedPlacements),
-    [placements, planCatalog, generatedPlacements],
+  const styleOf = useMemo(() => createStyleResolver(planCatalog), [planCatalog])
+  const scene = useMemo(
+    () => buildPlanScene(placements, planCatalog, styleOf, generatedPlacements),
+    [placements, planCatalog, styleOf, generatedPlacements],
   )
 
   /**
@@ -318,7 +343,7 @@ function Builder({ index }: { index: CatalogIndex }) {
         <div className="of-builder-toolbar-slot">
           <PlanToolbar
             tools={tools}
-            status={status}
+            status={plate}
             armed={armed}
             placed={bill.placements}
             onClear={clearPlacements}
@@ -346,23 +371,39 @@ function Builder({ index }: { index: CatalogIndex }) {
 
         {/* §2.4's two corner plates. Pointer-transparent, so a click near the
             bottom of the drawing still reaches the canvas. */}
-        <p className="of-build-plate of-build-hint">{status?.hint ?? 'Pick a tile from the palette to start.'}</p>
+        <p className="of-build-plate of-build-hint">{plate?.hint ?? 'Pick a tile from the palette to start.'}</p>
         <p className="of-build-plate of-build-armed">
           {armed === undefined ? 'No tile armed' : armed.name}
-          {status === null ? null : (
-            <span className="of-build-at">{describeCell(status.cursor[0], status.cursor[1])}</span>
+          {plate === null ? null : (
+            <span className="of-build-at">{describeCell(plate.cursor[0], plate.cursor[1])}</span>
           )}
         </p>
 
         {/*
-          Row G2. Closed it is a plate in the stage's top-right and costs 1.17 kB
-          gzipped; opened it covers the stage, and three.js, r3f and the glTF
-          loader arrive in their own chunk on that press. It covers rather than
-          replaces the canvas because `PlanCanvas` holds its viewport — zoom, pan,
-          cursor — outside the store, and swapping it out would reset the drawing
-          every time somebody glanced at the room.
+          Rows G2 and R2. **Open on arrival**, because the owner asked for the 3D
+          view to *be* the builder rather than a panel behind a gate — and the old
+          gate was worse than a gate: its button was disabled until a tile had
+          been placed, so the 3D view could not be reached until the 2D view had
+          been used first.
+
+          It covers the plan canvas and, from row R2, sits *below* the toolbar
+          band and the two corner plates in the stacking order — `builder3d.css`
+          carries that arithmetic. Every control in `PlanToolbar` writes
+          `PlanTools`, and `PlanTools` is precisely what the 3D surface reads, so
+          the existing toolbar is the 3D surface's toolbar with no new UI at all.
+
+          It still covers rather than replaces the canvas: `PlanCanvas` holds its
+          viewport — zoom, pan, cursor — outside the store, so swapping it out
+          would reset the drawing every time somebody dropped back to the plan.
+          Row R4 deletes the thing being covered, and this becomes the stage.
         */}
-        <Builder3DPanel catalog={planCatalog} placements={placements} assets={index.file.assets} />
+        <Builder3DPanel
+          catalog={planCatalog}
+          scene={scene}
+          tools={tools}
+          assets={index.file.assets}
+          onStatus={setSurfaceStatus}
+        />
 
         {/*
           Row S4. Closed it is a plate in the stage's top-left and costs 656 B
@@ -390,7 +431,7 @@ function Builder({ index }: { index: CatalogIndex }) {
           assets={index.file.assets}
           onPlace={placeGenerated}
           placeAt={(foot) => {
-            const [x, z] = freeCellFor(vacancyScene, foot.footprint)
+            const [x, z] = freeCellFor(scene, foot.footprint)
             return { x, z }
           }}
         />
