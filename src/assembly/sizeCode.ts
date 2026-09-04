@@ -29,20 +29,39 @@
  * the *discriminant* (`rect` vs `tri`) and not the dimensions.
  *
  * **The join is now on {@link footprintKey}** — the resolved primitive — and the
- * code keeps three narrower jobs:
+ * code keeps two narrower jobs:
  *
- *   1. **A width, for the search layer's size tokens.** {@link sizeCodeWidth},
- *      unchanged, and the corpus assertion above still guards it.
- *   2. **A tie-break inside a congruent candidate set** —
- *      `MATCH_WEIGHTS.code` in `resolve.ts`. Once every candidate is congruent,
- *      geometric fit is settled by the key and the code is the strongest
- *      remaining *identity* signal: the base belongs to the same published size
- *      family. It cannot outvote the lock or the print option.
- *   3. **The last-resort key for a topper with no primitive at all** — 14
+ *   1. **A tie-break inside a congruent candidate set** —
+ *      `MATCH_WEIGHTS.code` in `baseMatch.ts`. Once every candidate is
+ *      congruent, geometric fit is settled by the key and the code is the
+ *      strongest remaining *identity* signal: the base belongs to the same
+ *      published size family. It cannot outvote the lock or the print option.
+ *   2. **The last-resort key for a topper with no primitive at all** — 14
  *      toppers, every one of them coded `U`, whose footprint W4 declined to
  *      guess. That path is the one place the old defect could still bite, so it
  *      is gated on {@link sharedPrimitive}: a code may only find a base when the
  *      bases carrying it agree about what shape they are.
+ *
+ * ## Row A3 deleted the third job, which was the width
+ *
+ * `SIZE_CODE_WIDTH_UNITS` and `sizeCodeWidth` are gone, and the plan was right
+ * that nothing consumed them — but wrong that the file could go with them. The
+ * only references were the barrel's re-export, this module, and
+ * `assembly.test.ts`'s table check. `src/search/textIndex.ts` names the constant
+ * in a **docblock**, explaining why its own size-token vocabulary omits `QxG`,
+ * and reimplements nothing — so the search layer's size tokens were never this
+ * function's caller. The `QxG` argument survives below because it is the reason
+ * no width table should be reintroduced from the tag, not because anything reads
+ * one.
+ *
+ * What keeps the *module*: {@link sharedPrimitive} and
+ * {@link AMBIGUOUS_SIZE_CODES} are read by `baseMatch.ts#candidatesFor`, which
+ * outlived rule 1 as the default-fill ranking. The corpus assertion that the
+ * code determines a width **with zero exceptions over 2,822 tiles** is kept in
+ * `assembly.test.ts` and now runs against the emitted records directly rather
+ * than against a table this file publishes. A drifted tag still fails the build;
+ * what no longer exists is a hard-coded five-entry table for it to drift
+ * against.
  *
  * That gate is not decoration. All 26 codes on the base side pass it today — the
  * `I`, `S` and `X` bases are homogeneous, and no base carries `O` at all — which
@@ -55,34 +74,6 @@
 import type { CatalogRecord } from '@/catalog'
 
 import { footprintKey } from './footprint'
-
-/**
- * The five codes §7 fixes, in grid units.
- *
- * Deliberately **not** exhaustive over the 36 codes in the corpus. The other 31
- * (`S`, `SB`, `SA`, `I`, `IL`, `X`, `AxG`, `A+S`, …) have no published width and
- * are not guessed at here; the width is a search token, and an unknown code
- * costs the base match nothing now that the match does not read the code as a
- * key at all.
- *
- * `QxG` stays off the table on purpose, and row W4 measured why: it is tagged
- * `size|width|4` and the mesh is **3.000**. Its footprint is `wall:3`, so the
- * base match already treats it as three units wide by congruence. Adding it here
- * would be a search-token change (row A2's surface), and the entry would be
- * **3**, never the 4 the tag claims.
- */
-export const SIZE_CODE_WIDTH_UNITS: Readonly<Record<string, number>> = Object.freeze({
-  A: 2,
-  BA: 1.5,
-  IA: 1,
-  D: 3,
-  Q: 4,
-})
-
-/** The width a size code determines, or `undefined` for the 31 codes with no published width. */
-export function sizeCodeWidth(code: string): number | undefined {
-  return SIZE_CODE_WIDTH_UNITS[code]
-}
 
 /**
  * The codes measured to span more than one footprint primitive, and what they

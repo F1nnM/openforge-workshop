@@ -2,77 +2,95 @@
  * Assembly resolution's public surface.
  *
  * Import from `@/assembly`, not from the modules beneath it. The whole surface
- * is two functions over an index:
+ * is three functions over an index and a context:
  *
  * ```ts
- * const index = buildAssemblyIndex(catalog)              // once per catalog build
- * const one   = resolvePlacement(placement, index, { lock })
- * const bill  = buildBillOfTiles(Object.values(scene), index, { lock })
- * const which = resolveVariant(design, index, { lock })  // rule 0, on its own
+ * const index = buildAssemblyIndex(catalog)          // once per catalog build
+ * const ctx   = { templates, composition, lock }     // AssemblyContext
+ * const one   = resolveInstance(instance, index, ctx)
+ * const bill  = buildBillOfTiles(Object.values(scene), index, ctx)
  * ```
  *
- * Row A6 added the fourth line and a step above the other three: the lock
- * preference decides **which file of the placed item** to print before any base
- * is considered. Row V4 made that step the *only* resolution — a placement names
- * an item and never a file — so `resolvePlacement`'s `tile` is the resolved
- * record and there is no other, and `ResolvedPlacement.resolution` says what was
- * chosen out of how many and how complete an assembly it is.
+ * ## What row A3 removed from this list
  *
- * {@link selectVariantForLock} is the fifth name, and it is the one the *canvas*
- * and the slots panel take: rule 0 with no base index, so a room draws and a
- * composition resolves against the same file the bill lists. `resolve.ts`'s
- * module docblock names all three callers.
+ * `resolvePlacement` and `resolveVariant` are gone, and so is the two-step they
+ * described. A placement used to name a `DesignId`, so *"which file of the placed
+ * item does this build want"* (rule 0) and *"which base goes under it"* (rule 1)
+ * were both questions this module answered on the user's behalf. A template
+ * instance names a template and its slots name **files**, so neither question
+ * exists at resolution time: {@link resolveInstance} looks up what the scene
+ * already says and reports what is missing or wrong.
+ *
+ * Two names survived the deletion because they were never about placements:
+ *
+ *   - {@link selectVariantForLock} — rule 0's ranking, over an aggregate rather
+ *     than a placement. Five call sites outside this directory ask it, and row
+ *     C2's fill solver is the sixth: a candidate grid is an *item* grid, and the
+ *     file is picked from the item afterwards.
+ *   - {@link matchBase} and {@link rankBases} — rule 1's *ranking*, without rule
+ *     1. The auto-insert is gone; the ladder that chose between candidate bases
+ *     is the default-fill C2 needs for a `base` slot, and it is exported for the
+ *     way `src/ui/lock-picker/build.ts` already used it. `baseMatch.ts` carries
+ *     the argument and the corpus figures.
+ *
+ * {@link baseGap} replaced `missingBaseNote`, and the change of return type is
+ * the point: the archive's base gap is still a fact worth asserting — 86 / 31 /
+ * 260 over 4,363 toppers, identical under every lock preference — but it is no
+ * longer a `Note`, because no bill can emit one now that nothing inserts a base.
  *
  * Pure throughout — no React, no DOM, no fetch, no renderer, and no state of its
  * own. {@link buildAssemblyIndex} is a deterministic function of the catalog, so
  * a caller may memoise it on the catalog's version stamp and never think about
- * it again.
+ * it again; the same contract holds for `@/composition`'s index, which
+ * {@link AssemblyContext} asks the caller to supply for that reason.
  *
- * `PrintOption` is re-exported for a reason worth stating: `BaseMatch.option` is
- * of that type and `BaseMatch` is part of this surface, so without the name here
- * a consumer could hold the value and not be able to declare it.
+ * `PrintOption` is re-exported for a reason worth stating: `BaseRanking.option`
+ * is of that type and `BaseRanking` is part of this surface, so without the name
+ * here a consumer could hold the value and not be able to declare it.
  */
 export type { AssemblyIndex, AssemblyIndexStats, PrintOption } from './assemblyIndex'
 export { PRINT_OPTIONS, buildAssemblyIndex, printOption } from './assemblyIndex'
 
-export type { BillLine, BillOfTiles, DownloadSize, DownloadVerdict, FilenameCollision } from './bill'
+export type {
+  BillLine,
+  BillOfTiles,
+  BillSlotRef,
+  DownloadSize,
+  DownloadVerdict,
+  FilenameCollision,
+  UnfilledSlot,
+} from './bill'
 export { DOWNLOAD_HUGE_BYTES, DOWNLOAD_LARGE_BYTES, buildBillOfTiles, downloadSize } from './bill'
 
-export { footprintKey, footprintsMatch } from './footprint'
+export { footprintKey } from './footprint'
 
-export type { BillNote, Note, NoteCode } from './notes'
+export type { BillNote, Note, NoteCode, NoteSubject } from './notes'
 export { NOTE_SEVERITY, rollUpNotes } from './notes'
 
 export type {
-  AssemblyOptions,
+  AssemblyContext,
   AssemblyPart,
-  BaseMatch,
-  MatchedBase,
-  PartRole,
-  PlacementVerdict,
-  ResolvedPlacement,
-  VariantResolution,
+  AssemblySlot,
+  AssemblyTemplate,
+  ResolvedInstance,
+  ResolvedSlotFill,
+  TemplateLookup,
 } from './resolve'
-/**
- * `matchBase` and `missingBaseNote` are rule 1's two halves, exported together
- * and for one reason: row A6's rule 0 resolves an item to a file *before* a base
- * is considered, so `resolvePlacement` no longer observes either. A topper whose
- * item has a one-part print in the chosen lock gets no base and no warning —
- * correctly — which makes "what base would this topper get?" and "why does this
- * topper have none?" questions the resolver can no longer be asked. They are
- * corpus facts that `docs/corpus-base-gap.md` and every D1/D4/D5 guard rest on.
- *
- * Neither adds a part. Rule 1 — every `connection|openforge` piece gets a base
- * line item — is still enforced in exactly one place, and that is
- * `resolvePlacement`.
- */
-export {
-  MATCH_WEIGHTS,
-  matchBase,
-  missingBaseNote,
-  resolvePlacement,
-  resolveVariant,
-  selectVariantForLock,
-} from './resolve'
+export { resolveInstance, selectVariantForLock } from './resolve'
 
-export { SIZE_CODE_WIDTH_UNITS, sizeCodeWidth } from './sizeCode'
+/**
+ * The base ranking, exported without the rule it used to serve.
+ *
+ * Row A3 deleted the auto-insert and kept the choice: something must
+ * default-fill a `base` slot, and that default is exactly this ladder. Row C2
+ * owns the fill solver and takes {@link rankBases} — the ranking over a
+ * candidate set `@/composition` produced. {@link matchBase} keeps its pre-A3
+ * signature for `src/ui/lock-picker/build.ts`, whose question is about the
+ * archive rather than about a scene, and {@link baseGap} answers the other half
+ * of it: which of the three ways the archive holds no base for a topper.
+ *
+ * **Neither adds a part.** A base reaches a bill as a filled slot and nothing
+ * else, so there is no second implementation of "this instance needs a base".
+ */
+export type { BaseGap, BaseMatch, BaseRanking, MatchedBase } from './baseMatch'
+export { MATCH_WEIGHTS, baseGap, matchBase, rankBases } from './baseMatch'
