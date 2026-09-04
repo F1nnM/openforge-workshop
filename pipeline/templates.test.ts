@@ -18,6 +18,11 @@
  *      with the generator.
  *   4. **The census.** Every figure `pipeline/templates.ts` and row C3's PR
  *      quote, computed rather than restated.
+ *   5. **Row B2's slot geometry costs the index nothing.** Every fixture's
+ *      part-name set resolves to one of the three authored conventions (40 of
+ *      40), an unknown set fails the *import* rather than the browser, and the
+ *      emitted artefact is byte-identical with and without the row — asserted by
+ *      rebuilding the corpus at the payload epoch, not by prose.
  *
  * Skips **loudly** without the fixtures, naming the path and the override — the
  * precedent `src/composition/corpus.test.ts` and `src/search/corpus.test.ts`
@@ -42,7 +47,12 @@ import { z } from 'zod'
 
 import { TagRef } from '../src/catalog'
 
+import { SLOT_CONVENTIONS, conventionFor } from '../src/template/rules'
+
+import { buildCatalog } from './build'
+import { measureCatalog, serialiseCatalog } from './emit'
 import { FixtureRow, fixtureFingerprint, fixturesDir, loadFixtureRows } from './fixtures'
+import { emptyManifest } from './ordinals'
 import type { TemplateFixture } from './templates'
 import {
   TEMPLATES_MODULE_PATH,
@@ -50,8 +60,10 @@ import {
   printFixture,
   printTemplateModule,
   readTemplateFile,
+  templateConvention,
   templateSlug,
 } from './templates'
+import { PAYLOAD_TIMESTAMP, SIZE_BUDGET_BYTES } from './version'
 
 const FIXTURES = fixturesDir()
 const hasFixtures = existsSync(FIXTURES)
@@ -200,6 +212,145 @@ describeFixtures(title, () => {
       return total + (original - after)
     }, 0)
     expect(lost).toBe(70)
+  })
+
+  /* ------------------------------------------------------------ slot geometry */
+
+  /**
+   * Rebuilding the 8,702-tile corpus and brotli-ing 5.9 MB at quality 11, twice.
+   * `role.test.ts` measures the same way for the same reason.
+   */
+  const SLOW_MS = 300_000
+
+  describe('row B2’s slot conventions', () => {
+    it('covers all 40 part-name sets, in the 32 / 4 / 4 split', () => {
+      const per = new Map<string, number>()
+      for (const entry of entries) {
+        const convention = templateConvention(entry)
+        per.set(convention.id, (per.get(convention.id) ?? 0) + 1)
+      }
+      expect(Object.fromEntries(per)).toEqual({
+        'wall-on-tile': 32,
+        'external-corner': 4,
+        'internal-corner': 4,
+      })
+      expect(SLOT_CONVENTIONS).toHaveLength(3)
+    })
+
+    it('fails the import, naming the file and the template, on a set it does not know', () => {
+      /* The whole point of reading the conventions from the pipeline. A
+         twenty-first fixture file with a new part set is a template this project
+         cannot lay out, and the honest place to find that out is
+         `npm run import:catalog` — not the browser, where an unlaid-out template
+         is indistinguishable from an archive gap. */
+      const invented: TemplateFixture = {
+        source: 'blueprints.s2w.invented.yaml',
+        name: 'S2W: Wall on Tile: Ceiling (Any, Modular)',
+        type: 'blueprint',
+        tags: ['object|tile'],
+        parts: [
+          { name: 'ceiling', tags: { require: [{ tag: 'shape|roof' }] } },
+          { name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } },
+          { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
+        ],
+      }
+      expect(() => templateConvention(invented)).toThrow(/blueprints\.s2w\.invented\.yaml/)
+      expect(() => templateConvention(invented)).toThrow(/no slot convention covers/)
+      expect(() => printTemplateModule([...entries, invented])).toThrow(/no slot convention covers/)
+    })
+
+    it('keys on the part-name set, which the fixtures’ own shape tags cannot do', () => {
+      /* Two of the four internal-corner entries carry `shape|corner`. Read from
+         the fixtures rather than from the generated module, so the defect is
+         observed at its source. Row **B6** files it upstream. */
+      const misTagged = entries.filter(
+        (entry) =>
+          entry.tags.includes('shape|corner') &&
+          conventionFor(entry.parts.map((part) => part.name))?.id === 'internal-corner',
+      )
+      expect(misTagged).toHaveLength(2)
+      expect(misTagged.map((entry) => entry.source).sort()).toEqual([
+        'blueprints.s2w.internal_corner.low.yaml',
+        'blueprints.s2w.internal_corner.yaml',
+      ])
+      // And every one of them really has no wall part, which is what a
+      // tag-keyed rule would have gone looking for.
+      for (const entry of misTagged) {
+        expect(entry.parts.map((part) => part.name)).not.toContain('wall')
+      }
+    })
+
+    it(
+      'adds 0 B to the index, against +808 B for shipping the same rule inside it',
+      () => {
+        /* The claim the row rests on, measured rather than argued. The
+           conventions ship in the bundle, `pipeline/build.ts` never reaches this
+           module, and the emitted artefact is therefore **byte-identical** to
+           what row B1 pinned — which is what "0 B" has to mean to be checkable.
+
+           Confirmed once directly as well, by building the same corpus at the
+           same epoch from a tree with this row reverted: same raw length
+           (5,907,324 B), same brotli (366,173 B) and the same SHA-256 of the
+           serialised index, `cf21ab85ac304a20…`.
+
+           The counterfactual here is the 128-row expansion of the same three
+           rules as a `layouts` key, against **this** construction — a fresh
+           build with an empty ordinal manifest. `src/template/corpus.test.ts`
+           prices it against the shipped artefact instead and gets +222 B, and
+           the research measured +374 B against the pre-B1 `catalog.json`. All
+           three are the same table. Row B1 records the lesson in this same
+           file: brotli is not additive over 5.9 MB, so a "this field costs N
+           bytes" figure is a fact about one artefact at one epoch, never a
+           rate. */
+        const { file } = buildCatalog({
+          rows: loadFixtureRows(FIXTURES),
+          manifest: emptyManifest(),
+          fixturesRef: 'test',
+          builtAt: PAYLOAD_TIMESTAMP,
+        })
+        const json = serialiseCatalog(file)
+        const shipped = measureCatalog(json)
+
+        const layouts = entries.map((entry) => ({
+          id: templateSlug(entry.name),
+          slots: templateConvention(entry).slots.map((slot) => ({
+            part: slot.part,
+            anchor: slot.anchor,
+            side: slot.side,
+            restsOn: slot.restsOn,
+          })),
+        }))
+        const withTable = measureCatalog(serialiseCatalog({ ...file, layouts } as never))
+
+        process.stdout.write(
+          `\n[template] index ${String(shipped.brotli)} B unchanged · the same rule inside it ` +
+            `${String(withTable.brotli)} B (+${String(withTable.brotli - shipped.brotli)})\n`,
+        )
+
+        expect(shipped.brotli).toBe(366_173)
+        expect(shipped.withinBudget).toBe(true)
+        expect(shipped.brotli / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
+        // And nothing of the model is in the bytes, which is the structural half.
+        for (const needle of ['anchor', 'restsOn', 'layouts', 'wall-on-tile', 'external-corner']) {
+          expect(json).not.toContain(needle)
+        }
+        expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
+        expect(withTable.brotli - shipped.brotli).toBe(808)
+      },
+      SLOW_MS,
+    )
+
+    it('is not on the index’s path at all, so the 0 B is structural', () => {
+      /* `pipeline/templates.ts` already documents that `build.ts` does not
+         import it; this asserts it, and asserts the same of `emit.ts`, which is
+         what actually writes the bytes. A future row wiring slot geometry into
+         the index fails here rather than moving a byte count silently. */
+      for (const module of ['pipeline/build.ts', 'pipeline/emit.ts']) {
+        const source = readFileSync(module, 'utf8')
+        expect(source, module).not.toContain("from './templates'")
+        expect(source, module).not.toContain('src/template')
+      }
+    })
   })
 
   /* ---------------------------------------------------------- the emitted module */

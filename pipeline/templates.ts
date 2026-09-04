@@ -104,6 +104,8 @@ import { z } from 'zod'
 
 import { PartSlot } from '../src/catalog'
 import type { ConstrainRef, TagRef } from '../src/catalog'
+import type { SlotConvention } from '../src/template/rules'
+import { conventionFor } from '../src/template/rules'
 
 import { fixturesDir } from './fixtures'
 
@@ -417,6 +419,41 @@ export function loadTemplateFixtures(dir: string = templateFixturesDir()): reado
   return files.flatMap((name) => readTemplateFile(name, readFileSync(join(dir, name), 'utf8')))
 }
 
+/* -------------------------------------------------------------- slot geometry */
+
+/**
+ * The layout convention for one template, or a throw naming the template.
+ *
+ * Row **B2**'s build-time gate, and the one thing the pipeline does with slot
+ * geometry. Nothing is *emitted*: the three conventions ship in the bundle in
+ * `src/template/rules.ts`, and the index gains **0 B** — a 128-row expansion of
+ * the same rule as a `layouts` key was measured at **+222 B** brotli against the
+ * shipped artefact at the payload epoch and declined, exactly as the 40
+ * templates themselves were. `templates.test.ts` asserts the 0 B rather than
+ * quoting it, by rebuilding the corpus and comparing the emitted bytes;
+ * `src/template/corpus.test.ts` prices the counterfactual against the shipped
+ * artefact.
+ *
+ * What the gate is for: `conventionFor` is keyed on the **part-name set**, which
+ * classifies 40 of 40, and a set it does not know is a template this project
+ * cannot lay out. Reading it here makes that a failure of
+ * `npm run import:catalog`, naming the file and the template, rather than a
+ * template that reaches the browser with no geometry and reads as an archive
+ * gap. `src/template/rules.ts` is deliberately import-free so this crossing
+ * costs `tsconfig.node.json` one named file and no transitive dependency.
+ */
+export function templateConvention(entry: TemplateFixture): SlotConvention {
+  const convention = conventionFor(entry.parts.map((part) => part.name))
+  if (convention === undefined) {
+    throw new Error(
+      `${entry.source}: ${entry.name} has the part set ` +
+        `[${entry.parts.map((part) => part.name).join(', ')}], which no slot convention covers — ` +
+        'author one in src/template/rules.ts',
+    )
+  }
+  return convention
+}
+
 /* ------------------------------------------------------------- the round-trip */
 
 /**
@@ -542,6 +579,11 @@ export function printTemplateModule(entries: readonly TemplateFixture[]): string
     const id = templateSlug(entry.name)
     if (seen.has(id)) throw new Error(`two templates slug to ${id}`)
     seen.add(id)
+    /* Row B2's gate, run here because this is what `npm run import:catalog`
+       calls. It emits nothing — the conventions ship in the bundle and the index
+       gains 0 B — so the bytes below are unchanged by it, and a fixture with an
+       unknown part set fails the import rather than the browser. */
+    templateConvention(entry)
     body.push(
       '  {',
       `    id: ${quote(id)},`,
