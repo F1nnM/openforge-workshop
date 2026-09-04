@@ -27,7 +27,7 @@ import { solveTemplateFills } from './fill'
 import type { FillFixtureRecord } from './fixture'
 import { fillFixture } from './fixture'
 import { measureGreedy, measureGreying } from './measure'
-import { EXTERNAL_CORNER, INTERNAL_CORNER, SLOT_CONVENTIONS, WALL_ON_TILE } from './rules'
+import { EXTERNAL_CORNER, INTERNAL_CORNER, SLOT_CONVENTIONS, WALL_ON_TILE, conventionFor } from './rules'
 
 /* ------------------------------------------------------------------ the harness */
 
@@ -527,6 +527,64 @@ describe('the size parameter', () => {
     expect(floor?.gap).toBe('unknown-ref')
     expect(floor?.unknownRefs).toEqual(['size|width|5'])
     expect(fill.complete).toBe(false)
+  })
+
+  it('applies B4’s per-family refs to every slot, layout or no layout', () => {
+    /* Row B4's own size control: `GENERATED_FAMILY_SIZES` gives a family a list
+       of `{ label, tags }` whose tags are exactly this spelling. All 51 of its
+       families have one part and none has a convention, so this is the only
+       path that reaches them — `corpus.test.ts` runs all 350 of its options. */
+    const { index, context } = harness(SIZED_RECORDS, {
+      lock: 'openlock',
+      size: ['size|width|2', 'size|depth|2'],
+    })
+    const template: AssemblyTemplate = {
+      id: 'fixture-generated-floor',
+      tags: ['role|floor'],
+      parts: [{ name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } }],
+    }
+    const fill = solveTemplateFills(template, index, context)
+
+    expect(conventionFor(['floor'])).toBeUndefined()
+    expect(fill.fills.floor).toBe('tiles/floor-2x2')
+    expect(fill.complete).toBe(true)
+  })
+
+  it('narrows nothing for a family whose size domain is empty', () => {
+    /* B4 ships *any size* as an option carrying no tags at all, and 8 of its 51
+       families have nothing else. An empty ref list must not read as a
+       constraint — B3's third measured trap, and the one the brief names. */
+    const { index, context } = harness(SIZED_RECORDS, { lock: 'openlock', size: [] })
+    const template: AssemblyTemplate = {
+      id: 'fixture-no-domain',
+      tags: ['role|floor'],
+      parts: [{ name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } }],
+    }
+    const fill = solveTemplateFills(template, index, context)
+
+    expect(fill.fills.floor).toBe('tiles/floor-1x1')
+    expect(fill.decisions[0]?.candidates).toBe(2)
+  })
+
+  it('intersects the two size paths when a caller gives both', () => {
+    const { index, context } = harness(SIZED_RECORDS, {
+      lock: 'openlock',
+      cell: { w: 2, d: 2 },
+      size: ['size|width|1'],
+    })
+    const floor = solveTemplateFills(sizedTemplate, index, context).decisions.find(
+      (one) => one.slot === 'floor',
+    )
+
+    /* `size|width|1` and `size|width|2` at once: the caller asked for an
+       intersection and gets one, empty — reported, not silently preferred.
+
+       And the gap is `no-candidate` rather than `closed-by-siblings`, because
+       the cold re-resolution behind that classification carries the size too.
+       That is the reading a user needs: *nothing in the archive is this size*,
+       not *change an earlier choice*. No sibling could reopen it. */
+    expect(floor?.tile).toBeUndefined()
+    expect(floor?.gap).toBe('no-candidate')
   })
 
   it('reads the cell through the layout, so an unknown part-name set narrows nothing', () => {
