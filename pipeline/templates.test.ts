@@ -51,6 +51,8 @@ import { SLOT_CONVENTIONS, conventionFor } from '../src/template/rules'
 
 import { buildCatalog } from './build'
 import { measureCatalog, serialiseCatalog } from './emit'
+import { deriveFamilies } from './families'
+import type { GeneratedFamily } from './families'
 import { FixtureRow, fixtureFingerprint, fixturesDir, loadFixtureRows } from './fixtures'
 import { emptyManifest } from './ordinals'
 import type { TemplateFixture } from './templates'
@@ -80,6 +82,28 @@ describeFixtures(title, () => {
   const entries: readonly TemplateFixture[] = hasFixtures ? loadTemplateFixtures(FIXTURES) : []
   const parts = entries.flatMap((entry) => entry.parts)
   const constrain = parts.flatMap((part) => part.tags.constrain ?? [])
+
+  /**
+   * Row B4's families, built once and lazily.
+   *
+   * The emitted module has two sources now, so the byte-identity assertion below
+   * needs both — and the second one is a function of the *built corpus* rather
+   * than of the fixtures directory, which is what makes its 0 B structural. Built
+   * on first use so the two-thirds of this file that only reads YAML still runs
+   * without paying for a corpus build.
+   */
+  let cachedFamilies: readonly GeneratedFamily[] | undefined
+  const families = (): readonly GeneratedFamily[] => {
+    cachedFamilies ??= deriveFamilies(
+      buildCatalog({
+        rows: loadFixtureRows(FIXTURES),
+        manifest: emptyManifest(),
+        fixturesRef: 'test',
+        builtAt: PAYLOAD_TIMESTAMP,
+      }).file,
+    )
+    return cachedFamilies
+  }
 
   /* ------------------------------------------------------------ the two halves */
 
@@ -256,7 +280,7 @@ describeFixtures(title, () => {
       }
       expect(() => templateConvention(invented)).toThrow(/blueprints\.s2w\.invented\.yaml/)
       expect(() => templateConvention(invented)).toThrow(/no slot convention covers/)
-      expect(() => printTemplateModule([...entries, invented])).toThrow(/no slot convention covers/)
+      expect(() => printTemplateModule([...entries, invented], [])).toThrow(/no slot convention covers/)
     })
 
     it('keys on the part-name set, which the fixtures’ own shape tags cannot do', () => {
@@ -355,12 +379,16 @@ describeFixtures(title, () => {
 
   /* ---------------------------------------------------------- the emitted module */
 
-  it('has the committed module byte-identical to the emitter’s output', () => {
-    expect(
-      printTemplateModule(entries),
-      `${TEMPLATES_MODULE_PATH} is out of date or hand-edited. ${REFRESH}`,
-    ).toBe(readFileSync(TEMPLATES_MODULE_PATH, 'utf8'))
-  })
+  it(
+    'has the committed module byte-identical to the emitter’s output',
+    () => {
+      expect(
+        printTemplateModule(entries, families()),
+        `${TEMPLATES_MODULE_PATH} is out of date or hand-edited. ${REFRESH}`,
+      ).toBe(readFileSync(TEMPLATES_MODULE_PATH, 'utf8'))
+    },
+    SLOW_MS,
+  )
 
   it('slugs the 40 names to 40 distinct ids, and refuses to emit a collision', () => {
     const ids = entries.map((entry) => templateSlug(entry.name))
@@ -372,7 +400,7 @@ describeFixtures(title, () => {
     // duplicate key the screen would render as a disappearing card.
     const [first] = entries
     if (first === undefined) throw new Error('no templates to build the collision from')
-    expect(() => printTemplateModule([first, { ...first, name: `${first.name}!` }])).toThrow(/slug to/)
+    expect(() => printTemplateModule([first, { ...first, name: `${first.name}!` }], [])).toThrow(/slug to/)
   })
 
   /* ------------------------------------------------------------------ the census */

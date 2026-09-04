@@ -23,12 +23,29 @@
  * Keyed on `(role, form, build)` the corpus needs 52 families; with size in the
  * key it needs 217 to 277, which is the whole reason size is a slot parameter.
  * `src/template/size.ts` carries the predicate and the encoding decision.
+ *
+ * Row B4 added `./families`, which is what those three were for: 51 one-slot
+ * families generated from the key, with the size domain as a control on the
+ * placed instance. They ride into the browser through the *same* generated
+ * module as the 40 — `./templates` merges the two sources and emits one file —
+ * so the index still gains 0 B and the tag table is still 930 strings.
  */
 export { MIN_DETECTION_RECALL, assertAggregation, measureAggregation } from './aggregate'
 export type { AggregateViolation, AggregationReport, DetectionScore } from './aggregate'
 export { buildCatalog } from './build'
 export type { BuildOptions, BuildResult, BuildStats } from './build'
 export { buildDesignIndex, designId, designKey } from './design'
+export {
+  ANY_SIZE,
+  BARE_BASE_KEY,
+  BUILD_TAGS,
+  FAMILY_TABLE_BYTES,
+  SKIPPED_ROLES,
+  deriveFamilies,
+  familyLayout,
+  familySlug,
+} from './families'
+export type { FamilySizePosition, GeneratedFamily } from './families'
 export {
   assertWithinBudget,
   compressCatalog,

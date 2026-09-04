@@ -21,11 +21,15 @@
  *     record of which integer every share link means.
  *   - `src/screens/assemblies/templates.ts` — **checked in, and generated**. The
  *     40 recipe templates, read out of the 20 `*.yaml` fixtures the index
- *     deliberately skips. They are not records — none carries `file_metadata` —
- *     and they are not in `catalog.json`; `pipeline/templates.ts` carries the
- *     +1,260 B measurement behind that and the reason. This step is the only
+ *     deliberately skips, **and** row B4's 51 generated families, derived from
+ *     the built corpus's own `(role, form, build)` tags. Neither is a record —
+ *     no template carries `file_metadata` — and neither is in `catalog.json`;
+ *     `pipeline/templates.ts` carries the +1,260 B measurement behind that and
+ *     `pipeline/families.ts` the 0 B one behind the families. The families are
+ *     derived *after* the build because they are a function of the emitted tag
+ *     table, which is what makes their 0 B structural. This step is the only
  *     thing that should write that module, and `pipeline/templates.test.ts`
- *     fails when its committed bytes are not what the emitter produces.
+ *     fails when its committed bytes are not what the emitters produce.
  *
  * `--dry-run` skips all three, so a size check on a branch cannot append
  * ordinals or rewrite a source file as a side effect.
@@ -47,6 +51,7 @@ import {
   assertWithinBudget,
   buildCatalog,
   compressCatalog,
+  deriveFamilies,
   fixturesDir,
   formatBytes,
   loadFixtureRows,
@@ -80,8 +85,9 @@ function main(): number {
 
   const json = serialiseCatalog(result.file)
   const size = measureCatalog(json)
-  const module = printTemplateModule(templates)
-  report(dir, result, size, dryRun, inventory, templates, module)
+  const families = deriveFamilies(result.file)
+  const module = printTemplateModule(templates, families)
+  report(dir, result, size, dryRun, inventory, templates, families, module)
 
   if (!dryRun) {
     mkdirSync(OUT_DIR, { recursive: true })
@@ -103,6 +109,7 @@ function report(
   dryRun: boolean,
   inventory: ReturnType<typeof readThumbInventory>,
   templates: ReturnType<typeof loadTemplateFixtures>,
+  families: ReturnType<typeof deriveFamilies>,
   module: string,
 ): void {
   const { stats, file } = result
@@ -129,6 +136,9 @@ function report(
     `templates     ${String(templates.length)} recipes over ${String(new Set(templates.map((entry) => entry.source)).size)} yaml fixtures · ` +
       `${String(templates.reduce((total, entry) => total + entry.parts.length, 0))} parts · ` +
       `${formatBytes(Buffer.byteLength(module, 'utf8'))} raw of generated module, 0 B of the index`,
+    `slot families ${String(families.length)} generated over ${String(families.reduce((total, family) => total + family.records, 0))} records ` +
+      `(${((100 * families.slice(0, -1).reduce((total, family) => total + family.records, 0)) / stats.records).toFixed(1)}% of the corpus by key) · ` +
+      `${String(families.reduce((total, family) => total + family.sizes.length, 0))} size positions`,
     dryRun
       ? 'output        (dry run — nothing written)'
       : `output        ${OUT_DIR}/catalog.json · ${TEMPLATES_MODULE_PATH}`,

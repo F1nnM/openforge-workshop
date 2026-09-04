@@ -1,6 +1,15 @@
 /**
  * The 40 recipe templates: the other half of the fixtures directory, read at
- * last.
+ * last — and, since row **B4**, the merge point where they meet the generated
+ * families.
+ *
+ * The 40 and the 51 have nothing in common upstream: one set is parsed out of
+ * YAML and validated part-by-part against `PartSlot`, the other is a `GROUP BY`
+ * over the emitted `(role, form, build)` tags in `pipeline/families.ts`. They
+ * meet in {@link printTemplateModule}, which emits **one** file with three
+ * exports, because they arrive in the browser through the same lazily-mounted
+ * chunk and neither is in the index. That function's docblock carries the merge
+ * decisions; everything below it is still about the 40 alone.
  *
  * ## What the 40 are, and why nothing had read them
  *
@@ -107,6 +116,7 @@ import type { ConstrainRef, TagRef } from '../src/catalog'
 import type { SlotConvention } from '../src/template/rules'
 import { conventionFor } from '../src/template/rules'
 
+import type { GeneratedFamily } from './families'
 import { fixturesDir } from './fixtures'
 
 /**
@@ -558,12 +568,35 @@ function printModulePart(part: PartSlot): string[] {
 }
 
 /**
- * The whole of {@link TEMPLATES_MODULE_PATH}, emitted from the fixtures.
+ * The whole of {@link TEMPLATES_MODULE_PATH}, emitted from the fixtures **and**
+ * from row B4's generated families.
  *
  * `templates.test.ts` asserts the committed file is byte-identical to what this
- * returns, so the module is *provably* the fixtures' content and not a
+ * returns, so the module is *provably* its two sources' content and not a
  * transcription of it. `npm run import:catalog` rewrites it, which is the only
  * thing that should: the header says so and the test enforces it.
+ *
+ * ## Two sources, three exports, one file
+ *
+ * The 40 come from YAML and are validated part-by-part against `PartSlot`; the
+ * families come from the *corpus*, keyed on the `(role, form, build)` tags
+ * `pipeline/build.ts` already interned. They meet only here, and they meet as
+ * the same emitted type: `RecipeTemplate` covers both without a field to spare,
+ * because a family's `tags` are the `parentTags` its size positions are joined
+ * against and its `source` is the corpus key it was derived from.
+ *
+ * They stay **separate arrays**, and that is not tidiness. `RECIPE_TEMPLATES`
+ * is asserted to hold exactly 40 entries in six suites and
+ * `AssembliesScreen` quotes its length as *"N recipes from the archive's own
+ * blueprint fixtures"* — which a generated family is not. `families` is a
+ * required parameter rather than a defaulted one for the same reason: a default
+ * of `[]` would let a caller silently emit an empty family table, and the whole
+ * of B4 is in that table.
+ *
+ * The `id` namespace is shared, though, and checked as one: {@link templateSlug}
+ * and `families.ts#familySlug` are the same construction and a collision between
+ * a fixture slug and a family key throws here rather than becoming a duplicate
+ * React key.
  *
  * The emitted `fulfills` is flattened from the grammar's `[{ part: 'base' }]` to
  * `['base']`, which is a derivation and is named as one. `PartSlot.fulfills`
@@ -571,7 +604,10 @@ function printModulePart(part: PartSlot): string[] {
  * the projection the consumer reads, the same way `CatalogRecord.blob` is a
  * projection of `file_metadata.md5`.
  */
-export function printTemplateModule(entries: readonly TemplateFixture[]): string {
+export function printTemplateModule(
+  entries: readonly TemplateFixture[],
+  families: readonly GeneratedFamily[],
+): string {
   const seen = new Set<string>()
   const body: string[] = []
 
@@ -597,30 +633,80 @@ export function printTemplateModule(entries: readonly TemplateFixture[]): string
     )
   }
 
+  const familyBody: string[] = []
+  for (const family of families) {
+    if (seen.has(family.id)) throw new Error(`two templates slug to ${family.id}`)
+    seen.add(family.id)
+    familyBody.push(
+      '  {',
+      `    id: ${quote(family.id)},`,
+      `    name: ${quote(family.name)},`,
+      /* The corpus key — a generated family's whole provenance, and the answer a
+         fixture template gives with a file name. */
+      `    source: ${quote(family.key)},`,
+      `    tags: [${family.tags.map(quote).join(', ')}],`,
+      '    parts: [',
+      ...printModulePart(family.slot),
+      '    ],',
+      '  },',
+    )
+  }
+
+  const sizeBody = families.map(
+    (family) =>
+      `  ${quote(family.id)}: [${family.sizes
+        .map((size) => `{ label: ${quote(size.label)}, tags: [${size.tags.map(quote).join(', ')}] }`)
+        .join(', ')}],`,
+  )
+
   return `${[
     '/**',
-    ' * The 40 recipe templates, as data.',
+    ' * The 40 recipe templates and the 51 generated families, as data.',
     ' *',
     ' * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`',
-    ' * fixtures beside the JSON and emits this file; `npm run import:catalog` writes',
-    ' * it and `pipeline/templates.test.ts` asserts the committed bytes are exactly',
-    " * `printTemplateModule(loadTemplateFixtures())`, so an edit here fails the suite",
-    ' * rather than drifting quietly.',
+    ' * fixtures beside the JSON, `pipeline/families.ts` derives the families from the',
+    ' * built corpus, and this file is what the two emit; `npm run import:catalog`',
+    ' * writes it and `pipeline/templates.test.ts` asserts the committed bytes are',
+    ' * exactly `printTemplateModule(loadTemplateFixtures(), deriveFamilies(file))`, so',
+    ' * an edit here fails the suite rather than drifting quietly.',
     ' *',
-    ' * The 40 are not in `catalog.json`: none of them carries `file_metadata`, so none',
-    ' * is an STL and none is a `CatalogRecord`. Putting them in the index anyway was',
-    ' * measured at +1,260 B brotli and declined — `pipeline/templates.ts` carries the',
-    ' * table and the reason, which is that the recipe list is the one part of this',
-    ' * screen that renders before the index lands.',
+    ' * `RECIPE_TEMPLATES` is the 40 read from the fixtures — all of them',
+    ' * `S2W: Wall on Tile`, reaching 35.4% of the corpus. `GENERATED_FAMILIES` is one',
+    ' * family per `(role, form, build)` key the emitted tags already carry, each with',
+    ' * one required slot, plus the bare-base family no such key can name.',
+    ' * `GENERATED_FAMILY_SIZES` is each family’s size control keyed by family id: a',
+    ' * placed instance adds a position’s tags to its `parentTags`, where the slot’s own',
+    ' * `constrain` block collects them, so size costs no new resolution code at all.',
+    ' * `pipeline/families.ts` carries every measurement behind all three.',
+    ' *',
+    ' * None of it is in `catalog.json`. No template carries `file_metadata`, so none is',
+    ' * an STL and none is a `CatalogRecord`; putting the 40 in the index anyway was',
+    ' * measured at +1,260 B brotli and declined. Every ref the families emit is a tag',
+    ' * the corpus already carries, so the index gains 0 B and the tag table stays at 930',
+    ' * strings. The reason both live in the bundle is that the recipe list is the one',
+    ' * part of this screen that renders before the index lands.',
     ' *',
     ` * ${String(entries.length)} templates over ${String(new Set(entries.map((entry) => entry.source)).size)} fixture files, ${String(
       entries.reduce((total, entry) => total + entry.parts.length, 0),
     )} parts.`,
+    ` * ${String(families.length)} generated families over ${String(
+      families.reduce((total, family) => total + family.records, 0),
+    )} records, ${String(families.reduce((total, family) => total + family.sizes.length, 0))} size positions.`,
     ' */',
     "import type { RecipeTemplate } from './assembly'",
     '',
     'export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [',
     ...body,
     ']',
+    '',
+    'export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [',
+    ...familyBody,
+    ']',
+    '',
+    'export const GENERATED_FAMILY_SIZES: Readonly<',
+    '  Record<string, readonly { readonly label: string; readonly tags: readonly string[] }[]>',
+    '> = {',
+    ...sizeBody,
+    '}',
   ].join('\n')}\n`
 }
