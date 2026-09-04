@@ -41,6 +41,25 @@ import type { AssemblyChoice, RecipeIndex, RecipeTemplate } from '@/screens/asse
 import { assemblyState, createRecipeIndex } from '@/screens/assemblies/assembly'
 import { RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
 
+import { buildAggregateIndex } from '@/catalog'
+import type { AssemblyIndex, AssemblyTemplate } from '@/assembly'
+import { buildAssemblyIndex } from '@/assembly'
+import { createCompositionIndex, resolveSlotTags } from '@/composition'
+
+import type { FillContext } from './fill'
+import { SOLVE_QUERIES, solveTemplateFills } from './fill'
+import type { SceneCost } from './measure'
+import {
+  measureBacktracking,
+  measureBaseLadder,
+  measureFilterSoundness,
+  measureGreedy,
+  measureGreying,
+  measureLockSpread,
+  measureMonotonicity,
+  measureSceneCost,
+  measureSolver,
+} from './measure'
 import type { PlacedTemplate, SlotDoubtCode } from './offsets'
 import { placeTemplateSlots, slotOffset } from './offsets'
 import type { SlotName, TemplateLayout } from './rules'
@@ -732,3 +751,340 @@ describeCorpus(corpusTitle, () => {
     SLOW_MS,
   )
 })
+
+/* ============================================================== row C2's half */
+
+/**
+ * The **fill solver** against the same archive.
+ *
+ * Row C2 shares this directory with B2's slot geometry and shares nothing else
+ * with it, so it gets its own block and its own indexes rather than threading
+ * two rows' fixtures through one closure. What it does share is the reason the
+ * file exists: nothing in the app reads `src/template/**` yet, and the research
+ * report this row was briefed from no longer exists, so **a figure that is not
+ * recomputed here is a figure nobody can check.**
+ *
+ * The row's headline is one comparison, and it is the first two assertions
+ * below: 24 of 40 against 40 of 40.
+ */
+describeCorpus(
+  hasCatalog
+    ? 'the fill solver against the live archive'
+    : `the fill solver against the live archive — SKIPPED, no ${CATALOG} (run \`npm run import:catalog\`)`,
+  () => {
+    const catalog = hasCatalog ? CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8'))) : undefined
+    const composition =
+      catalog === undefined ? undefined : createCompositionIndex(catalog, buildAggregateIndex(catalog))
+    const assembly = catalog === undefined ? undefined : buildAssemblyIndex(catalog)
+    const context = composition === undefined ? undefined : { composition, lock: 'openlock' as const }
+
+    /* Every figure below is computed from these three, so a `!` here would be the
+       only unchecked claim in the block. `describeCorpus` skips when the artefact
+       is absent, so the guard is unreachable rather than defensive. */
+    const ready = (): { index: AssemblyIndex; context: FillContext } => {
+      if (assembly === undefined || context === undefined) throw new Error('no catalog')
+      return { index: assembly, context }
+    }
+
+    /* ------------------------------------------------- the policy comparison */
+
+    it('completes 24 of the 40 recipes on the first candidate, and all 16 failures are the base slot', () => {
+      const { context: ctx } = ready()
+      const greedy = measureGreedy(RECIPE_TEMPLATES, ctx.composition)
+
+      expect(greedy.completed).toBe(24)
+      expect(greedy.failures).toHaveLength(16)
+      // Not "mostly the base slot". Every one of them, on the sixteen modular
+      // wall recipes, and each with candidates before its siblings were picked.
+      expect(new Set(greedy.failures.map((one) => one.slot))).toEqual(new Set(['base']))
+      expect(greedy.failures.every((one) => one.template.endsWith('-modular'))).toBe(true)
+      expect(greedy.failures.every((one) => one.atFailure === 0)).toBe(true)
+      expect([...new Set(greedy.failures.map((one) => one.cold))].sort((a, b) => a - b)).toEqual([48, 305])
+    })
+
+    it('completes 40 of 40 when it refuses a candidate that empties a sibling', () => {
+      const { index, context: ctx } = ready()
+      const greying = measureGreying(RECIPE_TEMPLATES, ctx.composition)
+      const solver = measureSolver(RECIPE_TEMPLATES, index, ctx)
+
+      // The independent walk and the shipped solver, separately, on the same 40.
+      expect(greying.completed).toBe(40)
+      expect(greying.failures).toEqual([])
+      expect(solver.completed).toBe(40)
+      expect(solver.failures).toEqual([])
+      expect(solver.skipped).toBe(23)
+
+      process.stdout.write(
+        `\n[fill] first candidate ${String(measureGreedy(RECIPE_TEMPLATES, ctx.composition).completed)}/40 · ` +
+          `greying walk ${String(greying.completed)}/40 · solver ${String(solver.completed)}/40 ` +
+          `(${String(solver.queries)} queries, ${String(solver.skipped)} candidates refused)\n`,
+      )
+    })
+
+    it('is refusing a policy failure and not an unsolvable archive', () => {
+      const { context: ctx } = ready()
+      const search = measureBacktracking(RECIPE_TEMPLATES, ctx.composition)
+
+      // Every recipe is solvable over item representatives, so the greedy walk's
+      // 16 failures belong to the walk. And backtracking completes the same 40
+      // the one-step rule does, at 162 nodes — so the extra machinery buys
+      // nothing on this corpus and the one-step rule is not a compromise.
+      expect(search.unsolvable).toEqual([])
+      expect(search.completed).toBe(40)
+      expect(search.nodes).toBe(162)
+    })
+
+    it('empties nothing it had not filled, over all 148 post-pick observations', () => {
+      const { index, context: ctx } = ready()
+      const walk = measureMonotonicity(RECIPE_TEMPLATES, index, ctx)
+
+      /* The plan's claim, restated as an observation of the walk the solver
+         actually took: **0 of 148 emptied**. The 90 narrowings are the same 90
+         the guided flow reports (72 on the first pick, 18 on the second), and
+         the 0 rescues are the corner the grammar permits and this archive does
+         not contain. */
+      expect(walk).toEqual({ observations: 148, emptied: 0, rescued: 0, narrowed: 90 })
+    })
+
+    it('drops 36 of those 148 probes as unreachable, and every one of them is inert', () => {
+      const { index, context: ctx } = ready()
+      const filter = measureFilterSoundness(RECIPE_TEMPLATES, index, ctx)
+
+      expect(filter).toEqual({ pairs: 148, probed: 112, dropped: 36, inert: 36 })
+    })
+
+    it('costs the queries `SOLVE_QUERIES` names', () => {
+      const { index, context: ctx } = ready()
+      const solver = measureSolver(RECIPE_TEMPLATES, index, ctx)
+
+      expect(solver.queries).toBe(SOLVE_QUERIES)
+      // 128 slot resolutions is the floor: one per part, and the rest is the
+      // greying rule's probes plus the lazy before-counts.
+      expect(solver.queries).toBeGreaterThan(128)
+    })
+
+    /* ------------------------------------------------------- the empty sets */
+
+    it('has no template part that is ever empty, and two that offer 308 and 428 items', () => {
+      const { context: ctx } = ready()
+      const cold = RECIPE_TEMPLATES.flatMap((template) =>
+        template.parts.map((part) =>
+          ctx.composition.candidatesFor(resolveSlotTags(part.tags, template.tags, [])),
+        ),
+      )
+
+      /* The three empty-set situations are three situations: **0 of 128**
+         template parts is ever empty, minimum 5 candidate files, so that path
+         needs no UI at all — and the two `(Any, …)` walls are why a default fill
+         is not optional. */
+      expect(cold).toHaveLength(128)
+      expect(cold.filter((one) => one.deadEnd)).toEqual([])
+      expect(Math.min(...cold.map((one) => one.tiles.length))).toBe(5)
+      expect(
+        cold
+          .map((one) => one.items.length)
+          .sort((a, b) => b - a)
+          .slice(0, 2),
+      ).toEqual([428, 308])
+    })
+
+    /* -------------------------------------------------------- the base ladder */
+
+    it('hands every base slot a `plain` base, where the candidate order hands 16 of 40 a topless one', () => {
+      const { index, context: ctx } = ready()
+      const picks = measureBaseLadder(RECIPE_TEMPLATES, index, ctx)
+      const tally = (options: readonly (string | undefined)[]): Record<string, number> => {
+        const counts: Record<string, number> = {}
+        for (const option of options) counts[String(option)] = (counts[String(option)] ?? 0) + 1
+        return counts
+      }
+
+      /* This is why `rankBases` is consumed rather than reimplemented as "take
+         the first candidate". A topless base has no top surface: 16 of the 40
+         recipes would print one, and nothing on screen would say so. */
+      expect(picks).toHaveLength(40)
+      expect(tally(picks.map((one) => one.rankedOption))).toEqual({ plain: 40 })
+      expect(tally(picks.map((one) => one.orderedOption))).toEqual({ plain: 24, topless: 16 })
+      expect(picks.filter((one) => one.lockAgrees)).toHaveLength(40)
+
+      /* And the honest half: of the ladder's five criteria only two do any work
+         here. **0 of 40** chosen bases publish the floor's `size|openlock` code,
+         because a `base` slot's candidates are selected by tag rather than by
+         footprint congruence and the coded bases are not among them. The code
+         criterion is not wrong — it decides 1,870 of 1,999 coded toppers for
+         `matchBase` — it is silent on this population. */
+      expect(picks.filter((one) => one.codeAgrees)).toHaveLength(0)
+      expect(picks.every((one) => one.ranked !== one.ordered)).toBe(true)
+
+      process.stdout.write(
+        `\n[fill] base slots: ranked ${JSON.stringify(tally(picks.map((one) => one.rankedOption)))} · ` +
+          `candidate order ${JSON.stringify(tally(picks.map((one) => one.orderedOption)))}\n`,
+      )
+    })
+
+    it('reads the base slot off the layout, and it is `base` on all 40 recipes', () => {
+      const rested = RECIPE_TEMPLATES.map((template) => {
+        const layout = conventionFor(template.parts.map((part) => part.name))
+        if (layout === undefined) throw new Error(`no convention for ${template.id}`)
+        return layout.slots.filter((rule) => layout.slots.some((other) => other.restsOn === rule.part)).map((rule) => rule.part)
+      })
+
+      expect(new Set(rested.map((parts) => parts.join(',')))).toEqual(new Set(['base']))
+      // And the cell the ladder ranks against is the floor, on all 40.
+      expect(
+        new Set(
+          RECIPE_TEMPLATES.map(
+            (template) => conventionFor(template.parts.map((part) => part.name))?.cell,
+          ),
+        ),
+      ).toEqual(new Set(['floor']))
+    })
+
+    /* ------------------------------------------------------ the two preferences */
+
+    it('completes 40 of 40 under every lock preference and under none', () => {
+      const { index, context: ctx } = ready()
+
+      for (const lock of [undefined, 'openlock', 'dragonlock', 'magnetic'] as const) {
+        const result = measureSolver(RECIPE_TEMPLATES, index, { composition: ctx.composition, lock })
+        expect(result.completed, `lock ${String(lock)}`).toBe(40)
+      }
+    })
+
+    it('moves 74 of the 128 slots between the three locks, and not one item', () => {
+      const { index, context: ctx } = ready()
+      const spread = measureLockSpread(RECIPE_TEMPLATES, index, ctx, ['openlock', 'dragonlock', 'magnetic'])
+
+      /* What a lock toggle is *for*, measured: 74 slots change file. And the
+         structural claim `relock.ts` rests on — **the candidate set is
+         lock-free** — measured from the other side: 0 slots change *item*, so a
+         toggle can never empty a slot or complete one. */
+      expect(spread.reduce((total, one) => total + one.moved.length, 0)).toBe(74)
+      expect(spread.flatMap((one) => one.movedItem)).toEqual([])
+      expect(spread.filter((one) => one.moved.length > 0)).toHaveLength(40)
+    })
+
+    it('completes 40 of 40 under every design family, honouring it where the family reaches', () => {
+      const { index, context: ctx } = ready()
+      const families = ['dungeon_stone', 'cut-stone', 'towne', 'aztlan', 'cave'] as const
+      const honoured: string[] = []
+
+      for (const family of families) {
+        const local = { composition: ctx.composition, lock: 'openlock' as const, family }
+        expect(measureSolver(RECIPE_TEMPLATES, index, local).completed, family).toBe(40)
+        const slots = RECIPE_TEMPLATES.flatMap(
+          (template) => solveTemplateFills(template, index, local).decisions,
+        ).filter((one) => one.familyHonoured).length
+        honoured.push(`${family} ${String(slots)}/128`)
+      }
+
+      /* The family is a **preference and not a filter**, and this is the pair of
+         figures that says so: `dungeon_stone` reaches 89 of the 128 slots and
+         `cave` reaches **none of them** — and both complete all 40. A filter
+         would have completed 0 recipes under `cave`. */
+      expect(honoured).toEqual([
+        'dungeon_stone 89/128',
+        'cut-stone 89/128',
+        'towne 66/128',
+        'aztlan 49/128',
+        'cave 0/128',
+      ])
+    })
+
+    /* ------------------------------------------------------- the fills, placed */
+
+    it('produces a template that closes geometrically on 34 of the 40, and B2 owns the other 6', () => {
+      const { index, context: ctx } = ready()
+      const verdicts: Record<string, number> = {}
+      const doubts: Record<string, number> = {}
+      const failing: string[] = []
+
+      for (const template of RECIPE_TEMPLATES) {
+        const layout = conventionFor(template.parts.map((part) => part.name))
+        if (layout === undefined) throw new Error(`no convention for ${template.id}`)
+        const fill = solveTemplateFills(template, index, ctx)
+        const feet = new Map<SlotName, Footprint>()
+        for (const [slot, tile] of Object.entries(fill.fills)) {
+          const record = index.byId.get(tile)
+          if (record !== undefined) feet.set(slot, record.foot)
+        }
+        const placed = placeTemplateSlots(layout, feet)
+        verdicts[placed.verdict] = (verdicts[placed.verdict] ?? 0) + 1
+        for (const doubt of placed.doubts) doubts[doubt.code] = (doubts[doubt.code] ?? 0) + 1
+        if (placed.verdict === 'fails') failing.push(template.id)
+      }
+
+      /* The end-to-end question this row cannot answer on its own: does the
+         one-click default actually *fit*? On 34 of 40 it does. The 6 that do not
+         are B2's known population and not this solver's choice:
+
+           - **4 `undecidable`** — the four internal corners, which have no wall
+             part at all, so there is no closure to check;
+           - **2 `fails`** — the two external-corner `single_piece` recipes,
+             whose two `size|width|2` walls plus a 0.5 column cannot share two
+             2-unit edges. The mitre is in no tag and in no measured mesh, and
+             B2's §9 rule is *"do not silently write 1.5"*, so they surface as
+             `over-run` doubts, two walls each.
+
+         No choice of fill closes those two — the arithmetic is over the tagged
+         widths, which every candidate carries — so this is not a policy failure
+         and a different ordering would not fix it. What it does mean is that a
+         one-click placement can arrive with a doubt on it, which is C1's and
+         C3's to disclose and is exactly what `SlotDoubt` is for. */
+      expect(verdicts).toEqual({ closes: 34, fails: 2, undecidable: 4 })
+      expect(doubts).toEqual({ 'over-run': 4 })
+      expect(failing.every((id) => id.includes('corner') && id.endsWith('-single-piece'))).toBe(true)
+    })
+
+    /* --------------------------------------------------------- the scene scale */
+
+    it('re-solves a 250-instance room inside a frame, and only because it memoises', () => {
+      const { index, context: ctx } = ready()
+      const room = Array.from(
+        { length: 250 },
+        (_, at) => RECIPE_TEMPLATES[at % RECIPE_TEMPLATES.length] as AssemblyTemplate,
+      )
+
+      /* §11's third gap: *"the lock re-solve has never been measured at scene
+         scale — 250 instances at 5 slots is 1,250 candidate queries,
+         synchronously, on one click."* Measured, a solve per instance is 1,790
+         queries; memoised on `(template, preference, pins)` it is 288, because
+         a room of 250 instances is built out of 40 recipes.
+
+         A floor over attempts, for `screens/assemblies/corpus.test.ts`'s reason:
+         contention can only add time, so a shape that is genuinely over budget
+         is over budget on every attempt. The budget is loose because this is a
+         regression guard and the line printed below is the measurement: read in
+         isolation the two shapes are 53-65 ms and 8-9 ms, and inside a
+         whole-suite run 149.6 ms and 22.8 ms — a scheduling spike, not a
+         different function. */
+      const floors = new Map<string, SceneCost>()
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        for (const cost of measureSceneCost(room, index, ctx)) {
+          const best = floors.get(cost.shape)
+          if (best === undefined || cost.ms < best.ms) floors.set(cost.shape, cost)
+        }
+      }
+
+      const perInstance = floors.get('per instance')
+      const memoised = floors.get('memoised')
+
+      expect(perInstance?.solves).toBe(250)
+      expect(perInstance?.queries).toBe(1_790)
+      expect(memoised?.solves).toBe(40)
+      expect(memoised?.queries).toBe(SOLVE_QUERIES)
+
+      process.stdout.write(
+        `\n[fill] 250-instance re-solve: per instance ${(perInstance?.ms ?? 0).toFixed(1)} ms / ` +
+          `${String(perInstance?.queries)} queries · memoised ${(memoised?.ms ?? 0).toFixed(1)} ms / ` +
+          `${String(memoised?.queries)} queries\n`,
+      )
+
+      // One frame at 60 Hz is 16.7 ms and the memoised reading is 8-9 in
+      // isolation. The bound is loose enough not to fail under whole-suite
+      // contention (22.8 ms there) and tight enough that losing the memo fails
+      // it (53-65 ms in isolation, 149.6 ms contended).
+      expect(memoised?.ms).toBeLessThan(40)
+    })
+  },
+)
