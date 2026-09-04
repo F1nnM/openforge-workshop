@@ -21,12 +21,17 @@
  * reachable file may reach, over every eager entry in the store, the canvas and
  * the panels.
  */
+import { TileId } from '@/catalog'
 import { canonicalise } from '@/generator/panel/recipe'
 import type { RecipeValue } from '@/generator/panel/recipe'
 import type { PanelEntry } from '@/generator/panel/schemas'
 import type { PlaceAt } from '@/generator/placement/placement'
 import { placeRecipe } from '@/generator/placement/placement'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
+
+import type { TemplateInstance } from './schema'
+import { SlotName, TemplateId } from './schema'
+import type { NewTemplateInstance } from './workshopStore'
 
 /**
  * The parameter set every fixture starts from: a 2×2 openlock square, on the
@@ -80,4 +85,64 @@ export function aBinaryStl(triangles = 2): Uint8Array {
   // digest by both being all zeroes.
   for (let index = 84; index < bytes.length; index += 1) bytes[index] = (index * 31) % 251
   return bytes
+}
+
+/* --------------------------------------------------------- template instances */
+
+/**
+ * A real shipped template id, and its five real slot names.
+ *
+ * `s2w-wall-on-tile-corner-low-single-piece` is the first of the 40 in
+ * `screens/assemblies/templates.ts`, and §2.1 of the plan names its slots as the
+ * worked example — *"the requested floor plus two walls plus a column in the
+ * corner, verbatim"*. Spelled out here rather than imported, for the reason
+ * `schema.ts#TemplateId` gives at length: `@/store` must not reach a screen, and
+ * a fixture that imported the table would make the store's tests depend on the
+ * one module in the app that row B4 regenerates wholesale.
+ *
+ * It is checked against the real table in exactly one place — `corpus.test.ts`
+ * asserts that all 40 ids parse as {@link TemplateId} — so a fixture that drifted
+ * from the shipped shape would be caught there rather than by 40 duplicated
+ * imports.
+ */
+export const A_TEMPLATE = TemplateId.parse('s2w-wall-on-tile-corner-low-single-piece')
+
+/** The five slots of {@link A_TEMPLATE}, in declared order. */
+export const A_TEMPLATE_SLOTS: readonly SlotName[] = [
+  'column',
+  'right wall',
+  'left wall',
+  'floor',
+  'base',
+].map((name) => SlotName.parse(name))
+
+/** Two files, spelled as real catalog paths so `TileId`'s pattern is exercised. */
+export const A_TILE = TileId.parse('tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl')
+export const ANOTHER_TILE = TileId.parse('tiles/cave/thick_wall/wall/corner/openlock/cave%corner.IL.openlock.stl')
+
+/**
+ * One template instance, ready to hand to `placeTemplate`.
+ *
+ * Defaults to **one filled slot of five**, not to a complete fill map, and that
+ * is the fixture making contract **C-g** the easy path: §3.2 places a template
+ * with slots still open, so a fixture that arrived complete would let a test
+ * pass against a shape the app mostly does not produce. Pass `fills: {}` for the
+ * fully-open case and {@link aFullFillMap} for the closed one.
+ */
+export function aTemplateInstance(over: Partial<NewTemplateInstance> = {}): NewTemplateInstance {
+  return {
+    template: A_TEMPLATE,
+    x: 0,
+    z: 0,
+    rotation: 0,
+    fills: { [A_TEMPLATE_SLOTS[0] ?? SlotName.parse('column')]: { tile: A_TILE, pinned: false } },
+    ...over,
+  }
+}
+
+/** Every slot of {@link A_TEMPLATE} filled `auto` with the same file. */
+export function aFullFillMap(tile = A_TILE): TemplateInstance['fills'] {
+  const fills: Record<string, { tile: TileId; pinned: boolean }> = {}
+  for (const slot of A_TEMPLATE_SLOTS) fills[slot] = { tile, pinned: false }
+  return fills
 }

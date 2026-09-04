@@ -11,6 +11,7 @@
  *
  * | error | what the user is told | offer |
  * | --- | --- | --- |
+ * | `IncompleteSceneError` | which slots are empty, and that a pack would be short | — |
  * | `EmptyArchiveError` | nothing is placed | — |
  * | `ArchiveTooLargeToBufferError` | this browser cannot stream a save, and the room is over the buffering limit | the URL list, plus `ATTRIBUTION.csv` |
  * | `NoSaveTargetError` | this browser offers no way to save a file | — |
@@ -28,6 +29,28 @@
  * would find out until a print failed. It is reachable in exactly the way a user
  * meets it — place a base, reload, press download — because the recipe persists
  * and the mesh does not.
+ *
+ * ## The same rule, for a hole between the lines — row A8
+ *
+ * `IncompleteSceneError` is the first row of the table and it is **this
+ * module's**, not `@/download`'s, and that placement is the requirement rather
+ * than a convenience. A template instance is three to five slots and each is
+ * filled independently, so a scene can be missing a file *between* two bill
+ * lines: `buildBillOfTiles` reports it as `BillOfTiles.complete` plus a list of
+ * `unfilled` slots, and `src/download/**` structurally cannot see it — a plan is
+ * built from lines, and a hole is the absence of one. So the gate has to be here,
+ * at the only point that holds the bill.
+ *
+ * **Every slot of every recipe in the build is required**: `PartSlot.optional` is
+ * absent from all 128 parts of the 40 shipped templates, and absence means
+ * required. So there is no scene for which an empty slot is an acceptable pack,
+ * and the refusal has no exemption to make. §3.2 still places the instance
+ * anyway — the grid accepts an incomplete recipe, the *zip* does not — which is
+ * the same split row S5 made for a generated base with no mesh.
+ *
+ * Thrown before the pack module is loaded and before a byte is fetched, for the
+ * reason the too-large check is raised early: there is nothing to discover later
+ * that could change the answer.
  *
  * The too-large case is checked **before a byte is fetched**, not only caught
  * from `saveArchive`. `save.ts` refuses at 512 MB when there is no
@@ -53,7 +76,7 @@
  */
 import { useCallback, useMemo, useRef, useState } from 'react'
 
-import type { BillOfTiles } from '@/assembly'
+import type { BillOfTiles, UnfilledSlot } from '@/assembly'
 import type { CatalogAssets } from '@/catalog'
 import type { ArchivePlan, BlobSource, GeneratedArchiveSection, SaveEnvironment, SaveVia } from '@/download'
 import {
@@ -83,6 +106,37 @@ import type * as GeneratedPackModule from '@/generator/placement/pack'
 import type { GeneratedMeshHoldings } from '@/generator/placement/pack'
 
 /**
+ * The scene has a declared slot with no file in it, so no pack of it is
+ * printable.
+ *
+ * Declared here rather than in `@/download` because the fact is the bill's and
+ * the bill is this module's argument: `src/download/**` builds a plan from
+ * `BillLine`s and a hole is the absence of one, so nothing there can raise it.
+ * See the module note.
+ *
+ * It carries the holes rather than a count, because the sentence a user can act
+ * on names the recipe and the slot — *"the base slot of a wall-on-tile corner"* —
+ * and a bare "3 slots are empty" sends them to look at a drawing that is one tab
+ * stop.
+ */
+export class IncompleteSceneError extends Error {
+  readonly unfilled: readonly UnfilledSlot[]
+
+  constructor(unfilled: readonly UnfilledSlot[]) {
+    super(
+      `${String(unfilled.length)} declared ${unfilled.length === 1 ? 'slot has' : 'slots have'} no file in ` +
+        'it, so this pack would be short of a printable model.',
+    )
+    // Assigned rather than declared as a parameter property, and the field is
+    // spelled above: `erasableSyntaxOnly` is on, so a parameter property is a
+    // compile error — it is the one piece of TypeScript syntax in a class body
+    // that emits code. `download/save.ts`'s own errors are written the same way.
+    this.name = 'IncompleteSceneError'
+    this.unfilled = unfilled
+  }
+}
+
+/**
  * Row S5's pack module, loaded on the press rather than imported.
  *
  * The type is a namespace `typeof import(...)`, which is erased, so **nothing in
@@ -101,6 +155,7 @@ type GeneratedPack = typeof GeneratedPackModule
 /** Which failure this is, for the panel's own branching. Prose is in the object. */
 export type DownloadFailureKind =
   | 'empty'
+  | 'incomplete'
   | 'too-large'
   | 'no-save-target'
   | 'fetch'
@@ -246,6 +301,13 @@ export function useArchiveDownload({
       let plan: ArchivePlan | undefined
       let pack: GeneratedPack | undefined
       try {
+        // **The hole between the lines, refused first.** Before the pack module
+        // is loaded, before a plan exists and before a byte is fetched: nothing
+        // discovered later can change the answer, and the two facts it reads are
+        // already computed. See the module note for why this cannot live in
+        // `@/download`.
+        if (!bill.complete) throw new IncompleteSceneError(bill.unfilled)
+
         // Loaded before the plan, because the plan needs the section. Held in
         // `pack` for `classify` below: the three refusals this module carries
         // are `instanceof` checks against classes that live inside this chunk,
@@ -400,6 +462,22 @@ function classify(error: unknown, plan: ArchivePlan | undefined, pack: Generated
     }
   }
 
+  if (error instanceof IncompleteSceneError) {
+    return {
+      kind: 'incomplete',
+      headline:
+        error.unfilled.length === 1
+          ? 'One slot on the plan is still empty'
+          : `${String(error.unfilled.length)} slots on the plan are still empty`,
+      detail:
+        `${unfilledSentence(error.unfilled)} Every slot of every recipe in this build is required, so a pack ` +
+        'without them would be short of a printable model — and a streamed zip records its sizes at the end, so ' +
+        'a short one still opens and nobody would find out until the print failed. Nothing was saved. Fill each ' +
+        'slot, or take the piece off the grid.',
+      retryable: false,
+    }
+  }
+
   if (error instanceof EmptyArchiveError) {
     return {
       kind: 'empty',
@@ -500,6 +578,22 @@ function shortfallOf(
   if (plan === undefined || pack === undefined) return {}
   const sentence = pack.urlListShortfall(plan)
   return sentence === null ? {} : { urlListShortfall: sentence }
+}
+
+/**
+ * The holes, named — at most three of them, then a count.
+ *
+ * Three because the failure block is prose in a 302px column and the list is
+ * unbounded: a fifty-instance room with one empty slot each would otherwise be a
+ * hundred and fifty recipe names. A slot is `undefined` for an instance whose
+ * whole recipe is unknown, which is a different sentence and is spelled as one.
+ */
+function unfilledSentence(unfilled: readonly UnfilledSlot[]): string {
+  const named = unfilled
+    .slice(0, 3)
+    .map((hole) => (hole.slot === undefined ? `${hole.template} (no such recipe in this build)` : `${hole.template}: ${hole.slot}`))
+  const rest = unfilled.length - named.length
+  return `${named.join('; ')}${rest > 0 ? `; and ${String(rest)} more` : ''}.`
 }
 
 /** Bytes as the panel spells them. Decimal, one place — the corpus's own convention. */

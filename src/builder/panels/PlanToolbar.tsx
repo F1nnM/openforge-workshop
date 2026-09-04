@@ -30,13 +30,21 @@
  * are written down and this component reads them from `tools.step` — it does not
  * spell them out.
  *
- * ## The rotate step is the tile's own
+ * ## The rotate step is supplied, not derived
  *
- * Never 90. 893 tiles carry a `size|angle` that is not a multiple of it (45,
- * 22.5, 11.25, 60, 120, 240, 300) and would never tile on a 90° step, so the step
- * comes from `rotationStepFor(record)` for whichever tile is armed. With nothing
- * armed there is nothing to turn and the button is disabled — a rotation applied
- * to no tile is state the user cannot see.
+ * It was `rotationStepFor(record)` over the armed **tile**: never 90, because 893
+ * tiles carry a `size|angle` that is not a multiple of it (45, 22.5, 11.25, 60,
+ * 120, 240, 300) and would never tile on a 90° step. Since row A1 what is armed
+ * is a template **family**, which is up to five files and has no single record —
+ * so the step is a prop, and row A4b already decided what a caller must pass:
+ * `ARMED_TURN_STEP_DEG`, the corpus default, because a family's step is the least
+ * common multiple of its parts' own and row C2 has not chosen the parts yet.
+ * `three/edits.ts#planTurn` turns an armed family by the same constant, so the
+ * toolbar and the surface cannot disagree.
+ *
+ * With nothing armed there is nothing to turn and the button is disabled — a
+ * rotation applied to no piece is state the user cannot see. That is unchanged,
+ * and it is now the caller's `undefined` rather than an absent record.
  *
  * ## `role="group"`, not `role="toolbar"`
  *
@@ -47,9 +55,8 @@
  * labelled group is the honest markup, and the canvas's own key map (`R`, `P`,
  * `E`, `G`) is the fast path for anyone who wants one.
  */
-import type { CatalogRecord } from '@/catalog'
 import type { PlanTools } from '@/builder/canvas'
-import { formatUnits, rotationStepFor } from '@/builder/canvas'
+import { formatUnits } from '@/builder/canvas'
 import type { SurfaceStatus } from '@/builder/three'
 import { Button, ToggleGroup, ToggleItem, VisuallyHidden } from '@/ui/primitives'
 
@@ -68,8 +75,15 @@ export interface PlanToolbarProps {
    * `boundary.test.ts` walks value imports only, for the same reason.
    */
   readonly status: SurfaceStatus | null
-  /** The armed tile, for its rotation step. */
-  readonly armed: CatalogRecord | undefined
+  /**
+   * The rotation step of whatever is armed, in degrees, or `undefined` for
+   * nothing armed.
+   *
+   * The caller's, because the caller is the one that knows what is armed: see
+   * the module note, and `three/edits.ts#ARMED_TURN_STEP_DEG` for the value a
+   * template family takes.
+   */
+  readonly armedStep: number | undefined
   readonly placed: number
   readonly onClear: () => void
 }
@@ -79,8 +93,8 @@ function stepLabel(step: number): string {
   return step === 1 ? 'one unit' : 'half a unit'
 }
 
-export function PlanToolbar({ tools, status, armed, placed, onClear }: PlanToolbarProps) {
-  const step = armed === undefined ? undefined : rotationStepFor(armed)
+export function PlanToolbar({ tools, status, armedStep, placed, onClear }: PlanToolbarProps) {
+  const step = armedStep
   const conflicts = status?.conflicts ?? 0
 
   return (
@@ -117,8 +131,8 @@ export function PlanToolbar({ tools, status, armed, placed, onClear }: PlanToolb
         */}
         <VisuallyHidden>
           {step === undefined
-            ? '— no tile is armed yet'
-            : `the armed tile by ${formatUnits(step)} degrees, shortcut R`}
+            ? '— nothing is armed yet'
+            : `the armed recipe by ${formatUnits(step)} degrees, shortcut R`}
         </VisuallyHidden>
         <kbd className="of-build-key" aria-hidden="true">
           R

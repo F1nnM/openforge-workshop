@@ -20,26 +20,29 @@
  *
  *   1. **Erase picks the plane, not the meshes.** `surface.ts` sets out why, and
  *      why a single ground plane is not enough either.
- *   2. **The ghost is the real mesh.** The mockup builds a box or an extrusion
- *      per tile kind; the owner rejected primitives, so the ghost is the tile's
- *      own geometry from the store, positioned by the *same* `tileMatrix` call
- *      the placed instance will use. When the mesh has not arrived the ghost
- *      falls back to a footprint plate — `markers.ts` — which is the footprint
- *      the catalog tagged and not a guess at the tile.
- *   3. **The ghost rises onto its own base, and onto nothing else.** The mockup
- *      lifts a wall 0.25 units when a floor is under it, and it can, because it
- *      stores a `y` with every placement. This app's placement has no `y`, so a
- *      ghost drawn at a *user-directed* stacking elevation would sit where the
- *      tile will not land — the disagreement `ghost.ts` was made pure to prevent.
- *      `SurfacePick.elevationMm` is therefore still computed and still not
- *      applied.
- *
- *      Row **R3** made the one elevation that *is* answerable real: the base rule
- *      1 auto-inserts. It is not a placement and needs no stored `y` — it is a
- *      derivation of `(design, lock)`, so the ghost, the instance, the plate and
- *      the pick all read the same number out of `bases.ts` and cannot disagree.
- *      A median base is 6.00 mm and a median floor tile 4.50 mm, so this is the
- *      difference between a tile standing on its base and a tile buried in it.
+ *   2. **The ghost is a cell marker, and row A4b is why.** The mockup builds a
+ *      box or an extrusion per tile kind and the owner rejected primitives, so
+ *      until this row the ghost was the *tile's own mesh*, positioned by the same
+ *      `tileMatrix` call the placed instance would use and falling back to the
+ *      tagged footprint as a plate. Since row **A1** the armed thing is a
+ *      **template family** rather than a file, and a family's geometry is the
+ *      union of parts row **C2**'s fill solver has not chosen yet — so there is
+ *      no mesh to draw and no footprint to fall back to.
+ *      `edits.ts#templateGhost` states exactly what the marker claims. **This is
+ *      the one place the surface got less capable this row**, and it is temporary
+ *      in the precise sense that one call restores it: `computeGhost` over a
+ *      solved fill map, fed through `reanchorPiece`, which is what A4a suggests.
+ *   3. **The parts rise by the recipe's own elevations, and by nothing else.**
+ *      The mockup lifts a wall 0.25 units when a floor is under it, and it can,
+ *      because it stores a `y` with every placement. A `TemplateInstance` has no
+ *      `y` and needs none: a part's height above the plan is
+ *      `SlotLayout.elevationMm`, declared by the recipe and delivered per part by
+ *      row **A4a**, so the instance matrix, the plate and the pick all read one
+ *      number and cannot disagree about it. What is still computed and still
+ *      **not** applied is `SurfacePick.elevationMm` — a *user-directed* stack, a
+ *      wall the user puts on top of another instance's floor, which would need a
+ *      stored `y` this app does not have. Row R2 refused to draw it and that
+ *      refusal stands.
  *
  * ## Why the drag has to fight for the pointer, and how it wins cleanly
  *
@@ -58,11 +61,36 @@
  *
  * `usePlanTools` transfers untouched — it has no DOM in it, so the mode, the
  * snap, the pending rotation and the palette selection are the same state object
- * `PlanToolbar` already writes. `computeGhost` draws the ghost and decides the
- * placement. `beginMove` / `dragMoveTo` / `nudgeMove` / `previewMove` are the
- * whole move. `pieceAt` resolves every pick. `subjectsConflict` is reached only
- * through those. There is no second geometry in this file and no second opinion
- * about where anything is.
+ * `PlanToolbar` already writes. `beginMove` / `dragMoveTo` / `nudgeMove` /
+ * `previewMove` are the whole move. `pieceAt` resolves every pick, and it
+ * resolves it to a **placement** — which is the right arity for all four
+ * gestures, because erase, move and turn each act on one `PlacementId` and a
+ * template is placed and rotated as one unit. `partAt` is the other half of a
+ * pick and is deliberately not called here: it names the *slot* a point landed
+ * in, which is the slot editor's question rather than the surface's.
+ * `subjectsConflict` is reached only through `pieceAt` and the move. There is no
+ * second geometry in this file and no second opinion about where anything is.
+ *
+ * ## Row A4b: everything drawn is a **part**, and the preview is a whole piece
+ *
+ * A placement is N parts, so every list this component builds is a list of parts
+ * — the plates, the ring, the preview — and each one takes its own `box`, `angle`,
+ * `polygons`, `style` and `layout.elevationMm` off the {@link PlanPiecePart} A4a
+ * resolved. `box.x`/`box.z` on a part **is** its world anchor and `angle` is
+ * already the drawn angle, so nothing here composes an offset or adds two
+ * rotations; `slotGeometry` did both, once, in the projection.
+ *
+ * The move preview is the clearest case of the shape paying off.
+ * `MovePreview.moved` is *the whole piece re-projected at the proposed anchor* —
+ * A1 replaced the flat `box`/`parts`/`angle`/`axisAligned` quartet with it,
+ * because four numbers could only ever describe one part of five. So the preview
+ * is drawn by the same `map` over `parts` that draws the scene, and there is no
+ * second shape to keep in step.
+ *
+ * A piece's **height** for the pick is the tallest of its parts' tops rather than
+ * one mesh's height, and `heightOf` is where that is stated: a pointer over a
+ * corner template must land on the wall standing on the floor, not on the floor
+ * under it, or the click falls through to the plane below.
  */
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -72,15 +100,13 @@ import { Raycaster } from 'three'
 import type {
   MoveDrag,
   PlanPart,
-  PlanPiece,
+  PlanPiecePart,
   PlanPoint,
   PlanScene,
-  PlanStyle,
   PlanTools,
   ScenePiece,
 } from '@/builder/canvas'
 import {
-  computeGhost,
   describeCell,
   describeNudge,
   dragMoveTo,
@@ -91,21 +117,19 @@ import {
   previewMove,
   snapTo,
 } from '@/builder/canvas'
-import type { AssemblyPart } from '@/assembly'
-import type { CatalogRecord } from '@/catalog'
 import { GRID_UNIT_MM } from '@/catalog'
-import type { PlacementId } from '@/store'
+import type { PlacementId, TemplateId } from '@/store'
 import {
   moveGeneratedPlacement,
   movePlacement,
-  placeTile,
+  placeTemplate,
   removeGeneratedPlacement,
   removePlacement,
   rotateGeneratedPlacement,
   rotatePlacement,
 } from '@/store'
 
-import type { SurfaceEdit, SurfaceStatus } from './edits'
+import type { SurfaceEdit, SurfaceStatus, TemplateGhost } from './edits'
 import {
   describeAbandon,
   describeSurfaceHint,
@@ -115,9 +139,8 @@ import {
   planRemoval,
   planTurn,
   removalOf,
+  templateGhost,
 } from './edits'
-import type { PieceBase } from './bases'
-import { baseElevationMm } from './bases'
 import { InstancedTiles } from './InstancedTiles'
 import type { LodInstanceGroup, Room3D } from './instances'
 import type { LodGeometry } from './loadLod'
@@ -151,29 +174,16 @@ export interface RoomSurfaceProps {
   readonly geometries: ReadonlyMap<string, LodGeometry>
   readonly fit: SurfaceFit
   readonly tools: PlanTools
-  /** The armed tile, resolved by the caller from `tools.selectedTileId`. */
-  readonly armed: CatalogRecord | undefined
   /**
-   * The auto-inserted base under each placed piece — row **R3**.
+   * The armed **family** — `tools.selectedTemplate`, taken as a prop.
    *
-   * Read here for three things the instance matrices cannot carry: the plate a
-   * base with no mesh is drawn as, the **height** every piece is picked and
-   * plated at, and the ring over a base X10's note says is already on the plan.
-   * Defaults to empty, so a caller with no assembly index in hand gets the pre-R3
-   * surface exactly.
+   * A `TemplateId` since row A1, because §2.5 makes templates the only placement
+   * unit and there is no file for the palette to arm. It is still a prop rather
+   * than read off `tools` inside the component so that the one place the armed
+   * thing is *resolved* stays the caller's, which is where it will have to be
+   * when row C2's fill solver turns a family into a fill map.
    */
-  readonly bases?: ReadonlyMap<PlacementId, PieceBase>
-  /**
-   * The base the *armed* item would get, for the ghost.
-   *
-   * Separate from {@link bases} because the ghost is not a placement: it has no
-   * `PlacementId` to look one up by. Without it the ghost would sit 6 mm below
-   * where the tile lands, which is precisely the disagreement row R2 refused to
-   * introduce when it left this row a correct elevation and no picture.
-   */
-  readonly armedBase?: AssemblyPart | undefined
-  /** For the ghost alone: every placed piece carries its own resolved style. */
-  readonly styleOf: (record: CatalogRecord) => PlanStyle
+  readonly armed: TemplateId | null
   readonly onStatus: (status: SurfaceStatus) => void
   readonly announce: (text: string) => void
   /** Id of the paragraph holding the key map, for the canvas's `aria-describedby`. */
@@ -188,9 +198,6 @@ export function RoomSurface({
   fit,
   tools,
   armed,
-  bases = NO_BASES,
-  armedBase,
-  styleOf,
   onStatus,
   announce,
   keyHelpId,
@@ -208,90 +215,97 @@ export function RoomSurface({
   cursorRef.current = cursor
 
   /**
-   * How far above the plan a piece's **underside** sits, in millimetres.
+   * The top of one part, in millimetres above the plan.
    *
-   * Zero for everything the plan view ever drew, and the base's own height for
-   * the 1,878 items in 3,822 that rule 1 stands on one — row **R3**. One
-   * function, `bases.ts`'s, shared with the instance matrices, so a tile cannot
-   * be drawn at one height and picked at another.
+   * Its declared elevation plus whatever stands on it — the mesh's own upright
+   * height when one has arrived, and the plate's when it has not. A part with no
+   * geometry is exactly as tall as the marker drawn for it, so it is pickable at
+   * the height it appears at.
    */
-  const elevationOf = useCallback(
-    (piece: ScenePiece): number =>
-      piece.kind !== 'catalog' ? 0 : baseElevationMm(bases.get(piece.id), geometries),
-    [bases, geometries],
+  const partTopMm = useCallback(
+    (part: PlanPiecePart): number => {
+      const lod = geometries.get(part.record.blob)
+      return part.layout.elevationMm + (lod === undefined ? PLATE_HEIGHT_MM : meshHeightMm(lod.bounds))
+    },
+    [geometries],
   )
 
   /**
-   * A piece's height above the plan, in millimetres.
+   * A piece's height above the plan, in millimetres: its **tallest** part's top.
    *
-   * The one place the pick consults the mesh store, and it is asking a question
-   * a plate can answer too: a piece with no geometry is exactly as tall as the
-   * marker drawn for it, so it is pickable at the height it appears at. Nothing
-   * else in the gesture path reads `geometries` at all — which is why a missing
-   * mesh cannot make a cell behave as though it were empty.
+   * The one place the gesture path consults the mesh store, and row A4b is what
+   * makes the maximum the right reduction: a corner template is a base under a
+   * floor under two walls and a column, so the surface a pointer lands on is the
+   * top of the column and not the top of the base. Told to `pickSurface`, because
+   * a plane placed at any of the other four would let a click fall through to the
+   * ground behind the piece.
    *
-   * Since R3 it is the **top** of the assembly: the base lifts the tile, so a
-   * pointer over a based floor tile is 6 mm further up than one over an integral
-   * floor and `pickSurface` has to be told, or clicking a based tile would fall
-   * through to the plane below it.
+   * Nothing else in the gesture path reads `geometries` at all — which is why a
+   * missing mesh cannot make a cell behave as though it were empty.
    */
   const heightOf = useCallback(
     (piece: ScenePiece): number => {
       if (piece.kind !== 'catalog') return PLATE_HEIGHT_MM
-      const lod = geometries.get(piece.record.blob)
-      return elevationOf(piece) + (lod === undefined ? PLATE_HEIGHT_MM : meshHeightMm(lod.bounds))
+      // `parts` is never empty — `PlanPiece`'s own invariant — so this is a real
+      // maximum and not `-Infinity`.
+      return Math.max(...piece.parts.map(partTopMm))
     },
-    [geometries, elevationOf],
+    [partTopMm],
   )
 
   /* --------------------------------------------------------------- derivations */
 
-  const ghost = useMemo(
-    () => (armed === undefined || cursor === null ? null : computeGhost(armed, tools.rotation, cursor, tools.step, scene)),
-    [armed, cursor, tools.rotation, tools.step, scene],
+  const ghost = useMemo<TemplateGhost | null>(
+    () => (armed === null || cursor === null ? null : templateGhost(armed, tools.rotation, cursor, tools.step)),
+    [armed, cursor, tools.rotation, tools.step],
   )
   const under = useMemo(() => (cursor === null ? undefined : pieceAt(scene, cursor)), [scene, cursor])
   const moving = useMemo(() => (drag === null ? undefined : previewMove(drag, scene)), [drag, scene])
 
   /**
-   * Placed pieces with no mesh — what the plates are drawn for.
+   * Everything with no mesh, as one flat list of plates — **per part**.
    *
-   * Both populations. A catalog piece is waiting on R1's cache or on a `/lod/`
-   * object that is not there; a generated base has never been in this store at
-   * all, since `buildRoom3D` maps `scene.pieces` alone. Either way the cell is
-   * occupied and must look it.
+   * Both populations and, since row A4b, both *arities*. A catalog part is
+   * waiting on R1's conversion or on a `/lod/` object that is not there; a
+   * generated base has never been in this store at all, since `buildRoom3D` walks
+   * `scene.pieces` alone. Either way the ground is occupied and must look it.
+   *
+   * Flattened to parts rather than left as pieces because a three-part template
+   * with one converted file is **one mesh and two plates**, and a plate drawn per
+   * *piece* would have to choose one of the three outlines to be — which is
+   * exactly the single-primitive assumption A1 broke. Each plate takes its own
+   * part's tint, elevation and outline, so a wall waiting for a mesh appears at
+   * wall height over the floor that has one.
    */
-  const plated = useMemo<readonly ScenePiece[]>(
-    () => [
-      ...scene.generated,
-      ...scene.pieces.filter((piece) => !geometries.has(piece.record.blob)),
-    ],
-    [scene, geometries],
-  )
+  const plated = useMemo<readonly PlatedPart[]>(() => {
+    const plates: PlatedPart[] = [
+      ...scene.generated.map((piece) => ({
+        key: piece.id,
+        id: piece.id,
+        polygons: piece.polygons,
+        tint: piece.style.tint,
+        edge: piece.style.edge,
+        heightMm: PLATE_HEIGHT_MM,
+      })),
+    ]
+    for (const piece of scene.pieces) {
+      for (const part of piece.parts) {
+        if (geometries.has(part.record.blob)) continue
+        plates.push({
+          key: `${piece.id}:${part.slot}`,
+          id: piece.id,
+          polygons: part.polygons,
+          tint: part.style.tint,
+          edge: part.style.edge,
+          heightMm: part.layout.elevationMm + PLATE_HEIGHT_MM,
+        })
+      }
+    }
+    return plates
+  }, [scene, geometries])
 
-  /**
-   * Bases the bill lists and neither store holds a mesh for — row **R3**.
-   *
-   * The same answer a mesh-less *tile* gets, deliberately reusing R2's plate
-   * rather than inventing a second absent-geometry state: the footprint the
-   * catalog tagged, flat, in the base's own material tint. Drawn on the plan at
-   * `PLATE_HEIGHT_MM` with the topper lifted to `ABSENT_BASE_ELEVATION_MM` above
-   * it, so the ring stays visible under the tile instead of being buried in it.
-   *
-   * Under openlock this is the state **every** based tile is in until R1's
-   * conversion has run and, before this row wired it, the state they were all in
-   * permanently.
-   */
-  const basePlates = useMemo(
-    () =>
-      scene.pieces
-        .map((piece) => ({ piece, base: bases.get(piece.id) }))
-        .filter(
-          (entry): entry is { piece: PlanPiece; base: PieceBase } =>
-            entry.base !== undefined && !entry.base.duplicate && !geometries.has(entry.base.record.blob),
-        ),
-    [scene, bases, geometries],
-  )
+  /** The placements with at least one plate on them, for the erase ring's test. */
+  const platedIds = useMemo(() => new Set(plated.map((plate) => plate.id)), [plated])
 
   /* ------------------------------------------------------------- the mutations */
 
@@ -309,15 +323,26 @@ export function RoomSurface({
    * Apply one verdict: at most one store write, then say what happened.
    *
    * The only function in this row that writes to the store, and the only one
-   * that names the store's placement shape — which is the whole of this row's
-   * exposure to row **V4**. Everything above it deals in records, anchors and
-   * angles.
+   * that names the store's placement shape. Everything above it deals in
+   * families, anchors and angles.
+   *
+   * `placeTemplate` since row A1 — the only placement action the store offers —
+   * and the fills come off the verdict rather than being written here, so the day
+   * row C2 solves them this line does not change. `edits.ts` sets out why they
+   * are empty today and why contract **C-g** makes that a placement rather than a
+   * failure.
    */
   const apply = useCallback(
     (edit: SurfaceEdit): boolean => {
       switch (edit.kind) {
         case 'place':
-          placeTile({ design: edit.record.design, x: edit.anchor[0], z: edit.anchor[1], rotation: edit.rotation })
+          placeTemplate({
+            template: edit.template,
+            x: edit.anchor[0],
+            z: edit.anchor[1],
+            rotation: edit.rotation,
+            fills: edit.fills,
+          })
           break
         case 'remove':
           if (edit.generated) removeGeneratedPlacement(edit.id)
@@ -367,9 +392,9 @@ export function RoomSurface({
 
   const actAt = useCallback(
     (at: PlanPoint) => {
-      const { scene: current, tools: state, armed: record, apply: run } = latest.current
+      const { scene: current, tools: state, armed: family, apply: run } = latest.current
       if (state.tool === 'erase') run(planRemoval(current, at))
-      else run(planPlacement(current, record, state.rotation, at, state.step))
+      else run(planPlacement(family, state.rotation, at, state.step))
     },
     [],
   )
@@ -531,7 +556,11 @@ export function RoomSurface({
         return
       }
       setDrag(next)
-      setCursor([preview.box.x + preview.box.w / 2, preview.box.z + preview.box.d / 2])
+      // The **proposed** box — `moved` is the whole piece re-projected at the
+      // anchor the nudge just produced — so the cursor lands on the centre of
+      // where the piece would be, not on where it still is.
+      const box = preview.moved.box
+      setCursor([box.x + box.w / 2, box.z + box.d / 2])
       latest.current.say(describeNudge(preview))
       invalidate()
     },
@@ -562,7 +591,7 @@ export function RoomSurface({
     canvas.setAttribute('aria-describedby', keyHelpId)
 
     const onKey = (event: KeyboardEvent) => {
-      const { tools: state, scene: current, armed: record, apply: run } = latest.current
+      const { tools: state, scene: current, armed: family, apply: run } = latest.current
       const step = state.step * (event.shiftKey ? FAST_STEPS : 1)
       const at = cursorRef.current
       const handled = () => {
@@ -639,7 +668,7 @@ export function RoomSurface({
         case 'R': {
           handled()
           const target = at === null ? undefined : pieceAt(current, at)
-          const edit = planTurn(current, sticky.current, target, record, state.rotation, event.shiftKey ? -1 : 1)
+          const edit = planTurn(current, sticky.current, target, family, state.rotation, event.shiftKey ? -1 : 1)
           sticky.current = edit.kind === 'turn' ? edit.id : null
           run(edit)
           return
@@ -689,13 +718,13 @@ export function RoomSurface({
       describeSurfaceHint({
         tool: tools.tool,
         armed,
-        ghost,
         under,
         moving,
         onPlan: cursor !== null,
         waiting: plated.length,
+        unfilled: scene.unfilled.length,
       }),
-    [tools.tool, armed, ghost, under, moving, cursor, plated.length],
+    [tools.tool, armed, under, moving, cursor, plated.length, scene.unfilled.length],
   )
 
   const status = useMemo<SurfaceStatus>(
@@ -705,13 +734,21 @@ export function RoomSurface({
       step: tools.step,
       tool: tools.tool,
       hint,
-      selectedName: armed?.name ?? null,
-      refusal: ghost?.refusal?.message ?? null,
+      selectedName: ghost?.name ?? null,
+      // Nothing left to refuse about an armed family — see `edits.ts`. It stays a
+      // field of the readout because `move.ts` and row C2's solver both have
+      // refusals to put in it, and a `null` here is a true statement about the
+      // *place* gesture rather than a placeholder.
+      refusal: null,
       moving: moving === undefined ? null : pieceName(moving.piece),
-      placements: scene.pieces.length,
+      // Instances with nothing chosen are placements — they are in the store, they
+      // can be filled and they can be removed — so a count that omitted them
+      // would say "0 placed" about a room the user has just clicked five times
+      // into.
+      placements: scene.pieces.length + scene.unfilled.length,
       conflicts: scene.conflicts.size,
     }),
-    [cursor, tools.snap, tools.step, tools.tool, hint, armed, ghost, moving, scene],
+    [cursor, tools.snap, tools.step, tools.tool, hint, ghost, moving, scene],
   )
 
   useEffect(() => {
@@ -726,130 +763,157 @@ export function RoomSurface({
 
   /* --------------------------------------------------------------- the drawing */
 
-  const ghostLod = ghost === null ? undefined : geometries.get(ghost.record.blob)
-  const movingLod =
-    moving === undefined || moving.piece.kind !== 'catalog' ? undefined : geometries.get(moving.piece.record.blob)
-  // The ghost stands on the base the bill will list for it, exactly as the
-  // placed tile will — `armedBase` is the same `resolvePlacement` answer, asked
-  // about a design instead of a placement.
-  const ghostLift = baseElevationMm(armedBase, geometries)
-  const ghostBaseLod = armedBase === undefined ? undefined : geometries.get(armedBase.record.blob)
-  const movingLift = moving === undefined ? 0 : baseElevationMm(bases.get(moving.piece.id), geometries)
+  /**
+   * The piece in the air, as parts with their own matrices — row A4b.
+   *
+   * `moving.moved` is the whole piece re-projected at the proposed anchor, so the
+   * preview is built by the same walk over `parts` that draws the scene: one
+   * translucent copy per slot, at that slot's own box, angle and elevation. The
+   * flat `box`/`angle`/`axisAligned` triple this used to read is gone from
+   * `MovePreview`, which is contract **C-h** doing its job — a wall of a corner
+   * template would have been drawn at the floor's angle and nothing would have
+   * complained.
+   *
+   * A part with no mesh contributes a translucent plate rather than nothing, so
+   * a template halfway through converting still shows its full outline while it
+   * is carried.
+   */
+  const movingParts = useMemo<readonly MovingPart[]>(() => {
+    if (moving === undefined) return []
+    const piece = moving.moved
+    const alarmed = moving.refusal !== null || moving.conflict
+    // A generated base has never been in the mesh store — `buildRoom3D` walks
+    // `scene.pieces` alone — so its preview is a plate by construction rather
+    // than as a fallback, exactly as its placed form is.
+    if (piece.kind === 'generated') {
+      return [
+        {
+          key: piece.id,
+          polygons: piece.polygons,
+          matrix: null,
+          geometry: undefined,
+          tint: alarmed ? ACCENT : piece.style.tint,
+          plateHeightMm: PLATE_HEIGHT_MM * 2,
+        },
+      ]
+    }
+    return piece.parts.map((part) => {
+      const lod = geometries.get(part.record.blob)
+      return {
+        key: `${piece.id}:${part.slot}`,
+        polygons: part.polygons,
+        matrix:
+          lod === undefined
+            ? null
+            : liftMatrix(
+                tileMatrix(lod.bounds, {
+                  shape: part.shape,
+                  rotation: piece.placement.rotation,
+                  angle: part.angle,
+                  box: part.box,
+                  parts: part.polygons,
+                  axisAligned: part.axisAligned,
+                }),
+                part.layout.elevationMm,
+              ),
+        geometry: lod?.geometry,
+        tint: alarmed ? ACCENT : part.style.tint,
+        plateHeightMm: part.layout.elevationMm + PLATE_HEIGHT_MM * 2,
+      }
+    })
+  }, [moving, geometries])
 
   return (
     <group scale={fit.scale}>
       <Lattice />
 
-      {/* Bases first, and that is what a base *is* rather than a tie-break —
-          `scene.ts#scenePaintOrder` makes the same argument about the generated
-          ones. */}
-      {room.baseGroups.map((group: LodInstanceGroup) => (
-        <InstancedTiles key={`base:${group.key}`} group={group} />
-      ))}
-
+      {/*
+        One list, because a base is one part of a template like any other. Row
+        R3 drew a `baseGroups` list first and called it *"what a base is rather
+        than a tie-break"*; with the base declared as a slot there is no second
+        list to order, and in 3D there is no paint order to get wrong either — a
+        pick is a raycast and the nearest hit wins by geometry.
+      */}
       {room.groups.map((group: LodInstanceGroup) => (
         <InstancedTiles key={group.key} group={group} />
       ))}
 
-      {basePlates.map(({ piece, base }) => (
+      {plated.map((plate) => (
         <FootprintPlate
-          key={`base:${piece.id}`}
-          parts={piece.parts}
-          tint={styleOf(base.record).tint}
-          edge={styleOf(base.record).edge}
-          heightMm={PLATE_HEIGHT_MM}
+          key={plate.key}
+          parts={plate.polygons}
+          tint={plate.tint}
+          edge={plate.id === under?.id && tools.tool === 'erase' ? ACCENT : plate.edge}
+          heightMm={plate.heightMm}
         />
       ))}
 
-      {plated.map((piece) => (
-        <FootprintPlate
-          key={piece.id}
-          parts={piece.parts}
-          tint={piece.style.tint}
-          edge={piece.id === under?.id && tools.tool === 'erase' ? ACCENT : piece.style.edge}
-          heightMm={elevationOf(piece) + PLATE_HEIGHT_MM}
-        />
-      ))}
-
-      {/* X10's `base-already-on-plan`, drawn. The bill still lists the second
-          base; a second solid in the same cell at the same height would read as
-          the one already there, so it is a ring at the topper's underside
-          instead. `BuilderRoom`'s notice carries the sentence. */}
-      {room.duplicateBases.map((id) => {
-        const piece = scene.pieces.find((candidate) => candidate.id === id)
-        return piece === undefined ? null : (
-          <PlateOutline
-            key={`dup:${id}`}
-            parts={piece.parts}
-            colour={ACCENT}
-            heightMm={elevationOf(piece) + PLATE_HEIGHT_MM / 2}
-          />
-        )
-      })}
-
-      {/* The piece under the pointer in erase mode, ringed at its own height, so
-          "click to remove that" names a piece the user can see is named. */}
-      {under === undefined || tools.tool !== 'erase' || plated.includes(under) ? null : (
-        <PlateOutline parts={under.parts} colour={ACCENT} heightMm={heightOf(under) + PLATE_HEIGHT_MM} />
+      {/*
+        The piece under the pointer in erase mode, ringed at its own height, so
+        "click to remove that" names a piece the user can see is named. The ring
+        is the **instance's** union outline and not a part's, because erase takes
+        the whole placement — `removalOf` names one `PlacementId` — and ringing
+        one slot of five would promise a removal the store cannot make.
+      */}
+      {under === undefined || tools.tool !== 'erase' || platedIds.has(under.id) ? null : (
+        <PlateOutline parts={under.polygons} colour={ACCENT} heightMm={heightOf(under) + PLATE_HEIGHT_MM} />
       )}
 
+      {/*
+        The armed marker: one cell at the snapped anchor, with no mesh behind it
+        and none available — `edits.ts#templateGhost` sets out why, and the
+        module note calls it the one capability this row lost. Drawn through
+        `Ghost` with a null matrix, which is the path a tile whose mesh had not
+        arrived already took, so there is no second absent-geometry state.
+      */}
       {ghost === null ? null : (
-        <>
-          {/* The ghost's own base, translucent, on the plan. Drawn because the
-              alternative is a tile floating over an empty cell with the reason
-              off screen — the base is the half of the assembly the owner asked
-              this row to make visible, and it is as true of a tile about to be
-              placed as of one already there. */}
-          {ghostBaseLod === undefined ? null : (
-            <Ghost
-              parts={ghost.parts}
-              matrix={tileMatrix(ghostBaseLod.bounds, ghost)}
-              geometry={ghostBaseLod.geometry}
-              tint={styleOf(ghost.record).tint}
-              plateHeightMm={PLATE_HEIGHT_MM}
-            />
-          )}
-          <Ghost
-            parts={ghost.parts}
-            matrix={ghostLod === undefined ? null : liftMatrix(tileMatrix(ghostLod.bounds, ghost), ghostLift)}
-            geometry={ghostLod?.geometry}
-            tint={ghost.duplicate || ghost.conflict || ghost.refusal !== null ? ACCENT : styleOf(ghost.record).tint}
-            plateHeightMm={ghostLift + PLATE_HEIGHT_MM * 2}
-          />
-        </>
-      )}
-
-      {moving === undefined ? null : (
         <Ghost
-          parts={moving.parts}
-          matrix={
-            movingLod === undefined
-              ? null
-              : liftMatrix(
-                  tileMatrix(movingLod.bounds, {
-                    shape: moving.piece.shape,
-                    rotation: moving.piece.placement.rotation,
-                    angle: moving.angle,
-                    box: moving.box,
-                    parts: moving.parts,
-                    axisAligned: moving.axisAligned,
-                  }),
-                  movingLift,
-                )
-          }
-          geometry={movingLod?.geometry}
-          tint={moving.refusal !== null || moving.conflict ? ACCENT : moving.piece.style.tint}
-          plateHeightMm={movingLift + PLATE_HEIGHT_MM * 2}
+          parts={ghost.polygons}
+          matrix={null}
+          geometry={undefined}
+          tint={ACCENT}
+          plateHeightMm={PLATE_HEIGHT_MM * 2}
         />
       )}
+
+      {movingParts.map((part) => (
+        <Ghost
+          key={part.key}
+          parts={part.polygons}
+          matrix={part.matrix}
+          geometry={part.geometry}
+          tint={part.tint}
+          plateHeightMm={part.plateHeightMm}
+        />
+      ))}
 
       {focused && cursor !== null ? <Caret at={cursor} /> : null}
     </group>
   )
 }
 
-/** No bases resolved. A module constant, so the default prop is one identity. */
-const NO_BASES: ReadonlyMap<PlacementId, PieceBase> = new Map()
+/** One plate to draw: an outline, two colours and a height. */
+interface PlatedPart {
+  /** Stable across renders: the placement, then the slot. */
+  readonly key: string
+  /** The placement it belongs to, for the erase highlight. */
+  readonly id: PlacementId
+  readonly polygons: readonly PlanPart[]
+  readonly tint: string
+  readonly edge: string
+  readonly heightMm: number
+}
+
+/** One translucent part of the piece in the air. */
+interface MovingPart {
+  readonly key: string
+  readonly polygons: readonly PlanPart[]
+  /** `null` when this part's mesh has not arrived; the plate is drawn instead. */
+  readonly matrix: Matrix4 | null
+  readonly geometry: BufferGeometry | undefined
+  readonly tint: string
+  readonly plateHeightMm: number
+}
 
 /** One raycaster for the life of the module. A pointer move must not allocate. */
 const CASTER = new Raycaster()
@@ -882,19 +946,20 @@ function Lattice() {
 }
 
 /**
- * A piece with no mesh: its tagged footprint, filled and ringed.
+ * A part with no mesh: its tagged footprint, filled and ringed.
  *
- * Flat, 0.6 mm of it, in the piece's own material tint with a bright contour —
+ * Flat, 0.6 mm of it, in the part's own material tint with a bright contour —
  * `markers.ts` sets out why that cannot be read as the tile and why it must not
- * be omitted. The geometry is built from the piece's convex parts and disposed
+ * be omitted. The geometry is built from the outline's convex parts and disposed
  * explicitly on unmount rather than left to the reconciler, which disposes what
  * it constructed and not what it was handed.
  *
- * Takes `parts` and two colours rather than a `ScenePiece` since row **R3**, for
- * one reason: an auto-inserted **base** with no mesh gets the same plate, and it
- * is not a `ScenePiece` — it has no placement, and its tint is its own record's
- * rather than the topper's. `heightMm` because a plate for a based tile has to be
- * drawn above the plate for the base underneath it.
+ * Takes `parts` and two colours rather than a piece, which since row **A4b** is
+ * the only shape that works: a plate is drawn **per slot**, so it needs that
+ * slot's own outline and tint, and a generated base has neither a record nor a
+ * slot. `heightMm` is the slot's declared elevation plus the plate's thickness,
+ * so a wall waiting for a mesh appears at wall height over the floor that has
+ * one.
  */
 function FootprintPlate({
   parts,
@@ -967,9 +1032,9 @@ function Ghost({
   /**
    * Where the fallback ring is drawn when there is no mesh.
    *
-   * A parameter since row R3 rather than the constant it was, because a ghost
-   * that will land on a base has to ring the cell at the height it will land at
-   * — the same reason the matrix is lifted.
+   * A parameter rather than the constant it was, because a part that will land
+   * at a slot elevation has to ring the cell at the height it will land at — the
+   * same reason the matrix is lifted.
    */
   plateHeightMm?: number
 }) {

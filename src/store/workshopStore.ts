@@ -10,7 +10,7 @@
  *     in step with the type the app reads. Here there is one shape, so a
  *     migration is written against exactly what `schema.ts` describes.
  *   - **Components never subscribe to an action.** An action reached through
- *     `useStore((s) => s.addToLibrary)` is a subscription; an imported function
+ *     `useStore((s) => s.placeTemplate)` is a subscription; an imported function
  *     is not, so a component that only *writes* never re-renders.
  *   - **Non-React callers work unchanged.** The share codec and the download
  *     builder read this store from plain modules.
@@ -19,31 +19,35 @@
  * are): every exported selector returns either a primitive or a state slice that
  * is replaced only when that slice changes. Zustand compares with `Object.is`,
  * so a selector that builds a new array or object on each call re-renders its
- * component on *every* store write — placing a tile would then re-render the
- * catalog grid. Concretely: a catalog card subscribes through
- * {@link useIsInLibrary}, whose value is a boolean derived from `library`, so
- * the two hundred writes of a drag across the grid touch `placements` only and
- * the card never re-renders.
+ * component on *every* store write. Concretely: {@link usePlacement} returns one
+ * instance, so filling a slot on one piece re-renders that piece and not the
+ * other forty.
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-import type { DesignId } from '@/catalog'
+import type { TileId } from '@/catalog'
 import type { GeneratedBaseId, GeneratedPlacement } from '@/generator/placement/scene'
 import { GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/placement/scene'
 
 import { clearGeneratedMeshes, retainGeneratedMeshes } from './meshes'
 import type { RecoveredState } from './migrations'
 import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
-import type { LockSystem, Placement, PlacementId, WorkshopState } from './schema'
-import { Placement as PlacementSchema, PlacementId as PlacementIdSchema, defaultWorkshopState, normalizeRotation } from './schema'
+import type { LockSystem, PlacementId, SlotFill, SlotName, TemplateInstance, WorkshopState } from './schema'
+import {
+  PlacementId as PlacementIdSchema,
+  TemplateInstance as TemplateInstanceSchema,
+  defaultWorkshopState,
+  normalizeRotation,
+} from './schema'
+import { clearPendingDesign } from './selection'
 import { STORAGE_KEY, clearPersistedWorkshopState, workshopStorage } from './storage'
 
 /**
  * Say out loud what recovery discarded.
  *
  * Silent salvage is the failure mode this whole module exists to avoid: a user
- * whose room quietly comes back one tile short has no way to tell that from
+ * whose room quietly comes back one piece short has no way to tell that from
  * having mis-remembered placing it. Warned once per hydration, not per dropped
  * entry, so a thoroughly corrupt blob produces one message rather than four
  * hundred.
@@ -107,85 +111,6 @@ export const useWorkshopStore = create<WorkshopState>()(
   }),
 )
 
-/* ------------------------------------------------------------------- library */
-
-/**
- * Save an item — a **design**, never a file. Idempotent, and a no-op returns the
- * identical state object so subscribers are not woken for a click that changed
- * nothing.
- *
- * The parameter is a {@link DesignId} because `library` is keyed by one; see
- * `schema.ts` for why that key and not `AggregateAddress`. Every caller has a
- * design in hand already — `TileAggregate.design`, `TileVariant.design` and
- * `CatalogRecord.design` are all the same field — so nothing has to resolve
- * anything, and the two brands being mutually unassignable means a call that
- * used to save a file is a compile error rather than a key that resolves to no
- * record.
- *
- * **Returns whether it inserted**, which is not decoration. It is the hook row
- * R1 asked for: R1 warms an aggregate's meshes in the browser at the moment it
- * is saved, and it needs somewhere to attach that does not fire on a second
- * press of an already-saved item. Two attachment points, both open, neither
- * needing a change here:
- *
- *   - **At the call site**, on this return value:
- *     `if (addToLibrary(item.design)) void warmDesign(item.design)`. Five call
- *     sites exist today.
- *   - **On the store**, as a diff:
- *     `useWorkshopStore.subscribe((now, before) => …)` over `now.library`. The
- *     design key is what makes that diff answerable — one new key is exactly one
- *     item and therefore exactly one mesh set to warm. Under the old file key
- *     the same diff could not say what to warm: one item is 2.28 files on
- *     average and up to 20, and which of them the user would eventually print
- *     was a function of a lock preference they had not yet chosen.
- *
- * A listener registry was considered and not built. It would be speculative
- * machinery for a consumer that does not exist yet, in the same row that deleted
- * a migration ladder for being kept against a hypothetical.
- */
-export function addToLibrary(design: DesignId): boolean {
-  let inserted = false
-  useWorkshopStore.setState((state) => {
-    if (state.library[design] === true) return state
-    inserted = true
-    return { library: { ...state.library, [design]: true } }
-  })
-  return inserted
-}
-
-/** Drop a saved item. No-op if it was never there. */
-export function removeFromLibrary(design: DesignId): void {
-  useWorkshopStore.setState((state) => {
-    if (state.library[design] === undefined) return state
-    const library = { ...state.library }
-    delete library[design]
-    return { library }
-  })
-}
-
-/**
- * Add or remove, whichever the item is not.
- *
- * The whole toggle is now expressible, which it was not before: a file-keyed
- * library made "is this item saved?" a question about up to 20 keys and "unsave
- * it" a loop over all of them, and `TileCard` carried both plus a docblock
- * explaining that removing had to clear every variant or the button's own label
- * would not change. One key, one press, no loop.
- */
-export function toggleLibrary(design: DesignId): void {
-  useWorkshopStore.setState((state) => {
-    if (state.library[design] === undefined) return { library: { ...state.library, [design]: true } }
-    const library = { ...state.library }
-    delete library[design]
-    return { library }
-  })
-}
-
-/** Empty the library. Placements are untouched — they are a separate decision. */
-export function clearLibrary(): void {
-  useWorkshopStore.setState({ library: {} })
-}
-
 /* ---------------------------------------------------------------- placements */
 
 /**
@@ -207,38 +132,72 @@ function newPlacementId(): PlacementId {
 }
 
 /**
- * Put an **item** on the grid and return its key.
+ * What a caller hands {@link placeTemplate}: an instance without its identity.
  *
- * The name is kept — `placeTile` is what a user does, and "tile" is the word the
- * whole app says on screen — while the argument is a design-addressed
- * {@link Placement} since row V4. Nothing here resolves anything: which file
- * gets printed is decided when the bill is built, so a scene placed under one
- * lock preference and downloaded under another is the same room and a different
- * pack.
+ * `id` is minted here rather than passed, which is what makes the map key and
+ * the `id` field agree by construction — the disagreement `schema.ts` describes
+ * and `migrations.ts` resolves is expressible only in a blob out of storage, and
+ * nothing in the app can produce one. `Omit` rather than a second hand-written
+ * interface, so a field added to {@link TemplateInstance} arrives here without an
+ * edit.
+ */
+export type NewTemplateInstance = Omit<TemplateInstance, 'id'>
+
+/**
+ * Put a **template instance** on the grid and return its key.
+ *
+ * ## Incomplete fills are accepted, and that is contract C-g
+ *
+ * `fills` may name every slot, some of them, or **none**. §3.2 is explicit that a
+ * template with no candidate for a part *"places anyway"*, marked *needs a
+ * choice*, so a store that demanded a complete map would make that state
+ * unreachable from the bottom of the stack upward — C2's solver could not report
+ * a slot it failed to fill, and C3's editor would have nothing to open on. There
+ * is deliberately no `completeness` argument, no second action for the partial
+ * case and no warning: an unfilled slot is an ordinary state of an instance, not
+ * a degraded one, and `migrations.ts#salvageFills` treats it the same way on the
+ * way back in.
+ *
+ * The store also does not check that the named slots **belong** to the template.
+ * It cannot — that needs the family table, which must not enter the store's file
+ * closure (`schema.ts#TemplateId`) — and it should not: whoever holds the
+ * template is the only party that can say, and they are the party that built the
+ * map.
  *
  * Parsed on the way in, which is not redundant with the rehydrate check: this
  * catches a bad value at the call that produced it, where the stack still names
  * the culprit, instead of at a hydration months later where it looks like
  * storage corruption.
  */
-export function placeTile(placement: Placement): PlacementId {
+export function placeTemplate(instance: NewTemplateInstance): PlacementId {
   const id = newPlacementId()
-  const validated = PlacementSchema.parse({ ...placement, rotation: normalizeRotation(placement.rotation) })
+  const validated = TemplateInstanceSchema.parse({
+    ...instance,
+    id,
+    rotation: normalizeRotation(instance.rotation),
+  })
   useWorkshopStore.setState((state) => ({ placements: { ...state.placements, [id]: validated } }))
   return id
 }
 
-/** Move a placed tile. No-op if the key is unknown, which a stale drag can be. */
+/** Move a placed instance. No-op if the key is unknown, which a stale drag can be. */
 export function movePlacement(id: PlacementId, x: number, z: number): void {
   useWorkshopStore.setState((state) => {
     const current = state.placements[id]
     if (current === undefined) return state
-    const moved = PlacementSchema.parse({ ...current, x, z })
+    const moved = TemplateInstanceSchema.parse({ ...current, x, z })
     return { placements: { ...state.placements, [id]: moved } }
   })
 }
 
-/** Rotate a placed tile. The angle is folded into `[0, 360)`; see the schema. */
+/**
+ * Rotate a placed instance.
+ *
+ * One angle for the whole instance, because a template is placed and rotated as
+ * one unit (§1). The slot offsets follow from it arithmetically at fill time
+ * (§2.2), so there is nothing per-slot to rotate and nothing to keep in step.
+ * The angle is folded into `[0, 360)`; see the schema.
+ */
 export function rotatePlacement(id: PlacementId, rotation: number): void {
   useWorkshopStore.setState((state) => {
     const current = state.placements[id]
@@ -248,7 +207,7 @@ export function rotatePlacement(id: PlacementId, rotation: number): void {
   })
 }
 
-/** Take a tile off the grid. */
+/** Take an instance off the grid. */
 export function removePlacement(id: PlacementId): void {
   useWorkshopStore.setState((state) => {
     if (state.placements[id] === undefined) return state
@@ -258,7 +217,7 @@ export function removePlacement(id: PlacementId): void {
   })
 }
 
-/** Clear the builder scene, keeping the library and the lock preference. */
+/** Clear the builder scene, keeping the lock preference. */
 export function clearPlacements(): void {
   useWorkshopStore.setState({ placements: {}, generated: {} })
   // Every hold is now orphaned. `retainGeneratedMeshes(new Set())` would say the
@@ -267,21 +226,123 @@ export function clearPlacements(): void {
   clearGeneratedMeshes()
 }
 
+/* --------------------------------------------------------------------- fills */
+
+/**
+ * What a fill attempt did.
+ *
+ * **Four states rather than a boolean, and contract C-k is the reason.** The
+ * obvious signature is `boolean` — row V1's `addToLibrary` returned one, and row
+ * R1 attached to it — but here `false` would mean three different things, and
+ * two of them are things a caller has to tell apart:
+ *
+ *   - `'kept-pinned'` is *"the user chose this slot and I left it alone"*. After
+ *     a lock change, the count of these is the number of deliberate choices the
+ *     re-solve honoured, which is exactly what §3.3 has to disclose. C-k warns
+ *     that the lock toggle can stop working with **nothing failing**; a solver
+ *     that cannot see this state cannot report it either.
+ *   - `'unchanged'` is *"I would have written the fill that is already there"*.
+ *     A re-solve that produces the same file is the common case and is not news.
+ *   - `'unknown-placement'` is a stale drag or a race, and it is a bug in the
+ *     caller rather than an outcome of the room.
+ *
+ * Collapsing the first two is the specific mistake that would make a lock
+ * change look like it had done nothing when it had in fact honoured forty pins,
+ * or look like it had honoured them when the candidate set had simply not moved.
+ */
+export type FillOutcome = 'filled' | 'unchanged' | 'kept-pinned' | 'unknown-placement'
+
+/**
+ * Write one slot's fill, or leave it alone.
+ *
+ * The shared half of {@link fillSlot} and {@link pinFill}. `guardPinned` is the
+ * only difference between them and it is the whole of contract **C-k**: the
+ * solver must not overwrite a pinned fill and the user must always be able to.
+ */
+function writeFill(id: PlacementId, slot: SlotName, fill: SlotFill, guardPinned: boolean): FillOutcome {
+  let outcome: FillOutcome = 'unknown-placement'
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    const existing = current.fills[slot]
+    if (guardPinned && existing?.pinned === true) {
+      outcome = 'kept-pinned'
+      return state
+    }
+    if (existing !== undefined && existing.tile === fill.tile && existing.pinned === fill.pinned) {
+      outcome = 'unchanged'
+      return state
+    }
+    outcome = 'filled'
+    const updated: TemplateInstance = { ...current, fills: { ...current.fills, [slot]: fill } }
+    return { placements: { ...state.placements, [id]: updated } }
+  })
+  return outcome
+}
+
+/**
+ * Fill a slot **automatically** — the default solver's write.
+ *
+ * Writes `pinned: false`, and **refuses a slot the user has pinned**, returning
+ * `'kept-pinned'`. That refusal is where §2.1's rule lives: *"a lock change
+ * re-solves every `auto` fill and never touches a `pinned` one."* Putting it
+ * here rather than in the solver is the difference between an invariant and a
+ * convention — C2 re-walks every slot of an instance after a lock change, and a
+ * solver that simply forgot to skip pinned slots would silently discard every
+ * deliberate choice in the room, with no test failing and nothing on screen to
+ * say so. See {@link FillOutcome} for why the refusal is *named* rather than
+ * being a `false` among two other falses.
+ *
+ * There is deliberately **no `pinned` parameter** on either this or
+ * {@link pinFill}. Contract **C-k** warns that if C3's editor writes every fill
+ * `pinned` the lock toggle stops working and nothing fails; a boolean argument
+ * is exactly how that happens, because the two call sites are then one function
+ * apart and a copy-paste carries the wrong literal. Two names cannot be
+ * confused, and the names say which is which.
+ *
+ * A no-op returns the identical state object, so a re-solve that changes nothing
+ * wakes no subscriber.
+ */
+export function fillSlot(id: PlacementId, slot: SlotName, tile: TileId): FillOutcome {
+  return writeFill(id, slot, { tile, pinned: false }, true)
+}
+
+/**
+ * Fill a slot **because the user said so** — the editor's write.
+ *
+ * Writes `pinned: true` and never refuses, so it never returns `'kept-pinned'`:
+ * a user's pick overrides a previous pick as readily as it overrides a solved
+ * one. §3.3's remaining rules are C3's,
+ * not this function's — re-running the greying walk over still-open siblings, and
+ * refusing a pick that would invalidate a sibling's existing fill *with its
+ * reason*. Neither is expressible here, because both need the candidate sets and
+ * therefore the catalog.
+ *
+ * **There is no `unpinFill`, and its absence is a known gap rather than a
+ * decision.** Nothing in §3.3 offers a user a way to hand a slot back to the
+ * lock preference, so no caller exists to write one for; if C3 wants "reset this
+ * slot", it is one more action here and not a change of shape.
+ */
+export function pinFill(id: PlacementId, slot: SlotName, tile: TileId): FillOutcome {
+  return writeFill(id, slot, { tile, pinned: true }, false)
+}
+
 /* ----------------------------------------------------------- generated bases */
 
 /**
  * Put a generated base on the grid and return its key.
  *
- * The mirror of {@link placeTile}, and deliberately a *separate* action over a
- * separate map rather than a widened one: row S5's whole identity argument rests
- * on a generated base being neither a catalog file nor a catalog *item* — it has
- * no `TileId` and, since row V4 put a `DesignId` in that slot, no design either.
- * The `PlacementId` space *is* shared, which is what lets one id name a piece on
- * the plan whichever map holds it.
+ * The mirror of {@link placeTemplate}, and deliberately a *separate* action over
+ * a separate map rather than a widened one: row S5's whole identity argument
+ * rests on a generated base being neither a catalog file nor a catalog *item*,
+ * and row A1 sharpened it — an instance is a family with up to five slots, each
+ * holding a file, and a `GeneratedPlacement` has no slot for any of that. The
+ * `PlacementId` space *is* shared, which is what lets one id name a piece on the
+ * plan whichever map holds it.
  *
- * Parsed on the way in for {@link placeTile}'s reason — a bad value fails at the
- * call that produced it, where the stack still names the culprit, rather than at
- * a hydration months later where it looks like storage corruption. The schema
+ * Parsed on the way in for {@link placeTemplate}'s reason — a bad value fails at
+ * the call that produced it, where the stack still names the culprit, rather than
+ * at a hydration months later where it looks like storage corruption. The schema
  * also folds `-0` on both coordinates and constrains the entry point to the five
  * the panel offers.
  *
@@ -366,11 +427,19 @@ function placedGeneratedBases(state: WorkshopState): Set<GeneratedBaseId> {
  * obvious bug — a toolbar control that changes the lock and leaves the
  * first-run notice on screen — and nothing would catch it.
  *
- * Placements are untouched. Changing the lock system does not invalidate a
- * scene: `@/assembly` treats lock as a weighted preference over base matching
- * (`MATCH_WEIGHTS.lock`), not a filter, so switching re-resolves the bill of
- * tiles and may add `base-lock-mismatch` or `lock-unavailable` warnings to
- * placements that no longer line up. Nothing is removed from the grid.
+ * **Placements are untouched, and since row A1 that is a much stronger claim
+ * than it used to be.** A fill names an exact file, so switching the lock does
+ * not merely re-weight a preference at bill time — it means the room is now
+ * showing files chosen under the *old* system, for the 1,419 of 3,822 items
+ * (37.1%) where the three disagree. What repairs that is a **re-solve**, not a
+ * write from here: C2 walks every instance's slots and calls {@link fillSlot},
+ * which rewrites the `auto` fills and refuses the `pinned` ones. Doing it here
+ * instead would put the fill solver — and therefore the catalog — inside the
+ * store, which is the dependency `schema.ts` spends its `TemplateId` docblock
+ * refusing.
+ *
+ * So this action is the *trigger* and not the repair, and nothing is removed
+ * from the grid either way.
  */
 export function setLockSystem(lock: LockSystem): void {
   useWorkshopStore.setState({ lock, lockChosen: true })
@@ -392,55 +461,52 @@ export function acknowledgeLockSystem(): void {
 /* --------------------------------------------------------------------- reset */
 
 /**
- * Wipe everything — state and the persisted copy both.
+ * Wipe everything — state, the persisted copy, the held meshes and the
+ * selection channel.
  *
  * `replace: true` rather than a merge, so a field removed in a future version
  * cannot survive a reset.
+ *
+ * ## Why it now reaches into the selection store — contract C-f
+ *
+ * `selection.ts` used to argue the opposite, and the argument was sound while it
+ * lasted: *"the reader already refuses to arm a file the palette holds no
+ * placeable row for, so a reset that emptied the library disarms the handoff by
+ * making it unclaimable, and coupling the persisted store to this one to restate
+ * that would be a dependency bought for nothing."*
+ *
+ * **Its premise was the library, and row A0 deleted the library.** The palette
+ * no longer lists the items a user kept — it lists 52 generated template
+ * families (§3.1), which are a function of the catalog and not of anything a
+ * reset clears. So a pending handoff now survives a reset *and stays claimable*,
+ * and the first render of the builder after "clear everything" would arm a piece
+ * the user has just thrown away. That is not a dependency bought for nothing; it
+ * is one line closing a hole the deletion opened.
+ *
+ * The coupling is one-directional and stays that way: this store imports
+ * `clearPendingDesign` and the selection store imports nothing from here.
  */
 export function resetWorkshop(): void {
   useWorkshopStore.setState(defaultWorkshopState(), true)
   clearGeneratedMeshes()
+  clearPendingDesign()
 }
 
 /* ----------------------------------------------------------------- selectors */
 
-/**
- * The library as a keyed set of {@link DesignId}s. Stable identity until the
- * library changes.
- *
- * **The key type changed in row V1 and the value's meaning changed with it.** A
- * reader that indexes this map with a `TileId` no longer compiles, which is the
- * intended outcome: the answer it wanted — "is this file saved?" — is not a
- * question the library can answer any more, because the library does not hold
- * files. The question to ask instead is `library[record.design] === true`, and
- * every record, variant and aggregate carries that field.
- */
-export const selectLibrary = (state: WorkshopState): WorkshopState['library'] => state.library
-
-/** How many items are in the library. A number, so equal counts do not re-render. */
-export const selectLibraryCount = (state: WorkshopState): number => Object.keys(state.library).length
-
-/**
- * Membership for one item.
- *
- * Curried so the design is bound once: the resulting selector returns a boolean,
- * which is what keeps 3,822 catalog cards out of the re-render path when an
- * unrelated item is added. It also narrows further than it used to — the
- * file-keyed version made a card's membership a `some()` over its variants, so
- * the card re-rendered whenever *any* of them changed.
- */
-export const selectIsInLibrary =
-  (design: DesignId) =>
-  (state: WorkshopState): boolean =>
-    state.library[design] === true
-
 /** The whole scene. Changes on every placement — subscribe from the canvas only. */
 export const selectPlacements = (state: WorkshopState): WorkshopState['placements'] => state.placements
 
-/** One placement, for a component that renders exactly one tile. */
+/**
+ * One instance, for a component that renders exactly one piece.
+ *
+ * The granularity that matters most since row A1: an instance is up to five
+ * parts and a slot edit rewrites one entry of one `fills` map, so a component
+ * subscribed through this re-renders for an edit to *its* piece and for no other.
+ */
 export const selectPlacement =
   (id: PlacementId) =>
-  (state: WorkshopState): Placement | undefined =>
+  (state: WorkshopState): TemplateInstance | undefined =>
     state.placements[id]
 
 /**
@@ -455,12 +521,15 @@ export const selectPlacement =
 export const selectGeneratedPlacements = (state: WorkshopState): WorkshopState['generated'] => state.generated
 
 /**
- * How many tiles are on the grid.
+ * How many instances are on the grid.
  *
- * Catalog placements only, and deliberately: this is the header's `{n} tiles
- * placed` chip and the toolbar's count, both of which are about tiles from the
- * archive. A generated base is counted in the generated bill's own line, which
- * says what it is.
+ * Instances, **not parts**, and the distinction is new: one instance is up to
+ * five printed pieces. This is the header's `{n} placed` chip and the toolbar's
+ * count, both of which are about what the user put down. Row C4 owns the count
+ * of *parts*, which is a question for the bill and needs the templates to answer.
+ *
+ * Catalog placements only; a generated base is counted in the generated bill's
+ * own line, which says what it is.
  */
 export const selectPlacementCount = (state: WorkshopState): number => Object.keys(state.placements).length
 
@@ -477,28 +546,13 @@ export const selectLockChosen = (state: WorkshopState): boolean => state.lockCho
 
 /* --------------------------------------------------------------------- hooks */
 
-/** @see selectLibrary */
-export function useLibrary(): WorkshopState['library'] {
-  return useWorkshopStore(selectLibrary)
-}
-
-/** @see selectLibraryCount */
-export function useLibraryCount(): number {
-  return useWorkshopStore(selectLibraryCount)
-}
-
-/** @see selectIsInLibrary */
-export function useIsInLibrary(design: DesignId): boolean {
-  return useWorkshopStore((state) => state.library[design] === true)
-}
-
 /** @see selectPlacements */
 export function usePlacements(): WorkshopState['placements'] {
   return useWorkshopStore(selectPlacements)
 }
 
 /** @see selectPlacement */
-export function usePlacement(id: PlacementId): Placement | undefined {
+export function usePlacement(id: PlacementId): TemplateInstance | undefined {
   return useWorkshopStore((state) => state.placements[id])
 }
 

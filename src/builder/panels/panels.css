@@ -337,16 +337,6 @@
   background: color-mix(in srgb, var(--acc) 14%, transparent);
 }
 
-/* The resolution summary is disclosure, not a warning: it says what the lock
-   preference did, and every scene with a topper in it has one. So it keeps the
-   note's shape and drops to the muted rule and a transparent ground — the
-   warnings above it have to stay the loudest thing in the column. */
-.of-bill-note[data-tone='resolved'] {
-  background: none;
-  border-left-color: var(--line);
-  color: var(--mut);
-}
-
 .of-bill-note-head {
   font-weight: 700;
 }
@@ -465,31 +455,11 @@ div.of-bill-open {
   text-align: center;
 }
 
-/* A base the resolver added, not a tile the user placed. */
-.of-bill-auto {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 0 0 3px 60px;
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--mut);
-}
-
-/* A row-level resolution mark that is a compromise rather than an explanation —
-   a base in the wrong system, a tile with no version in this one. Full ink
-   instead of muted, which is the only lever available: the Parchment palette has
-   no alarm colour, and `panels.css` may not invent one. */
-.of-bill-auto[data-tone='warn'] {
-  color: var(--ink);
-}
-
-.of-bill-row[data-auto] .of-bill-open {
-  /* Hatched left edge, echoing the drawing's own "this was added for you" mark
-     without borrowing the canvas's pattern id. */
-  border-left: 2px dashed var(--line);
-  padding-left: 6px;
-}
+/* Row A3 deleted three rules from here — `.of-bill-auto`, its `warn` tone and
+   the hatched `[data-auto]` left edge. All three marked a decision the app made
+   on the user's behalf: a base rule 1 inserted, and the variant rule 0 chose.
+   Nothing is inserted and nothing is chosen, so there is no such row to mark and
+   the selectors matched nothing. Row C4 owns whatever a row says about a fill. */
 
 /* ── Placements under a row ──────────────────────────────────────────────── */
 

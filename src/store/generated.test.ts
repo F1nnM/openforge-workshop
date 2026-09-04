@@ -32,7 +32,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { DesignId, TileId } from '@/catalog'
 import { GENERATED_ID_PREFIX, generatedPlacementKey } from '@/generator/placement/scene'
 
-import { A_RECIPE, aBinaryStl, aGeneratedBase } from './fixture'
+import { A_RECIPE, aBinaryStl, aGeneratedBase, aTemplateInstance } from './fixture'
 import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
 import { clearGeneratedMeshes, holdGeneratedMesh, meshFactsOf, useGeneratedMeshStore } from './meshes'
 import { STORAGE_KEY, clearPersistedWorkshopState } from './storage'
@@ -41,22 +41,12 @@ import {
   clearPlacements,
   moveGeneratedPlacement,
   placeGeneratedBase,
-  placeTile,
+  placeTemplate,
   removeGeneratedPlacement,
   resetWorkshop,
   rotateGeneratedPlacement,
   useWorkshopStore,
 } from './workshopStore'
-
-/**
- * One catalog placement's identity — a **design**, since row V4.
- *
- * `d` plus twelve hex characters, the shape the live corpus's 3,822 all have, so
- * `migrations.ts` can tell it from a `tiles/…` file id and from a `gen:` recipe
- * key. That three-way distinction is what this file's id-space assertions are
- * about.
- */
-const A_DESIGN = DesignId.parse('d4c2a57740b65')
 
 const state = () => useWorkshopStore.getState()
 const holds = () => useGeneratedMeshStore.getState().holds
@@ -76,7 +66,7 @@ beforeEach(() => {
 
 describe('placing a generated base', () => {
   it('keys it in the same PlacementId space as a catalog placement, without colliding', () => {
-    const tileKey = placeTile({ design: A_DESIGN, x: 0, z: 0, rotation: 0 })
+    const tileKey = placeTemplate(aTemplateInstance())
     const baseKey = placeGeneratedBase(aGeneratedBase({ x: 4, z: 0 }))
 
     // One namespace, two maps. That is what lets one id name a piece on the plan
@@ -88,27 +78,29 @@ describe('placing a generated base', () => {
     expect(Object.keys(state().generated)).toEqual([baseKey])
   })
 
-  it('gives it an identity that can never be a TileId, and is refused in the design slot', () => {
-    // Row S5's proof, re-run through the store. **Row V4 needed the second
-    // half.** S5's argument was lexical — `gen:` fails `TileId`'s `^tiles/…`
-    // pattern — and a placement now holds a `DesignId`, which carries no
-    // pattern at all, so `gen:` against *that* space is not disjoint by schema.
-    // `move.ts#identityOf` no longer relies on it (it qualifies by population)
-    // and `migrations.ts` rejects it by name on the way out of `localStorage`,
-    // which is what this asserts.
+  it('gives it an identity that can never be a TileId, and is refused in the template slot', () => {
+    // Row S5's proof, re-run through the store, and **row A1 changed which half
+    // is load bearing.** S5's argument was lexical — `gen:` fails `TileId`'s
+    // `^tiles/…` pattern; V4 put a pattern-free `DesignId` in the identity slot,
+    // so the guard in `migrations.ts` was the only thing left. A1's `TemplateId`
+    // carries a pattern again and a colon fails it, so the entry would be
+    // dropped either way — what the named arm still buys is the **message**,
+    // which is the only thing a reader of the console warning gets. Asserted
+    // here, so deleting that arm still fails a test.
     const key = placeGeneratedBase(aGeneratedBase({ x: 0, z: 0 }))
     const base = state().generated[key]?.base
     expect(base).toBeDefined()
     expect(base?.startsWith(GENERATED_ID_PREFIX)).toBe(true)
     expect(TileId.safeParse(base).success).toBe(false)
-    // The gap the schemas leave, and the guard that closes it.
+    // `DesignId` is the one brand it does satisfy, which is the gap V4 left and
+    // A1 closed by giving the identity slot a pattern.
     expect(DesignId.safeParse(base).success).toBe(true)
     const recovered = salvageWorkshopState({
-      placements: { '1e6a1f4e-0000-4000-8000-000000000000': { design: base, x: 0, z: 0, rotation: 0 } },
+      placements: { '1e6a1f4e-0000-4000-8000-000000000000': { template: base, x: 0, z: 0, rotation: 0 } },
     })
     expect(recovered.state.placements).toEqual({})
     expect(recovered.dropped).toEqual([
-      'placements.1e6a1f4e-0000-4000-8000-000000000000: design is a generated base id, which belongs in the generated map',
+      'placements.1e6a1f4e-0000-4000-8000-000000000000: template is a generated base id, which belongs in the generated map',
     ])
   })
 
@@ -156,7 +148,7 @@ describe('move, rotate and remove — exactly as any other placement', () => {
   })
 
   it('removes one, and leaves the catalog half alone', () => {
-    const tileKey = placeTile({ design: A_DESIGN, x: 0, z: 0, rotation: 0 })
+    const tileKey = placeTemplate(aTemplateInstance())
     const key = placeGeneratedBase(aGeneratedBase({ x: 4, z: 0 }))
 
     removeGeneratedPlacement(key)
@@ -249,10 +241,11 @@ describe('what persists, and what does not', () => {
   })
 
   it('drops an unreadable generated entry whole, and names it', () => {
-    // The asymmetry with a `Placement`, stated: a bad rotation on a catalog
-    // placement resets to 0 and keeps the tile, because 0 is a legal rotation.
-    // There is no partial reading of a recipe — a missing `-D` is a different
-    // base — so the entry goes and the report says which.
+    // The asymmetry with a `TemplateInstance`, stated: a bad rotation on a
+    // catalog placement resets to 0 and keeps the piece, because 0 is a legal
+    // rotation, and a bad *fill* costs one slot of five. There is no partial
+    // reading of a recipe — a missing `-D` is a different base — so the entry
+    // goes and the report says which.
     const good = aGeneratedBase({ x: 0, z: 0 })
     const recovered = readPersistedState(
       {

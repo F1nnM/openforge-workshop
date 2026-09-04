@@ -11,60 +11,89 @@
  * Four groups, in order of how much they matter:
  *
  *   1. **The version gate.** Row V1 deleted the migration ladder — see
- *      `migrations.ts` for the owner decision that licensed it — so the first
- *      obligation is that every shape that ever shipped is *discarded*, wholly
- *      and audibly, rather than half-read into the current shape.
+ *      `migrations.ts` for the owner decision that licensed it, and for why row
+ *      A1's 5 → 6 rung would have to *fabricate* rather than convert — so the
+ *      first obligation is that every shape that ever shipped is *discarded*,
+ *      wholly and audibly, rather than half-read into the current shape.
  *   2. **The expiry.** The licence to discard is a fact about deployment, and it
  *      will pass silently. One guard here is the closest in-repo proxy for it.
  *   3. **Garbage.** Every input below reached this list because it is something
  *      a browser can actually hand back. None may throw; all must produce a
  *      valid state.
  *   4. **Salvage detail.** What a *current-version* blob keeps and loses, which
- *      is the part of this module the ladder's removal did not touch.
+ *      is the part of this module the ladder's removal did not touch — and which
+ *      row A1 extended one level down, into a placement's `fills`.
  */
 import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { DesignId, TileId } from '@/catalog'
-
-import { aGeneratedBase } from './fixture'
+import { ANOTHER_TILE, A_TEMPLATE, A_TILE, aGeneratedBase } from './fixture'
 import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
 import {
   DEFAULT_LOCK_SYSTEM,
   PlacementId,
+  SlotName,
   WorkshopState as WorkshopStateSchema,
   defaultWorkshopState,
 } from './schema'
 
 /* -------------------------------------------------------------- test fixtures */
 
-const TILE_A = TileId.parse('tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl')
-const TILE_B = TileId.parse('tiles/cave/thick_wall/wall/corner/openlock/cave%aggregate+2#corner.IL.openlock.stl')
+const TILE_A = A_TILE
+const TILE_B = ANOTHER_TILE
 
 /**
  * Two items, spelled the way `pipeline/design.ts` mints one — `d` plus twelve
  * hex characters, and `d4c2a57740b65` is a real one (the `aztlan col+T` column
- * whose openlock variant owns the sprite sheet). The shape matters: it is what
- * makes a design id and a tile id lexically disjoint, which is the whole basis
- * of `salvageLibrary`'s ability to recognise a file id sitting in the library.
+ * whose openlock variant owns the sprite sheet).
+ *
+ * These are no longer an identity this store holds; they are the identity
+ * **version 5 held**, kept as strings so the reader can be shown refusing them.
+ * They are deliberately not `DesignId.parse`d: nothing in `schema.ts` imports
+ * `DesignId` any more, and a fixture that reached for the brand would suggest
+ * the store still has a use for it.
  */
-const DESIGN_A = DesignId.parse('d4c2a57740b65')
-const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
+const DESIGN_A = 'd4c2a57740b65'
+const DESIGN_B = 'd0f1a2b3c4d5e'
 
 const PLACEMENT_A = PlacementId.parse('9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f')
 const PLACEMENT_B = PlacementId.parse('b2c3d4e5-6f70-4812-9a3b-4c5d6e7f8091')
 const PLACEMENT_C = PlacementId.parse('c3d4e5f6-7081-4923-ab4c-5d6e7f809123')
 
+const FLOOR = SlotName.parse('floor')
+const WALL = SlotName.parse('right wall')
+
 /** One generated base, through `placeRecipe`. See `fixture.ts`. */
 const GENERATED_BASE = aGeneratedBase({ x: 4, z: 0, rotation: 90 })
 
-/** A scene exactly as **this** version writes it: the library and the placements hold designs. */
+/**
+ * A scene exactly as **this** version writes it: two template instances, one
+ * fully filled and one with a slot still open.
+ *
+ * The open slot is not an edge case dressed up as a fixture — §3.2 places a
+ * template with a slot nothing can fill, so a "normal" scene has them, and a
+ * fixture that was always complete would let the reader's handling of an absent
+ * fill go untested on the main path.
+ */
 const SCENE = {
-  library: { [DESIGN_A]: true, [DESIGN_B]: true },
   placements: {
-    [PLACEMENT_A]: { design: DESIGN_A, x: 0, z: 0, rotation: 0 },
-    [PLACEMENT_B]: { design: DESIGN_B, x: 2.5, z: -1.5, rotation: 270 },
+    [PLACEMENT_A]: {
+      id: PLACEMENT_A,
+      template: A_TEMPLATE,
+      x: 0,
+      z: 0,
+      rotation: 0,
+      fills: { [FLOOR]: { tile: TILE_A, pinned: false }, [WALL]: { tile: TILE_B, pinned: true } },
+    },
+    [PLACEMENT_B]: {
+      id: PLACEMENT_B,
+      template: A_TEMPLATE,
+      x: 2.5,
+      z: -1.5,
+      rotation: 270,
+      fills: { [FLOOR]: { tile: TILE_A, pinned: false } },
+    },
   },
   generated: { [PLACEMENT_C]: GENERATED_BASE },
   lock: 'magnetic',
@@ -72,16 +101,22 @@ const SCENE = {
 } as const
 
 /**
- * The placement map as versions 1-4 wrote it: keyed by **file**.
+ * The placement map as versions 1–4 wrote it: keyed by **file**.
  *
- * Spelled out rather than derived from {@link SCENE}, because it is the shape
- * the reader must refuse and a derivation would go stale the moment `Placement`
- * changes again — which is exactly what happened to the version 1-3 entries when
+ * Spelled out rather than derived from {@link SCENE}, because it is a shape the
+ * reader must refuse and a derivation would go stale the moment a placement
+ * changes again — which is exactly what happened to the version 1–3 entries when
  * row V4 landed and they silently started carrying designs.
  */
 const FILE_PLACEMENTS = {
   [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 },
   [PLACEMENT_B]: { tileId: TILE_B, x: 2.5, z: -1.5, rotation: 270 },
+} as const
+
+/** The placement map as version 5 wrote it: keyed by **design**. */
+const DESIGN_PLACEMENTS = {
+  [PLACEMENT_A]: { design: DESIGN_A, x: 0, z: 0, rotation: 0 },
+  [PLACEMENT_B]: { design: DESIGN_B, x: 2.5, z: -1.5, rotation: 270 },
 } as const
 
 /**
@@ -94,13 +129,11 @@ const FILE_PLACEMENTS = {
  * these are the blobs.
  *
  * The load-bearing detail is the **identity in every slot**. Versions 1 to 3
- * keyed `library` by {@link TileId} and versions 1 to 4 put one in every
- * placement, so reading either as a version 5 state would produce keys and
- * placements that name no item: they would render nowhere, count towards the
- * header's tally, and be unremovable through any button in the app. The
- * placement case is the worse of the two — a stale library row is one the
- * library screen offers to clear, while a stale placement is a piece of
- * somebody's *room*.
+ * keyed `library` by file, versions 1 to 4 put a file in every placement,
+ * version 5 put a design there, and none of the five has a template or a fill
+ * anywhere. Reading any of them as a version 6 state would produce a room of
+ * pieces that name nothing: they would render nowhere, count towards the
+ * header's tally, and be unremovable through any button in the app.
  */
 const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob: unknown])[] = [
   [
@@ -108,7 +141,7 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
     'no lockChosen and no generated',
     {
       library: { [TILE_A]: true, [TILE_B]: true },
-      placements: SCENE.placements,
+      placements: FILE_PLACEMENTS,
       lock: 'dragonlock',
     },
   ],
@@ -117,7 +150,7 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
     'lockChosen, still no generated',
     {
       library: { [TILE_A]: true, [TILE_B]: true },
-      placements: SCENE.placements,
+      placements: FILE_PLACEMENTS,
       lock: 'magnetic',
       lockChosen: false,
     },
@@ -139,6 +172,17 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
     {
       library: { [DESIGN_A]: true, [DESIGN_B]: true },
       placements: FILE_PLACEMENTS,
+      generated: { [PLACEMENT_C]: GENERATED_BASE },
+      lock: 'magnetic',
+      lockChosen: false,
+    },
+  ],
+  [
+    5,
+    'a placement holds one design on one cell, and there is still a library (row V4, before A1)',
+    {
+      library: { [DESIGN_A]: true, [DESIGN_B]: true },
+      placements: DESIGN_PLACEMENTS,
       generated: { [PLACEMENT_C]: GENERATED_BASE },
       lock: 'magnetic',
       lockChosen: false,
@@ -179,38 +223,47 @@ describe('the version gate', () => {
     expect(readPersistedState(throughJSON(blob), version).state).toEqual(defaultWorkshopState())
   })
 
-  it('does not half-read an old library or an old scene into the new one', () => {
-    // The sharpest claim in the file. Every version 1-3 library was a map of
-    // *files* and every version 1-4 placement named one, and `DesignId` is
-    // `z.string().min(1)` — so a reader that only parsed the values would accept
-    // every one of them and hand the app a library and a room of items that do
-    // not exist. The gate is what stops that, and `salvageLibrary` /
-    // `salvageDesign` are the second line if a hand edit gets past it.
+  it('does not half-read an old scene into the new one', () => {
+    // The sharpest claim in the file. Every version 1-5 placement named exactly
+    // one thing — a file, then a design — and neither is a template with slots,
+    // so a reader that shrugged and kept the coordinates would hand the app a
+    // room of pieces made of nothing. The gate is what stops that, and
+    // `salvageTemplate` is the second line if a hand edit gets past it.
     for (const [version, , blob] of HISTORICAL_BLOBS) {
-      const recovered = readPersistedState(blob, version).state
-      expect(recovered.library).toEqual({})
-      expect(recovered.placements).toEqual({})
+      expect(readPersistedState(blob, version).state.placements).toEqual({})
     }
-    expect(salvageWorkshopState({ library: { [TILE_A]: true } }).state.library).toEqual({})
     expect(salvageWorkshopState({ placements: FILE_PLACEMENTS }).state.placements).toEqual({})
-    // And it names the shape it met, per entry. Three shapes are reachable and
-    // they get three sentences: the historical field name (this), a file id
-    // under the *new* field name (a hand edit that renamed the key and not the
-    // value), and a `gen:` recipe key (a generated base in the catalog map).
+    expect(salvageWorkshopState({ placements: DESIGN_PLACEMENTS }).state.placements).toEqual({})
+  })
+
+  it('names the old identity field it found, per entry', () => {
+    // Three shapes are reachable through the unstamped path and they get three
+    // sentences: the version 1-4 field name, the version 5 field name, and a
+    // `gen:` recipe key in the template slot (a generated base in the catalog
+    // map).
     expect(salvageWorkshopState({ placements: FILE_PLACEMENTS }).dropped).toEqual([
-      `placements.${PLACEMENT_A}: names a file in the old tileId field — a placement holds an item now`,
-      `placements.${PLACEMENT_B}: names a file in the old tileId field — a placement holds an item now`,
+      `placements.${PLACEMENT_A}: names a file in the old tileId field — a placement holds a template now`,
+      `placements.${PLACEMENT_B}: names a file in the old tileId field — a placement holds a template now`,
     ])
-    expect(
-      salvageWorkshopState({ placements: { [PLACEMENT_A]: { design: TILE_A, x: 0, z: 0, rotation: 0 } } }).dropped,
-    ).toEqual([`placements.${PLACEMENT_A}: design is a file id, not a design id — a placement holds an item now`])
+    expect(salvageWorkshopState({ placements: DESIGN_PLACEMENTS }).dropped).toEqual([
+      `placements.${PLACEMENT_A}: names an item in the old design field — a placement holds a template now`,
+      `placements.${PLACEMENT_B}: names an item in the old design field — a placement holds a template now`,
+    ])
     expect(
       salvageWorkshopState({
-        placements: { [PLACEMENT_A]: { design: 'gen:base-square', x: 0, z: 0, rotation: 0 } },
+        placements: { [PLACEMENT_A]: { template: 'gen:base-square', x: 0, z: 0, rotation: 0 } },
       }).dropped,
-    ).toEqual([
-      `placements.${PLACEMENT_A}: design is a generated base id, which belongs in the generated map`,
-    ])
+    ).toEqual([`placements.${PLACEMENT_A}: template is a generated base id, which belongs in the generated map`])
+  })
+
+  it('refuses a file id in the template slot, which no pattern-free brand would have', () => {
+    // `TemplateId` is a lowercase hyphen-separated slug, so a `tiles/…` path
+    // fails it outright. Under `z.string().min(1)` — which is what `DesignId`
+    // still is — this would have parsed and produced an instance naming no
+    // template at all.
+    expect(
+      salvageWorkshopState({ placements: { [PLACEMENT_A]: { template: TILE_A, x: 0, z: 0, rotation: 0 } } }).dropped,
+    ).toEqual([`placements.${PLACEMENT_A}: template is not a template id (${JSON.stringify(TILE_A.slice(0, 40))})`])
   })
 
   it('reads a payload stamped with the current version', () => {
@@ -236,10 +289,10 @@ describe('the version gate', () => {
     ['a stringified current version', String(STORE_VERSION)],
   ])('discards %s rather than guessing', (_label, version) => {
     // Symmetric on purpose: a gate with a direction has a wrong side, and the
-    // wrong side of a shape mismatch is a screen full of items that resolve to
+    // wrong side of a shape mismatch is a screen full of pieces that resolve to
     // nothing. The previous reader read a *newer* blob best-effort, which was
     // right while the shared fields were stable and is not right across the
-    // change row V1 made to `library`.
+    // change row A1 made to a placement.
     const recovered = readPersistedState(SCENE, version)
     expect(recovered.state).toEqual(defaultWorkshopState())
     expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
@@ -249,7 +302,7 @@ describe('the version gate', () => {
   it('reports the version it found, whatever it was', () => {
     // The message is the only thing the user or a bug report will ever see, so
     // it has to distinguish "written by an older build" from "unreadable".
-    expect(readPersistedState(SCENE, 3).dropped[0]).toContain('version 3')
+    expect(readPersistedState(SCENE, 5).dropped[0]).toContain('version 5')
     expect(readPersistedState(SCENE, 'one').dropped[0]).toContain('"one"')
     expect(readPersistedState(SCENE, undefined).dropped[0]).toContain('undefined')
   })
@@ -271,6 +324,11 @@ describe('the version gate', () => {
  * turns it red, which was checked rather than assumed. What it cannot prove is
  * the thing it stands in for: a deploy from a 0.x tree is entirely possible, and
  * this test would pass through it. It is a reminder with teeth, not a gate.
+ *
+ * Row A1 is the third row to lean on this licence and by far the heaviest —
+ * `STORE_VERSION` 5 → 6 discards a user's whole room, and unlike V1 and V4 there
+ * is no rung a later author could retrofit that would not *invent* the room it
+ * claimed to recover. The guard is deliberately not weakened for it.
  */
 describe('the licence to discard persisted state', () => {
   it('is still valid, because this repo has not called itself 1.0.0', () => {
@@ -281,7 +339,7 @@ describe('the licence to discard persisted state', () => {
     expect(
       major,
       'package.json has left 0.x, which means this is about to ship or has shipped. ' +
-        'Discarding a user\'s saved library and room is no longer allowed: read the ' +
+        "Discarding a user's saved room is no longer allowed: read the " +
         '"When this licence expires" section of src/store/migrations.ts and write a ' +
         'migration rung before bumping STORE_VERSION again.',
     ).toBe(0)
@@ -296,6 +354,18 @@ describe('the licence to discard persisted state', () => {
     expect(source).toContain('When this licence expires')
     expect(source).toContain('served to a user who is not a developer')
   })
+
+  it('records that a 5 → 6 rung would have to fabricate a room rather than convert one', () => {
+    // The one thing A1 adds to the notice, and the reason it has to be written
+    // down: V1's and V4's rung was merely unwritable at hydrate time, which
+    // reads as a scheduling problem. A1's is underdetermined — 52 families, and
+    // nothing in a design says which one a user meant — so a future author who
+    // treated it as the same kind of problem would ship a plausible room nobody
+    // chose. §3.4 already names that failure class.
+    const source = readFileSync('src/store/migrations.ts', 'utf8')
+    expect(source).toContain('underdetermined')
+    expect(source).toContain('discard, or fabricate')
+  })
 })
 
 /* -------------------------------------------------------------------- garbage */
@@ -305,46 +375,69 @@ describe('the licence to discard persisted state', () => {
  * previous library, an object truncated by a tab killed mid-write, a hand edit
  * in devtools, an export format that used an array, a field whose type changed.
  */
+const AN_INSTANCE = { id: PLACEMENT_A, template: A_TEMPLATE, x: 0, z: 0, rotation: 0, fills: {} }
+
 const GARBAGE: readonly (readonly [string, unknown])[] = [
   ['null', null],
   ['undefined', undefined],
   ['an empty object', {}],
   ['an array where the state belongs', []],
-  ['an array of plausible placements', [{ design: DESIGN_A, x: 0, z: 0, rotation: 0 }]],
+  ['an array of plausible placements', [AN_INSTANCE]],
   ['a string', 'openforge'],
   ['a number', 42],
   ['a boolean', true],
-  ['a truncated object', { library: { [DESIGN_A]: true } }],
+  ['a truncated object', { placements: { [PLACEMENT_A]: AN_INSTANCE } }],
   ['an object with only a lock', { lock: 'magnetic' }],
-  ['a half-written placement', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: 1 } } }],
-  ['an array where placements belong', { placements: [{ design: DESIGN_A, x: 0, z: 0, rotation: 0 }] }],
-  ['an array where the library belongs', { library: [DESIGN_A] }],
-  ['a string where the library belongs', { library: DESIGN_A }],
+  ['a half-written placement', { placements: { [PLACEMENT_A]: { template: A_TEMPLATE, x: 1 } } }],
+  ['an array where placements belong', { placements: [AN_INSTANCE] }],
   ['a null placement', { placements: { [PLACEMENT_A]: null } }],
-  ['a wrong-typed coordinate', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: '3', z: 0, rotation: 0 } } }],
-  ['a NaN coordinate', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: Number.NaN, z: 0, rotation: 0 } } }],
+  ['a wrong-typed coordinate', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, x: '3' } } }],
+  ['a NaN coordinate', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, x: Number.NaN } } }],
+  ['an infinite coordinate', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, x: Number.POSITIVE_INFINITY } } }],
+  ['a null rotation', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, rotation: null } } }],
+  ['a numeric template id', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, template: 42 } } }],
+  ['an empty template id', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, template: '' } } }],
+  ['an uppercase template id', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, template: 'S2W-Corner' } } }],
+  // The shape every version 1-5 blob wrote, and the shape a hand edit still
+  // produces.
+  ['a file id where the template goes', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, template: TILE_A } } }],
+  ['the version 1-4 field name', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 } } }],
+  ['the version 5 field name', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: 0, z: 0, rotation: 0 } } }],
+  ['an id that disagrees with its key', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, id: PLACEMENT_B } } }],
+  // Fills, which are the population row A1 added.
+  ['a string where fills belong', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: 'floor' } } }],
+  ['an array where fills belong', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: [] } } }],
+  ['a null fill', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { floor: null } } } }],
+  ['a fill with no tile', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { floor: { pinned: true } } } } }],
   [
-    'an infinite coordinate',
-    { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: Number.POSITIVE_INFINITY, z: 0, rotation: 0 } } },
+    'a fill whose tile is a design id',
+    { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { floor: { tile: DESIGN_A, pinned: false } } } } },
   ],
-  ['a null rotation', { placements: { [PLACEMENT_A]: { design: DESIGN_A, x: 0, z: 0, rotation: null } } }],
-  ['a numeric design id', { placements: { [PLACEMENT_A]: { design: 42, x: 0, z: 0, rotation: 0 } } }],
-  ['an empty design id', { placements: { [PLACEMENT_A]: { design: '', x: 0, z: 0, rotation: 0 } } }],
-  // The shape every version 1-4 blob wrote, and the shape a hand edit still
-  // produces. `DesignId` is `min(1)` and would accept it, so this is the
-  // recognition `salvageDesign` adds.
-  ['a file id where the design goes', { placements: { [PLACEMENT_A]: { design: TILE_A, x: 0, z: 0, rotation: 0 } } }],
-  ['the old field name', { placements: { [PLACEMENT_A]: { tileId: TILE_A, x: 0, z: 0, rotation: 0 } } }],
+  [
+    'a fill with no pinned bit',
+    { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { floor: { tile: TILE_A } } } } },
+  ],
+  [
+    'a fill whose pinned bit is a string',
+    { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { floor: { tile: TILE_A, pinned: 'yes' } } } } },
+  ],
+  ['an empty slot name', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { '': { tile: TILE_A } } } } }],
+  [
+    'a prototype payload among the fills',
+    {
+      placements: {
+        [PLACEMENT_A]: { ...AN_INSTANCE, fills: JSON.parse(`{"__proto__":{"polluted":true}}`) as unknown },
+      },
+    },
+  ],
   ['an unknown lock system', { lock: 'openlok' }],
   ['a string where the chosen flag belongs', { lockChosen: 'yes' }],
   ['a numeric chosen flag', { lockChosen: 1 }],
   ['a null chosen flag', { lockChosen: null }],
   ['a numeric lock system', { lock: 3 }],
-  ['a library value that is not true', { library: { [DESIGN_A]: 1 } }],
-  ['a library keyed by file, which is what every version 1-3 blob held', { library: { [TILE_A]: true } }],
-  ['a nested prototype payload', { library: JSON.parse(`{"__proto__":{"polluted":true}}`) as unknown }],
+  ['a leftover library, which no longer has a reader', { library: { [DESIGN_A]: true } }],
   ['a state-level prototype payload', JSON.parse(`{"__proto__":{"polluted":true},"lock":"magnetic"}`) as unknown],
-  ['a very long key', { library: { [`d${'f'.repeat(5000)}`]: true } }],
+  ['a very long template id', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, template: 'a'.repeat(5000) } } }],
   ['a function-valued field', { placements: { [PLACEMENT_A]: () => null } }],
 ]
 
@@ -355,7 +448,7 @@ describe('garbage input', () => {
   })
 
   it.each(GARBAGE)('reads %s without throwing, at every version stamp', (_label, input) => {
-    for (const version of [0, 1, 3, STORE_VERSION, STORE_VERSION + 1, undefined, 'four']) {
+    for (const version of [0, 1, 5, STORE_VERSION, STORE_VERSION + 1, undefined, 'four']) {
       const recovered = readPersistedState(input, version)
       expect(WorkshopStateSchema.safeParse(recovered.state).success).toBe(true)
     }
@@ -385,38 +478,36 @@ describe('garbage input', () => {
 /* ------------------------------------------------------------ salvage details */
 
 describe('salvaging keeps what it can', () => {
-  it('drops only the corrupt placement, not the whole scene', () => {
+  it('drops only the corrupt instance, not the whole scene', () => {
     const recovered = salvageWorkshopState({
-      library: { [DESIGN_A]: true },
       placements: {
-        [PLACEMENT_A]: { design: DESIGN_A, x: 1, z: 2, rotation: 90 },
-        [PLACEMENT_B]: { design: DESIGN_B, x: 'over there', z: 2, rotation: 90 },
+        [PLACEMENT_A]: { ...AN_INSTANCE, x: 1, z: 2, rotation: 90 },
+        [PLACEMENT_B]: { ...AN_INSTANCE, id: PLACEMENT_B, x: 'over there', z: 2, rotation: 90 },
       },
       lock: 'magnetic',
     })
     expect(Object.keys(recovered.state.placements)).toEqual([PLACEMENT_A])
-    expect(recovered.state.library).toEqual({ [DESIGN_A]: true })
     expect(recovered.state.lock).toBe('magnetic')
     expect(recovered.dropped).toHaveLength(1)
     expect(recovered.dropped[0]).toContain(PLACEMENT_B)
   })
 
-  it('keeps a placement whose rotation is unreadable, resetting it to zero', () => {
+  it('keeps an instance whose rotation is unreadable, resetting it to zero', () => {
     // Position has no safe default — a fallback of 0 would stack every corrupt
-    // tile on the origin — but 0 is a perfectly legal rotation, so a placement
+    // piece on the origin — but 0 is a perfectly legal rotation, so an instance
     // is worth keeping when only its angle is lost.
     const recovered = salvageWorkshopState({
-      placements: { [PLACEMENT_A]: { design: DESIGN_A, x: 1, z: 2, rotation: 'sideways' } },
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, x: 1, z: 2, rotation: 'sideways' } },
     })
-    expect(recovered.state.placements[PLACEMENT_A]).toEqual({ design: DESIGN_A, x: 1, z: 2, rotation: 0 })
+    expect(recovered.state.placements[PLACEMENT_A]).toEqual({ ...AN_INSTANCE, x: 1, z: 2, rotation: 0 })
     expect(recovered.dropped[0]).toContain('rotation')
   })
 
   it('folds an out-of-range rotation into [0, 360)', () => {
     const recovered = salvageWorkshopState({
       placements: {
-        [PLACEMENT_A]: { design: DESIGN_A, x: 0, z: 0, rotation: 450 },
-        [PLACEMENT_B]: { design: DESIGN_B, x: 0, z: 0, rotation: -90 },
+        [PLACEMENT_A]: { ...AN_INSTANCE, rotation: 450 },
+        [PLACEMENT_B]: { ...AN_INSTANCE, id: PLACEMENT_B, rotation: -90 },
       },
     })
     expect(recovered.state.placements[PLACEMENT_A]?.rotation).toBe(90)
@@ -426,32 +517,26 @@ describe('salvaging keeps what it can', () => {
 
   it('folds a negative zero coordinate, which does not survive JSON, to positive zero', () => {
     const recovered = salvageWorkshopState({
-      placements: { [PLACEMENT_A]: { design: DESIGN_A, x: -0, z: -0, rotation: -0 } },
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, x: -0, z: -0, rotation: -0 } },
     })
-    const placement = recovered.state.placements[PLACEMENT_A]
-    expect(Object.is(placement?.x, 0)).toBe(true)
-    expect(Object.is(placement?.z, 0)).toBe(true)
-    expect(Object.is(placement?.rotation, 0)).toBe(true)
-    expect(recovered.dropped).toEqual([])
-  })
-
-  it('reads a library entry of false as absence, not as corruption', () => {
-    const recovered = salvageWorkshopState({ library: { [DESIGN_A]: true, [DESIGN_B]: false } })
-    expect(recovered.state.library).toEqual({ [DESIGN_A]: true })
+    const instance = recovered.state.placements[PLACEMENT_A]
+    expect(Object.is(instance?.x, 0)).toBe(true)
+    expect(Object.is(instance?.z, 0)).toBe(true)
+    expect(Object.is(instance?.rotation, 0)).toBe(true)
     expect(recovered.dropped).toEqual([])
   })
 
   it('resets an unreadable lock system to the default rather than dropping the scene', () => {
-    const recovered = salvageWorkshopState({ library: { [DESIGN_A]: true }, lock: 'padlock' })
+    const recovered = salvageWorkshopState({ placements: { [PLACEMENT_A]: AN_INSTANCE }, lock: 'padlock' })
     expect(recovered.state.lock).toBe(DEFAULT_LOCK_SYSTEM)
-    expect(recovered.state.library).toEqual({ [DESIGN_A]: true })
+    expect(Object.keys(recovered.state.placements)).toEqual([PLACEMENT_A])
     expect(recovered.dropped[0]).toContain('lock')
   })
 
   it('reads an absent chosen flag as not chosen, silently', () => {
     // Absence is the normal case for every blob written before version 2, so it
     // is not corruption and must not be reported as such.
-    const recovered = salvageWorkshopState({ library: { [DESIGN_A]: true }, lock: 'openlock' })
+    const recovered = salvageWorkshopState({ placements: {}, lock: 'openlock' })
     expect(recovered.state.lockChosen).toBe(false)
     expect(recovered.dropped).toEqual([])
   })
@@ -463,28 +548,20 @@ describe('salvaging keeps what it can', () => {
     expect(recovered.dropped[0]).toContain('lockChosen')
   })
 
-  it('refuses keys that are not design or placement ids', () => {
-    const recovered = salvageWorkshopState({
-      library: { '': true },
-      placements: { '': { design: DESIGN_A, x: 0, z: 0, rotation: 0 } },
-    })
-    expect(recovered.state.library).toEqual({})
+  it('refuses keys that are not placement ids', () => {
+    const recovered = salvageWorkshopState({ placements: { '': AN_INSTANCE } })
     expect(recovered.state.placements).toEqual({})
-    expect(recovered.dropped).toHaveLength(2)
+    expect(recovered.dropped).toEqual(['placements.: not a placement id'])
   })
 
-  it('names a file id in the library rather than keeping it or dropping it silently', () => {
-    // The one corruption row V1 made possible, and the reason `salvageLibrary`
-    // checks `TileId` before `DesignId` rather than after: a catalog path passes
-    // `DesignId`'s `min(1)`, so parse order is the whole defence. Keeping it
-    // would put an unremovable phantom in the library; dropping it without a
-    // word would be the same loss with no message.
-    const recovered = salvageWorkshopState({
-      library: { [DESIGN_A]: true, [TILE_A]: true, [TILE_B]: true },
-    })
-    expect(recovered.state.library).toEqual({ [DESIGN_A]: true })
-    expect(recovered.dropped).toHaveLength(2)
-    expect(recovered.dropped[0]).toContain('a file id, not a design id')
+  it('says nothing at all about a leftover library', () => {
+    // Not corruption of the current shape: a field this build has dropped. On
+    // the unstamped path — the only one that reaches here with an old blob — it
+    // has no reader and no effect, and a message would tell the user about a
+    // feature that is gone.
+    const recovered = salvageWorkshopState({ library: { [DESIGN_A]: true }, placements: {}, lock: 'magnetic' })
+    expect(recovered.dropped).toEqual([])
+    expect(recovered.state).toEqual({ ...defaultWorkshopState(), lock: 'magnetic' })
   })
 
   it('is idempotent, so validating twice on the read path reports nothing twice', () => {
@@ -492,5 +569,163 @@ describe('salvaging keeps what it can', () => {
     const twice = salvageWorkshopState(once.state)
     expect(twice.state).toEqual(once.state)
     expect(twice.dropped).toEqual([])
+  })
+})
+
+/* ---------------------------------------------------------------------- fills */
+
+describe('salvaging an instance’s fills', () => {
+  it('keeps the instance and loses only the unreadable fill', () => {
+    // The granularity that matters most in this row. A slot with no fill is a
+    // state §3.2 already requires the app to draw — needs a choice — so losing
+    // one costs a choice the user has to make again, while dropping the instance
+    // would cost the whole piece and its position.
+    const recovered = salvageWorkshopState({
+      placements: {
+        [PLACEMENT_A]: {
+          ...AN_INSTANCE,
+          fills: { [FLOOR]: { tile: TILE_A, pinned: true }, [WALL]: { tile: 'nonsense', pinned: false } },
+        },
+      },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.fills).toEqual({ [FLOOR]: { tile: TILE_A, pinned: true } })
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}.fills.${WALL}: tile is not a file id ("nonsense")`,
+    ])
+  })
+
+  it('reads an absent fills map as nothing filled, silently — contract C-g', () => {
+    // §3.2 places a template with slots still open, so "no fills" is a legal
+    // state of a *current* instance and not a shape a reader should complain
+    // about. There is no threshold of unfilled slots at which an instance stops
+    // being one.
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { id: PLACEMENT_A, template: A_TEMPLATE, x: 1, z: 1, rotation: 0 } },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.fills).toEqual({})
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('reads an unreadable fills map as nothing filled, and says so', () => {
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: ['floor'] } },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.fills).toEqual({})
+    expect(recovered.dropped).toEqual([`placements.${PLACEMENT_A}: fills is not an object (array), read as unfilled`])
+  })
+
+  it('falls back to auto for a missing pinned bit, which the next lock change repairs', () => {
+    // The direction is the whole content of the assertion. `false` means the
+    // solver chose it, so C2's re-solve rewrites the slot and the damage heals;
+    // `true` would freeze a choice the user never made, permanently and
+    // invisibly. Contract C-k is about that bit staying honest.
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { [FLOOR]: { tile: TILE_A } } } },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.fills[FLOOR]).toEqual({ tile: TILE_A, pinned: false })
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}.fills.${FLOOR}: pinned is not a boolean (undefined), read as auto`,
+    ])
+  })
+
+  it('keeps a pinned bit that is there', () => {
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { [FLOOR]: { tile: TILE_A, pinned: true } } } },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.fills[FLOOR]?.pinned).toBe(true)
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('refuses a prototype key among the fills, which is the loosest key space in the store', () => {
+    // A slot name is `z.string().min(1)`, because the authority on what a slot
+    // is called is the template. So `fills` is the one map whose key shape rules
+    // nothing out, and the `__proto__` check is load bearing rather than
+    // belt-and-braces the way it is on a UUID-keyed map.
+    const recovered = salvageWorkshopState({
+      placements: {
+        [PLACEMENT_A]: {
+          ...AN_INSTANCE,
+          fills: JSON.parse(`{"__proto__":{"tile":"tiles/x.stl","pinned":true}}`) as unknown,
+        },
+      },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.fills).toEqual({})
+    expect(recovered.dropped).toEqual([`placements.${PLACEMENT_A}.fills.__proto__: unsafe key`])
+    const probe: Record<string, unknown> = {}
+    expect(probe.tile).toBeUndefined()
+  })
+
+  it('refuses an empty slot name', () => {
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { '': { tile: TILE_A, pinned: false } } } },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.fills).toEqual({})
+    expect(recovered.dropped).toEqual([`placements.${PLACEMENT_A}.fills.: not a slot name`])
+  })
+
+  it('keeps a slot name with a space in it, because five of the 128 have one', () => {
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { 'right wall': { tile: TILE_A, pinned: false } } } },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.fills[WALL]).toEqual({ tile: TILE_A, pinned: false })
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('lets two slots name the same file — contract C-c', () => {
+    // Not deduped here, and it must not be: A3 and A4b are entitled to two
+    // slots resolving to one STL (`bill.ts` groups on md5 and counts both), and
+    // a store that collapsed them would silently print one piece where two are
+    // needed.
+    const recovered = salvageWorkshopState({
+      placements: {
+        [PLACEMENT_A]: {
+          ...AN_INSTANCE,
+          fills: { [FLOOR]: { tile: TILE_A, pinned: false }, [WALL]: { tile: TILE_A, pinned: false } },
+        },
+      },
+    })
+    expect(Object.keys(recovered.state.placements[PLACEMENT_A]?.fills ?? {})).toHaveLength(2)
+    expect(recovered.dropped).toEqual([])
+  })
+})
+
+/* ------------------------------------------------------------------- identity */
+
+describe('the map key and the id field', () => {
+  it('rewrites the field from the key and names the disagreement', () => {
+    // `schema.ts` puts `id` inside the instance because one travels detached
+    // from the map; the price is a disagreement that a blob can express. The key
+    // wins, because `state.placements[id]` is the lookup the whole app makes and
+    // trusting the field would produce an instance that cannot be found by its
+    // own id.
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, id: PLACEMENT_B } },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.id).toBe(PLACEMENT_A)
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}: id field says ${JSON.stringify(PLACEMENT_B)}; the map key wins`,
+    ])
+  })
+
+  it('fills in a missing id field silently, because the key is the whole answer', () => {
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { template: A_TEMPLATE, x: 0, z: 0, rotation: 0, fills: {} } },
+    })
+    expect(recovered.state.placements[PLACEMENT_A]?.id).toBe(PLACEMENT_A)
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('leaves every surviving instance addressable by its own id', () => {
+    // The invariant the two tests above exist for, asserted over a whole scene
+    // including the deliberately mismatched entry.
+    const recovered = salvageWorkshopState({
+      placements: {
+        [PLACEMENT_A]: { ...AN_INSTANCE, id: PLACEMENT_B },
+        [PLACEMENT_B]: { ...AN_INSTANCE, id: PLACEMENT_B },
+      },
+    })
+    for (const [key, instance] of Object.entries(recovered.state.placements)) {
+      expect(instance.id).toBe(key)
+    }
   })
 })

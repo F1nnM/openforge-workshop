@@ -336,6 +336,22 @@ function SideJoineryFact({ build }: { build: LockBuild }) {
  * point in one clause, which is the one sentence of `SettingsScreen`'s honesty
  * block that had nowhere else to go: a reader who thinks this is a filter thinks
  * switching will hide tiles, which is the opposite of what it does.
+ *
+ * ## Row A8 rewrote the placed branch, because it had become false
+ *
+ * It said *"each placed topper is re-matched to a base"* and named
+ * `base-lock-mismatch` as the flag a user would see in the bill. Row A3 deleted
+ * the auto-insert and that code with it — one of eight — so nothing re-matches
+ * anything and the bill could never show that string. The honesty requirement
+ * this block exists for was inverted by it: the promise was that *the codes named
+ * here are the codes the bill shows*.
+ *
+ * What is true today is smaller and is stated as such. A {@link SlotFill} names
+ * an exact **file**, so switching the preference changes nothing about a placed
+ * scene at all; the one code the bill can still show for a lock is
+ * `lock-unavailable`, and re-solving the `auto` fills under a new preference is
+ * row **C2**'s — `store/schema.ts#SlotFill` carries the contract and the 37.1%
+ * measurement that makes it worth doing.
  */
 function ChangeConsequences({ placed }: { placed: number }) {
   if (placed === 0) {
@@ -350,16 +366,16 @@ function ChangeConsequences({ placed }: { placed: number }) {
   return (
     <div className="of-lock-pop-note" data-tone="warn">
       <p className="of-lock-pop-note-lead">
-        You have <span className="of-lock-pop-mono">{countLabel(placed)}</span> {placed === 1 ? 'tile' : 'tiles'}{' '}
-        placed. Switching keeps every one of them — and may change what you have to print for them.
+        You have <span className="of-lock-pop-mono">{countLabel(placed)}</span>{' '}
+        {placed === 1 ? 'piece' : 'pieces'} placed. Switching keeps every one of them, and every file in
+        them.
       </p>
       <p className="of-lock-pop-note-body">
-        Each placed topper is re-matched to a base. Where no base in the new system carries the size code that topper
-        needs, the closest one is still used and the bill is flagged{' '}
-        <span className="of-lock-pop-mono">base-lock-mismatch</span> — those two pieces will not clip together as
-        printed. A tile offering only the system you left is flagged{' '}
-        <span className="of-lock-pop-mono">lock-unavailable</span>: it stays on the grid, and it is the joinery rather
-        than the tile that is now wrong. Anything already printed is unaffected.
+        A filled slot names one exact file, so nothing already on the grid is re-resolved and the bill
+        will ask for the same prints. What changes is what the archive offers you next, and what the bill
+        says about what is there: a slot holding a file that offers only the system you left is flagged{' '}
+        <span className="of-lock-pop-mono">lock-unavailable</span> — it stays on the grid, and it is the
+        joinery rather than the piece that is now wrong. Anything already printed is unaffected.
       </p>
     </div>
   )

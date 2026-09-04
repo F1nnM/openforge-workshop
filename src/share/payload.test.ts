@@ -18,24 +18,84 @@
  *   - **The lock wire order.** The one constant here that cannot be re-derived
  *     from anything, and whose silent breakage would change the joinery of every
  *     link already shared.
+ *   - **The variable-arity half row A1 introduced.** An instance's fill count is
+ *     the first field in this format whose value decides how many *other* fields
+ *     follow, so the guards around it are the ones with a new failure mode behind
+ *     them: a claimed count that nothing bounds, and a bitset whose last byte has
+ *     bits nobody wrote.
  */
 import { describe, expect, it } from 'vitest'
 
 import { LockSystem } from '@/store'
 
 import { ByteReader, ByteWriter, MalformedPayloadError, TruncatedPayloadError } from './bytes'
-import type { WirePayload, WirePlacement } from './payload'
-import { LOCK_ORDER, MAX_SHARE_PLACEMENTS, SHARE_FORMAT_VERSION, decodePayload, encodePayload } from './payload'
+import type { WireInstance, WirePayload } from './payload'
+import {
+  LOCK_ORDER,
+  MAX_SHARE_FILLS,
+  MAX_SHARE_PLACEMENTS,
+  MAX_SHARE_TABLE,
+  SHARE_FORMAT_VERSION,
+  decodePayload,
+  encodePayload,
+} from './payload'
 
-function payload(placements: readonly WirePlacement[], overrides: Partial<WirePayload> = {}): WirePayload {
-  return { manifestVersion: 1, lockIndex: 0, digest: 0xdeadbeef, placements, recipes: [], generated: [], ...overrides }
+/**
+ * Two real template ids and the six real slot names.
+ *
+ * Taken from `src/screens/assemblies/templates.ts` rather than invented, because
+ * the two things the tables cost are the *length* of a template id (mean 41.0
+ * characters over the 40 shipped, 51 at the widest) and the fact that two of the
+ * six slot names contain a space. A fixture of `'t1'` and `'a'` would measure
+ * neither. Not imported: this module is deliberately ignorant of the catalog, and
+ * the template table lives beside a screen.
+ */
+const TEMPLATES: readonly string[] = [
+  's2w-wall-on-tile-corner-low-single-piece',
+  's2w-wall-on-tile-internal-corner-low-modular',
+]
+const SLOTS: readonly string[] = ['base', 'column', 'floor', 'left wall', 'right wall', 'wall']
+
+function payload(instances: readonly WireInstance[], overrides: Partial<WirePayload> = {}): WirePayload {
+  return {
+    manifestVersion: 1,
+    lockIndex: 0,
+    digest: 0xdeadbeef,
+    templates: TEMPLATES,
+    slots: SLOTS,
+    instances,
+    recipes: [],
+    generated: [],
+    ...overrides,
+  }
 }
 
-const ROOM: readonly WirePlacement[] = [
-  { ordinal: 0, x: 0, z: 0, rotation: 0 },
-  { ordinal: 8701, x: -12.5, z: 40.5, rotation: 270 },
-  { ordinal: 4321, x: 3.5, z: -0.5, rotation: 11.25 },
-  { ordinal: 4321, x: 3.5, z: -0.5, rotation: 348.75 },
+/** An instance at `x`/`z` with `arity` fills, ordinals ascending from `ordinal`. */
+function instance(arity: number, ordinal: number, x: number, z: number, rotation: number): WireInstance {
+  return {
+    template: arity === 5 ? 1 : 0,
+    x,
+    z,
+    rotation,
+    fills: Array.from({ length: arity }, (_unused, index) => ({
+      slot: index,
+      ordinal: ordinal + index,
+      // Every third fill pinned, so the bitset is neither all zeros nor all ones
+      // and the byte boundary falls inside an instance at arity 3 and 5 both.
+      pinned: (ordinal + index) % 3 === 0,
+    })),
+  }
+}
+
+/**
+ * A realistic scene: the corpus's two arities, both edges of the ordinal range,
+ * the finest rotation the corpus carries, and two instances of one template.
+ */
+const ROOM: readonly WireInstance[] = [
+  instance(3, 0, 0, 0, 0),
+  instance(5, 8697, -12.5, 40.5, 270),
+  instance(3, 4321, 3.5, -0.5, 11.25),
+  instance(3, 4321, 3.5, -0.5, 348.75),
 ]
 
 describe('byte primitives', () => {
@@ -96,11 +156,27 @@ describe('payload round trip', () => {
   })
 
   it('is exact for an empty scene', () => {
-    const decoded = decodePayload(encodePayload(payload([])))
-    expect(decoded).toEqual(payload([]))
-    // Nine bytes of header and empty columns, plus the two zero counts that open
-    // the generated half — a recipe table of none and no generated placements.
-    expect(encodePayload(payload([])).length).toBe(11)
+    const empty = payload([], { templates: [], slots: [] })
+    expect(decodePayload(encodePayload(empty))).toEqual(empty)
+    // Nine bytes of header, then the four zero counts that open the two string
+    // tables, the recipe table and the generated column.
+    expect(encodePayload(empty).length).toBe(13)
+  })
+
+  it('carries a table entry no instance names', () => {
+    // An encoder does not produce one, but the format permits it and a decoder
+    // must not quietly renumber the table it was given.
+    const source = payload([instance(3, 10, 1, 1, 0)], { templates: [...TEMPLATES, 'unused-family'] })
+    expect(decodePayload(encodePayload(source))).toEqual(source)
+  })
+
+  it('carries an instance with no filled slots at all', () => {
+    // Contract C-g: a template with no candidate for a part places anyway. A
+    // template with no candidate for *any* part is the same statement, and the
+    // format has to be able to say it — the fill count column reads zero and the
+    // bitset is empty.
+    const source = payload([{ template: 0, x: 2, z: 3, rotation: 90, fills: [] }])
+    expect(decodePayload(encodePayload(source))).toEqual(source)
   })
 
   it('carries the manifest version and the lock index verbatim', () => {
@@ -119,6 +195,36 @@ describe('payload round trip', () => {
     }
   })
 
+  it('keeps each instance’s fills with that instance, at mixed arity', () => {
+    // The flat columns are the hazard row A1 introduced: three columns of fills
+    // are re-split by the fill count column, so an off-by-one there would hand
+    // one instance's floor to the next one — a plausible wrong room, with no
+    // error. Mixed arities in one payload are what make that visible.
+    const source = payload([instance(5, 100, 0, 0, 0), instance(3, 200, 1, 0, 0), instance(5, 300, 2, 0, 0)])
+    const decoded = decodePayload(encodePayload(source))
+    expect(decoded.instances.map((entry) => entry.fills.length)).toEqual([5, 3, 5])
+    expect(decoded.instances.map((entry) => entry.fills.map((fill) => fill.ordinal))).toEqual([
+      [100, 101, 102, 103, 104],
+      [200, 201, 202],
+      [300, 301, 302, 303, 304],
+    ])
+    expect(decoded).toEqual(source)
+  })
+
+  it('carries the pinned bit across every byte boundary', () => {
+    // One instance per length from 1 to 20 fills, so the bitset's last byte is
+    // partial at every possible width, and the pattern is not periodic in 8.
+    for (let arity = 1; arity <= 20; arity += 1) {
+      const fills = Array.from({ length: arity }, (_unused, index) => ({
+        slot: index % SLOTS.length,
+        ordinal: index,
+        pinned: index % 5 === 1 || index % 7 === 3,
+      }))
+      const source = payload([{ template: 0, x: 0, z: 0, rotation: 0, fills }])
+      expect(decodePayload(encodePayload(source)).instances[0]?.fills).toEqual(fills)
+    }
+  })
+
   it('preserves every rotation the corpus can produce', () => {
     // The observed `size|angle` values, and every multiple of the finest of them.
     const steps = [90, 45, 22.5, 11.25, 60, 120, 240, 300, 270]
@@ -126,49 +232,50 @@ describe('payload round trip', () => {
     for (const step of steps) {
       for (let turn = 0; turn * step < 360; turn += 1) rotations.add(turn * step)
     }
-    const placements = [...rotations].map((rotation, index) => ({ ordinal: index, x: 0, z: 0, rotation }))
-    expect(decodePayload(encodePayload(payload(placements))).placements).toEqual(placements)
+    const instances = [...rotations].map((rotation, index) => instance(3, index, 0, 0, rotation))
+    expect(decodePayload(encodePayload(payload(instances))).instances).toEqual(instances)
   })
 
   it('preserves half-unit positions over a large plan', () => {
-    const placements: WirePlacement[] = []
+    const instances: WireInstance[] = []
     for (let step = -200; step <= 200; step += 1) {
       // `+ 0` because `-0 / 2` is `-0`, and the codec canonicalises that to `+0`
-      // exactly as `Placement`'s own coordinate transform does — see the `-0` test
-      // below. A fixture holding `-0` would be asserting the opposite.
-      placements.push({ ordinal: 1, x: step / 2 + 0, z: -step / 2 + 0, rotation: 0 })
+      // exactly as `TemplateInstance`'s own coordinate transform does — see the
+      // `-0` test below. A fixture holding `-0` would be asserting the opposite.
+      instances.push(instance(3, 1, step / 2 + 0, -step / 2 + 0, 0))
     }
-    expect(decodePayload(encodePayload(payload(placements))).placements).toEqual(placements)
+    expect(decodePayload(encodePayload(payload(instances))).instances).toEqual(instances)
   })
 
   it('falls back to exact float64 for a position off the half-unit grid', () => {
-    // `Placement` validates any finite coordinate, so a finer snap mode is legal
-    // input the day it ships. Quantising it would move the tile silently.
-    const placements = [{ ordinal: 5, x: 0.25, z: 1 / 3, rotation: 0 }]
-    const bytes = encodePayload(payload(placements))
-    expect(decodePayload(bytes).placements).toEqual(placements)
+    // `TemplateInstance` validates any finite coordinate, so a finer snap mode is
+    // legal input the day it ships. Quantising it would move the instance
+    // silently.
+    const instances = [instance(3, 5, 0.25, 1 / 3, 0)]
+    const bytes = encodePayload(payload(instances))
+    expect(decodePayload(bytes).instances).toEqual(instances)
     // Both position columns escape; the rotation column stays quantised.
     expect(bytes[1]).toBe(0b011)
   })
 
   it('falls back to exact float64 for a rotation off the quarter-degree grid', () => {
-    const placements = [{ ordinal: 5, x: 1, z: 2, rotation: 33.7 }]
-    const bytes = encodePayload(payload(placements))
-    expect(decodePayload(bytes).placements).toEqual(placements)
+    const instances = [instance(3, 5, 1, 2, 33.7)]
+    const bytes = encodePayload(payload(instances))
+    expect(decodePayload(bytes).instances).toEqual(instances)
     expect(bytes[1]).toBe(0b100)
   })
 
   it('keeps the columns independent when only one of them escapes', () => {
-    const placements = [{ ordinal: 5, x: 0.25, z: 2, rotation: 90 }]
-    const bytes = encodePayload(payload(placements))
+    const instances = [instance(3, 5, 0.25, 2, 90)]
+    const bytes = encodePayload(payload(instances))
     expect(bytes[1]).toBe(0b001)
-    expect(decodePayload(bytes).placements).toEqual(placements)
+    expect(decodePayload(bytes).instances).toEqual(instances)
   })
 
   it('normalises -0 to 0 so a round trip compares equal', () => {
-    const decoded = decodePayload(encodePayload(payload([{ ordinal: 1, x: -0, z: -0, rotation: 0 }])))
-    expect(Object.is(decoded.placements[0]?.x, 0)).toBe(true)
-    expect(Object.is(decoded.placements[0]?.z, 0)).toBe(true)
+    const decoded = decodePayload(encodePayload(payload([instance(3, 1, -0, -0, 0)])))
+    expect(Object.is(decoded.instances[0]?.x, 0)).toBe(true)
+    expect(Object.is(decoded.instances[0]?.z, 0)).toBe(true)
   })
 
   it('stamps the current format version', () => {
@@ -183,7 +290,22 @@ describe('payload refuses input it cannot represent', () => {
   })
 
   it('rejects a negative ordinal', () => {
-    expect(() => encodePayload(payload([{ ordinal: -1, x: 0, z: 0, rotation: 0 }]))).toThrow(MalformedPayloadError)
+    const fills = [{ slot: 0, ordinal: -1, pinned: false }]
+    expect(() => encodePayload(payload([{ template: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
+      MalformedPayloadError,
+    )
+  })
+
+  it('rejects an index off the end of the table it names', () => {
+    // Both directions of the same mistake, and they are the reason the encoder
+    // checks at all: the tables are built by `link.ts` from the same scene, so a
+    // stale index here is a bug in the caller and not user data.
+    const bad = { template: TEMPLATES.length, x: 0, z: 0, rotation: 0, fills: [] }
+    expect(() => encodePayload(payload([bad]))).toThrow(MalformedPayloadError)
+    const fills = [{ slot: SLOTS.length, ordinal: 1, pinned: false }]
+    expect(() => encodePayload(payload([{ template: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
+      MalformedPayloadError,
+    )
   })
 })
 
@@ -213,10 +335,10 @@ describe('payload decode is total under corruption', () => {
   })
 
   it('rejects unknown flag bits', () => {
-    // Bit 6, the lowest bit no flag claims. Bits 0-2 are the tile columns' exact
-    // escape hatch and bits 3-5 the generated columns', so this assertion has to
-    // move up as the byte fills - and it must be a *reserved* bit, because a
-    // known one is a legal payload rather than a rejected one. That is not
+    // Bit 6, the lowest bit no flag claims. Bits 0-2 are the instance columns'
+    // exact escape hatch and bits 3-5 the generated columns', so this assertion
+    // has to move up as the byte fills - and it must be a *reserved* bit, because
+    // a known one is a legal payload rather than a rejected one. That is not
     // hypothetical: format 2 took bit 3, and this test caught the stale 0b1000.
     const wrong = Uint8Array.from(good)
     wrong[1] = 0b100_0000
@@ -238,6 +360,80 @@ describe('payload decode is total under corruption', () => {
     writer.uvar(MAX_SHARE_PLACEMENTS + 1)
     for (let i = 0; i < 4; i += 1) writer.u8(0)
     expect(() => decodePayload(writer.bytes())).toThrow(MalformedPayloadError)
+  })
+
+  it('rejects a fill count column that claims more fills than the format carries', () => {
+    // The guard row A1 made necessary: the instance count no longer bounds the
+    // number of ordinals in the payload, so a header inside every other limit can
+    // still claim half a billion fills. Two instances are enough to overflow the
+    // total without either one exceeding what a `uvar` says innocently.
+    const writer = new ByteWriter()
+    writer.u8(SHARE_FORMAT_VERSION)
+    writer.u8(0)
+    writer.uvar(1)
+    writer.u8(0)
+    writer.uvar(2)
+    for (let i = 0; i < 4; i += 1) writer.u8(0)
+    writer.uvar(1)
+    writer.utf8('family')
+    writer.uvar(1)
+    writer.utf8('floor')
+    writer.uvar(0)
+    writer.uvar(0)
+    writer.zigzag(0)
+    writer.zigzag(0)
+    writer.zigzag(0)
+    writer.zigzag(0)
+    writer.uvar(0)
+    writer.uvar(0)
+    writer.uvar(MAX_SHARE_FILLS)
+    writer.uvar(MAX_SHARE_FILLS)
+    expect(() => decodePayload(writer.bytes())).toThrow(MalformedPayloadError)
+  })
+
+  it('rejects a string table larger than the format carries', () => {
+    // The tables are the one place a payload claims a count of *strings*, so a
+    // claimed count is a claim about far more than a byte each. Both tables go
+    // through one reader, so one test covers both limits.
+    const writer = new ByteWriter()
+    writer.u8(SHARE_FORMAT_VERSION)
+    writer.u8(0)
+    writer.uvar(1)
+    writer.u8(0)
+    writer.uvar(0)
+    for (let i = 0; i < 4; i += 1) writer.u8(0)
+    writer.uvar(MAX_SHARE_TABLE + 1)
+    expect(() => decodePayload(writer.bytes())).toThrow(MalformedPayloadError)
+  })
+
+  it('rejects a table count larger than the bytes that follow it', () => {
+    // The cheaper of the two checks, and the one that catches almost every
+    // corrupt header: a table entry costs at least its own length prefix.
+    const writer = new ByteWriter()
+    writer.u8(SHARE_FORMAT_VERSION)
+    writer.u8(0)
+    writer.uvar(1)
+    writer.u8(0)
+    writer.uvar(0)
+    for (let i = 0; i < 4; i += 1) writer.u8(0)
+    writer.uvar(64)
+    writer.utf8('family')
+    expect(() => decodePayload(writer.bytes())).toThrow(MalformedPayloadError)
+  })
+
+  it('rejects padding bits above the last pinned flag', () => {
+    // Three fills, so five bits of the pinned byte are padding. Setting one of
+    // them is a payload with two encodings, and the format has exactly one.
+    const source = payload([instance(3, 1, 0, 0, 0)])
+    const bytes = encodePayload(source)
+    expect(decodePayload(bytes)).toEqual(source)
+
+    // The bitset is the byte before the two zero counts that open the generated
+    // half, which a three-fill scene reaches with no recipes.
+    const pinnedAt = bytes.length - 3
+    const wrong = Uint8Array.from(bytes)
+    wrong[pinnedAt] = (wrong[pinnedAt] ?? 0) | 0b1000_0000
+    expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
   })
 
   it('rejects trailing bytes rather than ignoring them', () => {

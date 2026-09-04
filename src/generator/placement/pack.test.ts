@@ -19,8 +19,10 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import type { BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
-import type { CatalogFile } from '@/catalog'
-import { CatalogFile as CatalogFileSchema, DesignId, MEASURED_SPRITE_SHEET } from '@/catalog'
+import type { AssemblyContext, AssemblyTemplate } from '@/assembly'
+import type { CatalogFile, TileId } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, MEASURED_SPRITE_SHEET } from '@/catalog'
+import { createCompositionIndex } from '@/composition'
 import { ArchiveNamingError } from '@/download/entries'
 import { EmptyArchiveError, GeneratedDigestCollisionError, buildArchivePlan } from '@/download/plan'
 import type { BlobSource } from '@/download/source'
@@ -28,7 +30,7 @@ import { originalStlUrl } from '@/download/source'
 import { ArchiveLengthMismatchError, openArchiveStream } from '@/download/stream'
 import { urlListText } from '@/download/urlList'
 import { BINARY_FACET_BYTES, BINARY_HEADER_BYTES, binaryStl, box } from '@/three/stl/fixtures'
-import type { PlacementId } from '@/store'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 
 import { md5 } from '../engine/md5'
 import { canonicalise, recipeKey } from '../panel/recipe'
@@ -122,13 +124,43 @@ function catalogOf(rows: readonly { id: string; blob: string; bytes: number }[])
 const CATALOGUED_BLOB = 'a'.repeat(32)
 const CATALOG = catalogOf([{ id: 'tiles/x/wall.stl', blob: CATALOGUED_BLOB, bytes: 4_096 }])
 
+/**
+ * A one-slot recipe, so an instance is exactly one file.
+ *
+ * The whole of what row A8 changed in this file. Every assertion here is about
+ * the *generated* half of a pack — digests, notices, licences, refusals — and the
+ * catalog half only has to list the files a test named. Before A3 a placement
+ * named a design and the resolver picked the file; a fill names the file, and
+ * this is the smallest recipe that turns one file into one instance.
+ *
+ * `tags: {}` admits every record — `candidatesFor` starts from the whole document
+ * list when the require set is empty — so no fixture fill is ever reported
+ * `fill-off-slot`, and these tests stay about packs rather than about C1's
+ * constraint semantics.
+ */
+const FIXTURE_SLOT = 'model' as SlotName
+const FIXTURE_TEMPLATE_ID = 'pack-fixture' as TemplateId
+const FIXTURE_TEMPLATE: AssemblyTemplate = {
+  id: FIXTURE_TEMPLATE_ID,
+  tags: [],
+  parts: [{ name: FIXTURE_SLOT, tags: {} }],
+}
+
+const CATALOG_CONTEXT: AssemblyContext = {
+  templates: (id) => (id === FIXTURE_TEMPLATE_ID ? FIXTURE_TEMPLATE : undefined),
+  composition: createCompositionIndex(CATALOG),
+}
+
 function catalogBill(ids: readonly string[]): BillOfTiles {
-  // A placement names an item (row V4), and `catalogOf` gives every fixture
-  // record its own design keyed on the id, so this bill lists exactly `ids`.
-  return buildBillOfTiles(
-    ids.map((id) => ({ design: DesignId.parse(`d${id}`), x: 0, z: 0, rotation: 0 })),
-    buildAssemblyIndex(CATALOG),
-  )
+  const instances: TemplateInstance[] = ids.map((id, at) => ({
+    id: `p${String(at)}` as PlacementId,
+    template: FIXTURE_TEMPLATE_ID,
+    x: at * 2,
+    z: 0,
+    rotation: 0,
+    fills: { [FIXTURE_SLOT]: { tile: id as TileId, pinned: false } },
+  }))
+  return buildBillOfTiles(instances, buildAssemblyIndex(CATALOG), CATALOG_CONTEXT)
 }
 
 const EMPTY_BILL = catalogBill([])
