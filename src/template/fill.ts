@@ -81,18 +81,35 @@
  * (`unknown-ref` — empty across the corpus today, and reachable the moment a
  * caller asks for a size the corpus has no tag for: `size|width` has no `3`).
  *
- * ## Size is layered on, in B3's spelling
+ * ## Size is layered on, and it arrives two ways
  *
- * {@link FillContext.cell} is row B4's instance size parameter. It resolves
- * through `size.ts#slotSizePredicate` and `sizeRefs` — B3's derivation from B2's
- * anchor — and is appended to the slot's own resolved `require`/`deny`. There is
- * no second spelling of `size|width|<n>` in this file, deliberately: B3 asks to
- * be consulted before a ref is authored, and the tag vocabulary has one home.
+ * The instance's size is a **parameter**, not part of the family key (B3: 52
+ * families keyed without it, 217 to 277 with it), so it is narrowed onto the
+ * slots at fill time and never stored. Two fields, because the two kinds of
+ * template answer differently:
+ *
+ *   - {@link FillContext.cell} — a grid cell, spread over the slots by
+ *     `size.ts#slotSizePredicate` and `sizeRefs`, B3's derivation from B2's
+ *     anchor. This is the path for a template with a **layout**: a 2x2 recipe
+ *     wants a 2x2 floor and a 2-unit *run* of wall, which one ref list cannot
+ *     say.
+ *   - {@link FillContext.size} — exact `size|` refs applied to every slot. This
+ *     is row **B4**'s own control, and it is here because B4 landed mid-row and
+ *     **all 51 of its generated families have exactly one part and no layout**,
+ *     deliberately and with four measurements behind it — so **0 of 51 have a
+ *     convention** and `cell` would have been inert on every palette row C1 is
+ *     building. Measured over B4's shipped domain: **350 of 350 size options
+ *     fill, and 51 of 51 families fill with no size asked for at all.**
+ *
+ * There is no second spelling of `size|width|<n>` in this file either way — B3
+ * asks to be consulted before a ref is authored, and B4's table is the same
+ * vocabulary because both read tags the corpus already carries.
  *
  * **A slot with no size requirement is not a slot with no candidates.** A
- * `corner` anchor resolves to `{ kind: 'none' }` and contributes no refs at all,
- * and five of B4's 52 families have an empty size domain and will place with no
- * cell at all. Both paths are `corpus.test.ts` assertions rather than comments.
+ * `corner` anchor resolves to `{ kind: 'none' }` and contributes no refs, and 8
+ * of B4's 51 families offer nothing but *any size* — an empty domain, which B3
+ * predicted for 5 of them. Every one of those paths is a `corpus.test.ts`
+ * assertion rather than a comment.
  *
  * ## What this file does not do
  *
@@ -181,15 +198,58 @@ export interface FillContext {
    */
   readonly family?: string | undefined
   /**
-   * The instance's grid cell — row B4's size parameter, or absent for "whatever
-   * the recipe says".
+   * The instance's grid cell, for a template B2 has a **layout** for.
    *
-   * The 40 shipped recipes pin their own sizes in `require` (`size|width|2`),
-   * so passing the cell they already imply changes nothing and passing a
-   * different one empties the slot rather than silently placing the wrong size.
-   * B4's generated families are the caller this is for.
+   * Resolved per slot through B3's anchor derivation — congruence for a `cell`
+   * anchor, the anchored face's run for an `edge`, nothing for a `corner` — so
+   * one cell narrows a five-slot recipe correctly, which a single ref list
+   * cannot: a 2x2 recipe wants a 2x2 floor and a 2-unit *run* of wall, and those
+   * are different refs.
+   *
+   * The 40 shipped recipes pin their own sizes in `require` already
+   * (`size|width|2`), so passing the cell they imply changes nothing and passing
+   * a different one empties the slot rather than silently placing the wrong
+   * size. Absent means "whatever the recipe says".
    */
   readonly cell?: GridSize | undefined
+  /**
+   * Exact `size|` refs to require of **every** slot — row B4's own size control.
+   *
+   * ## Why this exists beside `cell`, and what it corrects
+   *
+   * `cell` alone was this row's reading of the plan: B4 would generate the
+   * families, B2's layout would spread one cell over their slots, and §2.4's
+   * *"size is a slot parameter"* would be satisfied by the anchor derivation.
+   * **That reading was wrong about the families, and B4 is right.** Its 51
+   * generated families have **exactly one part** each — 19 `wall`, 17 `floor`, 6
+   * `column`, 3 `stair`, 2 `riser`, 2 `roof`, 1 `decor`, 1 `base` — for four
+   * measured reasons it sets out under *"One slot per family, and the
+   * alternative is a defect"*, the first of which is this row's own finding: a
+   * one-slot family has no sibling to empty, so it cannot fail a walk at any
+   * depth. It also declines a layout deliberately, because B2's three outputs
+   * are all constants for one slot at the origin.
+   *
+   * So **0 of 51 have a part-name set `rules.ts` has a convention for**, no
+   * anchor exists, and `cell` narrows *nothing* on any palette row C1 is
+   * building. The size control would have been inert exactly where it is the
+   * whole interaction.
+   *
+   * B4 ships the domain instead, as `GENERATED_FAMILY_SIZES`: per family, a list
+   * of `{ label, tags }` whose tags are exactly `size|width|<n>` and
+   * `size|depth|<n>` — **350 options over the 51 families**, and the same
+   * spelling `size.ts#sizeRefs` produces, because both read the tags the corpus
+   * already carries. So this field takes that list and appends it, and the two
+   * paths cannot drift into two vocabularies.
+   *
+   * **Family-wide is correct only because the family has one slot.** Applying
+   * one ref list to every slot of a *multi*-slot recipe would require the wall
+   * and the floor to carry the same size tags, which is the mistake `cell`
+   * exists to avoid — B3 measured that an `edge` slot wants a run and a `cell`
+   * slot a congruence. Both may be given; the refs are unioned, and a caller
+   * that gives both for a multi-slot template gets the intersection it asked
+   * for.
+   */
+  readonly size?: readonly string[] | undefined
 }
 
 /* --------------------------------------------------------------- the decision */
@@ -201,7 +261,11 @@ export interface FillContext {
  *     archive, before any sibling is picked. **0 of the 128 shipped template
  *     parts**, minimum 5 candidates, so this needs no UI for templates at all;
  *     it is the accessory-slot case (9 of 1,244) and it reads as an archive gap
- *     rather than a step to take.
+ *     rather than a step to take. The **requested size counts as the slot's own
+ *     constraint** here — the cold re-resolution behind this classification
+ *     carries it — so a size nothing in the archive matches reads as *nothing
+ *     is this size* rather than as *change an earlier choice*, which is the
+ *     honest reading: no sibling could reopen it.
  *   - `closed-by-siblings` — the slot had candidates and the picks around it
  *     took them all. This is the greedy walk's 16 failures, and the policy
  *     exists to make it unreachable for an unpinned instance; it stays reachable
@@ -464,20 +528,33 @@ function candidatesOf(walk: Walk, slot: AssemblySlot, override?: readonly Siblin
  * The size refs one slot carries, or `undefined` when size is not a parameter of
  * this fill.
  *
- * `undefined` for three distinct reasons and they all mean *do not narrow*: no
- * cell was asked for, the part-name set has no layout to read an anchor from, or
- * the anchor is a `corner`, for which B3 measured the honest predicate to be
- * `{ kind: 'none' }`. The third is the one worth naming — a slot with no size
+ * Two sources, unioned: {@link FillContext.size}, which is B4's own per-family
+ * list and applies to every slot, and {@link FillContext.cell}, which is B3's
+ * per-slot derivation from B2's anchor.
+ *
+ * `undefined` means *do not narrow*, and it has four distinct causes that all
+ * mean the same thing: neither field was given; the part-name set has no layout
+ * to read an anchor from (**all 51 of B4's generated families**, which is why
+ * the `size` field exists); the anchor is a `corner`, for which B3 measured the
+ * honest predicate to be `{ kind: 'none' }`; or the family's size domain is
+ * empty and B4's option carries no tags — **8 of its 51 families** have nothing
+ * but *any size*. The last two are the ones worth naming: a slot with no size
  * control must not become a slot with no candidates.
  */
 function sizeRefsFor(walk: Walk, part: string): { readonly require: readonly string[]; readonly deny: readonly string[] } | undefined {
+  const require = [...(walk.context.size ?? [])]
+  const deny: string[] = []
+
   const cell = walk.context.cell
   const layout = walk.layout
-  if (cell === undefined || layout === undefined) return undefined
-  const rule = layout.slots.find((one) => one.part === part)
-  if (rule === undefined) return undefined
-  const refs = sizeRefs(slotSizePredicate(rule, cell, cornerSpanOf(layout)))
-  return refs.require.length === 0 && refs.deny.length === 0 ? undefined : refs
+  const rule = layout?.slots.find((one) => one.part === part)
+  if (cell !== undefined && layout !== undefined && rule !== undefined) {
+    const refs = sizeRefs(slotSizePredicate(rule, cell, cornerSpanOf(layout)))
+    for (const tag of refs.require) if (!require.includes(tag)) require.push(tag)
+    for (const tag of refs.deny) if (!deny.includes(tag)) deny.push(tag)
+  }
+
+  return require.length === 0 && deny.length === 0 ? undefined : { require, deny }
 }
 
 /** One still-open sibling a pick could move. */
