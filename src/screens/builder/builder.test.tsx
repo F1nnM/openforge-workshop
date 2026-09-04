@@ -231,23 +231,32 @@ describe('the builder screen', () => {
     expect(screen.getByRole('button', { name: /^Lock system: / })).toBeInTheDocument()
   })
 
-  it('reads the facets out of the URL, so a shared palette search arrives filtered', async () => {
-    const { router } = await renderBuilder('/builder?q=cave')
+  it('reads the query out of the URL, so a shared palette link arrives filtered', async () => {
+    // **What `q` narrows changed with row C1 and the linkability did not.** The
+    // palette listed the archive's 3,822 items and this asserted that a shared
+    // `?q=cave` found a *tile*; it lists the 91 templates this build can place,
+    // so the same URL narrows the family list — `curve` matches the three curve
+    // families and nothing in the catalog is consulted. `routeTree.tsx` still
+    // validates the whole `FacetSearch` for the route, which is why the link
+    // works at all.
+    const { router } = await renderBuilder('/builder?q=curve')
 
-    expect(currentSearch(router).q).toBe('cave')
-    // The archive block appears with the matching tile in it — the palette
-    // searched the whole catalog rather than only the (empty) library.
-    expect(screen.getByRole('region', { name: /^Archive/ })).toHaveTextContent(FIXTURE_NAMES.wallNoBase)
+    expect(currentSearch(router).q).toBe('curve')
+    const templates = screen.getByRole('region', { name: /^Templates/ })
+    expect(templates).toHaveTextContent('Curve (Separate Wall)')
+    // And a tile's name is no longer a query this list can answer, which is why
+    // the drawer's handoff stopped seeding one.
+    expect(templates).not.toHaveTextContent(FIXTURE_NAMES.wallNoBase)
   })
 
   it('writes the palette query back to the URL', async () => {
     const { router } = await renderBuilder()
 
-    fireEvent.change(screen.getByRole('searchbox', { name: /Search the catalog/ }), {
-      target: { value: 'dungeon' },
+    fireEvent.change(screen.getByRole('searchbox', { name: /Search the template families/ }), {
+      target: { value: 'corner' },
     })
     await waitFor(() => {
-      expect(currentSearch(router).q).toBe('dungeon')
+      expect(currentSearch(router).q).toBe('corner')
     })
   })
 

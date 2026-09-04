@@ -107,10 +107,14 @@
   list-style: none;
 }
 
+/* A column since row C1: the armed row grows a size control under its own
+   button, and that control belongs to the row rather than to a block of its own
+   — see `PalettePanel.tsx#PaletteList`. */
 .of-pal-row {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -131,15 +135,7 @@
     border-color 120ms ease;
 }
 
-/* A `<div>`, not a button: the tile has no footprint that can be drawn, so
-   there is nothing to arm. See `PalettePanel.tsx` on why it is not a disabled
-   button. */
-.of-pal-row:not([data-placeable]) .of-pal-pick {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.of-pal-row[data-placeable] .of-pal-pick:hover {
+.of-pal-pick:hover {
   background: var(--bg3);
 }
 
@@ -149,23 +145,15 @@
   border-color: var(--acc);
 }
 
-.of-pal-thumb {
-  flex: none;
-  /* 52×40 — the contract's palette thumbnail. Both dimensions are set, so the
-     4:3 `aspect-ratio` the catalog card relies on does not apply and the square
-     frame inside sits 6px in from each side of the well. */
-  width: 52px;
-  height: 40px;
-}
-
 .of-pal-name {
   flex: 1;
   min-width: 0;
   font-size: 12.5px;
   line-height: 1.25;
   color: var(--ink);
-  /* Two lines, then ellipsis. The corpus's display names run to five words and a
-     size token, and a 272px column cannot hold one on a line. */
+  /* Two lines, then ellipsis. A family name is short once the group heading has
+     taken its role off the front — `Straight (Separate Wall)` — but the 40
+     recipe names still run to four words after their shared prefix goes. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -185,6 +173,103 @@
   font-size: 12px;
   line-height: 1.45;
   color: var(--mut);
+}
+
+/* ── The palette's groups, facets and size control (row C1) ──────────────────
+   Nine role groups over 91 rows, two facet axes, and one size control that
+   appears inside the armed row. Every measurement behind the shape is in
+   `palette.ts` and `families.ts`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-pal-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* Same hairline rule as the block heading, one step quieter: nine of these are
+   on screen at once and the block's own `<h2>` has to stay the louder one. */
+.of-pal-subheading {
+  margin-top: 4px;
+}
+
+.of-pal-facets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.of-pal-facet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.of-pal-chip,
+.of-pal-sizebtn {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 4px 6px;
+  color: var(--mut);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.of-pal-chip:hover,
+.of-pal-sizebtn:hover {
+  background: var(--bg3);
+}
+
+.of-pal-chip[aria-pressed='true'],
+.of-pal-sizebtn[aria-pressed='true'] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--acc) 14%, transparent);
+  border-color: var(--acc);
+}
+
+/* Wrapped, not scrolled: the longest domain is 32 positions and a horizontal
+   scroller in a 272px column hides most of them behind a gesture. */
+.of-pal-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 6px 4px;
+}
+
+.of-pal-sizebtn {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+/* The candidate count on a size chip. Quieter than the label, because the label
+   is what is being chosen and the count is what it costs. */
+.of-pal-sizecount {
+  font-size: 9.5px;
+  color: var(--mut);
+  opacity: 0.8;
+}
+
+.of-pal-sizebtn[aria-pressed='true'] .of-pal-sizecount {
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+/* The sentence the 8 families with no expressible size domain get instead of a
+   control, indented to the control's own inset so it reads as the row's. */
+.of-pal-nosize {
+  padding: 0 6px 4px;
+  font-size: 11px;
 }
 
 /* ── The floating toolbar ────────────────────────────────────────────────────
@@ -679,6 +764,8 @@ div.of-bill-open {
 
 @media (prefers-reduced-motion: reduce) {
   .of-pal-pick,
+  .of-pal-chip,
+  .of-pal-sizebtn,
   .of-bill-open {
     transition: none;
   }

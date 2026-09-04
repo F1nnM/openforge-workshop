@@ -19,13 +19,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { TileId } from '@/catalog'
-import { DesignId } from '@/catalog'
 
 import { ANOTHER_TILE, A_TEMPLATE, A_TILE, aFullFillMap, aTemplateInstance } from './fixture'
 import { STORE_VERSION } from './migrations'
 import type { PlacementId, TemplateId } from './schema'
 import { DEFAULT_LOCK_SYSTEM, SlotName as SlotNameSchema, WorkshopState } from './schema'
-import { claimPendingDesign, sendDesignToBuilder } from './selection'
+import { armTemplateInBuilder, claimPendingArm } from './selection'
 import { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 import { WORKSHOP_EXPORT_KIND, WorkshopExport, exportWorkshop, importWorkshop } from './transfer'
 import {
@@ -48,14 +47,15 @@ const FLOOR = SlotNameSchema.parse('floor')
 const WALL = SlotNameSchema.parse('right wall')
 
 /**
- * A design id for the selection channel, which still carries an item.
+ * An arm for the selection channel.
  *
- * Row C1 owns whether that stays true — a palette of 52 template families may
- * want a `TemplateId` in the box instead — so this row reads the channel without
- * taking a position on its currency, and names the one fact it needs:
- * `resetWorkshop` empties it.
+ * This row read the channel without taking a position on its currency, because
+ * **row C1 owned what it should carry** and took the decision: an item was
+ * something no reader could act on, so the box holds the palette's arm — a
+ * `TemplateId` and one size position. The one fact this row needs is unchanged:
+ * `resetWorkshop` empties it. `selection.test.ts` holds the rest.
  */
-const A_PENDING_DESIGN = DesignId.parse('d4c2a57740b65')
+const A_PENDING_ARM = { template: A_TEMPLATE, size: [] as readonly string[] }
 
 const state = () => useWorkshopStore.getState()
 
@@ -498,12 +498,12 @@ describe('persistence', () => {
   it('clears the selection channel on reset — contract C-f', () => {
     // `selection.ts` used to argue the opposite, and its premise was the
     // library: "a reset that emptied the library disarms the handoff by making
-    // it unclaimable". Row A0 deleted the library, so the palette now lists 52
-    // generated template families that no reset can clear — and a pending
+    // it unclaimable". Row A0 deleted the library, so the palette now lists the
+    // 91 templates this build ships, which no reset can clear — and a pending
     // handoff would survive "clear everything" and still be claimable.
-    sendDesignToBuilder(A_PENDING_DESIGN)
+    armTemplateInBuilder(A_PENDING_ARM)
     resetWorkshop()
-    expect(claimPendingDesign()).toBeNull()
+    expect(claimPendingArm()).toBeNull()
   })
 
   it('clears the persisted copy on request', () => {

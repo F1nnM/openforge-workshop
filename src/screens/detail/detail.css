@@ -181,10 +181,29 @@
 
 /* ── Actions ─────────────────────────────────────────────────────────────── */
 
+/* A column since row C1: the one action carries a line under it saying which
+   family and size it will arm, and for an insert the line replaces the button
+   entirely. */
 .of-detail-actions {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   margin-bottom: 22px;
+}
+
+/* What "Use in builder" will arm, or — for the 94 insert designs no family can
+   name — where the tile goes instead. Muted, because it qualifies the press
+   rather than competing with it. */
+.of-detail-armnote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+
+.of-detail-armnote strong {
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .of-detail-action {

@@ -40,7 +40,7 @@ import {
   defaultWorkshopState,
   normalizeRotation,
 } from './schema'
-import { clearPendingDesign } from './selection'
+import { clearPendingArm } from './selection'
 import { STORAGE_KEY, clearPersistedWorkshopState, workshopStorage } from './storage'
 
 /**
@@ -476,20 +476,20 @@ export function acknowledgeLockSystem(): void {
  * that would be a dependency bought for nothing."*
  *
  * **Its premise was the library, and row A0 deleted the library.** The palette
- * no longer lists the items a user kept — it lists 52 generated template
- * families (§3.1), which are a function of the catalog and not of anything a
+ * no longer lists the items a user kept — it lists the 91 templates this build
+ * ships (§3.1, row C1), which are a function of the bundle and not of anything a
  * reset clears. So a pending handoff now survives a reset *and stays claimable*,
  * and the first render of the builder after "clear everything" would arm a piece
  * the user has just thrown away. That is not a dependency bought for nothing; it
  * is one line closing a hole the deletion opened.
  *
  * The coupling is one-directional and stays that way: this store imports
- * `clearPendingDesign` and the selection store imports nothing from here.
+ * `clearPendingArm` and the selection store imports nothing from here.
  */
 export function resetWorkshop(): void {
   useWorkshopStore.setState(defaultWorkshopState(), true)
   clearGeneratedMeshes()
-  clearPendingDesign()
+  clearPendingArm()
 }
 
 /* ----------------------------------------------------------------- selectors */
