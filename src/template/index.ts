@@ -11,7 +11,19 @@
  * and wrong for most of the others. What is authored is a **rule**; the numbers
  * are arithmetic over the fill's own footprint at fill time.
  *
- * Two files, split by whether they hold a number:
+ * Three files now. Row **B3** added the third:
+ *
+ *   - `size.ts` — **the size predicate**, which is what makes size a *parameter*
+ *     of a placed instance rather than part of B4's family key: keyed on
+ *     `(role, form, build)` the corpus needs 52 families and keyed with size in
+ *     it, 217 to 277. It derives a per-slot requirement from B2's `anchor` —
+ *     exact congruence for a `cell`, the anchored face for an `edge`, nothing
+ *     for a `corner` — and resolves it to `require`/`deny` refs over tags the
+ *     corpus **already** carries, so the index gains 0 bytes and
+ *     `src/composition/**` needs no change. Import-free but for `./rules`, and
+ *     named in `tsconfig.node.json` for the same reason `rules.ts` is.
+ *
+ * Two files split by whether they hold a number:
  *
  *   - `rules.ts` — the types, and the **three authored conventions**, keyed on
  *     the part-name set. No numbers, and no imports: `pipeline/templates.ts`
@@ -74,6 +86,26 @@ export {
   partNameKey,
   ruleFor,
 } from './rules'
+
+export type { GridSize, ResolvedSize, SizePredicate, SizeRefs } from './size'
+export {
+  GRID_UNITS,
+  LATTICE_TOLERANCE_UNITS,
+  RUN_DENY_TAGS,
+  RUN_UNREACHABLE,
+  cornerSpanOf,
+  faceSpan,
+  formatUnits,
+  isOnLattice,
+  latticeDistance,
+  layoutSizePredicates,
+  sizeAdmits,
+  sizeRefs,
+  sizeRefsResolve,
+  sizeSentence,
+  slotSizePredicate,
+  snapToLattice,
+} from './size'
 
 export type { PlacedTemplate, SlotDoubt, SlotDoubtCode, SlotPlacement, SlotVerdict } from './offsets'
 export {
