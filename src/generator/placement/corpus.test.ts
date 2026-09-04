@@ -21,7 +21,7 @@ import { existsSync, readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildAssemblyIndex, matchBase, missingBaseNote } from '@/assembly'
+import { baseGap, buildAssemblyIndex, matchBase } from '@/assembly'
 import type { CatalogFile as CatalogFileType, CatalogRecord, Footprint } from '@/catalog'
 import { resolveTags } from '@/catalog'
 import { resolveMaterial } from '@/materials'
@@ -143,8 +143,14 @@ describeCorpus(title, () => {
       if (record.layer !== 'topper') continue
       if (matchBase(record, index, 'openlock') !== undefined) continue
       gaps += 1
-      const note = missingBaseNote(record, index)
-      byCode.set(note.code, (byCode.get(note.code) ?? 0) + 1)
+      // `baseGap` since row A3 — the same classification, returned as the code
+      // rather than wrapped in a `Note`, because no bill can emit one now that
+      // nothing inserts a base. It asks `matchBase` with **no** preference where
+      // the filter above asks with openlock, and the assertion below is what
+      // pins the two populations together: `'no-gap'` would appear the moment
+      // they came apart, rather than being skipped in silence.
+      const gap = baseGap(record, index) ?? 'no-gap'
+      byCode.set(gap, (byCode.get(gap) ?? 0) + 1)
       if (!generatable(record.foot)) continue
       const key = JSON.stringify(record.foot)
       closed.set(key, (closed.get(key) ?? 0) + 1)

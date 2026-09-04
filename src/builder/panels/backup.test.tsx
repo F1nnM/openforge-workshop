@@ -15,23 +15,31 @@
  * entry it dropped rather than quietly returning a room one tile short.
  *
  * One assertion the block lost with the library: the `salvageLibrary` messages.
- * They belong to a field row A1 deletes, and `store/migrations.test.ts` is where
- * the salvage rules are proved. The placement salvage — a **file** id where a
- * design belongs, the shape every placement written before row V5 held — is the
- * one that survives and is kept.
+ * They belong to a field row A1 deleted, and `store/migrations.test.ts` is where
+ * the salvage rules are proved. The placement salvage is the one that survives
+ * and is kept, and row **A8** re-aimed it one version forward: it used to import
+ * a **file** id where a design belonged (versions 1–4's `tileId`), and it now
+ * imports a version 5 placement — one `design` on a cell — which is the shape
+ * every room saved before row A1 holds. `migrations.ts#salvageTemplate`
+ * recognises it by *field name*, because a `DesignId` parses as a `TemplateId`
+ * and no value-shaped check could tell the two apart.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { DesignId, TileId } from '@/catalog'
-import { STORE_VERSION, clearPersistedWorkshopState, placeTile, resetWorkshop, useWorkshopStore } from '@/store'
+import {
+  STORE_VERSION,
+  clearPersistedWorkshopState,
+  placeTemplate,
+  resetWorkshop,
+  useWorkshopStore,
+} from '@/store'
+import { A_TEMPLATE, A_TILE, aTemplateInstance } from '@/store/fixture'
 
 import { BackupPanel } from './BackupPanel'
 
-const DESIGN_A = DesignId.parse('d0000000000a')
-const DESIGN_B = DesignId.parse('d0000000000b')
-/** A file id, which is what a pre-V5 placement held where a design belongs. */
-const FILE_ID = TileId.parse('tiles/dungeon_stone/floor/2x2.stl')
+/** An item id, which is what a version 5 placement held where a template belongs. */
+const LEGACY_DESIGN = 'd0000000000a'
 
 beforeEach(() => {
   clearPersistedWorkshopState()
@@ -86,9 +94,10 @@ async function importFile(contents: string, name = 'workshop.json'): Promise<voi
 describe('export and import', () => {
   it('round-trips a scene through a file', async () => {
     const urls = stubObjectUrls()
+    let first = ''
     act(() => {
-      placeTile({ design: DESIGN_A, x: 1.5, z: -2, rotation: 90 })
-      placeTile({ design: DESIGN_B, x: 0, z: 0, rotation: 0 })
+      first = placeTemplate(aTemplateInstance({ x: 1.5, z: -2, rotation: 90 }))
+      placeTemplate(aTemplateInstance({ x: 0, z: 0, rotation: 0 }))
     })
     render(<BackupPanel />)
 
@@ -109,18 +118,23 @@ describe('export and import', () => {
     await waitFor(() => {
       expect(Object.values(useWorkshopStore.getState().placements)).toHaveLength(2)
     })
+    // The whole instance, `id` and fill map included: the round trip is only
+    // worth anything if what comes back is what a `placeTemplate` produced, and
+    // a fill is the one part of it a lossy export would silently flatten.
     expect(Object.values(useWorkshopStore.getState().placements)).toContainEqual({
-      design: DESIGN_A,
+      id: first,
+      template: A_TEMPLATE,
       x: 1.5,
       z: -2,
       rotation: 90,
+      fills: { column: { tile: A_TILE, pinned: false } },
     })
     expect(report()).toHaveTextContent('Imported 2 placements.')
   })
 
   it('reports a file that is not ours, and changes nothing', async () => {
     act(() => {
-      placeTile({ design: DESIGN_A, x: 0, z: 0, rotation: 0 })
+      placeTemplate(aTemplateInstance())
     })
     render(<BackupPanel />)
 
@@ -134,7 +148,7 @@ describe('export and import', () => {
 
   it('reports a file that is not JSON at all, rather than throwing', async () => {
     act(() => {
-      placeTile({ design: DESIGN_A, x: 0, z: 0, rotation: 0 })
+      placeTemplate(aTemplateInstance())
     })
     render(<BackupPanel />)
 
@@ -156,23 +170,27 @@ describe('export and import', () => {
         state: {
           placements: {
             '2f8d1e0a-0000-4000-8000-000000000000': {
-              design: DESIGN_A,
+              template: A_TEMPLATE,
               x: 2,
               z: 0,
               rotation: 0,
+              fills: { floor: { tile: A_TILE, pinned: true } },
             },
-            // Row V4's case: a **file** id where a design belongs, which is what
-            // every placement written before V5 held. Named and dropped rather
-            // than kept as a piece of the room that draws nothing and cannot be
-            // removed.
+            // Row A1's case: one **item** on a cell, which is what every
+            // placement written before it held. Named and dropped rather than
+            // kept as a piece of the room that draws nothing and cannot be
+            // removed — a design says nothing about which recipe the user meant,
+            // so there is no repair, only a report.
             '2f8d1e0a-1111-4111-8111-111111111111': {
-              design: FILE_ID,
+              design: LEGACY_DESIGN,
               x: 0,
               z: 0,
               rotation: 0,
             },
           },
+          generated: {},
           lock: 'openlock',
+          lockChosen: false,
         },
       }),
     )
@@ -180,12 +198,19 @@ describe('export and import', () => {
     expect(report()).toHaveTextContent('Imported 1 placement.')
     expect(report()).toHaveTextContent('1 entry could not be read')
     expect(report()).toHaveTextContent(
-      'placements.2f8d1e0a-1111-4111-8111-111111111111: design is a file id, not a design id — a ' +
-        'placement holds an item now',
+      'placements.2f8d1e0a-1111-4111-8111-111111111111: names an item in the old design field — a ' +
+        'placement holds a template now',
     )
     // The readable entry survived, and no phantom placement came with it.
     expect(Object.values(useWorkshopStore.getState().placements)).toEqual([
-      { design: DESIGN_A, x: 2, z: 0, rotation: 0 },
+      {
+        id: '2f8d1e0a-0000-4000-8000-000000000000',
+        template: A_TEMPLATE,
+        x: 2,
+        z: 0,
+        rotation: 0,
+        fills: { floor: { tile: A_TILE, pinned: true } },
+      },
     ])
   })
 

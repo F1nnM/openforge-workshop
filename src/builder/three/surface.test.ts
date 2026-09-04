@@ -20,7 +20,7 @@
 import { Box3, PerspectiveCamera, Ray, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
-import type { PlanPoint } from '@/builder/canvas'
+import type { PlanBand, PlanPoint, ScenePiece } from '@/builder/canvas'
 import { boxCentre, pieceAt, planCatalogFromFile } from '@/builder/canvas'
 import { FIXTURE_IDS, fixtureCatalogFile } from '@/builder/canvas/fixture'
 import { GRID_UNIT_MM } from '@/catalog'
@@ -196,7 +196,7 @@ describe('picking the surface under the pointer', () => {
   })
 
   it('finds a flat tile the pointer is over', () => {
-    const scene = sceneOf(CATALOG, [{ tileId: FIXTURE_IDS.floor2, x: 0, z: 0 }])
+    const scene = sceneOf(CATALOG, [{ tile: FIXTURE_IDS.floor2, x: 0, z: 0 }])
     const floor = scene.pieces[0]
     expect(floor).toBeDefined()
     const centre = boxCentre((floor as NonNullable<typeof floor>).box)
@@ -216,7 +216,7 @@ describe('picking the surface under the pointer', () => {
    * pointing at.
    */
   it('takes the wall the pointer is on, not the floor five units behind it', () => {
-    const withWall = sceneOf(CATALOG, [{ tileId: FIXTURE_IDS.wall2, x: 0, z: 0 }])
+    const withWall = sceneOf(CATALOG, [{ tile: FIXTURE_IDS.wall2, x: 0, z: 0 }])
     const wall = withWall.pieces[0]
     expect(wall).toBeDefined()
     const wallCentre = boxCentre((wall as NonNullable<typeof wall>).box)
@@ -236,17 +236,20 @@ describe('picking the surface under the pointer', () => {
     // A 1 × 1 floor centred on exactly that stray point, so the wrong answer is
     // a real piece rather than an absence.
     const scene = sceneOf(CATALOG, [
-      { tileId: FIXTURE_IDS.wall2, x: 0, z: 0 },
-      { tileId: FIXTURE_IDS.floor1, x: stray[0] - 0.5, z: stray[1] - 0.5 },
+      { tile: FIXTURE_IDS.wall2, x: 0, z: 0 },
+      { tile: FIXTURE_IDS.floor1, x: stray[0] - 0.5, z: stray[1] - 0.5 },
     ])
-    const heights = (piece: { band: string }): number => (piece.band === 'edge' ? WALL_MM : FLOOR_MM)
+    const heights = (piece: ScenePiece): number => (bandOf(piece) === 'edge' ? WALL_MM : FLOOR_MM)
 
     // The ground answer: the floor. Confidently, wrongly.
-    expect(pieceAt(scene, stray)?.band).toBe('area')
+    const under = pieceAt(scene, stray)
+    expect(under).toBeDefined()
+    expect(bandOf(under as ScenePiece)).toBe('area')
 
     // The surface answer: the wall, at its own height.
     const pick = pickSurface(scene, pointerRay(cameraOn(planToScene(aim, WALL_MM, FIT)), { x: 0, y: 0 }), FIT, heights)
-    expect(pick?.piece?.band).toBe('edge')
+    expect(pick?.piece).toBeDefined()
+    expect(bandOf(pick?.piece as ScenePiece)).toBe('edge')
     expect(pick?.elevationMm).toBe(WALL_MM)
     expect(pick?.point[0]).toBeCloseTo(aim[0], 5)
     expect(pick?.point[1]).toBeCloseTo(aim[1], 5)
@@ -258,11 +261,11 @@ describe('picking the surface under the pointer', () => {
     // the floor only, and the wall's plane crosses the floor's cell — so a pick
     // that skipped the height check would report the floor at 63.5 mm.
     const scene = sceneOf(CATALOG, [
-      { tileId: FIXTURE_IDS.wall2, x: 10, z: 10 },
-      { tileId: FIXTURE_IDS.floor2, x: 0, z: 0 },
+      { tile: FIXTURE_IDS.wall2, x: 10, z: 10 },
+      { tile: FIXTURE_IDS.floor2, x: 0, z: 0 },
     ])
-    const heights = (piece: { band: string }): number => (piece.band === 'edge' ? WALL_MM : FLOOR_MM)
-    const floor = scene.pieces.find((piece) => piece.band === 'area')
+    const heights = (piece: ScenePiece): number => (bandOf(piece) === 'edge' ? WALL_MM : FLOOR_MM)
+    const floor = scene.pieces.find((piece) => bandOf(piece) === 'area')
     expect(floor).toBeDefined()
     const centre = boxCentre((floor as NonNullable<typeof floor>).box)
     const pick = pickSurface(
@@ -272,11 +275,12 @@ describe('picking the surface under the pointer', () => {
       heights,
     )
     expect(pick?.elevationMm).toBe(FLOOR_MM)
-    expect(pick?.piece?.band).toBe('area')
+    expect(pick?.piece).toBeDefined()
+    expect(bandOf(pick?.piece as ScenePiece)).toBe('area')
   })
 
   it('is null when the ray misses the plan, whatever is on it', () => {
-    const scene = sceneOf(CATALOG, [{ tileId: FIXTURE_IDS.floor2, x: 0, z: 0 }])
+    const scene = sceneOf(CATALOG, [{ tile: FIXTURE_IDS.floor2, x: 0, z: 0 }])
     const camera = new PerspectiveCamera(CAMERA_FOV, 1.5, CAMERA_NEAR, CAMERA_FAR)
     camera.position.set(0, 2, 0)
     camera.lookAt(0, 3, 0)
@@ -314,3 +318,24 @@ describe('a mesh’s height', () => {
     expect(meshHeightMm(bounds)).toBeCloseTo(63.5, 9)
   })
 })
+
+/* ------------------------------------------------------------------- helpers */
+
+/**
+ * A fixture piece's band. Row **A4a** moved `band` off the piece onto the part.
+ *
+ * A helper here rather than a widened accessor in the canvas, because the
+ * question this file asks — *"is the thing at this point a wall or a floor?"* —
+ * only has one answer for a **single-part** piece, and every placement in this
+ * suite is one file in one slot. A five-part template has a floor in `area` and
+ * two walls in `edge`, which is exactly why contract **C-h** deleted the field
+ * from the piece: a `piece.band` returning the first part's would have compiled
+ * everywhere and described a fifth of the placement. Elevation-aware picking
+ * across a real template is row **A7**'s.
+ */
+function bandOf(piece: ScenePiece): PlanBand {
+  if (piece.kind === 'generated') return piece.band
+  const [first] = piece.parts
+  // Non-empty by `PlanPiece.parts`'s own invariant.
+  return (first as NonNullable<typeof first>).band
+}

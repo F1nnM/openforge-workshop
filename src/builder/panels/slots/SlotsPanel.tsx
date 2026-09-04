@@ -33,6 +33,14 @@
  * scan over 8,702 records and is fine for one lookup on a drawer open, but this
  * callback fires per pick on a panel that re-renders on every store write.
  *
+ * ## A holder is a filled slot, not a placement
+ *
+ * Row **A8**, following `planSlots.ts`: a template instance holds up to five
+ * files and each declares its own composition slots, so one placed corner can
+ * appear here two or three times — once per file that opens something. The
+ * heading says *pieces*, and a piece is now a filled slot of a placed recipe
+ * rather than a whole placement.
+ *
  * ## Why the whole picker is reused rather than reimplemented
  *
  * Dead-end greying is the row's point and it is the part that would rot if there
@@ -54,7 +62,7 @@ import { useMemo } from 'react'
 import { describeCell } from '@/builder/canvas'
 import type { CatalogFile, DesignId, TileId } from '@/catalog'
 import { SlotFills } from '@/screens/detail/slots'
-import type { LockSystem, Placement } from '@/store'
+import type { TemplateInstance } from '@/store'
 import { Eyebrow } from '@/ui/primitives'
 
 import { planSlots } from './planSlots'
@@ -64,18 +72,7 @@ import './slots.css'
 export interface SlotsPanelProps {
   readonly catalog: CatalogFile
   /** `WorkshopState.placements`, passed straight through from the screen. */
-  readonly placements: Readonly<Record<string, Placement>>
-  /**
-   * The build's lock preference, passed through for the same reason
-   * `placements` is: this panel is a projection of the store and the screen
-   * already holds both.
-   *
-   * Row V4 needs it because a placement names an item and a slot is a property
-   * of a *file* — `config` is one of the fields that differ between an item's
-   * variants — so which slots are open is a question the preference helps
-   * answer. See `planSlots.ts#PlanSlotHolder.parent`.
-   */
-  readonly lock?: LockSystem
+  readonly placements: Readonly<Record<string, TemplateInstance>>
 }
 
 /**
@@ -90,12 +87,16 @@ function designIndex(catalog: CatalogFile): ReadonlyMap<TileId, DesignId> {
   return out
 }
 
-export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
+export function SlotsPanel({ catalog, placements }: SlotsPanelProps) {
   const designOf = useMemo(() => designIndex(catalog), [catalog])
-  // One resolution per placed file that declares a slot, and the panel re-renders
+  // One resolution per filled file that declares a slot, and the panel re-renders
   // on every store change — 0.09 ms each is cheap and 50 of them on every store
   // write is not, so it is memoised on the placements it read.
-  const inventory = useMemo(() => planSlots(catalog, placements, lock), [catalog, placements, lock])
+  //
+  // No `lock` in the dependency list since row A8, because `planSlots` takes
+  // none: a fill names an exact file, so which slots are open does not move when
+  // the preference does.
+  const inventory = useMemo(() => planSlots(catalog, placements), [catalog, placements])
 
   return (
     /*
@@ -139,7 +140,10 @@ export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
                 <p className="of-planslots-piece">
                   {holder.name}
                   <span className="of-planslots-at">
-                    {describeCell(holder.placement.x, holder.placement.z)}
+                    {/* The slot as well as the cell, since row A8: two holders of
+                        one instance sit at the same coordinate, so the cell alone
+                        no longer tells them apart. */}
+                    {holder.slot} · {describeCell(holder.instance.x, holder.instance.z)}
                   </span>
                 </p>
                 <SlotFills
@@ -167,7 +171,7 @@ export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
         <p className="of-planslots-gap">
           {`${String(inventory.orphans.length)} ${
             inventory.orphans.length === 1 ? 'placement names' : 'placements name'
-          } an item this index no longer holds, so what it can hold is unknown.`}
+          } a file this index no longer holds, so what it can hold is unknown.`}
         </p>
       )}
     </section>

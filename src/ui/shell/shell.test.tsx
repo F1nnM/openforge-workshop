@@ -20,18 +20,22 @@ import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { DesignId } from '@/catalog'
 import { createWorkshopRouter } from '@/routes'
-import { clearPersistedWorkshopState, placeTile, resetWorkshop } from '@/store'
+import { aTemplateInstance } from '@/store/fixture'
+import { clearPersistedWorkshopState, placeTemplate, resetWorkshop } from '@/store'
 
 import type { CatalogStats } from './catalogStats'
 import { CatalogStatsProvider } from './catalogStats'
 
 const STATS: CatalogStats = { tileCount: 8702, archiveHost: 'objects.openforge.tools' }
 
-/** Two items. A placement names an item, not a file, since row V4. */
-const DESIGN_A = DesignId.parse('d4c2a57740b65')
-const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
+/**
+ * Two placements. Since row A1 a placement is a **template instance** — a recipe,
+ * an angle and a fill per slot — so the two differ by cell rather than by
+ * identity, which is all this file's subject (a count in the header) needs them
+ * to differ by. The store's own parse is exercised in `src/store/**`.
+ */
+const place = (x: number) => placeTemplate(aTemplateInstance({ x, z: 0 }))
 
 async function renderApp(path = '/', stats: CatalogStats | null = STATS) {
   // The router resets scroll after a navigation. jsdom 30 defines `scrollTo` as a
@@ -145,8 +149,8 @@ describe('nav', () => {
   })
 
   it('names the count rather than showing a bare number', async () => {
-    placeTile({ design: DESIGN_A, x: 0, z: 0, rotation: 0 })
-    placeTile({ design: DESIGN_B, x: 2, z: 0, rotation: 0 })
+    place(0)
+    place(2)
 
     await renderApp('/catalog')
 
@@ -160,7 +164,7 @@ describe('nav', () => {
     expect(screen.getByRole('link', { name: BUILDER(0) })).toBeInTheDocument()
 
     act(() => {
-      placeTile({ design: DESIGN_A, x: 0, z: 0, rotation: 0 })
+      place(0)
     })
 
     expect(screen.getByRole('link', { name: BUILDER(1) })).toBeInTheDocument()

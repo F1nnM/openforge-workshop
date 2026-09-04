@@ -1,38 +1,46 @@
 /**
- * The two catalog derivations that decide *which meshes exist* — built once per
+ * The catalog derivations that decide *which meshes exist* — built once per
  * session, from the index the shell has already fetched.
  *
  * ## Why this module exists rather than a prop
  *
- * Row R1 stated the add-to-library contract as
- * `ensureAggregateMeshes(meshQueue(assets), aggregate, { lock })` and left the
- * wiring to another row. Wiring it turned out to need a third input R1 did not
- * name, and the corpus is emphatic about why: **the mesh an openforge topper
- * needs is not only its own.** 1,878 of 3,822 items resolve, under openlock, to
- * a topper plus an auto-inserted base — rule 1 in `@/assembly` — and that base is
- * a *different design* with a *different blob*. `planAggregateMeshes` covers an
- * aggregate's own lock-reachable variants and nothing else, so without the base
- * the 3D room draws a floating topper over a footprint plate, which is precisely
- * the picture row **R3** exists to remove.
+ * `tiers.ts` states its contract as `ensureSceneMeshes(queue, tiles,
+ * aggregates)`, and the third argument is the reason this file exists: the
+ * warmer is a **store subscription**, armed once in `src/App.tsx`, so there is
+ * no component to hang a `useMemo` on and nowhere for a prop to arrive from.
  *
- * Answering "which base" is {@link AssemblyIndex}'s job, and an assembly index is
- * a pure function of the catalog file. So is an {@link AggregateIndex}. Both are
- * therefore memoised here at module scope — the same argument
- * `src/screens/catalog/catalogIndex.ts` makes for the search engine: a pure
- * function of a version-stamped build artefact cannot change under a running
- * session, so module scope is the *correct* lifetime rather than a cache with an
- * invalidation problem.
+ * An {@link AggregateIndex} is a pure function of the catalog file, and so is an
+ * {@link AssemblyIndex}. Both are therefore memoised here at module scope — the
+ * same argument `src/screens/catalog/catalogIndex.ts` makes for the search
+ * engine: a pure function of a version-stamped build artefact cannot change
+ * under a running session, so module scope is the *correct* lifetime rather than
+ * a cache with an invalidation problem.
  *
  * Two consumers, and they are why this is a module and not a local `useMemo`:
  *
- *   - `warm.ts`, which runs outside React entirely — it is a store subscription,
- *     armed once in `src/App.tsx`, and there is no component to hang a memo on.
- *   - `src/builder/three/BuilderRoom.tsx`, which needs the *base record* to draw
- *     it and cannot be handed one: `Builder3DPanel.tsx` and `BuilderScreen.tsx`
- *     belong to row **R4**, which is deleting the plan view as this row lands, so
- *     a new prop would have to be threaded through two files this row must not
- *     touch. Reading the derivation here instead means **R4 has nothing to
- *     reconcile.**
+ *   - `warm.ts`, which runs outside React entirely and reads
+ *     {@link MeshContext.aggregates} — `byTile` to turn a fill's file into a
+ *     blob, `byDesign` to reach the background tier's candidates.
+ *   - `src/builder/three/BuilderRoom.tsx`, which resolves the same memo in an
+ *     effect rather than taking a prop, because threading one would cross two
+ *     files it does not own.
+ *
+ * ## Rule 1 is gone, and `autoInsertedBase` went with it
+ *
+ * This module used to export `autoInsertedBase(design, assembly, lock)`, which
+ * asked `resolvePlacement` what base rule 1 would insert under a topper. Row A1
+ * ended that question: **a template declares its base as an explicit slot**, so
+ * the base is an ordinary key of `fills` naming an exact file, and it reaches
+ * this directory through `warm.ts#sceneTiles` beside every other part. There is
+ * no longer a base that has to be *inferred*, so inferring one would be a second
+ * answer to a question the scene has already answered — the divergence class
+ * where a room draws a base the bill does not list.
+ *
+ * It could not have survived in any case: it took a `Placement`, the
+ * `{ design, x, z, rotation }` record A1 deleted, and there is nothing in a
+ * `TemplateInstance` to build one from. Deleting it rather than repointing it is
+ * contract **C-h** applied one file over — every reader becomes a compile error
+ * instead of silently describing a fraction of a multi-part placement.
  *
  * ## The cost, measured, and the seam it leaves
  *
@@ -40,10 +48,10 @@
  * memo is a second copy of it for the life of the session. Measured over the
  * emitted index (8,702 records, 1,963 bases): `buildAggregateIndex` and
  * `buildAssemblyIndex` together are **43 ms and about 3 MB**, paid once, off the
- * first paint — the subscription resolves this only when the library is
- * non-empty and the room resolves it in an effect. The seam worth naming: when
- * R4 collapses `BuilderScreen` onto the 3D surface, the screen's own index can be
- * passed down and this memo becomes the fallback for the non-React caller alone.
+ * first paint — the subscription resolves this only when the scene names a file.
+ * {@link MeshContext.assembly} is kept for the room's sake alone now that rule 1
+ * is gone from this file; the row that owns `builder/three/` should drop the
+ * field the day nothing there reads it.
  *
  * ## `loadCatalogIndex` is injectable, and no test ever reaches the network
  *
@@ -54,19 +62,21 @@
  * docblock says it belongs in `src/catalog/`; when it moves, this import moves
  * with it and nothing else changes.
  */
-import type { AssemblyIndex, AssemblyPart } from '@/assembly'
-import { buildAssemblyIndex, resolvePlacement } from '@/assembly'
-import type { AggregateIndex, CatalogFile, DesignId } from '@/catalog'
+import type { AssemblyIndex } from '@/assembly'
+import { buildAssemblyIndex } from '@/assembly'
+import type { AggregateIndex, CatalogFile } from '@/catalog'
 import { buildAggregateIndex } from '@/catalog'
-import type { LockSystem, Placement } from '@/store/schema'
 import { loadCatalogIndex } from '@/ui/shell/catalogStats'
 
-/** What a caller needs to know which mesh a saved item, and its base, resolve to. */
+/** What a caller needs to turn a scene's fills into meshes. */
 export interface MeshContext {
   readonly file: CatalogFile
-  /** Design → aggregate. `ensureDesignMeshes` takes `byDesign` off this. */
+  /**
+   * File → variant and design → aggregate. `planSceneMeshes` takes `byTile` off
+   * this for the eager tier and `byDesign` for the background one.
+   */
   readonly aggregates: AggregateIndex
-  /** Rule 1's index — what `resolvePlacement` needs to name a base. */
+  /** The resolver's index. Read by `builder/three/`, not by this directory. */
   readonly assembly: AssemblyIndex
 }
 
@@ -113,51 +123,4 @@ export function setCatalogLoader(next: CatalogLoader): void {
 export function resetMeshContext(): void {
   loader = loadCatalogIndex
   pending = null
-}
-
-/* ------------------------------------------------------------------ rule 1 */
-
-/**
- * The base rule 1 would auto-insert under this item, under this preference — or
- * `undefined` when it inserts none.
- *
- * **{@link resolvePlacement} and nothing else**, because that function is the
- * only place in the project where a base enters a parts list: its own docblock
- * says *"a base enters a bill through this module and nowhere else"*, and the
- * match arrives already made by rule 0 so nothing is ranked twice. Anything
- * cheaper here — `matchBase` behind a `layer === 'topper'` test, say — would be a
- * second implementation of rule 1, and the failure mode is a room that draws a
- * base the bill does not list, or lists a base the room does not draw. Both are
- * lies about what the user is going to print.
- *
- * The placement is fabricated at the origin and that is safe rather than
- * convenient: resolution is *"a function of the placed item and the lock
- * preference only"*, and `x`, `z` and `rotation` are documented as carried
- * through untouched and never read. This is why the two callers can share one
- * function at all — `warm.ts` has no placement, and the 3D room has a real one.
- *
- * Measured over the emitted index, per lock, at the **design** level:
- *
- * | preference | items given a base | distinct base blobs | print option |
- * | --- | ---: | ---: | --- |
- * | openlock | **1,878** | 84 | 1,878 `plain` |
- * | dragonlock | 2,761 | 111 | 2,761 `plain` |
- * | magnetic | 2,765 | 112 | 2,763 `plain`, **2 `topless`** |
- * | none | 1,878 | 84 | 1,878 `plain` |
- *
- * The openlock column reproduces the v3 plan's `with-base` count of 1,878
- * exactly, and the other two exceed the plan's by the `mismatched` verdicts (2
- * and 12), which also receive a base. **84 distinct base meshes for the whole
- * corpus under openlock** is the number that makes drawing them affordable: a
- * room reuses them, and the median base is 0.91 MB against the median tile's
- * 10.77 MB.
- */
-export function autoInsertedBase(
-  design: DesignId,
-  assembly: AssemblyIndex,
-  lock: LockSystem | undefined,
-): AssemblyPart | undefined {
-  const placement: Placement = { design, x: 0, z: 0, rotation: 0 }
-  const resolved = resolvePlacement(placement, assembly, lock === undefined ? {} : { lock })
-  return resolved.parts.find((part) => part.role === 'base')
 }

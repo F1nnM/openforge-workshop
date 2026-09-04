@@ -27,11 +27,12 @@ import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import type { BillOfTiles } from '@/assembly'
+import type { AssemblyContext, AssemblyTemplate, BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
-import type { BlobId, CatalogFile, CatalogRecord, DesignId } from '@/catalog'
+import type { BlobId, CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, MEASURED_SPRITE_SHEET } from '@/catalog'
-import type { Placement } from '@/store'
+import { createCompositionIndex } from '@/composition'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 
 import { ATTRIBUTION_COLUMNS, attributionCsv, licenceText } from './attribution'
 import { ZIP32_LIMIT, framingLength, needsZip64, predictZipLength, utf8Length } from './clientZip'
@@ -73,10 +74,10 @@ interface RawRow {
  *
  * Parsed through the real `CatalogFile` schema rather than cast, so a fixture
  * that could not exist in production fails here instead of passing a test that
- * proves nothing. Every row is `integral`, which is what keeps the bills in this
- * file predictable: an `openforge` topper would pull in an auto-inserted base and
- * the line counts below would be about the assembly rules rather than about
- * naming.
+ * proves nothing. Every row is `integral`, which used to be what kept the bills
+ * here predictable — before row A3 an `openforge` topper pulled in an
+ * auto-inserted base. Nothing is auto-inserted now, so predictability comes from
+ * {@link FIXTURE_TEMPLATE} instead: one slot, one file, one line.
  */
 function catalogOf(rows: readonly RawRow[]): CatalogFile {
   return CatalogFileSchema.parse({
@@ -121,21 +122,60 @@ function catalogOf(rows: readonly RawRow[]): CatalogFile {
 }
 
 /**
- * A placement of the item a fixture file id belongs to.
+ * A one-slot template, so an instance is exactly one file.
  *
- * The fixture gives every record its own design, so `designFor` is injective and
- * a bill built from these ids lists exactly those files — which is what every
- * assertion in this file is about. Row V4: a `Placement` names a design.
+ * The whole of what row A3 changed in this file. Every assertion here is about
+ * *naming and framing* — entry names, collisions, zip lengths, the attribution
+ * csv — so a bill has to list exactly the files a test named and nothing else.
+ * Before A3 a `Placement` named a design and the resolver picked the file; now a
+ * fill names the file, and this template is the smallest recipe that turns one
+ * file into one instance.
+ *
+ * `tags: {}` is deliberate and is not a shortcut: a slot with no `require`,
+ * `deny` or `accept` admits **every** record — `candidatesFor` starts from the
+ * whole document list when the require set is empty — so every fixture fill is
+ * admissible and no `fill-off-slot` note appears in any bill below. That keeps
+ * these tests about naming rather than about C1's constraint semantics, which
+ * `src/composition` already covers with 69 ported tests of its own.
  */
-const place = (tileId: string): Placement => ({ design: designFor(tileId), x: 0, z: 0, rotation: 0 })
+const FIXTURE_SLOT = 'model' as SlotName
+const FIXTURE_TEMPLATE_ID = 'download-fixture' as TemplateId
+const FIXTURE_TEMPLATE: AssemblyTemplate = {
+  id: FIXTURE_TEMPLATE_ID,
+  tags: [],
+  parts: [{ name: FIXTURE_SLOT, tags: {} }],
+}
 
-/** The design a fixture id was given. See {@link catalogOf}. */
-function designFor(tileId: string): DesignId {
-  return `d${tileId}` as DesignId
+/** One instance per file, so a bill's lines are the files the caller named. */
+function place(tileId: string, at: number): TemplateInstance {
+  return {
+    id: `p${String(at)}` as PlacementId,
+    template: FIXTURE_TEMPLATE_ID,
+    x: 0,
+    z: 0,
+    rotation: 0,
+    fills: { [FIXTURE_SLOT]: { tile: tileId as TileId, pinned: false } },
+  }
+}
+
+/**
+ * The context `buildBillOfTiles` requires: the template table, and the
+ * composition index over the *same* catalog.
+ *
+ * Both are required arguments rather than defaulted options, which is row A3's
+ * point — a resolution with no template has no slots to walk, and one with no
+ * composition index cannot say whether a fill belongs in its slot, so a caller
+ * that has not supplied them is a compile error rather than a quiet half-answer.
+ */
+function contextFor(catalog: CatalogFile): AssemblyContext {
+  return {
+    templates: (id) => (id === FIXTURE_TEMPLATE_ID ? FIXTURE_TEMPLATE : undefined),
+    composition: createCompositionIndex(catalog),
+  }
 }
 
 function billOf(catalog: CatalogFile, ids: readonly string[]): BillOfTiles {
-  return buildBillOfTiles(ids.map(place), buildAssemblyIndex(catalog))
+  return buildBillOfTiles(ids.map(place), buildAssemblyIndex(catalog), contextFor(catalog))
 }
 
 function planOf(catalog: CatalogFile, ids: readonly string[]): ArchivePlan {
@@ -873,6 +913,7 @@ describeCorpus(corpusSuite, () => {
   // still evaluates the body, so this must not throw.
   const file = corpus ?? ({ records: [], tags: [], assets: { models: MODELS } } as unknown as CatalogFile)
   const index = buildAssemblyIndex(file)
+  const context = contextFor(file)
   const records: readonly CatalogRecord[] = file.records
 
   it('gives every one of the 89 colliding filenames distinct entry names', () => {
@@ -888,9 +929,9 @@ describeCorpus(corpusSuite, () => {
     const collidingFilenames = new Set(colliding.map(([filename]) => filename))
     const placements = records
       .filter((record) => collidingFilenames.has(record.file))
-      .map((record) => ({ design: record.design, x: 0, z: 0, rotation: 0 }))
+      .map((record, at) => place(record.id, at))
 
-    const bill = buildBillOfTiles(placements, index)
+    const bill = buildBillOfTiles(placements, index, context)
     const names = archiveEntryNames(bill.lines)
 
     expect(names.size).toBe(bill.lines.length)
@@ -910,8 +951,9 @@ describeCorpus(corpusSuite, () => {
 
   it('names every live tile uniquely when the whole corpus is in one bill', () => {
     const bill = buildBillOfTiles(
-      records.map((record) => ({ design: record.design, x: 0, z: 0, rotation: 0 })),
+      records.map((record, at) => place(record.id, at)),
       index,
+      context,
     )
     const names = archiveEntryNames(bill.lines)
     expect(names.size).toBe(bill.lines.length)
@@ -932,8 +974,8 @@ describeCorpus(corpusSuite, () => {
   })
 
   it('predicts a plausible archive for a fifty-tile room and warns where it should', () => {
-    const fifty = records.slice(0, 50).map((record) => ({ design: record.design, x: 0, z: 0, rotation: 0 }))
-    const bill = buildBillOfTiles(fifty, index)
+    const fifty = records.slice(0, 50).map((record, at) => place(record.id, at))
+    const bill = buildBillOfTiles(fifty, index, context)
     const plan = buildArchivePlan(bill, { assets: file.assets, generatedAt: GENERATED_AT })
 
     // Framing is negligible against the meshes — the whole reason the bill's

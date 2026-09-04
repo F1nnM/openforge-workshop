@@ -40,7 +40,7 @@ export type { GeneratedBillSectionProps } from './GeneratedBillSection'
 export { DownloadAction } from './DownloadAction'
 export type { DownloadActionProps } from './DownloadAction'
 
-export { useArchiveDownload } from './useArchiveDownload'
+export { IncompleteSceneError, useArchiveDownload } from './useArchiveDownload'
 export type {
   ArchiveDownload,
   ArchiveDownloadOptions,
@@ -53,14 +53,5 @@ export type {
 export { MAX_SEARCH_ROWS, searchRows } from './palette'
 export type { PaletteLookup, PaletteRow, PaletteSource } from './palette'
 
-export { billInventory, noteCopy, resolutionSummary, rowResolutionCopy, thresholdLabel, verdictCopy } from './billView'
-export type {
-  BillInventory,
-  BillPlacement,
-  BillRow,
-  NoteCopy,
-  ResolutionSummary,
-  RowResolution,
-  RowResolutionCopy,
-  VerdictCopy,
-} from './billView'
+export { billInventory, noteCopy, thresholdLabel, verdictCopy } from './billView'
+export type { BillInventory, BillPlacement, BillRow, NoteCopy, VerdictCopy } from './billView'

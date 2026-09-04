@@ -1,20 +1,27 @@
 /**
  * OpenForge Workshop — the shape of the persisted client state.
  *
- * Five things survive a reload: the **library** (the items the user kept), the
- * **placements** (the builder scene), the **generated bases** on that scene as
- * recipes rather than meshes, the **lock preference** and whether the user has
- * ever chosen that preference. Nothing else.
+ * Four things survive a reload: the **placements** (the builder scene, now
+ * template instances rather than tiles), the **generated bases** on that scene
+ * as recipes rather than meshes, the **lock preference** and whether the user
+ * has ever chosen that preference. Nothing else.
  * Anything derivable from the catalog — the assembly a placement resolves to,
- * the bill of tiles, the base auto-inserted for a `connection|openforge` piece —
- * is deliberately absent, because a derived value written to `localStorage` goes
- * stale the moment the catalog is reimported or the lock preference changes, and
- * a stale copy is worse than a recomputation that costs microseconds.
+ * the bill of tiles, the candidate set of a slot — is deliberately absent,
+ * because a derived value written to `localStorage` goes stale the moment the
+ * catalog is reimported, and a stale copy is worse than a recomputation that
+ * costs microseconds.
+ *
+ * **The library is gone.** Row A0 deleted the screen and every reader; row A1
+ * deleted the field, the four actions, the three selectors, the three hooks and
+ * the salvage function. Templates are the only placement unit (§2.5), so the
+ * "items the user kept" surface has no home and no caller. Nothing here
+ * deprecates it or keeps a shim: the field is absent, and a blob still carrying
+ * one is discarded by the version gate.
  *
  * **Zod is the source of truth**, matching `src/catalog/schema.ts`: every
  * exported type is `z.infer`'d from the schema beside it, so a schema edit
  * cannot leave a stale type behind. Identities come from the catalog contract —
- * this module never invents its own `TileId`.
+ * this module never invents its own {@link TileId}.
  *
  * This file describes the *current* shape only, and — for as long as nothing is
  * deployed — the *only* shape the app will read. `migrations.ts` holds the
@@ -23,7 +30,7 @@
  */
 import { z } from 'zod'
 
-import { DesignId } from '@/catalog'
+import { TileId } from '@/catalog'
 import { GeneratedPlacement } from '@/generator/placement/scene'
 
 /* --------------------------------------------------------------- lock system */
@@ -57,7 +64,7 @@ export type LockSystem = z.infer<typeof LockSystem>
  */
 export const DEFAULT_LOCK_SYSTEM: LockSystem = 'openlock'
 
-/* ---------------------------------------------------------------- placements */
+/* --------------------------------------------------------------- identities */
 
 /**
  * Identity of one placement in the builder scene.
@@ -66,10 +73,10 @@ export const DEFAULT_LOCK_SYSTEM: LockSystem = 'openlock'
  * An array would address a placement by position, so every concurrent edit would
  * have to rewrite indices — fine for one user with an undo stack, fatal to the
  * collaborative editing the plan leaves open. A map costs nothing today and
- * keeps that door open. It also makes "move the tile the user is dragging" a
+ * keeps that door open. It also makes "move the instance the user is dragging" a
  * single-key write rather than a splice.
  *
- * Branded so a `PlacementId` cannot be passed where a `TileId` is
+ * Branded so a `PlacementId` cannot be passed where a {@link TileId} is
  * expected. Both are opaque strings over the same scene, and confusing them
  * would be a silent lookup miss rather than an error.
  */
@@ -77,63 +84,123 @@ export const PlacementId = z.string().min(1).brand<'PlacementId'>()
 export type PlacementId = z.infer<typeof PlacementId>
 
 /**
- * One **item** placed on the plan-view grid.
+ * Identity of a **template family** — the recipe an instance is an instance of.
  *
- * Four fields, and the omissions are as deliberate as the inclusions:
+ * ## Why a pattern and not `min(1)`
  *
- *   - **`design`, not a `tileId`** — row V4, and it is the reversal of the
- *     argument this docblock used to make. That argument was: §2 fixes `id` (the
- *     fixture `full_name`) as the key React, placements and share links address a
- *     tile by, §7's *"place designs, not files"* is about the palette, and
- *     resolving the concrete file at download time keeps a saved scene correct
- *     when the user later changes the lock preference — *"while storing the
- *     resolved file would freeze it"*.
+ * Row X5's argument for {@link TileId}, applied one field over: `migrations.ts`
+ * runs this schema over a value out of `localStorage`, so the brand is the only
+ * thing standing between a corrupt blob and an instance that names no template —
+ * which would draw nothing, price nothing, and be unremovable through any button
+ * in the app. Under `z.string().min(1)` the strings `"undefined"`, `"null"` and
+ * a whole JSON document all survive.
  *
- *     **That last clause is what defeats it.** Row V3 made the palette arm an
- *     *item*, so by the time a click reaches the store there is no file to put in
- *     this slot; one has to be *resolved* to fill it, under whatever preference
- *     happened to be set at the moment of the click. Storing that is precisely
- *     the freezing the old docblock warned against, one step earlier in the
- *     pipeline — and the three lock systems disagree about which file for
- *     **1,419 of the 3,822 items (37.1%)**, so it is a freeze with teeth.
+ * The pattern is exactly what `pipeline/templates.ts#templateSlug` emits —
+ * `name.toLowerCase().replace(/[^a-z0-9]+/g, '-')` with the ends trimmed — so it
+ * is the *generator's* range rather than a guess at it, and `corpus.test.ts`
+ * asserts that all 40 shipped ids parse. A single segment is legal because the
+ * slug function can produce one from a one-word family name; requiring a hyphen
+ * would buy lexical disjointness from `DesignId` (below) at the price of
+ * refusing a legitimate id the day B4 generates a one-word family — the same
+ * failure mode {@link coordinate} refuses to court by not enforcing the snap
+ * lattice.
  *
- *     A design is the identity that cannot freeze anything, because there is no
- *     choice in it to freeze. `src/store/selection.ts` made the same move for
- *     G5's handoff and gives the long version.
+ * ## What this is *not* disjoint from, stated rather than discovered
  *
- *     Why {@link DesignId} and not a `TileId` kept "as a hint" beside it:
- *     two identities for one placement is two things to keep in step, and the
- *     hint would be read — `billView.ts` used to report the difference between
- *     the two as a *substitution*, which after this row is a difference between
- *     nothing and something. See {@link WorkshopState.library} for why a design
- *     hash beats an {@link AggregateAddress} in persisted state.
+ * A `DesignId` is `d` followed by twelve hex characters (measured: all 3,822),
+ * which **matches this pattern**. So unlike the `TileId`/`DesignId` pair that
+ * rows V1 and V4 relied on, `TemplateId` and `DesignId` are *not* lexically
+ * disjoint and no salvage check can tell them apart.
  *
- *   - **No footprint, size or colour.** All three used to be named as
- *     `CatalogRecord` fields and now they are also **hoisted facets of the
- *     item**: `pipeline/aggregate.ts` fails the build if any of the 3,822
- *     aggregates holds two distinct values of `name`, `kinds`, `texture`,
- *     `build`, `foot`, `sizeCode` or `rotStep`. So the plan-view geometry of a
- *     placement is a function of the design alone and does not move when the
- *     lock preference re-resolves the file — which is what makes drawing a
- *     design as cheap as drawing a file was. Copying any of them here would
- *     still double the persisted payload and desynchronise on the next import.
+ * That costs nothing, and the reason is what a version 5 blob actually looks
+ * like: it wrote the identity under `design`, and **had no `template` field at
+ * all**. So the reachable corruption is a placement carrying `design` and no
+ * `template`, which `migrations.ts#salvageTemplate` recognises by *field name*
+ * and reports — a stronger check than any pattern, because it does not depend on
+ * the two id spaces looking different. A hand edit that renamed the field as
+ * well as re-stamped the version is the one case that slips through, and it
+ * fails closed: the id resolves to no template and the instance is reported as
+ * unrenderable by the same path a retired family takes.
  *
- *   - **No base.** Every `connection|openforge` piece needs a base line item
- *     (§7), but it is *auto-inserted* into the bill of tiles by the assembly
- *     resolver, not placed by the user. Persisting it would produce two bases
- *     the day that rule changes. Unchanged by this row, and strengthened by it:
- *     under openlock 1,808 of the 4,363 base-needing files resolve to a sibling
- *     that needs no base at all, so whether a placement has a base under it is
- *     now a question about the *preference*, and a persisted answer would be
- *     wrong for a third of the catalog the moment the user changed it.
+ * Not imported from `screens/assemblies/templates.ts`, and that is deliberate:
+ * `@/store` must not reach a screen, and the 40-entry data table has no business
+ * in the store's file closure. Whether an id names a template the *build* ships
+ * is a question for the reader that has the table; whether it is a well-formed
+ * id is this schema's.
+ */
+export const TemplateId = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'a template id is a lowercase hyphen-separated slug')
+  .brand<'TemplateId'>()
+export type TemplateId = z.infer<typeof TemplateId>
+
+/**
+ * The name of one slot on a template — `'floor'`, `'right wall'`, `'base'`.
  *
- * `x`/`z` are grid units — plan-view coordinates, `y` being height, which v1
- * does not model. They are validated as finite numbers and nothing stronger:
- * §7 snaps to 0.5 units with 1.0 as a coarse mode, but snapping is the canvas's
- * job (PR 17) and a schema that enforced it here would reject a scene the day a
- * legitimate finer mode ships. What the schema *does* enforce is that a
- * coordinate is a real number, because a tile at `NaN` cannot be rendered,
- * hit-tested or shared.
+ * `min(1)` and nothing stronger. Two of the six shipped part names contain a
+ * space — `'right wall'` and `'left wall'`, carried by **8 of the 128 parts** —
+ * so a {@link TemplateId}-style slug pattern here would refuse real data, and
+ * `corpus.test.ts` measures that. There is no pattern that would separate a
+ * *real* slot name from an arbitrary string either, because the authority on
+ * what a slot is called is the template: validation here is a shape check and
+ * the meaning check belongs to whoever holds the template — C2's solver and
+ * C3's editor.
+ *
+ * ## The brand buys nothing in key position, and this is the notice that says so
+ *
+ * {@link TemplateInstance.fills} is keyed by this type, and a Zod brand is
+ * **dropped from the key position of a `Record`**: a branded string is not a
+ * literal union, so `Record<SlotName, SlotFill>` compiles to an index signature
+ * and `Record<string, SlotFill>` is assignable to it. Row V3 found that with
+ * `tsc` on the library's key and the finding is unchanged; `readonly SlotName[]`
+ * is *not* assignable to `readonly string[]`'s inverse, so **the array is the
+ * safe position and the map is not.** {@link filledSlots} is the one place that
+ * crosses from one to the other.
+ *
+ * The brand is kept anyway, for the one thing it does do: it makes
+ * `fillSlot(id, slot, tile)`'s signature say which of its two string arguments
+ * is which, and it forces a caller to mint a slot name deliberately rather than
+ * hand over whatever string was to hand. That is documentation with a compiler
+ * behind it at the *argument* positions, and nothing at all at the key
+ * positions. Both halves are true and only one of them is worth relying on.
+ */
+export const SlotName = z.string().min(1).brand<'SlotName'>()
+export type SlotName = z.infer<typeof SlotName>
+
+/* ---------------------------------------------------------------- placements */
+
+/**
+ * A rotation in degrees, canonicalised to `[0, 360)`.
+ *
+ * The *step* is per-family and comes from the catalog — 893 tiles carry an angle
+ * that is not a multiple of 90 and would never tile on a 90° step — so the step
+ * is not stored, only the resulting angle. The range is enforced so that two
+ * instances at the same visual angle compare equal, which is what lets the share
+ * codec (row A5) encode an angle as a small integer rather than as an unbounded
+ * float.
+ *
+ * Named rather than left inline because a template instance rotates as **one
+ * unit** (§1: "the whole thing placed and rotated as one unit"): the slot
+ * offsets are arithmetic against this one angle at fill time (§2.2), so there is
+ * exactly one rotation per instance and no per-slot yaw to keep in step with it.
+ */
+export const Rotation = z.number().finite().nonnegative().lt(360)
+export type Rotation = z.infer<typeof Rotation>
+
+/**
+ * A plan-view coordinate.
+ *
+ * `x`/`z` are grid units — `y` being height, which the store deliberately does
+ * not model: elevation is derived (§2.2, §9), because 18.4% of measured toppers
+ * are authored pre-lifted by 6.0 mm and 77.5% are not, and a stored elevation
+ * would encode that inconsistency.
+ *
+ * Validated as finite numbers and nothing stronger. §7 snaps the template
+ * *origin* to 0.5 units, and §2.2's slot offsets land on multiples of 0.25 and
+ * deliberately do **not** snap — but snapping is the canvas's job and a schema
+ * that enforced a lattice here would reject a scene the day a legitimate finer
+ * mode ships. What the schema *does* enforce is that a coordinate is a real
+ * number, because an instance at `NaN` cannot be rendered, hit-tested or shared.
  */
 const coordinate = z
   .number()
@@ -144,25 +211,135 @@ const coordinate = z
   // equal to itself after an export and re-import.
   .transform((value) => value + 0)
 
-export const Placement = z.object({
-  design: DesignId,
+/**
+ * What fills one slot: an exact **file**, plus who chose it.
+ *
+ * Decision **D1** (§2.1): a fill names a file rather than a design. That deletes
+ * roughly 700 of `resolve.ts`'s 956 lines — rule 0, which guessed a variant out
+ * of an aggregate, and rule 1, which guessed a base under every topper — and it
+ * makes a saved room deterministic: a re-import cannot silently change what it
+ * contains.
+ *
+ * ## Why `pinned` is not optional, and not a default
+ *
+ * A file-valued fill freezes the lock choice at fill time, and the three lock
+ * systems disagree about which file to print for **1,419 of 3,822 items
+ * (37.1%)** — measured in `corpus.test.ts`, in this directory, because it is the
+ * only fact justifying this field. Without the bit, switching lock style would
+ * leave a placed room unchanged, contradicting the requirement row V3 shipped
+ * (the base a user sees follows their lock selection). With it, the lock stays
+ * live for every slot the user has not deliberately overridden, and an explicit
+ * pick is honoured exactly. One boolean per fill buys both.
+ *
+ * **Required rather than `.optional()` with a default**, so that every producer
+ * decides. `pinned` absent would mean "auto", which is the state a solver that
+ * forgot to write the field would silently land in — and the solver is the one
+ * caller for which "auto" happens to be right, so the mistake would never
+ * surface. Making it explicit puts the decision at every call site, which is
+ * what contract **C-k** turns on: `fillSlot` writes `false` and `pinFill` writes
+ * `true`, and neither takes a boolean parameter that could be passed wrongly.
+ *
+ * `migrations.ts` supplies `false` for a blob whose `pinned` is missing, names
+ * the drop, and the direction is deliberate: `false` is repaired by the next
+ * lock change, while `true` would freeze a choice the user never made,
+ * permanently and invisibly.
+ */
+export const SlotFill = z.object({
+  /** The file this slot is filled with. A `TileId`, so it is one printable STL. */
+  tile: TileId,
+  /**
+   * `false` when the default solver chose it, `true` when the user did.
+   * A lock change re-solves every `auto` fill and never touches a `pinned` one.
+   */
+  pinned: z.boolean(),
+})
+export type SlotFill = z.infer<typeof SlotFill>
+
+/**
+ * One **template instance** on the plan-view grid: the epic's placement unit.
+ *
+ * §1: *"a recipe with named slots, each slot filled from the catalog, the whole
+ * thing placed and rotated as one unit. Templates are the only placement
+ * unit."* This replaces row V4's `Placement`, which was a single `DesignId`
+ * on a cell. The reversal is not a refinement of that argument but a change of
+ * subject: V4 asked *which identity should one tile carry*, and the answer no
+ * longer matters because a placement is not one tile.
+ *
+ * ## `fills` is a map, not an array, and the brand is not why
+ *
+ * The choice is between `Record<SlotName, SlotFill>` and
+ * `readonly { slot, tile, pinned }[]`. The array would enforce the
+ * {@link SlotName} brand, which the map cannot (see {@link SlotName}), and that
+ * is the *only* thing it wins — the brand cannot distinguish a real slot name
+ * from any other string, so what it enforces is a cast discipline rather than a
+ * fact. The map wins two things that are facts:
+ *
+ *   - **One fill per slot, by construction.** An array admits two fills for
+ *     `floor`, which is a corruption class needing a salvage policy ("which
+ *     wins?") and a UI that can render it. `corpus.test.ts` measures that all 40
+ *     shipped templates have unique part names, so uniqueness is a property of
+ *     the data and the map is not lying about it.
+ *   - **`fills[slot]` is the editor's whole question.** C3 lists slots and asks
+ *     each one what fills it; on an array that is a scan, and on a map it is the
+ *     lookup the shape already is.
+ *
+ * **An absent key is an unfilled slot, and reads as *needs a choice*.** That is
+ * contract **C-g** and §3.2's "places anyway": a template with no candidate for
+ * one part is dropped on the grid with that part empty, not refused. Under
+ * `noUncheckedIndexedAccess` a branded-key `Record` already indexes to
+ * `SlotFill | undefined`, so the plan's `Partial<Record<…>>` and this schema's
+ * inference are the same type at every read site; `Partial` is not spelled here
+ * because `z.record` does not emit it and a hand-written type beside the schema
+ * is the stale-type hazard this module exists to avoid.
+ *
+ * There is deliberately **no check that `fills`' keys are slots of `template`**.
+ * That needs the template table, which lives in the bundle beside
+ * `screens/assemblies/templates.ts` and must not enter the store's file closure
+ * (see {@link TemplateId}). An unknown key is therefore expressible, and it
+ * fails closed the same way an unknown template does — nothing renders it,
+ * because rendering walks the *template's* parts and asks `fills` for each.
+ *
+ * ## `id` is inside the object as well as being the map key
+ *
+ * The plan's §2.1 sketch puts it there, and the reason is that an instance is
+ * now a composite that travels **detached from the map**: the resolver takes
+ * one, the bill groups by one, the renderer keys React on one, and the share
+ * codec ordinals one. Every one of them needs the identity, so the alternative
+ * is an `[id, instance]` tuple threaded through eight rows' signatures.
+ *
+ * The hazard that buys is a key and a field that can disagree, and it is closed
+ * in exactly one place: **the key wins.** `migrations.ts#salvageInstance`
+ * reports a disagreement and rewrites the field from the key, because the key is
+ * what every reader of the map addresses by; and `placeTemplate` mints both from
+ * one value so nothing in the app can produce the disagreement in the first
+ * place.
+ *
+ * ## What is still absent, and why
+ *
+ * **No footprint, size or colour**, for row V4's reason, unchanged: they are
+ * hoisted facets of the fill's own record, and `pipeline/aggregate.ts` fails the
+ * build if an aggregate holds two values of any of them. Copying one here would
+ * double the payload and desynchronise on the next import.
+ *
+ * **No slot offsets.** §1.4 measured the `base` slot admitting **25 distinct
+ * footprints** and `wall` 14, so a stored `(dx, dz, dy, yaw)` is wrong for most
+ * fills of the same slot. Layout is a *rule* evaluated against the fill's own
+ * footprint at fill time (§2.2, row B2), and there is nothing here for it to go
+ * stale against.
+ *
+ * **No base.** It used to be auto-inserted by the resolver; a template declares
+ * it as an explicit slot instead, so it is an ordinary key of `fills` and rule 1
+ * dies with it (§1.7).
+ */
+export const TemplateInstance = z.object({
+  id: PlacementId,
+  template: TemplateId,
   x: coordinate,
   z: coordinate,
-  /**
-   * Rotation in degrees, canonicalised to `[0, 360)`.
-   *
-   * The *step* is per-item and comes from `CatalogRecord.rotStep` — 893 tiles
-   * carry an angle that is not a multiple of 90 and would never tile on a 90°
-   * step — so the step is not stored here; only the resulting angle is.
-   * `rotStep` is one of the hoisted facets, so the step is the same for every
-   * variant of a design and asking the resolved record for it is asking the
-   * item. The range is enforced so that two placements at the same visual angle
-   * compare equal, which is what lets the share codec (PR 10) encode an angle as
-   * a small integer rather than as an unbounded float.
-   */
-  rotation: z.number().finite().nonnegative().lt(360),
+  rotation: Rotation,
+  fills: z.record(SlotName, SlotFill),
 })
-export type Placement = z.infer<typeof Placement>
+export type TemplateInstance = z.infer<typeof TemplateInstance>
 
 /**
  * Fold an arbitrary angle into `[0, 360)`.
@@ -188,119 +365,48 @@ export function normalizeRotation(deg: number): number {
  * migration functions operate on exactly the type the app reads, with no
  * projection to keep in step. **Anything added here is persisted**; ephemeral UI
  * state (hover, drag-in-progress, panel open) belongs in component state or in a
- * separate un-persisted store.
- *
- * `library` is a set held as a keyed map whose value slot carries no
- * information. A JSON object is the only shape that survives `JSON.stringify`
- * as a set without a custom replacer — and a custom replacer is exactly the kind
- * of asymmetry that breaks a reader years later. The map also gives O(1)
- * membership, which is what lets a catalog card ask "am I in the library?"
- * without scanning, and it preserves insertion order: a {@link DesignId} is
- * `d` followed by twelve hex characters (verified: **all 3,822** in the live
- * corpus), so no key is integer-like and V8's ordering rules keep them in the
- * order they were added.
+ * separate un-persisted store — `selection.ts` and `meshes.ts` are the two that
+ * exist.
  */
 export const WorkshopState = z.object({
   /**
-   * The items the user kept, keyed by **design**.
+   * The builder scene: template instances, keyed by {@link PlacementId}.
    *
-   * The owner's requirement, twice over: *"I want this aggregation to be done
-   * correctly everywhere. The aggregated tile is always the thing the user
-   * sees"*, and then *"the user should be saving aggregates not individual
-   * tiles."* §7 of `docs/architecture-plan.md` already said it — *"place
-   * designs, not files"* — and the catalog screen honoured it while this field
-   * did not: it held a `TileId`, so saving an item saved **one way of
-   * printing it**, chosen by whatever lock preference happened to be set at the
-   * moment of the click.
-   *
-   * ## Why {@link DesignId} and not {@link AggregateAddress}
-   *
-   * Both name an item. Only one of them survives a catalog reimport, and this
-   * map is persisted, so that is the whole question.
-   *
-   *   - A `DesignId` is `pipeline/design.ts`'s **content hash of the design**:
-   *     twelve hex characters of SHA-256 over the tag set with the whole
-   *     `connection|` namespace removed. It is a pure function of the design, so
-   *     two builds agree and an unrelated addition to the corpus changes
-   *     nothing.
-   *   - An `AggregateAddress` is the **lowest {@link ManifestOrdinal} in the
-   *     group**, and its own docblock in `src/catalog/schema.ts` says it is
-   *     *"NOT stable under retirement"*: if the lowest-ordinal file leaves the
-   *     corpus the address changes even though the group only shrank, and
-   *     **1,705 of 3,822 aggregates (44.6%)** hold two or more files and are
-   *     exposed to exactly that. Row A1 also gave it no inverse, on purpose —
-   *     `aggregateAddress(ord)` is the only conversion and there is no path back
-   *     — so a stale address in storage could not even be diagnosed, only
-   *     dropped.
-   *
-   * A1 accepted that instability *"only because this number never enters a share
-   * link"*, contrasting a stale catalog URL ("that item moved", a normal web
-   * outcome) with a share link decoding to a different room. A persisted library
-   * is the second kind of object, not the first: it is read back weeks later, on
-   * a newer index, with no user present to notice that entry 40 became entry 41.
-   *
-   * The design hash's own instability is a **tag edit** — add a tag to a file and
-   * it leaves its design for another. That is a real exposure and it is the
-   * smaller one: it is caused by an edit to the very thing the user saved, it
-   * cannot be caused by an unrelated file retiring, and it fails *closed* (the
-   * key resolves to nothing and the library screen already reports and offers to
-   * clear an entry the catalog no longer holds).
-   *
-   * ## Not a `TileId`, and the type system is what keeps it that way
-   *
-   * `DesignId` and `TileId` are separate Zod brands, so neither is assignable to
-   * the other and a call that used to save a file is a compile error rather than
-   * a key that silently resolves to nothing. They are also **lexically
-   * disjoint**: a `TileId` matches `^tiles/…` (row X5) and no design id in the
-   * corpus starts `tiles/` — 0 of 3,822, asserted in `corpus.test.ts` — which is
-   * what lets `migrations.ts` recognise a file id sitting in this map and say so
-   * instead of keeping a dangling key. It is the same disjointness argument row
-   * S5 made for `gen:` against `tiles/`, one level up.
-   *
-   * ## What the collapse buys, measured
-   *
-   * At 2.28 files per design, saving every file in the corpus is **8,702 entries
-   * under the old key and 3,822 under this one, 56.1% fewer**. The number that
-   * matters more is how often two saves of *one* item used to produce two
-   * entries: the three lock systems pick **two or more distinct files for 1,419
-   * of the 3,822 items (37.1%)**, so browsing under openlock, switching to
-   * dragonlock and pressing Add again used to leave a duplicate — and the
-   * library screen had to explain it. There is nothing left to explain.
+   * The key is duplicated in each value's `id`; see
+   * {@link TemplateInstance} for why, and for the rule that the key wins.
    */
-  library: z.record(DesignId, z.literal(true)),
-  placements: z.record(PlacementId, Placement),
+  placements: z.record(PlacementId, TemplateInstance),
   /**
    * Generated bases on the grid — a **second map beside {@link placements}**, in
    * the same {@link PlacementId} space.
    *
    * Row S5 minted the record and argued the shape; this is the field it said the
-   * store row would add. Not a widening of {@link Placement}'s identity slot,
-   * because every reader of the other map — the share codec, `migrations.ts`'s
-   * per-entry parse, `billView.ts`'s `placementKey`, `buildBillOfTiles` — is
-   * entitled to keep assuming that slot names one *item in the catalog*, and a
-   * generated base is not in the catalog at all: it has no design, no aggregate
-   * and no manifest ordinal. A union in that slot would make all of them
-   * conditional for a population that is not in any of their questions. Row V4
-   * changed that slot from a `TileId` to a `DesignId` and did not weaken this
-   * argument by one word — if anything it sharpened it, because a `DesignId` is
-   * the key of a *derivation over the catalog* and there is nothing for a
-   * recipe to derive from.
+   * store row would add. Not a widening of the instance's identity slot, because
+   * every reader of the other map — the share codec, `migrations.ts`'s per-entry
+   * parse, `billView.ts`'s `placementKey`, `buildBillOfTiles` — is entitled to
+   * keep assuming that slot names something *in the catalog*, and a generated
+   * base is not in the catalog at all: it has no design, no aggregate and no
+   * manifest ordinal. A union in that slot would make all of them conditional
+   * for a population that is not in any of their questions.
    *
-   * Sharing the id space is what makes one namespace over the whole scene.
-   * **What V4 did change is the proof.** S5's was lexical — a `GeneratedBaseId`
-   * starts `gen:` and therefore fails `TileId`'s `^tiles/…` pattern — and
-   * `DesignId` carries no such pattern (`z.string().min(1)`, and tightening it
-   * would rewrite 208 fixture ids across 28 files to buy back a theorem), so
-   * that argument would now rest on a measurement of the corpus rather than on
-   * the schemas. There is exactly **one** place that compares identities across
-   * the two populations, `move.ts#identityOf` behind row G4's identical-twin
-   * refusal, and it now qualifies the id with the population it came from — so
-   * the disjointness is a fact about `'catalog'` versus `'generated'` rather
-   * than about what the ids happen to look like, and no measurement is load
-   * bearing. `placementKey` and `generatedPlacementKey` were never keys of one
-   * map, so their disjointness was only ever needed for that comparison.
-   * `migrations.ts` still rejects a `TileId` or a `gen:` id in the design slot
-   * by name, because that slot reads `localStorage`.
+   * **Row A1 sharpened that, and it is now the strongest form of the
+   * argument.** V4 changed the slot from a `TileId` to a `DesignId` and left the
+   * argument standing; A1 changes it to a {@link TemplateId} plus a map of
+   * fills, so the two populations no longer even have the same *arity*. A
+   * generated base is one recipe with one footprint; an instance is a family
+   * with up to five slots, each holding a file that resolves through the lock
+   * preference. There is no slot in a `GeneratedPlacement` for any of that and
+   * nothing a fill could name.
+   *
+   * Sharing the id space is what makes one namespace over the whole scene. S5's
+   * disjointness proof was lexical — a `GeneratedBaseId` starts `gen:` and
+   * therefore fails `TileId`'s `^tiles/…` pattern — and there is exactly **one**
+   * place that compares identities across the two populations,
+   * `move.ts#identityOf` behind row G4's identical-twin refusal, which qualifies
+   * the id with the population it came from. So the disjointness is a fact about
+   * `'catalog'` versus `'generated'` rather than about what the ids look like,
+   * and no measurement is load bearing. `migrations.ts` still rejects a `gen:`
+   * id in the template slot by name, because that slot reads `localStorage`.
    *
    * ## What persists, and what cannot
    *
@@ -339,42 +445,41 @@ export const WorkshopState = z.object({
    * the default is fine" without touching `lock`. Both live in
    * `workshopStore.ts`.
    *
-   * Persisted, because the whole point is that it survives a reload. It is also
-   * the reason the store is at version 2: a version 1 blob has no such field,
-   * and `migrations.ts` fills it in.
+   * Persisted, because the whole point is that it survives a reload.
    */
   lockChosen: z.boolean(),
 })
 export type WorkshopState = z.infer<typeof WorkshopState>
 
 /**
- * The saved designs, as an array whose element type is the library's own key.
+ * The slots an instance has filled, as an array whose element type is the map's
+ * own key.
  *
- * Generic on purpose, and the reason is a hole row V3 found with `tsc`:
- * `Readonly<Record<TileId, true>>` **is** assignable to
- * `Readonly<Record<DesignId, true>>`, because a branded string is not a literal
- * union, so `Record` produces an index signature and the brand is dropped from
- * the key position. `readonly TileId[]` is **not** assignable to
- * `readonly DesignId[]`. **The array is the safe position; the map is not.**
+ * Generic on purpose, and the reason is a hole row V3 found with `tsc` and this
+ * row inherited one field over: **a Zod brand is dropped from the key position
+ * of a `Record`**, because a branded string is not a literal union, so
+ * `Record<string, SlotFill>` *is* assignable to `Record<SlotName, SlotFill>`.
+ * `readonly SlotName[]` is not assignable to an arbitrary `readonly K[]`.
+ * **The array is the safe position; the map is not.**
  *
  * So the derivations take arrays, and this is the one place that turns the map
- * into one. Reading `K` off the caller's own field means a library keyed by
- * file yields `TileId[]`, which every consumer then refuses — where
- * `Object.keys(library) as DesignId[]` names the brand instead of deriving it
- * and would keep compiling the day the key changes again, handing every entry
- * to a lookup that cannot resolve it and rendering an empty list in silence.
+ * into one. Reading `K` off the caller's own field is what makes that worth
+ * anything: `Object.keys(fills) as SlotName[]` names the brand instead of
+ * deriving it and would keep compiling the day the key changes again, handing
+ * every entry to a lookup that cannot resolve it and rendering an empty list in
+ * silence.
  *
- * It lives here, beside the field it exists for, rather than in either
- * derivation: `screens/library/grouping.ts` and `builder/panels/palette.ts` are
- * both store-free, and importing `@/store` into them to share three lines would
- * cost more than the duplication did. Both *call sites* are components that
- * already read the store.
+ * It lives here, beside the field it exists for, rather than in each consumer:
+ * eight rows import {@link TemplateInstance} from this module and every one of
+ * them walks a `fills` map, so the alternative is eight casts.
  *
- * `Partial` is load-bearing rather than politeness: `Record<K, true>` demands
- * every member of `K`, and a library holds a handful of 3,822.
+ * This is the shape row V3 shipped as `libraryDesigns`, kept while the field it
+ * was written for was deleted. The *lesson* was never about the library — it was
+ * about brands in key position — and the field that inherits it has eight
+ * readers where the library had three.
  */
-export function libraryDesigns<K extends string>(library: Readonly<Partial<Record<K, true>>>): K[] {
-  return Object.keys(library) as K[]
+export function filledSlots<K extends string>(fills: Readonly<Partial<Record<K, SlotFill>>>): K[] {
+  return Object.keys(fills) as K[]
 }
 
 /**
@@ -385,5 +490,5 @@ export function libraryDesigns<K extends string>(library: Readonly<Partial<Recor
  * migration's fallback alias the store's live state.
  */
 export function defaultWorkshopState(): WorkshopState {
-  return { library: {}, placements: {}, generated: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false }
+  return { placements: {}, generated: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false }
 }

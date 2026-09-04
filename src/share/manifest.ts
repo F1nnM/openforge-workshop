@@ -15,39 +15,39 @@
  * reason, so this is the app's one URL currency for a tile rather than a second
  * scheme.
  *
- * ## Why a *design* still travels as an ordinal — row V4
+ * Row A1 multiplied that ratio by the arity of a template rather than changing
+ * it: a placement is an instance with **up to five filled slots**, so a link
+ * carries three to five file addresses where it used to carry one, and the
+ * choice between two bytes and 39–183 characters is made three to five times per
+ * placement instead of once. `capacity.test.ts` measures what that costs.
  *
- * A placement names a {@link DesignId} now, and the obvious move would be to put
- * one on the wire: it is 13 characters flat against a `TileId`'s 39–183, which
- * looks like a saving of 26 to 170 characters per placement. **It is not a
- * saving at all, and this is the arithmetic that says so.** The codec has never
- * written a `TileId`; it writes an *ordinal*, which is one or two varint bytes,
- * and 13 raw characters is 6 to 13 times worse than that. A design id on the
- * wire would also need its own dedup table to stop repeating, which is what the
- * ordinal column gets for free from deflate.
+ * ## Why a *fill* travels as a file ordinal — row A5, reversing part of row V4
  *
- * So a design travels as **the lowest {@link ManifestOrdinal} among its files**
- * — which is A1's {@link AggregateAddress}, computed here from the records
- * rather than imported, because this module's dependency is two fields per
- * record and building an aggregate index to read one number would pull the whole
- * derivation into the codec. Encoding takes that ordinal for determinism (two
- * shares of one scene must produce one link); decoding accepts **any** ordinal
- * of any variant and resolves it to the design, through {@link designOf}.
+ * A placement is a **template instance whose slots are filled with files**
+ * (`src/store/schema.ts#SlotFill`, decision D1), so the thing a link has to name
+ * is a file, and {@link ordinalOfTile} is the direction that names it. Row V4
+ * had deleted that direction, moving `ordinalOf` from a file to a
+ * {@link DesignId} on the argument that a design id is *"13 characters flat
+ * against a `TileId`'s 39-183"*. **That premise was about a string this codec
+ * has never put on the wire**: it writes an *ordinal*, one or two varint bytes,
+ * so there was no per-character cost on either side of the choice and the
+ * arithmetic decided nothing. What decides it is what a placement holds, and a
+ * placement now holds files.
  *
- * That asymmetry is deliberate and it is what makes a version 2 link readable:
- * a v2 payload carried the ordinal of the exact file the user placed, and
- * resolving *that* ordinal to its design gives the design they placed. See
- * `payload.ts#SHARE_FORMAT_VERSION`.
+ * Addressing the file also removes an ambiguity V4 had to introduce and live
+ * with. A design's address is the **lowest ordinal among its files** - a derived
+ * number, and one V4's own docblock recorded as *not* stable under retirement:
+ * retire the lowest-ordinal file of a design and every link that placed that
+ * design breaks, retire any other file of it and nothing breaks. A file's own
+ * ordinal is append-only for ever (`src/catalog/schema.ts#ManifestOrdinal`), so
+ * a fill's address is stable under exactly the invariant the whole format
+ * already rests on, and there is precisely one number it can be.
  *
- * The cost of the address's known instability — A1: *"NOT stable under
- * retirement"* — is bounded and is a straight trade against what file addressing
- * cost. Under files, retiring **any** file dropped every placement of it. Under
- * design addressing, retiring the lowest-ordinal file of a design drops every
- * placement of that design, and retiring any other file of it drops nothing;
- * 1,705 of 3,822 designs (44.6%) hold two or more files, so the second case is
- * the common one and it used to be a loss. Either way the failure is the same
- * `unresolved` report the checksum blind spot already has words for, never a
- * plausible wrong room.
+ * {@link ordinalOf} and {@link designOf} therefore have **no caller under
+ * `src/share`** any more. They are kept because `tools/stamp/run.ts` and
+ * `tools/hygiene/project.test.ts` verify the design-address round trip against
+ * the real catalog on every stamp, and `tools` is not this row's to edit; a row
+ * that retires that check should retire these two accessors with it.
  *
  * ## The risk this module exists to manage
  *
@@ -57,12 +57,17 @@
  * existing link decodes to a different room, with no error anywhere.** Not a
  * crash, not an empty scene — a plausible wrong answer.
  *
- * Two defences, and they catch different failures:
+ * Two defences, and they catch different failures. Row A5 changed **what each
+ * one covers** without changing either mechanism, because an ordinal in a
+ * payload now names one of an instance's fills rather than a design's address:
  *
  *   1. **The manifest version**, `CatalogFile.version.manifest`, travels in every
  *      payload. It is bumped only when the invariant is broken *deliberately*, and
  *      a payload whose version does not match the running build is refused
- *      outright. This is the mechanism §13 specifies.
+ *      outright. This is the mechanism §13 specifies. It is a statement about the
+ *      whole numbering, so it protects every ordinal in the link whatever those
+ *      ordinals mean — the one of the two defences A5 leaves untouched in scope
+ *      as well as in mechanism.
  *
  *   2. **A 32-bit checksum over the (ordinal, tile id) pairs the link actually
  *      references**, also in the payload. This catches the invariant broken *by
@@ -70,7 +75,17 @@
  *      realised. It is scoped to the referenced pairs rather than to the whole
  *      manifest precisely so that **appending tiles does not invalidate old
  *      links**, which is the entire point of an append-only manifest. Four bytes,
- *      once per payload, regardless of how many placements share an ordinal.
+ *      once per payload, regardless of how many fills share an ordinal.
+ *
+ *      What it covers moved, and that is the row's one real gain here. A V4 link
+ *      referenced one ordinal per placement — the *design's address file* — so
+ *      the digest was computed over a representative that the room need not have
+ *      contained: place the second variant of a design and the checked pair was
+ *      the first variant's. An A5 link references the ordinal of every fill, so
+ *      the digest now covers **exactly the set of STLs the download pack would
+ *      hold**, and nothing else. `link.test.ts` proves the half that is new:
+ *      renumbering the file a fill actually names is drift even when that file
+ *      is not its design's address.
  *
  * Defence 2 has one blind spot, and it is named rather than papered over. A link
  * may reference an ordinal that this build cannot resolve — the tile was retired
@@ -84,17 +99,18 @@ import type { DesignId, ManifestOrdinal, TileId } from '@/catalog'
 
 /**
  * What the codec needs from a catalog: a manifest version, and each record's
- * ordinal and design.
+ * ordinal, file id and design.
  *
  * Structural rather than `CatalogFile` on purpose. A parsed `CatalogFile`
  * satisfies it as-is, so the app passes one straight through; but the codec's real
  * dependency is three fields, and saying so keeps a test from having to fabricate
  * 8,702 records with a footprint and a tag list to check a checksum.
  *
- * `id` is still here and is not redundant with `design`: the **checksum** is over
- * (ordinal, tile id) pairs, because §13's failure is two ordinals swapping the
- * *files* they name, and a digest over designs would miss a swap inside one
- * design entirely.
+ * `id` carries the codec: it is both what a fill names and what the **checksum**
+ * is over — (ordinal, tile id) pairs, because §13's failure is two ordinals
+ * swapping the *files* they name, and a digest over designs would miss a swap
+ * inside one design entirely. `design` is no longer read by anything under
+ * `src/share`; the module docblock says what still reads it and why it stays.
  */
 export interface ShareManifestSource {
   readonly version: { readonly manifest: number }
@@ -117,14 +133,30 @@ export interface ShareManifest {
   /** Designs this build can resolve. 3,822 against `size`'s 8,702 on the live corpus. */
   readonly designs: number
   /**
+   * The ordinal a **file** travels as — its own — or `undefined` if this build
+   * does not carry the file.
+   *
+   * **The direction the codec encodes with**, restored by row A5 because a
+   * `SlotFill` names a file (see the module docblock). One record per ordinal
+   * and one ordinal per record, so unlike {@link ordinalOf} there is nothing
+   * derived about the answer and nothing for a retirement elsewhere in the
+   * design to move.
+   *
+   * Named `ordinalOfTile` rather than reclaiming the bare `ordinalOf` only
+   * because {@link ordinalOf} still has two readers under `tools`, which row A5
+   * does not own. The brands mean the two cannot be confused at a call site
+   * whatever they are called: a {@link TileId} and a {@link DesignId} are
+   * separate zod brands, so handing one accessor the other's id is a compile
+   * error rather than a lookup that silently misses and drops the scene.
+   */
+  ordinalOfTile(tile: TileId): ManifestOrdinal | undefined
+  /**
    * The ordinal a **design** travels as — the lowest among its files — or
    * `undefined` if this build does not carry the design.
    *
-   * Takes a {@link DesignId} and not a {@link TileId} since row V4, and the
-   * brands are what make that a compile error rather than a lookup that misses:
-   * the two spaces are separate zod brands, so a caller still handing over a
-   * file id does not silently get `undefined` and drop every placement in the
-   * scene.
+   * No longer used by the codec: an A5 link addresses files. Kept for
+   * `tools/stamp/run.ts`'s and `tools/hygiene/project.test.ts`'s round-trip
+   * check over the real catalog — see the module docblock.
    */
   ordinalOf(design: DesignId): ManifestOrdinal | undefined
   /**
@@ -141,10 +173,11 @@ export interface ShareManifest {
    *
    * Total over the same population as {@link tileOf} — every record has a design
    * — so a link's ordinal resolves to a design exactly when it resolves to a
-   * tile, and the two never disagree about what was lost. **Any** ordinal of any
-   * variant answers, which is what lets a version 2 link (which encoded the
-   * placed file) decode under version 3's reading (which encodes the design's
-   * address).
+   * tile, and the two never disagree about what was lost.
+   *
+   * No longer used by the codec, for {@link ordinalOf}'s reason and kept for
+   * {@link ordinalOf}'s two readers: a decoded fill is a file, and
+   * {@link tileOf} is the whole of what reading one needs.
    */
   designOf(ordinal: number): DesignId | undefined
 }
@@ -164,13 +197,22 @@ export interface ShareManifest {
  * order today, so first-writer and minimum agree, and a link's determinism must
  * not rest on an emission order no schema states. A `Math.min` cannot be wrong
  * about it.
+ *
+ * The file → ordinal direction needs no such rule and that is the point of row
+ * A5's restoration: the relation is one-to-one, so there is no set to take a
+ * minimum over and no emission order to depend on. It is first-writer-wins for
+ * the same reason `byOrdinal` is — a duplicate `id` is as impossible in a
+ * validated `CatalogFile` as a duplicate `ord`, so this is a deterministic
+ * answer to an unreachable question rather than a policy.
  */
 export function buildShareManifest(source: ShareManifestSource): ShareManifest {
   const byOrdinal = new Map<number, { id: TileId; design: DesignId }>()
+  const byTile = new Map<TileId, ManifestOrdinal>()
   const addressOf = new Map<DesignId, ManifestOrdinal>()
 
   for (const record of source.records) {
     if (!byOrdinal.has(record.ord)) byOrdinal.set(record.ord, { id: record.id, design: record.design })
+    if (!byTile.has(record.id)) byTile.set(record.id, record.ord)
     const current = addressOf.get(record.design)
     if (current === undefined || record.ord < current) addressOf.set(record.design, record.ord)
   }
@@ -179,6 +221,7 @@ export function buildShareManifest(source: ShareManifestSource): ShareManifest {
     version: source.version.manifest,
     size: byOrdinal.size,
     designs: addressOf.size,
+    ordinalOfTile: (tile) => byTile.get(tile),
     ordinalOf: (design) => addressOf.get(design),
     tileOf: (ordinal) => byOrdinal.get(ordinal)?.id,
     designOf: (ordinal) => byOrdinal.get(ordinal)?.design,
@@ -226,6 +269,11 @@ export interface ResolvedOrdinals {
 
 /**
  * Resolve a link's ordinals and checksum what they mean.
+ *
+ * Since row A5 the ordinals handed in are **an instance's fills** rather than one
+ * per placement, which changes nothing here: the digest is over distinct
+ * ordinals, so a room whose forty instances share one floor file pays for that
+ * file once, exactly as forty placements of one tile used to.
  *
  * The digest covers **distinct ordinals in ascending order**, each paired with the
  * tile id it resolves to. Two properties fall out of that, and both are needed:
