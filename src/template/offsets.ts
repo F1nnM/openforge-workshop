@@ -10,10 +10,10 @@
  * ## The arithmetic
  *
  * Everything is derived in a frame `F` where the anchored face is `-z`. In `F`
- * the cell extent is `rotatedExtent(cell, side * 90)` — a w/d swap on an odd
- * quarter turn, taken through `geometry.ts`'s exact-swap branch and never
- * through trigonometry — and the part is already aligned, because the part is
- * yawed by exactly `side * 90`. So:
+ * the cell extent is the cell's own extent with `w` and `d` swapped on an odd
+ * quarter turn — exact, never trigonometric, and asserted equal to
+ * `geometry.ts#rotatedExtent` for every multiple of 90 — and the part is already
+ * aligned, because the part is yawed by exactly `side * 90`. So:
  *
  * ```
  * cell   →  (0, 0)
@@ -75,7 +75,7 @@
 import type { Footprint } from '@/catalog'
 import { WALL_THICKNESS_UNITS } from '@/catalog'
 import type { Extent, PlanPoint } from '@/builder/canvas'
-import { footprintExtent, rotatedExtent } from '@/builder/canvas'
+import { footprintExtent } from '@/builder/canvas'
 
 import type { SlotAnchor, SlotName, SlotRule, SlotSide, TemplateLayout } from './rules'
 import { ruleFor } from './rules'
@@ -123,6 +123,29 @@ export function quarterTurn(point: PlanPoint, side: SlotSide): PlanPoint {
 }
 
 /**
+ * A cell extent seen from the frame in which face `side` is `-z`.
+ *
+ * A w/d swap on an odd quarter turn, and the same answer
+ * `geometry.ts#rotatedExtent` gives for a multiple of 90 —
+ * `offsets.test.ts` asserts that equivalence over every extent and side, so the
+ * two cannot silently diverge.
+ *
+ * Written here rather than called there for one reason: `rotatedExtent` also has
+ * a trigonometric branch for the 893 tiles whose angle is not a multiple of 90,
+ * and this module never needs it. A slot's `side` is one of four values by
+ * construction. Depending on the general function would make this row's
+ * arithmetic sensitive to a change in rotation semantics it does not use —
+ * and row **A4a** is rewriting `src/builder/canvas/**`. So the *behavioural*
+ * dependency is dropped and the *equivalence* is kept as an assertion.
+ * `footprintExtent` stays a real import: it is the single footprint-to-extent
+ * reader and a second copy of its seven-case switch would be a second source of
+ * truth, which is worth a dependency where a w/d swap is not.
+ */
+function quarterTurnExtent(extent: Extent, side: SlotSide): Extent {
+  return side % 2 === 0 ? { w: extent.w, d: extent.d } : { w: extent.d, d: extent.w }
+}
+
+/**
  * The slot's offset from the template's centre, in grid units, in the
  * template's own frame — before the placement's own rotation.
  *
@@ -133,7 +156,7 @@ export function quarterTurn(point: PlanPoint, side: SlotSide): PlanPoint {
  */
 export function slotOffset(rule: SlotRule, cell: Extent, part: Extent): PlanPoint {
   if (rule.anchor === 'cell') return [0, 0]
-  const inFrame = rotatedExtent(cell, rule.side * DEGREES_PER_SIDE)
+  const inFrame = quarterTurnExtent(cell, rule.side)
   const dz = -(inFrame.d - part.d) / 2
   const dx = rule.anchor === 'corner' ? -(inFrame.w - part.w) / 2 : 0
   return quarterTurn([dx, dz], rule.side)

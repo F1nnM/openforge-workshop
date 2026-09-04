@@ -13,7 +13,13 @@
  *      symptom.
  *   2. **The rule table must hold no millimetre.** Asserted structurally: the
  *      only numbers in the three conventions are the legal `side` values.
- *   3. **The elevation must come from the one existing measurement.**
+ *   3. **The frame swap must stay equal to `rotatedExtent`.** `offsets.ts` does
+ *      the w/d swap itself rather than calling the general rotation, because a
+ *      slot's `side` is one of four values and `rotatedExtent` also carries a
+ *      trigonometric branch this row never uses — and row A4a is rewriting that
+ *      directory. The equivalence is therefore asserted here instead of assumed
+ *      by an import, over every extent and every side.
+ *   4. **The elevation must come from the one existing measurement.**
  *      `bases.ts#baseElevationMm` is that measurement and this row does not
  *      import it — row A4b owns the file and row A2 reports it may be deleted.
  *      So the block below pins the **contract** that function satisfies (the
@@ -23,7 +29,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { SNAP_STEP, snapTo } from '@/builder/canvas'
+import { SNAP_STEP, rotatedExtent, snapTo } from '@/builder/canvas'
+import type { Extent } from '@/builder/canvas'
 import type { Footprint } from '@/catalog'
 import { WALL_THICKNESS_UNITS } from '@/catalog'
 
@@ -179,6 +186,49 @@ describe('slotOffset', () => {
         -(w - 0.5) / 2,
         -(d - 0.5) / 2,
       ])
+    }
+  })
+})
+
+describe('the frame swap, against the general rotation it deliberately does not call', () => {
+  it('agrees with rotatedExtent on every extent and every side', () => {
+    /* `slotOffset` derives the inset in the frame where the anchored face is
+       `-z`, and gets there by swapping `w` and `d` on an odd quarter turn. That
+       is exactly `rotatedExtent(cell, side * 90)` for a multiple of 90, and this
+       recomputes the whole offset through the general function to prove it.
+
+       Asserted rather than imported: the source depends on `footprintExtent`
+       from `@/builder/canvas` and on nothing else there, so a change to rotation
+       semantics in row A4a's directory fails *this test* — visibly — instead of
+       silently moving every slot in the builder. */
+    const cells: readonly Extent[] = [
+      { w: 1, d: 1 },
+      { w: 2, d: 2 },
+      { w: 4, d: 2 },
+      { w: 2, d: 4 },
+      { w: 3, d: 1 },
+      { w: 8, d: 8 },
+    ]
+    const parts: readonly Extent[] = [
+      { w: 2, d: WALL_THICKNESS_UNITS },
+      { w: 2, d: 1.5 },
+      { w: WALL_THICKNESS_UNITS, d: WALL_THICKNESS_UNITS },
+    ]
+
+    for (const anchor of ['edge', 'corner'] as const) {
+      for (const side of [0, 1, 2, 3] as const) {
+        for (const cell of cells) {
+          for (const part of parts) {
+            const rule: SlotRule = { part: 'wall', anchor, side, restsOn: 'base' }
+            const inFrame = rotatedExtent(cell, side * 90)
+            const dz = -(inFrame.d - part.d) / 2
+            const dx = anchor === 'corner' ? -(inFrame.w - part.w) / 2 : 0
+            expect(slotOffset(rule, cell, part), `${anchor}/${String(side)}`).toEqual(
+              quarterTurn([dx, dz], side),
+            )
+          }
+        }
+      }
     }
   })
 })
