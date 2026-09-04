@@ -69,31 +69,43 @@
  * is also why a variant swap cannot rescue one — there is no sibling with a
  * footprint to swap to. `palette.corpus.test.ts` re-measures both figures.
  *
- * ## Arming: an item is picked, and that is the whole of it
+ * ## Arming is **reduced**, and row C1 is what restores it
  *
- * Row V4. `usePlanTools.selectedDesign` is a `DesignId` because
- * `Placement.design` is one, so arming is `tools.setSelectedDesign(item.design)`
- * and the pressed row is `selected === item.design`. **Nothing in this file
- * knows a file id**, and the one place a file appears is the thumbnail's
- * `row.preview`, which is a picture.
+ * `usePlanTools` no longer holds a `selectedDesign`. Row A1 made templates the
+ * only placement unit, so the tool state is a `selectedTemplate: TemplateId` and
+ * the work surface turns that into a `placeTemplate` call (`three/edits.ts`).
+ * **This panel lists the archive's 3,822 items, and not one of them is a
+ * template family** — a `TemplateId` names one of the 40 recipes in
+ * `screens/assemblies/templates.ts`, and a `DesignId` is a catalog identity that
+ * happens to match the same slug pattern (`store/schema.ts` measures that and
+ * says why it is not a licence to pass one for the other).
  *
- * V3 had to do more than that, and what it did is worth recording because the
- * disappearance is the point. `selectedTileId` was a `TileId`, so V3 inserted a
- * resolve-to-arm hop — `palette.ts#armFile`, `selectVariant` under the build's
- * lock preference — plus its inverse `armedItem` to decide which row read as
- * pressed, and the inverse could not simply re-run the hop, because that
- * comparison is taken under *today's* lock and switching preference after arming
- * would silently un-press the row while leaving the canvas armed. Both
- * functions, that hazard and this section's four call sites are gone rather than
- * moved: a design cannot be resolved under the wrong preference because it is
- * not resolved at all.
+ * So row **A8 declined to arm anything from here.** Selecting a row keeps its
+ * own selection — the press, the `aria-pressed` state and the disarm-on-repress
+ * are unchanged, because they are the interaction row C1 rebuilds over the
+ * families — and it writes nothing to `PlanTools`. The panel says so on screen,
+ * in one line under the heading, rather than offering a control that quietly does
+ * nothing: an item selected here cannot be placed, and the toolbar's own
+ * "No tile armed" plate would otherwise be the only clue.
  *
- * The two directions that remain still use different rules, and the pair is
- * measured: `selectVariant` names a file other than `preview` on **1,598 of
- * 3,822** items. The thumb answers *what is this* — `preview`, a sprite-carrying
- * topper since V5. What answers *what would I print* is no longer here at all:
- * it is `resolvePlacement`'s rule 0, run when the bill is built, which is where
- * it belonged. `variantsByPreference`' docblock is the long version.
+ * The alternative was to pass the `DesignId` to `setSelectedTemplate`. It
+ * compiles after a cast and it is a lie: `resolveInstance` would report every
+ * placement `unknown-template`, the surface would draw a one-cell marker for a
+ * recipe that does not exist, and the bill would fill with orphans. **Row C1
+ * replaces the whole of this list with the generated template families**, at
+ * which point the write comes back and the note goes.
+ *
+ * The G5 handoff below is reduced the same way and for the same reason: it still
+ * claims the channel exactly once, so a stale item cannot sit in the box waiting
+ * to arm a later mount, and it selects the row rather than arming the surface.
+ *
+ * **Nothing in this file knows a file id**, and the one place a file appears is
+ * the thumbnail's `row.preview`, which is a picture. That was row V4's doing and
+ * it survives the reduction: the thumb answers *what is this* — `preview`, a
+ * sprite-carrying topper since V5 — and *what would I print* is not a question
+ * this panel has ever answered. Since row A3 nothing answers it by resolution
+ * either: a fill names an exact file, so the file is chosen when a slot is
+ * filled, which is row C2's.
  *
  * ## The handoff from "Use in builder"
  *
@@ -171,7 +183,13 @@ export const COMMIT_DELAY_MS = 180
 
 export interface PalettePanelProps {
   readonly index: CatalogIndex
-  /** Shared with the toolbar and the canvas; this panel writes the selection. */
+  /**
+   * Shared with the toolbar and the surface.
+   *
+   * **This panel no longer writes the selection** — see the module note on row
+   * A8's reduction. All it writes is `setTool('place')`, so that a press is not
+   * swallowed by the eraser. The prop stays because row C1 restores the write.
+   */
   readonly tools: PlanTools
   /** `/builder`'s validated search. Only `q` is ever set by this screen. */
   readonly search: FacetSearch
@@ -203,15 +221,23 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
 
   const rows = useMemo(() => searchRows(result.items, lookup), [result, lookup])
 
-  // Which item is armed. Row V4: the store's own currency, so there is nothing
-  // to look up and nothing that can go stale when the lock preference changes.
-  const armed = tools.selectedDesign
+  /**
+   * The selected item — **local to this panel since row A8**, where it used to be
+   * `tools.selectedDesign`.
+   *
+   * A `DesignId` cannot arm the work surface any more: the surface places a
+   * template family and this list holds no families. See the module note for why
+   * casting one to the other was refused. Row **C1** takes this state back into
+   * `PlanTools` as a `TemplateId` when it replaces the list.
+   */
+  const [armed, setArmed] = useState<DesignId | null>(null)
 
   const arm = useCallback(
     (item: TileAggregate) => {
-      tools.setSelectedDesign(item.design)
-      // §3: arming forces place mode. Selecting a tile while the eraser is up
-      // otherwise looks like the palette ignored the click.
+      setArmed(item.design)
+      // §3: selecting forces place mode. Selecting a tile while the eraser is up
+      // otherwise looks like the palette ignored the click — still true of the
+      // press, and the one thing here that still reaches `PlanTools`.
       tools.setTool('place')
     },
     [tools],
@@ -241,13 +267,35 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
           <Eyebrow>Archive</Eyebrow> <Chip tone="count">{countLabel(result.total)}</Chip>
         </h2>
 
+        {/*
+          **Row A8's reduction, said on screen.** The list is the archive and the
+          surface places template families, so a press here selects and cannot
+          arm — see the module note. Row C1 replaces the list with the families
+          and this line goes with it. It is a plain note rather than a warning
+          because nothing has gone wrong: the builder is mid-migration and this
+          says which half is missing.
+        */}
+        <p className="of-pal-note">
+          Placing is not wired to this list yet. The work surface places one of
+          the 40 template recipes, and these are the archive&rsquo;s individual
+          files — selecting one shows what you picked and arms nothing.
+        </p>
+
         {result.total === 0 ? (
           <p className="of-pal-note">
             Nothing in the organised archive matches. Untagged tiles exist in storage and are not
             reachable from here yet.
           </p>
         ) : (
-          <PaletteList rows={rows} index={index} armed={armed} tools={tools} arm={arm} />
+          <PaletteList
+            rows={rows}
+            index={index}
+            armed={armed}
+            disarm={() => {
+              setArmed(null)
+            }}
+            arm={arm}
+          />
         )}
 
         {result.total > rows.length ? (
@@ -267,14 +315,14 @@ function PaletteList({
   rows,
   index,
   armed,
-  tools,
+  disarm,
   arm,
 }: {
   rows: readonly PaletteRow[]
   index: CatalogIndex
-  /** The armed item — `tools.selectedDesign`, threaded down so a row can read as pressed. */
+  /** The selected item, threaded down so a row can read as pressed. */
   armed: DesignId | null
-  tools: PlanTools
+  disarm: () => void
   arm: (item: TileAggregate) => void
 }) {
   return (
@@ -291,7 +339,7 @@ function PaletteList({
             // Re-selecting the armed row disarms it, which is what `aria-pressed`
             // promises.
             if (armed === row.item.design) {
-              tools.setSelectedDesign(null)
+              disarm()
               return
             }
             arm(row.item)

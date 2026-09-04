@@ -46,11 +46,21 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type * as BuilderThree from '@/builder/three'
+import type * as GeneratorPanelModule from '@/generator/panel'
+import type { ArchivedPlacement } from '@/generator/placement'
 import { createWorkshopRouter } from '@/routes'
 import type { FacetSearch } from '@/search'
-import { FIXTURE_CATALOG, FIXTURE_DESIGNS, FIXTURE_NAMES } from '@/builder/panels/fixture'
+import { TileId } from '@/catalog'
+import { FIXTURE_CATALOG, FIXTURE_IDS, FIXTURE_NAMES, anInstance } from '@/builder/panels/fixture'
 import { resetCatalogSearchIndex } from '@/screens/catalog'
-import { clearPersistedWorkshopState, resetWorkshop, useWorkshopStore } from '@/store'
+import {
+  SlotName,
+  TemplateId,
+  clearPersistedWorkshopState,
+  placeTemplate,
+  resetWorkshop,
+  useWorkshopStore,
+} from '@/store'
 import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
 
 /**
@@ -77,6 +87,57 @@ import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
 vi.mock('@/builder/three', async () => {
   const actual = await vi.importActual<typeof BuilderThree>('@/builder/three')
   return { ...actual, Builder3DPanel: () => <div data-testid="builder-3d" /> }
+})
+
+/**
+ * The generator drawer, reduced to its one seam — `onPlace`.
+ *
+ * Row **A8** needs the screen's *handling* of a resolved recipe under test, and
+ * the drawer that produces one is behind a lazy boundary with the pinned
+ * parameter schemas, the base resolver and, one import further on, the OpenSCAD
+ * engine. Mounting it to press a button would put all of that in this test's
+ * graph to exercise one callback.
+ *
+ * So the element is swapped for a button that calls `onPlace` with the value the
+ * real drawer hands over. That value is `placeRecipe`'s own return type, spelled
+ * as a literal here rather than produced by calling it: what is under test is
+ * what `BuilderScreen` does with an {@link ArchivedPlacement}, not how the
+ * generator arrives at one — `src/generator/placement/placement.test.ts` owns
+ * that half, and building a `Resolution` here would couple this test to the
+ * resolver's fixtures for nothing.
+ *
+ * `importActual` keeps the module real, so the barrel's own type surface is
+ * still exercised by the import; only the component is replaced.
+ */
+const ARCHIVED_BASE_FILE = 'plain#base.2x2.openlock.stl'
+const ARCHIVED: ArchivedPlacement = {
+  kind: 'archived',
+  fill: { tile: TileId.parse(FIXTURE_IDS.base2), pinned: true },
+  at: { x: 4, z: 0, rotation: 0 },
+  // `ArchiveBase` is the resolver's own record type and carries a dozen fields
+  // this screen never reads — it takes the file and the fill and nothing else —
+  // so only those are spelled, and the cast is what says the rest is not this
+  // test's subject. `src/generator/panel/resolve.ts` owns the whole shape.
+  base: { id: FIXTURE_IDS.base2, file: ARCHIVED_BASE_FILE } as ArchivedPlacement['base'],
+  recipeId: 'abcd1234',
+  note: `Placed from the generator. ${ARCHIVED_BASE_FILE} is Devon's published mesh.`,
+}
+
+vi.mock('@/generator/panel', async () => {
+  const actual = await vi.importActual<typeof GeneratorPanelModule>('@/generator/panel')
+  return {
+    ...actual,
+    GeneratorPanel: ({ onPlace }: GeneratorPanelModule.GeneratorPanelProps) => (
+      <button
+        type="button"
+        onClick={() => {
+          onPlace?.(ARCHIVED, null)
+        }}
+      >
+        place the archived base
+      </button>
+    ),
+  }
 })
 
 /* ------------------------------------------------------------------ scaffold */
@@ -196,17 +257,84 @@ describe('the builder screen', () => {
     expect(screen.getByRole('heading', { name: '0 tiles placed' })).toBeInTheDocument()
 
     act(() => {
-      useWorkshopStore.setState({
-        placements: {
-          // `PlacementId` and `DesignId` are branded strings over the same
-          // scene; the store's own parse is exercised in `panels.test.tsx`.
-          p1: { design: FIXTURE_DESIGNS.floor1, x: 0, z: 0, rotation: 0 },
-        } as never,
+      // Through `placeTemplate`, not `setState`: the screen's bill needs a real
+      // {@link TemplateInstance} and the store's parse is the thing that says
+      // this fixture is one. `anInstance` puts one file in a one-slot recipe —
+      // `fixture.ts` carries both, and the screen resolves them against the
+      // shipped table, so the recipe here is deliberately *not* one of the 40.
+      placeTemplate(anInstance([FIXTURE_IDS.floor1]))
+    })
+
+    // One placement, and the bill reports it as an instance whose recipe this
+    // build does not ship — which is the honest outcome for a fixture family and
+    // is what makes the count and the orphan block both live.
+    expect(screen.getByRole('heading', { name: '1 tile placed' })).toBeInTheDocument()
+    expect(screen.getByText(/1 placed piece has nothing this build can print/)).toBeInTheDocument()
+  })
+
+  it('drives the bill through the shipped recipe table, so a real family resolves', async () => {
+    await renderBuilder()
+
+    act(() => {
+      // `s2w-wall-on-tile-corner-low-single-piece` is one of the 40 in
+      // `screens/assemblies/templates.ts`, and its `floor` slot is a real slot —
+      // so this is the one assertion that the screen's `templates` lookup is the
+      // shipped table rather than an empty one. Four of its five slots are open,
+      // which §3.2 places anyway.
+      placeTemplate({
+        template: TemplateId.parse('s2w-wall-on-tile-corner-low-single-piece'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('floor')]: { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: false } },
       })
     })
 
-    expect(screen.getByRole('heading', { name: '1 tile placed' })).toBeInTheDocument()
     expect(screen.getByText(FIXTURE_NAMES.floor1, { selector: '.of-bill-name' })).toBeInTheDocument()
+    // The recipe resolved, so the piece is a row rather than an orphan — and the
+    // open slots are reported instead.
+    expect(screen.queryByText(/nothing this build can print/)).toBeNull()
+    expect(screen.getByText(/4 slots are still empty/)).toBeInTheDocument()
+  })
+
+  /**
+   * **Row A8's one refusal, asserted so row B4 finds it deliberate.**
+   *
+   * The generator's archived arm resolves a recipe to a file Devon already
+   * publishes — 682 of the archive's 709 resolvable keys — and that shortcut is
+   * what stops the 298 kB worker chunk and the 10.5 MB WASM being fetched at all.
+   * It cannot *place* the result: a base goes on the grid as a one-slot recipe
+   * predicating on `shape|base`, row **B4** owes that family, and `base` is not
+   * one of B1's eight roles, so no family keyed on `(role, form, build)` can be
+   * it (all 686 resolvable base records spread across eight keys, none a base).
+   *
+   * So this pins both halves: the resolved file is named on screen, and the store
+   * is untouched. Filling the `base` slot of a `role|floor` family would compile,
+   * would work geometrically, and would mislabel a base as a floor in the
+   * palette — which is why A9 left this as a compile error and A8 left it as a
+   * refusal rather than closing it with a guess.
+   */
+  it('names the archived base it resolved and declines to place it, pending row B4', async () => {
+    await renderBuilder()
+
+    act(() => {
+      screen.getByRole('button', { name: 'place the archived base' }).click()
+    })
+
+    // By class, not by role: the screen already has two live regions of its own
+    // (the toolbar's readout and the bill's verdict), so `getByRole('status')`
+    // is ambiguous here. The role itself is asserted on the node.
+    const notice = document.querySelector('.of-build-declined')
+    expect(notice).not.toBeNull()
+    expect(notice).toHaveAttribute('role', 'status')
+    expect(notice).toHaveTextContent(ARCHIVED_BASE_FILE)
+    expect(notice).toHaveTextContent(/already in the archive, so nothing was generated/)
+    expect(notice).toHaveTextContent(/a base is placed as a one-slot recipe, and that recipe is not in this build/)
+    // Nothing was written to either map: not the catalog scene, and not the
+    // generated one — the archive publishes this file, so generating it would be
+    // the other wrong answer.
+    expect(useWorkshopStore.getState().placements).toEqual({})
+    expect(useWorkshopStore.getState().generated).toEqual({})
   })
 
   it('offers a retry rather than a blank screen when the index cannot be loaded', async () => {

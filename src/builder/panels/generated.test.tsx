@@ -42,7 +42,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import type { AssemblyIndex } from '@/assembly'
-import type { CatalogFile, DesignId } from '@/catalog'
+import type { CatalogFile } from '@/catalog'
 import { resolveTags } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
 /**
@@ -63,7 +63,7 @@ import {
   clearPersistedWorkshopState,
   holdGeneratedMesh,
   placeGeneratedBase,
-  placeTile,
+  placeTemplate,
   resetWorkshop,
   useGeneratedHoldings,
   useGeneratedMeshes,
@@ -72,7 +72,7 @@ import {
 } from '@/store'
 
 import { BillPanel } from './BillPanel'
-import { FIXTURE_DESIGNS, fixtureCatalogFile } from './fixture'
+import { FIXTURE_IDS, anInstance, fixtureContext, fixtureCatalogFile } from './fixture'
 import { useArchiveDownload } from './useArchiveDownload'
 
 /* ------------------------------------------------------------------ scaffold */
@@ -187,7 +187,7 @@ function Harness({
   const holdings = useGeneratedHoldings()
 
   const bill = useMemo(
-    () => buildBillOfTiles(Object.values(placements), assembly, { lock: 'openlock' }),
+    () => buildBillOfTiles(Object.values(placements), assembly, { ...fixtureContext(file), lock: 'openlock' }),
     [placements],
   )
   const generatedBill = useMemo(
@@ -398,7 +398,7 @@ describe('the pack’s refusals, through the real hook', () => {
 
 describe('downloading a room with generated bases in it', () => {
   it('streams a mixed room whose length matches the plan to the byte', async () => {
-    placeTile({ design: FIXTURE_DESIGNS.floor1 as DesignId, x: 0, z: 0, rotation: 0 })
+    placeTemplate(anInstance([FIXTURE_IDS.floor1]))
     placeBase({ x: 6, triangles: 12 })
 
     render(<Harness environment={blobEnvironment()} source={fakeSource(sizesOf(file))} />)
@@ -443,7 +443,7 @@ describe('downloading a room with generated bases in it', () => {
     // §11's degradation path has nothing to offer a mesh that was never
     // published: there is no URL, because the bytes were made in this browser.
     // Row S5's `urlListShortfall` is that sentence and this is the call site.
-    placeTile({ design: FIXTURE_DESIGNS.big as DesignId, x: 0, z: 0, rotation: 0 })
+    placeTemplate(anInstance([FIXTURE_IDS.big]))
     placeBase({ x: 20 })
 
     render(<Harness environment={blobEnvironment(1_000_000)} source={fakeSource(sizesOf(file))} />)
@@ -457,7 +457,7 @@ describe('downloading a room with generated bases in it', () => {
   })
 
   it('says nothing about a shortfall when there is none', async () => {
-    placeTile({ design: FIXTURE_DESIGNS.big as DesignId, x: 0, z: 0, rotation: 0 })
+    placeTemplate(anInstance([FIXTURE_IDS.big]))
     render(<Harness environment={blobEnvironment(1_000_000)} source={fakeSource(sizesOf(file))} />)
     fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
     const alert = await failure()

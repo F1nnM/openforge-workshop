@@ -17,52 +17,83 @@
  * **Row C3 gives the pick a destination** (a `SlotFill` on a placed template
  * instance) and owns the assertions that go with it; what is left here is that
  * the press is inert and the panel says so.
+ *
+ * ## A holder is a filled slot, since row A8
+ *
+ * Every `at(…)` below is now a **template instance with one fill**, and the fill
+ * names the file whose accessory slots the assertion is about. That is a
+ * simplification rather than a translation: a placement used to name a design and
+ * `planSlots` had to resolve it to a file through the lock preference, because
+ * `config` differs between an item's variants. A fill *is* the file, so the
+ * preference is gone from the signature and `FILL.torchStone` versus
+ * `FILL.torchStoneFlex` — two files of one item, which this file's subject turns
+ * on — is now a distinction a test can simply state.
+ *
+ * One instance with two filled slots is two holders, and the last test in the
+ * inventory block is what pins that.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import type { DesignId } from '@/catalog'
+import type { TileId } from '@/catalog'
 import { PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
-import type { Placement } from '@/store'
-import { clearPersistedWorkshopState, resetWorkshop } from '@/store'
+import type { TemplateInstance } from '@/store'
+import {
+  PlacementId,
+  SlotName,
+  TemplateId,
+  clearPersistedWorkshopState,
+  resetWorkshop,
+} from '@/store'
 
 import { planSlots } from './planSlots'
 import { SlotsPanel } from './SlotsPanel'
 
 /**
- * The design a fixture file belongs to.
+ * The one recipe these tests place.
  *
- * Read off the fixture catalog rather than written out, because a placement names
- * a design (row V4) and every holder below is named by one of its files.
+ * A slug rather than one of the 40 real ids: `planSlots` never looks a template
+ * up — it walks the fills — so the family it names is not one of this file's
+ * facts, and naming a real one would imply the fills below belong to its slots.
  */
-const designOf = (id: string): string => {
-  const record = SLOT_CATALOG.records.find((candidate) => candidate.id === id)
-  if (record === undefined) throw new Error(`no fixture record for ${id}`)
-  return record.design
-}
+const A_RECIPE = 'slots-fixture'
 
-/** An item this index does not hold — the orphan case, since row V4. */
-const RETIRED_DESIGN = 'd-retired-nothing' as DesignId
+/** A file this index does not hold — the orphan case. */
+const RETIRED_TILE = 'tiles/gone/forever.stl' as TileId
 
-/** A placement of {@link RETIRED_DESIGN} at the origin. */
-function atRetired(): Placement {
-  return { design: RETIRED_DESIGN, x: 0, z: 0, rotation: 0 }
+/** An instance whose one fill names {@link RETIRED_TILE}, at the origin. */
+function atRetired(): TemplateInstance {
+  return instance({ fill: RETIRED_TILE, x: 0, z: 0 })
 }
 
 /**
- * A placement of the item a fixture file belongs to.
+ * An instance holding one file per slot, at a cell.
  *
- * Row V4, and it interacts with this file's subject: `FILL.torchStone` and
- * `FILL.torchStoneFlex` are two files of **one** item, so placing either now
- * places the same design and the panel resolves the file whose slots it shows
- * from the lock preference. Every `at(…)` below names a holder, and holders in
- * this fixture are single-file designs.
+ * The slots are named `slot0`, `slot1`, … because `planSlots` orders a holder's
+ * siblings by slot name and nothing here depends on the recipe's declared order;
+ * `id` is a placeholder the caller's map key overwrites in the store and which
+ * this inventory reads only as `holder.placement`.
  */
-function at(id: string, x: number, z: number): Placement {
-  return { design: designOf(id) as DesignId, x, z, rotation: 0 }
+function instance({ fill, fills, x, z }: { fill?: TileId; fills?: readonly TileId[]; x: number; z: number }): TemplateInstance {
+  const tiles = fills ?? (fill === undefined ? [] : [fill])
+  return {
+    id: PlacementId.parse('p'),
+    template: TemplateId.parse(A_RECIPE),
+    x,
+    z,
+    rotation: 0,
+    fills: Object.fromEntries(
+      tiles.map((tile, at) => [SlotName.parse(`slot${String(at)}`), { tile, pinned: false }]),
+    ),
+  }
 }
 
-const plan = (entries: Record<string, Placement>) => entries
+/** An instance whose single fill is one named fixture file. */
+function at(id: string, x: number, z: number): TemplateInstance {
+  return instance({ fill: id as TileId, x, z })
+}
+
+const plan = (entries: Record<string, TemplateInstance>) => entries
 
 beforeEach(() => {
   resetWorkshop()
@@ -118,10 +149,38 @@ describe('planSlots', () => {
         nearLeft: at(PARENT.pairedGrate, 0, 0),
       }),
     )
-    expect(inventory.holders.map((holder) => holder.id)).toEqual(['nearLeft', 'nearRight', 'far'])
+    expect(inventory.holders.map((holder) => holder.placement)).toEqual([
+      'nearLeft',
+      'nearRight',
+      'far',
+    ])
   })
 
-  it('calls a placement the index has retired an orphan rather than dropping it', () => {
+  it('gives one instance a holder per filled slot, because each file has its own', () => {
+    // Row A8's change of unit, stated: a template instance is up to five files
+    // and each declares its own accessory slots, so a single placed recipe can
+    // open several. `wallTowne` opens `torch` and `pairedGrate` opens two grates.
+    const inventory = planSlots(
+      SLOT_CATALOG,
+      plan({
+        one: instance({
+          fills: [PARENT.wallTowne as TileId, PARENT.pairedGrate as TileId],
+          x: 0,
+          z: 0,
+        }),
+      }),
+    )
+    expect(inventory.holders).toHaveLength(2)
+    // Keyed by placement *and* slot, so two holders of one instance are distinct
+    // React keys rather than a duplicate.
+    expect(inventory.holders.map((holder) => holder.id)).toEqual(['one|slot0', 'one|slot1'])
+    expect(inventory.holders.map((holder) => holder.parent)).toEqual([
+      PARENT.wallTowne,
+      PARENT.pairedGrate,
+    ])
+  })
+
+  it('calls a fill the index has retired an orphan rather than dropping it', () => {
     const inventory = planSlots(SLOT_CATALOG, plan({ gone: atRetired() }))
     expect(inventory.orphans).toEqual(['gone'])
     expect(inventory.holders).toEqual([])
@@ -153,7 +212,8 @@ describe('SlotsPanel', () => {
 
   it('names each holder with its grid position', () => {
     render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.wallTowne, 3.5, 2) })} />)
-    expect(screen.getByText('x 3.5, z 2')).toBeInTheDocument()
+    // The slot leads, because two holders of one instance sit at one cell.
+    expect(screen.getByText(/slot0 · x 3\.5, z 2/)).toBeInTheDocument()
     expect(screen.getByText(/Dungeon Stone Torch Wall 2x/)).toBeInTheDocument()
   })
 
@@ -196,9 +256,9 @@ describe('SlotsPanel', () => {
       />,
     )
     expect(
-      // "an item", not "a file": since row V4 a placement names a design, so an
-      // orphan is an item the index has lost and not a file it has retired.
-      screen.getByText(/1 placement names an item this index no longer holds/),
+      // "a file", not "an item": a fill names a file (decision D1), so an orphan
+      // is a file the index has retired rather than an item it has lost.
+      screen.getByText(/1 placement names a file this index no longer holds/),
     ).toBeInTheDocument()
   })
 

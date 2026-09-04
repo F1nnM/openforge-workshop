@@ -63,20 +63,28 @@
  *     navigate to `/settings` — **and dismisses without one on the page**, which
  *     is the branch a host on the download path would hit.
  *   - **The consequences copy is conditional on there being a scene.** Telling a
- *     user with an empty grid about `base-lock-mismatch` is noise; not telling a
- *     user with forty tiles placed is dishonest.
+ *     user with an empty grid what switching costs a build is noise; not telling
+ *     a user with forty pieces placed is dishonest.
+ *
+ * Row **A8** re-aimed that last pair. The copy named `base-lock-mismatch` as the
+ * flag a user would meet in the bill, and row A3 deleted that note code with the
+ * auto-insert that emitted it — so the assertion was guarding a string no bill
+ * can produce. `lock-unavailable` is the one code that survives, and it is what
+ * is asserted now; `LockToggle.tsx` carries the argument for the rewritten
+ * sentence.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DesignId, TileId } from '@/catalog'
+import { TileId } from '@/catalog'
 import {
   clearPersistedWorkshopState,
-  placeTile,
+  placeTemplate,
   resetWorkshop,
   setLockSystem,
   useWorkshopStore,
 } from '@/store'
+import { aTemplateInstance } from '@/store/fixture'
 import { LockNotice, LockToggle, resetLockBuild } from '@/ui/lock-picker'
 import { resetCatalogIndexCache } from '@/ui/shell'
 
@@ -593,23 +601,25 @@ describe('what changing it does to a build in progress', () => {
   it('says nothing about warnings while the grid is empty', async () => {
     await openDisclosure()
     expect(screen.getByText(/Nothing is placed yet/i)).toBeInTheDocument()
-    expect(screen.queryByText('base-lock-mismatch')).toBeNull()
+    expect(screen.queryByText('lock-unavailable')).toBeNull()
   })
 
   it('names the placements and the exact warnings once there are some', async () => {
     act(() => {
-      // The item, since row V4 — `TILE_A` is one of its files and `d-open` is
-      // the design the fixture gives it.
-      placeTile({ design: DesignId.parse('d-open'), x: 0, z: 0, rotation: 0 })
-      placeTile({ design: DesignId.parse('d-open'), x: 1, z: 0, rotation: 0 })
+      // A template instance, since row A1 — the placed unit is a recipe with a
+      // fill per slot, and this control's copy is about what a change of
+      // preference does to those fills.
+      placeTemplate(aTemplateInstance({ x: 0, z: 0 }))
+      placeTemplate(aTemplateInstance({ x: 1, z: 0 }))
     })
     await openDisclosure()
 
-    expect(screen.getByText(/tiles placed/i, { selector: '.of-lock-pop-note-lead' })).toBeInTheDocument()
+    expect(screen.getByText(/pieces placed/i, { selector: '.of-lock-pop-note-lead' })).toBeInTheDocument()
     expect(screen.getByText('2', { selector: '.of-lock-pop-mono' })).toBeInTheDocument()
-    // The honesty requirement: the codes named here are the strings the bill of
-    // tiles shows, so a user can recognise them there.
-    expect(screen.getByText('base-lock-mismatch')).toBeInTheDocument()
+    // The honesty requirement, unchanged in substance: every code named here is
+    // one the bill of tiles can actually show, so a user can recognise it there.
+    // `base-lock-mismatch` was the other one and row A3 deleted it — see the
+    // module note.
     expect(screen.getByText('lock-unavailable')).toBeInTheDocument()
     // And it must not claim the scene is destroyed, because it is not.
     expect(screen.getByText(/keeps every one of them/i, { selector: '.of-lock-pop-note-lead' })).toBeInTheDocument()

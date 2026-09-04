@@ -8,39 +8,36 @@
  *
  * ## It is a warning surface, not a footnote
  *
- * Four things this panel exists to say out loud, all of them measured rather
- * than defensive:
+ * Two things this panel exists to say out loud, both measured rather than
+ * defensive:
  *
- *   1. **The total carries its verdict.** Fifty placements at the corpus median
- *      of 10.36 MB is 518 MB *before* the auto-inserted bases, and half the
- *      corpus needs one. So a bare figure in a footer would bury the fact that an
- *      ordinary room is a gigabyte download. `verdictCopy` turns
- *      `buildBillOfTiles`' verdict into the sentence, at exactly the thresholds
- *      the library screen uses.
- *   2. **Every warning note is on screen.** 377 openforge toppers in the live
- *      corpus have no base the archive can supply, in three categories with three
- *      different remedies (86 absent base, 31 unsupportable shapes, 260 with
- *      nothing to match on). Somebody printing a wall with no base gets a wall
- *      that will not stand up. Those notes are rendered in full, above the rows,
- *      with the detail visible — not behind a disclosure, and not summarised as
- *      "some warnings".
- *   3. **Auto-inserted bases are marked.** A base is a line item the user did not
- *      place and often the larger print of the pair. A row they cannot account
- *      for reads as a bug in the bill.
- *   4. **The variant the lock preference chose is named.** Row A6 put a second
- *      invisible decision above the base: a placement resolves to a *different
- *      file of the same item* when the build's lock system has a better one, and
- *      for 1,419 of 3,822 items the three systems disagree about which. So the
- *      panel carries a `Resolved for openlock` block saying what the preference
- *      did to the scene, and marks the individual rows it moved. Without those
- *      the bill would be two decisions deep with nothing said about either — and
- *      the visible symptom would be a row naming a file the user never picked.
+ *   1. **The total carries its verdict.** An ordinary room is a gigabyte
+ *      download — one median-filled template instance is 26.4 MB over about
+ *      three files, so fifty of them are about 1.32 GB — and a bare figure in a
+ *      footer would bury that. `verdictCopy` turns `buildBillOfTiles`' verdict
+ *      into the sentence. **The two thresholds are stale by 2.58× and are
+ *      deliberately not moved here**: row A3 states why, and row C4 restates
+ *      them in parts rather than in placements.
+ *   2. **Every warning note is on screen**, rendered in full, above the rows,
+ *      with the detail visible — not behind a disclosure and not summarised as
+ *      "some warnings". The loudest of them is now `slot-unfilled`: every slot
+ *      of every recipe in the build is required, so an empty one is a hole in
+ *      the print and it is the one thing that refuses the download.
+ *
+ * **Two more claims stood here and row A3 removed the facts behind both.** The
+ * `base · added` mark read `BillLine.baseQuantity`, and nothing inserts a base —
+ * a recipe declares one as an ordinary slot, so every copy in the bill is a copy
+ * the scene asked for. The `Resolved for openlock` block and the per-row variant
+ * marks read a `VariantResolution`, and a fill names an exact file, so nothing
+ * chooses at resolution time and there is no decision left to disclose.
+ * `billView.ts` carries the long form of both, and row **C4** owns what this
+ * panel says about a fill instead.
  *
  * The `info` notes are quieter but still present, in a `<details>`: they are
- * true, and `build-unspecified` alone fires on a third of the archive, so giving
- * them the same weight as a missing base would make the missing base unreadable.
- * That is the one place this panel trades prominence for legibility, and it does
- * it in the direction that keeps the warnings loud.
+ * true, and `build-unspecified` alone fires on a quarter of what the recipes
+ * admit, so giving them the same weight as an empty slot would make the empty
+ * slot unreadable. That is the one place this panel trades prominence for
+ * legibility, and it does it in the direction that keeps the warnings loud.
  *
  * ## It is also the accessible inventory of the scene
  *
@@ -50,8 +47,10 @@
  * position, its angle, and a Remove button. So a keyboard-only or screen-reader
  * user can enumerate a room and take a tile out of it without ever touching the
  * drawing. `billView.ts#billInventory` is the join that makes it possible, and
- * placements the bill cannot describe at all — a retired tile id — get their own
- * removable block rather than being silently absent.
+ * instances the bill cannot describe at all — a retired recipe, or a recipe whose
+ * every fill has left the archive — get their own removable block rather than
+ * being silently absent. An instance now expands under **every** file it
+ * resolved to rather than under one, because a five-slot corner is five rows.
  */
 import { useId, useState } from 'react'
 
@@ -61,13 +60,13 @@ import type { GeneratedBill } from '@/generator/placement/bill'
 import type { MaterialId } from '@/materials'
 import { describeCell, formatUnits } from '@/builder/canvas'
 import { countLabel, fileSizeLabel, sizeLabel, totalBytesLabel } from '@/screens/catalog'
-import type { Placement, WorkshopState } from '@/store'
+import type { TemplateInstance, WorkshopState } from '@/store'
 import { removePlacement } from '@/store'
-import { Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
+import { Eyebrow, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
 import type { BillPlacement, BillRow } from './billView'
-import { billInventory, noteCopy, resolutionSummary, rowResolutionCopy, verdictCopy } from './billView'
+import { billInventory, noteCopy, verdictCopy } from './billView'
 import { DownloadAction } from './DownloadAction'
 import { GeneratedBillSection } from './GeneratedBillSection'
 import type { ArchiveDownload } from './useArchiveDownload'
@@ -76,8 +75,15 @@ import './panels.css'
 
 export interface BillPanelProps {
   readonly bill: BillOfTiles
-  /** The store's scene, for the placement ids the bill does not carry. */
-  readonly placements: Readonly<Record<string, Placement>>
+  /**
+   * The store's scene.
+   *
+   * Passed in rather than read from the store, so this panel stays a projection
+   * of one map: the screen builds the bill from these instances and hands both
+   * over, and the inventory below cannot describe a scene the bill was not built
+   * from. `billInventory` joins them on the `PlacementId`.
+   */
+  readonly placements: Readonly<Record<string, TemplateInstance>>
   readonly assets: CatalogAssets
   readonly sheet: SpriteSheet
   /**
@@ -105,10 +111,6 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
   const headingId = useId()
   const { rows, orphans } = billInventory(bill, placements)
   const verdict = verdictCopy(bill.download)
-  // What the lock preference did to the whole scene, once. Below the download
-  // verdict and the warnings deliberately: it is disclosure rather than a
-  // problem, and it must not push a missing base off the top of the panel.
-  const resolution = resolutionSummary(bill)
   // `unknown-tile` is deliberately dropped from this list: `OrphanBlock` below is
   // that note's rendering, and it is the better one — it names the retired ids and
   // offers to take them off the grid. Two paragraphs saying the same sentence, one
@@ -126,13 +128,14 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
         {bill.parts > bill.placements ? (
           <p className="of-bill-sub">
             {/*
-              "the pieces that need one" rather than "every OpenForge topper":
-              row A6's rule 0 resolves 1,808 of the 4,363 topper files to a
-              sibling that needs no base under openlock, so the old sentence
-              over-claimed for exactly the placements this panel no longer
-              expands.
+              Row A3. It read "a base is added under the pieces that need one",
+              which was rule 1's disclosure and is now false of every scene:
+              nothing is added. `parts` exceeds `placements` because a recipe is
+              three to five slots — 128 parts over the 40 shipped templates — and
+              this says that and nothing more.
             */}
-            {countLabel(bill.parts)} parts to print — a base is added under the pieces that need one.
+            {countLabel(bill.parts)} parts to print across{' '}
+            {bill.placements === 1 ? 'one recipe' : `${countLabel(bill.placements)} recipes`}.
           </p>
         ) : null}
       </header>
@@ -152,12 +155,6 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
             </p>
           )
         })}
-
-        {resolution === null ? null : (
-          <p className="of-bill-note" data-tone="resolved">
-            <strong className="of-bill-note-head">{resolution.headline}.</strong> {resolution.detail}
-          </p>
-        )}
 
         {orphans.length > 0 ? <OrphanBlock orphans={orphans} /> : null}
 
@@ -251,8 +248,7 @@ function BillRowView({
 }) {
   const listId = useId()
   const [open, setOpen] = useState(false)
-  const { line, placements, autoBaseOnly } = row
-  const resolution = rowResolutionCopy(row)
+  const { line, placements } = row
 
   const body = (
     <>
@@ -280,7 +276,7 @@ function BillRowView({
   )
 
   return (
-    <li className="of-bill-row" data-auto={autoBaseOnly ? '' : undefined}>
+    <li className="of-bill-row">
       {placements.length === 0 ? (
         <div className="of-bill-open">{body}</div>
       ) : (
@@ -307,25 +303,6 @@ function BillRowView({
         </button>
       )}
 
-      {autoBaseOnly ? (
-        <p className="of-bill-auto">
-          <Chip tone="tag">base · added</Chip>{' '}
-          {line.baseQuantity === 1 ? 'Added under a topper you placed' : 'Added under toppers you placed'}
-          , not placed by you.
-        </p>
-      ) : line.baseQuantity > 0 ? (
-        <p className="of-bill-auto">
-          <Chip tone="tag">base · added</Chip> {countLabel(line.baseQuantity)} of these{' '}
-          {line.baseQuantity === 1 ? 'copy is' : 'copies are'} an added base.
-        </p>
-      ) : null}
-
-      {resolution === null ? null : (
-        <p className="of-bill-auto" data-tone={resolution.tone}>
-          <Chip tone="tag">{resolution.chip}</Chip> {resolution.detail}
-        </p>
-      )}
-
       {open && placements.length > 0 ? (
         <ul className="of-bill-places" id={listId} role="list">
           {placements.map((entry) => (
@@ -348,8 +325,8 @@ function PlacementRow({ entry, name }: { entry: BillPlacement; name: string }) {
   return (
     <li className="of-bill-place">
       <span className="of-bill-at">
-        {describeCell(entry.placement.x, entry.placement.z)}
-        {entry.placement.rotation === 0 ? '' : ` · ${formatUnits(entry.placement.rotation)}°`}
+        {describeCell(entry.instance.x, entry.instance.z)}
+        {entry.instance.rotation === 0 ? '' : ` · ${formatUnits(entry.instance.rotation)}°`}
       </span>
       <button
         type="button"
@@ -359,7 +336,14 @@ function PlacementRow({ entry, name }: { entry: BillPlacement; name: string }) {
         }}
       >
         Remove{' '}
-        <VisuallyHidden>{`${name} at ${describeCell(entry.placement.x, entry.placement.z)}`}</VisuallyHidden>
+        {/*
+          Removing takes the **whole instance** off the grid, not this one part
+          of it, and the clipped text says so: a recipe is placed and rotated as
+          one unit (§1), so there is no store action that removes one slot's file
+          and nothing on this row could be pointed at one. Row C3's slot editor
+          is where a single fill is cleared.
+        */}
+        <VisuallyHidden>{`the piece holding ${name} at ${describeCell(entry.instance.x, entry.instance.z)}`}</VisuallyHidden>
       </button>
     </li>
   )
@@ -368,32 +352,40 @@ function PlacementRow({ entry, name }: { entry: BillPlacement; name: string }) {
 /* ------------------------------------------------------------------ orphans */
 
 /**
- * Placements the catalog can no longer describe.
+ * Instances the bill could not describe at all.
  *
- * A saved room or an old share link really can name one: since row V4 a
- * placement names an *item*, so what strands it is the whole item leaving the
- * corpus or a tag edit moving its files to another design — `DesignId`'s own
- * instability, and the exposure `src/store/schema.ts` accepted as the smaller
- * one. It resolves to no parts, so it appears in no bill line — and without this
- * block it would sit in the scene, count towards "tiles placed", and be
- * invisible in the inventory.
+ * Two reachable causes since row A3, and the block covers both because the
+ * consequence is identical — the instance resolves to **no parts**, appears in no
+ * line, and would otherwise sit in the scene, count towards "tiles placed" and be
+ * invisible in the inventory:
+ *
+ *   - **The recipe is not in this build.** A saved room or an old share link can
+ *     name a family a later build dropped, and `store/migrations.ts` cannot catch
+ *     it — it deliberately has no access to the template table.
+ *   - **Every fill has left the archive.** An instance whose slots are all empty
+ *     or all name retired files has nothing to print either.
+ *
+ * An instance with *some* resolved parts is not here: it is a row above with a
+ * hole in it, and `slot-unfilled` is the note that says so.
  */
 function OrphanBlock({ orphans }: { orphans: readonly BillPlacement[] }) {
   return (
     <div className="of-bill-note" data-tone="warn">
       <strong className="of-bill-note-head">
-        {countLabel(orphans.length)} placed {orphans.length === 1 ? 'tile is' : 'tiles are'} not in
-        this catalog build.
+        {countLabel(orphans.length)} placed {orphans.length === 1 ? 'piece has' : 'pieces have'}{' '}
+        nothing this build can print.
       </strong>{' '}
-      They cannot be drawn, priced or downloaded.
+      Either the recipe is not in this build, or every file it names has left the archive.
       <ul className="of-bill-places" role="list">
         {orphans.map((entry) => (
           <li className="of-bill-place" key={entry.id}>
-            {/* The design id, which is the only identity an orphan has: the
-                catalog holds no record for it, so there is no name, no size and
-                no thumbnail to show. Thirteen characters, where the file path
-                this used to render was 39 to 183 in a 302px column. */}
-            <span className="of-bill-at">{entry.placement.design}</span>
+            {/* The template id, which is the only identity an orphan is
+                guaranteed to have: the build may hold no recipe by that id, so
+                there is no name, no part list and no thumbnail to show, and the
+                fills may name nothing this catalog holds either. A slug, where
+                the file path this once rendered was 39 to 183 characters in a
+                302px column. */}
+            <span className="of-bill-at">{entry.instance.template}</span>
             <button
               type="button"
               className="of-bill-remove"
@@ -402,7 +394,7 @@ function OrphanBlock({ orphans }: { orphans: readonly BillPlacement[] }) {
               }}
             >
               Remove{' '}
-              <VisuallyHidden>{`the retired tile at ${describeCell(entry.placement.x, entry.placement.z)}`}</VisuallyHidden>
+              <VisuallyHidden>{`the unprintable piece at ${describeCell(entry.instance.x, entry.instance.z)}`}</VisuallyHidden>
             </button>
           </li>
         ))}
