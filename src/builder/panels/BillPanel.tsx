@@ -2,36 +2,45 @@
  * The builder's right column — design-contract.md §2.4's bill of tiles, and the
  * screen's warning surface.
  *
- * A mono eyebrow, `{n} tiles placed`, one row per unique file with its thumbnail,
- * name, size and count, then a footer with the unique-model count, the total and
- * the download action.
+ * A mono eyebrow, `{n} pieces placed` over the parts and files those pieces cost,
+ * one row per unique file with its thumbnail, name, size and count, then a footer
+ * with the unique-model count, the total and the download action.
  *
  * ## It is a warning surface, not a footnote
  *
  * Two things this panel exists to say out loud, both measured rather than
  * defensive:
  *
- *   1. **The total carries its verdict.** An ordinary room is a gigabyte
- *      download — one median-filled template instance is 26.4 MB over about
- *      three files, so fifty of them are about 1.32 GB — and a bare figure in a
- *      footer would bury that. `verdictCopy` turns `buildBillOfTiles`' verdict
- *      into the sentence. **The two thresholds are stale by 2.58× and are
- *      deliberately not moved here**: row A3 states why, and row C4 restates
- *      them in parts rather than in placements.
+ *   1. **The total carries its verdict**, and at 512 MB the verdict is a
+ *      forecast of a refusal rather than a grumble about a slow transfer: that
+ *      figure is `download/save.ts#BLOB_FALLBACK_LIMIT_BYTES` to the byte, so
+ *      every browser without a streaming save declines the archive above it.
+ *      `verdictCopy` turns `buildBillOfTiles`' verdict into the sentence and now
+ *      says which browsers stop. **Row C4 restated both thresholds in distinct
+ *      files and moved neither**, because A3's "stale by 2.58×" was an artefact
+ *      of leaving the md5 dedupe out: 200 solver-filled instances of the shipped
+ *      recipes are the same 36 files and the same 366,230,378 B as 50.
+ *      `assembly/bill.ts#DOWNLOAD_LARGE_BYTES` carries the measurements.
  *   2. **Every warning note is on screen**, rendered in full, above the rows,
  *      with the detail visible — not behind a disclosure and not summarised as
  *      "some warnings". The loudest of them is now `slot-unfilled`: every slot
  *      of every recipe in the build is required, so an empty one is a hole in
  *      the print and it is the one thing that refuses the download.
  *
- * **Two more claims stood here and row A3 removed the facts behind both.** The
- * `base · added` mark read `BillLine.baseQuantity`, and nothing inserts a base —
- * a recipe declares one as an ordinary slot, so every copy in the bill is a copy
- * the scene asked for. The `Resolved for openlock` block and the per-row variant
- * marks read a `VariantResolution`, and a fill names an exact file, so nothing
- * chooses at resolution time and there is no decision left to disclose.
- * `billView.ts` carries the long form of both, and row **C4** owns what this
- * panel says about a fill instead.
+ * **Two claims stood here and row A3 removed the facts behind both**, and what
+ * row C4 put in their place is not a replacement in kind. The `base · added`
+ * mark read `BillLine.baseQuantity`, and nothing inserts a base — a recipe
+ * declares one as an ordinary slot, so every copy in the bill is a copy the scene
+ * asked for. The `Resolved for openlock` block and the per-row variant marks read
+ * a `VariantResolution`, and a fill names an exact file, so nothing chooses at
+ * resolution time and there is no decision left to disclose. Both disclosed a
+ * choice the *app* made; the scene names the files now, so the question worth
+ * answering is the inverse one — **is a fill wrong** — and rule 0 could not ask
+ * it. {@link SlotFaultBlock} is that surface, over `ResolvedSlotFill.admissible`
+ * and the `fill-off-slot` note, and it is where a user finds out that an
+ * explicitly-filled instance will print and will not fit. The one thing the
+ * deleted `base · added` mark is genuinely replaced by is provenance: a `×2` on a
+ * row now names the two slots that asked, from `BillLine.slots`.
  *
  * The `info` notes are quieter but still present, in a `<details>`: they are
  * true, and `build-unspecified` alone fires on a quarter of what the recipes
@@ -54,7 +63,7 @@
  */
 import { useId, useState } from 'react'
 
-import type { BillOfTiles } from '@/assembly'
+import type { BillLine, BillOfTiles } from '@/assembly'
 import type { CatalogAssets, CatalogRecord, SpriteSheet } from '@/catalog'
 import type { GeneratedBill } from '@/generator/placement/bill'
 import type { MaterialId } from '@/materials'
@@ -65,8 +74,8 @@ import { removePlacement } from '@/store'
 import { Eyebrow, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
-import type { BillPlacement, BillRow } from './billView'
-import { billInventory, noteCopy, verdictCopy } from './billView'
+import type { BillPlacement, BillRow, SlotFault } from './billView'
+import { billInventory, noteCopy, slotFaultCopy, slotFaults, slotsAsking, verdictCopy } from './billView'
 import { DownloadAction } from './DownloadAction'
 import { GeneratedBillSection } from './GeneratedBillSection'
 import type { ArchiveDownload } from './useArchiveDownload'
@@ -117,27 +126,48 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
   // of them actionable, is worse than one.
   const warnings = bill.notes.filter((note) => note.severity === 'warn' && note.code !== 'unknown-tile')
   const infos = bill.notes.filter((note) => note.severity === 'info')
+  // Row C4's surface, minus the instances `OrphanBlock` below already owns —
+  // which is every instance that resolved to no parts at all, whether because
+  // this build ships no such recipe or because every fill has left the archive.
+  // That block is the better rendering for those: the whole piece has to go, not
+  // one slot of it, and two blocks for one instance would put two Remove buttons
+  // for it in one 302px column. An instance with *some* parts is a row above with
+  // a hole in it, and it belongs here.
+  const orphaned = new Set(orphans.map((entry) => entry.id))
+  const faults = slotFaults(bill).filter((fault) => !orphaned.has(fault.placement))
 
   return (
     <aside className="of-bill" aria-labelledby={headingId}>
       <header className="of-bill-head">
         <Eyebrow as="div">Bill of tiles</Eyebrow>
         <h2 className="of-bill-title" id={headingId}>
-          {countLabel(bill.placements)} {bill.placements === 1 ? 'tile' : 'tiles'} placed
+          {/*
+            **`pieces`, not `tiles` — row C4.** The count is `bill.placements`,
+            which is template *instances*, and an instance is three to five files:
+            128 parts over the 40 shipped recipes. "4 tiles placed" for four
+            instances understated the print by a factor of three and read as a
+            count of files, which is the one thing it is not. `piece` is the noun
+            the rest of this panel already uses for an instance — the orphan block
+            and three of the note headlines — and row C4 moved the per-*fill* note
+            copy off it in the same pass, so the two nouns no longer overlap.
+          */}
+          {countLabel(bill.placements)} {bill.placements === 1 ? 'piece' : 'pieces'} placed
         </h2>
-        {bill.parts > bill.placements ? (
+        {bill.placements === 0 ? null : (
           <p className="of-bill-sub">
             {/*
-              Row A3. It read "a base is added under the pieces that need one",
-              which was rule 1's disclosure and is now false of every scene:
-              nothing is added. `parts` exceeds `placements` because a recipe is
-              three to five slots — 128 parts over the 40 shipped templates — and
-              this says that and nothing more.
+              Unconditional wherever anything is placed, which is the other half
+              of the noun fix: the heading counts instances and this counts what
+              they cost, so a reader is never left to infer one from the other.
+              It was rendered only when `parts > placements`, so a scene of
+              one-part instances showed no part count at all — and `parts` can be
+              *below* `placements` when instances have holes in them, which is
+              exactly when a reader most needs to see both.
             */}
-            {countLabel(bill.parts)} parts to print across{' '}
-            {bill.placements === 1 ? 'one recipe' : `${countLabel(bill.placements)} recipes`}.
+            {countLabel(bill.parts)} {bill.parts === 1 ? 'part' : 'parts'} to print, over{' '}
+            {bill.files === 1 ? 'one file' : `${countLabel(bill.files)} files`}.
           </p>
-        ) : null}
+        )}
       </header>
 
       <div className="of-bill-scroll">
@@ -155,6 +185,8 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
             </p>
           )
         })}
+
+        {faults.length > 0 ? <SlotFaultBlock faults={faults} /> : null}
 
         {orphans.length > 0 ? <OrphanBlock orphans={orphans} /> : null}
 
@@ -306,7 +338,7 @@ function BillRowView({
       {open && placements.length > 0 ? (
         <ul className="of-bill-places" id={listId} role="list">
           {placements.map((entry) => (
-            <PlacementRow key={entry.id} entry={entry} name={line.tile.name} />
+            <PlacementRow key={entry.id} entry={entry} line={line} name={line.tile.name} />
           ))}
         </ul>
       ) : null}
@@ -321,12 +353,19 @@ function BillRowView({
  * coordinate, so the panel and the canvas's live region say the same words about
  * the same tile.
  */
-function PlacementRow({ entry, name }: { entry: BillPlacement; name: string }) {
+function PlacementRow({ entry, line, name }: { entry: BillPlacement; line: BillLine; name: string }) {
+  // **Row C4: `BillLine.slots`' first consumer.** A quantity above one is
+  // legitimate under templates (contract C-c) — two slots of one instance can
+  // resolve to the same md5 — and before this the row said `×2` with one
+  // placement under it and no way to account for the second copy. Named only
+  // when there is more than one, so the ordinary single-ask row stays quiet.
+  const asking = slotsAsking(line, entry.id)
   return (
     <li className="of-bill-place">
       <span className="of-bill-at">
         {describeCell(entry.instance.x, entry.instance.z)}
         {entry.instance.rotation === 0 ? '' : ` · ${formatUnits(entry.instance.rotation)}°`}
+        {asking.length > 1 ? ` · ${asking.join(' + ')}` : ''}
       </span>
       <button
         type="button"
@@ -345,6 +384,92 @@ function PlacementRow({ entry, name }: { entry: BillPlacement; name: string }) {
         */}
         <VisuallyHidden>{`the piece holding ${name} at ${describeCell(entry.instance.x, entry.instance.z)}`}</VisuallyHidden>
       </button>
+    </li>
+  )
+}
+
+/* --------------------------------------------------------------- slot faults */
+
+/**
+ * Every slot in the scene that is empty, retired, or holding a file it does not
+ * admit — one line each, and a way to reach the piece.
+ *
+ * **This is the answer to the question row A3 left open and row A8 declined to
+ * invent.** Three surfaces were deleted from this panel because the facts behind
+ * them stopped being computed, and all three disclosed a *choice the app had
+ * made*: the `Resolved for openlock` block, the per-row variant marks and the
+ * `base · added` mark. Nothing is chosen and nothing is inserted, so there was
+ * nothing to replace them with in kind. What replaced them is the inverse
+ * question, which the pre-A3 resolver could not ask: **the scene names the files,
+ * so the scene can be wrong**, and until this block a user's only trace of that
+ * was a rolled-up note saying how many slots were wrong and nothing about which.
+ *
+ * Two tones, and the split is `SlotFault.blocksDownload` — which is §7's line
+ * drawn where the user meets it. An empty or retired slot means the pack is one
+ * file short of a printable model and the download is refused; a fill the slot
+ * does not admit will print and will not fit, and the download goes ahead. A
+ * reader is told which of the two they are looking at rather than being handed
+ * one undifferentiated list of problems.
+ *
+ * **`countLabel(faults.length)` counts slots, not pieces**, and the copy says
+ * "slots" for the same reason `noteCopy` now says "files": one instance can
+ * contribute five entries here, so a count of entries is never a count of things
+ * on the grid.
+ */
+function SlotFaultBlock({ faults }: { faults: readonly SlotFault[] }) {
+  const blocking = faults.filter((fault) => fault.blocksDownload).length
+  return (
+    <div className="of-bill-note" data-tone="warn">
+      <strong className="of-bill-note-head">
+        {countLabel(faults.length)} {faults.length === 1 ? 'slot needs' : 'slots need'} attention.
+      </strong>{' '}
+      {blocking === 0
+        ? 'These will print and will not fit. The download is not refused over them.'
+        : blocking === faults.length
+          ? 'The download is refused until each one holds a file.'
+          : `${countLabel(blocking)} of them ${blocking === 1 ? 'refuses' : 'refuse'} the download; the rest will print and will not fit.`}
+      <ul className="of-bill-faults" role="list">
+        {faults.map((fault) => (
+          <SlotFaultRow key={`${fault.placement}/${fault.slot ?? ''}`} fault={fault} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * One faulty slot: which recipe, which slot, where on the plan, and what is
+ * wrong with it.
+ *
+ * The cell is `describeCell` — the canvas's own spelling — so this and the plan's
+ * live region say the same words about the same piece. Remove takes the **whole
+ * instance** off the grid rather than clearing the one fill, for the reason
+ * `PlacementRow` gives: a recipe is placed and rotated as one unit and there is
+ * no store action that empties a single slot. Row C3's slot editor is where a
+ * fill is re-chosen in place, and the two surfaces are complementary — this one
+ * says a slot is wrong from a panel that lists the whole scene, that one fixes it.
+ */
+function SlotFaultRow({ fault }: { fault: SlotFault }) {
+  const copy = slotFaultCopy(fault)
+  const at = describeCell(fault.instance.x, fault.instance.z)
+  return (
+    <li className="of-bill-fault" data-blocking={fault.blocksDownload ? '' : undefined}>
+      <span className="of-bill-fault-head">
+        <span className="of-bill-at">
+          {copy.subject} · {at}
+        </span>
+        <button
+          type="button"
+          className="of-bill-remove"
+          onClick={() => {
+            removePlacement(fault.placement)
+          }}
+        >
+          Remove{' '}
+          <VisuallyHidden>{`the piece with the faulty ${fault.slot ?? 'recipe'} at ${at}`}</VisuallyHidden>
+        </button>
+      </span>
+      <span className="of-bill-fault-why">{copy.reason}</span>
     </li>
   )
 }

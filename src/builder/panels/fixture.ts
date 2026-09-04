@@ -37,7 +37,7 @@
  * real path through `CatalogFile.parse` where a fixture that drifted from the
  * schema gets caught.
  *
- * ## Two recipes, added by row A8
+ * ## Two recipes, added by row A8, and a third by row C4
  *
  * A placement is a template instance, so a test that wants a bill needs a recipe
  * and an {@link AssemblyContext} as well as records. {@link ONE_SLOT_TEMPLATE}
@@ -48,7 +48,8 @@
  * They are declared here rather than in each suite because three files build a
  * bill over these records (`panels.test.tsx`, `generated.test.tsx` and
  * `screens/builder/builder.test.tsx`) and a fourth copy of a one-slot recipe is
- * how the copies drift.
+ * how the copies drift. {@link STRICT_TEMPLATE} is row C4's addition: neither of
+ * A8's two can hold an inadmissible fill, because both declare `tags: {}`.
  */
 import type { AssemblyContext, AssemblyTemplate } from '@/assembly'
 import type { CatalogFile, TileId } from '@/catalog'
@@ -396,10 +397,12 @@ export function mixedCatalogFile(): CatalogFile {
  * `tags: {}` on the part is deliberate and is not a shortcut — a slot with no
  * `require`, `deny` or `accept` admits **every** record, because `candidatesFor`
  * starts from the whole document list when the require set is empty. So every
- * fill below is admissible and no `fill-off-slot` note appears in any bill these
- * fixtures produce, which keeps the panels' tests about panels rather than about
- * C1's constraint semantics (`src/composition` covers those with 69 ported tests
- * of its own).
+ * fill in this recipe and in {@link TWO_SLOT_TEMPLATE} is admissible and neither
+ * can produce a `fill-off-slot` note, which keeps the panels' tests about panels
+ * rather than about C1's constraint semantics (`src/composition` covers those
+ * with 69 ported tests of its own). {@link STRICT_TEMPLATE} is the one that can,
+ * and it exists because that made the condition row C4's fault surface is for
+ * unreachable from here.
  */
 export const ONE_SLOT = 'model' as SlotName
 export const ONE_SLOT_TEMPLATE_ID = 'panels-one-slot' as TemplateId
@@ -427,6 +430,55 @@ export const TWO_SLOT_TEMPLATE: AssemblyTemplate = {
 }
 
 /**
+ * A one-slot recipe whose slot admits **floors only** — the fixture row C4 needed
+ * and neither A8 template could be.
+ *
+ * `ONE_SLOT_TEMPLATE` and `TWO_SLOT_TEMPLATE` both declare `tags: {}`, and that
+ * is not an oversight: a slot with no `require`, `deny` or `accept` admits every
+ * record, because `candidatesFor` starts from the whole document list when the
+ * require set is empty. So **no bill either of them produces can carry a
+ * `fill-off-slot` note**, and `ResolvedSlotFill.admissible` is `true` for every
+ * fill in every existing panels test. That was the right call for A8 — it keeps
+ * those tests about panels rather than about C1's constraint semantics — but it
+ * makes the one condition row C4's fault surface exists for unreachable.
+ *
+ * One `require` tag is the whole difference. `shape|floor` is carried by
+ * `floor1`, `floor2`, `base2`'s twin-keyed floor and `twin`, and **not** by
+ * `wallNoBase`, `slab` or `arc` — so filling this slot with a wall is an
+ * inadmissible fill made of records the fixture already holds, with no fourth
+ * catalog needed and no change to any existing bill total.
+ */
+export const STRICT_SLOT = 'floor' as SlotName
+export const STRICT_TEMPLATE_ID = 'panels-floor-only' as TemplateId
+export const STRICT_TEMPLATE: AssemblyTemplate = {
+  id: STRICT_TEMPLATE_ID,
+  tags: [],
+  parts: [{ name: STRICT_SLOT, tags: { require: [{ tag: 'shape|floor' }] } }],
+}
+
+/**
+ * One instance of {@link STRICT_TEMPLATE} holding the file given.
+ *
+ * A separate mint rather than a fourth arity of {@link anInstance}, because that
+ * function chooses its recipe from the *number* of entries and a strict one-slot
+ * instance is indistinguishable from a permissive one by count alone.
+ */
+export function aStrictInstance(
+  tile: string,
+  at: { x?: number; z?: number; rotation?: number } = {},
+): TemplateInstance {
+  minted += 1
+  return {
+    id: `fixture-s${String(minted)}` as PlacementId,
+    template: STRICT_TEMPLATE_ID,
+    x: at.x ?? 0,
+    z: at.z ?? 0,
+    rotation: at.rotation ?? 0,
+    fills: { [STRICT_SLOT]: { tile: tile as TileId, pinned: true } },
+  }
+}
+
+/**
  * The context `resolveInstance` and `buildBillOfTiles` require, over one catalog.
  *
  * Both fields are required arguments rather than defaulted options, which is row
@@ -443,6 +495,7 @@ export function fixtureContext(catalog: CatalogFile): AssemblyContext {
   const byId = new Map<string, AssemblyTemplate>([
     [ONE_SLOT_TEMPLATE_ID, ONE_SLOT_TEMPLATE],
     [TWO_SLOT_TEMPLATE_ID, TWO_SLOT_TEMPLATE],
+    [STRICT_TEMPLATE_ID, STRICT_TEMPLATE],
   ])
   return { templates: (id) => byId.get(id), composition: createCompositionIndex(catalog) }
 }

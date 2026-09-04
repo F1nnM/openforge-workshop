@@ -461,6 +461,50 @@ div.of-bill-open {
    Nothing is inserted and nothing is chosen, so there is no such row to mark and
    the selectors matched nothing. Row C4 owns whatever a row says about a fill. */
 
+/* ── Faulty slots (row C4) ───────────────────────────────────────────────────
+   Inside a `.of-bill-note`, so the accent bar and the tone are the note's. Each
+   entry is two lines rather than one — the subject with its Remove action, then
+   the reason — because the reason is a sentence and the subject is a recipe slug
+   plus a slot name plus a cell, and in a 302px column those do not share a line.
+   The ones that refuse the download carry a second rule down the left, which is
+   the same device the `huge` verdict uses: heavier bar, same hue, no new colour.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-bill-faults {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-bill-fault {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 7px;
+  border-left: 1px solid color-mix(in srgb, var(--acc) 35%, transparent);
+}
+
+.of-bill-fault[data-blocking] {
+  border-left-width: 2px;
+  border-left-color: var(--acc);
+}
+
+.of-bill-fault-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.of-bill-fault-why {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+
 /* ── Placements under a row ──────────────────────────────────────────────── */
 
 .of-bill-places {
