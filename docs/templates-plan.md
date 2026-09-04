@@ -911,6 +911,27 @@ which rule 0 structurally could not ask: **the scene names the files, so a fill 
   for every one-part scene and for every scene whose instances have holes in them, which is when a
   reader most needs both. In the same pass the four `noteCopy` codes that count *fills* moved off
   "piece" onto "file", so the two nouns no longer overlap.
+### The 5-versus-8 empty size domain, reconciled (rows B3, B4, C2)
+
+Row B3 measured **5** families with an empty size domain; row B4's shipped table has **8**, and row
+C2 flagged the disagreement rather than resolving it. Measured over the shipped
+`GENERATED_FAMILY_SIZES` — 51 families, 350 options, **43 with real positions and 8 whose only
+option is *any size*** — the two rows were answering different questions and both are right.
+
+B3's five are the families where **no record resolves a cell at all**: `wall|diagonal|separate wall`
+(121 records), `wall|hex|thick wall` (56), `decor|straight` (26), `wall|octagon|separate wall` (20),
+`floor|octagon` (8).
+
+B4's eight are those five plus **three whose cells exist geometrically and cannot be spelled as
+tags** — `stair|curve`, `floor|curve|separate wall` and `column|corner|s2w`. Those are exactly
+B4's own enumeration of the 16 inexpressible cells arriving at family granularity: the 90-degree
+sectors take their cell from geometry while the tags are silent, and a half-unit column has no
+`size|width|0.5` to name.
+
+So the honest statement is: **5 families have no size, and 8 offer no size *position*.** A size
+control is rendered for 43 of 51. Neither figure needs correcting; what needed saying is which
+question each answers.
+
 ---
 
 ## 11. Still open, and owned by nobody
