@@ -33,8 +33,11 @@
  * real path through `CatalogFile.parse`, which is where a fixture that drifted
  * from the schema gets caught.
  */
-import type { CatalogFile, DesignId } from '@/catalog'
+import type { CatalogFile, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
+import type { PlacementId, SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
+
+import type { SlotLayout } from './geometry'
 
 const TAGS = [
   'shape|floor',
@@ -302,53 +305,15 @@ export function fixtureCatalogFile(): CatalogFile {
 }
 
 /**
- * The design a fixture *file* belongs to.
+ * Ids by role, so a test reads as its intent rather than as a path.
  *
- * The bridge row V4 needs in the tests: a scene helper is handed a file id,
- * because that is what a canvas test is about — which outline, which band, which
- * tint — and a placement holds an item. Every record here is its own design, so
- * the conversion is total and injective, and a test that places
- * `FIXTURE_IDS.floor1` still draws exactly `FIXTURE_IDS.floor1`.
- *
- * Throws on an id the fixture does not hold, which is what a test placing a
- * retired tile wants: those tests pass a design id directly (see
- * `plan.test.ts`'s unknown-tile case) rather than asking this to invent one.
+ * **Files**, and since row A1 that is all a test needs: a `SlotFill` names an
+ * exact file (decision **D1**) and `PlanCatalog.record` takes a {@link TileId},
+ * so a test that wants a particular outline in a particular slot says so
+ * directly. Row V4's `FIXTURE_DESIGNS` and `fixtureDesignOf` were the bridge from
+ * a file id to the *item* a placement held, and both are deleted with the field
+ * they bridged to — there is no aggregate hop left for them to make.
  */
-export function fixtureDesignOf(tileId: string): DesignId {
-  const record = FIXTURE_CATALOG.records.find((candidate) => candidate.id === tileId)
-  if (record === undefined) throw new Error(`no fixture record for ${tileId}`)
-  return record.design as DesignId
-}
-
-/**
- * **Designs** by role — what a test places, since row V4.
- *
- * Every record in this fixture is its own design (eleven records, eleven
- * designs), so this map is one-to-one with {@link FIXTURE_IDS} and a test that
- * places `FIXTURE_DESIGNS.floor1` gets the record at `FIXTURE_IDS.floor1`. That
- * is a property of *this* fixture and not of the corpus, where a design averages
- * 2.28 files; a test that needs an item with two variants builds its own
- * catalog, and `assembly.test.ts` is full of them.
- *
- * {@link FIXTURE_IDS} stays because plenty of questions are still about a file:
- * which blob an instanced mesh keys on, which entry a download pack writes,
- * which record `materialOf` tints.
- */
-export const FIXTURE_DESIGNS = {
-  floor1: 'd-floor-1',
-  floor2: 'd-floor-2',
-  wall2: 'd-wall-2',
-  angled: 'd-angled',
-  arc: 'd-arc',
-  arcFallback: 'd-arc-convex',
-  column: 'd-column',
-  tri: 'd-tri',
-  diag: 'd-diag',
-  shapeless: 'd-none',
-  thickWall: 'd-thick-wall',
-} as const
-
-/** Ids by role, so a test reads as its intent rather than as a path. */
 export const FIXTURE_IDS = {
   floor1: 'tiles/dungeon_stone/floor/1x1.openlock.stl',
   floor2: 'tiles/dungeon_stone/floor/2x2.openlock.stl',
@@ -362,3 +327,130 @@ export const FIXTURE_IDS = {
   shapeless: 'tiles/cave/hex/hex.stl',
   thickWall: 'tiles/cut_stone/thick_wall/2x0.5.openlock.stl',
 } as const
+
+/* --------------------------------------------------------------- templates */
+
+/**
+ * A template family for the canvas's tests, and its five slot names.
+ *
+ * Named after the shipped family §2.1 uses as its worked example —
+ * `s2w-wall-on-tile-corner-low-single-piece`, *"the requested floor plus two
+ * walls plus a column in the corner, verbatim"* — but spelled out here rather
+ * than imported, for the reason `src/store/schema.ts#TemplateId` gives at length:
+ * the 40-entry table lives beside a screen, and `catalog.ts` sets out why the
+ * canvas must not reach one.
+ *
+ * **Two of the five slot names contain a space.** That is not decoration: it is
+ * the property `src/store/schema.ts#SlotName` refuses a slug pattern over —
+ * `'right wall'` and `'left wall'` are carried by 8 of the corpus's 128 parts —
+ * so a fixture without one would let a slot-name assumption through.
+ */
+export const FIXTURE_TEMPLATE = 'fixture-corner' as TemplateId
+
+/** A second family, for the tests about telling two apart. */
+export const OTHER_FIXTURE_TEMPLATE = 'fixture-corridor' as TemplateId
+
+/** The five slots, in the shipped family's own declared order. */
+export const FIXTURE_SLOTS = {
+  column: 'column' as SlotName,
+  rightWall: 'right wall' as SlotName,
+  leftWall: 'left wall' as SlotName,
+  floor: 'floor' as SlotName,
+  base: 'base' as SlotName,
+}
+
+/**
+ * A slot layout with **real offsets**, so a test can prove the composition.
+ *
+ * `originSlotLayout` — the rule in force until row B2's lands — puts every part
+ * at the instance origin, which is right for `floor` and `base` and stacks the
+ * rest. A canvas test written only against that could not tell a correct
+ * `slotGeometry` from one that ignored `dx`/`dz` and `layout.rotation` entirely,
+ * so this rule lays out a 2 × 2 corner: the floor and the base on the cell, the
+ * left wall along its north edge, the right wall turned a quarter along its east
+ * edge, and the column in the corner where the two meet.
+ *
+ * **The numbers are a fixture, not a measurement**, and they are chosen to
+ * exercise three facts rather than to describe a real recipe: the offsets are
+ * multiples of 0.25 and include values off the 0.5 snap lattice (§2.2),
+ * `right wall` carries a yaw of its own so a part's angle is not its instance's,
+ * and the elevations are distinct so a renderer reading one part's height for
+ * another is visible. Row **B2** owns the real rule.
+ */
+export function fixtureSlotLayout(_template: TemplateId, slot: SlotName): SlotLayout {
+  switch (slot) {
+    case FIXTURE_SLOTS.base:
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 0 }
+    case FIXTURE_SLOTS.floor:
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 6.35 }
+    case FIXTURE_SLOTS.leftWall:
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 12.7 }
+    case FIXTURE_SLOTS.rightWall:
+      return { dx: 1.5, dz: 0, rotation: 90, elevationMm: 12.7 }
+    case FIXTURE_SLOTS.column:
+      return { dx: 1.5, dz: 1.5, rotation: 0, elevationMm: 12.7 }
+    default:
+      // A slot this fixture has no rule for sits a quarter unit off the origin —
+      // deliberately *off* the 0.5 lattice, since §2.2 says a slot offset never
+      // snaps. Total rather than throwing, because `PlanCatalog.parts` walks
+      // whatever the instance's fill map holds and a test is entitled to invent
+      // a slot.
+      return { dx: 0.25, dz: 0.25, rotation: 0, elevationMm: 25.4 }
+  }
+}
+
+/**
+ * A fill map from `[slot, tileId]` pairs. Every fill `auto`, which is the
+ * solver's.
+ *
+ * Takes **plain strings** and brands them here, which is the whole job of a
+ * fixture: `SlotName` and `TileId` are opaque brands over strings, so a test
+ * that had to mint them itself would be a line of casts per row. One cast here
+ * beats one per call site, and it keeps the `as` out of the tests where it would
+ * read as significant.
+ */
+export function fixtureFills(rows: readonly (readonly [string, string])[]): TemplateInstance['fills'] {
+  const fills: Record<string, SlotFill> = {}
+  for (const [slot, tile] of rows) fills[slot as SlotName] = { tile: tile as TileId, pinned: false }
+  return fills
+}
+
+/**
+ * What {@link fixtureInstance} lets a test override, families as plain strings.
+ *
+ * Every field is `?: T | undefined` rather than `?: T`, because this project sets
+ * `exactOptionalPropertyTypes`: under it a plain `?: T` refuses an explicit
+ * `undefined`, and a test that builds these rows from a tuple with an optional
+ * tail hands over exactly that. Spelling both out is what lets a caller write
+ * `{ template }` instead of `...(template === undefined ? {} : { template })`.
+ */
+export interface FixtureInstanceOptions {
+  readonly x?: number | undefined
+  readonly z?: number | undefined
+  readonly rotation?: number | undefined
+  /** Defaults to {@link FIXTURE_TEMPLATE}. Branded here, for `fixtureFills`' reason. */
+  readonly template?: string | undefined
+}
+
+/**
+ * One template instance, ready to put in a `placements` map.
+ *
+ * `id` is written into the object as well as being the map key, which is
+ * `src/store/schema.ts`'s own rule and the reason it takes the key: *"the key
+ * wins"*, and a fixture that let the two disagree would let a test pass against a
+ * shape nothing in the app can produce.
+ */
+export function fixtureInstance(
+  id: string,
+  fills: TemplateInstance['fills'],
+  over: FixtureInstanceOptions = {},
+): TemplateInstance {
+  return {
+    id: id as PlacementId,
+    template: (over.template ?? FIXTURE_TEMPLATE) as TemplateId,
+    x: over.x ?? 0,
+    z: over.z ?? 0,
+    rotation: over.rotation ?? 0,
+    fills,
+  }
+}

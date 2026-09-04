@@ -20,6 +20,7 @@ import { GRID_UNIT_MM, WALL_THICKNESS_UNITS } from '@/catalog'
 import { fixtureCatalogFile } from './fixture'
 import {
   DIAGONAL_ANGLE_DEG,
+  ORIGIN_LAYOUT,
   SNAP_STEP,
   anchorFor,
   anchorForShape,
@@ -42,9 +43,14 @@ import {
   quadContains,
   rotatedExtent,
   rotationStepFor,
+  slotAnchor,
+  slotGeometry,
   snapTo,
+  turnOffset,
+  unionBox,
   unitsToMm,
 } from './geometry'
+import type { SlotLayout } from './geometry'
 
 const catalog = fixtureCatalogFile()
 const record = (id: string) => {
@@ -382,3 +388,99 @@ describe('readouts', () => {
   })
 })
 
+describe('slot layout — row A4a', () => {
+  const wall = footprintShape({ shape: 'wall', length: 2 })
+  if (wall === undefined) throw new Error('the wall footprint must draw')
+
+  it('leaves an offset alone at rotation 0, exactly', () => {
+    expect(turnOffset(1.5, 0.25, 0)).toEqual([1.5, 0.25])
+    expect(slotAnchor([2, 3], 0, { dx: 1.5, dz: 0.25, rotation: 0, elevationMm: 0 })).toEqual([3.5, 3.25])
+  })
+
+  it('turns an offset exactly on every quarter, with no trigonometric residue', () => {
+    // The whole reason the quarter turns are a swap rather than a cosine:
+    // `Math.cos(Math.PI / 2)` is 6.1e-17, so trig would put a 0.25-unit offset
+    // 1.5e-17 off the lattice — and equality is what two abutting parts need.
+    expect(turnOffset(1, 0.25, 90)).toEqual([-0.25, 1])
+    expect(turnOffset(1, 0.25, 180)).toEqual([-1, -0.25])
+    expect(turnOffset(1, 0.25, 270)).toEqual([0.25, -1])
+    expect(turnOffset(1, 0.25, 360)).toEqual([1, 0.25])
+  })
+
+  it('keeps a quarter-unit offset on the quarter-unit lattice through a full circle', () => {
+    // §2.2: slot offsets land on multiples of 0.25 and deliberately never snap.
+    // Whatever the instance's quarter turn, they must stay there exactly.
+    for (const rotation of [0, 90, 180, 270]) {
+      for (const [dx, dz] of [
+        [0.25, 0.75],
+        [1.5, 0.25],
+        [2.75, 1.25],
+      ]) {
+        const [x, z] = turnOffset(dx as number, dz as number, rotation)
+        expect(Number.isInteger(x * 4)).toBe(true)
+        expect(Number.isInteger(z * 4)).toBe(true)
+      }
+    }
+  })
+
+  it('folds a negative zero, which the negating branches really do produce', () => {
+    // `-0` survives in memory but not through `JSON.stringify`, so an offset
+    // holding one would stop a scene comparing equal to itself after a round
+    // trip. Both negating quarters can reach it from a zero component.
+    expect(Object.is(turnOffset(0, 1, 90)[0], -0)).toBe(false)
+    expect(Object.is(turnOffset(0, 0, 180)[0], -0)).toBe(false)
+    expect(Object.is(turnOffset(0, 0, 180)[1], -0)).toBe(false)
+    expect(Object.is(turnOffset(1, 0, 270)[1], -0)).toBe(false)
+  })
+
+  it('falls back to trigonometry off the quarter turns', () => {
+    // The 893 tiles whose angle is not a multiple of 90 are placeable, so an
+    // instance really can sit at 45°.
+    const [x, z] = turnOffset(2, 0, 45)
+    expect(x).toBeCloseTo(Math.SQRT2, 10)
+    expect(z).toBeCloseTo(Math.SQRT2, 10)
+  })
+
+  it('adds the slot yaw to the instance rotation and the footprint angle', () => {
+    // Three angles, one line: `slotGeometry` is the only place they meet.
+    const layout: SlotLayout = { dx: 0, dz: 0, rotation: 90, elevationMm: 12.7 }
+    expect(slotGeometry(wall, layout, [0, 0], 0).angle).toBe(90)
+    expect(slotGeometry(wall, layout, [0, 0], 45).angle).toBe(135)
+    // And it folds past a full circle rather than reporting 450.
+    expect(slotGeometry(wall, layout, [0, 0], 300).angle).toBe(30)
+  })
+
+  it('anchors a part at its orbited corner, so the box is the turned extent there', () => {
+    const layout: SlotLayout = { dx: 1.5, dz: 0, rotation: 90, elevationMm: 0 }
+    // Unturned instance: the wall sits at its own offset, turned a quarter by
+    // its slot, so a 2 x 0.5 run becomes 0.5 x 2 at x 1.5.
+    expect(slotGeometry(wall, layout, [0, 0], 0).box).toEqual({ x: 1.5, z: 0, w: 0.5, d: 2 })
+    // Instance turned a quarter: the corner orbits to (0, 1.5) and the part is
+    // at a half turn, so the extents come back to 2 x 0.5.
+    expect(slotGeometry(wall, layout, [0, 0], 90).box).toEqual({ x: 0, z: 1.5, w: 2, d: 0.5 })
+  })
+
+  it('puts every part at the instance origin under the default layout', () => {
+    // `ORIGIN_LAYOUT` is the rule in force until row B2's lands: right for the
+    // `floor` and `base` slots, and stacking for the rest.
+    expect(ORIGIN_LAYOUT).toEqual({ dx: 0, dz: 0, rotation: 0, elevationMm: 0 })
+    expect(Object.isFrozen(ORIGIN_LAYOUT)).toBe(true)
+    expect(slotGeometry(wall, ORIGIN_LAYOUT, [2, 3], 0).box).toEqual({ x: 2, z: 3, w: 2, d: 0.5 })
+  })
+
+  it('unions a template s boxes into the one box the instance occupies', () => {
+    expect(
+      unionBox([
+        { x: 0, z: 0, w: 2, d: 2 },
+        { x: 1.5, z: 0, w: 0.5, d: 2 },
+        { x: 0, z: -0.5, w: 2, d: 0.5 },
+      ]),
+    ).toEqual({ x: 0, z: -0.5, w: 2, d: 2.5 })
+  })
+
+  it('has no box for no parts, rather than a degenerate one', () => {
+    // An instance with nothing drawable is a thing `scene.ts` reports rather
+    // than draws, so the empty case must not be a zero-sized box at the origin.
+    expect(unionBox([])).toBeUndefined()
+  })
+})

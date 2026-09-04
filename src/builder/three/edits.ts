@@ -16,48 +16,83 @@
  * **no test in this repo can mount the 3D surface.** The verdicts can still be
  * proven exactly, and they are the substance of the row.
  *
- * ## Nothing here constructs a `Placement`
+ * ## Nothing here constructs a `TemplateInstance`
  *
- * Row **V4** is changing what a placement *is* — from a `TileId` to a design
- * resolved per lock — and its files include `src/store/schema.ts`,
- * `canvas/{scene,move,ghost}.ts` and the share codec. So a `place` edit carries
- * the **record, the anchor and the angle**, not a placement object, and the one
- * line that turns those into a store write lives in `RoomSurface.tsx`. Nothing
- * in this row reads `placement.tileId`, `placement.x` or `placement.z` off a
- * store record: coordinates come from `ScenePiece.placement` through the pure
- * API `move.ts` already exposes, and identity comes from `CatalogRecord.id`.
- * V4's change is therefore invisible to this file.
+ * A `place` edit carries the **family, the anchor and the angle**, not a store
+ * object, and the one line that turns those into a `placeTemplate` call lives in
+ * `RoomSurface.tsx`. Nothing in this row reads a field off a store record:
+ * coordinates come from `ScenePiece.placement` through the pure API `move.ts`
+ * already exposes, and identity is a `PlacementId` or a `TemplateId`.
  *
- * ## The refusals came from the plan view, unchanged
+ * ## Row A4b: the armed thing is a **template family**, and that shrinks placing
  *
- * Every one of them comes out of `ghost.ts` or `move.ts` and is re-worded, never
- * re-decided: a `none` footprint cannot be placed, an identical tile at
- * identical coordinates and an identical angle is refused (it would be invisible
- * in the room and would double a line in the bill), and an overlap **informs and
- * commits** — `overlap.ts` is emphatic about that, and the reason applies twice
- * over in 3D, where a sector's convex parts are an outward bound and can report
- * a contact the meshes do not have.
+ * Row **A1** made templates the only placement unit (§2.5) and retyped the
+ * palette's selection to a `TemplateId`; `placeTemplate` is the only placement
+ * action the store offers. So the four gestures split cleanly in two:
+ *
+ *   - **Erasing, moving and turning are unaffected.** All three act on a piece
+ *     that is *already* in the scene, and A4a's projection hands them one with a
+ *     box, an outline, a name and a rotation step — `pieceRotationStep` being the
+ *     least common multiple of its parts'. Every refusal they carry is still
+ *     `move.ts`'s, re-worded and never re-decided, and an overlap still **informs
+ *     and commits** because `overlap.ts` is emphatic about that.
+ *   - **Placing has almost nothing left to refuse**, and that is not a
+ *     simplification — it is the honest consequence of what an armed template
+ *     *is*. Turning a family into files is row **C2**'s fill solver and it does
+ *     not exist, so at the moment of the click this module knows the family, the
+ *     cursor and the pending angle, and it does not know a footprint. Every
+ *     refusal `computeGhost` produced was a fact about a footprint: `none` has
+ *     nothing to draw, an identical file at an identical corner and angle is an
+ *     invisible double, an outline overlaps, a band rule is unmeasured. **None of
+ *     those four is answerable about a family**, and inventing an answer — say by
+ *     picking the first file the palette happens to hold — would refuse
+ *     placements the app will accept and permit ones it will not.
+ *
+ * So {@link planPlacement} places, and contract **C-g** is what makes that
+ * correct rather than lax: `fills` may name *no* slots, §3.2 places a template
+ * with no candidate for a part *"anyway"*, and `PlanScene.unfilled` is the state
+ * the instance lands in. `workshopStore.ts` states it from the store's end —
+ * *"an unfilled slot is an ordinary state of an instance, not a degraded one"*.
+ * The one thing the surface owes the user is to **say** so, which is why the
+ * message names the empty slots instead of reading like a completed placement.
+ *
+ * {@link templateGhost} is the marker that goes with it, and `ghost.ts`'s
+ * `computeGhost` is deliberately not called: it takes one `CatalogRecord` and
+ * there is none to give it. See that function for what the marker claims and
+ * what it does not.
  */
-import type { MoveDrag, MovePreview, PlanGhost, PlanPoint, PlanScene, PlanTool, ScenePiece, SnapMode } from '@/builder/canvas'
+import type {
+  MoveDrag,
+  MovePreview,
+  PlanBox,
+  PlanPart,
+  PlanPoint,
+  PlanScene,
+  PlanTool,
+  ScenePiece,
+  SnapMode,
+} from '@/builder/canvas'
 import {
   beginMove,
-  computeGhost,
   describeCancel,
   describeCell,
   describeDrop,
   describeGrab,
   describeMoveHint,
+  describeTemplate,
   formatUnits,
   nextRotation,
   pieceAt,
   pieceName,
   pieceRotationStep,
+  planBox,
+  planQuad,
   previewMove,
-  rotationStepFor,
   scenePaintOrder,
+  snapTo,
 } from '@/builder/canvas'
-import type { CatalogRecord } from '@/catalog'
-import type { PlacementId } from '@/store'
+import { DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
+import type { PlacementId, TemplateId, TemplateInstance } from '@/store'
 
 /**
  * A gesture's outcome: at most one store write, and the sentence to say.
@@ -70,13 +105,28 @@ import type { PlacementId } from '@/store'
 export type SurfaceEdit =
   | {
       readonly kind: 'place'
-      /** The armed tile. The caller turns this into the store's placement shape. */
-      readonly record: CatalogRecord
-      /** Minimum corner, snapped. The ghost's own anchor, not a second derivation. */
+      /**
+       * The armed **family**. The caller turns this into a `placeTemplate` call.
+       *
+       * A `TemplateId` and not a record since row A4b: §2.5 makes templates the
+       * only placement unit, and both id spaces are opaque strings that
+       * `src/store/schema.ts` measures as *not* lexically disjoint — so the type
+       * is the only thing that can catch a caller still meaning a file.
+       */
+      readonly template: TemplateId
+      /** Minimum corner, snapped. The marker's own anchor, not a second derivation. */
       readonly anchor: PlanPoint
       readonly rotation: number
-      /** Whether the placement lands on a piece already there. Committed anyway. */
-      readonly conflict: boolean
+      /**
+       * The slots this instance is placed with — **none**, until row C2 lands.
+       *
+       * Carried as a field rather than left implicit so the caller writes what
+       * the verdict says instead of an empty literal of its own, and so the day
+       * C2's solver produces a fill map this arm needs no new shape. Contract
+       * **C-g**: an instance with no filled slot is legitimate, and
+       * `PlanScene.unfilled` reports it.
+       */
+      readonly fills: TemplateInstance['fills']
       readonly message: string
     }
   | {
@@ -118,47 +168,107 @@ export function writes(edit: SurfaceEdit): boolean {
 /* -------------------------------------------------------------------- placing */
 
 /**
- * What a click at `at` would place, or why it would not.
+ * The extent of the armed marker: **one cell**.
  *
- * The ghost is computed here rather than taken as an argument, and that is the
- * same guarantee `ghost.ts` was built for: the outline the user saw and the
- * anchor that reaches the store come out of **one** call to `computeGhost`, so
- * they cannot be half a unit apart. The component draws its ghost from the same
- * function on the same cursor, so the two agree by construction rather than by
+ * Not a claim about the family's size, and it must not be read as one — the
+ * `s2w` corner families are 2 × 2 and the corridors are longer still. It is the
+ * *cursor's* own cell, which is the only thing the surface can honestly draw
+ * before a fill solver has said which files the instance will hold. See
+ * {@link templateGhost}.
+ */
+const MARKER_EXTENT = { w: 1, d: 1 } as const
+
+/**
+ * Where the armed family would land, and the marker drawn over it.
+ *
+ * **The one derivation of the anchor**, which is the guarantee `ghost.ts` was
+ * built for restated at a smaller size: the marker the user saw and the anchor
+ * that reaches `placeTemplate` come out of one call, so they cannot be half a
+ * unit apart. `RoomSurface` draws from this function on the same cursor that
+ * {@link planPlacement} resolves, so the two agree by construction rather than by
  * both being careful.
+ *
+ * ## What the marker claims, and what it does not
+ *
+ * It is a **1 × 1 cell outline at the snapped anchor** and nothing more. Not the
+ * instance's footprint — a family's footprint is the union of its parts' and the
+ * parts are what row **C2**'s fill solver decides, so there is nothing to take a
+ * union over yet. Not turned by `rotation` either, and that is deliberate rather
+ * than unfinished: a square marker turned about its own corner would *move* —
+ * `slotAnchor`'s convention has the corner orbit the origin — and a mark that
+ * slides across the plan as the user presses ⟳ would report a placement point
+ * the store is not going to receive. The angle is still carried through to the
+ * store, where it means what §1 says it means: the instance is placed and
+ * rotated as one unit.
+ *
+ * The cursor is the point the marker is *centred* on, which is what makes it feel
+ * attached to the pointer, so the corner is derived by backing off half a cell
+ * before snapping — the same arithmetic `computeGhost` uses for the footprint it
+ * cannot draw.
+ */
+export interface TemplateGhost {
+  readonly template: TemplateId
+  /** Minimum corner, snapped. What reaches `placeTemplate`. */
+  readonly anchor: PlanPoint
+  /** The pending angle, carried to the store. The marker itself does not turn. */
+  readonly rotation: number
+  readonly box: PlanBox
+  /** The marker's outline, in world units — one axis-aligned cell. */
+  readonly polygons: readonly PlanPart[]
+  /** The family, as a readout says it. `describeTemplate`'s wording. */
+  readonly name: string
+}
+
+export function templateGhost(
+  template: TemplateId,
+  rotation: number,
+  cursor: PlanPoint,
+  step: number,
+): TemplateGhost {
+  const anchor: PlanPoint = [snapTo(cursor[0] - 0.5, step), snapTo(cursor[1] - 0.5, step)]
+  return {
+    template,
+    anchor,
+    rotation,
+    box: planBox(MARKER_EXTENT, 0, anchor[0], anchor[1]),
+    polygons: [planQuad(MARKER_EXTENT, 0, anchor[0], anchor[1])],
+    name: describeTemplate(template),
+  }
+}
+
+/**
+ * What a click at `at` would place.
+ *
+ * Two outcomes rather than the old five, and the module note sets out why: with
+ * an armed *family* there is no footprint to refuse, duplicate, overlap or
+ * disclose a band rule about. So this refuses exactly one thing — an empty
+ * palette — and otherwise places.
+ *
+ * The instance goes down with **no fills**, which is contract **C-g** and not a
+ * shortcut, and the sentence says so: a user who has just placed a template and
+ * sees an empty cell needs to be told the parts are chosen next, or the room
+ * looks broken. `PlanScene.unfilled` is where the instance then appears, and the
+ * panel that renders that list offers the Remove.
  */
 export function planPlacement(
-  scene: PlanScene,
-  record: CatalogRecord | undefined,
+  template: TemplateId | null,
   rotation: number,
   at: PlanPoint,
   step: number,
 ): SurfaceEdit {
-  if (record === undefined) {
-    return { kind: 'none', message: 'No tile is armed. Choose one in the palette first.' }
+  if (template === null) {
+    return { kind: 'none', message: 'No template is armed. Choose one in the palette first.' }
   }
-  const ghost = computeGhost(record, rotation, at, step, scene)
-  if (ghost.refusal !== null) return { kind: 'none', message: ghost.refusal.message }
-  if (ghost.duplicate) {
-    return {
-      kind: 'none',
-      message: `${record.name} is already placed at ${describeCell(ghost.anchor[0], ghost.anchor[1])}.`,
-    }
-  }
-  const conflict = ghost.conflict ? ', overlapping a piece already there' : ''
-  // The caveat is announced on the act and not only carried on the piece: 462 of
-  // the 1,199 curves rest on a band rule with no accepted mesh fit behind it, and
-  // in 3D there is no hatch pattern to carry that — a fill is all there is. So the
-  // sentence is the only disclosure, which makes it load-bearing rather than
-  // polite.
-  const caveat = ghost.caveat === null ? '' : ` ${ghost.caveat.message}`
+  const ghost = templateGhost(template, rotation, at, step)
   return {
     kind: 'place',
-    record,
+    template,
     anchor: ghost.anchor,
     rotation: ghost.rotation,
-    conflict: ghost.conflict,
-    message: `Placed ${record.name} at ${describeCell(ghost.anchor[0], ghost.anchor[1])}${conflict}.${caveat}`,
+    fills: {},
+    message:
+      `Placed ${ghost.name} at ${describeCell(ghost.anchor[0], ghost.anchor[1])} with no parts chosen yet. ` +
+      'Fill its slots to give it something to draw.',
   }
 }
 
@@ -251,16 +361,26 @@ export function describeAbandon(drag: MoveDrag, scene: PlanScene): string {
  * clicked, and the second press would otherwise silently start turning the
  * *ghost* instead.
  *
- * The step is the tile's own — `pieceRotationStep` for a placed piece,
- * `rotationStepFor` for the armed one. 893 tiles carry an angle that is not a
- * multiple of 90, and on all 1,199 curves the step *equals the sweep*, which is
- * what makes one press land a curve beside its predecessor.
+ * ## The step of a **placed** piece is measured; the armed family's cannot be
+ *
+ * For a piece in the scene it is `pieceRotationStep(piece)` — the least common
+ * multiple of its parts' own steps, which is the coarsest angle *every* part can
+ * still mate at. 893 tiles carry an angle that is not a multiple of 90, and on
+ * all 1,199 curves the step *equals the sweep*, which is what makes one press
+ * land a curve beside its predecessor. That is unchanged and it is why `R` on a
+ * placed template is exact.
+ *
+ * For an armed **family** it is {@link ARMED_TURN_STEP_DEG}, because a family's
+ * step is a fact about its parts' files and row **C2** has not chosen them yet.
+ * It is `DEFAULT_ROTATION_STEP_DEG` by name rather than a literal 90, so the one
+ * place the corpus's default is written down is still the only place — and so
+ * the day a solver can answer this, one constant is what changes.
  */
 export function planTurn(
   scene: PlanScene,
   sticky: PlacementId | null,
   under: ScenePiece | undefined,
-  armed: CatalogRecord | undefined,
+  armed: TemplateId | null,
   armedRotation: number,
   direction: 1 | -1 = 1,
 ): SurfaceEdit {
@@ -276,17 +396,32 @@ export function planTurn(
       message: `Turned ${pieceName(piece)} to ${formatUnits(rotation)} degrees.`,
     }
   }
-  if (armed === undefined) {
-    return { kind: 'none', message: 'Nothing to turn. Arm a tile or put the pointer on a placed one.' }
+  if (armed === null) {
+    return { kind: 'none', message: 'Nothing to turn. Arm a template or put the pointer on a placed one.' }
   }
-  const step = rotationStepFor(armed)
+  const step = ARMED_TURN_STEP_DEG
   return {
     kind: 'arm',
     step,
     direction,
-    message: `${armed.name} will be placed at ${formatUnits(nextRotation(armedRotation, step, direction))} degrees.`,
+    message:
+      `${describeTemplate(armed)} will be placed at ` +
+      `${formatUnits(nextRotation(armedRotation, step, direction))} degrees.`,
   }
 }
+
+/**
+ * The step `R` turns an armed **family** by: the corpus's own default, 90°.
+ *
+ * Not a guess and not a hardcoded literal — `DEFAULT_ROTATION_STEP_DEG` is where
+ * `@/catalog` writes the corpus default down, and this names it so that the one
+ * place is still the only place. It is the right answer for a family precisely
+ * because nothing finer is *known*: a step is a property of the files in the
+ * parts, `pieceRotationStep` computes it as their least common multiple once
+ * they exist, and proposing a finer angle for a family whose parts cannot mate at
+ * it would be worse than proposing the default.
+ */
+export const ARMED_TURN_STEP_DEG = DEFAULT_ROTATION_STEP_DEG
 
 /* --------------------------------------------------------------------- readout */
 
@@ -317,14 +452,30 @@ export interface SurfaceStatus {
 
 export interface SurfaceHintInput {
   readonly tool: PlanTool
-  readonly armed: CatalogRecord | undefined
-  readonly ghost: PlanGhost | null
+  /** The armed family, or `null` when the palette has nothing selected. */
+  readonly armed: TemplateId | null
   readonly under: ScenePiece | undefined
   readonly moving: MovePreview | undefined
   /** `false` while the pointer is off the plan — orbited past the horizon, or outside. */
   readonly onPlan: boolean
-  /** Pieces placed whose mesh has not arrived. Named because it changes what is drawn. */
+  /**
+   * Drawn **parts** whose mesh has not arrived, each one a plate on screen.
+   *
+   * Parts and not placements since row A4b, because a plate is drawn per part:
+   * a three-part template with one converted file is two plates and one mesh,
+   * and a count of *placements* would say "1 outlined" about two outlines.
+   */
   readonly waiting: number
+  /**
+   * Instances with no filled slot at all — `PlanScene.unfilled.length`.
+   *
+   * **The state a fresh placement lands in**, until row C2's fill solver runs, so
+   * it is the single most important thing this line can say: a user who clicks
+   * the plan gets an instance in the store, a marker over the cell and no
+   * geometry, and without a sentence naming that the app looks broken. Contract
+   * **C-g** makes it legitimate; this makes it legible.
+   */
+  readonly unfilled: number
 }
 
 /**
@@ -332,54 +483,78 @@ export interface SurfaceHintInput {
  *
  * The precedence was `PlanCanvas`'s `buildHint` and the wording was not: this
  * surface's primary gesture is **click**, its drag is the orbit, and it has no
- * drag-paint to describe. The one thing that is genuinely new is `waiting` — a
- * placed tile whose mesh has not arrived is drawn as a marker rather than as
- * itself, and a user looking at a plate where a tile should be needs the surface
- * to say which of the two it is looking at.
+ * drag-paint to describe.
+ *
+ * Two of the lines are about the gap between what is in the store and what is on
+ * screen, and both are ordered *below* every gesture and *above* the plain case,
+ * because neither is an error and neither may be silent: `unfilled` is an
+ * instance whose slots nobody has chosen files for, and `waiting` is a part whose
+ * chosen file has no mesh yet. `unfilled` leads, because it is the one the user
+ * can act on — fill the slots — where a conversion only needs waiting for.
+ *
+ * The four ghost lines row R2 wrote here are **gone with the record-shaped
+ * ghost**, not merely unreachable: a refusal, a duplicate, an overlap and an
+ * unmeasured band are all facts about a footprint, and an armed family has none
+ * until C2 resolves it. Restating them against a marker would be the surface
+ * asserting something it does not know.
  */
 export function describeSurfaceHint(input: SurfaceHintInput): string {
-  const { tool, armed, ghost, under, moving, onPlan, waiting } = input
+  const { tool, armed, under, moving, onPlan, waiting, unfilled } = input
 
-  // A piece in the air outranks everything, including a refusal about the armed
-  // tile: nothing else on screen is what the user is doing.
+  // A piece in the air outranks everything: nothing else on screen is what the
+  // user is doing.
   if (moving !== undefined) return describeMoveHint(moving)
-  if (!onPlan) return 'Drag to orbit. Point at the plan to place or remove a tile.'
+  if (!onPlan) return 'Drag to orbit. Point at the plan to place or remove a template.'
 
   if (tool === 'move') {
     return under === undefined
-      ? 'Move: drag a tile to reposition it. Drag anywhere else to orbit.'
+      ? 'Move: drag a template to reposition it. Drag anywhere else to orbit.'
       : `Move: drag ${pieceName(under)} to reposition it.`
   }
   if (tool === 'erase') {
-    return under === undefined ? 'Erase: click a tile to remove it.' : `Erase: click to remove ${pieceName(under)}.`
+    return under === undefined
+      ? 'Erase: click a template to remove it.'
+      : `Erase: click to remove ${pieceName(under)}.`
   }
-  if (armed === undefined) return 'Choose a tile in the palette, then click the plan to place it.'
-  if (ghost !== null && ghost.refusal !== null) return ghost.refusal.message
-  if (ghost?.duplicate === true) return `${armed.name} is already here — move the pointer to place another.`
-  if (ghost?.conflict === true) {
-    return `Overlaps a piece already placed. R turns by ${formatUnits(rotationStepFor(armed))}°.`
-  }
-  if (ghost?.caveat != null) {
-    return `${ghost.caveat.message} R turns by ${formatUnits(rotationStepFor(armed))}°.`
-  }
-  // Below every problem, and above the plain case: a marker where a tile should
-  // be is not an error, and it must not be silent either.
-  if (waiting > 0) {
+  if (armed === null) return 'Choose a template in the palette, then click the plan to place it.'
+
+  const name = describeTemplate(armed)
+  if (unfilled > 0) {
     return (
-      `${String(waiting)} placed ${waiting === 1 ? 'tile has' : 'tiles have'} no mesh yet and ` +
-      `${waiting === 1 ? 'is' : 'are'} drawn as a marked outline. Click to place ${armed.name}.`
+      `${unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts ` +
+      `chosen yet, so ${unfilled === 1 ? 'it draws' : 'they draw'} nothing. Fill their slots, or click to place ` +
+      `${name}.`
     )
   }
-  return `Click to place ${armed.name}. R turns by ${formatUnits(rotationStepFor(armed))}°.`
+  if (waiting > 0) {
+    return (
+      `${String(waiting)} placed ${waiting === 1 ? 'part has' : 'parts have'} no mesh yet and ` +
+      `${waiting === 1 ? 'is' : 'are'} drawn as a marked outline. Click to place ${name}.`
+    )
+  }
+  return `Click to place ${name}. R turns by ${formatUnits(ARMED_TURN_STEP_DEG)}°.`
 }
 
-/** The `<canvas>`'s accessible label — a summary, not an inventory. */
+/**
+ * The `<canvas>`'s accessible label — a summary, not an inventory.
+ *
+ * Counts **placements** in both populations, which is what a user means by "how
+ * much is in this room"; `waiting` is parts, and it is named as parts so the two
+ * numbers cannot be read as the same unit. The instances with nothing chosen are
+ * counted separately for {@link describeSurfaceHint}'s reason: a room of five
+ * templates and no fills is not an empty room, and it is not a full one either.
+ */
 export function describeSurface(scene: PlanScene, waiting: number): string {
-  const placed = scene.pieces.length + scene.generated.length
+  const placed = scene.pieces.length + scene.generated.length + scene.unfilled.length
   if (placed === 0) {
-    return 'An empty plan in 3D. Drag to orbit; click to place the armed tile.'
+    return 'An empty plan in 3D. Drag to orbit; click to place the armed template.'
   }
   const conflict = scene.conflicts.size === 0 ? '' : `, ${String(scene.conflicts.size)} overlapping`
-  const pending = waiting === 0 ? '' : `, ${String(waiting)} awaiting a mesh`
-  return `${String(placed)} placed ${placed === 1 ? 'tile' : 'tiles'} in 3D${conflict}${pending}. Drag to orbit; click to place or remove.`
+  const pending = waiting === 0 ? '' : `, ${String(waiting)} ${waiting === 1 ? 'part' : 'parts'} awaiting a mesh`
+  const empty =
+    scene.unfilled.length === 0 ? '' : `, ${String(scene.unfilled.length)} with no parts chosen`
+  return (
+    `${String(placed)} placed ${placed === 1 ? 'template' : 'templates'} in 3D${conflict}${empty}${pending}. ` +
+    'Drag to orbit; click to place or remove.'
+  )
 }

@@ -38,23 +38,28 @@
  * ## What the builder screen needs from here
  *
  * ```tsx
- * const catalog = useMemo(() => planCatalogFromFile(file, lock), [file, lock])  // once
+ * const catalog = useMemo(() => planCatalogFromFile(file, slotLayout), [file])  // once
  * const tools = usePlanTools()                                       // shared
  * const scene = useMemo(() => buildPlanScene(placements, catalog, styleOf, generated), [...])
  *
- * <Palette selected={tools.selectedDesign} onSelect={tools.setSelectedDesign} />
+ * <Palette selected={tools.selectedTemplate} onSelect={tools.setSelectedTemplate} />
  * <Builder3DPanel catalog={catalog} scene={scene} tools={tools} onStatus={setStatus} />
  * <Toolbar tools={tools} status={status} onClear={clearPlacements} />
  * ```
  *
- *   - **`planCatalogFromFile(file, lock)`** is memoised on the **lock** as well
- *     as the file since row V4, because a placement names an item and this is
- *     where the item becomes the record this build would print. `catalog.ts` has
- *     the argument for putting the hop there rather than in `buildPlanScene`.
+ *   - **`planCatalogFromFile(file, layout)`** is the canvas's view of the
+ *     catalog, and since row **A4a** it is where an *instance* becomes N records:
+ *     `catalog.record(tile)` de-references one file and `catalog.parts(instance)`
+ *     returns one entry per filled slot, each with the slot, the fill, the record
+ *     and its `SlotLayout`. **It no longer takes a `lock`**, because a
+ *     `SlotFill` names an exact file (decision D1) and there is no variant left
+ *     to choose; `catalog.ts` has the argument. `layout` is the `SlotLayoutRule`
+ *     row **B2** will supply, and it defaults to `originSlotLayout`.
  *   - **`usePlanTools()`** is the shared tool state: mode, snap, pending
- *     rotation, palette selection (an item, not a file). Call it once in the
- *     screen and pass it to the palette, the toolbar and the surface — all three
- *     write to it.
+ *     rotation, palette selection (a **template family** since row A1, not an
+ *     item and not a file — §2.5 makes templates the only placement unit). Call
+ *     it once in the screen and pass it to the palette, the toolbar and the
+ *     surface — all three write to it.
  *   - **The readout is `SurfaceStatus`, and it is not declared here.** It lives
  *     in `@/builder/three/edits.ts`, which is the module that produces it. Until
  *     R4 there were two field-for-field identical types, `PlanStatus` in
@@ -73,10 +78,13 @@
  *     curves are drawn from a band rule with no accepted mesh fit behind it. They
  *     *are* placeable; the caveat is what says the outline may sit up to half a
  *     unit in or out.
- *   - **`rotationStepFor(record)`** is the ⟳ Rotate button's step. Do not
- *     hardcode 90: 893 tiles carry an angle that is not a multiple of it, 823 of
- *     them now placeable, and on all 1,199 curves the step *equals the sweep* —
- *     which is what makes one press land a curve beside its predecessor.
+ *   - **`rotationStepFor(record)`** is one file's step and
+ *     **`pieceRotationStep(piece)`** is a placed piece's. Do not hardcode 90: 893
+ *     tiles carry an angle that is not a multiple of it, 823 of them now
+ *     placeable, and on all 1,199 curves the step *equals the sweep* — which is
+ *     what makes one press land a curve beside its predecessor. For a template
+ *     instance the parts can disagree, so `pieceRotationStep` is their least
+ *     common multiple: the coarsest angle *every* part can still mate at.
  *   - **`SNAP_STEP`** is the only place the snap values are written down.
  *   - **`move.ts`** is the move operation PR #29 refused: `beginMove`,
  *     `dragMoveTo` / `nudgeMove` and `previewMove` are the whole of it, and the
@@ -84,7 +92,9 @@
  *     `movePlacement` write on the drop and nothing at all on a cancel. The
  *     toolbar's third mode is `PlanTool`'s `'move'`; the readout's `moving`
  *     field names the piece in the air, because a `Shift`-drag move shows no
- *     mode.
+ *     mode. Since row A1 a `MovePreview` publishes **`moved`** — the whole piece
+ *     re-projected at the proposed anchor — rather than one box and one angle,
+ *     so a renderer draws the preview with the code it draws the scene with.
  *
  * ## Row X9: the second population
  *
@@ -101,6 +111,36 @@
  *
  * Callers with no generated map pass nothing and get an empty second list.
  *
+ * ## Row A4a: a piece is a template instance, and its parts carry the records
+ *
+ * `PlanPiece` is a **container**. It holds the `TemplateInstance`, a
+ * `PlanPiecePart` per filled slot — with that part's `record`, `slot`, `layout`
+ * (offset, own yaw, `elevationMm`), `shape`, `box`, `angle`, `band`, `style` and
+ * `caveat` — plus the union of their outlines as **`polygons`** and the union of
+ * their boxes as `box`. The fields that described one primitive moved down to
+ * the part rather than being kept at the top describing a fifth of the piece,
+ * which is contract **C-h**; `parts` was renamed to `polygons` for the same
+ * reason, so a reader handed slot records where it expected polygons cannot
+ * type-check.
+ *
+ * Four functions are the flattenings everything else goes through, and none of
+ * them is optional:
+ *
+ *   - **`sceneSubjects(scene)`** — every drawn part of both populations as
+ *     `OverlapCandidate`s, all of an instance's parts sharing its `PlacementId`.
+ *     The conflict sweep, the ghost, the move and the vacancy search all read
+ *     this one function, so they cannot disagree about a drop.
+ *   - **`pieceSubjects(piece)`** — the same for one piece.
+ *   - **`reanchorPiece(piece, anchor)`** — the piece re-projected at a new
+ *     origin. Pure geometry, same shape out as in.
+ *   - **`partAt(piece, point)`** — which slot a pick landed in, once `pieceAt`
+ *     has said which instance.
+ *
+ * `PlanScene` grew a third omission list, **`unfilled`**: an instance with no
+ * filled slots at all is legitimate (contract C-g, §3.2 *"places anyway"*) and
+ * has nothing to draw, so it is reported rather than dropped or turned into a
+ * piece with an empty `parts` array.
+ *
  * The builder screen owns the bill of tiles and does **not** get it from here:
  * it comes from `buildBillOfTiles(Object.values(placements), assemblyIndex,
  * { lock })` in `@/assembly`, over the same store map the surface writes. The
@@ -110,11 +150,20 @@
 export { usePlanTools } from './usePlanTools'
 export type { PlanTool, PlanToolDefaults, PlanTools } from './usePlanTools'
 
-export { createStyleResolver, planCatalogFromFile } from './catalog'
-export type { PlanCatalog, PlanStyle } from './catalog'
+export { createStyleResolver, originSlotLayout, planCatalogFromFile } from './catalog'
+export type {
+  PlanCatalog,
+  PlanSlotPart,
+  PlanSlotPartBase,
+  PlanStyle,
+  ResolvedSlotPart,
+  SlotLayoutRule,
+  StrandedSlotPart,
+} from './catalog'
 
 export {
   DIAGONAL_ANGLE_DEG,
+  ORIGIN_LAYOUT,
   SNAP_MODES,
   SNAP_STEP,
   anchorFor,
@@ -141,7 +190,11 @@ export {
   quadContains,
   rotatedExtent,
   rotationStepFor,
+  slotAnchor,
+  slotGeometry,
   snapTo,
+  turnOffset,
+  unionBox,
   unitsToMm,
 } from './geometry'
 export type {
@@ -156,6 +209,7 @@ export type {
   PlanShape,
   Refusal,
   RefusalCode,
+  SlotLayout,
   SnapMode,
 } from './geometry'
 
@@ -172,8 +226,27 @@ export {
 export { findConflicts, partsOverlap, planBand, quadsOverlap } from './overlap'
 export type { OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
 
-export { buildPlanScene, navigationOrder, pieceAt, pieceName, pieceRotationStep, scenePaintOrder } from './scene'
-export type { GeneratedPlanPiece, PlanOmission, PlanPiece, PlanScene, ScenePiece } from './scene'
+export {
+  buildPlanScene,
+  describeTemplate,
+  navigationOrder,
+  partAt,
+  pieceAt,
+  pieceName,
+  pieceRotationStep,
+  pieceSubjects,
+  reanchorPiece,
+  sceneSubjects,
+  scenePaintOrder,
+} from './scene'
+export type {
+  GeneratedPlanPiece,
+  PlanOmission,
+  PlanPiece,
+  PlanPiecePart,
+  PlanScene,
+  ScenePiece,
+} from './scene'
 
 export { VACANCY_SEARCH_UNITS, VACANCY_STEP, freeCellFor } from './vacancy'
 

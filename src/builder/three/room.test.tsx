@@ -59,7 +59,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { planCatalogFromFile } from '@/builder/canvas'
 import * as loadLod from './loadLod'
-import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from '@/builder/canvas/fixture'
+import { FIXTURE_IDS, FIXTURE_TEMPLATE, fixtureCatalogFile } from '@/builder/canvas/fixture'
 
 /**
  * What the two stubs record.
@@ -139,7 +139,7 @@ const { AO_RADIUS_MM, BuilderRoom, MEDIAN_TILE_MM } = await import('./BuilderRoo
 const { AO_RADIUS } = await import('@/three/Stage')
 const { VIEW_RADIUS } = await import('@/three/geometry')
 const { surfaceFit } = await import('./surface')
-const { planTools, recordOf, sceneOf } = await import('./fixture')
+const { planTools, sceneOf } = await import('./fixture')
 const { readFileSync } = await import('node:fs')
 const { join } = await import('node:path')
 
@@ -155,7 +155,7 @@ const ASSETS = {
 function scene(ids: readonly string[]) {
   return sceneOf(
     CATALOG,
-    ids.map((id, i) => ({ tileId: id, x: i * 2, z: 0 })),
+    ids.map((id, i) => ({ tile: id, x: i * 2, z: 0 })),
   )
 }
 
@@ -208,11 +208,13 @@ describe('the room with an empty store — today’s real state', () => {
     // because the ground plane *is* where the next tile goes.
     expect(screen.getByTestId('stage')).toBeInTheDocument()
     expect(screen.getByTestId('surface')).toBeInTheDocument()
-    // Both numbers, so an outlined tile is legible rather than mysterious.
-    expect(screen.getByText(/2 of 2 placed tiles have no mesh/i)).toBeInTheDocument()
-    // And the disclosure says the tile is real, which is the thing a marker must
+    // Both numbers, and in **parts**: a plate is drawn per part since row A4b,
+    // so a count of placements would say "2" about a room that might be showing
+    // six outlines.
+    expect(screen.getByText(/2 of 2 placed parts have no mesh/i)).toBeInTheDocument()
+    // And the disclosure says the part is real, which is the thing a marker must
     // never leave in doubt.
-    expect(screen.getByText(/tile is really there/i)).toBeInTheDocument()
+    expect(screen.getByText(/part is really there/i)).toBeInTheDocument()
   })
 
   it('reports the budget and the draw count even when nothing drew', async () => {
@@ -226,7 +228,7 @@ describe('the room with an empty store — today’s real state', () => {
       />,
     )
     await waitFor(() => {
-      expect(screen.getByText('0 in 0 instanced meshes, 1 outlined')).toBeInTheDocument()
+      expect(screen.getByText('0 parts in 0 instanced meshes, 1 outlined')).toBeInTheDocument()
     })
     expect(screen.getByText('1 of 150 meshes')).toBeInTheDocument()
   })
@@ -254,17 +256,44 @@ describe('the room with an empty store — today’s real state', () => {
   })
 })
 
-describe('the armed tile', () => {
-  it('is requested before it is placed, so the first ghost has geometry', async () => {
-    // The armed tile is not in the scene — that is what "armed" means — so a
-    // store driven by the scene alone would leave the user placing their first
-    // tile blind.
+describe('the armed family', () => {
+  it('fetches nothing for it, because a family names no mesh yet', async () => {
+    // **The inverse of what row R2 asserted here, and a real loss of capability
+    // rather than a tidier test.** R2 added the armed tile's own blob to the
+    // load set so the first ghost had geometry before the first placement. Since
+    // row A1 the armed thing is a `TemplateId`; turning one into the files that
+    // fill its slots is row **C2**'s solver and it does not exist, so there is no
+    // address to request and `edits.ts#templateGhost` draws a cell marker
+    // instead. When C2 lands, its fill map is one more source to union into
+    // `roomBlobs`' answer and the ghost gets its mesh back in the same change.
     const fetchImpl = spyFetch()
     render(
       <BuilderRoom
         catalog={CATALOG}
         scene={scene([])}
-        tools={planTools({ selectedDesign: fixtureDesignOf(FIXTURE_IDS.floor1) })}
+        tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        assets={ASSETS}
+        fetchImpl={fetchImpl as unknown as typeof fetch}
+      />,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('stage')).toBeInTheDocument()
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('loads exactly the parts the scene draws, and nothing beside them', async () => {
+    // Contract **C-d** at the component boundary: the fetched set is
+    // `roomBlobs(scene)`, so it holds one address per drawn part and no extras.
+    // A second derivation here is what would report "not in the store" about a
+    // blob nobody asked for.
+    const fetchImpl = spyFetch()
+    const drawn = scene([FIXTURE_IDS.floor1, FIXTURE_IDS.wall2])
+    render(
+      <BuilderRoom
+        catalog={CATALOG}
+        scene={drawn}
+        tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
         assets={ASSETS}
         fetchImpl={fetchImpl as unknown as typeof fetch}
       />,
@@ -272,10 +301,11 @@ describe('the armed tile', () => {
     await waitFor(() => {
       expect(fetchImpl).toHaveBeenCalled()
     })
-    const record = recordOf(CATALOG, FIXTURE_IDS.floor1)
-    expect(record).toBeDefined()
+    const wanted = new Set(drawn.pieces.flatMap((piece) => piece.parts.map((part) => part.record.blob)))
+    expect(wanted.size).toBe(2)
     const asked = fetchImpl.mock.calls.map(([url]) => url)
-    expect(asked.some((url) => url.includes(record?.blob ?? 'none'))).toBe(true)
+    expect(asked).toHaveLength(wanted.size)
+    for (const blob of wanted) expect(asked.some((url) => url.includes(blob))).toBe(true)
   })
 })
 
@@ -352,8 +382,11 @@ describe('the room with a store object', () => {
       expect(surfaceCalls.at(-1)?.groups).toBe(1)
     })
 
-    // Three placements of one tile: one instanced mesh, three instances.
-    expect(screen.getByText('3 in 1 instanced mesh')).toBeInTheDocument()
+    // Three placements of one file: one instanced mesh, three parts.
+    expect(screen.getByText('3 parts in 1 instanced mesh')).toBeInTheDocument()
+    // And the arity the other lines are in terms of, so "3 parts in 1 mesh" is
+    // readable — three placements of one part each, none of them empty.
+    expect(screen.getByText('3 placed')).toBeInTheDocument()
     // 118 triangles per instance from the fixture, times three.
     expect(screen.getByText('354')).toBeInTheDocument()
     expect(screen.getByText('1 of 1 loaded')).toBeInTheDocument()
@@ -362,7 +395,7 @@ describe('the room with a store object', () => {
     expect(screen.getByText(/1 of 150 meshes · .* of 36\.2 MB/)).toBeInTheDocument()
 
     const call = stageCalls.at(-1)
-    expect(call?.label).toContain('3 placed tiles')
+    expect(call?.label).toContain('3 placed templates')
     // `enablePan`, at last passed by the component `Stage`'s prop docblock names:
     // a two-metre plan cannot be walked across by orbit and zoom alone.
     expect(call?.enablePan).toBe(true)

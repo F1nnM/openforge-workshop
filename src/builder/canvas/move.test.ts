@@ -7,6 +7,12 @@
  * allowed* while an identical twin is *refused*, and that the concentric-snap
  * limitation is disclosed on exactly the pieces it applies to.
  *
+ * Since row **A1** they also prove the thing the shape change put at risk: a
+ * move re-projects **every part** of a template against the new origin, so a
+ * five-part instance arrives whole rather than as its first part. `MovePreview`
+ * publishes that as `moved` — a re-projected `ScenePiece` — and the assertions
+ * are written against it.
+ *
  * **What they cannot prove:** anything about the gesture. There is no pointer, no
  * renderer and no store here; whether `Shift`+drag reaches `beginMove` was
  * `canvas.test.tsx`'s question, and row **R4** deleted that file with the plan
@@ -24,10 +30,19 @@
  */
 import { describe, expect, it } from 'vitest'
 
+import type { TileId } from '@/catalog'
 import type { PlacementId, WorkshopState } from '@/store'
 
 import { createStyleResolver, planCatalogFromFile } from './catalog'
-import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from './fixture'
+import {
+  FIXTURE_IDS,
+  FIXTURE_SLOTS,
+  OTHER_FIXTURE_TEMPLATE,
+  fixtureCatalogFile,
+  fixtureFills,
+  fixtureInstance,
+  fixtureSlotLayout,
+} from './fixture'
 import { SNAP_STEP } from './geometry'
 import {
   beginMove,
@@ -48,27 +63,51 @@ import { buildPlanScene } from './scene'
 import type { PlanPiece, PlanScene } from './scene'
 
 const file = fixtureCatalogFile()
-const catalog = planCatalogFromFile(file)
+const catalog = planCatalogFromFile(file, fixtureSlotLayout)
 const styleOf = createStyleResolver(catalog)
 
 /**
- * The record a fixture file id names.
- *
- * Through `fixtureDesignOf` since row V4: `PlanCatalog.record` is keyed by
- * design and resolves the variant the build would print, and with one file per
- * fixture design that is the file asked for.
+ * The record a fixture file id names — a direct lookup since row A1, because a
+ * `SlotFill` names an exact file.
  */
 const record = (id: string) => {
-  const found = catalog.record(fixtureDesignOf(id))
+  const found = catalog.record(id as TileId)
   if (found === undefined) throw new Error(`no fixture record ${id}`)
   return found
 }
 
-/** A scene from `[key, tileId, x, z, rotation]` tuples — `plan.test.ts`'s shape, `fixtureDesignOf` included. */
+/** One-part instances from `[key, tileId, x, z, rotation]` tuples — `plan.test.ts`'s shape. */
 function sceneOf(rows: readonly [string, string, number, number, number][]): PlanScene {
-  const placements: WorkshopState['placements'] = {}
+  const placements: Record<string, WorkshopState['placements'][PlacementId]> = {}
   for (const [key, tileId, x, z, rotation] of rows) {
-    placements[key as PlacementId] = { design: fixtureDesignOf(tileId), x, z, rotation }
+    placements[key] = fixtureInstance(key, fixtureFills([[FIXTURE_SLOTS.floor, tileId]]), { x, z, rotation })
+  }
+  return buildPlanScene(placements, catalog, styleOf)
+}
+
+/**
+ * One row of {@link instanceSceneOf}: a key, a fill map, a cell, an angle and an
+ * optional family.
+ *
+ * Named, and the family slot is `string | undefined` rather than optional,
+ * because a helper that builds one of these with `as const` produces a tuple
+ * whose sixth element is `string | undefined` — and TypeScript will not assign
+ * that to an optional-element tuple.
+ */
+type InstanceRow = readonly [
+  key: string,
+  fills: readonly (readonly [string, string])[],
+  x: number,
+  z: number,
+  rotation: number,
+  template: string | undefined,
+]
+
+/** A scene of instances with whatever fill maps you hand it. */
+function instanceSceneOf(rows: readonly InstanceRow[]): PlanScene {
+  const placements: Record<string, WorkshopState['placements'][PlacementId]> = {}
+  for (const [key, fills, x, z, rotation, template] of rows) {
+    placements[key] = fixtureInstance(key, fixtureFills(fills), { x, z, rotation, template })
   }
   return buildPlanScene(placements, catalog, styleOf)
 }
@@ -105,10 +144,13 @@ describe('picking a piece up', () => {
 
     const preview = previewMove(drag, after)
     // The 2 x 0.5 wall turned a quarter turn: the box is 0.5 x 2 about the same
-    // anchor corner, which is `geometry.ts`'s anchoring rule.
-    expect(preview?.box.w).toBe(0.5)
-    expect(preview?.box.d).toBe(2)
-    expect(preview?.angle).toBe(90)
+    // anchor corner, which is `geometry.ts`'s anchoring rule. Read off `moved`,
+    // the re-projected piece, since row A1 — a flat `box` on the preview could
+    // only ever have described one part of a template.
+    expect(preview?.moved.box.w).toBe(0.5)
+    expect(preview?.moved.box.d).toBe(2)
+    expect(preview?.moved.kind).toBe('catalog')
+    expect(preview?.moved.kind === 'catalog' ? preview.moved.parts[0]?.angle : undefined).toBe(90)
   })
 
   it('gives up rather than throwing when the piece has gone', () => {
@@ -183,7 +225,7 @@ describe('rotation survives a move', () => {
     const scene = sceneOf([['a', FIXTURE_IDS.angled, 0, 0, 45]])
     const preview = previewMove(carried(scene, 'a', 1.5, 0), scene)
     expect(preview?.piece.placement.rotation).toBe(45)
-    expect(preview?.angle).toBe(45)
+    expect(preview?.moved.kind === 'catalog' ? preview.moved.parts[0]?.angle : undefined).toBe(45)
   })
 
   it('keeps a diag’s intrinsic 45° folded into the drawn angle', () => {
@@ -193,8 +235,9 @@ describe('rotation survives a move', () => {
     const scene = sceneOf([['a', FIXTURE_IDS.diag, 0, 0, 0]])
     const preview = previewMove(carried(scene, 'a', 1, 1), scene)
     expect(preview?.piece.placement.rotation).toBe(0)
-    expect(preview?.angle).toBe(45)
-    expect(preview?.axisAligned).toBe(false)
+    const part = preview?.moved.kind === 'catalog' ? preview.moved.parts[0] : undefined
+    expect(part?.angle).toBe(45)
+    expect(part?.axisAligned).toBe(false)
   })
 
   it('moves an arc at a sub-90° sweep without touching its angle', () => {
@@ -237,7 +280,7 @@ describe('a blocked move', () => {
     ])
     const preview = previewMove(carried(scene, 'b', -3, 0), scene)
     expect(preview?.refusal?.code).toBe('duplicate')
-    expect(preview?.refusal?.message).toContain('double its line in the bill')
+    expect(preview?.refusal?.message).toContain('double its lines in the bill')
     expect(preview?.committable).toBe(false)
   })
 
@@ -272,8 +315,162 @@ describe('a blocked move', () => {
       ['b', FIXTURE_IDS.wall2, 6, 0, 0],
     ])
     const preview = previewMove(carried(scene, 'b', -6, 0.5), scene)
-    expect(preview?.piece.band).toBe('edge')
+    // The band is on the **part** since row A1 — a template spans both.
+    expect(preview?.moved.kind === 'catalog' ? preview.moved.parts[0]?.band : undefined).toBe('edge')
     expect(preview?.conflict).toBe(false)
+  })
+})
+
+describe('moving a template instance', () => {
+  /** A four-part corner: base and floor on the cell, a left wall, a right wall. */
+  const corner = (key: string, x: number, z: number, rotation = 0, template?: string): InstanceRow => [
+    key,
+    [
+      [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+      [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+      [FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2],
+      [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2],
+    ],
+    x,
+    z,
+    rotation,
+    template,
+  ]
+
+  it('re-projects every part against the new origin, offsets and yaws intact', () => {
+    // The property the flat `box`/`angle` quartet could not express: a move
+    // carries four parts, each keeping its own offset inside the recipe.
+    const scene = instanceSceneOf([corner('a', 0, 0)])
+    const preview = previewMove(carried(scene, 'a', 4, 2), scene)
+    const moved = preview?.moved
+    expect(moved?.kind).toBe('catalog')
+    if (moved?.kind !== 'catalog') throw new Error('expected the catalog arm')
+
+    expect(preview?.anchor).toEqual([4, 2])
+    expect(moved.parts).toHaveLength(4)
+    // Every part shifted by exactly the same delta, so the recipe is rigid.
+    const before = piece(scene, 'a')
+    for (const [index, part] of moved.parts.entries()) {
+      const was = before.parts[index]
+      expect(part.slot).toBe(was?.slot)
+      expect(part.box.x - (was?.box.x ?? 0)).toBe(4)
+      expect(part.box.z - (was?.box.z ?? 0)).toBe(2)
+      // The layout — offset, own yaw, elevation — is a property of the recipe and
+      // a move must not touch it.
+      expect(part.layout).toEqual(was?.layout)
+      expect(part.angle).toBe(was?.angle)
+    }
+    // And the right wall is still on the east edge of the moved cell.
+    expect(moved.parts.find((part) => part.slot === 'right wall')?.box).toEqual({
+      x: 5.5,
+      z: 2,
+      w: 0.5,
+      d: 2,
+    })
+    // The instance box is the union of all four, not the first part's.
+    expect(moved.box).toEqual({ x: 4, z: 2, w: 2, d: 2 })
+  })
+
+  it('re-labels the moved piece, so a readout does not quote the old cell', () => {
+    const scene = instanceSceneOf([corner('a', 0, 0)])
+    const preview = previewMove(carried(scene, 'a', 4, 2), scene)
+    expect(preview?.moved.label).toContain('x 4, z 2')
+    expect(preview?.moved.label).not.toContain('x 0, z 0')
+    // The piece as the scene still holds it is untouched — the store has not
+    // been written and `piece` is what a cancel returns to.
+    expect(preview?.piece.label).toContain('x 0, z 0')
+  })
+
+  it('never counts a multi-part instance against its own parts', () => {
+    // Stacked `base` and `floor` in one `area` band: without the same-id rule
+    // this preview would report the instance overlapping itself.
+    const scene = instanceSceneOf([corner('a', 0, 0)])
+    const preview = previewMove(carried(scene, 'a', 0.5, 0), scene)
+    expect(preview?.overlaps).toEqual([])
+    expect(preview?.conflict).toBe(false)
+    expect(preview?.moved.conflict).toBe(false)
+  })
+
+  it('counts an overlap once per piece, however many parts touch', () => {
+    // Four parts of `b` land across two instances of `a`; the readout says
+    // "1 piece", because that is what the user can see.
+    const scene = instanceSceneOf([corner('a', 0, 0), corner('b', 8, 0)])
+    const preview = previewMove(carried(scene, 'b', -8, 0), scene)
+    expect(preview?.overlaps.map((hit) => hit.id)).toEqual(['a'])
+    expect(preview?.conflict).toBe(true)
+    expect(preview?.moved.conflict).toBe(true)
+    expect(describeDrop(preview!)).toContain('overlapping 1 piece already there')
+  })
+
+  it('refuses a twin by its whole fill map, and names the family', () => {
+    const scene = instanceSceneOf([corner('a', 0, 0), corner('b', 8, 0)])
+    const preview = previewMove(carried(scene, 'b', -8, 0), scene)
+    expect(preview?.refusal?.code).toBe('duplicate')
+    expect(preview?.refusal?.message).toContain('Fixture corner')
+    expect(preview?.refusal?.message).toContain('double its lines in the bill')
+    expect(preview?.committable).toBe(false)
+  })
+
+  it('does not call it a twin when one slot is filled differently', () => {
+    // Same family, same cell, same angle, one different wall: a physically
+    // distinct object that prints differently, so both must stay on the plan.
+    const scene = instanceSceneOf([
+      corner('a', 0, 0),
+      [
+        'b',
+        [
+          [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+          [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+          [FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2],
+          [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.thickWall],
+        ],
+        8,
+        0,
+        0,
+        undefined,
+      ],
+    ])
+    const preview = previewMove(carried(scene, 'b', -8, 0), scene)
+    expect(preview?.refusal).toBeNull()
+    expect(preview?.committable).toBe(true)
+  })
+
+  it('does not call it a twin when the family differs but the fills match', () => {
+    // The other half of the identity: two recipes filled identically are still
+    // two recipes, and the fills alone would have refused this.
+    const scene = instanceSceneOf([corner('a', 0, 0), corner('b', 8, 0, 0, OTHER_FIXTURE_TEMPLATE)])
+    const preview = previewMove(carried(scene, 'b', -8, 0), scene)
+    expect(preview?.piece.kind === 'catalog' ? preview.piece.placement.template : undefined).toBe(
+      OTHER_FIXTURE_TEMPLATE,
+    )
+    expect(preview?.refusal).toBeNull()
+    expect(preview?.committable).toBe(true)
+  })
+
+  it('reports the concentric limit once, however many curves the recipe holds', () => {
+    // The disclosure is a fact about the instance's anchor, not about each part,
+    // so two off-lattice curves in one template produce one note.
+    const scene = instanceSceneOf([
+      [
+        'a',
+        [
+          [FIXTURE_SLOTS.leftWall, FIXTURE_IDS.arcFallback],
+          [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.arcFallback],
+        ],
+        0,
+        0,
+        0,
+        undefined,
+      ],
+    ])
+    const preview = previewMove(beginMove(piece(scene, 'a'), null), scene)
+    expect(preview?.note?.code).toBe('off-lattice-centre')
+    expect(describeGrab(preview!)).toContain('cannot line it up concentrically')
+  })
+
+  it('reports no concentric limit for a recipe of straight parts', () => {
+    const scene = instanceSceneOf([corner('a', 0, 0)])
+    expect(previewMove(carried(scene, 'a', 4, 0), scene)?.note).toBeNull()
   })
 })
 
@@ -325,21 +522,31 @@ describe('the concentric-snap limitation', () => {
 })
 
 describe('what the live region says', () => {
-  const scene = sceneOf([
-    ['a', FIXTURE_IDS.floor2, 0, 0, 0],
-    ['b', FIXTURE_IDS.wall2, 6, 6, 0],
+  /**
+   * Two instances of **different families**, because since row A1 a readout names
+   * the family rather than a file.
+   *
+   * `pieceName` was `record.name` and there is no single record now — an
+   * instance is up to five files. So the two pieces here differ by *template*,
+   * which is what makes these assertions discriminating: with both on
+   * `FIXTURE_TEMPLATE` every readout would say "Fixture corner" and a readout
+   * that named the wrong piece would still pass.
+   */
+  const scene = instanceSceneOf([
+    ['a', [[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]], 0, 0, 0, undefined],
+    ['b', [[FIXTURE_SLOTS.floor, FIXTURE_IDS.wall2]], 6, 6, 0, OTHER_FIXTURE_TEMPLATE],
   ])
 
   it('names the piece and the keys on the grab', () => {
     const preview = previewMove(beginMove(piece(scene, 'b'), null), scene)
-    expect(describeGrab(preview!)).toContain('Picked up Cut stone wall 2')
+    expect(describeGrab(preview!)).toContain('Picked up Fixture corridor')
     expect(describeGrab(preview!)).toContain('x 6, z 6')
     expect(describeGrab(preview!)).toContain('Escape puts it back')
   })
 
   it('is short on a step, and says where the piece is', () => {
     const preview = previewMove(carried(scene, 'b', 1, 0), scene)
-    expect(describeNudge(preview!)).toBe('Cut stone wall 2 to x 7, z 6.')
+    expect(describeNudge(preview!)).toBe('Fixture corridor to x 7, z 6.')
   })
 
   it('says so when a carry has come back to where it started', () => {
@@ -349,7 +556,7 @@ describe('what the live region says', () => {
 
   it('names both ends on a drop', () => {
     const preview = previewMove(carried(scene, 'b', -1, 0), scene)
-    expect(describeDrop(preview!)).toBe('Moved Cut stone wall 2 from x 6, z 6 to x 5, z 6.')
+    expect(describeDrop(preview!)).toBe('Moved Fixture corridor from x 6, z 6 to x 5, z 6.')
   })
 
   it('reports a no-op drop as one rather than silently', () => {
@@ -359,7 +566,7 @@ describe('what the live region says', () => {
 
   it('says where a cancelled piece went back to', () => {
     const preview = previewMove(carried(scene, 'b', 3, 3), scene)
-    expect(describeCancel(preview!)).toBe('Put Cut stone wall 2 back at x 6, z 6.')
+    expect(describeCancel(preview!)).toBe('Put Fixture corridor back at x 6, z 6.')
   })
 
   it('pluralises the overlap count', () => {
@@ -384,7 +591,7 @@ describe('what the live region says', () => {
 
   it('otherwise tells the hint plate how to finish the move', () => {
     const preview = previewMove(carried(scene, 'b', 1, 0), scene)
-    expect(describeMoveHint(preview!)).toContain('Moving Cut stone wall 2 to x 7, z 6')
+    expect(describeMoveHint(preview!)).toContain('Moving Fixture corridor to x 7, z 6')
     expect(describeMoveHint(preview!)).toContain('Escape puts it back')
   })
 })
