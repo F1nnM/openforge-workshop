@@ -9,16 +9,15 @@
  * Nothing here interprets. The four maps are the four *keys* the corpus supports
  * — catalog identity, base size code, base footprint, content address — plus the
  * filename multimap the download path needs. Which of them a match should use is
- * the resolver's decision, in `resolve.ts`.
+ * the ranking's decision, in `baseMatch.ts`.
  *
  * One derived *fact* rides alongside the keys — {@link PrintOption}, per base —
  * for the same reason `sizeCode` is hoisted onto `CatalogRecord`: it lives in the
  * interned tag list, only this module holds the intern table, and the resolver
  * compares it once per candidate. It is a fact, not a key: nothing is grouped by
- * it, and the ranking that consumes it is `resolve.ts`'s.
+ * it, and the ranking that consumes it is `baseMatch.ts`'s.
  */
-import type { AggregateIndex, BlobId, CatalogFile, CatalogRecord, TileId } from '@/catalog'
-import { buildAggregateIndex } from '@/catalog'
+import type { BlobId, CatalogFile, CatalogRecord, TileId } from '@/catalog'
 
 import { footprintKey } from './footprint'
 
@@ -141,7 +140,7 @@ export interface AssemblyIndex {
    * determines a width and not a shape and four of them span more than one
    * primitive. What this map is still for: the ranking's family tie-break, the
    * gate that keeps the one remaining code path honest, and naming the code in
-   * the gap report. See `resolve.ts#candidatesFor` and `sizeCode.ts`.
+   * the gap report. See `baseMatch.ts#candidatesFor` and `sizeCode.ts`.
    */
   readonly basesBySizeCode: ReadonlyMap<string, readonly CatalogRecord[]>
 
@@ -186,25 +185,6 @@ export interface AssemblyIndex {
    */
   readonly basePrintOption: ReadonlyMap<TileId, PrintOption>
 
-  /**
-   * Row A1's aggregate layer over the same catalog — **one item per `design`**,
-   * with every file in the group as a variant.
-   *
-   * It rides on this index rather than being a parameter of `resolvePlacement`
-   * because of what the store says a placement *is*, and row V4 turned that
-   * argument from strong into structural. It used to be that `Placement.tileId`
-   * named a file and this layer was what re-resolved it, so a caller who forgot
-   * to pass an aggregate index would silently get the pre-A6 behaviour — a real
-   * answer to the wrong question, with no symptom. Now a placement names a
-   * `DesignId` and **this layer is the only thing that can turn one into a
-   * record at all**: without it `resolvePlacement` has no parts to return, so
-   * forgetting it is not a silent regression but an empty bill.
-   *
-   * See `resolve.ts#resolveVariant` for what reads it, and
-   * {@link buildAssemblyIndex} on why it is still a parameter of the *builder*.
-   */
-  readonly aggregates: AggregateIndex
-
   readonly stats: AssemblyIndexStats
 }
 
@@ -220,24 +200,38 @@ export interface AssemblyIndex {
  * omission: `matchBase` keeps the first candidate at the best score, so whatever
  * this function put first won every tie, and "smallest file" turned out to mean
  * "topless" for 79.1% of openlock toppers. Suitability now lives entirely in
- * `resolve.ts` — see `MATCH_WEIGHTS` — where it can see the topper and the lock
+ * `baseMatch.ts` — see `MATCH_WEIGHTS` — where it can see the topper and the lock
  * preference, which this function cannot. Bytes decide only what is left: two
  * bases equally suited to the same topper, where the cheaper print is the honest
  * answer. Keeping the two apart is also what lets the maps be rekeyed without
  * touching the ranking.
  *
- * **{@link AssemblyIndex.aggregates} is a parameter with a default**, the pattern
- * `ui/lock-picker/build.ts#deriveLockBuild` established and for its reason: the
- * aggregate index costs 62 ms against this function's 12 ms, and a caller that
- * already holds one — `SearchEngine` builds one for its facets — should pay for
- * it once. Defaulted rather than required so that no existing call site has to
- * change to keep working, and so that a test can build an index from a fixture
- * with one argument.
+ * ## Row A3 removed the aggregate layer from this index
+ *
+ * It used to ride here because a placement named a `DesignId` and this layer was
+ * *the only thing that could turn one into a record at all*. A placement is now
+ * a template instance whose slots name **files**, so nothing in this directory
+ * has a design to aggregate: `resolveInstance` looks its fills up in
+ * {@link AssemblyIndex.byId}, and `selectVariantForLock` is handed an aggregate
+ * by its caller.
+ *
+ * Verified before removing it rather than assumed: the only reader of
+ * `index.aggregates` outside this directory is
+ * `builder/panels/slots/planSlots.ts`, which reads it as
+ * `index.aggregates.byDesign.get(placement.design)` — and `placement.design` is
+ * a field row A1 deleted, so that line is a compile error under the new schema
+ * either way. (`src/mesh/warm.ts` reads `context.aggregates`, which is its own
+ * `MeshContext` field and a different object.) No call site ever passed the
+ * second argument.
+ *
+ * Dropping it takes `buildAggregateIndex`'s measured **62 ms** off this
+ * function, which measured **12 ms** on its own, so the index build stops being
+ * dominated by a layer it did not use. It also removes the defaulted parameter
+ * and the mismatched-index hazard that came with it: an aggregate layer built
+ * over a *different* catalog could previously reach the resolver and resolve
+ * nothing, and there is no longer a parameter to pass one through.
  */
-export function buildAssemblyIndex(
-  catalog: CatalogFile,
-  aggregates: AggregateIndex = buildAggregateIndex(catalog),
-): AssemblyIndex {
+export function buildAssemblyIndex(catalog: CatalogFile): AssemblyIndex {
   const byId = new Map<TileId, CatalogRecord>()
   const basesBySizeCode = new Map<string, CatalogRecord[]>()
   const basesByFootprint = new Map<string, CatalogRecord[]>()
@@ -292,7 +286,6 @@ export function buildAssemblyIndex(
     byBlob,
     blobsByFilename,
     basePrintOption,
-    aggregates,
     stats: {
       records: catalog.records.length,
       bases,

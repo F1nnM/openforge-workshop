@@ -33,19 +33,41 @@
  * trusted at all is refused outright — the one case where refusing beats
  * recovering, because the recovered answer would be a *plausible wrong room*
  * rather than an obviously broken one.
+ *
+ * ## Row A1 moved the *granularity* of that salvage, and this is the contract
+ *
+ * A placement used to be one tile, so "the tile is gone" and "the placement is
+ * gone" were the same sentence. An instance holds three to five fills, and they
+ * fail independently, so the rule is now stated per level:
+ *
+ *   - **A retired file drops its fill and leaves the slot empty**, keeping the
+ *     instance. It is not a repair and not a degradation: an absent key *is* the
+ *     schema's "unfilled slot" (contract C-g, §3.2's "places anyway"), so the
+ *     room opens with that part marked as needing a choice, which is a state the
+ *     editor already renders. Dropping the whole instance instead would throw
+ *     away a template, a position and up to four intact fills to report one
+ *     missing file.
+ *   - **An unreadable template drops the instance.** There is nothing to place
+ *     without a family, and the fills are named against *its* slots.
+ *   - **A non-finite coordinate drops the instance**, for the reason
+ *     `src/store/migrations.ts` gives: there is no safe default position, and
+ *     stacking it on the origin reads as a builder bug.
+ *
+ * Every one of those is named in `dropped`, at the level it happened.
  */
-import type { DesignId } from '@/catalog'
+import type { TileId } from '@/catalog'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
-import type { LockSystem, Placement } from '@/store'
-import { DEFAULT_LOCK_SYSTEM, normalizeRotation } from '@/store'
+import type { LockSystem, NewTemplateInstance, SlotFill } from '@/store'
+import { DEFAULT_LOCK_SYSTEM, SlotName, TemplateId, filledSlots, normalizeRotation } from '@/store'
 import { parseCompactSearch, stringifyCompactSearch } from '@/search/searchSchema'
 
 import { MalformedPayloadError, TruncatedPayloadError } from './bytes'
 import type { ShareManifest } from './manifest'
 import { resolveOrdinals } from './manifest'
-import type { WireGenerated, WirePlacement } from './payload'
+import type { WireFill, WireGenerated, WireInstance, WirePayload } from './payload'
 import {
   LOCK_ORDER,
+  MAX_SHARE_FILLS,
   MAX_SHARE_GENERATED,
   MAX_SHARE_PLACEMENTS,
   SHARE_FORMAT_VERSION,
@@ -81,10 +103,16 @@ export const SHARE_PARAM = 's'
  * than breaks.
  *
  * **Gate on {@link shareUrlFits}, never on a placement count.** Measured capacity
- * at this budget ranges from 243 placements to 29,705 depending only on how
- * repetitive the build is — a two-orders-of-magnitude spread, so any count-based
- * rule is wrong in one direction or the other by a factor of 100. The encoded
+ * at this budget ranges from **88 template instances to 7,358** depending only on
+ * how repetitive the build is — a factor of 84, so any count-based rule is wrong
+ * in one direction or the other by nearly two orders of magnitude. The encoded
  * length is known before the link is shown, and it is the only honest test.
+ *
+ * Both figures are row A5's, re-measured on A1's shape by `capacity.test.ts`; the
+ * pre-A1 pair (243 and 29,705) counted single-tile placements and is not
+ * comparable. Per *file* the range moved much less than the instance counts
+ * suggest: the 88-instance scattered link carries 264 to 440 files, against 243
+ * before.
  */
 export const SHARE_URL_BUDGET = 2000
 
@@ -113,6 +141,15 @@ export type ShareEncodeFailure =
   | 'unsupported'
   /** More placements than the format carries — see `MAX_SHARE_PLACEMENTS`. */
   | 'too-many'
+  /**
+   * More filled slots in total than the format carries — see `MAX_SHARE_FILLS`.
+   *
+   * A second ceiling rather than a redundant one: since row A1 the placement
+   * count no longer bounds the number of ordinals in a payload, because an
+   * instance carries a fill per slot and nothing in `@/store` caps the slots of
+   * a template. Reachable only from a scene no template table can produce.
+   */
+  | 'too-many-fills'
   /** More generated bases than the format carries — see `MAX_SHARE_GENERATED`. */
   | 'too-many-generated'
 
@@ -165,9 +202,12 @@ export type ShareDecodeResult =
       readonly ok: true
       readonly scene: SharedScene
       /**
-       * One entry per datum discarded or repaired, naming its index and the reason
-       * — `placement 3: tile ordinal 9001 is not in this catalog build`. Meant for
-       * a notice beside the opened room, never for control flow.
+       * One entry per datum discarded or repaired, naming what it was and the
+       * reason — `placement 3, slot floor: tile ordinal 9001 is not in this
+       * catalog build`. A fill, an instance and a table entry are three different
+       * units and each is named as itself; see the module docblock's three levels
+       * of salvage. Meant for a notice beside the opened room, never for control
+       * flow.
        */
       readonly dropped: readonly string[]
     }
@@ -182,12 +222,12 @@ export type ShareDecodeResult =
  * action** — see `src/share/transport.ts`; PR 5 keeps persistence synchronous and
  * an `await` in that path is how rapid tile placement loses writes.
  *
- * Tolerant in one direction only. A placement whose item this build does not carry
- * is dropped and named, because encoding is triggered by a user who can be told
- * "two tiles in your room are no longer in the catalog"; there is no sense in
- * refusing to share the other forty. A placement with a non-finite coordinate is
- * dropped for the reason `src/store/migrations.ts` gives: there is no safe default
- * position, and stacking it on the origin reads as a builder bug.
+ * Tolerant in one direction only, at the granularity the module docblock states:
+ * a fill whose file this build does not carry leaves its slot empty and is named,
+ * because encoding is triggered by a user who can be told "two tiles in your room
+ * are no longer in the catalog"; there is no sense in refusing to share the other
+ * forty instances, or in throwing away the four intact fills beside the missing
+ * one.
  */
 export async function encodeShareFragment(scene: SharedScene, manifest: ShareManifest): Promise<ShareEncodeResult> {
   if (!isShareCodecSupported()) {
@@ -195,36 +235,25 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
   }
 
   const dropped: string[] = []
-  const placements: WirePlacement[] = []
+  const { templates, slots, instances } = collectInstances(scene.placements, manifest, dropped)
+  const ordinals = fillOrdinals(instances)
 
-  scene.placements.forEach((placement, index) => {
-    // The design's address — its lowest ordinal — so two shares of one scene
-    // produce one link. `manifest.ts` has the whole argument for why a design
-    // travels as an ordinal rather than as its own 13-character id.
-    const ordinal = manifest.ordinalOf(placement.design)
-    if (ordinal === undefined) {
-      dropped.push(`placement ${String(index)}: ${placement.design} is not in this catalog build`)
-      return
-    }
-    if (!Number.isFinite(placement.x) || !Number.isFinite(placement.z)) {
-      dropped.push(`placement ${String(index)}: position is not a finite point`)
-      return
-    }
-    placements.push({
-      ordinal,
-      x: placement.x + 0,
-      z: placement.z + 0,
-      rotation: normalizeRotation(placement.rotation),
-    })
-  })
-
-  if (placements.length > MAX_SHARE_PLACEMENTS) {
+  if (instances.length > MAX_SHARE_PLACEMENTS) {
     return {
       ok: false,
       reason: 'too-many',
       message:
         `A share link carries at most ${String(MAX_SHARE_PLACEMENTS)} placements; ` +
-        `this scene has ${String(placements.length)}.`,
+        `this scene has ${String(instances.length)}.`,
+    }
+  }
+  if (ordinals.length > MAX_SHARE_FILLS) {
+    return {
+      ok: false,
+      reason: 'too-many-fills',
+      message:
+        `A share link carries at most ${String(MAX_SHARE_FILLS)} filled slots in total; ` +
+        `this scene has ${String(ordinals.length)}.`,
     }
   }
 
@@ -245,12 +274,18 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
     dropped.push(`lock: ${String(scene.lock)} is not a lock system, shared as ${DEFAULT_LOCK_SYSTEM}`)
   }
 
-  const { digest } = resolveOrdinals(
-    placements.map((placement) => placement.ordinal),
-    manifest,
-  )
+  const { digest } = resolveOrdinals(ordinals, manifest)
 
-  const raw = encodePayload({ manifestVersion: manifest.version, lockIndex, digest, placements, recipes, generated })
+  const raw = encodePayload({
+    manifestVersion: manifest.version,
+    lockIndex,
+    digest,
+    templates,
+    slots,
+    instances,
+    recipes,
+    generated,
+  })
   const compressed = await deflateRaw(raw)
   if (compressed === undefined) {
     return { ok: false, reason: 'unsupported', message: 'This browser cannot create share links.' }
@@ -265,6 +300,91 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
     compressedBytes: compressed.length,
     dropped,
   }
+}
+
+/**
+ * An interning table: a list of distinct strings, and the index of one.
+ *
+ * First-use order rather than sorted, because the index column compresses on
+ * *locality* and a room places its families in the order it was built. Sorting
+ * the table would buy a canonical form the scene order does not have anyway —
+ * `sharedSceneFromState` is explicit that determinism here is per scene object,
+ * so two shares of one scene agree and two builds of one room need not.
+ */
+function stringTable(): { readonly entries: string[]; intern: (value: string) => number } {
+  const entries: string[] = []
+  const index = new Map<string, number>()
+  return {
+    entries,
+    intern: (value) => {
+      const found = index.get(value)
+      if (found !== undefined) return found
+      index.set(value, entries.length)
+      entries.push(value)
+      return entries.length - 1
+    },
+  }
+}
+
+/** Every fill ordinal in the payload, in wire order. What the digest is taken over. */
+function fillOrdinals(instances: readonly WireInstance[]): number[] {
+  return instances.flatMap((instance) => instance.fills.map((fill) => fill.ordinal))
+}
+
+/**
+ * Turn the scene's instances into a template table, a slot table and the wire
+ * instances that index them.
+ *
+ * The **slots of one instance are written in sorted order**, and that is not
+ * cosmetic: `fills` is a `z.record`, so its key order is whatever the producer
+ * happened to insert — the solver, the editor, a re-import — and two rooms that
+ * are the same room would otherwise emit different slot columns. Sorting also
+ * puts the same slot in the same position of every instance of a template, which
+ * is what turns the slot column into a repeating pattern for deflate.
+ *
+ * `filledSlots` is the sanctioned crossing from the map to an array, and it is
+ * imported rather than reimplemented for the reason its docblock gives: an
+ * `Object.keys(fills) as SlotName[]` here would name the brand instead of
+ * deriving it and would keep compiling the day the key type changes.
+ */
+function collectInstances(
+  placements: readonly NewTemplateInstance[],
+  manifest: ShareManifest,
+  dropped: string[],
+): { templates: string[]; slots: string[]; instances: WireInstance[] } {
+  const templates = stringTable()
+  const slots = stringTable()
+  const instances: WireInstance[] = []
+
+  placements.forEach((instance, index) => {
+    if (!Number.isFinite(instance.x) || !Number.isFinite(instance.z)) {
+      dropped.push(`placement ${String(index)}: position is not a finite point`)
+      return
+    }
+    const fills: WireFill[] = []
+    for (const slot of filledSlots(instance.fills).sort()) {
+      const fill = instance.fills[slot]
+      if (fill === undefined) continue
+      // The file's own ordinal — a fill names a file, and that ordinal is
+      // append-only for ever. `manifest.ts` has the argument, and row A5's
+      // reversal of row V4's design addressing.
+      const ordinal = manifest.ordinalOfTile(fill.tile)
+      if (ordinal === undefined) {
+        dropped.push(`placement ${String(index)}, slot ${slot}: ${fill.tile} is not in this catalog build`)
+        continue
+      }
+      fills.push({ slot: slots.intern(slot), ordinal, pinned: fill.pinned })
+    }
+    instances.push({
+      template: templates.intern(instance.template),
+      x: instance.x + 0,
+      z: instance.z + 0,
+      rotation: normalizeRotation(instance.rotation),
+      fills,
+    })
+  })
+
+  return { templates: templates.entries, slots: slots.entries, instances }
 }
 
 /**
@@ -427,21 +547,8 @@ export async function decodeShareFragment(fragment: string, manifest: ShareManif
  * the checksum is over what the ordinals mean, not over the bytes — so resolution
  * and verification are one step, and the salvage loop reads the result of it.
  */
-function assembleScene(
-  decoded: {
-    manifestVersion: number
-    lockIndex: number
-    digest: number
-    placements: readonly WirePlacement[]
-    recipes: readonly string[]
-    generated: readonly WireGenerated[]
-  },
-  manifest: ShareManifest,
-): ShareDecodeResult {
-  const resolved = resolveOrdinals(
-    decoded.placements.map((placement) => placement.ordinal),
-    manifest,
-  )
+function assembleScene(decoded: WirePayload, manifest: ShareManifest): ShareDecodeResult {
+  const resolved = resolveOrdinals(fillOrdinals(decoded.instances), manifest)
 
   if (resolved.unresolved.length === 0 && resolved.digest !== decoded.digest) {
     return {
@@ -462,33 +569,156 @@ function assembleScene(
     )
   }
 
-  const placements: Placement[] = []
-  decoded.placements.forEach((placement, index) => {
-    // Two lookups over one map, and both are needed. `resolved.tiles` is the
-    // *checksum's* view — (ordinal, tile id) pairs, because §13's failure is two
-    // ordinals swapping files — and `designOf` is what the scene is built from,
-    // since a placement holds an item. They are total over the same population,
-    // so this branch is the one condition either can report.
-    const design: DesignId | undefined = manifest.designOf(placement.ordinal)
-    if (design === undefined || !resolved.tiles.has(placement.ordinal)) {
-      dropped.push(`placement ${String(index)}: tile ordinal ${String(placement.ordinal)} is not in this catalog build`)
+  const placements = assembleInstances(decoded, resolved.tiles, dropped)
+  const generated = assembleGenerated(decoded.recipes, decoded.generated, dropped)
+
+  return { ok: true, scene: { lock: readLock(decoded.lockIndex, dropped), placements, generated }, dropped }
+}
+
+/**
+ * How many payload entries name each index of a table.
+ *
+ * The reason the tables are parsed once per *entry* rather than once per use: a
+ * room of ninety instances on one unreadable template must produce one line of
+ * `dropped` saying so and not ninety, because `dropped` is meant for a notice
+ * beside the opened room.
+ */
+function useCounts(indices: Iterable<number>): Map<number, number> {
+  const uses = new Map<number, number>()
+  for (const index of indices) uses.set(index, (uses.get(index) ?? 0) + 1)
+  return uses
+}
+
+/**
+ * Parse one of the payload's three string tables, reporting each entry it cannot
+ * read once, with the number of things that entry cost.
+ *
+ * Generic over what an entry parses to, because all three tables have the same
+ * shape of problem and the same shape of answer: a stranger's text, a total
+ * parse, and a count of what naming it would have placed. `label` is a function
+ * rather than a string so each caller's message names its own units — a template
+ * costs placements, a slot costs fills, a recipe costs bases.
+ */
+function readStringTable<T>(
+  entries: readonly string[],
+  uses: ReadonlyMap<number, number>,
+  parse: (entry: string) => T | undefined,
+  label: (index: number, count: number) => string,
+  dropped: string[],
+): Map<number, T> {
+  const table = new Map<number, T>()
+  entries.forEach((entry, index) => {
+    const parsed = parse(entry)
+    if (parsed !== undefined) {
+      table.set(index, parsed)
       return
     }
-    if (!Number.isFinite(placement.x) || !Number.isFinite(placement.z)) {
+    // An entry nothing names is not a loss, so it is not reported. That is
+    // reachable: an encoder is free to leave one, and a hand-edited payload does.
+    const count = uses.get(index) ?? 0
+    if (count > 0) dropped.push(label(index, count))
+  })
+  return table
+}
+
+function plural(count: number, unit: string): string {
+  return `${String(count)} ${unit}${count === 1 ? '' : 's'}`
+}
+
+/**
+ * Turn the wire instances and the two tables back into placements.
+ *
+ * The three levels of salvage the module docblock states are the branches below,
+ * and they are in that order for a reason: a template that cannot be read makes
+ * the fills meaningless, since a slot name is named against *its* parts, so there
+ * is nothing to salvage from an instance whose family is gone.
+ *
+ * A template id that parses but names no family this build ships is **not**
+ * detectable here and is deliberately not attempted: the family table lives
+ * beside a screen and must not enter this closure (`src/store/schema.ts#TemplateId`
+ * makes the same argument for the store). It fails closed one level up — nothing
+ * renders an instance whose template it cannot find, because rendering walks the
+ * template's parts.
+ */
+function assembleInstances(
+  decoded: WirePayload,
+  tiles: ReadonlyMap<number, TileId>,
+  dropped: string[],
+): NewTemplateInstance[] {
+  const templates = readStringTable(
+    decoded.templates,
+    useCounts(decoded.instances.map((instance) => instance.template)),
+    (entry) => TemplateId.safeParse(entry).data,
+    (index, count) => `template ${String(index)}: not a readable template id, dropping ${plural(count, 'placement')}`,
+    dropped,
+  )
+  const slots = readStringTable(
+    decoded.slots,
+    useCounts(decoded.instances.flatMap((instance) => instance.fills.map((fill) => fill.slot))),
+    (entry) => SlotName.safeParse(entry).data,
+    (index, count) => `slot ${String(index)}: not a readable slot name, dropping ${plural(count, 'fill')}`,
+    dropped,
+  )
+
+  const placements: NewTemplateInstance[] = []
+  decoded.instances.forEach((instance, index) => {
+    const template = templates.get(instance.template)
+    if (template === undefined) return
+    if (!Number.isFinite(instance.x) || !Number.isFinite(instance.z)) {
       dropped.push(`placement ${String(index)}: position is not a finite point`)
       return
     }
     placements.push({
-      design,
-      x: placement.x + 0,
-      z: placement.z + 0,
-      rotation: normalizeRotation(placement.rotation),
+      template,
+      x: instance.x + 0,
+      z: instance.z + 0,
+      rotation: normalizeRotation(instance.rotation),
+      fills: assembleFills(instance.fills, index, slots, tiles, dropped),
     })
   })
+  return placements
+}
 
-  const generated = assembleGenerated(decoded.recipes, decoded.generated, dropped)
-
-  return { ok: true, scene: { lock: readLock(decoded.lockIndex, dropped), placements, generated }, dropped }
+/**
+ * The fills of one instance, as the schema's map.
+ *
+ * `tiles` is the *checksum's* own view — the (ordinal, tile id) pairs
+ * `resolveOrdinals` resolved, because §13's failure is two ordinals swapping the
+ * files they name — so reading the fill out of it rather than calling `tileOf`
+ * again is what keeps the room and the digest describing the same files by
+ * construction rather than by two lookups agreeing.
+ */
+function assembleFills(
+  wire: readonly WireFill[],
+  index: number,
+  slots: ReadonlyMap<number, SlotName>,
+  tiles: ReadonlyMap<number, TileId>,
+  dropped: string[],
+): Record<SlotName, SlotFill> {
+  const fills: Record<SlotName, SlotFill> = {}
+  for (const fill of wire) {
+    const slot = slots.get(fill.slot)
+    // Reported once against the table entry, not once per fill.
+    if (slot === undefined) continue
+    const tile = tiles.get(fill.ordinal)
+    if (tile === undefined) {
+      dropped.push(
+        `placement ${String(index)}, slot ${slot}: tile ordinal ${String(fill.ordinal)} is not in this ` +
+          'catalog build',
+      )
+      continue
+    }
+    if (fills[slot] !== undefined) {
+      // Unreachable from any encoder — `fills` is a map on both sides — so this
+      // is a hand-edited payload contradicting itself. First writer wins, which
+      // is deterministic rather than correct, and it is named because silently
+      // choosing between two files is the one thing this codec does not do.
+      dropped.push(`placement ${String(index)}: slot ${slot} is filled twice, keeping the first`)
+      continue
+    }
+    fills[slot] = { tile, pinned: fill.pinned }
+  }
+  return fills
 }
 
 /**
@@ -515,26 +745,14 @@ function assembleGenerated(
   wire: readonly WireGenerated[],
   dropped: string[],
 ): GeneratedPlacement[] {
-  const uses = new Map<number, number>()
-  for (const entry of wire) uses.set(entry.recipe, (uses.get(entry.recipe) ?? 0) + 1)
-
-  const table = new Map<number, SharedGeneratedBase>()
-  recipes.forEach((document, index) => {
-    const count = uses.get(index) ?? 0
-    const parsed = readGeneratedDocument(document)
-    if (parsed === undefined) {
-      // A table entry nothing names is not a loss, so it is not reported. That is
-      // reachable: an encoder is free to leave one, and a hand-edited payload does.
-      if (count > 0) {
-        dropped.push(
-          `generated recipe ${String(index)}: not a readable base recipe, ` +
-            `dropping ${String(count)} base${count === 1 ? '' : 's'}`,
-        )
-      }
-      return
-    }
-    table.set(index, parsed)
-  })
+  const table = readStringTable(
+    recipes,
+    useCounts(wire.map((entry) => entry.recipe)),
+    readGeneratedDocument,
+    (index, count) =>
+      `generated recipe ${String(index)}: not a readable base recipe, dropping ${plural(count, 'base')}`,
+    dropped,
+  )
 
   const generated: GeneratedPlacement[] = []
   wire.forEach((entry, index) => {

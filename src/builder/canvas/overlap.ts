@@ -29,9 +29,34 @@
  *     really do fill their square. Two of these in the same square collide.
  *
  * Cross-band pairs are never reported. That is the whole of the false-positive
- * fix, and it is a *model* of the height axis rather than a fudge: row G2's
- * instanced 3D builder replaces the two bands with a real `y`, and this module
- * goes away.
+ * fix, and it is a *model* of the height axis rather than a fudge.
+ *
+ * ## Where row A7 cuts in, and what row A4a deliberately did not do
+ *
+ * Elevation is now a real quantity: `geometry.ts#SlotLayout` carries an
+ * `elevationMm` per part, normalised rather than measured (§2.2, §9 — 18.4% of
+ * measured `openforge` toppers are authored pre-lifted by exactly 6.0 mm and
+ * 77.5% are not). **This module does not read it, and that is the boundary.**
+ * Two cuts, in this order:
+ *
+ *   1. **{@link OverlapSubject} gains a vertical interval** — `elevationMm` plus
+ *      the record's own height — and {@link subjectsConflict}'s first line,
+ *      `a.band !== b.band`, becomes a disjointness test on it. That is the whole
+ *      change: {@link partsOverlap} is already a plan-view test over an array of
+ *      convex parts and needs nothing, and the sweep in {@link findConflicts}
+ *      needs nothing either.
+ *   2. **{@link planBand} and {@link PlanBand} retire with it.** The two bands
+ *      are a two-valued approximation of that interval, and the 323 tiles the
+ *      footprint-first rule moves from `area` to `edge` are 323 pieces whose
+ *      *real* answer is a height.
+ *
+ * Until then the approximation is visible where it is wrong: two **different**
+ * instances stacked — a floor instance under a wall instance, which is a legal
+ * and common build — are two `area`-band or two `edge`-band pieces on the same
+ * square and are reported as a conflict. Row A4a fixed the *intra*-instance case
+ * only, and by identity rather than by height (see {@link OverlapCandidate}),
+ * because a recipe's own slots are stacked by design and no elevation is needed
+ * to know it.
  *
  * ## Flag, not prevent
  *
@@ -190,7 +215,26 @@ export interface OverlapSubject {
   readonly axisAligned: boolean
 }
 
-/** One placement, identified. */
+/**
+ * One **part** of one placement, identified by the placement it belongs to.
+ *
+ * Since row **A1** a placement is a template instance with a fill per named
+ * slot, so one placement contributes N candidates and they all carry the same
+ * {@link PlacementId}. That is deliberate and it is what keeps
+ * `PlanScene.conflicts` a set of placement ids: the question the room asks is
+ * *is this piece in conflict*, and every consumer of the set — the hatch, the
+ * count, the bill's warning row — is asking it about a piece.
+ *
+ * The consequence is the rule in {@link findConflicts}: **two candidates with
+ * the same id are never tested against each other.** That is not tidiness, and
+ * the corpus is what makes it load bearing: measured over
+ * `src/screens/assemblies/templates.ts`, **all 40 shipped templates declare both
+ * a `floor` slot and a `base` slot**. A base sits under its floor by
+ * construction, so those two parts occupy the same square in the same `area`
+ * band on *every instance the app can place* — and without this rule every
+ * instance in every room would report a conflict with itself and the hatch would
+ * mean nothing at all.
+ */
 export interface OverlapCandidate extends OverlapSubject {
   readonly id: PlacementId
 }
@@ -331,6 +375,11 @@ export function findConflicts(candidates: readonly OverlapCandidate[]): Readonly
       if (other.box.x + other.box.w - candidate.box.x <= TOUCH_EPS) open.splice(i, 1)
     }
     for (const other of open) {
+      // Two parts of one instance are never a conflict — see
+      // {@link OverlapCandidate}. A piece cannot collide with itself, and since
+      // row A1 that sentence has content: a template's stacked slots would
+      // otherwise light up every instance in the room.
+      if (other.id === candidate.id) continue
       if (!subjectsConflict(other, candidate)) continue
       conflicts.add(candidate.id)
       conflicts.add(other.id)

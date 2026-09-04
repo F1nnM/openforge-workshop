@@ -32,6 +32,11 @@
  *      one per md5 and names a `CatalogRecord`, a generated line is one per recipe
  *      and names no published file at all.
  *
+ *      **The archived half of that seam does not place, and row A8 left it that
+ *      way on purpose.** `placeGenerated` carries the argument and the
+ *      measurement: a bare base needs a one-slot family keyed on `shape|base`
+ *      that row **B4** owes and nothing in the tree yet emits.
+ *
  * There were five. **`chrome={false}` was the fourth and row R4 removed the
  * decision by removing the alternative.** `PlanCanvas` could draw §2.4's two
  * corner plates itself, and this screen drew them instead because the canvas's
@@ -85,22 +90,30 @@
 import { getRouteApi } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 
+import type { TemplateLookup } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { buildPlanScene, createStyleResolver, describeCell, freeCellFor, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
 import { BackupPanel, BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 import type { SurfaceStatus } from '@/builder/three'
+// Deep, and not through the barrel: `@/builder/three/index.ts` exports only
+// `Builder3DPanel` and `lod.ts` as values, and its `boundary.test.ts` walks that
+// entry's closure to keep the renderer out of it. `edits.ts` imports no renderer
+// — `@/builder/canvas`, `@/catalog`, `@/store` — so reading one constant from it
+// costs this screen nothing and leaves that rule intact.
+import { ARMED_TURN_STEP_DEG } from '@/builder/three/edits'
 import { GeneratorPanel } from '@/generator/panel'
 import type { GeneratorPlaceHandler } from '@/generator/panel'
 import { buildGeneratedBill } from '@/generator/placement/bill'
+import { RECIPE_TEMPLATES } from '@/screens/assemblies'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
+import { compositionIndexFor } from '@/screens/detail/slots'
 import {
   clearPlacements,
   holdGeneratedMesh,
   placeGeneratedBase,
-  placeTile,
   useGeneratedHoldings,
   useGeneratedMeshes,
   useGeneratedPlacements,
@@ -177,52 +190,76 @@ function Builder({ index }: { index: CatalogIndex }) {
    * sentence in the hint plate below is for.
    */
   const [status, setStatus] = useState<SurfaceStatus | null>(null)
+  /**
+   * The archived resolution this screen could not place, or `null`.
+   *
+   * Set by {@link placeGenerated}'s archived arm and cleared by the next
+   * generated placement. See that callback for why the arm resolves and declines
+   * rather than placing, and which row closes it.
+   */
+  const [declined, setDeclined] = useState<{ tile: string; file: string } | null>(null)
 
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
 
   /**
-   * The canvas's view of the catalog — **memoised on the lock as well as the
-   * index**, since row V4.
+   * The canvas's view of the catalog — **memoised on the index alone**, since
+   * row A4a.
    *
-   * A placement names an item, so something has to turn one into the record a
-   * renderer can draw, and `planCatalogFromFile` is where that happens: it
-   * resolves each design through `selectVariantForLock`, the same function the
-   * bill's rule 0 uses, so the mesh in the 3D room and the line in the bill are
-   * the same file. That makes the lock an input, and a `PlanCatalog` held across
-   * a change of preference would draw the previous one's variants.
-   *
-   * `index.engine.aggregates` is handed over rather than letting the default
-   * build a second aggregate index over the same file — 3,822 groups of work
-   * this screen has already paid for.
+   * It was memoised on the lock as well, because a placement named an item and
+   * `planCatalogFromFile` resolved each design through `selectVariantForLock`.
+   * A fill names an exact **file** (decision D1), so there is no variant to
+   * choose, the function no longer takes a lock or an aggregate index, and
+   * nothing about this view goes stale when the preference changes.
    */
-  const planCatalog = useMemo(
-    () => planCatalogFromFile(index.file, lock, index.engine.aggregates),
-    [index, lock],
-  )
+  const planCatalog = useMemo(() => planCatalogFromFile(index.file), [index])
   const assembly = useMemo(() => buildAssemblyIndex(index.file), [index])
-  // Anchors only, and memoised rather than mapped inline: a fresh array on every
-  // render would be a new dependency identity every render, so the bill below —
-  // one pass over the scene — would rebuild on a hover or a status change.
-  const generatedBaseAnchors = useMemo(
-    () => Object.values(generatedPlacements).map((placement) => ({ x: placement.x, z: placement.z })),
-    [generatedPlacements],
+
+  /**
+   * The two authorities `resolveInstance` requires beside the catalog index.
+   *
+   * **Both are required arguments rather than defaulted options**, which is row
+   * A3's point: without the template there are no slots to walk, and without the
+   * composition index a fill cannot be checked against the slot that holds it —
+   * and a resolution that silently skipped the check would emit a plausible bill
+   * for a scene full of misfitting parts.
+   *
+   * `templates` is a lookup over the 40 shipped recipes. `RecipeTemplate` is
+   * assignable to {@link AssemblyTemplate} without an adapter — its
+   * `TemplatePart` is `Pick<PartSlot, 'name' | 'tags'>` plus `fulfills`, and
+   * extra properties are fine in a non-literal position — so this is a `Map`
+   * over the table and nothing more. It is a `Map` rather than a `find` because
+   * the lookup runs once per instance on every store write.
+   *
+   * `composition` comes from `compositionIndexFor`, which is the **shared**
+   * index: a `WeakMap` keyed on the parsed file, so the drawer's picker, the
+   * variants table, the slots panel below and this bill are four readers of one
+   * 409,432-byte inverted index rather than four builds of it. The engine's own
+   * aggregate index is handed over for the same reason `planCatalogFromFile`
+   * used to take it — deriving a second one is 86.8 ms this screen has already
+   * paid.
+   */
+  const recipes = useMemo(() => new Map(RECIPE_TEMPLATES.map((recipe) => [recipe.id, recipe])), [])
+  const templates = useMemo<TemplateLookup>(() => (id) => recipes.get(id), [recipes])
+  const composition = useMemo(
+    () => compositionIndexFor(index.file, index.engine.aggregates),
+    [index],
   )
   /**
-   * `generatedBases` is the one thing the catalog bill needs from the generated
-   * map, and it is positions only.
+   * The catalog bill. **`generatedBases` is gone from the context, and so is the
+   * anchor list this screen built for it.**
    *
-   * Row X9 reported that `buildBillOfTiles` sees `placements` alone, so the
-   * auto-insert rule cannot see a generated base and adds a catalog one beside
-   * it. It still adds one — row X10 measured why suppressing would be worse than
-   * disclosing, in `assembly/notes.ts#base-already-on-plan` — but the bill can
-   * now *say* so, and this is the argument it needs to. Nothing else about a
-   * generated base crosses into the catalog bill: the two remain the separate
-   * derivations S5 made them, for the reasons in the note below.
+   * Row X9 added it because the auto-insert rule could not see a generated base
+   * and added a catalog one beside it, which the bill then had to disclose
+   * (`base-already-on-plan`). Row A3 deleted the auto-insert: a recipe declares
+   * its base as an ordinary slot, so nothing is added, nothing can be added
+   * twice, and there is nothing for the positions of the generated bases to
+   * inform. The two bills remain the separate derivations S5 made them, for the
+   * reasons in the note below.
    */
   const bill = useMemo(
-    () => buildBillOfTiles(Object.values(placements), assembly, { lock, generatedBases: generatedBaseAnchors }),
-    [placements, assembly, lock, generatedBaseAnchors],
+    () => buildBillOfTiles(Object.values(placements), assembly, { templates, composition, lock }),
+    [placements, assembly, templates, composition, lock],
   )
 
   /**
@@ -286,38 +323,69 @@ function Builder({ index }: { index: CatalogIndex }) {
   )
 
   /**
-   * Take what the drawer resolved and write it to the store.
+   * Take what the drawer resolved and write it to the store — **or, for an
+   * archived resolution, decline to and say so.**
    *
-   * Three writes across two stores, and the split is row S5's identity argument
-   * made concrete:
+   * The generated arm is unchanged and is two writes across two stores, which is
+   * row S5's identity argument made concrete: the recipe goes to the second map,
+   * which persists it, and the **mesh**, when the engine has produced one, goes
+   * to the un-persisted holdings store. Two writes rather than one because the
+   * recipe is durable and the bytes are not, and this is the only press where
+   * both are in hand. A generated base with no mesh is placed anyway: the
+   * footprint is arithmetic, so the outline is truthful before the engine has
+   * been asked anything, and it becomes a `warn` bill row and a refused download
+   * rather than a silent omission.
    *
-   *   - an **archived** resolution is an ordinary `Placement` addressed by the
-   *     archived record's own `TileId`, so it goes through `placeTile` and rides
-   *     the canvas, `resolvePlacement`, the bill and the pack that already exist.
-   *     682 of the archive's 709 resolvable keys land here and cost nothing new.
-   *   - a **generated** one goes to the second map, which persists the recipe;
-   *   - and its **mesh**, when the engine has produced one, goes to the
-   *     un-persisted holdings store. Two writes rather than one because the
-   *     recipe is durable and the bytes are not, and this is the only press where
-   *     both are in hand.
+   * ## The archived arm resolves and does not place, and that is deliberate
    *
-   * A generated base with no mesh is placed anyway. The footprint is arithmetic,
-   * so the outline is truthful before the engine has been asked anything — it
-   * becomes a `warn` bill row and a refused download rather than a silent
-   * omission.
+   * It used to call `placeTile(placed.placement)` — an ordinary placement
+   * addressed by the archived record's own `TileId`. Row **A9** replaced that
+   * with a {@link SlotFill} plus a cell and **deliberately named no template**,
+   * and row **A8** kept the gap open rather than filling it, because the family
+   * a bare base belongs to does not exist yet:
+   *
+   *   - a base slot predicates on `shape|base`, which is exactly coextensive
+   *     with `layer === 'base'` — **1,963 records both ways, zero exceptions** —
+   *     and row **B4** owes the one-slot bare-base family on that predicate;
+   *   - it cannot come out of B4's `(role, form, build)` key as it stands,
+   *     because `base` is not one of B1's eight roles: over the 686 records the
+   *     resolver can answer with, all of them `layer: 'base'`, the population
+   *     spreads across eight family keys and **none of them is a base**.
+   *
+   * So there is nothing honest to pass as the `template`. Filling the `base`
+   * slot of a `role|floor` family would work geometrically and would mislabel a
+   * base as a floor in the palette; inventing an id would make every such
+   * placement `unknown-template`. `placement.ts` carries the whole measurement.
+   *
+   * **The shortcut itself is preserved, and that is the point of not deleting
+   * this arm.** The drawer still resolves the recipe against the archive, which
+   * is what stops the 298 kB worker chunk and the 10.5 MB WASM being fetched at
+   * all for **682 of the archive's 709 resolvable keys**. What is missing is one
+   * store write, and until B4 lands the screen names the file the archive already
+   * publishes and says plainly that it cannot put it on the grid — rather than
+   * appearing to place something and placing nothing.
    */
   const placeGenerated = useCallback<GeneratorPlaceHandler>((placed, mesh) => {
     if (placed.kind === 'archived') {
-      placeTile(placed.placement)
+      setDeclined({ tile: placed.fill.tile, file: placed.base.file })
       return
     }
+    setDeclined(null)
     placeGeneratedBase(placed.placement)
     if (mesh !== null) holdGeneratedMesh(placed.placement.base, mesh)
   }, [])
 
-  // The armed item, as the record this build would print — `planCatalog` is the
-  // one place that hop lives, so the toolbar names the same file the bill will.
-  const armed = tools.selectedDesign === null ? undefined : planCatalog.record(tools.selectedDesign)
+  /**
+   * The armed **family**, as the recipe table names it.
+   *
+   * `tools.selectedTemplate` is a `TemplateId` since row A1, so there is no
+   * record to look up: `planCatalog.record` takes a file and a family is not
+   * one. This screen holds the table the id names — see `templates` above — so
+   * it can say the family's real name, which is exactly the case
+   * `canvas/scene.ts#describeTemplate` defers to: *"A panel that holds the table
+   * can say it better; nothing here can."*
+   */
+  const armed = tools.selectedTemplate === null ? undefined : recipes.get(tools.selectedTemplate)
 
   return (
     <section className="of-builder" aria-label="Builder">
@@ -342,7 +410,15 @@ function Builder({ index }: { index: CatalogIndex }) {
           <PlanToolbar
             tools={tools}
             status={status}
-            armed={armed}
+            /*
+              The step, not the record — row A4b's answer, taken rather than
+              re-derived. A family's rotation step is the least common multiple
+              of its parts' own steps and row C2 has not chosen the parts, so
+              `ARMED_TURN_STEP_DEG` is the corpus default and `planTurn` already
+              turns an armed family by it. Passing the step keeps the toolbar and
+              the surface turning by one number.
+            */
+            armedStep={tools.selectedTemplate === null ? undefined : ARMED_TURN_STEP_DEG}
             placed={bill.placements}
             onClear={clearPlacements}
           />
@@ -374,11 +450,28 @@ function Builder({ index }: { index: CatalogIndex }) {
             the drawing. */}
         <p className="of-build-plate of-build-hint">{status?.hint ?? 'Pick a tile from the palette to start.'}</p>
         <p className="of-build-plate of-build-armed">
-          {armed === undefined ? 'No tile armed' : armed.name}
+          {armed === undefined ? 'No recipe armed' : armed.name}
           {status === null ? null : (
             <span className="of-build-at">{describeCell(status.cursor[0], status.cursor[1])}</span>
           )}
         </p>
+
+        {/*
+          Row A8. The archived arm of the generator resolves a published file and
+          cannot place it until row B4 emits the bare-base family — see
+          `placeGenerated` for the measurement. Said out loud, with the file
+          named, because the press otherwise looks like it worked. A `role="status"`
+          rather than an alert: nothing has failed, and the resolution itself is
+          the thing that saved the engine being loaded.
+        */}
+        {declined === null ? null : (
+          <p className="of-build-plate of-build-declined" role="status">
+            <strong>{declined.file}</strong> is already in the archive, so nothing was generated. It
+            cannot go on the grid yet: a base is placed as a one-slot recipe, and that recipe is not
+            in this build.
+            <span className="of-build-at">{declined.tile}</span>
+          </p>
+        )}
 
         {/*
           Rows G2, R2 and R4. **The stage**, and no longer a panel: R2 opened it
@@ -458,7 +551,7 @@ function Builder({ index }: { index: CatalogIndex }) {
           slot is not a placement, so `buildBillOfTiles` neither counts a torch
           in a wall's `torch` slot nor can.
         */}
-        <SlotsPanel catalog={index.file} placements={placements} lock={lock} />
+        <SlotsPanel catalog={index.file} placements={placements} />
         {/*
           Row A0. The app's only backup path, and it was the library screen's
           until that screen was deleted — architecture-plan.md §13 (Safari evicts

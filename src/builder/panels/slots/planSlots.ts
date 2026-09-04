@@ -26,47 +26,73 @@
  *
  * ## Dead ends reach the plan, and 9 slots cannot be filled at all
  *
- * The same two failures the drawer's picker shows arrive here per placement:
+ * The same two failures the drawer's picker shows arrive here per fill:
  * **9 of the 1,244 accessory declarations have no candidate whatsoever** in
  * their initial state (5 `fracture slope`, 4 `top`), and a pick can empty a
  * sibling — 416 of 4,330 item picks corpus-wide, every one of them emptying the
  * `base` slot. {@link PlanSlotInventory.unfillable} counts the first; the
  * greying is the picker's and is shared rather than reimplemented, from
  * `@/screens/detail/slots`.
+ *
+ * ## A holder is a **filled template slot**, not a placement, since row A8
+ *
+ * A placement used to be one design, so *"which file's slots do we show"* was a
+ * question — answered by `selectVariantForLock`, because `config` is one of the
+ * fields that differ between an item's variants. A template instance holds up to
+ * five slots and each one names an **exact file** (decision **D1**), so the
+ * question is gone twice over: there is no variant to pick, and there is no one
+ * file per placement to pick it for. This walks the fills.
+ *
+ * That makes the lock preference irrelevant here and the parameter is deleted
+ * rather than ignored. It also means one instance can contribute several
+ * holders — a wall-on-tile corner with a torch bracket in the wall and a grate in
+ * the floor is two — which is why {@link PlanSlotHolder.id} is no longer the
+ * store's key on its own.
+ *
+ * **A template's own slots are not these.** `resolveInstance` walks the recipe's
+ * declared parts and reports the empty ones as `slot-unfilled`; this walks the
+ * *composition* slots the already-chosen files declare, one level further in.
+ * Row **C3** is what joins the two surfaces, and it owns whatever a pick here
+ * writes.
  */
-import { selectVariantForLock } from '@/assembly'
 import type { CatalogFile, TileId } from '@/catalog'
 import type { SlotState } from '@/screens/detail/slots'
 import { compositionIndexFor, slotStates } from '@/screens/detail/slots'
-import type { LockSystem, Placement } from '@/store'
+import type { PlacementId, SlotName, TemplateInstance } from '@/store'
+import { filledSlots } from '@/store'
 
-/** One placed piece that opens at least one accessory slot. */
+/** One filled template slot whose file opens at least one accessory slot. */
 export interface PlanSlotHolder {
-  /** The placement's key in `WorkshopState.placements`. */
-  readonly id: string
-  readonly placement: Placement
   /**
-   * The file whose slots these are. The picker resolves against this and not
-   * against its item.
+   * A key unique within the inventory: the placement's key in
+   * `WorkshopState.placements`, then the slot name.
    *
-   * Row V4 made a placement name an item, so this is now the file the item
-   * *resolves to* under the build's lock preference — and that is not a
-   * convenience, it is the only well-posed answer. `config` is one of the fields
-   * a variant swap changes (`assembly/resolve.ts` lists them), so two variants
-   * of one design can declare different slots, and the slots worth showing are
-   * the ones on the file being printed. Every other field a holder carries —
-   * `name` — is a hoisted facet and would have been the same whichever variant
-   * answered.
+   * Not the placement key alone, because one instance can hold several files
+   * that each declare an accessory slot — see the module note. Composed here
+   * rather than left to the renderer so that the order and the key come from one
+   * pass.
+   */
+  readonly id: string
+  /** The placement's own key, for a caller that wants to address the instance. */
+  readonly placement: PlacementId
+  readonly instance: TemplateInstance
+  /** Which slot of the recipe this file fills. */
+  readonly slot: SlotName
+  /**
+   * The file whose accessory slots these are.
+   *
+   * The fill's own `tile`, with no resolution step at all: a {@link SlotFill}
+   * names a file, so the file being printed is the file in the scene. The picker
+   * resolves against this — `config` is a property of a file, which is the whole
+   * reason `CompositionIndex.resolve` takes a `TileId` parent.
    */
   readonly parent: TileId
   /**
    * The item's display name.
    *
-   * No fallback to a raw id any more, and the reason is that the branch that
-   * needed one is gone: this used to look the *variant* up by file id and then
-   * the aggregate up by the variant's design, so the second lookup could miss
-   * where the first had not. One lookup by design cannot, so a holder either has
-   * a name or is an orphan.
+   * Two hops — file to variant to aggregate — because `name` is a hoisted facet
+   * of the *item* and a fill names a file. Either hop can miss for a retired id,
+   * and both misses are the same orphan.
    */
   readonly name: string
   /** Its accessory slots, resolved with nothing picked. Never empty. */
@@ -96,30 +122,36 @@ export interface PlanSlotInventory {
   readonly unfillable: number
   /** Slot names the plan opens, with how many of each. Descending count, then name. */
   readonly byName: readonly { readonly name: string; readonly count: number }[]
-  /** Placements the index no longer holds a record for. The bill's orphan case. */
+  /**
+   * Placement keys holding a fill the index no longer has a record for — the
+   * bill's orphan case, one entry per instance however many of its fills are
+   * stranded.
+   */
   readonly orphans: readonly string[]
 }
 
 /**
  * The plan's open accessory slots.
  *
- * One pass over the placements, and one composition resolution per placed file
- * that declares a slot. The resolution is the expensive-sounding half and is not:
- * a full slot resolution measures **0.09 ms mean, 2.3 ms worst** over the real
- * corpus, and only 11.5% of files reach it at all.
+ * One pass over the instances, one over each instance's fills, and one
+ * composition resolution per filled file that declares a slot. The resolution is
+ * the expensive-sounding half and is not: a full slot resolution measures
+ * **0.09 ms mean, 2.3 ms worst** over the real corpus, and only 11.5% of files
+ * reach it at all.
  *
- * Ordered by depth then across — the same plan reading order `billInventory`
- * uses, so a row in this panel and a row in the bill refer to the drawing the
- * same way.
+ * Ordered by depth then across, and within one instance by slot name — the same
+ * plan reading order `billInventory` uses, so a row in this panel and a row in
+ * the bill refer to the drawing the same way, plus a total tie-break so two runs
+ * over one scene produce the same list.
  *
- * `lock` is optional and absent means *no preference*, which is
- * `AssemblyOptions.lock`'s convention: a fixture that states no preference gets
- * the resolution a preference-free build would print, not `openlock`'s.
+ * **No lock parameter, and that is not an omission.** It took one, to pick which
+ * variant of a placed design to read `config` off. A fill names the file, so
+ * there is nothing to pick and a preference could only be ignored. See the module
+ * note.
  */
 export function planSlots(
   file: CatalogFile,
-  placements: Readonly<Record<string, Placement>>,
-  lock?: LockSystem,
+  placements: Readonly<Record<string, TemplateInstance>>,
 ): PlanSlotInventory {
   const index = compositionIndexFor(file)
   const holders: PlanSlotHolder[] = []
@@ -133,31 +165,41 @@ export function planSlots(
     ([, a], [, b]) => a.z - b.z || a.x - b.x,
   )
 
-  for (const [id, placement] of ordered) {
-    const aggregate = index.aggregates.byDesign.get(placement.design)
-    if (aggregate === undefined) {
-      orphans.push(id)
-      continue
-    }
-    // Rule 0's own function, so the slots shown belong to the file the bill
-    // lists — see {@link PlanSlotHolder.parent}.
-    const parent = selectVariantForLock(aggregate, lock).variant.id
-    const states = slotStates(index, parent)
-    if (states.length === 0) continue
+  for (const [id, instance] of ordered) {
+    let stranded = false
+    for (const slot of filledSlots(instance.fills).sort((a, b) => a.localeCompare(b))) {
+      const fill = instance.fills[slot]
+      if (fill === undefined) continue
+      const variant = index.aggregates.byTile.get(fill.tile)
+      const aggregate = variant === undefined ? undefined : index.aggregates.byDesign.get(variant.design)
+      if (aggregate === undefined) {
+        // A fill this build has retired. One orphan entry per instance however
+        // many of its fills are stranded: the panel's sentence is about a
+        // placement it cannot describe, and saying it twice for one piece would
+        // over-count the scene.
+        stranded = true
+        continue
+      }
+      const states = slotStates(index, fill.tile)
+      if (states.length === 0) continue
 
-    holders.push({
-      id,
-      placement,
-      parent,
-      name: aggregate.name,
-      slots: states,
-    })
-    for (const state of states) {
-      slots += 1
-      if (!state.optional) required += 1
-      if (state.deadEnd) unfillable += 1
-      names.set(state.name, (names.get(state.name) ?? 0) + 1)
+      holders.push({
+        id: `${id}|${slot}`,
+        placement: id as PlacementId,
+        instance,
+        slot,
+        parent: fill.tile,
+        name: aggregate.name,
+        slots: states,
+      })
+      for (const state of states) {
+        slots += 1
+        if (!state.optional) required += 1
+        if (state.deadEnd) unfillable += 1
+        names.set(state.name, (names.get(state.name) ?? 0) + 1)
+      }
     }
+    if (stranded) orphans.push(id)
   }
 
   return {

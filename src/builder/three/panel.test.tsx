@@ -63,7 +63,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { planCatalogFromFile } from '@/builder/canvas'
 import type { PlanScene, PlanTools } from '@/builder/canvas'
-import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from '@/builder/canvas/fixture'
+import { FIXTURE_IDS, OTHER_FIXTURE_TEMPLATE, fixtureCatalogFile } from '@/builder/canvas/fixture'
 
 import { Builder3DPanel } from './Builder3DPanel'
 import { planTools, sceneOf } from './fixture'
@@ -72,7 +72,7 @@ vi.mock('./BuilderRoom', () => ({
   default: ({ scene, tools }: { scene: PlanScene; tools: PlanTools }) => (
     <div data-testid="room">
       <span>room of {scene.pieces.length}</span>
-      <span data-testid="armed">{tools.selectedDesign ?? 'nothing'}</span>
+      <span data-testid="armed">{tools.selectedTemplate ?? 'nothing'}</span>
     </div>
   ),
 }))
@@ -86,7 +86,7 @@ const ASSETS = {
 function scene(count: number): PlanScene {
   return sceneOf(
     CATALOG,
-    Array.from({ length: count }, (_unused, i) => ({ tileId: FIXTURE_IDS.floor1, x: i * 2, z: 0 })),
+    Array.from({ length: count }, (_unused, i) => ({ tile: FIXTURE_IDS.floor1, x: i * 2, z: 0 })),
   )
 }
 
@@ -123,8 +123,9 @@ describe('the boundary', () => {
 
 describe('what reaches the room', () => {
   it('hands over the screen’s scene rather than a placements map', async () => {
-    // The contract with row V4: the room never sees a `Placement`, so a change
-    // to what a placement *is* cannot reach this row.
+    // The room never sees a `TemplateInstance` map: every piece of geometry,
+    // every conflict and every omission arrives already projected, so a change
+    // to what a placement *is* reaches the canvas and stops there.
     render(<Builder3DPanel catalog={CATALOG} scene={scene(4)} tools={planTools()} assets={ASSETS} />)
     expect(await screen.findByTestId('room')).toHaveTextContent('room of 4')
   })
@@ -134,14 +135,15 @@ describe('what reaches the room', () => {
       <Builder3DPanel
         catalog={CATALOG}
         scene={scene(1)}
-        tools={planTools({ selectedDesign: fixtureDesignOf(FIXTURE_IDS.wall2) })}
+        tools={planTools({ selectedTemplate: OTHER_FIXTURE_TEMPLATE })}
         assets={ASSETS}
       />,
     )
-    // The design, not the file: since row V4 the tool state arms an item and
-    // `RoomSurface` resolves the variant. Asserted as the same expression that
+    // The **family**, not a file and not a design: since row A1 the tool state
+    // arms a `TemplateId` (§2.5 — templates are the only placement unit) and
+    // turning one into files is row C2's. Asserted as the same expression that
     // was armed, so this proves the hand-over rather than a literal.
-    expect(await screen.findByTestId('armed')).toHaveTextContent(fixtureDesignOf(FIXTURE_IDS.wall2))
+    expect(await screen.findByTestId('armed')).toHaveTextContent(OTHER_FIXTURE_TEMPLATE)
   })
 })
 

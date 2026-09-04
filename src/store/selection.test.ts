@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { DesignId, TileId } from '@/catalog'
 
+import { aTemplateInstance } from './fixture'
 import { STORAGE_KEY, clearPersistedWorkshopState } from './storage'
 import {
   claimPendingDesign,
@@ -30,7 +31,7 @@ import {
   sendDesignToBuilder,
   useSelectionStore,
 } from './selection'
-import { addToLibrary, placeTile, resetWorkshop, setLockSystem, useWorkshopStore } from './workshopStore'
+import { placeTemplate, resetWorkshop, setLockSystem, useWorkshopStore } from './workshopStore'
 
 /**
  * Two items, spelled the way `pipeline/design.ts` mints one — `d` plus twelve
@@ -116,7 +117,7 @@ describe('what it is not', () => {
   it('is not part of the persisted state, so nothing reaches localStorage', () => {
     // The persisted store is made to write first, so the assertion is about what
     // the channel *adds* to a real blob rather than about an absent key.
-    addToLibrary(DESIGN_A)
+    placeTemplate(aTemplateInstance())
     const before = localStorage.getItem(STORAGE_KEY)
     expect(before).not.toBeNull()
 
@@ -133,31 +134,37 @@ describe('what it is not', () => {
     // `generated` is row X9's, and it *is* part of `WorkshopState` — it moved
     // `STORE_VERSION` to 3 for exactly the reason this test states. Listed here
     // rather than counted so adding a field stays a deliberate edit.
-    expect(Object.keys(useWorkshopStore.getState())).toEqual([
-      'library',
-      'placements',
-      'generated',
-      'lock',
-      'lockChosen',
-    ])
+    expect(Object.keys(useWorkshopStore.getState())).toEqual(['placements', 'generated', 'lock', 'lockChosen'])
   })
 
-  it('survives a workshop reset, because a reset is about a scene and this is not one', () => {
-    // Stated rather than assumed: `resetWorkshop` deliberately does not reach
-    // into this store, and the reader's guard is what disarms a handoff whose
-    // tile is no longer listed.
+  it('is cleared by a workshop reset — contract C-f, and it inverts row G5', () => {
+    // **This assertion used to be the opposite one**, and the argument it rested
+    // on was the library: `resetWorkshop` did not reach into this store because
+    // "a reset that emptied the library disarms the handoff by making it
+    // unclaimable", the palette holding no placeable row for an item nobody had
+    // saved.
+    //
+    // Row A0 deleted the library and row A1 deleted the field. The palette now
+    // lists 52 generated template families (§3.1) — a function of the catalog,
+    // which no reset touches — so the old mechanism is gone and a pending
+    // handoff would survive "clear everything" *and stay claimable*. The first
+    // render of the builder after a reset would then arm a piece the user had
+    // just thrown away.
     sendDesignToBuilder(DESIGN_A)
     resetWorkshop()
-    expect(pending()).toBe(DESIGN_A)
+    expect(pending()).toBeNull()
   })
 
   it('is not a placement: sending an item puts nothing on the grid', () => {
     sendDesignToBuilder(DESIGN_A)
     expect(Object.keys(useWorkshopStore.getState().placements)).toHaveLength(0)
-    // Since row V4 a placement addresses the same thing the box carries, so
-    // this line needs no conversion at all — which is the shape G5's original
-    // argument said was impossible.
-    placeTile({ design: DESIGN_A, x: 0, z: 0, rotation: 0 })
+    // Row V4 had made the box and a placement address the same thing; row A1
+    // parted them again, because a placement is now a template family with a
+    // fill per slot and no design appears in one. **Whether the channel should
+    // follow is row C1's**, and it owns `selection.ts`: a palette of 52
+    // families may want a `TemplateId` in the box. What this row asserts is
+    // only that placing does not consume the handoff.
+    placeTemplate(aTemplateInstance())
     expect(pending()).toBe(DESIGN_A)
   })
 })
@@ -182,11 +189,11 @@ describe('selection against resolution', () => {
     sendDesignToBuilder(DESIGN_A)
     const claimed = claimPendingDesign()
     expect(typeof claimed).toBe('string')
-    // A `DesignId` is the item — the same currency as `WorkshopState.library`'s
-    // keys since row V1, and what row V3's palette rows will be keyed by. An
+    // A `DesignId` is the item — what row V3's palette rows are keyed by. An
     // ordinal would be a `ManifestOrdinal` the reader had to re-resolve, and an
     // `AggregateAddress` names the same item but is a catalog *address* that its
-    // own docblock says moves when a sibling file retires.
+    // own docblock says moves when a sibling file retires. (Row A1 removed the
+    // other half of this sentence: the library it used to compare against.)
     expect(claimed).toBe(DESIGN_A)
     expect(DesignId.parse(claimed)).toBe(DESIGN_A)
     // And what it is *not*: nothing out of this box may parse as a catalog path,

@@ -36,9 +36,25 @@
  * Exported as a plain object rather than a parsed `CatalogFile`, so it travels the
  * real path through `CatalogFile.parse` where a fixture that drifted from the
  * schema gets caught.
+ *
+ * ## Two recipes, added by row A8
+ *
+ * A placement is a template instance, so a test that wants a bill needs a recipe
+ * and an {@link AssemblyContext} as well as records. {@link ONE_SLOT_TEMPLATE}
+ * and {@link TWO_SLOT_TEMPLATE} are the smallest pair that covers what the panels
+ * assert — one file per instance, and more parts than placements — and
+ * {@link fixtureContext} is the context over whichever catalog a block parsed.
+ *
+ * They are declared here rather than in each suite because three files build a
+ * bill over these records (`panels.test.tsx`, `generated.test.tsx` and
+ * `screens/builder/builder.test.tsx`) and a fourth copy of a one-slot recipe is
+ * how the copies drift.
  */
-import type { CatalogFile } from '@/catalog'
+import type { AssemblyContext, AssemblyTemplate } from '@/assembly'
+import type { CatalogFile, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
+import { createCompositionIndex } from '@/composition'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 
 const TAGS = [
   'shape|floor',
@@ -370,4 +386,103 @@ export function mixedCatalogFile(): CatalogFile {
     ...FIXTURE_CATALOG,
     records: [...FIXTURE_CATALOG.records, MIXED_INTEGRAL],
   })
+}
+
+/* --------------------------------------------------- the recipes (row A8) */
+
+/**
+ * A one-slot recipe: an instance of it is exactly one file.
+ *
+ * `tags: {}` on the part is deliberate and is not a shortcut — a slot with no
+ * `require`, `deny` or `accept` admits **every** record, because `candidatesFor`
+ * starts from the whole document list when the require set is empty. So every
+ * fill below is admissible and no `fill-off-slot` note appears in any bill these
+ * fixtures produce, which keeps the panels' tests about panels rather than about
+ * C1's constraint semantics (`src/composition` covers those with 69 ported tests
+ * of its own).
+ */
+export const ONE_SLOT = 'model' as SlotName
+export const ONE_SLOT_TEMPLATE_ID = 'panels-one-slot' as TemplateId
+export const ONE_SLOT_TEMPLATE: AssemblyTemplate = {
+  id: ONE_SLOT_TEMPLATE_ID,
+  tags: [],
+  parts: [{ name: ONE_SLOT, tags: {} }],
+}
+
+/**
+ * A two-slot recipe, for the one thing a one-slot one cannot express: a bill
+ * whose `parts` exceeds its `placements`.
+ *
+ * That is the ordinary case in the real build — the 40 shipped templates declare
+ * 3 to 5 parts each, 128 over 40 — and it is what the panel's "parts to print"
+ * subline is for. Two rather than five because two is enough to make the
+ * inequality true, and every extra slot is another fill every test has to supply.
+ */
+export const TWO_SLOTS = ['floor', 'wall'].map((name) => name as SlotName)
+export const TWO_SLOT_TEMPLATE_ID = 'panels-two-slot' as TemplateId
+export const TWO_SLOT_TEMPLATE: AssemblyTemplate = {
+  id: TWO_SLOT_TEMPLATE_ID,
+  tags: [],
+  parts: TWO_SLOTS.map((name) => ({ name, tags: {} })),
+}
+
+/**
+ * The context `resolveInstance` and `buildBillOfTiles` require, over one catalog.
+ *
+ * Both fields are required arguments rather than defaulted options, which is row
+ * A3's point: a resolution with no template has no slots to walk, and one with no
+ * composition index cannot say whether a fill belongs in its slot, so a caller
+ * that has not decided is a compile error rather than a quiet half-answer.
+ *
+ * The composition index is built per call and that is fine here — these are
+ * nine- to thirteen-record catalogs. The app shares one through
+ * `compositionIndexFor`'s `WeakMap`, because over the real corpus it is 10.7 ms
+ * and 409,432 bytes.
+ */
+export function fixtureContext(catalog: CatalogFile): AssemblyContext {
+  const byId = new Map<string, AssemblyTemplate>([
+    [ONE_SLOT_TEMPLATE_ID, ONE_SLOT_TEMPLATE],
+    [TWO_SLOT_TEMPLATE_ID, TWO_SLOT_TEMPLATE],
+  ])
+  return { templates: (id) => byId.get(id), composition: createCompositionIndex(catalog) }
+}
+
+let minted = 0
+
+/**
+ * One instance, filled from the files given: a `TemplateInstance` ready for the
+ * store or for `buildBillOfTiles`.
+ *
+ * The recipe follows the **number of entries** — one is {@link ONE_SLOT_TEMPLATE},
+ * two is {@link TWO_SLOT_TEMPLATE} — so a test names what it wants printed and
+ * never a family.
+ *
+ * **`null` leaves that slot open**, which is contract **C-g** written as a
+ * fixture: §3.2 places a template with a part still empty, so
+ * `anInstance([file, null])` is the state `slot-unfilled`,
+ * `BillOfTiles.complete` and `useArchiveDownload`'s refusal are all about, and it
+ * is the *only* way to produce it — the recipe still declares two slots, so an
+ * instance with one entry would be a complete one-slot instance instead.
+ *
+ * The id is minted per call so two instances are never the same key, and it is
+ * deliberately *not* stable across runs of the module — nothing asserts an id,
+ * and a fixed one would let a test pass while the store overwrote an entry.
+ */
+export function anInstance(
+  tiles: readonly (string | null)[],
+  at: { x?: number; z?: number; rotation?: number } = {},
+): TemplateInstance {
+  const slots = tiles.length > 1 ? TWO_SLOTS : [ONE_SLOT]
+  const filled = tiles.flatMap((tile, index) =>
+    tile === null ? [] : [[slots[index] ?? ONE_SLOT, { tile: tile as TileId, pinned: false }] as const],
+  )
+  minted += 1
+  return {
+    id: `fixture-p${String(minted)}` as PlacementId,
+    template: tiles.length > 1 ? TWO_SLOT_TEMPLATE_ID : ONE_SLOT_TEMPLATE_ID,
+    x: at.x ?? 0,
+    z: at.z ?? 0,
+    rotation: at.rotation ?? 0,
+    fills: Object.fromEntries(filled),
+  }
 }

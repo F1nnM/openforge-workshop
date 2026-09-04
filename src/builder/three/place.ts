@@ -47,18 +47,22 @@
  * on `y = 0`. {@link footprintDelta} is how a caller finds out by how much the
  * two disagree instead of having the answer hidden from it.
  *
- * ## `y = 0` is the plan, not the floor of the assembly — row R3
+ * ## `y = 0` is the plan, not the floor of the assembly
  *
- * {@link tileMatrix} still rests every mesh it is handed on `y = 0`, unchanged,
- * and that is what makes it usable for a **base** as well as a tile. What row R3
- * added is one composable step on top of it, {@link liftMatrix}, for the case the
- * corpus makes the majority of: 1,878 of 3,822 items resolve under openlock to a
- * topper *plus* an auto-inserted base, the base is a median **6.00 mm** tall and
- * the median floor tile is 4.50 mm, so a topper left on `y = 0` would be entirely
- * inside the base it is meant to be standing on. The base takes `y = 0`; the
- * topper is lifted by the base's own measured height. Nothing about the
- * placement's stored shape changes — `bases.ts` says why the elevation is a
- * derivation rather than a field.
+ * {@link tileMatrix} rests every mesh it is handed on `y = 0`, and that is what
+ * makes it usable for a **base** as well as a tile: a base is one part of a
+ * template like any other, and it is the part whose elevation is zero. One
+ * composable step sits on top of it, {@link liftMatrix}, for every part whose
+ * elevation is not — a floor standing on that base, and the walls standing on the
+ * floor. Without it a template's parts would all rest on the plan and the room
+ * would show one object where the bill lists three.
+ *
+ * **The elevation is a rule's answer, not a measurement, and it is not this
+ * module's to derive.** It arrives as `SlotLayout.elevationMm` from row A4a's
+ * per-part projection, in millimetres, normalised; `geometry.ts` measures why a
+ * height read off the mesh would be wrong. Nothing about the placement's stored
+ * shape carries it — a `TemplateInstance` has an `x`, a `z` and one rotation, and
+ * the lift follows from the recipe.
  */
 import { Box3, Matrix4, Vector3 } from 'three'
 
@@ -140,16 +144,17 @@ export function tileMatrix(bounds: MeshBounds, geometry: PlanGeometry, target = 
  *
  * Mutates and returns its argument, because every caller has just built the
  * matrix and a room of instances must not allocate a second one per frame. `0`
- * is the identity and is the common case: 1,497 of 3,822 items are
- * `self-sufficient` under openlock and stand on nothing.
+ * is the identity and is the common case rather than an edge: `base` and `floor`
+ * are **80 of the 128 parts** the 40 shipped families declare, and the `base`
+ * slot's elevation is zero by construction.
  *
- * This is row **R3**'s answer to row R2's hand-off. R2 computed a stacking
- * elevation and declined to apply it, because *"an elevated ghost would sit where
- * the tile will not land"* — true while the elevation came from a piece the user
- * had placed, since `Placement` has no `y` to put it in. The auto-inserted base
- * is different in kind: it is derived from `(design, lock)` rather than chosen,
- * so the number is the same for the ghost, the instance, the pick and the plate,
- * and `bases.ts` computes it in one place for all four.
+ * This is row **R3**'s answer to row R2's hand-off, on the footing row A4a gave
+ * it. R2 computed a stacking elevation and declined to apply it, because *"an
+ * elevated ghost would sit where the tile will not land"* — true while the
+ * elevation was a *guess* about a piece the user had placed. A slot's elevation
+ * is not a guess: it is declared by the recipe and delivered per part as
+ * `SlotLayout.elevationMm`, so the instance, the pick and the plate all read one
+ * number out of the projection and cannot disagree about it.
  */
 export function liftMatrix(matrix: Matrix4, elevationMm: number): Matrix4 {
   if (elevationMm === 0) return matrix
