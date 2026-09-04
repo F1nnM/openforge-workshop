@@ -21,6 +21,7 @@ import type { PlacementId, WorkshopState } from '@/store'
 
 import { createStyleResolver, planCatalogFromFile } from './catalog'
 import {
+  FIXTURE_CELL,
   FIXTURE_IDS,
   FIXTURE_SLOTS,
   FIXTURE_TEMPLATE,
@@ -330,9 +331,23 @@ describe('scene', () => {
     const by = (slot: string) => piece.parts.find((part) => part.slot === slot)
 
     // The offsets are the rule's, and the right wall's 1.5 is a multiple of 0.25
-    // that is *on* the 0.5 lattice; the layout is not snapped either way.
-    expect(by('base')?.layout).toEqual({ dx: 0, dz: 0, rotation: 0, elevationMm: 0 })
-    expect(by('right wall')?.layout).toEqual({ dx: 1.5, dz: 0, rotation: 90, elevationMm: 12.7 })
+    // that is *on* the 0.5 lattice; the layout is not snapped either way. The
+    // cell travels with every part of the instance, which is what makes the
+    // assembly a rigid body under rotation — see `geometry.ts#slotAnchor`.
+    expect(by('base')?.layout).toEqual({
+      dx: 0,
+      dz: 0,
+      rotation: 0,
+      elevationMm: 0,
+      cell: FIXTURE_CELL,
+    })
+    expect(by('right wall')?.layout).toEqual({
+      dx: 1.5,
+      dz: 0,
+      rotation: 90,
+      elevationMm: 12.7,
+      cell: FIXTURE_CELL,
+    })
 
     // Elevation is per part and normalised — never read off the mesh. Three
     // distinct heights on one instance is what a renderer needs to stack them.
@@ -340,9 +355,10 @@ describe('scene', () => {
   })
 
   it('turns each part about the instance origin, folding the slot yaw into the drawn angle', () => {
-    // The composition rule: the part turns about its own anchor corner and that
-    // corner orbits the instance origin. A 2 x 0.5 wall at dx 1.5 with a slot
-    // yaw of 90 is the east edge of the 2 x 2 cell.
+    // The composition rule: the part's box turns about the instance origin and
+    // the turned assembly is re-anchored by the cell's own turned corner, so the
+    // instance's minimum corner stays its `x`/`z` at every angle. A 2 x 0.5 wall
+    // at dx 1.5 with a slot yaw of 90 is the east edge of the 2 x 2 cell.
     const piece = onlyPiece(
       instancesOf([
         [
@@ -382,7 +398,7 @@ describe('scene', () => {
     // after an export and re-import.
     expect(Object.is(wall?.box.x, -0)).toBe(false)
     // Instance rotation 90 plus the slot's own 90 is a half turn, so the 2 x 0.5
-    // wall keeps its extents about the orbited corner.
+    // wall comes back to its own extents where its turned box landed.
     expect(wall?.angle).toBe(180)
     expect(wall?.box.w).toBe(2)
     expect(wall?.box.d).toBe(0.5)
