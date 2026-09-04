@@ -2,6 +2,27 @@
  * Footprint congruence — the fallback base↔topper key, for the toppers the size
  * code cannot reach.
  *
+ * ## Row A3 planned to delete this file and could not
+ *
+ * The plan put `footprint.ts` on the delete list on the strength of rule 1 going
+ * away, and that reasoning holds for one of the two exports and not for the
+ * module. {@link footprintKey} has **three consumers outside `src/assembly`**,
+ * none of them a base insert, and two of them import this module path directly
+ * rather than through the `@/assembly` barrel:
+ *
+ *   - `pipeline/catalog.test.ts` runs it over all 8,702 emitted footprints — row
+ *     W7's cross-check that the *emitter's* footprints agree with the app's
+ *     congruence reading.
+ *   - `tools/hygiene/project.test.ts` imports and calls it as the consumer that
+ *     proves `tsconfig.node.json`'s `include` list and `paths` alias still reach
+ *     into `src/`. Deleting that import is a green typecheck that has quietly
+ *     lost the capability, which is the failure that file exists to prevent.
+ *   - `baseMatch.ts`, still, because the base *ranking* survived A3 as a
+ *     default-fill function even though the auto-insert did not.
+ *
+ * `footprintsMatch` did go, exactly as the plan predicted for it: verified zero
+ * consumers repo-wide outside its own test and the barrel's re-export.
+ *
  * 2,364 of the 4,363 `connection|openforge` toppers (54.2%) carry **no**
  * `size|openlock` code, so a code-only join leaves the hard rule of §7 — every
  * openforge piece gets a base line item — unenforceable for more than half the
@@ -87,10 +108,4 @@ export function footprintKey(foot: Footprint): string | undefined {
     case 'none':
       return undefined
   }
-}
-
-/** Whether two footprints are congruent under {@link footprintKey}. */
-export function footprintsMatch(a: Footprint, b: Footprint): boolean {
-  const key = footprintKey(a)
-  return key !== undefined && key === footprintKey(b)
 }
