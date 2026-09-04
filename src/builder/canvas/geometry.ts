@@ -36,6 +36,12 @@
  * edge of a cell becomes a 0.5 × 2 wall lying along its west edge. That is both
  * lattice-safe and what a plan editor reads as "turn this piece".
  *
+ * A *template* of N parts turns the same way, and {@link slotAnchor} is where the
+ * two-line generalisation lives: each part's **box** turns about the instance
+ * origin — a box, not its corner, which is the whole of row A10 — and the turned
+ * assembly is re-anchored by the cell's own turned corner, so the union's minimum
+ * corner is still `x`/`z` and its area is unchanged.
+ *
  * ## Six of the seven footprints are placeable
  *
  * `src/catalog/schema.ts` carries seven cases; `docs/verify-catalog-facts.py`
@@ -444,8 +450,15 @@ export function planGeometry(shape: PlanShape, rotation: number, x: number, z: n
  * most fills of the same slot. Nothing here evaluates a rule; the rule is passed
  * in (`catalog.ts`'s `SlotLayoutRule`) and this is the answer it returns.
  *
- * ## Three facts the fields are shaped by
+ * ## Four facts the fields are shaped by
  *
+ *   - **`dx`/`dz` locate the part's *minimum corner*, in the template's own
+ *     unrotated frame.** Not its centre, for the module note's two reasons
+ *     applied one level down: a wall's short axis is
+ *     {@link WALL_THICKNESS_UNITS} = 0.5, so a centred wall's faces would sit a
+ *     quarter unit off the lattice, and the corner is what abuts. Row **B2**'s
+ *     `slotOffset` states its answer from the cell's *centre* instead, so the
+ *     rule that fills this in converts — see {@link SlotLayout.cell}.
  *   - **`dx`/`dz` land on multiples of 0.25 and deliberately do not snap.** §2.2:
  *     the *origin* of an instance snaps to the 0.5 lattice (§7) and a slot offset
  *     never does. So these are plain finite numbers and no lattice is enforced —
@@ -464,14 +477,38 @@ export function planGeometry(shape: PlanShape, rotation: number, x: number, z: n
  *     units and the two must never be added.
  */
 export interface SlotLayout {
-  /** Offset along `x` from the instance origin, in grid units, before its rotation. */
+  /** Offset along `x` from the instance origin to the part's minimum corner, in grid units. */
   readonly dx: number
-  /** Offset along `z` from the instance origin, in grid units, before its rotation. */
+  /** Offset along `z` from the instance origin to the part's minimum corner, in grid units. */
   readonly dz: number
   /** The part's own yaw inside the recipe, in degrees. Added to the instance's. */
   readonly rotation: number
   /** How high the part stands above the plan, in millimetres. Normalised, never measured. */
   readonly elevationMm: number
+  /**
+   * The template's own footprint — the box the instance turns **within**, in
+   * grid units, unrotated. Absent when the part is its own cell.
+   *
+   * **The field that makes a template a rigid body**, and it is here rather than
+   * derived because the derivation is not local: §1 places and rotates a
+   * template *as one unit*, so a quarter turn may swap the instance's width for
+   * its depth and must not change its area — and re-anchoring the turned
+   * assembly needs the box the whole thing occupies, which no single part knows.
+   * Row **B2** resolves it once per instance (`TemplateLayout.cell` names the
+   * slot whose fill *is* the cell, `rect` on 2,996 of 2,996 files) and every
+   * part of that instance carries the same value.
+   *
+   * Absent means **the part is its own cell**, which is not a fallback but the
+   * single-piece convention this module already states: rotation preserves the
+   * anchor corner and the extents swap around it. It is exact for every rule
+   * that puts its parts at the origin — {@link ORIGIN_LAYOUT}, and so the whole
+   * shipped corpus until B2's rule is wired — because N boxes sharing one corner
+   * union to `(max w) x (max d)`, whose area a quarter turn also preserves. A
+   * *non-zero* `dx`/`dz` with no cell is the one combination that is not rigid,
+   * and `geometry.test.ts` measures it at three times its own ground so the
+   * field cannot be quietly dropped.
+   */
+  readonly cell?: Extent | undefined
 }
 
 /**
@@ -512,6 +549,9 @@ export const ORIGIN_LAYOUT: SlotLayout = Object.freeze({ dx: 0, dz: 0, rotation:
  *
  * `+ 0` folds `-0`, which the negating branches really do produce from a zero
  * offset — and `-0` survives in memory but not through `JSON.stringify`.
+ *
+ * **This is the orbit of a point.** A *box* does not orbit by its corner —
+ * {@link slotAnchor} is the one that turns a part, and `turnedCorner` is why.
  */
 export function turnOffset(dx: number, dz: number, rotation: number): PlanPoint {
   if (isAxisAligned(rotation)) {
@@ -533,25 +573,80 @@ export function turnOffset(dx: number, dz: number, rotation: number): PlanPoint 
 }
 
 /**
- * The world anchor corner of one part: its slot offset, turned with the
- * instance, added to the instance origin.
+ * The minimum corner of a box at `dx`/`dz` with extent `extent`, once the box is
+ * turned about the instance origin.
  *
- * **The composition rule, stated once.** Corner anchoring does not compose under
- * rotation on its own — this module's own note says rotation *preserves* the
- * anchor corner and swaps the extents around it, which is the right convention
- * for a piece turning in place and says nothing about a piece turning about
- * something else. So the rule is spelled out: **the part turns about its own
- * anchor corner, and that corner orbits the instance origin.** One rotation, two
- * effects, and both of them are what a plan editor reads as "turn the whole
- * thing".
+ * **Not `turnOffset` of the corner**, and the difference is the whole of row
+ * A10. Orbiting a *point* is right for a point; a box's minimum corner is not
+ * preserved by the orbit, because the box then still extends towards +x/+z from
+ * wherever the corner landed instead of in the direction the turn sent it. The
+ * image of `[x0, x1] x [z0, z1]` under `+90°` — which sends `(x, z)` to
+ * `(-z, x)` — is `[-z1, -z0] x [x0, x1]`, so the new minimum corner is
+ * `(-(dz + d), dx)` and the depth is the term the orbit drops.
  *
- * Row **B2** owns whether that is the right convention for a `SlotRule`, since it
- * owns what `dx`/`dz` mean. This is the arithmetic A4a assumed in order to draw
- * anything at all, and it is one function to change.
+ * Written out per quarter rather than as centre-orbit-then-recentre for
+ * {@link turnOffset}'s reason: every branch here is additions of the caller's own
+ * values, so a 0.25-unit offset on a 0.5-unit extent stays exactly where it is,
+ * where `(dx + w / 2) - w / 2` is only exact when `w / 2` is binary-exact. Off
+ * the quarters there is no lattice left to keep and the centre form is used.
  */
-export function slotAnchor(origin: PlanPoint, rotation: number, layout: SlotLayout): PlanPoint {
-  const [dx, dz] = turnOffset(layout.dx, layout.dz, rotation)
-  return [origin[0] + dx, origin[1] + dz]
+function turnedCorner(dx: number, dz: number, extent: Extent, rotation: number): PlanPoint {
+  if (isAxisAligned(rotation)) {
+    switch (Math.round(normalizeRotation(rotation) / 90) % 4) {
+      case 1:
+        return [-(dz + extent.d) + 0, dx + 0]
+      case 2:
+        return [-(dx + extent.w) + 0, -(dz + extent.d) + 0]
+      case 3:
+        return [dz + 0, -(dx + extent.w) + 0]
+      default:
+        return [dx + 0, dz + 0]
+    }
+  }
+  const [cx, cz] = turnOffset(dx + extent.w / 2, dz + extent.d / 2, rotation)
+  const turned = rotatedExtent(extent, rotation)
+  return [cx - turned.w / 2, cz - turned.d / 2]
+}
+
+/**
+ * The world anchor corner of one part: where its box lands once the whole
+ * template has turned.
+ *
+ * **The composition rule, stated once, and row A10 restated it.** A4a's rule was
+ * *"the part turns about its own anchor corner, and that corner orbits the
+ * instance origin"*, which row A4b then measured: on the five-part fixture corner
+ * the union footprint went 4.00 → 7.00 → **12.25** → 7.00 units² across the four
+ * quarters, so a half-turned 2 x 2 corner covered three times its own ground and
+ * `fitRoom` framed a box three times too large. Orbiting the minimum corner and
+ * then extending towards +x/+z from it are two effects that do not compose; see
+ * {@link turnedCorner}.
+ *
+ * The rule that does compose, and the one this function implements:
+ *
+ *   1. **The part's box turns about the instance origin** — box, not corner, so
+ *      the assembly is a rigid body and the area is preserved exactly.
+ *   2. **The turned assembly is re-anchored to the origin**, by subtracting where
+ *      the *cell* box landed. That is what keeps `x`/`z` the minimum corner of
+ *      what the instance occupies at every angle, which is the convention the
+ *      module note derives from the 0.5 lattice and the share codec's quantum,
+ *      and it is why the fix is not simply "orbit the centre": rotating about the
+ *      origin alone would swing a 2 x 2 corner out of its own cell.
+ *
+ * With no {@link SlotLayout.cell} the part is its own cell and step 2 cancels
+ * step 1's re-anchoring for that part alone, which reproduces the single-piece
+ * convention exactly — `ORIGIN_LAYOUT` places every part at the origin and every
+ * part stays there, extents swapping, as it did before this row.
+ */
+export function slotAnchor(
+  shape: PlanShape,
+  layout: SlotLayout,
+  origin: PlanPoint,
+  rotation: number,
+): PlanPoint {
+  const local = rotatedExtent(shape.extent, normalizeRotation(layout.rotation + shape.angle))
+  const [px, pz] = turnedCorner(layout.dx, layout.dz, local, rotation)
+  const [cx, cz] = turnedCorner(0, 0, layout.cell ?? local, rotation)
+  return [origin[0] + px - cx, origin[1] + pz - cz]
 }
 
 /**
@@ -570,7 +665,7 @@ export function slotGeometry(
   origin: PlanPoint,
   rotation: number,
 ): PlanGeometry {
-  const anchor = slotAnchor(origin, rotation, layout)
+  const anchor = slotAnchor(shape, layout, origin, rotation)
   return planGeometry(shape, normalizeRotation(rotation + layout.rotation), anchor[0], anchor[1])
 }
 
