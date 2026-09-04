@@ -1,26 +1,37 @@
 // @vitest-environment jsdom
 /**
- * The plan's accessory slots, as an inventory and as a panel.
+ * The plan's pieces and their slots — the inventory, the panel, and row C3's
+ * editor.
  *
- * The interesting assertions are the two the bill of tiles cannot make: that a
- * drawing's *open* slots are counted at all, and that the count separates a slot
- * the user can fill from one **nothing in the archive can** — 9 of the corpus's
- * 1,244 accessory declarations are the second kind, and telling somebody to fill
- * one would be sending them after a file that does not exist.
+ * Three groups of assertions, and each one is about something no other surface
+ * in the app can say:
+ *
+ *   - **the accessory inventory** — a drawing's *open* composition slots are
+ *     counted at all, and the count separates a slot the user can fill from one
+ *     **nothing in the archive can** (9 of the corpus's 1,244 declarations);
+ *   - **the panel** — one row per placed piece, naming the family and what it
+ *     still needs, and opening the editor on a **right click** as well as on a
+ *     press, because §3.3 asks for both;
+ *   - **the editor** — the design filter, the greyed dead end, the write that is
+ *     `pinned`, and the refusal. The refusal is the row's headline and is the
+ *     one thing the guided-assembly walk cannot report on its own: a card that
+ *     would empty a still-**open** sibling is greyed before it is pressed, and a
+ *     card that would invalidate a sibling's **existing fill** is pressed,
+ *     refused, and told why.
  *
  * The fixture is row C2's, shared with the drawer's picker rather than copied:
  * the dead-end case is delicate enough that two versions of it would drift.
+ * {@link EDITOR_TEMPLATE} is this file's own and is the smallest recipe that
+ * reaches both failures — a `top` slot whose two items carry different textures,
+ * and a `base` slot that inherits texture from it.
  *
- * Row **A0** removed the two assertions about where a pick *lands*. They proved
- * the `TileId` to `DesignId` hop — that two files of one item could not put two
- * entries in the library for one pick — and the library they landed in is gone.
- * **Row C3 gives the pick a destination** (a `SlotFill` on a placed template
- * instance) and owns the assertions that go with it; what is left here is that
- * the press is inert and the panel says so.
+ * Row **A0** removed the two assertions about where a pick *lands*, because the
+ * library they landed in was gone. They are back, against the destination the
+ * templates plan intended: `pinFill` on the placed instance, `pinned: true`.
  *
  * ## A holder is a filled slot, since row A8
  *
- * Every `at(…)` below is now a **template instance with one fill**, and the fill
+ * Every `at(…)` below is a **template instance with one fill**, and the fill
  * names the file whose accessory slots the assertion is about. That is a
  * simplification rather than a translation: a placement used to name a design and
  * `planSlots` had to resolve it to a file through the lock preference, because
@@ -35,8 +46,10 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { buildAssemblyIndex } from '@/assembly'
 import type { TileId } from '@/catalog'
-import { PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
+import type { RecipeTemplate } from '@/screens/assemblies'
+import { FILL, PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
 import type { TemplateInstance } from '@/store'
 import {
   PlacementId,
@@ -44,10 +57,87 @@ import {
   TemplateId,
   clearPersistedWorkshopState,
   resetWorkshop,
+  useWorkshopStore,
 } from '@/store'
 
-import { planSlots } from './planSlots'
+import { planPieces, planSlots } from './planSlots'
 import { SlotsPanel } from './SlotsPanel'
+
+/** Built once: it is a pure function of the fixture and scans every record. */
+const ASSEMBLY = buildAssemblyIndex(SLOT_CATALOG)
+
+/**
+ * The smallest recipe that reaches both of §3.3's failures.
+ *
+ * `top` offers two items in two textures — `Dungeon Stone Secret Door Top` and
+ * `Towne Secret Door Top` — and `base` inherits `texture` from whatever fills
+ * `top`. So with `base` still open, the towne top is a **dead end** (no base is
+ * towne, and the greying walk says so before the press); with `base` already
+ * filled by the stone base, the same card is not greyed — `assemblyState`'s
+ * `open` map excludes a part that has a choice — and pressing it must be
+ * **refused**, because it would put that base outside its own slot.
+ *
+ * The recipe's own tags carry no `texture|`, which is what makes the constraint
+ * come from the sibling rather than from the template: 230 template tags over the
+ * 40 fixture recipes and four roots, none of them `size|` or `texture|`.
+ */
+const EDITOR_TEMPLATE: RecipeTemplate = {
+  id: 'fixture-secret-door',
+  name: 'Fixture: Secret Door',
+  source: 'fixture',
+  tags: ['object|tile'],
+  parts: [
+    { name: 'top', tags: { require: [{ tag: 'component|top' }] }, fulfills: [] },
+    {
+      name: 'base',
+      tags: { require: [{ tag: 'shape|base' }], constrain: [{ tag: 'texture' }] },
+      fulfills: [],
+    },
+  ],
+}
+
+/**
+ * A recipe whose part names **are** one of B2's three layout conventions, so the
+ * geometry rule actually runs.
+ *
+ * `WALL_ON_TILE` is exactly `base`, `floor`, `wall` and `layoutFor` matches on
+ * the part-name *set*, so this is the smallest template for which
+ * `placeTemplateSlots` produces a cell, a size predicate per slot and a doubt.
+ * {@link EDITOR_TEMPLATE} deliberately does not match one — a two-part `top` and
+ * `base` recipe is B4's generated shape, where there is no authored layout and
+ * therefore nothing to disclose.
+ *
+ * `floor` is the cell slot on all three conventions, and it predicates on
+ * `size|width|2` rather than on a shape so that the fixture's `rect 2x2` grate
+ * and its `wall`-footed walls are both in the pool: what is under test is the
+ * closure arithmetic over the fills, not the tag.
+ */
+const MITRE_TEMPLATE: RecipeTemplate = {
+  id: 'fixture-wall-on-tile',
+  name: 'Fixture: Wall on Tile',
+  source: 'fixture',
+  tags: ['object|tile'],
+  parts: [
+    { name: 'base', tags: { require: [{ tag: 'shape|base' }] }, fulfills: [] },
+    { name: 'floor', tags: { require: [{ tag: 'size|width|2' }] }, fulfills: [] },
+    { name: 'wall', tags: { require: [{ tag: 'shape|wall' }] }, fulfills: [] },
+  ],
+}
+
+const TEMPLATES = (id: string): RecipeTemplate | undefined =>
+  [EDITOR_TEMPLATE, MITRE_TEMPLATE].find((one) => one.id === id)
+
+/** The panel with the two indexes the builder screen hands it. */
+function panel(placements: Record<string, TemplateInstance>) {
+  return render(
+    <SlotsPanel
+      assembly={ASSEMBLY}
+      catalog={SLOT_CATALOG}
+      placements={placements}
+      templates={TEMPLATES}
+    />,
+  )
+}
 
 /**
  * The one recipe these tests place.
@@ -57,6 +147,15 @@ import { SlotsPanel } from './SlotsPanel'
  * facts, and naming a real one would imply the fills below belong to its slots.
  */
 const A_RECIPE = 'slots-fixture'
+
+/** The one placement key the editor tests read back, branded once. */
+const KEY = PlacementId.parse('a')
+
+/** The `top` slot, branded once — a `Record<SlotName, …>` will not take a literal. */
+const TOP = SlotName.parse('top')
+
+/** The stone base, which is what the towne top would strand. */
+const BASE_STONE = 'tiles/dungeon_stone/bases/base/stone%base.2x.stl'
 
 /** A file this index does not hold — the orphan case. */
 const RETIRED_TILE = 'tiles/gone/forever.stl' as TileId
@@ -187,74 +286,134 @@ describe('planSlots', () => {
   })
 })
 
+/* ------------------------------------------------------------- the piece list */
+
+/**
+ * An instance of {@link EDITOR_TEMPLATE} with named fills.
+ *
+ * `pinned: false` throughout, so the editor's own write is the only thing in
+ * this file that can produce a `true` — which is what makes the `pinned`
+ * assertion below about contract **C-k** rather than about the fixture.
+ */
+function piece(fills: Readonly<Record<string, string>>, x = 0, z = 0): TemplateInstance {
+  return {
+    /* {@link KEY}, and it has to match the map key the panel is given: `pinFill`
+       addresses the store by `TemplateInstance.id` and the schema's rule is that
+       the key wins, so a fixture whose two disagree would silently write
+       nothing. */
+    id: KEY,
+    template: TemplateId.parse(EDITOR_TEMPLATE.id),
+    x,
+    z,
+    rotation: 0,
+    fills: Object.fromEntries(
+      Object.entries(fills).map(([slot, tile]) => [
+        SlotName.parse(slot),
+        { tile: tile as TileId, pinned: false },
+      ]),
+    ),
+  }
+}
+
+describe('planPieces', () => {
+  it('counts the declared slots a piece has filled, and names the ones it has not', () => {
+    const [only] = planPieces(SLOT_CATALOG, { a: piece({ top: FILL.topWall }) }, TEMPLATES)
+    expect(only).toMatchObject({ name: 'Fixture: Secret Door', slots: 2, filled: 1, pinned: 0 })
+    expect(only?.needsChoice).toEqual(['base'])
+  })
+
+  it('reads the plan in depth-then-across order, the same as the bill', () => {
+    const pieces = planPieces(
+      SLOT_CATALOG,
+      {
+        far: piece({ top: FILL.topWall }, 0, 4),
+        nearRight: piece({ top: FILL.topWall }, 3, 0),
+        nearLeft: piece({ top: FILL.topWall }, 0, 0),
+      },
+      TEMPLATES,
+    )
+    expect(pieces.map((one) => one.placement)).toEqual(['nearLeft', 'nearRight', 'far'])
+  })
+
+  it('calls a fill this index has retired a slot needing a choice', () => {
+    // Not "filled": the file is in the store and not in the catalog, so there is
+    // nothing to print and nothing to draw. The same reading `resolveInstance`
+    // takes, which emits `unknown-tile` *and* `slot-unfilled` for one fill.
+    const [only] = planPieces(SLOT_CATALOG, { a: piece({ top: RETIRED_TILE }) }, TEMPLATES)
+    expect(only).toMatchObject({ filled: 0 })
+    expect(only?.needsChoice).toEqual(['top', 'base'])
+  })
+
+  it('says nothing about the slots of a recipe this build no longer ships', () => {
+    const [only] = planPieces(SLOT_CATALOG, { a: at(PARENT.wallTowne, 0, 0) }, TEMPLATES)
+    expect(only?.template).toBeUndefined()
+    // The id, because there is no name to give: `TemplateId` is not a catalog
+    // identity and only the party holding the table can turn one into a name.
+    expect(only?.name).toBe(A_RECIPE)
+    expect(only?.slots).toBe(0)
+  })
+})
+
 /* ----------------------------------------------------------------- the panel */
 
 describe('SlotsPanel', () => {
-  it('states the archive’s 11.5% when the plan opens nothing', () => {
-    render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.plainFloor, 0, 0) })} />)
+  it('states the archive’s 11.5% when the plan opens no accessory', () => {
+    panel({ a: at(PARENT.plainFloor, 0, 0) })
     expect(screen.getByText(/1,005 of the archive’s 8,702 files declare a slot/)).toBeInTheDocument()
   })
 
-  it('leads with the required count and says a pick has nowhere to go yet', () => {
-    render(
-      <SlotsPanel
-        catalog={SLOT_CATALOG}
-        placements={plan({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.wallLow, 2, 0) })}
-      />,
-    )
-    expect(screen.getByText(/2 slots open on 2 pieces, 1 of them required/)).toBeInTheDocument()
-    // Row A0: it said "adds its item to your library" until the library was
-    // deleted. It does not claim the bill will show a fill either, because the
-    // bill is built from placements and a slot fill is not one until row C3.
-    expect(screen.getByText(/not yet something this build can keep/)).toBeInTheDocument()
-    expect(screen.getByText(/a slot fill is not one/)).toBeInTheDocument()
+  it('leads with the pieces and how many slots still need a choice', () => {
+    panel({ a: piece({ top: FILL.topWall }), b: piece({}, 2, 0) })
+    // One piece has its `base` open and the other has both — three in all.
+    expect(screen.getByText(/2 pieces placed\./)).toBeInTheDocument()
+    expect(screen.getByText(/3 slots need a choice/)).toBeInTheDocument()
   })
 
-  it('names each holder with its grid position', () => {
-    render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.wallTowne, 3.5, 2) })} />)
-    // The slot leads, because two holders of one instance sit at one cell.
+  it('names each piece with its family and its grid position', () => {
+    panel({ a: piece({ top: FILL.topWall }, 3.5, 2) })
+    const row = screen.getByRole('button', { name: /Fixture: Secret Door/ })
+    expect(row).toHaveAccessibleName(/at x 3\.5, z 2/)
+    expect(row).toHaveAccessibleName(/1 of 2 slots filled/)
+    expect(row).toHaveAccessibleName(/needs a choice: base/)
+  })
+
+  it('refuses to open a piece whose recipe this build does not ship, and says so', () => {
+    panel({ a: at(PARENT.wallTowne, 0, 0) })
+    expect(screen.getByRole('button', { name: /ships no such recipe/ })).toBeDisabled()
+    expect(
+      screen.getByText(/1 piece names a recipe this build no longer ships/),
+    ).toBeInTheDocument()
+  })
+
+  it('explains that an accessory pick is a preview, because a fill is one level up', () => {
+    panel({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.wallLow, 2, 0) })
+    expect(screen.getByText(/2 slots open on 2 pieces, 1 of them required/)).toBeInTheDocument()
+    // Row A0 said "not yet something this build can keep", which was a schedule.
+    // The reason is structural and is now stated as one: `fills` is flat.
+    expect(screen.getByText(/one level below the recipe’s own slots/)).toBeInTheDocument()
+  })
+
+  it('names each accessory holder with its slot and grid position', () => {
+    panel({ a: at(PARENT.wallTowne, 3.5, 2) })
     expect(screen.getByText(/slot0 · x 3\.5, z 2/)).toBeInTheDocument()
     expect(screen.getByText(/Dungeon Stone Torch Wall 2x/)).toBeInTheDocument()
   })
 
-  it('calls an unfillable slot an archive gap rather than a step to take', () => {
-    render(
-      <SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.contradiction, 0, 0) })} />,
-    )
+  it('calls an unfillable accessory slot an archive gap rather than a step to take', () => {
+    panel({ a: at(PARENT.contradiction, 0, 0) })
     expect(screen.getByText(/gap in the archive, not a step to take/)).toBeInTheDocument()
   })
 
-  it('greys the dead-end pick here too, because the picker is the same one', () => {
-    render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.wallTowne, 0, 0) })} />)
+  it('greys the dead-end accessory pick here too, because the picker is the same one', () => {
+    panel({ a: at(PARENT.wallTowne, 0, 0) })
     expect(screen.getByRole('button', { name: /Towne Torch/ })).toHaveAttribute(
       'aria-disabled',
       'true',
     )
   })
 
-  it('accepts a pick and keeps nothing, because the destination is row C3’s', () => {
-    // Row A0. The pick used to write the chosen file's item to the library; the
-    // library is gone and **row C3** replaces the destination with a `SlotFill`
-    // on a placed template instance. What must stay true in between is that the
-    // press is harmless and the panel says so, rather than the panel offering a
-    // control that throws or silently mutates something else.
-    render(<SlotsPanel catalog={SLOT_CATALOG} placements={plan({ a: at(PARENT.wallTowne, 0, 0) })} />)
-
-    const card = () => screen.getByRole('button', { name: /Dungeon Stone Torch/ })
-    fireEvent.click(card())
-    fireEvent.click(card())
-
-    expect(screen.getByText(/not yet something this build can keep/)).toBeInTheDocument()
-    expect(card()).toBeInTheDocument()
-  })
-
   it('says how many placements it cannot describe', () => {
-    render(
-      <SlotsPanel
-        catalog={SLOT_CATALOG}
-        placements={plan({ gone: atRetired() })}
-      />,
-    )
+    panel({ gone: atRetired() })
     expect(
       // "a file", not "an item": a fill names a file (decision D1), so an orphan
       // is a file the index has retired rather than an item it has lost.
@@ -262,13 +421,8 @@ describe('SlotsPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('scopes each holder’s picker to that placement’s own file', () => {
-    const { container } = render(
-      <SlotsPanel
-        catalog={SLOT_CATALOG}
-        placements={plan({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.pairedGrate, 2, 0) })}
-      />,
-    )
+  it('scopes each accessory picker to that placement’s own file', () => {
+    const { container } = panel({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.pairedGrate, 2, 0) })
     // By class, not by `listitem`: the option cards are list items too, which is
     // the right markup for a grid and makes the role ambiguous here.
     const holders = [...container.querySelectorAll<HTMLElement>('.of-planslots-holder')]
@@ -277,5 +431,183 @@ describe('SlotsPanel', () => {
     expect(
       within(holders[1]!).getByRole('group', { name: 'Fill the grate (left) slot' }),
     ).toBeInTheDocument()
+  })
+})
+
+/* ---------------------------------------------------------------- the editor */
+
+/** The piece row, whichever way it is going to be opened. */
+const pieceRow = () => screen.getByRole('button', { name: /Fixture: Secret Door/ })
+
+/** A card in the editor's grid, by the item it stands for. */
+const card = (name: string | RegExp) =>
+  within(screen.getByRole('group', { name: /^Fill the/ })).getByRole('button', { name })
+
+describe('the slot editor', () => {
+  it('opens on a right click, which is what §3.3 asks for', () => {
+    panel({ a: piece({ top: FILL.topWall }) })
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    fireEvent.contextMenu(pieceRow())
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveAccessibleName('Fixture: Secret Door')
+    // Both slots listed, and it opens on the one still needing a choice.
+    expect(within(dialog).getByRole('group', { name: 'Fill the base slot' })).toBeInTheDocument()
+  })
+
+  it('opens on a plain press too, so it is reachable without a pointer', () => {
+    // The right click has no keyboard equivalent every platform agrees on, so
+    // the row is a real `<button>` and `Enter` fires its `onClick`. Asserted as
+    // a click because that is what jsdom dispatches for `Enter` on a button.
+    panel({ a: piece({ top: FILL.topWall }) })
+    fireEvent.click(pieceRow())
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('closes on Escape, so it is dismissible without a pointer', () => {
+    panel({ a: piece({ top: FILL.topWall }) })
+    fireEvent.contextMenu(pieceRow())
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('offers the design filter, counted in items, and applies it', () => {
+    // §1.6: the filter is the texture family, and the count is what it leaves.
+    // `top` offers one dungeon_stone item and one towne item.
+    panel({ a: piece({}) })
+    fireEvent.contextMenu(pieceRow())
+
+    // By class rather than by role, because a chip and the card it leaves carry
+    // the same texture in their accessible names.
+    const chips = () => [
+      ...document.querySelectorAll<HTMLButtonElement>('.of-sloted-design'),
+    ]
+    // Every chip says how many cards it leaves, which is the number the filter
+    // exists to move — §1.6's 394 buckets against 428 unfiltered.
+    expect(chips().map((chip) => chip.textContent)).toEqual([
+      'Any design2',
+      'Dungeon stone1',
+      'Towne1',
+    ])
+    expect(chips()[0]).toHaveAttribute('aria-pressed', 'true')
+    expect(card(/Dungeon Stone Secret Door Top/)).toBeInTheDocument()
+    expect(card(/Towne Secret Door Top/)).toBeInTheDocument()
+
+    fireEvent.click(chips()[2]!)
+    expect(screen.queryByRole('button', { name: /Dungeon Stone Secret Door Top/ })).toBeNull()
+    expect(card(/Towne Secret Door Top/)).toBeInTheDocument()
+  })
+
+  it('greys the pick that would empty a still-open sibling, before it is pressed', () => {
+    panel({ a: piece({}) })
+    fireEvent.contextMenu(pieceRow())
+
+    const towne = card(/Towne Secret Door Top/)
+    expect(towne).toHaveAttribute('aria-disabled', 'true')
+    expect(towne).toHaveAccessibleName(/unavailable/)
+    // Focusable, so the reason stays reachable — C2's rule, kept.
+    expect(towne).not.toBeDisabled()
+
+    fireEvent.click(towne)
+    expect(useWorkshopStore.getState().placements[KEY]?.fills[TOP]).toBeUndefined()
+  })
+
+  it('writes a pick as pinned, so the lock re-solve honours it', () => {
+    // Contract C-k from the other end: the editor is the one thing in the app
+    // that writes `pinned: true`, and `fillSlot` refuses to overwrite it.
+    useWorkshopStore.setState({ placements: { [KEY]: piece({}) } })
+    panel(useWorkshopStore.getState().placements)
+    fireEvent.contextMenu(pieceRow())
+
+    fireEvent.click(card(/Dungeon Stone Secret Door Top/))
+
+    expect(useWorkshopStore.getState().placements[KEY]?.fills[TOP]).toEqual({
+      tile: FILL.topWall,
+      pinned: true,
+    })
+  })
+
+  it('refuses a pick that would invalidate a sibling’s existing fill, with the reason', () => {
+    // §3.3's rule, and the row's headline. `base` holds the stone base, so the
+    // towne top is *not* greyed — the greying walk only speaks about still-open
+    // parts — and the press has to be refused rather than repaired, because
+    // there is no store action that can clear the base it would strand.
+    const held = piece({ top: FILL.topWall, base: BASE_STONE })
+    useWorkshopStore.setState({ placements: { [KEY]: held } })
+    panel(useWorkshopStore.getState().placements)
+    fireEvent.contextMenu(pieceRow())
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^top —/ }))
+
+    const towne = card(/Towne Secret Door Top/)
+    expect(towne).not.toHaveAttribute('aria-disabled')
+
+    fireEvent.click(towne)
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /Towne Secret Door Top cannot go in the top slot/,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /Dungeon Stone Base 2x in the base slot/,
+    )
+    // Refused, not repaired: neither slot moved.
+    expect(useWorkshopStore.getState().placements[KEY]?.fills).toEqual(held.fills)
+  })
+
+  it('discloses a slot the layout rule cannot fit, rather than fabricating a number', () => {
+    // §9 and brief point 1: the 8 single-piece corner mitres are in no tag and
+    // no measurement, so an over-run must surface as *needs a choice* and the
+    // panel must not write the figure that would close it. `slotDoubtSentence`'s
+    // docblock says the panel that mounts it is this row's; this is that mount.
+    //
+    // A 1 x 1 cell with a 2-unit wall on its edge is the same arithmetic the
+    // corner mitres fail on, reached with two fills instead of five.
+    panel({
+      a: {
+        id: KEY,
+        template: TemplateId.parse(MITRE_TEMPLATE.id),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: {
+          [SlotName.parse('floor')]: { tile: PARENT.plainFloor as TileId, pinned: true },
+          [SlotName.parse('wall')]: { tile: PARENT.wallTowne as TileId, pinned: true },
+        },
+      },
+    })
+    fireEvent.contextMenu(screen.getByRole('button', { name: /Fixture: Wall on Tile/ }))
+
+    // Both numbers, and neither is a correction: `want` is the cell edge and
+    // `got` is what the pieces on it sum to.
+    expect(
+      screen.getByText(/The wall part needs a choice: this edge is 1 units and the pieces on it come to 2/),
+    ).toBeInTheDocument()
+    // And the empty slot is named as a doubt of its own, not inferred.
+    expect(screen.getByText(/The base part needs a choice\./)).toBeInTheDocument()
+  })
+
+  it('names the size a slot wants, which is how "based on size" is answered', () => {
+    // B3's predicate over the instance's own resolved cell — the 2 x 2 grate in
+    // the `floor` slot makes it a 2 x 2 cell, so the `base` slot wants that and
+    // the `wall` slot wants a 2-unit run along its edge.
+    panel({
+      a: {
+        id: KEY,
+        template: TemplateId.parse(MITRE_TEMPLATE.id),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('floor')]: { tile: PARENT.pairedGrate as TileId, pinned: true } },
+      },
+    })
+    fireEvent.contextMenu(screen.getByRole('button', { name: /Fixture: Wall on Tile/ }))
+
+    expect(screen.getByText(/This slot takes 2 wide by 2 deep\./)).toBeInTheDocument()
+  })
+
+  it('leads with the slots that still need a choice', () => {
+    panel({ a: piece({}) })
+    fireEvent.contextMenu(pieceRow())
+    expect(screen.getByText(/2 of these slots need a choice: top, base/)).toBeInTheDocument()
   })
 })

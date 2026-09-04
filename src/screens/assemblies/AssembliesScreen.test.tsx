@@ -47,7 +47,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetCatalogSearchIndex } from '@/screens/catalog'
-import { clearPersistedWorkshopState, resetWorkshop } from '@/store'
+import { clearPersistedWorkshopState, resetWorkshop, useWorkshopStore } from '@/store'
 import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
 
 import { STEP_PAGE } from './assembly'
@@ -456,7 +456,7 @@ describe('dead ends', () => {
 })
 
 describe('finishing', () => {
-  it('reports progress, bills the files, and offers no action for them', async () => {
+  it('reports progress, bills the files, and places them as one instance', async () => {
     await renderScreen()
     await openRecipe()
     pick('wall', 'Torch Wall 2')
@@ -473,13 +473,31 @@ describe('finishing', () => {
     const billed = [...document.querySelectorAll('.of-asm-bill li')].map((li) => li.textContent)
     expect(billed.sort()).toEqual(['tiles/fix/base-2.stl', 'tiles/fix/floor-2.stl', 'tiles/fix/wall-2.stl'])
 
-    // Row A0. It pressed "Add all to library" here and asserted three designs in
-    // `WorkshopState.library`; the library is gone, so the panel bills the files
-    // and stops. Asserted as an absence rather than dropped, because **row C3**
-    // puts an action back — a finished recipe becomes a placed template instance —
-    // and this is what tells C3 the surface is empty rather than half-wired.
+    // Row A0 pressed "Add all to library" here and asserted three designs in
+    // `WorkshopState.library`. The library is gone and **row C3** replaces it
+    // with the verb the templates plan intended: a recipe *is* a template, so a
+    // finished walk is one `TemplateInstance` with a file pinned into every
+    // slot. The old action stays asserted absent, so nothing can bring a second
+    // destination back.
     expect(screen.queryByRole('button', { name: /Add all/ })).toBeNull()
-    expect(screen.getByText(/Nothing in this build places a finished assembly/)).toBeTruthy()
+
+    act(() => {
+      screen.getByRole('button', { name: 'Place on the plan' }).click()
+    })
+
+    const placements = Object.values(useWorkshopStore.getState().placements)
+    expect(placements).toHaveLength(1)
+    // One instance, three slots, and every fill `pinned` — the user chose these
+    // card by card, so the lock re-solve must honour them (contract C-k).
+    expect(placements[0]?.template).toBe('s2w-wall-on-tile-wall-torch-modular')
+    expect(placements[0]?.fills).toEqual({
+      wall: { tile: 'tiles/fix/wall-2.stl', pinned: true },
+      floor: { tile: 'tiles/fix/floor-2.stl', pinned: true },
+      base: { tile: 'tiles/fix/base-2.stl', pinned: true },
+    })
+    // Where it landed, said out loud: the press is on `/assemblies` and the
+    // piece appears on a plan the user is not looking at.
+    expect(screen.getByRole('status')).toHaveTextContent(/Placed at x /)
   })
 
   it('clears a pick when its own card is pressed again', async () => {

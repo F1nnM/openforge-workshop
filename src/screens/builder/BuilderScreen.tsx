@@ -88,9 +88,8 @@
  * line of height it cannot spare.
  */
 import { getRouteApi } from '@tanstack/react-router'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { TemplateLookup } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { buildPlanScene, createStyleResolver, describeCell, freeCellFor, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
 import { BackupPanel, BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
@@ -106,26 +105,46 @@ import { ARMED_TURN_STEP_DEG } from '@/builder/three/edits'
 import { GeneratorPanel } from '@/generator/panel'
 import type { GeneratorPlaceHandler } from '@/generator/panel'
 import { buildGeneratedBill } from '@/generator/placement/bill'
-import { RECIPE_TEMPLATES } from '@/screens/assemblies'
+import type { RecipeTemplate } from '@/screens/assemblies'
+import { GENERATED_FAMILIES, RECIPE_TEMPLATES } from '@/screens/assemblies'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
-import { compositionIndexFor } from '@/screens/detail/slots'
+import { BASE_SLOT, compositionIndexFor } from '@/screens/detail/slots'
 import {
+  SlotName,
+  TemplateId,
   clearPlacements,
   holdGeneratedMesh,
   placeGeneratedBase,
+  placeTemplate,
   useGeneratedHoldings,
   useGeneratedMeshes,
   useGeneratedPlacements,
   useLockSystem,
   usePlacements,
 } from '@/store'
+import { reSolveScene } from '@/template'
 import { LockNotice, LockToggle } from '@/ui/lock-picker'
 import { Button, Eyebrow } from '@/ui/primitives'
 
 import './builder.css'
 
 const builderApi = getRouteApi('/builder')
+
+/**
+ * B4's one-slot bare-base family — `require: [{ tag: 'shape|base' }]`.
+ *
+ * A literal here rather than an export from the family table, because
+ * `generator/placement/placement.ts` is explicit that this is the **caller's**
+ * to name: *"whether an id names a template the build ships is a question for
+ * the reader that has the table"*, and this screen is that reader. Parsed rather
+ * than cast, so a rename in `templates.ts` fails here at the press instead of
+ * arriving in the store as an `unknown-template` placement.
+ *
+ * `templates` below is the lookup that answers for it; `recipes` includes
+ * `GENERATED_FAMILIES`, which is what makes it resolvable at all.
+ */
+const BARE_BASE = TemplateId.parse('shape-base')
 
 export function BuilderScreen() {
   const state = useCatalogIndex()
@@ -190,14 +209,6 @@ function Builder({ index }: { index: CatalogIndex }) {
    * sentence in the hint plate below is for.
    */
   const [status, setStatus] = useState<SurfaceStatus | null>(null)
-  /**
-   * The archived resolution this screen could not place, or `null`.
-   *
-   * Set by {@link placeGenerated}'s archived arm and cleared by the next
-   * generated placement. See that callback for why the arm resolves and declines
-   * rather than placing, and which row closes it.
-   */
-  const [declined, setDeclined] = useState<{ tile: string; file: string } | null>(null)
 
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
@@ -239,8 +250,29 @@ function Builder({ index }: { index: CatalogIndex }) {
    * used to take it — deriving a second one is 86.8 ms this screen has already
    * paid.
    */
-  const recipes = useMemo(() => new Map(RECIPE_TEMPLATES.map((recipe) => [recipe.id, recipe])), [])
-  const templates = useMemo<TemplateLookup>(() => (id) => recipes.get(id), [recipes])
+  const recipes = useMemo(
+    /* **Both tables, and row C3 is what joins them.** It was the 40 fixture
+       recipes alone, because nothing could place anything else. B4's 51
+       generated families are placeable now — C1's palette lists them and the
+       generator's archived arm places `shape-base` below — and a family missing
+       from this lookup is reported `unknown-template` by `resolveInstance`,
+       which is a bill row and a refused download rather than a visible error.
+       Ids are disjoint across the two tables (`s2w-…` against `role-form-build`
+       slugs), so the `Map` cannot silently shadow a recipe with a family. */
+    () => new Map([...RECIPE_TEMPLATES, ...GENERATED_FAMILIES].map((recipe) => [recipe.id, recipe])),
+    [],
+  )
+  /* Typed on the **narrower** return, not on `TemplateLookup`. `RecipeTemplate`
+     is assignable to `AssemblyTemplate` structurally — that is row A3's stated
+     layering, the resolver taking a shape rather than importing a screen's type
+     — so this one lookup satisfies `buildBillOfTiles`, `reSolveScene` and the
+     slots panel, and only the panel needs the recipe's `name` and `source`.
+     Annotating it as `TemplateLookup` would throw those two away at the widest
+     consumer and leave the panel unable to say which family a piece is. */
+  const templates = useMemo(
+    () => (id: TemplateId): RecipeTemplate | undefined => recipes.get(id),
+    [recipes],
+  )
   const composition = useMemo(
     () => compositionIndexFor(index.file, index.engine.aggregates),
     [index],
@@ -323,8 +355,65 @@ function Builder({ index }: { index: CatalogIndex }) {
   )
 
   /**
-   * Take what the drawer resolved and write it to the store — **or, for an
-   * archived resolution, decline to and say so.**
+   * The **lock re-solve** — contract C-k's other half, and the only caller of
+   * `reSolveScene` in the app.
+   *
+   * Row C2 built the driver and wired nothing, and without this write **nothing
+   * reconverts**: a fill names an exact file (decision D1), the three lock
+   * systems disagree about which file to print for **1,419 of 3,822 items
+   * (37.1%)**, and row A2 proved `planSceneMeshes` is lock-free — so a lock
+   * change reaches the drawing, the bill and mesh conversion through the
+   * placements this rewrites and through nothing else. The alternative is
+   * C-k's named failure: the toggle stops working and *nothing fails*.
+   *
+   * **This row owns the call and not C1**, and the reason is which party holds
+   * the arguments. `reSolveScene` needs the assembly index, the composition
+   * index, the family lookup and every placement; this screen has all four
+   * already, memoised, for the bill. C1's palette holds a search engine and a
+   * family list and would have to derive two 400 kB indexes to make the same
+   * call. `LockToggle` is closer to the gesture and holds none of them — it
+   * takes no props at all by row L1's design — so the write belongs to the
+   * screen that owns the room.
+   *
+   * ## It runs on a *change* of preference, never on mount
+   *
+   * The ref is not a lint workaround. A re-solve on mount would rewrite a
+   * restored scene against whatever the current build's ranking says, which is
+   * the one moment a user has not asked for anything; and `fillSlot` returns the
+   * identical state object when nothing moves, so the only thing a mount-time
+   * pass could produce is a silent rewrite of a room somebody saved. `lock` is
+   * the sole dependency for the same reason: the placements are read through a
+   * ref, so a re-solve cannot retrigger itself on the writes it makes.
+   *
+   * The cost is measured and is not the solver. `reSolveScene` memoises on
+   * `(template, pins)`, so a 250-instance room is **40 solves, 288 queries,
+   * 8–9 ms**. The **write** is the expensive half — `workshopStore` is
+   * `persist`-wrapped over synchronous `localStorage`, so 750 fills measure
+   * **80.5 ms** — which `relock.ts` reports as A1's surface and three named
+   * options, none of which this row owns. A visible hitch on a rare gesture is
+   * the trade taken, deliberately, and it is written down there rather than
+   * worked around here.
+   */
+  /* Read from the effect below rather than listed as its dependencies, which is
+     `RoomSurface`'s pattern for the same reason: the re-solve writes to the
+     store, so a dependency on `placements` would make it retrigger on its own
+     writes. Refreshed on every render, so the effect never sees a stale room. */
+  const latest = useRef({ placements, assembly, templates, composition })
+  latest.current = { placements, assembly, templates, composition }
+
+  const previousLock = useRef(lock)
+  useEffect(() => {
+    if (previousLock.current === lock) return
+    previousLock.current = lock
+    reSolveScene(Object.values(latest.current.placements), latest.current.assembly, {
+      templates: latest.current.templates,
+      composition: latest.current.composition,
+      lock,
+    })
+  }, [lock])
+
+  /**
+   * Take what the drawer resolved and write it to the store.
    *
    * The generated arm is unchanged and is two writes across two stores, which is
    * row S5's identity argument made concrete: the recipe goes to the second map,
@@ -336,41 +425,42 @@ function Builder({ index }: { index: CatalogIndex }) {
    * been asked anything, and it becomes a `warn` bill row and a refused download
    * rather than a silent omission.
    *
-   * ## The archived arm resolves and does not place, and that is deliberate
+   * ## The archived arm places now, and row B4 is why it can
    *
-   * It used to call `placeTile(placed.placement)` — an ordinary placement
-   * addressed by the archived record's own `TileId`. Row **A9** replaced that
-   * with a {@link SlotFill} plus a cell and **deliberately named no template**,
-   * and row **A8** kept the gap open rather than filling it, because the family
-   * a bare base belongs to does not exist yet:
+   * Row **A9** rewrote this arm to hand over a {@link SlotFill} plus a cell and
+   * **deliberately named no template**, and row **A8** left the gap open rather
+   * than filling it, because the family a bare base belongs to did not exist: a
+   * base slot predicates on `shape|base`, which is exactly coextensive with
+   * `layer === 'base'` — 1,963 records both ways, zero exceptions — and that
+   * cannot come out of B4's `(role, form, build)` key, because `base` is not one
+   * of B1's eight roles. B4 shipped the one-slot family on exactly that
+   * predicate, so the honest template id now exists and this is the one line
+   * `placement.ts`'s docblock says the caller owes:
    *
-   *   - a base slot predicates on `shape|base`, which is exactly coextensive
-   *     with `layer === 'base'` — **1,963 records both ways, zero exceptions** —
-   *     and row **B4** owes the one-slot bare-base family on that predicate;
-   *   - it cannot come out of B4's `(role, form, build)` key as it stands,
-   *     because `base` is not one of B1's eight roles: over the 686 records the
-   *     resolver can answer with, all of them `layer: 'base'`, the population
-   *     spreads across eight family keys and **none of them is a base**.
+   * ```ts
+   * placeTemplate({ template: BARE_BASE, ...placed.at, fills: { [BASE_SLOT]: placed.fill } })
+   * ```
    *
-   * So there is nothing honest to pass as the `template`. Filling the `base`
-   * slot of a `role|floor` family would work geometrically and would mislabel a
-   * base as a floor in the palette; inventing an id would make every such
-   * placement `unknown-template`. `placement.ts` carries the whole measurement.
+   * The shortcut is untouched and is still the point: the drawer resolves the
+   * recipe against the archive, which is what stops the 298 kB worker chunk and
+   * the 10.5 MB WASM being fetched at all for **682 of the archive's 709
+   * resolvable keys**. What was missing was one store write, and the notice that
+   * stood in for it — `.of-build-declined` — is deleted with its test rather
+   * than left beside a press that now works.
    *
-   * **The shortcut itself is preserved, and that is the point of not deleting
-   * this arm.** The drawer still resolves the recipe against the archive, which
-   * is what stops the 298 kB worker chunk and the 10.5 MB WASM being fetched at
-   * all for **682 of the archive's 709 resolvable keys**. What is missing is one
-   * store write, and until B4 lands the screen names the file the archive already
-   * publishes and says plainly that it cannot put it on the grid — rather than
-   * appearing to place something and placing nothing.
+   * The fill arrives `pinned: true` and that is A9's reading, not a default: the
+   * recipe named the lock and the resolver matched on it, so the file is a fact
+   * about the resolution and the lock re-solve below must not rewrite it.
    */
   const placeGenerated = useCallback<GeneratorPlaceHandler>((placed, mesh) => {
     if (placed.kind === 'archived') {
-      setDeclined({ tile: placed.fill.tile, file: placed.base.file })
+      placeTemplate({
+        template: BARE_BASE,
+        ...placed.at,
+        fills: { [SlotName.parse(BASE_SLOT)]: placed.fill },
+      })
       return
     }
-    setDeclined(null)
     placeGeneratedBase(placed.placement)
     if (mesh !== null) holdGeneratedMesh(placed.placement.base, mesh)
   }, [])
@@ -457,23 +547,6 @@ function Builder({ index }: { index: CatalogIndex }) {
         </p>
 
         {/*
-          Row A8. The archived arm of the generator resolves a published file and
-          cannot place it until row B4 emits the bare-base family — see
-          `placeGenerated` for the measurement. Said out loud, with the file
-          named, because the press otherwise looks like it worked. A `role="status"`
-          rather than an alert: nothing has failed, and the resolution itself is
-          the thing that saved the engine being loaded.
-        */}
-        {declined === null ? null : (
-          <p className="of-build-plate of-build-declined" role="status">
-            <strong>{declined.file}</strong> is already in the archive, so nothing was generated. It
-            cannot go on the grid yet: a base is placed as a one-slot recipe, and that recipe is not
-            in this build.
-            <span className="of-build-at">{declined.tile}</span>
-          </p>
-        )}
-
-        {/*
           Rows G2, R2 and R4. **The stage**, and no longer a panel: R2 opened it
           with the screen because the owner asked for the 3D view to *be* the
           builder rather than a view behind a gate, and R4 deleted the plan
@@ -548,13 +621,24 @@ function Builder({ index }: { index: CatalogIndex }) {
           generated={{ bill: generatedBill, placements: generatedPlacements }}
         />
         {/*
-          Row C2, and the third child of a two-row grid on purpose: the bill
-          keeps the `1fr` and this lands in the implicit `auto` row beneath it.
-          It is the half of the inventory the bill cannot hold — a composition
-          slot is not a placement, so `buildBillOfTiles` neither counts a torch
-          in a wall's `torch` slot nor can.
+          Rows C2 and C3, and the third child of a two-row grid on purpose: the
+          bill keeps the `1fr` and this lands in the implicit `auto` row beneath
+          it. Two halves the bill cannot hold — **what is in each placed
+          recipe's slots**, which is where the right-click editor opens from, and
+          what the files in those slots themselves hold, which
+          `buildBillOfTiles` neither counts nor can.
+
+          It takes the same `assembly` index and the same `templates` lookup the
+          bill above is built from, rather than deriving either: `buildAssemblyIndex`
+          is 8,702 records and the table is this screen's, so passing them is
+          what keeps the panel and the bill answering about one room.
         */}
-        <SlotsPanel catalog={index.file} placements={placements} />
+        <SlotsPanel
+          assembly={assembly}
+          catalog={index.file}
+          placements={placements}
+          templates={templates}
+        />
         {/*
           Row A0. The app's only backup path, and it was the library screen's
           until that screen was deleted — architecture-plan.md §13 (Safari evicts

@@ -44,20 +44,19 @@
  * offsets, and a scrolling grid cell is the last place to discover what that does
  * to a clipped span.
  *
- * ## The choice is component state, and a finished recipe has no destination yet
+ * ## The choice is component state, and a finished recipe becomes a placement
  *
  * `@/store`'s docblock is explicit that everything in `WorkshopState` is
  * persisted and that ephemeral UI state belongs in a component, so the choice
  * lives here, keyed by {@link assemblyStepKey}.
  *
  * What a *finished* recipe could honestly do was put its files in the library —
- * the same destination C2's builder panel used, and the one place in this app
- * where "these are the tiles I am going to print" was modelled. Row **A0**
- * deleted the library, so it has nowhere to go, and **row C3 is what gives it
- * one**: under the templates plan a recipe *is* a template, so a finished walk
- * becomes a placed instance rather than a list of files to save. See
- * {@link Finished} and contract dependency **C-e** in
- * `docs/templates-plan.md` §8.
+ * the one place in this app where "these are the tiles I am going to print" was
+ * modelled. Row **A0** deleted the library and row **C3** gives the walk the
+ * destination the templates plan intended: a recipe **is** a template, and a
+ * finished walk is a `TemplateInstance` with a file pinned into every slot. So
+ * the panel places it, and contract dependency **C-e** is closed here. See
+ * {@link Finished}.
  *
  * ## It has no route yet, and that is one line in a file this row does not own
  *
@@ -78,11 +77,18 @@ import { useMemo, useState } from 'react'
 import type { CatalogFile, TileId } from '@/catalog'
 import type { MaterialId } from '@/materials'
 import { useCatalogIndex } from '@/screens/catalog'
+import { placeOnPlan } from '@/screens/detail/placeOnPlan'
 import { SlotFills, compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
 import { Button, Chip, Eyebrow } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
-import type { AssemblyChoice, AssemblyOption, AssemblyStep, RecipeTemplate } from './assembly'
+import type {
+  AssemblyChoice,
+  AssemblyOption,
+  AssemblyState,
+  AssemblyStep,
+  RecipeTemplate,
+} from './assembly'
 import {
   STEP_PAGE,
   assemblyState,
@@ -310,7 +316,9 @@ function Recipe({
             />
           ))}
 
-          {state.complete ? <Finished tiles={state.tiles} /> : null}
+          {state.complete ? (
+            <Finished catalog={catalog} state={state} template={template} />
+          ) : null}
         </>
       )}
     </div>
@@ -496,42 +504,86 @@ function cardLabel(option: AssemblyOption, reason: string, narrowing: string): s
 /* ----------------------------------------------------------------- the finish */
 
 /**
- * What a finished recipe offers: the files, and no action.
+ * What a finished recipe offers: the files, and the press that places them.
  *
- * It offered "Add all to library", which wrote the recipe's **items** to
- * `WorkshopState.library` — for C2's reason, that the bill of tiles is built from
- * placements and row G5 owns the selection channel, so the library was the only
- * destination a set of files to print could honestly have.
+ * It offered *"Add all to library"*, which wrote the recipe's **items** to
+ * `WorkshopState.library`. Row **A0** deleted the library and left the action
+ * *absent* rather than disabled — a disabled button reads as "not yet, for you",
+ * which was not what had happened — and **row C3 replaces it with a different
+ * verb**: under the templates plan a recipe *is* a template, so a finished walk
+ * is a `TemplateInstance` with a file pinned into every slot, and placing it is
+ * the whole of what "these are the tiles I am going to print" now means.
  *
- * **Row A0 deleted the library, and the action is absent rather than inert.** A
- * disabled button reads as "not yet, for you" — a permission or a missing pick —
- * and neither is true: nothing about this recipe is incomplete, and the
- * destination is what has gone. So the panel states the files and says, in one
- * sentence, that placing them is not something this build can do. **Row C3 is
- * what replaces it**, and with a different verb: under the templates plan a recipe *is* a template, so a
- * finished walk becomes a placed instance with its slots filled rather than a
- * list of items saved. Contract dependency **C-e** records the pair.
+ * Every fill is `pinned: true`, which is the point of walking a recipe by hand:
+ * the user chose these files card by card, so a lock change must honour them
+ * (§2.1). `placeOnPlan` finds a free cell with the plan's own collision
+ * predicate — this screen has no scene of its own — and the button then says
+ * where the piece landed rather than only that something happened.
  *
- * Two things went with the button. **The `designs` derivation** — one pass over
- * the index collapsing files to items — because nothing reads it; C3 needs the
- * same collapse and will build it against a `SlotFill`, which is a file, so
- * keeping this one would be keeping the wrong shape. And **the two-count copy**:
- * "5 files to print, 4 items to save" was honest about what the press did and
- * says nothing about what the list *is*. The `catalog` prop went with the
- * derivation for the same reason — the recipe's files are already resolved by the
- * time this renders, so the index was only ever needed to collapse them.
+ * **One thing this cannot carry, and it is measured.** A part a sibling's file
+ * `fulfills` contributes no fill, because two slots naming one file would print
+ * it twice (contract **C-c**: the bill groups on md5 and counts both). The store
+ * has no way to say "covered by a sibling", so the placed instance reports that
+ * part as `slot-unfilled` in the bill. It is reachable on **exactly one of the
+ * 40 recipes** — `assembly.ts` measures the blueprint-level `fulfills` reading —
+ * and the panel says so rather than leaving the bill to be the first place
+ * anybody hears about it.
  */
-function Finished({ tiles }: { tiles: readonly TileId[] }) {
+function Finished({
+  catalog,
+  state,
+  template,
+}: {
+  catalog: CatalogFile | undefined
+  state: AssemblyState
+  template: RecipeTemplate
+}) {
+  const [placed, setPlaced] = useState<string | null>(null)
+
+  /* One entry per part that holds its own choice. A `coveredBy` part is skipped
+     for the reason the docblock gives, which is also why `state.tiles` skips it. */
+  const fills = useMemo(() => {
+    const out: Record<string, TileId> = {}
+    for (const step of state.steps) {
+      if (step.chosen === undefined || step.coveredBy !== undefined) continue
+      out[step.name] = step.chosen
+    }
+    return out
+  }, [state])
+
+  const covered = state.steps.filter((step) => step.coveredBy !== undefined).map((step) => step.name)
+
   return (
     <div className="of-asm-done">
       <Chip>Complete</Chip>
       <p className="of-asm-note">
-        {`${String(tiles.length)} ${tiles.length === 1 ? 'file' : 'files'} to print. `}
-        Nothing in this build places a finished assembly — the builder&rsquo;s placement unit is
-        changing, and a recipe becomes one of its units rather than a list to save.
+        {`${String(state.tiles.length)} ${state.tiles.length === 1 ? 'file' : 'files'} to print. `}
+        Placing it puts one piece on the plan with these files pinned into its slots, so the lock
+        preference will leave them alone.
+        {covered.length === 0
+          ? ''
+          : ` The ${covered.join(' and ')} ${covered.length === 1 ? 'part is' : 'parts are'} covered by a sibling piece and carries no file of its own, which the bill will read as an unfilled slot.`}
       </p>
+
+      <Button
+        disabled={catalog === undefined}
+        onClick={() => {
+          if (catalog === undefined) return
+          setPlaced(placeOnPlan(catalog, { template: template.id, fills }).where)
+        }}
+        size="sm"
+      >
+        Place on the plan
+      </Button>
+
+      {placed === null ? null : (
+        <p className="of-asm-note" role="status">
+          {`Placed at ${placed}. Open the builder to see it — or press again for another.`}
+        </p>
+      )}
+
       <ul className="of-asm-bill">
-        {tiles.map((tile) => (
+        {state.tiles.map((tile) => (
           <li key={tile}>{tile}</li>
         ))}
       </ul>

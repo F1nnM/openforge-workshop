@@ -100,6 +100,27 @@
  * variant swap, retaining nothing — see {@link recordOf} for why that is not a
  * map.
  *
+ * ## The two actions
+ *
+ * §2.5 asks for two and row **A0** deleted the first with the library it wrote
+ * to. **Row C3 puts one back, with a different verb**: templates are the only
+ * placement unit, so *these are the tiles I am going to print* is now *this
+ * piece is on my plan*. "Place on the plan" resolves the shown file to one of
+ * B4's one-slot generated families, pins the file into that family's slot and
+ * places the instance at a cell the plan's own collision predicate says is
+ * free — `./placeOnPlan.ts` carries the whole argument, including why it arrives
+ * through `await import()` rather than as a static dependency of the catalog
+ * route.
+ *
+ * It **does not navigate**, and that is what makes it a second action rather
+ * than a quieter copy of the first: the library toggle accumulated without
+ * leaving the catalog, and so does this — press it on four tiles, then go to the
+ * builder. `Use in builder →` is the one that leaves.
+ *
+ * The refusal is a real state and is measured rather than defensive: B5's
+ * families reach **99.0% of records**, so a file in no family's pool exists, and
+ * the drawer says which file and why instead of a press that appears to work.
+ *
  * ## "Use in builder"
  *
  * The contract's third clause — "pre-selects the tile" — now has a channel. Row
@@ -390,14 +411,11 @@ function TileDetail({
 
       <div className="of-detail-actions">
         {/*
-          §2.5's first action was "+ Add to library" / "✓ In library" and row
-          **A0** removed it with the library it wrote to. **Row C3 owns what
-          takes its place** — "place this instance", the same action the catalog
-          card is waiting for — so the slot is deliberately empty rather than
-          filled with something that half-works: an action here that armed the
-          builder without navigating would be a second, quieter "Use in builder"
-          beside the real one.
+          §2.5's first action, in row C3's verb: the library is gone and a
+          placement is what "I am going to print this" means now. The module
+          docblock argues the shape; `PlaceOnPlan` owns the press.
         */}
+        <PlaceOnPlanAction catalog={catalog} record={record} shown={shown} />
         <button
           type="button"
           className="of-detail-action"
@@ -481,5 +499,81 @@ function Spec({
         {unit === undefined ? null : <span className="of-detail-unit"> {unit}</span>}
       </dd>
     </div>
+  )
+}
+
+/* ------------------------------------------------------- place on the plan */
+
+/**
+ * §2.5's first action: put this file on the plan as a one-slot instance.
+ *
+ * The whole closure it needs — the plan projection, the vacancy search and B4's
+ * family table — arrives on the press through `await import('./placeOnPlan')`,
+ * so the catalog route's chunk is unchanged by this button existing. That is the
+ * same boundary `useArchiveDownload` draws around row S5's pack, and the reason
+ * is the same: a module the user may never reach should not be in the bundle
+ * they always download.
+ *
+ * Four states and each is a different sentence, because they are four different
+ * things: nothing pressed yet, the import in flight, placed at a named cell, and
+ * **no family admits this file** — which is a fact about the archive (B5's
+ * families reach 99.0% of records) and not a failure of the press.
+ *
+ * `record` may be `undefined` for a variant this index has no row for, which
+ * `recordOf`'s docblock says is unreachable today and survives as the honest
+ * absence: with no tags there is no family to resolve, so the button says so
+ * rather than placing something unclassified.
+ */
+function PlaceOnPlanAction({
+  catalog,
+  record,
+  shown,
+}: {
+  catalog: CatalogFile
+  record: CatalogRecord | undefined
+  shown: TileVariant
+}) {
+  const [state, setState] = useState<
+    | { readonly kind: 'idle' }
+    | { readonly kind: 'placing' }
+    | { readonly kind: 'placed'; readonly where: string; readonly family: string }
+    | { readonly kind: 'refused' }
+  >({ kind: 'idle' })
+
+  return (
+    <>
+      <button
+        type="button"
+        className="of-detail-action"
+        disabled={state.kind === 'placing' || record === undefined}
+        onClick={() => {
+          if (record === undefined) return
+          setState({ kind: 'placing' })
+          void (async () => {
+            const { familyForRecord, placeOnPlan } = await import('./placeOnPlan')
+            const family = familyForRecord(catalog, record)
+            if (family === undefined) {
+              setState({ kind: 'refused' })
+              return
+            }
+            const placed = placeOnPlan(catalog, {
+              template: family.template.id,
+              fills: { [family.slot]: shown.id },
+            })
+            setState({ kind: 'placed', family: family.template.name, where: placed.where })
+          })()
+        }}
+      >
+        {state.kind === 'placing' ? 'Placing…' : '+ Place on the plan'}
+      </button>
+
+      {state.kind === 'idle' || state.kind === 'placing' ? null : (
+        <p className="of-detail-placed" role="status">
+          {state.kind === 'placed'
+            ? `Placed as ${state.family} at ${state.where}.`
+            : `No recipe in this build takes ${shown.file}. The builder places pieces as recipes, and this file is in no recipe's slot.`}
+        </p>
+      )}
+    </>
   )
 }

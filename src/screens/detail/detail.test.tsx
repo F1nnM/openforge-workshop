@@ -45,6 +45,7 @@ import {
   clearPersistedWorkshopState,
   resetWorkshop,
   setLockSystem,
+  useWorkshopStore,
 } from '@/store'
 
 import { SpriteRotator } from './SpriteRotator'
@@ -90,6 +91,14 @@ const TAGS = [
   'connection|side|dragonlock',
   'connection|openlock|topless',
   'shape|arch',
+  // Row **C3**. B1's two derived axes, on one record, so that
+  // `placeOnPlan.ts#familyForRecord` has a family to find: `floor-straight`
+  // requires exactly `role|floor` and `form|straight` and denies the five
+  // `build|` tags, none of which this fixture carries as a tag. Two tags rather
+  // than a whole second fixture, because what is under test is the drawer's
+  // press and not the family table.
+  'role|floor',
+  'form|straight',
 ]
 
 /**
@@ -139,7 +148,7 @@ const CATALOG = CatalogFile.parse({
       family: 'tiles/cave/floors/floor',
       name: 'Cave Floor 1x1',
       build: 'separate wall',
-      tags: [0, 3, 4],
+      tags: [0, 3, 4, 11, 12],
     }),
     tile({
       id: 'tiles/cave/floors/floor/cave%floor.2x2.stl',
@@ -760,20 +769,72 @@ describe('the storage address', () => {
 /* ------------------------------------------------------------------ actions */
 
 describe('the actions', () => {
-  it('offers one action, the library toggle having gone with the library', async () => {
-    // Row A0. §2.5 gave the drawer two actions and the first wrote to a store
-    // field that no longer exists. Asserted rather than left implicit, because
-    // **row C3 puts an action back in that slot** — "place this instance" — and
-    // this is the assertion that tells C3 the slot is empty rather than filled
-    // with something that half-works.
+  it('offers §2.5’s two actions, the library toggle having become a placement', async () => {
+    // Row A0 deleted the first action with the library it wrote to; **row C3**
+    // puts one back with a different verb, because templates are the only
+    // placement unit and *"I am going to print this"* now means *"this piece is
+    // on my plan"*. The old library toggle is still asserted absent, so nothing
+    // can quietly bring a second destination back.
     await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
 
     const actions = within(drawer())
       .getAllByRole('button')
       .filter((button) => button.className.includes('of-detail-action'))
-    expect(actions).toHaveLength(1)
-    expect(actions[0]).toHaveTextContent('Use in builder')
+    expect(actions.map((button) => button.textContent)).toEqual([
+      '+ Place on the plan',
+      'Use in builder →',
+    ])
     expect(within(drawer()).queryByRole('button', { name: /Add to library/ })).toBeNull()
+  })
+
+  it('places the shown file as the one-slot family that admits it', async () => {
+    // The whole of row C3's drawer half. `familyForRecord` resolves the file to
+    // B4's `floor-straight` — `role|floor` + `form|straight`, the two derived
+    // axes this fixture's first record carries — pins the *file* into that
+    // family's one slot, and `placeOnPlan` picks a cell with the plan's own
+    // collision predicate. The module arrives through `await import()`, which is
+    // why this awaits rather than asserting synchronously.
+    const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+
+    fireEvent.click(within(drawer()).getByRole('button', { name: /Place on the plan/ }))
+    // `waitFor`, because the press fetches `./placeOnPlan` and, through it, the
+    // plan projection — two dynamic imports, so the write lands a few
+    // microtasks later. That latency is the point of the boundary.
+    await waitFor(() => {
+      expect(within(drawer()).getByRole('status')).toHaveTextContent(/Placed as/)
+    })
+
+    const placements = Object.values(useWorkshopStore.getState().placements)
+    expect(placements).toHaveLength(1)
+    expect(placements[0]).toMatchObject({
+      template: 'floor-straight',
+      rotation: 0,
+      // `pinned: true`: the user chose this file card by card, so the lock
+      // re-solve must honour it (§2.1, contract C-k).
+      fills: { floor: { tile: 'tiles/cave/floors/floor/cave%floor.1x1.stl', pinned: true } },
+    })
+    // It does not navigate, which is what makes it a second action rather than a
+    // quieter copy of "Use in builder →": the library toggle accumulated without
+    // leaving the catalog and so does this.
+    expect(router.state.location.pathname).toBe('/catalog')
+    expect(within(drawer()).getByRole('status')).toHaveTextContent(/Placed as Floor: Straight at/)
+    expect(within(drawer()).getByRole('status')).toHaveTextContent(/at x /)
+  })
+
+  it('says so when no recipe in this build takes the file', async () => {
+    // B5's families reach 99.0% of records, so a file in no family's pool is a
+    // real population and not a defensive branch. This fixture's arch carries
+    // neither derived axis, so nothing admits it.
+    await renderAt(`/catalog?tile=${String(ORD.arc)}`)
+
+    fireEvent.click(within(drawer()).getByRole('button', { name: /Place on the plan/ }))
+    await waitFor(() => {
+      expect(within(drawer()).getByRole('status')).toHaveTextContent(
+        /No recipe in this build takes/,
+      )
+    })
+
+    expect(useWorkshopStore.getState().placements).toEqual({})
   })
 
   it('sends the item to the builder', async () => {

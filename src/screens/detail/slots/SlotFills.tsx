@@ -86,19 +86,24 @@ export interface SlotFillsProps {
    */
   readonly parent: TileId
   /**
-   * Told when a slot's fill changes, with `undefined` for "cleared".
+   * Told which **file** a slot now contributes, with `undefined` for "cleared".
    *
-   * Optional, and the two consumers use it differently on purpose. The tile
-   * drawer passes nothing: a pick there narrows the remaining slots and touches
-   * no persisted state, because the drawer already has an explicit "Add to
-   * library" for the file it is showing and a second, silent one would be a
-   * surprise. The builder's slots panel passes a handler that adds the chosen
-   * file to the library, because that panel's whole subject is what else the
-   * drawing needs printed — and it says so in its own copy.
+   * The picker's report of its own state, and it is a report rather than a
+   * persistence hook. **No consumer persists a pick, and row C3 measured why
+   * rather than deferring it:** an accessory slot is a slot of a *file*, one
+   * level below a template's own slots, and `TemplateInstance.fills` is
+   * `Record<SlotName, SlotFill>` with `SlotFill` being `{ tile, pinned }` —
+   * flat, with no key for a fill of a fill. Writing one under its bare name
+   * would land it beside the template's slots, where `resolve.ts#readFills`
+   * walks `template.parts` and would not bill it, while
+   * `canvas/catalog.ts#parts` walks every key of `fills` and would draw it. So
+   * all three call sites deliberately decline, and each says so in its own copy.
    *
-   * There is no third option today: `WorkshopState` holds a library and
-   * placements, the bill of tiles is built from placements, and row G5 owns the
-   * selection channel. A slot fill is not persistable yet.
+   * What the callback is still for is the one fact the DOM states only inside an
+   * accessible name: **which of an item's files** a card contributes. The grid
+   * is an item grid and `selectVariant` picks the print (C1's two-step), so a
+   * caller composing a preview of a finished piece needs the `TileId` rather
+   * than the card.
    */
   readonly onPick?: (slot: string, tile: TileId | undefined) => void
 }

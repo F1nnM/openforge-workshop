@@ -78,6 +78,25 @@ export {
   stepCountSentence,
 } from './assembly'
 
-export { RECIPE_TEMPLATES } from './templates'
+/**
+ * The recipes and B4's generated families.
+ *
+ * `GENERATED_FAMILIES` and `GENERATED_FAMILY_SIZES` are exported here by row
+ * **C3**, which is the first row that needs them outside the emitter: the
+ * builder's template lookup has to answer for a placed generated family or the
+ * bill reports it `unknown-template`, and the bare-base family `shape-base` is
+ * what the generator's archived arm places into. 51 families over 10,380
+ * records, with 350 size positions.
+ *
+ * `GENERATED_FAMILY_SIZES` is exported beside it for the **palette** (row C1),
+ * where §3.1 puts size: a family is armed with a size position, and the position's
+ * tags join the template's own `parentTags` so the slot's `constrain` block
+ * collects them. It is deliberately *not* a control on a placed instance, and
+ * `builder/panels/slots/slotEditor.ts` records the measurement that stops it
+ * being one: `TemplateInstance` has no size field, so a size chosen after
+ * placement has nowhere to persist and could only be re-derived from whichever
+ * files ended up in the slots.
+ */
+export { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from './templates'
 
 export { AssembliesScreen } from './AssembliesScreen'

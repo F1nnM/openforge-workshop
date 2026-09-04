@@ -56,9 +56,10 @@
  * writes.
  */
 import type { CatalogFile, TileId } from '@/catalog'
+import type { RecipeTemplate } from '@/screens/assemblies'
 import type { SlotState } from '@/screens/detail/slots'
 import { compositionIndexFor, slotStates } from '@/screens/detail/slots'
-import type { PlacementId, SlotName, TemplateInstance } from '@/store'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 import { filledSlots } from '@/store'
 
 /** One filled template slot whose file opens at least one accessory slot. */
@@ -212,4 +213,88 @@ export function planSlots(
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
     orphans,
   }
+}
+
+/* ------------------------------------------------------- the template's slots */
+
+/**
+ * One placed instance, summarised — the row the slot editor opens from.
+ *
+ * Deliberately **cheap**: a template lookup, a walk of the declared parts and a
+ * map lookup per fill. No candidate resolution at all, because the panel renders
+ * one of these per placement on every store write and
+ * `slotEditor.ts#slotEditorModel` measures 4.1 ms median per instance. The
+ * expensive model is built for the **open** instance only.
+ */
+export interface PlanPiece {
+  /** The placement's key, which is also the React key: one row per instance. */
+  readonly placement: PlacementId
+  readonly instance: TemplateInstance
+  /**
+   * The recipe, or `undefined` when this build ships none by that id.
+   *
+   * The same three-state reading `resolveInstance` takes: a persisted scene can
+   * name a retired family, and the honest answer is to say so rather than to
+   * render an empty slot list.
+   */
+  readonly template: RecipeTemplate | undefined
+  /** The family's own name, or the id when the build ships no such family. */
+  readonly name: string
+  /** Declared slots. 0 for an unknown template. */
+  readonly slots: number
+  /** Declared slots holding a fill this catalog still has a record for. */
+  readonly filled: number
+  /** Of those, the ones the user chose — `SlotFill.pinned`. */
+  readonly pinned: number
+  /** Declared slots with no fill, in declared order — §3.2's *needs a choice*. */
+  readonly needsChoice: readonly SlotName[]
+}
+
+/**
+ * Every placed instance, in plan reading order.
+ *
+ * The same depth-then-across order {@link planSlots} and `billInventory` use, so
+ * a row here, a row in the bill and a piece on the drawing refer to the drawing
+ * the same way.
+ *
+ * `templates` is a lookup rather than a table for `resolveInstance`'s reason: a
+ * caller may back it with the screen's array, a map or a lazily loaded chunk,
+ * and `undefined` is the honest answer for a retired family.
+ */
+export function planPieces(
+  file: CatalogFile,
+  placements: Readonly<Record<string, TemplateInstance>>,
+  templates: (id: TemplateId) => RecipeTemplate | undefined,
+): readonly PlanPiece[] {
+  const byId = new Map(file.records.map((record) => [record.id, record]))
+  const ordered = Object.entries(placements).sort(
+    ([a, one], [b, two]) => one.z - two.z || one.x - two.x || a.localeCompare(b),
+  )
+
+  return ordered.map(([id, instance]) => {
+    const template = templates(instance.template)
+    const parts = template?.parts ?? []
+    const needsChoice: SlotName[] = []
+    let filled = 0
+    let pinned = 0
+    for (const part of parts) {
+      const fill = instance.fills[part.name as SlotName]
+      if (fill === undefined || !byId.has(fill.tile)) {
+        needsChoice.push(part.name as SlotName)
+        continue
+      }
+      filled += 1
+      if (fill.pinned) pinned += 1
+    }
+    return {
+      placement: id as PlacementId,
+      instance,
+      template,
+      name: template?.name ?? instance.template,
+      slots: parts.length,
+      filled,
+      pinned,
+      needsChoice,
+    }
+  })
 }
