@@ -514,6 +514,23 @@ describe('the fixtures are the shipped table', () => {
   })
 })
 
+/**
+ * The capacity blocks binary-search an instance count against the codec and five
+ * alternative encodings, deflating a payload at every probe. That is seconds of
+ * real work rather than a hang, and vitest's 5,000 ms default is not enough for
+ * it: three rows (C1, C3 and this one's own author) reproduced a timeout at
+ * 5.06 s on an idle machine with the tree otherwise unmodified, and CI passes
+ * only because its runner is quieter. The same argument and the same fix as
+ * `src/composition/corpus.test.ts`, which carries a `SLOW_CORPUS_MS` for
+ * brotli-compressing candidate sets.
+ *
+ * Raised rather than narrowed deliberately: the search ceilings are already the
+ * lowered ones row A5 set (20,000 room / 2,000 scattered, down from 60,000 and
+ * 8,702), and the block's value is that it measures every encoding against the
+ * shipped one in a single pass.
+ */
+const SLOW_CAPACITY_MS = 120_000
+
 describe('capacity at the 2,000-character budget', () => {
   it('measures both build shapes against the codec and its alternatives', async () => {
     const measured: { label: string; room: number; scattered: number }[] = []
@@ -567,7 +584,7 @@ describe('capacity at the 2,000-character budget', () => {
     expect((shipped?.room ?? 0) / (inline?.room ?? 1)).toBeGreaterThan(2)
     // And the bitset is a small win, on the shape that is tight.
     expect(shipped?.scattered).toBeGreaterThanOrEqual(bytes?.scattered ?? 0)
-  })
+  }, SLOW_CAPACITY_MS)
 
   it('reproduces the shipped payload byte for byte from the control encoder', async () => {
     // What makes the five control rows above trustworthy: the control mirrors the
@@ -579,7 +596,7 @@ describe('capacity at the 2,000-character budget', () => {
     }
     // And the whole pipeline agrees, not just the bytes: same URL, same length.
     expect(await varintUrlLength(sceneOf(room, 90), SHIPPED)).toBe(await urlLength(sceneOf(room, 90)))
-  })
+  }, SLOW_CAPACITY_MS)
 
   it('prints the per-size costs both encodings actually produce', async () => {
     const lines: string[] = ['', '  n      room columnar  room naive   scattered columnar  scattered naive', '']
@@ -601,7 +618,7 @@ describe('capacity at the 2,000-character budget', () => {
     // A fifty-instance room — a single chamber, the common case — is a link
     // somebody can paste into chat without it wrapping.
     expect(await urlLength(sceneOf(room, 50))).toBeLessThan(400)
-  })
+  }, SLOW_CAPACITY_MS)
 })
 
 describe('what row A1 did to the length of a link', () => {
@@ -739,7 +756,7 @@ describe('what row A1 did to the length of a link', () => {
       const five = at(count, 5)
       expect((five?.v4 ?? 0) / (three?.v4 ?? 1)).toBeLessThan(5 / 3)
     }
-  })
+  }, SLOW_CAPACITY_MS)
 
   it('prints what one more filled slot costs across a room', async () => {
     const lines: string[] = ['', '  instances   arity 3   arity 5   per extra fill', '']
@@ -759,7 +776,7 @@ describe('what row A1 did to the length of a link', () => {
     expect(await urlLength({ lock: 'openlock', placements: uniform(400, 5), generated: [] })).toBeLessThan(
       SHARE_URL_BUDGET,
     )
-  })
+  }, SLOW_CAPACITY_MS)
 })
 
 describe('what a generated base costs in a link', () => {
@@ -853,7 +870,7 @@ describe('what a generated base costs in a link', () => {
     for (const row of measured.filter((entry) => entry.label !== '90 instances, 90 bases, 90 recipes')) {
       expect(row.chars, `${row.label} is over the budget`).toBeLessThan(SHARE_URL_BUDGET)
     }
-  })
+  }, SLOW_CAPACITY_MS)
 
   it('round-trips generated bases exactly, including a rotation and an off-grid position', async () => {
     const scene: SharedScene = {
@@ -877,7 +894,7 @@ describe('what a generated base costs in a link', () => {
     if (!decoded.ok) return
     expect(decoded.scene).toEqual(scene)
     expect(decoded.dropped).toEqual([])
-  })
+  }, SLOW_CAPACITY_MS)
 })
 
 describe('a scene at the URL limit', () => {
@@ -910,7 +927,7 @@ describe('a scene at the URL limit', () => {
     const decodedOver = await decodeShareFragment(over.fragment, MANIFEST)
     expect(decodedOver.ok).toBe(true)
     if (decodedOver.ok) expect(decodedOver.scene).toEqual(overLimit)
-  })
+  }, SLOW_CAPACITY_MS)
 
   it('round-trips a room build far past any plausible URL length', async () => {
     const scene = sceneOf(room, 10_000)
@@ -920,5 +937,5 @@ describe('a scene at the URL limit', () => {
     const decoded = await decodeShareFragment(encoded.fragment, MANIFEST)
     expect(decoded.ok).toBe(true)
     if (decoded.ok) expect(decoded.scene).toEqual(scene)
-  })
+  }, SLOW_CAPACITY_MS)
 })

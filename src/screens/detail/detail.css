@@ -206,6 +206,19 @@
   color: var(--ink);
 }
 
+/* Row C3. The outcome of "+ Place on the plan": the family the file was placed
+   as, and the cell it landed on. Mono, because a grid position is a measured
+   fact. No `flex-basis` and no wrap: row C1 made this container a column for its
+   own arm note, and a column gives a sentence its own line for free — which is
+   what the wrapped row this replaced was reaching for. */
+.of-detail-placed {
+  margin: 0;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
 .of-detail-action {
   flex: 1;
   padding: 11px 0;
@@ -219,8 +232,14 @@
   transition: filter 120ms ease;
 }
 
-.of-detail-action:hover {
+.of-detail-action:hover:not(:disabled) {
   filter: brightness(1.12);
+}
+
+/* Only while the placement module is being fetched — see `TileDrawer.tsx`. */
+.of-detail-action:disabled {
+  cursor: progress;
+  opacity: 0.6;
 }
 
 .of-detail-action[data-variant='ghost'] {

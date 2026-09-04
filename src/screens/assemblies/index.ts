@@ -91,7 +91,15 @@ export {
  * Row C1's palette reads all three through `builder/panels/families.ts`, which
  * imports `./templates` directly rather than this barrel: a value import of this
  * module reaches `AssembliesScreen.tsx` and its stylesheet, and the palette
- * needs two arrays and a table.
+ * needs two arrays and a table. Row **C3** consumes the same three the same way
+ * — `PLACEABLE_TEMPLATES` for the builder's recipe table, and the bare-base
+ * family `shape-base` for what the generator's archived arm places into.
+ *
+ * `GENERATED_FAMILY_SIZES` is the palette's domain and **not** a control on a
+ * placed instance; `builder/panels/slots/slotEditor.ts` carries the measurement
+ * that stops it being one, which is that `TemplateInstance` has no size field,
+ * so a size chosen after placement has nowhere to persist and could only be
+ * re-derived from whichever files ended up in the slots.
  */
 export { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from './templates'
 

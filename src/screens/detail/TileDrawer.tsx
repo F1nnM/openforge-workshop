@@ -100,6 +100,27 @@
  * variant swap, retaining nothing — see {@link recordOf} for why that is not a
  * map.
  *
+ * ## The two actions
+ *
+ * §2.5 asks for two and row **A0** deleted the first with the library it wrote
+ * to. **Row C3 puts one back, with a different verb**: templates are the only
+ * placement unit, so *these are the tiles I am going to print* is now *this
+ * piece is on my plan*. "Place on the plan" resolves the shown file to one of
+ * B4's one-slot generated families, pins the file into that family's slot and
+ * places the instance at a cell the plan's own collision predicate says is
+ * free — `./placeOnPlan.ts` carries the whole argument, including why it arrives
+ * through `await import()` rather than as a static dependency of the catalog
+ * route.
+ *
+ * It **does not navigate**, and that is what makes it a second action rather
+ * than a quieter copy of the first: the library toggle accumulated without
+ * leaving the catalog, and so does this — press it on four tiles, then go to the
+ * builder. `Use in builder →` is the one that leaves.
+ *
+ * The refusal is a real state and is measured rather than defensive: B5's
+ * families reach **99.0% of records**, so a file in no family's pool exists, and
+ * the drawer says which file and why instead of a press that appears to work.
+ *
  * ## "Use in builder"
  *
  * The contract's third clause — "pre-selects the tile" — has a channel, and row
@@ -174,7 +195,7 @@ import { buildAggregateIndex, resolveTags, selectVariant } from '@/catalog'
 import { armForTags, armNameForTags, armRefusalFor } from '@/builder/panels/familyKey'
 import { closeTileDrawer, resolveTileTarget } from '@/routes'
 import { resolveMaterial } from '@/materials'
-import type { PendingArm } from '@/store'
+import type { PendingArm, TemplateId } from '@/store'
 import { armTemplateInBuilder, useLockChosen, useLockSystem } from '@/store'
 import { Tile3DPanel } from '@/three'
 import { Chip, Drawer, Eyebrow } from '@/ui/primitives'
@@ -386,6 +407,10 @@ function TileDetail({
   // `TEXTURE_ROOT_MATERIAL[record.texture]` — row P3 measured those two
   // disagreeing on 691 of 8,702 records (7.9%).
   const material = useMemo(() => resolveMaterial(tags, shown.file).material, [tags, shown.file])
+  /* The family that admits this tile, and the gate on both actions. See the
+     comment on the actions block, and `familyKey.ts` for why the derivation
+     lives at this end of the channel. */
+  const arm = useMemo(() => armForTags(tags), [tags])
   const footprint = footprintLabel({ foot: aggregate.foot, sizeCode: aggregate.sizeCode }, tags)
   const height = heightLabel(tags)
   const address = storageAddress(catalog.assets, shown)
@@ -430,14 +455,18 @@ function TileDetail({
 
       <div className="of-detail-actions">
         {/*
-          §2.5's first action was "+ Add to library" / "✓ In library" and row
-          **A0** removed it with the library it wrote to. **Row C3 owns what
-          takes its place** — "place this instance", the same action the catalog
-          card is waiting for — so the slot is deliberately empty rather than
-          filled with something that half-works: an action here that armed the
-          builder without navigating would be a second, quieter "Use in builder"
-          beside the real one.
+          §2.5's two actions, and they are two verbs rather than one twice.
+          **Both are gated on the same answer** — `armForTags`, row C1's — so a
+          tile no family admits offers neither, and the refusal below is the only
+          one in this file. `arm` is derived twice (here and inside
+          {@link UseInBuilder}) and that is a second *call* and not a second
+          rule: the function is a pure walk of ten tags, both call sites memoise
+          it, and hoisting it would mean rewriting C1's component to take what it
+          can work out itself.
         */}
+        {arm === undefined ? null : (
+          <PlaceOnPlanAction catalog={catalog} shown={shown} template={arm.template} />
+        )}
         <UseInBuilder tags={tags} onGo={() => void router.navigate({ to: '/builder' })} />
       </div>
 
@@ -489,9 +518,8 @@ function unitFor(basis: SpecValue<string>['basis']): string | undefined {
   return basis === 'rect' || basis === 'wall' ? 'in' : undefined
 }
 
-/** One spec cell. `data-empty` marks a value that is a refusal, not a measurement. */
 /**
- * The third action, and what it says it will arm.
+ * The second action, and what it says it will arm.
  *
  * Two states, and the second is not an error: a tile whose tags name no family
  * cannot be armed, and all 94 such designs are inserts, which go in a host
@@ -543,6 +571,7 @@ function UseInBuilder({ tags, onGo }: { tags: readonly string[]; onGo: () => voi
 }
 
 
+/** One spec cell. `data-empty` marks a value that is a refusal, not a measurement. */
 function Spec({
   label,
   value,
@@ -561,5 +590,98 @@ function Spec({
         {unit === undefined ? null : <span className="of-detail-unit"> {unit}</span>}
       </dd>
     </div>
+  )
+}
+
+/* ------------------------------------------------------- place on the plan */
+
+/**
+ * §2.5's first action: put **this file** on the plan, as one instance of the
+ * family that admits it.
+ *
+ * The second verb beside {@link UseInBuilder}'s, and the difference is what each
+ * one keeps. Arming keeps the **family** and hands the print back to the fill
+ * solver, which C1 discloses on the button because it is lossy. This keeps the
+ * **file**: the family's one slot is filled with the variant on screen and
+ * pinned, so the piece on the plan is the piece in the preview well. That is
+ * §2.5's *"+ Add to library"* in the only verb left after row A0 — *these are
+ * the tiles I am going to print* is now *this piece is on my plan* — and it
+ * deliberately does **not** navigate, which is what keeps it a second action
+ * rather than a quieter copy of the first: the library toggle accumulated
+ * without leaving the catalog, and so does this.
+ *
+ * ## The family comes from `armForTags`, and row C3's own rule was wrong
+ *
+ * This took a `familyForRecord` in `./placeOnPlan.ts` that walked the generated
+ * table and preferred **the most specific family by `require` count**. Merging
+ * row C1 measured that rule against `familyKey.ts#armForTags` over the live
+ * index, and it is wrong on the bases — **1,963 of 1,963 `shape|base` records,
+ * zero exceptions**: a base carries the role of the piece it sits under (1,117
+ * are `role|wall`), so the three-ref `(role, form, build)` key always outranks
+ * the one-ref `shape|base`, and every base would have been placed as a wall.
+ * `armForTags` asks `shape|base` **first** for exactly that reason. On the other
+ * 6,739 records the two agreed exactly, and both refuse the same 285 insert
+ * records — so the whole disagreement was the defect. The function is deleted
+ * and this reads C1's answer, which is also the answer that reaches the channel,
+ * so the two actions cannot disagree about what this tile is.
+ *
+ * The **table** is still needed for one thing the tags cannot answer — the
+ * *name* of the family's single slot, which is where the file goes — and that is
+ * a lookup rather than a derivation. It happens inside `./placeOnPlan.ts`, which
+ * arrives through `await import()` on the press, so the +5.95 kB gzip entry-chunk
+ * cost `familyKey.ts` measured for importing the table here is not paid: the
+ * catalog route's chunk is byte-identical with this button present.
+ *
+ * Three states, and the fourth is gone: the caller only renders this when a
+ * family exists, so *"no family"* is C1's sentence beside the missing arm and
+ * not a refusal of its own. What is left is nothing pressed, the import in
+ * flight, and placed at a named cell.
+ */
+function PlaceOnPlanAction({
+  catalog,
+  shown,
+  template,
+}: {
+  catalog: CatalogFile
+  shown: TileVariant
+  /** The family `armForTags` derived. The caller has already gated on it. */
+  template: TemplateId
+}) {
+  const [state, setState] = useState<
+    | { readonly kind: 'idle' }
+    | { readonly kind: 'placing' }
+    | { readonly kind: 'placed'; readonly where: string; readonly family: string }
+  >({ kind: 'idle' })
+
+  return (
+    <>
+      <button
+        type="button"
+        className="of-detail-action"
+        disabled={state.kind === 'placing'}
+        onClick={() => {
+          setState({ kind: 'placing' })
+          void (async () => {
+            const { placeFileAsFamily } = await import('./placeOnPlan')
+            const placed = placeFileAsFamily(catalog, template, shown.id)
+            // `undefined` only if this build ships no such family, which the
+            // gate above has already ruled out — `armForTags` constructs the id
+            // and `families.test.ts` holds that construction to the emitter with
+            // 0 mismatches. Kept as a branch rather than asserted, because a
+            // press that silently did nothing would be worse than one that says
+            // nothing happened.
+            setState(placed === undefined ? { kind: 'idle' } : { kind: 'placed', ...placed })
+          })()
+        }}
+      >
+        {state.kind === 'placing' ? 'Placing…' : '+ Place on the plan'}
+      </button>
+
+      {state.kind === 'placed' ? (
+        <p className="of-detail-placed" role="status">
+          {`Placed as ${state.family} at ${state.where}.`}
+        </p>
+      ) : null}
+    </>
   )
 }

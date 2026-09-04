@@ -59,6 +59,7 @@ import {
   clearPersistedWorkshopState,
   placeTemplate,
   resetWorkshop,
+  setLockSystem,
   useWorkshopStore,
 } from '@/store'
 import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
@@ -307,43 +308,118 @@ describe('the builder screen', () => {
   })
 
   /**
-   * **Row A8's one refusal, asserted so row B4 finds it deliberate.**
+   * **A8's refusal, closed — and this is the assertion that replaces it.**
    *
    * The generator's archived arm resolves a recipe to a file Devon already
    * publishes — 682 of the archive's 709 resolvable keys — and that shortcut is
-   * what stops the 298 kB worker chunk and the 10.5 MB WASM being fetched at all.
-   * It cannot *place* the result: a base goes on the grid as a one-slot recipe
-   * predicating on `shape|base`, row **B4** owes that family, and `base` is not
-   * one of B1's eight roles, so no family keyed on `(role, form, build)` can be
-   * it (all 686 resolvable base records spread across eight keys, none a base).
+   * what stops the 298 kB worker chunk and the 10.5 MB WASM being fetched at
+   * all. Rows A9 and A8 left it unable to *place* the result, because a base
+   * goes on the grid as a one-slot recipe predicating on `shape|base`, `base` is
+   * not one of B1's eight roles, and no family keyed on `(role, form, build)`
+   * could be it. Row **B4** shipped that family — `shape-base` — so the write
+   * exists and the `.of-build-declined` notice is deleted with its test.
    *
-   * So this pins both halves: the resolved file is named on screen, and the store
-   * is untouched. Filling the `base` slot of a `role|floor` family would compile,
-   * would work geometrically, and would mislabel a base as a floor in the
-   * palette — which is why A9 left this as a compile error and A8 left it as a
-   * refusal rather than closing it with a guess.
+   * Three things are pinned here and each was a separate decision:
+   *
+   *   - the instance names **`shape-base`** and not a `role|floor` family, which
+   *     would have worked geometrically and mislabelled a base as a floor;
+   *   - the fill lands in the **`base`** slot, carrying A9's `pinned: true` —
+   *     the recipe named the lock and the resolver matched on it, so the lock
+   *     re-solve must not rewrite it;
+   *   - the **generated** map is still empty, because the archive publishes this
+   *     file and generating it would be the other wrong answer.
    */
-  it('names the archived base it resolved and declines to place it, pending row B4', async () => {
+  it('places the archived base it resolved as row B4’s bare-base recipe', async () => {
     await renderBuilder()
 
     act(() => {
       screen.getByRole('button', { name: 'place the archived base' }).click()
     })
 
-    // By class, not by role: the screen already has two live regions of its own
-    // (the toolbar's readout and the bill's verdict), so `getByRole('status')`
-    // is ambiguous here. The role itself is asserted on the node.
-    const notice = document.querySelector('.of-build-declined')
-    expect(notice).not.toBeNull()
-    expect(notice).toHaveAttribute('role', 'status')
-    expect(notice).toHaveTextContent(ARCHIVED_BASE_FILE)
-    expect(notice).toHaveTextContent(/already in the archive, so nothing was generated/)
-    expect(notice).toHaveTextContent(/a base is placed as a one-slot recipe, and that recipe is not in this build/)
-    // Nothing was written to either map: not the catalog scene, and not the
-    // generated one — the archive publishes this file, so generating it would be
-    // the other wrong answer.
-    expect(useWorkshopStore.getState().placements).toEqual({})
+    const placements = Object.values(useWorkshopStore.getState().placements)
+    expect(placements).toHaveLength(1)
+    expect(placements[0]).toMatchObject({
+      template: 'shape-base',
+      x: 4,
+      z: 0,
+      rotation: 0,
+      fills: { base: { tile: FIXTURE_IDS.base2, pinned: true } },
+    })
     expect(useWorkshopStore.getState().generated).toEqual({})
+    // The refusal is gone rather than quietened: nothing on the screen says the
+    // press did not work, because it did.
+    expect(document.querySelector('.of-build-declined')).toBeNull()
+  })
+
+  /* ------------------------------------------------------------ the re-solve */
+
+  /**
+   * **The lock re-solve, wired — contract C-k's other half.**
+   *
+   * Row C2 built `reSolveScene` and wired nothing, and C-k names the failure
+   * that leaves: without a store write the toggle stops working and *nothing
+   * fails*. Row A2 proved `planSceneMeshes` is lock-free, so a lock change
+   * reaches the drawing, the bill and mesh conversion only through the
+   * placements the re-solve rewrites — which makes this screen's effect the one
+   * thing standing between a live preference and a dead one.
+   *
+   * `shape-base` is B4's bare-base family and the fixture holds two `shape|base`
+   * records, so its one slot has a candidate set here. That is what makes the
+   * write observable at all: the fixture is nine records and most of the 40
+   * recipes resolve to nothing against it.
+   */
+  it('fills an open slot when the lock preference changes, which is what makes the toggle work', async () => {
+    await renderBuilder()
+
+    act(() => {
+      placeTemplate({
+        template: TemplateId.parse('shape-base'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        // Placed empty, which §3.2 permits (contract C-g): "no candidate leaves
+        // the slot empty, marked needs a choice, and places anyway".
+        fills: {},
+      })
+    })
+    const placed = () => Object.values(useWorkshopStore.getState().placements)[0]
+    expect(placed()?.fills).toEqual({})
+
+    act(() => {
+      setLockSystem('dragonlock')
+    })
+
+    const filled = placed()?.fills[SlotName.parse('base')]
+    expect(filled).toBeDefined()
+    // `pinned: false`, and that is the whole of C-k from this side: the solver
+    // writes through `fillSlot`, so its answer stays re-solvable next time.
+    expect(filled?.pinned).toBe(false)
+  })
+
+  it('leaves a pinned fill alone, however wrong the lock makes it', async () => {
+    // The other half of C-k. The pin names a *floor* in a `shape|base` slot, so
+    // no re-solve could ever produce it — which is what makes its survival
+    // evidence of the guard in `fillSlot` rather than a coincidence of ranking.
+    // Reported, never repaired: `relock.ts#PinLockWarning` is the surface for
+    // saying so, and there is no unpin to offer (§11's first gap).
+    await renderBuilder()
+
+    const pinned = { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: true }
+    act(() => {
+      placeTemplate({
+        template: TemplateId.parse('shape-base'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('base')]: pinned },
+      })
+    })
+    act(() => {
+      setLockSystem('magnetic')
+    })
+
+    const placed = Object.values(useWorkshopStore.getState().placements)[0]
+    expect(placed?.fills[SlotName.parse('base')]).toEqual(pinned)
   })
 
   it('offers a retry rather than a blank screen when the index cannot be loaded', async () => {

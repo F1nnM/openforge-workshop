@@ -45,6 +45,7 @@ import {
   clearPersistedWorkshopState,
   resetWorkshop,
   setLockSystem,
+  useWorkshopStore,
 } from '@/store'
 
 import { SpriteRotator } from './SpriteRotator'
@@ -90,12 +91,15 @@ const TAGS = [
   'connection|side|dragonlock',
   'connection|openlock|topless',
   'shape|arch',
-  /* Row C1. The drawer's "Use in builder" derives a template family from
-     `(role, form, build)` — or `shape|base` — so a fixture record with neither
-     axis names no family at all. That state is real (an unclassified record) and
-     the drawer says something different about it than about an insert, so both
-     are exercised: the records below carry the axes, the ones that do not are the
-     unclassified case, and `shapeless` is the insert. */
+  /* Rows C1 and C3. The drawer's two actions both derive a template family from
+     `(role, form, build)` — or from `shape|base` — through
+     `familyKey.ts#armForTags`, so a fixture record with neither axis names no
+     family at all. That state is real (an unclassified record) and the drawer
+     says something different about it than about an insert, so both are
+     exercised: the records below carry the axes, the ones that do not are the
+     unclassified case, and `shapeless` is the insert. Row C3's *"+ Place on the
+     plan"* is gated on the same answer, so these four tags are what let it
+     resolve `floor-straight` and place into its one slot. */
   'role|floor',
   'form|straight',
   'role|wall',
@@ -777,20 +781,57 @@ describe('the storage address', () => {
 /* ------------------------------------------------------------------ actions */
 
 describe('the actions', () => {
-  it('offers one action, the library toggle having gone with the library', async () => {
-    // Row A0. §2.5 gave the drawer two actions and the first wrote to a store
-    // field that no longer exists. Asserted rather than left implicit, because
-    // **row C3 puts an action back in that slot** — "place this instance" — and
-    // this is the assertion that tells C3 the slot is empty rather than filled
-    // with something that half-works.
+  it('offers §2.5’s two actions, the library toggle having become a placement', async () => {
+    // Row A0 deleted the first action with the library it wrote to; **row C3**
+    // puts one back with a different verb, because templates are the only
+    // placement unit and *"I am going to print this"* now means *"this piece is
+    // on my plan"*. The old library toggle is still asserted absent, so nothing
+    // can quietly bring a second destination back.
     await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
 
     const actions = within(drawer())
       .getAllByRole('button')
       .filter((button) => button.className.includes('of-detail-action'))
-    expect(actions).toHaveLength(1)
-    expect(actions[0]).toHaveTextContent('Use in builder')
+    expect(actions.map((button) => button.textContent)).toEqual([
+      '+ Place on the plan',
+      'Use in builder →',
+    ])
     expect(within(drawer()).queryByRole('button', { name: /Add to library/ })).toBeNull()
+  })
+
+  it('places the shown file into the family that admits it, keeping the file', async () => {
+    // Row C3's half of the two actions, and the difference from arming: this
+    // keeps the **file**. `armForTags` names the family — `role|floor` +
+    // `form|straight` is `floor-straight` — and `placeFileAsFamily` pins the
+    // variant on screen into that family's one slot, so the piece on the plan is
+    // the piece in the preview well. `placeOnPlan` picks the cell with the
+    // plan's own collision predicate.
+    const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+
+    fireEvent.click(within(drawer()).getByRole('button', { name: /Place on the plan/ }))
+    // `waitFor`, because the press fetches `./placeOnPlan` and, through it, the
+    // plan projection and the family table — the boundary that keeps all three
+    // out of the catalog's own chunk, and the reason this is not synchronous.
+    await waitFor(() => {
+      expect(within(drawer()).getByRole('status')).toHaveTextContent(/Placed as/)
+    })
+
+    const placements = Object.values(useWorkshopStore.getState().placements)
+    expect(placements).toHaveLength(1)
+    expect(placements[0]).toMatchObject({
+      template: 'floor-straight',
+      rotation: 0,
+      // `pinned: true`: the user pressed a button naming this tile, so the lock
+      // re-solve must honour it (§2.1, contract C-k).
+      fills: { floor: { tile: 'tiles/cave/floors/floor/cave%floor.1x1.stl', pinned: true } },
+    })
+    // It does not navigate, which is what keeps it a second action rather than a
+    // quieter copy of "Use in builder →": the library toggle accumulated without
+    // leaving the catalog and so does this. Nothing reaches the channel either —
+    // placing is not arming.
+    expect(router.state.location.pathname).toBe('/catalog')
+    expect(claimPendingArm()).toBeNull()
+    expect(within(drawer()).getByRole('status')).toHaveTextContent(/Placed as Floor: Straight at x /)
   })
 
   it('sends the family that admits the tile, and no query with it', async () => {
@@ -843,6 +884,9 @@ describe('the actions', () => {
     expect(within(drawer()).queryByRole('button', { name: /Use in builder/ })).toBeNull()
     expect(within(drawer()).getByText(/Inserts are not placed on their own/)).toBeInTheDocument()
     expect(claimPendingArm()).toBeNull()
+    // Row C3. Both actions are gated on the same answer, so the sentence stands
+    // alone rather than beside a "place it" that would place it wrongly.
+    expect(within(drawer()).queryByRole('button', { name: /Place on the plan/ })).toBeNull()
   })
 
   it('offers no arm for a tile this build files under no family', async () => {
@@ -854,6 +898,8 @@ describe('the actions', () => {
 
     expect(within(drawer()).queryByRole('button', { name: /Use in builder/ })).toBeNull()
     expect(within(drawer()).getByText(/files no template family for this tile/)).toBeInTheDocument()
+    // Row C3, as above: one refusal for both verbs.
+    expect(within(drawer()).queryByRole('button', { name: /Place on the plan/ })).toBeNull()
   })
 
   it('sends the family, and still shows the variant the preference picked', async () => {

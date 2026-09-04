@@ -279,18 +279,6 @@
   text-align: right;
 }
 
-/* Row A8's refusal: the generator resolved a published file and this build has
-   no recipe to place it as. Above the other two plates rather than beside them,
-   because it is a sentence rather than a readout and would otherwise crop at
-   `max-width: 44%`; wider for the same reason, and still pointer-transparent so
-   a click near the bottom of the room reaches the surface. */
-.of-build-declined {
-  left: 12px;
-  bottom: 52px;
-  max-width: 60%;
-  color: var(--ink);
-}
-
 .of-build-at {
   display: block;
   color: var(--mut);

@@ -1,9 +1,12 @@
 /**
- * The plan's accessory slots, as one import.
+ * The plan's pieces and their slots, as one import.
  *
- * Row C2's builder half. `planSlots` is the pure inventory over a drawing's
- * placements; `SlotsPanel` renders it and reuses the drawer's picker whole from
- * `@/screens/detail/slots` rather than restating dead-end greying.
+ * Rows C2 and C3. `planSlots` is the pure accessory inventory over a drawing's
+ * placements and `planPieces` is the per-instance summary the slot editor opens
+ * from; `slotEditor.ts` is the editor's own model, `SlotEditor` its dialog, and
+ * `SlotsPanel` renders both halves — reusing the drawer's picker whole from
+ * `@/screens/detail/slots` and the guided-assembly walk from
+ * `@/screens/assemblies` rather than restating dead-end greying twice.
  *
  * Mounted by `src/screens/builder/BuilderScreen.tsx` in the bill column, after
  * the bill of tiles — see `slots.css` for why the order matters to that column's
@@ -12,5 +15,18 @@
 export type { SlotsPanelProps } from './SlotsPanel'
 export { SlotsPanel } from './SlotsPanel'
 
-export type { PlanSlotHolder, PlanSlotInventory } from './planSlots'
-export { planSlots } from './planSlots'
+export type { SlotEditorProps } from './SlotEditor'
+export { SlotEditor } from './SlotEditor'
+
+export type { PlanPiece, PlanSlotHolder, PlanSlotInventory } from './planSlots'
+export { planPieces, planSlots } from './planSlots'
+
+export type { DesignBucket, EditorSlot, Invalidation, SlotEditorModel } from './slotEditor'
+export {
+  choiceOf,
+  designBuckets,
+  filterByDesign,
+  invalidatedBy,
+  refusalSentence,
+  slotEditorModel,
+} from './slotEditor'
