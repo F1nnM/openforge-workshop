@@ -547,20 +547,38 @@ describeFixtures(title, () => {
       expect(Math.max(...others)).toBe(8)
     })
 
-    it('leaves the emitted module carrying the fixtures’ own tags, defect included', () => {
-      /* The decision, asserted rather than described: the guard records the
-         defect and does not repair it, so the generated module is still
-         provably the fixtures' content. A normalisation would show up here. */
-      const occurrences = (text: string, needle: string): number => text.split(needle).length - 1
-      for (const text of [printTemplateModule(entries), readFileSync(TEMPLATES_MODULE_PATH, 'utf8')]) {
-        expect(text).toContain("name: 'S2W: Wall on Tile: Internal Corner: Low (Modular)'")
-        // The fixtures' own tally survives into the module: four `shape|corner`,
-        // one `shape|internal_corner|low`. A normalisation would read 2 and 2.
-        expect(occurrences(text, "'shape|corner'")).toBe(4)
-        expect(occurrences(text, "'shape|internal_corner|low'")).toBe(1)
-        expect(occurrences(text, "'shape|internal_corner'")).toBe(1)
-      }
-    })
+    it(
+      'leaves the emitted module carrying the fixtures’ own tags, defect included',
+      () => {
+        /* The decision, asserted rather than described: the guard records the
+           defect and does not repair it, so the generated module is still
+           provably the fixtures' content. A normalisation would show up here.
+
+           **Both arms take the real emitter call, families included, and that
+           is load-bearing since row B4.** The module has two sources now, so
+           the tally below is a claim about the *whole* file rather than about
+           its fixture half: a generated family whose tags spelled
+           `shape|corner` would break it, and none does — the 51 emit only
+           `role|`, `form|`, `build|` and `shape|base`. Passing `[]` here would
+           still compile and would quietly narrow the assertion back to the 40,
+           which is why this test pays for the corpus build. The byte-identity
+           test below is the other half: it proves the committed file *is* this
+           emitter's output, so the two arms are one artefact reached two ways. */
+        const occurrences = (text: string, needle: string): number => text.split(needle).length - 1
+        for (const text of [
+          printTemplateModule(entries, families()),
+          readFileSync(TEMPLATES_MODULE_PATH, 'utf8'),
+        ]) {
+          expect(text).toContain("name: 'S2W: Wall on Tile: Internal Corner: Low (Modular)'")
+          // The fixtures' own tally survives into the module: four `shape|corner`,
+          // one `shape|internal_corner|low`. A normalisation would read 2 and 2.
+          expect(occurrences(text, "'shape|corner'")).toBe(4)
+          expect(occurrences(text, "'shape|internal_corner|low'")).toBe(1)
+          expect(occurrences(text, "'shape|internal_corner'")).toBe(1)
+        }
+      },
+      SLOW_MS,
+    )
   })
 
   /* ---------------------------------------------------------- the emitted module */
@@ -572,6 +590,42 @@ describeFixtures(title, () => {
         printTemplateModule(entries, families()),
         `${TEMPLATES_MODULE_PATH} is out of date or hand-edited. ${REFRESH}`,
       ).toBe(readFileSync(TEMPLATES_MODULE_PATH, 'utf8'))
+    },
+    SLOW_MS,
+  )
+
+  it(
+    'emits the 40 byte-for-byte identically with and without the family table',
+    () => {
+      /* The merge point's own property, and the reason rows B6 and B4 can both
+         claim the module. B6 asserts the emitted module is byte-provably the
+         *fixtures'* content; B4 changed the byte-identity assertion above to
+         compare against **two** sources. Neither replaced the other, and this is
+         what says so: the `RECIPE_TEMPLATES` region is identical whether the
+         family table is emitted beside it or not, so the families are appended
+         and change nothing about the 40.
+
+         Without this, a future emitter change that interleaved the two — sorting
+         all 91 into one array, say — would still pass both guards separately
+         while destroying B6's claim, because its tally would then be counting
+         family bytes it never measured. */
+      const region = (text: string): string => {
+        const from = text.indexOf('export const RECIPE_TEMPLATES')
+        const to = text.indexOf('export const GENERATED_FAMILIES')
+        expect(from).toBeGreaterThan(-1)
+        return to < 0 ? text.slice(from) : text.slice(from, to)
+      }
+      const withFamilies = printTemplateModule(entries, families())
+      expect(region(withFamilies)).toBe(region(printTemplateModule(entries, [])))
+      expect(region(withFamilies)).toBe(region(readFileSync(TEMPLATES_MODULE_PATH, 'utf8')))
+
+      /* And the other half of the same claim, from the family side: the only
+         `shape|` tag the 51 families emit is `shape|base`, which is why B6's
+         `shape|corner` tally is a statement about the whole file and not just
+         about its fixture region. */
+      const familyRegion = withFamilies.slice(withFamilies.indexOf('export const GENERATED_FAMILIES'))
+      const shapeTags = new Set([...familyRegion.matchAll(/'(shape\|[^']*)'/g)].map((match) => match[1]))
+      expect([...shapeTags]).toEqual(['shape|base'])
     },
     SLOW_MS,
   )
