@@ -31,32 +31,68 @@
  * Cross-band pairs are never reported. That is the whole of the false-positive
  * fix, and it is a *model* of the height axis rather than a fudge.
  *
- * ## Where row A7 cuts in, and what row A4a deliberately did not do
+ * ## The vertical axis — row A7, and what it could not get
  *
- * Elevation is now a real quantity: `geometry.ts#SlotLayout` carries an
- * `elevationMm` per part, normalised rather than measured (§2.2, §9 — 18.4% of
- * measured `openforge` toppers are authored pre-lifted by exactly 6.0 mm and
- * 77.5% are not). **This module does not read it, and that is the boundary.**
- * Two cuts, in this order:
+ * Elevation is a real quantity on the subject now: {@link OverlapSubject} carries
+ * a {@link PlanLevel}, and {@link subjectsConflict} tests it for disjointness
+ * before it looks at the plan at all. So a floor instance under a wall instance —
+ * a legal and common build, and the false positive row **A4a** left behind — is
+ * two pieces at two elevations and is no longer reported. A4a fixed the
+ * *intra*-instance case only, and by identity rather than by height (see
+ * {@link OverlapCandidate}); this is the other half.
  *
- *   1. **{@link OverlapSubject} gains a vertical interval** — `elevationMm` plus
- *      the record's own height — and {@link subjectsConflict}'s first line,
- *      `a.band !== b.band`, becomes a disjointness test on it. That is the whole
- *      change: {@link partsOverlap} is already a plan-view test over an array of
- *      convex parts and needs nothing, and the sweep in {@link findConflicts}
- *      needs nothing either.
- *   2. **{@link planBand} and {@link PlanBand} retire with it.** The two bands
- *      are a two-valued approximation of that interval, and the 323 tiles the
- *      footprint-first rule moves from `area` to `edge` are 323 pieces whose
- *      *real* answer is a height.
+ * **Where the numbers come from is the whole of the difficulty.**
  *
- * Until then the approximation is visible where it is wrong: two **different**
- * instances stacked — a floor instance under a wall instance, which is a legal
- * and common build — are two `area`-band or two `edge`-band pieces on the same
- * square and are reported as a conflict. Row A4a fixed the *intra*-instance case
- * only, and by identity rather than by height (see {@link OverlapCandidate}),
- * because a recipe's own slots are stacked by design and no elevation is needed
- * to know it.
+ *   - **The underside is `SlotLayout.elevationMm` and nothing else.** Row A4b
+ *     deleted `three/bases.ts#baseElevationMm` so that there would be exactly one
+ *     elevation source; this module reads that one and derives no second.
+ *     Normalised rather than measured, because §2.2 and §9 measured **18.4% of
+ *     `openforge` toppers authored pre-lifted by exactly 6.0 mm and 77.5% not**,
+ *     so a lift taken off a mesh would encode that inconsistency.
+ *   - **The thickness is `0` for every catalog record, and that is measured
+ *     rather than deferred.** `catalog.json` carries no height at all: a record
+ *     holds `foot`, `kinds`, `layer` and 14 further fields and not one of them is
+ *     a `y` extent. The only place a height exists is
+ *     `tools/measure/measurements.json`, a dev-tool sidecar — **1,163 measured
+ *     blobs, covering 1,284 of 8,702 records (14.8%)** — and nothing under
+ *     `src/**` reads it. So a record's thickness is not "not yet plumbed"; there
+ *     is nothing to plumb. A piece of no known thickness is **the level it stands
+ *     at**, which is what {@link levelsOverlap} is built around.
+ *   - **A generated base is the one piece with a real height**, because a recipe
+ *     computes one: `HEIGHT` for a base, `z` half-squares for a riser
+ *     (`generator/panel/footprint.ts`). That is why this is an interval and not a
+ *     level comparison — a 50.8 mm riser reaches up through four levels and a
+ *     level test would miss every one of them.
+ *   - **A ghost has no level.** It belongs to no template, so there is no slot
+ *     rule to ask; `level: null` means *every* level, which is the conservative
+ *     direction this module commits to everywhere else — it may report a conflict
+ *     that is not quite there and can never miss one.
+ *
+ * ## What did *not* retire, against A4a's note: the band
+ *
+ * A4a's plan was that {@link planBand} and {@link PlanBand} retire with this
+ * change, the two bands being a two-valued approximation of the interval.
+ * **Measured, they cannot, and the measurement is one line:**
+ * `planCatalogFromFile` is called with no layout rule everywhere in the app
+ * (`screens/builder/BuilderScreen.tsx`), so the rule in force is
+ * `catalog.ts#originSlotLayout` → `ORIGIN_LAYOUT` → **`elevationMm: 0` on every
+ * part of every placement**. Row **B2** authored the real chain,
+ * `template/offsets.ts#slotElevationMm`, and nothing wires it: it takes the
+ * resting part's height as an argument and the only implementation of that
+ * argument was the `baseElevationMm` A4b deleted. `template/index.ts` says as
+ * much outright — *"nothing in the app reads this directory yet"*.
+ *
+ * So under the shipped rule every part is on the ground, every level is the same
+ * level, and an interval test separates nothing. Deleting the band today would
+ * flag a wall standing on a floor — the three junctions of the landing hero's own
+ * chamber included — which is the exact false positive this module exists to
+ * remove. The band therefore stays as what it always was: a **two-valued level
+ * index over tag data**, sound where the elevation rule is silent, and the first
+ * thing to delete when a `SlotLayoutRule` lands that returns a real elevation.
+ * *"is the only thing separating a wall from a floor under the shipped layout
+ * rule"* in `plan.test.ts` pins that dependency so the band cannot be deleted by
+ * accident, and *"separates two stacked instances once the layout rule gives
+ * them elevations"* pins the half that is already live.
  *
  * ## Flag, not prevent
  *
@@ -112,7 +148,7 @@
  *     false negative.
  */
 import type { CatalogRecord } from '@/catalog'
-import { WALL_THICKNESS_UNITS } from '@/catalog'
+import { GRID_UNIT_MM, WALL_THICKNESS_UNITS } from '@/catalog'
 import type { PlacementId } from '@/store'
 
 import type { PlanBox, PlanPart, PlanPoint } from './geometry'
@@ -131,6 +167,18 @@ export type PlanBand = 'area' | 'edge'
  * the normal case for a tiled floor — must not be a conflict.
  */
 const TOUCH_EPS = 1e-6
+
+/**
+ * The same tolerance in millimetres, for the vertical axis.
+ *
+ * `SlotLayout` measures the lift in millimetres and `dx`/`dz` in grid units —
+ * *"the unit is in the name because the two must never be added"* — so the plan
+ * tolerance cannot be reused as it stands. Converted rather than written out, so
+ * that a change to {@link TOUCH_EPS} moves both axes together and the two can
+ * never disagree about what touching means. 2.54e-5 mm, which is the figure
+ * {@link TOUCH_EPS}'s own note quotes.
+ */
+const TOUCH_MM = TOUCH_EPS * GRID_UNIT_MM
 
 /** Kind buckets that mean "this piece fills its square", not "it lines an edge". */
 const AREA_KINDS: readonly string[] = ['floor', 'base', 'stairs', 'riser']
@@ -188,6 +236,12 @@ function isWallThickness(foot: CatalogRecord['foot']): boolean {
  * a failure: an unbucketed piece is treated as filling its square, which is the
  * conservative choice — it will be flagged against other fills rather than
  * silently permitted to stack.
+ *
+ * **A level index, not a height, and that is why row A7 kept it.** The band says
+ * *which* of two levels a piece is on and never how thick it is, so it is not a
+ * second answer to {@link PlanLevel}'s question and cannot disagree with one.
+ * What it is, is the only answer available while `originSlotLayout` is the rule
+ * in force — see the module docblock.
  */
 export function planBand(record: Pick<CatalogRecord, 'foot' | 'kinds'>): PlanBand {
   if (isWallThickness(record.foot)) return 'edge'
@@ -196,9 +250,50 @@ export function planBand(record: Pick<CatalogRecord, 'foot' | 'kinds'>): PlanBan
   return wall && !fills ? 'edge' : 'area'
 }
 
+/**
+ * How much vertical space a piece takes, in millimetres.
+ *
+ * The two numbers have two different provenances and that is the point of
+ * spelling both out rather than storing a single top:
+ *
+ *   - `elevationMm` is `geometry.ts#SlotLayout.elevationMm`, **the project's one
+ *     elevation source** since row A4b deleted the other one. Normalised, never
+ *     read off a mesh.
+ *   - `heightMm` is how far the piece reaches above that, and it is `0` for every
+ *     catalog record because no height for one exists anywhere the app can read.
+ *     See the module docblock for the count.
+ *
+ * A `heightMm` of `0` is not a sentinel and needs no branch of its own in the
+ * callers: a piece of no thickness *is* the level it stands at, and
+ * {@link levelsOverlap} answers for it in the same sentence it answers for a
+ * 50.8 mm riser.
+ */
+export interface PlanLevel {
+  /** The underside, from `SlotLayout.elevationMm`. */
+  readonly elevationMm: number
+  /** How far it reaches above the underside. `0` when nothing knows. */
+  readonly heightMm: number
+}
+
+/** A piece of no known thickness: the level it stands at, and nothing above it. */
+export function levelAt(elevationMm: number): PlanLevel {
+  return { elevationMm, heightMm: 0 }
+}
+
 /** A placement's geometry, reduced to what overlap detection needs. */
 export interface OverlapSubject {
   readonly band: PlanBand
+  /**
+   * The vertical space it takes, or `null` when nothing knows yet.
+   *
+   * `null` is **every** level and not *no* level, which is the only safe reading
+   * of an unknown in this module: the one-directional error the docblock proves
+   * for the plan axis has to hold on the vertical one too, so a subject with no
+   * level is tested against every other and over-reports rather than missing.
+   * The ghost is the case — it belongs to no template, so there is no slot rule
+   * to ask.
+   */
+  readonly level: PlanLevel | null
   /** The exact bounding box of the outline. The reject filter, and it is sound — see above. */
   readonly box: PlanBox
   /**
@@ -237,6 +332,44 @@ export interface OverlapSubject {
  */
 export interface OverlapCandidate extends OverlapSubject {
   readonly id: PlacementId
+}
+
+/**
+ * The top of a level's vertical extent, in millimetres, as an *inclusive* bound.
+ *
+ * Two sentences, and the second is the reason this is a function rather than an
+ * addition at the call site:
+ *
+ *   - A piece with a thickness reaches `elevationMm + heightMm`, and a piece
+ *     resting exactly on that top must not be a conflict — `TOUCH_MM` off the
+ *     top is the vertical spelling of the rule {@link TOUCH_EPS} states for a
+ *     shared face, and a floor resting on a 6 mm base is the case.
+ *   - A piece with no thickness reaches its own underside, so two of them at one
+ *     elevation *do* meet and are a conflict — which is the answer the corpus
+ *     forces, every catalog record having no height at all.
+ *
+ * The two would cancel out if the tolerance were applied to both: subtracting it
+ * from a zero-height level would put its top *below* its own bottom and nothing
+ * would ever collide with anything.
+ */
+function ceilingMm(level: PlanLevel): number {
+  return level.heightMm === 0 ? level.elevationMm : level.elevationMm + level.heightMm - TOUCH_MM
+}
+
+/**
+ * Whether two pieces share vertical space — the test that makes a wall standing
+ * on a floor legal.
+ *
+ * A closed-interval intersection over {@link ceilingMm}, with one deliberate
+ * asymmetry: **a subject with no level at all overlaps every other.** See
+ * {@link OverlapSubject.level} for why the unknown resolves that way rather than
+ * the other.
+ */
+function levelsOverlap(a: OverlapSubject, b: OverlapSubject): boolean {
+  const here = a.level
+  const there = b.level
+  if (here === null || there === null) return true
+  return here.elevationMm <= ceilingMm(there) && there.elevationMm <= ceilingMm(here)
 }
 
 function boxesIntersect(a: PlanBox, b: PlanBox): boolean {
@@ -302,6 +435,26 @@ function longAxis(box: PlanBox): 'x' | 'z' | null {
  * every other sweep). All three therefore fall through to the plain answer: a
  * real shared area is flagged, and merely abutting is not, which is what the
  * `TOUCH_EPS` box reject already gives them.
+ *
+ * ## Row A7 measured whether the interval retires it. It does not.
+ *
+ * The brief's guess was that an exemption existing to excuse a false positive is
+ * dead weight once the false positive is gone. Two measurements say otherwise,
+ * and they point in opposite directions:
+ *
+ *   - **The interval cannot separate a corner.** Two walls meeting at one rest on
+ *     the *same* floor, so they carry the same `elevationMm` and
+ *     {@link levelsOverlap} passes them straight through. Whatever the layout
+ *     rule becomes, a corner stays a same-level pair — so this is the one
+ *     same-level overlap that is legal and it needs its own sentence.
+ *   - **The intra-template mitre B2 warned about is unreachable, so it was never
+ *     this function's to get wrong.** No call path tests two parts of one
+ *     instance against each other: {@link findConflicts} skips same-id pairs,
+ *     `move.ts#previewMove` filters `candidate.id !== drag.id` before it tests
+ *     anything, and `ghost.ts` compares a record that is in no instance at all.
+ *     A template's own five slots therefore never reach a predicate. What this
+ *     exemption does see is two **adjacent** corner templates, which is a
+ *     different case and a real one.
  */
 function isCornerJunction(a: OverlapSubject, b: OverlapSubject): boolean {
   if (a.band !== 'edge' || b.band !== 'edge') return false
@@ -320,9 +473,16 @@ function isCornerJunction(a: OverlapSubject, b: OverlapSubject): boolean {
  *
  * One function rather than two, because a ghost that predicted a conflict the
  * scene then did not report would be worse than either answer on its own.
+ *
+ * Five gates, ordered by cost rather than by importance: a band compare, then
+ * two additions and two compares on the vertical interval, then the exact box
+ * reject, then SAT over the convex parts, then the corner exemption. Only the
+ * last two can cost more than constant time, and neither is reached until the
+ * three cheap ones have all said yes.
  */
 export function subjectsConflict(a: OverlapSubject, b: OverlapSubject): boolean {
   if (a.band !== b.band) return false
+  if (!levelsOverlap(a, b)) return false
   if (!boxesIntersect(a.box, b.box)) return false
   if (!partsOverlap(a.parts, b.parts)) return false
   return !isCornerJunction(a, b)

@@ -521,7 +521,10 @@ function Builder({ index }: { index: CatalogIndex }) {
           assets={index.file.assets}
           onPlace={placeGenerated}
           placeAt={(foot) => {
-            const [x, z] = freeCellFor(scene, foot.footprint)
+            // The height as well as the footprint: `freeCellFor` tests the same
+            // vertical interval the scene's own sweep does, so a riser and a
+            // 6 mm base are free in different cells.
+            const [x, z] = freeCellFor(scene, foot.footprint, foot.heightMm)
             return { x, z }
           }}
         />

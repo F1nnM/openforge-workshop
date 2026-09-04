@@ -135,8 +135,21 @@ function isDuplicate(scene: PlanScene, record: CatalogRecord, anchor: PlanPoint,
  * The ghost as an overlap subject, so the prediction runs through exactly the
  * predicate the scene's conflict pass runs through — corner exemption included.
  */
+/**
+ * The ghost as the collision test sees it.
+ *
+ * **`level: null`, and that is the honest answer rather than a gap.** A level is
+ * `SlotLayout.elevationMm` for the slot a part fills, and a ghost fills no slot:
+ * `usePlanTools` arms a `TileId`, this module takes a bare `CatalogRecord`, and
+ * the family a placement of one would belong to is the gap rows A8 and B4 left
+ * open on purpose (`BuilderScreen.tsx` sets out why there is nothing honest to
+ * pass as the template). So there is no rule to ask for a lift. `overlap.ts`
+ * reads `null` as *every* level, which keeps the prediction on the
+ * over-reporting side of the error — a ghost that hatched where the scene then
+ * did not would be the worse failure.
+ */
 function subjectOf(ghost: Pick<PlanGhost, 'band' | 'box' | 'parts' | 'axisAligned'>): OverlapSubject {
-  return { band: ghost.band, box: ghost.box, parts: ghost.parts, axisAligned: ghost.axisAligned }
+  return { band: ghost.band, level: null, box: ghost.box, parts: ghost.parts, axisAligned: ghost.axisAligned }
 }
 
 /**
@@ -184,8 +197,11 @@ export function computeGhost(
   const geometry = planGeometry(resolved, rotation, anchor[0], anchor[1])
   const band = planBand(record)
   const duplicate = isDuplicate(scene, record, anchor, geometry.angle)
+  // See `subjectOf` for the `null` level: a ghost fills no slot, so no layout
+  // rule can lift it and it is tested against every level.
   const subject: OverlapSubject = {
     band,
+    level: null,
     box: geometry.box,
     parts: geometry.parts,
     axisAligned: geometry.axisAligned,
