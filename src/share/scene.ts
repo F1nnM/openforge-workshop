@@ -1,14 +1,22 @@
 /**
  * What a share link carries: the builder scene, and nothing else.
  *
- * ## An ordered list, not the store's keyed map
+ * ## An ordered list of *id-less* instances, not the store's keyed map
  *
  * `WorkshopState.placements` is a map keyed by `PlacementId`, and PR 5's docblock
- * explains why — a map makes "move the tile being dragged" a single-key write and
- * leaves the door open to collaborative editing. Those keys are UUIDs. Putting
- * them on the wire would cost 16 bytes per placement against the ~6 the placement
- * itself costs, cutting capacity by roughly three quarters to transmit identities
- * that mean nothing outside the browser that generated them.
+ * explains why — a map makes "move the instance being dragged" a single-key write
+ * and leaves the door open to collaborative editing. Those keys are UUIDs.
+ * Putting them on the wire would cost 16 bytes per instance against the **14.7
+ * (arity 3) to 20.9 (arity 5) an instance costs raw** — measured over a
+ * thousand-instance room — so it would nearly double the payload to transmit
+ * identities that mean nothing outside the browser that generated them.
+ *
+ * Row A1 put the id **inside** the record as well, so dropping it is now a
+ * projection rather than merely a choice of container: a shared placement is a
+ * {@link NewTemplateInstance}, which is `Omit<TemplateInstance, 'id'>` and is
+ * exactly what `placeTemplate` takes. That is the type this module hands out in
+ * both directions, so a receiver never constructs an id and an encoder never has
+ * to decide whether to trust one out of a URL.
  *
  * So a shared scene is an **ordered list**, and the receiving app mints fresh ids:
  *
@@ -17,7 +25,7 @@
  * if (decoded.ok) {
  *   clearPlacements()
  *   setLockSystem(decoded.scene.lock)
- *   for (const placement of decoded.scene.placements) placeTile(placement)
+ *   for (const instance of decoded.scene.placements) placeTemplate(instance)
  *   for (const base of decoded.scene.generated) placeGeneratedBase(base)
  * }
  * ```
@@ -57,20 +65,27 @@
  * link cannot carry part of your room" in front of a user for 440 characters of
  * URL, on the shape of scene the generator exists to produce.
  *
- * ## The library is not in the link
+ * ## What a fill carries, and what it deliberately does not
  *
- * `WorkshopState` also holds the library — the items a user kept. A share link is
- * "here is the room I built", not "here is my bookmark list", and the library is
- * the one part of the state that is personal rather than about the artefact.
- * **That is now the whole of the reason**, and the second one this docblock used
- * to give is worth 3× to 14× less than when it was written: it said an entry
- * *"costs a full `TileId`"*, 39 to 183 characters, since a library entry has no
- * placement to amortise an ordinal against. Row V1 re-keyed the library to
- * designs and a `DesignId` is **13 characters flat**, so the cost argument has
- * mostly evaporated — and it could evaporate entirely, since a library entry
- * could travel as its design's address ordinal exactly as a placement does. The
- * decision does not move: it was never about the bytes. JSON export
- * (`src/store/transfer.ts`) is the path that carries everything.
+ * A slot's fill is a **file and one bit** — `{ tile, pinned }`, the store's whole
+ * `SlotFill` — and both halves travel. The `tile` is not optional: D1 makes a
+ * saved room deterministic by naming exact files, so a link that carried only the
+ * template would open as a *different* room for a recipient whose lock preference
+ * differs, which is the failure the lock byte already exists to prevent one level
+ * up.
+ *
+ * `pinned` travels for the reason it is not defaulted in the schema: it is the
+ * difference between "the solver picked this, follow my lock" and "the user chose
+ * this file, leave it alone", and the two disagree for **1,419 of 3,822 items
+ * (37.1%)**. Dropping the bit would be indistinguishable from dropping it *to
+ * `false`* — every deliberate override in the room silently reopened to
+ * re-solving — and one bit per fill is the cheapest field in the format
+ * (`payload.ts` measures the whole column).
+ *
+ * What does **not** travel is anything derived: no resolved assembly, no slot
+ * offsets, no footprint, no bill. `src/store/schema.ts` refuses to persist those
+ * for the same reason, and a link is a weaker place to keep a derived value than
+ * `localStorage` is, not a stronger one.
  *
  * The facet state is likewise absent. `src/search/searchSchema.ts` already encodes
  * that into the **query string**, and this module owns the **fragment**; a link
@@ -81,7 +96,7 @@ import { z } from 'zod'
 
 import { GeneratedBaseId, GeneratedRecipe } from '@/generator/placement/scene'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
-import type { LockSystem, Placement, WorkshopState } from '@/store'
+import type { LockSystem, NewTemplateInstance, WorkshopState } from '@/store'
 import { DEFAULT_LOCK_SYSTEM } from '@/store'
 
 /**
@@ -150,19 +165,27 @@ export interface SharedScene {
    * whose own preference differs.
    */
   readonly lock: LockSystem
-  /** Placements in a stable order. Ids are minted by the receiver — see the module docblock. */
-  readonly placements: readonly Placement[]
+  /**
+   * Template instances in a stable order, each without its id.
+   *
+   * {@link NewTemplateInstance} rather than `TemplateInstance` because the id is
+   * minted by the receiver — see the module docblock — and rather than a shape
+   * of this module's own, because `placeTemplate` takes exactly this and a
+   * second definition of "an instance without its identity" would be one more
+   * thing to keep in step with `schema.ts`.
+   */
+  readonly placements: readonly NewTemplateInstance[]
   /**
    * Generated bases in a stable order, in the same shape the store holds them,
    * so a receiver hands each straight to `placeGeneratedBase`.
    *
    * A second list beside {@link placements} rather than one heterogeneous list,
-   * matching the store's two maps and for the store's stated reason: every
-   * reader of a `Placement` is entitled to keep assuming its identity slot names
-   * one item **in the catalog**. Row V4 changed that slot from a `TileId` to a
-   * `DesignId` and the entitlement is unchanged — a generated base has no design
-   * any more than it has a file, so it is no closer to fitting in that list than
-   * it was.
+   * matching the store's two maps and for the store's stated reason, which row
+   * A1 made the strongest form of: the two populations no longer have the same
+   * *arity*. An instance is a template family with up to five slots, each
+   * holding a file that resolves through the lock preference; a generated base
+   * is one recipe with one footprint and has no slot for any of that. There is
+   * nothing a fill could name in it.
    */
   readonly generated: readonly GeneratedPlacement[]
 }
@@ -174,9 +197,17 @@ export interface SharedScene {
  * headless and testable in a node environment. `Object.values` preserves the map's
  * insertion order, which is placement order, so two shares of one scene produce
  * the same link.
+ *
+ * The rest of each instance travels by **rest destructuring rather than by an
+ * explicit field list**, so a field added to `TemplateInstance` reaches the wire
+ * without an edit here. An explicit projection would compile the day a field is
+ * added and silently drop it, which is exactly the class of loss X9 found in the
+ * generated half. `id` is the one field named, because it is the one that must
+ * not travel.
  */
 export function sharedSceneFromState(state: WorkshopState): SharedScene {
-  return { lock: state.lock, placements: Object.values(state.placements), generated: Object.values(state.generated) }
+  const placements = Object.values(state.placements).map(({ id: _id, ...instance }) => instance)
+  return { lock: state.lock, placements, generated: Object.values(state.generated) }
 }
 
 /** An empty scene at the default lock — what a link with no placements decodes to. */
