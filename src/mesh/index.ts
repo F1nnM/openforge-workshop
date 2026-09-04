@@ -3,10 +3,10 @@
  * geometry `/lod/` would have served if it had ever been uploaded.
  *
  * ```ts
- * import { ensureAggregateMeshes, meshQueue, useMeshQueue } from '@/mesh'
+ * import { ensureSceneMeshes, meshQueue, useMeshQueue } from '@/mesh'
  *
- * // add-to-library, after the state write:
- * void ensureAggregateMeshes(meshQueue(assets), aggregate, { lock })
+ * // the scene warmer, once the fills are known:
+ * void ensureSceneMeshes(meshQueue(assets), tiles, aggregates)
  * ```
  *
  * ## Why the row exists
@@ -44,11 +44,12 @@
  * | `record.ts` | what is stored, what it costs, what gets evicted |
  * | `cache.ts` | IndexedDB |
  * | `queue.ts` | fetch → convert → cache, with all seven states named |
- * | `library.ts` | the tier policy and the call the library action makes |
+ * | `tiers.ts` | the conversion tier policy and the call the scene warmer makes |
  *
  * **Nothing here imports three.js.** That is load-bearing rather than tidy: the
- * conversion is triggered from the library and the palette, screens that must
- * not pull the 411 kB renderer chunk, and the `BufferGeometry` is built later by
+ * conversion is triggered from `src/App.tsx`, which is mounted for every screen
+ * including the landing one and must not pull the 411 kB renderer chunk, and the
+ * `BufferGeometry` is built later by
  * `src/builder/three/loadLod.ts` inside the lazily-loaded 3D chunk from the
  * cached arrays. `boundary.test.ts` asserts it by walking this barrel's static
  * import graph with `tools/boundary/closure.ts`.
@@ -87,25 +88,24 @@ export {
  *
  * It imports `meshoptimizer/simplifier`, 55 kB of wasm-bearing JS, and a value
  * export from this barrel would put it in the entry chunk of every module that
- * writes `from '@/mesh'` — which is the library screen, the palette and the
- * catalog card. The only importer of `convert.ts` is `worker.ts`, which Vite
+ * writes `from '@/mesh'`. The only importer of `convert.ts` is `worker.ts`, which Vite
  * emits as its own chunk. `boundary.test.ts` asserts it, and it does so with a
  * test that failed on the first draft of this file, when `convertStl` was
  * exported from here.
  */
 export type { ConvertedMesh } from './convert'
 
-export type { MeshPlan, MeshPlanOptions } from './library'
+export type { MeshPlan, MeshPlanOptions } from './tiers'
 export {
   LOCK_SYSTEMS,
   MESH_BACKGROUND_BUDGET_BYTES,
-  ensureAggregateMeshes,
-  ensureDesignMeshes,
+  ensureSceneMeshes,
+  lockReachable,
   meshQueue,
-  planAggregateMeshes,
+  planSceneMeshes,
   resetMeshQueue,
   useMeshQueue,
-} from './library'
+} from './tiers'
 
 export type { ConvertRequest, ConvertResponse, ConvertedResponse } from './protocol'
 export { convertRequest, convertedResponse, narrowIndices } from './protocol'
