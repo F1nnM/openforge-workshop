@@ -90,6 +90,54 @@ A median fifty-*tile* room was 1.01x `large`. So the calibrating sentence in the
 and twenty instances now trips a warning the copy calls large. **C4 restates the thresholds in
 parts rather than placements**; A3 deliberately did not recalibrate.
 
+### 4a. Row C4: the 2.58x is an artefact, and the unit is the *file*
+
+**A3's table above models a room in which no two instances share a file.** `DownloadSize.bytes` is
+one copy per distinct md5 — `BillOfTiles.files`, not `parts` and not `placements` — and the dedupe
+is the dominant term rather than a correction. Two rooms over the same 40 recipes, measured through
+the real `buildBillOfTiles` (`assembly.test.ts`, "shows that an instance count does not determine
+the download at all"):
+
+| instances | greedy-solver fills | every slot cycling its candidates |
+| ---: | --- | --- |
+| 20 | 23 files, 235,565,147 B, `ok` | 66 files, 546,609,140 B, `large` |
+| 50 | 36 files, 366,230,378 B, `ok` | 139 files, 1,156,629,241 B, `large` |
+| 100 | 36 files, 366,230,378 B, `ok` | 238 files, 2,173,063,288 B, `huge` |
+| 200 | **36 files, 366,230,378 B, `ok`** | 367 files, 3,905,784,208 B, `huge` |
+
+The left column **saturates** — 40 recipes are the whole vocabulary and a deterministic solver picks
+the same file for the same slot every time, so one instance of each is 112 parts over 36 files and
+366,230,378 B (0.72x `large`) and the two hundredth instance adds 0 bytes. **No scene of
+solver-filled shipped recipes can trip `large` at all.** So the instance count at which `large`
+fires is anywhere between **19** (right column: 63 files, 516,165,775 B) and **never**, and no
+docblock can name one. A3's model is exact while parts and files coincide (66 of each at twenty
+varied instances, its 528 MB 3.4% under the measured 546,609,140 B) and overstates from there: at
+fifty it predicts 1,319,740,600 B against 1,156,629,241 varied (+14.1%) and 366,230,378 solver-filled
+(**3.60x**).
+
+Restated in files, over the **2,990 distinct md5s** the 128 shipped slots admit (37,047,210,327 B
+total, median **11,255,184**, p90 24,415,784, p95 29,292,934):
+
+| | files |
+| --- | ---: |
+| 512 MB at the median admitted file | **45.5** |
+| 2 GB at the median admitted file | **177.7** |
+| 512 MB at p95 | 17.5 |
+
+So the file a builder user actually meets is **11.26 MB — 8.6% larger than the 10.36 MB
+whole-corpus median**, not 2.58x anything. **Neither constant moved**, and 512 MB is not a corpus
+fact at all: it is `download/save.ts#BLOB_FALLBACK_LIMIT_BYTES` to the byte, the point above which a
+browser with no `showSaveFilePicker` (iOS Safari always, plus Firefox and desktop Safari) *refuses*
+the archive and `useArchiveDownload` throws before the first fetch. The `large` verdict is the
+forecast of that refusal, so raising it would give an `ok` reading to a room iOS Safari cannot save.
+What C4 changed is the `large` **sentence**, which said "expect a long transfer" and quoted the
+wrong median.
+
+**One stale docblock is left standing on purpose:** `src/download/save.ts` still derives its own
+512 MB from "fifty placements at the 10.36 MB corpus median". `src/download/**` is ten source files
+with zero edits across this row and its whole contract with `src/assembly` is two type imports;
+whoever next owns that directory should restate that sentence.
+
 ## 5. Every shipped template slot is required (row A3)
 
 `optional` is **absent from all 128 template parts**, so every slot of every one of the 40 shipped
@@ -163,6 +211,51 @@ Two second-order hazards A1 found, both of which cost real time:
 3. **The re-solve has never been measured at scene scale.** A lock toggle costs instances times
    slots solver calls — 250 instances at 5 slots is 1,250 candidate queries, synchronously, on a
    click. Row C2 owns it.
+
+## 10a. What the bill says about a fill, and two facts that do not come back (row C4)
+
+Row A8 deleted three bill surfaces rather than repointing them — `resolutionSummary` /
+`rowResolutionCopy`, `BillRow.autoBaseOnly` and the `base · added` marks, and copy for eight note
+codes — because all three read facts about **a choice the app made**. Nothing chooses and nothing is
+inserted, so none of them has a replacement in kind. What replaced them is the inverse question,
+which rule 0 structurally could not ask: **the scene names the files, so a fill can be wrong.**
+
+- **`billView.ts#slotFaults` + `BillPanel.tsx#SlotFaultBlock`** are that surface. Four kinds over
+  `ResolvedSlotFill.admissible` and the `fill-off-slot` note — `off-slot`, `retired`, `empty`,
+  `no-recipe` — each naming the recipe, the slot and the grid cell, with a Remove action. Before it,
+  `fill-off-slot` reached the user only as a rolled-up note saying *how many* slots were wrong and
+  nothing about which. Two tones, split on `SlotFault.blocksDownload`, which is §7's line where the
+  user meets it: an empty or retired slot refuses the download, an inadmissible fill prints and does
+  not fit.
+- **`BillLine.slots` had zero consumers until this row.** A3 added it as the per-ask provenance
+  because `tileIds` is one id per catalog path and cannot tell two askers of one path from one.
+  `billView.ts#slotsAsking` is its first reader: a `×2` row now names the two slots that asked.
+  **`ATTRIBUTION.csv` still does not use it** — `download/plan.ts:319` copies `line.tileIds` into
+  `ArchiveFileEntry.tileIds` and `download/attribution.ts:101` writes it as `catalogPaths`, exactly
+  the pre-A3 provenance. Not fixed here: `src/download/**` is ten source files with zero edits and
+  its whole contract with `src/assembly` is two type imports. It is a provenance gap in the archive,
+  not an arithmetic error — the counts are right.
+- **`unknown-joinery` does not come back, measured.** It was the only surface for the records with no
+  `connection|` tag anywhere: **351 of the 8,702**. Reached through the recipes it is almost nothing
+  — of the **14,241 (slot, candidate) pairs** the 128 shipped slots admit, **15** name such a record,
+  over **15 of the 2,990 distinct md5s** admitted (0.11% of pairs, 0.50% of files). A fourth `warn`
+  beside `slot-unfilled` and `fill-off-slot` for a population that size would be loud and almost
+  never true. A joinery-less *candidate* is a fact about the pool a slot offers, so it belongs where
+  the pool is — row **C3**'s editor, beside `baseGap` — not in a bill written after the fills are
+  chosen.
+- **`baseMatch.ts#baseGap` stays, and "computing into nothing" is the wrong description.** It is a
+  pure classification of the *archive* with no bill caller by design; `@/assembly` exports it for the
+  fill-time surfaces C2 and C3 will build, and `generator/placement/corpus.test.ts` plus
+  `assembly/assembly.test.ts` both assert its 86 / 31 / 260 split against the live archive. Deleting
+  it would delete the answer those rows need before either has asked. It also lives in `baseMatch.ts`,
+  which is not in C4's file ownership at all.
+- **`BillPanel`'s heading was stale by a noun and the panel had two nouns for two things.** It read
+  `{n} tiles placed` for a count of template *instances*, understating the print by a factor of three
+  and reading as a count of files. It is `{n} pieces placed` now, over an **unconditional** subline
+  giving parts and files — it used to render only when `parts > placements`, which hid the part count
+  for every one-part scene and for every scene whose instances have holes in them, which is when a
+  reader most needs both. In the same pass the four `noteCopy` codes that count *fills* moved off
+  "piece" onto "file", so the two nouns no longer overlap.
 
 ## 11. Operational notes
 

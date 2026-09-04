@@ -17,8 +17,11 @@
  *      produced it. Row A3 sharpens that; see {@link BillLine.slots}.
  *
  *   2. **Size is a warning surface, not a footnote.** Corpus median is 10.36 MB,
- *      p95 32.87 MB, largest 108.9 MB. See {@link DOWNLOAD_LARGE_BYTES} for what
- *      row A3 measured about the two thresholds and why it did not move them.
+ *      p95 32.89 MB, largest 108.9 MB; the median file the 40 shipped recipes
+ *      admit is 11.26 MB. See {@link DOWNLOAD_LARGE_BYTES} for both thresholds
+ *      restated in the one unit that governs them — the distinct file — and for
+ *      why row A3's "stale by 2.58x" was an artefact of leaving the md5 dedupe
+ *      out of the arithmetic.
  *
  *   3. **Filename collisions are surfaced, not resolved silently.** 89 filenames
  *      map to two or three genuinely different meshes — `tudor#door+narrow.stl`
@@ -58,46 +61,88 @@ import { resolveInstance } from './resolve'
 /**
  * Where the download verdict changes, in bytes.
  *
- * Both numbers came from the corpus rather than from round-number instinct:
+ * **The unit is one distinct file, and that is row C4's correction.** Both
+ * numbers were calibrated on *"fifty placements at the 10.36 MB corpus median"*,
+ * a placement is now a template instance of three to five slots, and row A3
+ * concluded from that arithmetic that the thresholds were stale by 2.58x. They
+ * are not. {@link DownloadSize.bytes} is *"one copy per distinct md5, never per
+ * part"* — {@link BillOfTiles.files}, not {@link BillOfTiles.parts} and not
+ * {@link BillOfTiles.placements} — so the only unit either threshold can be
+ * stated in is the distinct file, and neither of the other two determines it.
  *
- *   - **512 MB — `large`.** Fifty placements at the 10.36 MB median is 518 MB,
- *     so a median fifty-tile room trips this and a median twenty-tile room does
- *     not.
- *   - **2 GB — `huge`.** Fifty placements at the p95 of 32.87 MB is 1.64 GB, and
- *     §11 reserves the Cloudflare Worker fallback for "iOS Safari and multi-GB
- *     rooms".
- *
- * Both are **decimal**, not binary, and that is not sloppiness: every corpus
- * size figure the plan quotes is decimal (10.36 MB median, 108.0 GB total), and
- * a 512 MiB threshold would put the median fifty-tile room *under* the line the
- * median fifty-tile room is supposed to be the reason for.
- *
- * ## Row A3 invalidated the calibration and deliberately did not move it
- *
- * Both thresholds are calibrated on *"fifty placements at the corpus median
- * file"*, and **a placement is no longer one file**. Measured on the live corpus
- * over the 40 shipped templates, taking the median-sized candidate for each
- * declared slot:
+ * Measured over the live corpus and the 40 shipped templates, taking every
+ * distinct md5 any of the 128 declared slots admits:
  *
  * | | files | bytes |
  * | --- | ---: | ---: |
- * | one instance, median | 3 | 26,394,812 |
- * | one instance, min / max | 3 / 5 | 10,019,059 / 44,321,212 |
- * | **fifty instances, median** | **150** | **1,319,740,600** |
+ * | distinct md5s the 128 slots admit | 2,990 | 37,047,210,327 |
+ * | median one of them | 1 | 11,255,184 |
+ * | p90 / p95 | 1 | 24,415,784 / 29,292,934 |
+ * | **512 MB** | **45.5** | — |
+ * | **2 GB** | **177.7** | — |
  *
- * So a median fifty-instance room is **2.58x the `large` threshold and 66% of
- * the `huge` one**, where a median fifty-*tile* room was 1.01x and 26%. The
- * sentence "fifty placements at the median trips `large` and twenty does not" is
- * now false: **twenty instances is 528 MB and trips it too**, and the number of
- * instances that fits under 2 GB is about 75 rather than 193.
+ * So the file a builder user actually meets is **11.26 MB, 8.6% larger than the
+ * 10.36 MB whole-corpus median** — not 2.58x anything. Restated in the unit that
+ * governs them, the two thresholds are **about fifty distinct files** and **about
+ * a hundred and eighty**, and both readings survived the change of what a
+ * placement is.
  *
- * Restating the thresholds is **row C4's**, and it is flagged rather than done
- * here for a reason A3 can see and C4 owns: the figures above are before the md5
- * dedupe, and they take the *median* candidate rather than the one a solver
- * picks, so the honest recalibration needs the solver row C2 has not shipped
- * yet. Moving them on this row's numbers would be swapping a stale calibration
- * for a differently stale one, and burying the fact that a placement changed
- * size.
+ * ## Why an instance count cannot appear here at all
+ *
+ * A3's model multiplies a median candidate per slot by the number of instances
+ * and never dedupes, and the dedupe is the dominant term rather than a
+ * correction. Two rooms built from the same 40 recipes, measured through
+ * {@link buildBillOfTiles}:
+ *
+ * | instances | greedy-solver fills | every slot cycling its candidates |
+ * | ---: | --- | --- |
+ * | 20 | 23 files, 235,565,147 B, `ok` | 66 files, 546,609,140 B, `large` |
+ * | 50 | 36 files, 366,230,378 B, `ok` | 139 files, 1,156,629,241 B, `large` |
+ * | 100 | 36 files, 366,230,378 B, `ok` | 238 files, 2,173,063,288 B, `huge` |
+ * | 200 | **36 files, 366,230,378 B, `ok`** | 367 files, 3,905,784,208 B, `huge` |
+ *
+ * The left column **saturates**: 40 recipes are the whole vocabulary and a
+ * deterministic solver picks the same file for the same slot every time, so one
+ * instance of each is 112 parts over 36 files and 366,230,378 B — 0.72x `large` —
+ * and the two hundredth instance adds 0 bytes. **No scene of solver-filled
+ * shipped recipes can trip `large` at all.** In the right column `large` first
+ * fires at **19 instances / 63 files / 516,165,775 B** and `huge` at **90
+ * instances / 220 files / 2,032,018,037 B**.
+ *
+ * So the instance count at which `large` fires is anywhere between **19 and
+ * never**, which is why the docblock cannot name one. A3's own figure is exact
+ * while parts and files coincide — 66 of each at twenty varied instances, where
+ * its predicted 528 MB is 3.4% under the measured 546,609,140 B — and overstates
+ * from there: at fifty it predicts
+ * 1,319,740,600 B against a measured 1,156,629,241 varied (+14.1%) and
+ * 366,230,378 solver-filled (**3.60x**).
+ *
+ * ## Neither number moves, and neither is a corpus fact
+ *
+ *   - **512 MB — `large`.** It is `download/save.ts#BLOB_FALLBACK_LIMIT_BYTES` to
+ *     the byte, and that is a **refusal**: every browser with no
+ *     `showSaveFilePicker` — iOS Safari always, plus Firefox and desktop Safari —
+ *     buffers the whole archive to a `Blob`, and above this figure
+ *     `useArchiveDownload` throws `ArchiveTooLargeToBufferError` before the first
+ *     fetch. The warning is the forecast of that failure, so moving it either way
+ *     would decouple the two: raise it and a room iOS Safari cannot save reads
+ *     `ok`, lower it and the bill cries off a download that would have worked.
+ *     That it also came out near "fifty placements at the median" is a
+ *     coincidence the old docblock mistook for a derivation.
+ *   - **2 GB — `huge`.** §11 reserves the Cloudflare Worker fallback for "iOS
+ *     Safari and multi-GB rooms", and this is a transport judgement about one
+ *     browser download finishing rather than a fact about tiles. In files it is
+ *     ~178 median ones, and the measured crossing above is 220.
+ *
+ * Both are **decimal**, not binary. Every corpus size figure the plan quotes is
+ * decimal (10.36 MB median, 108.0 GB total), `save.ts` spells its limit as
+ * `512_000_000`, and a 512 MiB warning threshold would sit 7% above a
+ * 512,000,000-byte refusal — the bill would read `ok` for an archive the browser
+ * has already declined.
+ *
+ * `src/assembly/assembly.test.ts` recomputes every figure above against
+ * `public/catalog/catalog.json` rather than restating it, so a corpus rebuild
+ * that moved any of them fails the suite.
  */
 export const DOWNLOAD_LARGE_BYTES = 512_000_000
 export const DOWNLOAD_HUGE_BYTES = 2_000_000_000

@@ -72,6 +72,7 @@ import type { LockSystem, PlacementId, SlotName, TemplateId, TemplateInstance } 
 import type { AssemblyIndex, PrintOption } from './assemblyIndex'
 import { PRINT_OPTIONS, buildAssemblyIndex, printOption } from './assemblyIndex'
 import { MATCH_WEIGHTS, baseGap, matchBase, rankBases } from './baseMatch'
+import type { BillOfTiles } from './bill'
 import { DOWNLOAD_HUGE_BYTES, DOWNLOAD_LARGE_BYTES, buildBillOfTiles, downloadSize } from './bill'
 import { footprintKey } from './footprint'
 import { NOTE_SEVERITY, rollUpNotes } from './notes'
@@ -484,32 +485,66 @@ describe('download verdict', () => {
     expect(downloadSize(DOWNLOAD_HUGE_BYTES).verdict).toBe('huge')
   })
 
-  it('fires `large` on a median fifty-tile room, and not on a median twenty-tile one', () => {
-    // The calibration as it stands, asserted so that row C4 changing it is a
-    // decision rather than a drift.
-    const medianBytes = 10.36 * 1000 * 1000
-    expect(downloadSize(50 * medianBytes).verdict).toBe('large')
-    expect(downloadSize(20 * medianBytes).verdict).toBe('ok')
+  it('is stated in distinct files, which is the only unit `bytes` is a sum over', () => {
+    // **Row C4's restatement.** `DownloadSize.bytes` is one copy per distinct
+    // md5, so neither a placement count nor a part count determines it: the
+    // thresholds can only be read in files. At the 11,255,184 B median file the
+    // 40 shipped recipes admit — measured in the corpus block below — `large` is
+    // about fifty of them and `huge` about a hundred and eighty.
+    const medianAdmitted = 11_255_184
+    expect(DOWNLOAD_LARGE_BYTES / medianAdmitted).toBeCloseTo(45.5, 1)
+    expect(DOWNLOAD_HUGE_BYTES / medianAdmitted).toBeCloseTo(177.7, 1)
+    expect(downloadSize(45 * medianAdmitted).verdict).toBe('ok')
+    expect(downloadSize(46 * medianAdmitted).verdict).toBe('large')
+    expect(downloadSize(178 * medianAdmitted).verdict).toBe('huge')
   })
 
-  it('records that a template instance breaks that calibration — row C4 owns the restatement', () => {
-    // Hazard 8, as a test rather than as a comment, because the figure is the
-    // reason somebody has to look. Both thresholds are calibrated on "fifty
-    // placements at the 10.36 MB corpus median file", and a placement is no
-    // longer one file: the corpus block below measures one median-filled
-    // instance at 26,394,812 B over 3 files.
+  it('keeps `large` on the byte the buffering fallback refuses at', () => {
+    // The reason row C4 restated the thresholds rather than moving them, and it
+    // is not a corpus fact. `download/save.ts#BLOB_FALLBACK_LIMIT_BYTES` is
+    // 512_000_000 and it is a *refusal*: a browser with no `showSaveFilePicker`
+    // — iOS Safari always, plus Firefox and desktop Safari — buffers the whole
+    // archive to a `Blob`, and `useArchiveDownload` throws
+    // `ArchiveTooLargeToBufferError` above this figure before the first fetch.
+    // The `large` verdict is the forecast of that failure, so the two have to be
+    // the same number: raise it and a room iOS Safari cannot save reads `ok`,
+    // lower it and the bill cries off a download that would have worked.
     //
-    // Row A3 deliberately does not recalibrate — see `bill.ts`'s docblock — so
-    // what is pinned here is the *consequence*, which is that the sentence in the
-    // test above stops being true of instances.
-    const medianInstanceBytes = 26_394_812
-    expect(downloadSize(50 * medianInstanceBytes).verdict).toBe('large')
-    expect((50 * medianInstanceBytes) / DOWNLOAD_LARGE_BYTES).toBeCloseTo(2.58, 2)
-    // Twenty instances trips `large` too, where twenty median tiles did not.
-    expect(downloadSize(20 * medianInstanceBytes).verdict).toBe('large')
-    // And it is still short of `huge`, so the verdict does not simply saturate.
-    expect(downloadSize(50 * medianInstanceBytes).verdict).not.toBe('huge')
-    expect((50 * medianInstanceBytes) / DOWNLOAD_HUGE_BYTES).toBeCloseTo(0.66, 2)
+    // Asserted by value rather than by importing `@/download`'s constant, for
+    // two reasons that agree. `save.ts` refuses to import this one because they
+    // are the same number for different reasons and a single symbol would let a
+    // change to the warning move the refusal; and `src/download`'s whole contract
+    // with this directory is two *type* imports, which a test reaching the other
+    // way for a value would be the first crack in.
+    const blobFallbackLimit = 512_000_000
+    expect(DOWNLOAD_LARGE_BYTES).toBe(blobFallbackLimit)
+    expect(downloadSize(blobFallbackLimit).verdict).toBe('large')
+    expect(downloadSize(blobFallbackLimit - 1).verdict).toBe('ok')
+  })
+
+  it('refutes A3’s per-instance calibration: an instance count does not determine bytes', () => {
+    // Row A3 read its own figure — one median-filled instance at 26,394,812 B
+    // over about three files — as making both thresholds stale by 2.58x, and
+    // **that is an artefact of leaving the md5 dedupe out of the arithmetic.**
+    // The corpus block below measures two rooms built from the same 40 recipes:
+    // solver-filled, 200 instances are the same 36 files and the same
+    // 366,230,378 B as 50, so no such room reaches `large` at all; with every
+    // slot cycling its candidates, `large` first fires at 19 instances.
+    //
+    // So the instance count at which `large` fires is between 19 and never, and
+    // this is the arithmetic half of that — A3's model is exact while parts and
+    // files coincide and overstates once they diverge.
+    const a3PerInstance = 26_394_812
+    expect(downloadSize(a3PerInstance * 50).verdict).toBe('large')
+    expect((a3PerInstance * 50) / DOWNLOAD_LARGE_BYTES).toBeCloseTo(2.58, 2)
+    // Against the measured rooms: 14.1% over the maximally varied fifty, 3.60x
+    // over the solver-filled fifty.
+    expect((a3PerInstance * 50) / 1_156_629_241).toBeCloseTo(1.141, 3)
+    expect((a3PerInstance * 50) / 366_230_378).toBeCloseTo(3.6, 2)
+    // And the solver-filled room the thresholds are supposed to be about is 0.72x
+    // `large`, so it is not merely under the line — it cannot reach it.
+    expect(downloadSize(366_230_378).verdict).toBe('ok')
+    expect(366_230_378 / DOWNLOAD_LARGE_BYTES).toBeCloseTo(0.72, 2)
   })
 })
 
@@ -2012,6 +2047,52 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
     }
   }
 
+  /**
+   * Fill every slot from a **different** candidate than the instance before it.
+   *
+   * The other extreme from {@link defaultFilled}, and row C4 needs both: a
+   * deterministic solver picks one file per slot for ever, so a room of it
+   * saturates and no instance count reaches `large`; a user varying every slot
+   * shares no file with the instance beside it, and that is the room A3's
+   * dedupe-free arithmetic was implicitly modelling. Neither is *the* room —
+   * which is the finding.
+   *
+   * Walked in declared order like {@link defaultFilled}, so each slot is
+   * narrowed by the ones already picked, and `at` indexes into the surviving
+   * candidate list modulo its length so the walk never falls off a short one.
+   */
+  function variedFilled(template: AssemblyTemplate, at: number): TemplateInstance {
+    const fills: Record<string, { tile: TileId; pinned: boolean }> = {}
+    const siblings: { partName: string; tags: readonly string[] }[] = []
+    for (const part of template.parts) {
+      const candidates = composition.candidatesFor(resolveSlotTags(part.tags, template.tags, siblings))
+      if (candidates.tiles.length === 0) continue
+      const chosen = candidates.tiles[at % candidates.tiles.length] as TileId
+      fills[part.name] = { tile: chosen, pinned: true }
+      siblings.push({ partName: part.name, tags: composition.tagsOf(chosen) })
+    }
+    return {
+      id: `v${String(at)}` as PlacementId,
+      template: template.id as TemplateId,
+      x: at % 10,
+      z: Math.floor(at / 10),
+      rotation: 0,
+      fills,
+    }
+  }
+
+  /** The middle value, low side on an even count — every distribution below. */
+  function median(values: readonly number[]): number {
+    const sorted = [...values].sort((a, b) => a - b)
+    return sorted[Math.floor(sorted.length / 2)] ?? 0
+  }
+
+  /** The value at a fraction of the sorted distribution, clamped to the last. */
+  function percentile(values: readonly number[], fraction: number): number {
+    const sorted = [...values].sort((a, b) => a - b)
+    return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0
+  }
+
   it('ships 40 recipes over 128 parts, and six distinct slot names', () => {
     expect(templates).toHaveLength(40)
     const parts = templates.flatMap((template) => template.parts)
@@ -2178,18 +2259,121 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
     expect(ranked).toBe(24)
   })
 
-  it('measures what one instance costs, which is row C4’s number', () => {
-    // Hazard 8, measured rather than asserted from the plan. `downloadSize`'s
-    // two thresholds are calibrated on "fifty placements at the 10.36 MB corpus
-    // median file", and a placement is no longer one file.
-    //
-    // Taking the **median-sized candidate** for each declared slot rather than
-    // the solver's pick, because the solver is row C2's and does not exist yet —
-    // which is also why row A3 flags the recalibration instead of doing it.
-    const median = (values: readonly number[]): number => {
-      const sorted = [...values].sort((a, b) => a - b)
-      return sorted[Math.floor(sorted.length / 2)] ?? 0
+  it('measures the median distinct file the 40 recipes admit — row C4’s unit', () => {
+    // **The restatement, computed rather than quoted.** `DownloadSize.bytes` is
+    // one copy per distinct md5, so the only unit either threshold can be stated
+    // in is the distinct file — not the placement it was calibrated on, and not
+    // the part either, since a part that repeats costs nothing.
+    const admitted = new Map<string, CatalogRecord>()
+    for (const template of templates) {
+      for (const part of template.parts) {
+        for (const tile of composition.candidatesFor(resolveSlotTags(part.tags, template.tags, [])).tiles) {
+          const record = index.byId.get(tile)
+          if (record !== undefined && !admitted.has(record.blob)) admitted.set(record.blob, record)
+        }
+      }
     }
+    const bytes = [...admitted.values()].map((record) => record.bytes)
+
+    expect(admitted.size).toBe(2990)
+    expect(bytes.reduce((sum, value) => sum + value, 0)).toBe(37_047_210_327)
+    expect(median(bytes)).toBe(11_255_184)
+    expect(percentile(bytes, 0.9)).toBe(24_415_784)
+    expect(percentile(bytes, 0.95)).toBe(29_292_934)
+    expect(Math.max(...bytes)).toBe(108_912_184)
+
+    // The file a builder user actually meets is **8.6% larger** than the
+    // whole-corpus median, not 2.58x anything — which is the first half of why
+    // row C4 restated the thresholds instead of moving them.
+    expect(median(records.map((record) => record.bytes))).toBe(10_364_884)
+    expect(median(bytes) / median(records.map((record) => record.bytes))).toBeCloseTo(1.086, 3)
+
+    // Both thresholds, in files.
+    expect(DOWNLOAD_LARGE_BYTES / median(bytes)).toBeCloseTo(45.5, 1)
+    expect(DOWNLOAD_HUGE_BYTES / median(bytes)).toBeCloseTo(177.7, 1)
+    expect(DOWNLOAD_LARGE_BYTES / percentile(bytes, 0.95)).toBeCloseTo(17.5, 1)
+  })
+
+  it('shows that an instance count does not determine the download at all', () => {
+    // **The second half, and the refutation of A3's 2.58x.** A3 multiplied a
+    // median candidate per slot by the number of instances and never deduped,
+    // and the dedupe is the dominant term rather than a correction. Two rooms
+    // over the same 40 recipes, through the real `buildBillOfTiles`:
+    //
+    //   - `defaultFilled` is the greedy solver stand-in, so it picks the same
+    //     file for the same slot every time. 40 recipes are the whole vocabulary,
+    //     so the room **saturates**: one instance of each is 112 parts over 36
+    //     files, and the two hundredth instance adds 0 bytes. No such room can
+    //     reach `large`.
+    //   - `variedFilled` cycles each slot's candidate list, so no two instances
+    //     share a fill until the sets run out. That is the other extreme, and it
+    //     trips `large` at 19 instances.
+    //
+    // So the instance count at which `large` fires is between **19 and never**,
+    // and `bill.ts`'s docblock names neither.
+    const solver = (n: number): BillOfTiles =>
+      buildBillOfTiles(
+        Array.from({ length: n }, (_, at) => defaultFilled(templates[at % templates.length] as AssemblyTemplate, at)),
+        index,
+        context,
+      )
+
+    const twenty = solver(20)
+    expect([twenty.files, twenty.download.bytes, twenty.download.verdict]).toEqual([23, 235_565_147, 'ok'])
+    for (const n of [50, 100, 200]) {
+      const room = solver(n)
+      expect([room.files, room.download.bytes, room.download.verdict], `n=${String(n)}`).toEqual([
+        36,
+        366_230_378,
+        'ok',
+      ])
+    }
+    // 0.72x `large`, and it is a ceiling rather than a reading: the parts keep
+    // growing and the files do not.
+    expect(solver(200).parts).toBe(560)
+    expect(366_230_378 / DOWNLOAD_LARGE_BYTES).toBeCloseTo(0.72, 2)
+
+    const varied = (n: number): BillOfTiles =>
+      buildBillOfTiles(
+        Array.from({ length: n }, (_, at) => variedFilled(templates[at % templates.length] as AssemblyTemplate, at)),
+        index,
+        context,
+      )
+
+    // Parts and files coincide up to twenty instances, which is exactly the range
+    // A3's dedupe-free model is right over — its predicted 528 MB is 3.4% *below*
+    // the measurement there, because it takes the median candidate per slot and
+    // the varied walk takes each slot's candidates in turn.
+    const twentyVaried = varied(20)
+    expect([twentyVaried.parts, twentyVaried.files]).toEqual([66, 66])
+    expect([twentyVaried.download.bytes, twentyVaried.download.verdict]).toEqual([546_609_140, 'large'])
+    expect((26_394_812 * 20) / twentyVaried.download.bytes).toBeCloseTo(0.966, 3)
+
+    // And they diverge from there, which is where the model starts overstating.
+    const fiftyVaried = varied(50)
+    expect([fiftyVaried.parts, fiftyVaried.files]).toEqual([161, 139])
+    expect([fiftyVaried.download.bytes, fiftyVaried.download.verdict]).toEqual([1_156_629_241, 'large'])
+    expect((26_394_812 * 50) / fiftyVaried.download.bytes).toBeCloseTo(1.141, 3)
+
+    // The two crossings, in files, which is the unit the thresholds are stated in.
+    const nineteen = varied(19)
+    expect([nineteen.files, nineteen.download.bytes, nineteen.download.verdict]).toEqual([
+      63,
+      516_165_775,
+      'large',
+    ])
+    expect(varied(18).download.verdict).toBe('ok')
+    const ninety = varied(90)
+    expect([ninety.files, ninety.download.bytes, ninety.download.verdict]).toEqual([220, 2_032_018_037, 'huge'])
+    expect(varied(89).download.verdict).toBe('large')
+  })
+
+  it('measures what one instance costs, and why it is not the threshold’s unit', () => {
+    // A3's figure, kept because it is a true fact about an instance and is quoted
+    // in `BillPanel.tsx`: taking the median-sized candidate for each declared
+    // slot, one instance is 26,394,812 B over 3 files. What row C4 removed is the
+    // *inference* from it — see the test above — because multiplying it by an
+    // instance count models a room in which no two instances share a file.
     const perInstance = templates.map((template) => {
       let bytes = 0
       for (const part of template.parts) {
@@ -2199,23 +2383,17 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
       return bytes
     })
 
-    expect(median(records.map((record) => record.bytes))).toBe(10_364_884)
     expect(median(perInstance)).toBe(26_394_812)
     expect(Math.min(...perInstance)).toBe(10_019_059)
     expect(Math.max(...perInstance)).toBe(44_321_212)
 
-    // Fifty instances is 1.32 GB over ~150 files, against the 518 MB the
-    // thresholds were set for: **2.58x the `large` line**, where a median
-    // fifty-*tile* room was 1.01x. Row A3 does not move the thresholds — the
-    // figure is before md5 dedupe and takes the median candidate rather than the
-    // solver's — and `bill.ts` carries the flag.
-    const fifty = median(perInstance) * 50
-    expect(fifty).toBe(1_319_740_600)
-    expect(fifty / DOWNLOAD_LARGE_BYTES).toBeCloseTo(2.58, 2)
-    expect(downloadSize(fifty).verdict).toBe('large')
-    // Twenty instances already trips it, where twenty median tiles did not.
-    expect(downloadSize(median(perInstance) * 20).verdict).toBe('large')
-    expect(downloadSize(10_364_884 * 20).verdict).toBe('ok')
+    // The solver's own pick, for comparison: 17,747,318 B median over 3 parts,
+    // which is 33% below the median-candidate model before any dedupe at all.
+    const solved = templates.map((template, at) =>
+      buildBillOfTiles([defaultFilled(template, at)], index, context),
+    )
+    expect(median(solved.map((bill) => bill.download.bytes))).toBe(17_747_318)
+    expect(median(solved.map((bill) => bill.parts))).toBe(3)
   })
 
   const records = file.records
