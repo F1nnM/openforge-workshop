@@ -21,43 +21,72 @@
  *      sentence about the *class* of problem, and — for the ones that matter —
  *      what the user should do about it.
  *
- * ## What row A3 deleted from this module, and what row A8 could not replace
+ * ## What row A3 deleted from this module, and what row C4 put in its place
  *
- * Three surfaces are gone rather than repointed, because the facts they reported
- * are no longer computed anywhere:
+ * Three surfaces went rather than being repointed, because the facts they
+ * reported are no longer computed anywhere. **One replacement covers the first
+ * and third of them, and it is {@link slotFaults}.**
  *
  *   - **`resolutionSummary` and `rowResolutionCopy`.** Both read
  *     `ResolvedPlacement.resolution`, a `VariantResolution` carrying a verdict,
  *     a variant count and an option tie. Rule 0 produced it: a placement named a
  *     *design* and the resolver chose the file. A fill names an exact **file**
  *     (decision D1), so nothing chooses at resolution time and there is no
- *     verdict to disclose — the user or row C2's solver put the file there. The
- *     seven `PlacementVerdict`s and their copy went with the type, including the
- *     `unknown-joinery` mark that was the only surface for the 93 items with no
- *     joinery tag anywhere. **Row C4 owns what the bill discloses about a fill**,
- *     and `ResolvedSlotFill.admissible` plus the `fill-off-slot` note are the
- *     facts it has to work from.
+ *     verdict to disclose — the user or row C2's solver put the file there.
+ *     What arrived instead is the opposite question: not *which file did the app
+ *     pick*, but **is the file the scene names wrong**, which rule 0
+ *     structurally could not ask. {@link slotFaults} is that surface, over
+ *     `ResolvedSlotFill.admissible` and the `fill-off-slot` note.
  *   - **`BillRow.autoBaseOnly` and the `base · added` marks.** They read
  *     `BillLine.baseQuantity`, which counted the copies rule 1 inserted. Nothing
  *     inserts a base: a template declares one as an ordinary slot, so every copy
  *     in the bill is a copy the scene asked for and a mark saying otherwise would
- *     be false for the whole corpus.
+ *     be false for the whole corpus. **Nothing replaces it** — a quantity above
+ *     one is now legitimate (contract C-c) and needs no mark. What it *does* need
+ *     is provenance, and {@link BillLine.slots} is where that lives; see
+ *     {@link slotsAsking}.
  *   - **Copy for eight note codes.** `no-matching-base`, `no-congruent-base`,
  *     `base-unmatchable`, `base-auto-inserted`, `base-already-on-plan`,
  *     `base-option-chosen`, `base-lock-mismatch` and `base-texture-mismatch` left
- *     `NoteCode` with rule 1. The archive's base gap is still a fact —
- *     `assembly/baseMatch.ts#baseGap` measures it at 86 / 31 / 260 over 4,363
- *     toppers — but **no bill can emit one**, so the copy had no reachable caller
- *     and `noteCopy` would have gone on rendering three paragraphs the panel can
- *     never be handed. `unknown-template`, `slot-unfilled` and `fill-off-slot`
- *     arrived in their place and are written below.
+ *     `NoteCode` with rule 1. See {@link noteCopy} on where the archive's base
+ *     gap went instead.
+ *
+ * ## Two facts A3 named as losses, and what row C4 decided about each
+ *
+ *   - **`unknown-joinery` does not come back, and the measurement is the
+ *     reason.** It was the only surface for the items with no `connection|` tag
+ *     anywhere — 351 of the 8,702 live records. Reached through the recipes it is
+ *     almost nothing: of the **14,241 (slot, candidate) pairs** the 128 shipped
+ *     template slots admit, **15 name such a record**, over **15 of the 2,990
+ *     distinct md5s** admitted (0.11% of the pairs, 0.50% of the files). A fourth
+ *     `warn` competing with `slot-unfilled` and `fill-off-slot` for a population
+ *     that size is the wallpaper trade `notes.ts` refuses in the other direction
+ *     for `build-unspecified`, and worse: it would be loud and almost never true.
+ *     A joinery-less *candidate* is a fact about the pool a slot offers, so it
+ *     belongs where the pool is — row **C3**'s slot editor — beside `baseGap`,
+ *     and not in a bill written after the fills are chosen.
+ *   - **`assembly/baseMatch.ts#baseGap` stays.** It is not computing into
+ *     nothing: it is a pure classification of the *archive* with no bill caller
+ *     by design, `@/assembly` exports it for the fill-time surfaces that do want
+ *     it, and `src/generator/placement/corpus.test.ts` and
+ *     `assembly/assembly.test.ts` both assert its 86 / 31 / 260 split against the
+ *     live corpus. Deleting it would delete the answer C2 and C3 need before
+ *     either has asked for it.
  *
  * Pure, DOM-free and store-free: it takes the bill and a snapshot of the
  * placements map, and returns data.
  */
-import type { BillLine, BillNote, BillOfTiles, DownloadSize, NoteCode } from '@/assembly'
-import type { BlobId } from '@/catalog'
-import type { PlacementId, TemplateInstance } from '@/store'
+import type {
+  BillLine,
+  BillNote,
+  BillOfTiles,
+  DownloadSize,
+  NoteCode,
+  ResolvedInstance,
+  ResolvedSlotFill,
+} from '@/assembly'
+import type { BlobId, CatalogRecord, TileId } from '@/catalog'
+import type { PlacementId, SlotName, TemplateInstance } from '@/store'
 import { countLabel } from '@/screens/catalog'
 
 /* --------------------------------------------------------------- inventory */
@@ -188,6 +217,206 @@ function byCopiesThenName(a: BillRow, b: BillRow): number {
   return a.line.blob < b.line.blob ? -1 : 1
 }
 
+/**
+ * Which slots of one instance asked for one line's file.
+ *
+ * **The first consumer of {@link BillLine.slots}, and the field was added for
+ * exactly this.** A line's `quantity` counts every part occurrence, so two slots
+ * of one instance resolving to the same md5 give a quantity of 2 with a single
+ * entry in `tileIds` — arithmetically right and silent about who asked. Row A3
+ * added the per-ask provenance and nothing rendered it, so a `×2` on a row with
+ * one placement under it was a number a user could not account for.
+ *
+ * Sorted already by `bill.ts#bySlotRef`, so this filters and does not reorder.
+ */
+export function slotsAsking(line: BillLine, placement: PlacementId): readonly SlotName[] {
+  return line.slots.filter((ref) => ref.placement === placement).map((ref) => ref.slot)
+}
+
+/* -------------------------------------------------------------- slot faults */
+
+/**
+ * What is wrong with one slot of one instance.
+ *
+ * Four kinds rather than a boolean, because the four are four different things
+ * to do about it and a user who is told only *"this slot is wrong"* has to open
+ * the recipe to find out which:
+ *
+ *   - `off-slot` — the slot holds a file it does not admit. The fill is real, the
+ *     catalog holds it, and `@/composition` says the slot's `require`, its `deny`
+ *     or the `constrain` join against the siblings rules it out. **This is the
+ *     state the pre-A3 resolver was structurally unable to express** — rule 0
+ *     chose the file, so there was nothing to disagree with — and it is the
+ *     reason this surface exists.
+ *   - `retired` — the slot names a file that has left the archive. There is
+ *     nothing to print and nothing to check.
+ *   - `empty` — the slot has no entry at all.
+ *   - `no-recipe` — the whole template is not in this build, so it has no
+ *     declared slots to fault. One entry per instance, with no slot. Emitted so
+ *     this function is total over the scene, and dropped by the panel: an
+ *     instance that resolved to no parts is `BillInventory.orphans`' to render,
+ *     and two blocks for one piece would offer two Remove buttons for it.
+ *
+ * `retired`, `empty` and `no-recipe` all refuse the download
+ * ({@link BillOfTiles.complete}); `off-slot` does not, and that split is §7's:
+ * an unprintable pack is refused, a wrong build is disclosed. A user is told
+ * which of the two they have.
+ */
+export type SlotFaultKind = 'off-slot' | 'retired' | 'empty' | 'no-recipe'
+
+/** One faulty slot, with everything needed to name it and reach it. */
+export interface SlotFault {
+  readonly placement: PlacementId
+  /** The instance, for its cell, its angle and the Remove action. */
+  readonly instance: TemplateInstance
+  /** The template id — the only identity a `no-recipe` instance is guaranteed to have. */
+  readonly template: string
+  /** The slot, or `undefined` for `no-recipe`. */
+  readonly slot: SlotName | undefined
+  readonly kind: SlotFaultKind
+  /** The file the slot names, present for `off-slot` and `retired`. */
+  readonly tile: TileId | undefined
+  /** The record behind it, present only for `off-slot` — a retired id resolves to nothing. */
+  readonly record: CatalogRecord | undefined
+  /** Whether the user pinned this fill or the default solver put it there. */
+  readonly pinned: boolean
+  /** Whether this fault refuses the download. `false` for `off-slot` alone. */
+  readonly blocksDownload: boolean
+}
+
+/**
+ * Every slot in the scene that is empty, retired, or holding a file it does not
+ * admit.
+ *
+ * **This is the surface row A3 left and row A8 could not build.** Three things
+ * were deleted from this module rather than repointed, and all three read facts
+ * about a *choice the app made*: `resolutionSummary` and `rowResolutionCopy` read
+ * a `VariantResolution`, and `BillRow.autoBaseOnly` read `BillLine.baseQuantity`.
+ * Nothing chooses and nothing is inserted, so there is no decision left to
+ * disclose — but an explicitly-filled instance can now be *wrong*, and until this
+ * function the only trace of that was a rolled-up `fill-off-slot` note saying
+ * **how many** slots were wrong and nothing about which.
+ *
+ * It reads {@link ResolvedSlotFill.admissible} — the third state is the point:
+ * `undefined` means "nothing to check" (empty, or a retired id) and `false` means
+ * "checked and wrong", and a boolean would have reported the first as the second.
+ * `bill.notes` is the roll-up of the same conditions and stays the summary; this
+ * is the list behind it, and the two cannot disagree because both are read off
+ * `ResolvedInstance.slots`.
+ *
+ * Ordered by plan reading order and then by the template's own declared slot
+ * order, so the list reads down the drawing rather than in whatever order the
+ * store's map iterates. Nothing here touches the catalog or the store: an
+ * instance is carried on `bill.resolved`, and a `no-recipe` instance is the one
+ * case with no slots to walk.
+ */
+export function slotFaults(bill: BillOfTiles): readonly SlotFault[] {
+  return [...bill.resolved]
+    .sort(byInstancePosition)
+    .flatMap((resolved) => faultsIn(resolved))
+}
+
+function faultsIn(resolved: ResolvedInstance): SlotFault[] {
+  const { instance } = resolved
+  const shared = { placement: instance.id, instance, template: instance.template }
+  if (resolved.template === undefined) {
+    return [
+      {
+        ...shared,
+        slot: undefined,
+        kind: 'no-recipe',
+        tile: undefined,
+        record: undefined,
+        pinned: false,
+        blocksDownload: true,
+      },
+    ]
+  }
+
+  // In the template's declared order, which `ResolvedInstance.slots` already is.
+  return resolved.slots.flatMap((slot) => {
+    const kind = kindOf(slot)
+    if (kind === undefined) return []
+    return [
+      {
+        ...shared,
+        slot: slot.slot,
+        kind,
+        tile: slot.fill?.tile,
+        record: slot.record,
+        pinned: slot.fill?.pinned ?? false,
+        blocksDownload: kind !== 'off-slot',
+      },
+    ]
+  })
+}
+
+/**
+ * The fault in one resolved slot, or `undefined` when there is none.
+ *
+ * An **optional** slot with nothing in it is not a fault — it is a decoration
+ * declined — which is the one place this differs from
+ * {@link BillOfTiles.unfilled}. No shipped template exercises it (`optional` is
+ * absent from all 128 parts of the 40, and absence means required), so the branch
+ * exists to keep this surface honest if one ever ships rather than because
+ * anything reaches it today.
+ */
+function kindOf(slot: ResolvedSlotFill): SlotFaultKind | undefined {
+  if (slot.record === undefined) {
+    if (slot.fill !== undefined) return 'retired'
+    return slot.optional ? undefined : 'empty'
+  }
+  return slot.admissible === false ? 'off-slot' : undefined
+}
+
+/** What one fault says, in the panel's own words. */
+export interface SlotFaultCopy {
+  /** The slot, named as a user reads it: `wall-on-tile corner · base`. */
+  readonly subject: string
+  /** One sentence: what is wrong. Ends in a full stop. */
+  readonly reason: string
+}
+
+/**
+ * A fault as prose.
+ *
+ * Separate from {@link slotFaults} for the reason {@link noteCopy} is separate
+ * from `notes.ts`: the classification is data a test can assert on, and the
+ * sentence is copy that gets rewritten without a semantic change. The `off-slot`
+ * sentence names the pinned/solved distinction because it is the only actionable
+ * part — a pinned fill is one the user chose and can re-choose, and a solved one
+ * that has gone inadmissible means the constraint moved under it.
+ */
+export function slotFaultCopy(fault: SlotFault): SlotFaultCopy {
+  const subject = fault.slot === undefined ? fault.template : `${fault.template} · ${fault.slot}`
+  switch (fault.kind) {
+    case 'off-slot':
+      return {
+        subject,
+        reason:
+          `${fault.record?.name ?? 'This file'} is not one of the files this slot admits, so it will print and ` +
+          (fault.pinned
+            ? 'will not fit. You pinned it; pick another file for the slot.'
+            : 'will not fit. Nothing pinned it, so the recipe or the pieces beside it have moved since it was filled.'),
+      }
+    case 'retired':
+      return {
+        subject,
+        reason: 'The file this slot names has left the archive, so there is nothing to print for it.',
+      }
+    case 'empty':
+      return { subject, reason: 'Nothing is in this slot, and every slot of every recipe in this build is required.' }
+    case 'no-recipe':
+      return { subject, reason: 'This build ships no recipe by that name, so the piece has no slots to fill.' }
+  }
+}
+
+function byInstancePosition(a: ResolvedInstance, b: ResolvedInstance): number {
+  if (a.instance.z !== b.instance.z) return a.instance.z - b.instance.z
+  if (a.instance.x !== b.instance.x) return a.instance.x - b.instance.x
+  return a.instance.id < b.instance.id ? -1 : 1
+}
+
 /* -------------------------------------------------------------------- notes */
 
 export interface NoteCopy {
@@ -244,7 +473,11 @@ export interface NoteCopy {
  */
 export function noteCopy(note: BillNote): NoteCopy {
   const n = countLabel(note.count)
-  const pieces = note.count === 1 ? 'piece' : 'pieces'
+  // **`file`, not `piece` — row C4.** Four of these nine codes are counted per
+  // *fill*, and the panel's heading counts placed *pieces*: an instance is up to
+  // five files, so one noun for both made "3 pieces name no build system" read as
+  // three things on the grid when it is three of one piece's five parts.
+  const files = note.count === 1 ? 'file' : 'files'
   const has = note.count === 1 ? 'has' : 'have'
   const is = note.count === 1 ? 'is' : 'are'
   const base = { code: note.code, severity: note.severity }
@@ -287,15 +520,15 @@ export function noteCopy(note: BillNote): NoteCopy {
         headline: `${n} filled ${note.count === 1 ? 'slot holds a file it does not admit' : 'slots hold files they do not admit'}`,
         detail:
           'The file fails what the slot asks for — its own tags, or the join against the recipe and the pieces ' +
-          'beside it. It will print and it will not fit. The solver cannot reach this state; a fill you pinned ' +
-          'yourself can, once a lock change or a re-import has moved it out of the set, and so can a share link ' +
-          'decoded against another build.',
+          'beside it. It will print and it will not fit. Each one is listed below by recipe, slot and cell. The ' +
+          'solver cannot reach this state; a fill you pinned yourself can, once a lock change or a re-import has ' +
+          'moved it out of the set, and so can a share link decoded against another build.',
       }
 
     case 'lock-unavailable':
       return {
         ...base,
-        headline: `${n} ${pieces} ${has} no version in your lock system`,
+        headline: `${n} ${files} ${has} no version in your lock system`,
         detail:
           'The tile names connectors, none of them the one you chose. It will print and it will stand; it will ' +
           'not join to the pieces either side of it.',
@@ -304,7 +537,7 @@ export function noteCopy(note: BillNote): NoteCopy {
     case 'no-footprint':
       return {
         ...base,
-        headline: `${n} ${pieces} cannot be drawn on the plan`,
+        headline: `${n} ${files} cannot be drawn on the plan`,
         detail:
           'The tile is in the bill and will be downloaded. The archive states no footprint for it, so it has no ' +
           'shape on the grid — 726 corpus tiles are in this state.',
@@ -313,7 +546,7 @@ export function noteCopy(note: BillNote): NoteCopy {
     case 'insert-on-grid':
       return {
         ...base,
-        headline: `${n} ${pieces} ${is} ${note.count === 1 ? 'a component, not a tile' : 'components, not tiles'}`,
+        headline: `${n} ${files} ${is} ${note.count === 1 ? 'a component, not a tile' : 'components, not tiles'}`,
         detail:
           'A door or a window fits into a slot in another piece rather than onto the grid. Placing it standalone ' +
           'is fine for the bill of tiles and meaningless as a floor plan.',
@@ -322,7 +555,7 @@ export function noteCopy(note: BillNote): NoteCopy {
     case 'build-unspecified':
       return {
         ...base,
-        headline: `${n} ${pieces} name no build system`,
+        headline: `${n} ${files} name no build system`,
         detail:
           'True of a quarter of everything the recipes in this build admit — 3,610 of 14,241 candidate files — ' +
           'so it is a fact rather than a fault. It means nothing checked whether these interleave with the rest ' +
@@ -351,17 +584,23 @@ export interface VerdictCopy {
 /**
  * What the size total means, or `null` when it means nothing yet.
  *
- * The thresholds and the arithmetic are `@/assembly`'s. **The two constants no
- * longer mean what they were chosen to mean, and row A3 left them alone
- * deliberately**: 512 MB was fifty *placements* at the corpus median and 2 GB was
- * fifty at p95, and a placement is now a template instance of three to five
- * files. Measured, one median-filled instance is 26,394,812 B over about three
- * files — so twenty instances already trip `large` at 528 MB where twenty tiles
- * did not, and fifty are about 1.32 GB. Recalibrating needs the solver row C2 has
- * not shipped, because the figure above takes the *median* candidate rather than
- * the one a solver picks and is before the md5 dedupe; row **C4** restates the
- * thresholds in parts rather than in placements. All this function adds is the
- * sentence, and the sentence is true at either calibration.
+ * The thresholds and the arithmetic are `@/assembly`'s, and **row C4 restated
+ * them in the unit that governs them rather than moving them.** A3 read its own
+ * figure — one median-filled instance over about three files — as making 512 MB
+ * stale by 2.58x, and that was an artefact of leaving the md5 dedupe out: the
+ * threshold is on **distinct files**, and a room of 200 solver-filled instances
+ * of the 40 shipped recipes is the same 36 files and the same 366,230,378 B as a
+ * room of 50. `bill.ts#DOWNLOAD_LARGE_BYTES` carries the measurements.
+ *
+ * What that changed here is the **`large` sentence**, and it is a change of
+ * subject rather than of tone. It said *"expect a long transfer"* and quoted the
+ * whole-corpus median, which is the wrong fact twice over: the median file a
+ * recipe admits is 11.26 MB rather than 10.36 MB, and for the browsers that have
+ * no streaming save 512 MB is not a slow download but a **refused** one — the
+ * same byte figure as `download/save.ts#BLOB_FALLBACK_LIMIT_BYTES`, checked by
+ * `useArchiveDownload` before the first fetch. So the sentence now says which
+ * browsers stop and which merely take a while, which is the only part a user can
+ * act on.
  */
 export function verdictCopy(size: DownloadSize): VerdictCopy | null {
   if (size.verdict === 'ok') return null
@@ -378,8 +617,11 @@ export function verdictCopy(size: DownloadSize): VerdictCopy | null {
         verdict: 'large',
         headline: over,
         detail:
-          'Expect a long transfer: the median model in this archive is 10.4 MB on its own, and every distinct ' +
-          'file is fetched once whatever its quantity.',
+          'Chrome and Edge stream this straight to disk and only the transfer is long. Firefox and Safari — and ' +
+          'every browser on iOS — have to hold the whole archive in memory instead, and past this point they ' +
+          'refuse it outright rather than slowing down; nothing is fetched when that happens, and the URL list ' +
+          'is offered in its place. This is about fifty distinct files: the median file these recipes use is ' +
+          '11.3 MB, and each one is fetched once whatever its print count.',
       }
 }
 

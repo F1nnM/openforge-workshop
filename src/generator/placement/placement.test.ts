@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest'
 
 import { GRID_UNIT_MM, TileId } from '@/catalog'
 import { footprintShape, planGeometry } from '@/builder/canvas/geometry'
-import { findConflicts, planBand } from '@/builder/canvas/overlap'
+import { findConflicts, levelAt, planBand } from '@/builder/canvas/overlap'
 import type { PlacementId } from '@/store'
 import { TemplateInstance as TemplateInstanceSchema } from '@/store'
 
@@ -310,6 +310,11 @@ describe('reaching the plan view’s collision', () => {
     const catalogue = {
       id: idOf(2),
       band: 'area' as const,
+      // A catalog part is the level it stands at — there is no height for one
+      // anywhere the app reads — and the shipped layout rule puts it on the
+      // ground. The generated base's own interval starts there and is 6 mm tall,
+      // so the two share vertical space and the sweep reaches the geometry.
+      level: levelAt(0),
       box: overlapping.box,
       parts: overlapping.parts,
       axisAligned: overlapping.axisAligned,

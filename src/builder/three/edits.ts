@@ -194,10 +194,10 @@ const MARKER_EXTENT = { w: 1, d: 1 } as const
  * instance's footprint — a family's footprint is the union of its parts' and the
  * parts are what row **C2**'s fill solver decides, so there is nothing to take a
  * union over yet. Not turned by `rotation` either, and that is deliberate rather
- * than unfinished: a square marker turned about its own corner would *move* —
- * `slotAnchor`'s convention has the corner orbit the origin — and a mark that
- * slides across the plan as the user presses ⟳ would report a placement point
- * the store is not going to receive. The angle is still carried through to the
+ * than unfinished: the anchor is the *minimum corner* the store receives, which
+ * `slotAnchor` keeps invariant under rotation for a real instance, and a square
+ * marker is already its own bounding box — so turning it could only move it away
+ * from the point the placement lands on. The angle is still carried through to the
  * store, where it means what §1 says it means: the instance is placed and
  * rotated as one unit.
  *

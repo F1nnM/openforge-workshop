@@ -210,7 +210,7 @@ describe('the builder screen', () => {
     // this level is that the stage's element is mounted; the role itself is
     // asserted where a real renderer produces it, in `three/room.test.tsx`.
     expect(screen.getByTestId('builder-3d')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /tiles placed/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /pieces placed/ })).toBeInTheDocument()
     expect(screen.queryByText(/Placeholder/)).toBeNull()
   })
 
@@ -254,7 +254,7 @@ describe('the builder screen', () => {
   it('drives the bill from the store, through the whole screen', async () => {
     await renderBuilder()
 
-    expect(screen.getByRole('heading', { name: '0 tiles placed' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '0 pieces placed' })).toBeInTheDocument()
 
     act(() => {
       // Through `placeTemplate`, not `setState`: the screen's bill needs a real
@@ -268,7 +268,7 @@ describe('the builder screen', () => {
     // One placement, and the bill reports it as an instance whose recipe this
     // build does not ship — which is the honest outcome for a fixture family and
     // is what makes the count and the orphan block both live.
-    expect(screen.getByRole('heading', { name: '1 tile placed' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '1 piece placed' })).toBeInTheDocument()
     expect(screen.getByText(/1 placed piece has nothing this build can print/)).toBeInTheDocument()
   })
 

@@ -47,7 +47,7 @@ const SLOW_SWEEP_MS = 120_000
 
 import type { PlanPart, PlanPoint } from './geometry'
 import { footprintShape, partsContain, planGeometry } from './geometry'
-import { subjectsConflict } from './overlap'
+import { levelAt, subjectsConflict } from './overlap'
 import type { OverlapSubject } from './overlap'
 import {
   SECTOR_TOLERANCE_UNITS,
@@ -362,7 +362,7 @@ function subject(foot: ArcFootprint, rotation: number, x: number, z: number): Ov
   const shape = footprintShape(foot)
   if (shape === undefined) throw new Error('an arc has a shape')
   const placed = planGeometry(shape, rotation, x, z)
-  return { band: 'area', box: placed.box, parts: placed.parts, axisAligned: placed.axisAligned }
+  return { band: 'area', level: levelAt(0), box: placed.box, parts: placed.parts, axisAligned: placed.axisAligned }
 }
 
 /**

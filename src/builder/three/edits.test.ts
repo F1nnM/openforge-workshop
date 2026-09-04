@@ -400,10 +400,9 @@ describe('the marker and the placement are one call, not two', () => {
   })
 
   it('leaves the marker unturned while carrying the angle to the store', () => {
-    // A square marker turned about its own corner would *move* —
-    // `slotAnchor`'s convention has the corner orbit the origin — so a mark
-    // that slid across the plan as the user pressed R would report a placement
-    // point the store never receives. The angle is still stored: §1 places and
+    // The anchor is the minimum corner the store receives, and `slotAnchor`
+    // keeps that invariant under rotation — so a marker that turned could only
+    // slide away from the point the placement lands on. The angle is still stored: §1 places and
     // rotates a template as one unit.
     const unturned = templateGhost(FIXTURE_TEMPLATE, 0, [2, 2], FINE)
     const turned = templateGhost(FIXTURE_TEMPLATE, 90, [2, 2], FINE)

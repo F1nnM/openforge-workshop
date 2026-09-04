@@ -84,6 +84,7 @@ import {
   FIXTURE_NAMES,
   MIXED_INTEGRAL,
   ONE_SLOT_TEMPLATE_ID,
+  aStrictInstance,
   anInstance,
   fixtureContext,
   fixtureCatalogFile,
@@ -772,14 +773,14 @@ function inertDownload(bill: BillOfTiles): ArchiveDownload {
 describe('the bill of tiles', () => {
   it('reflects the store as it fills', () => {
     render(<BillHarness />)
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('0 tiles placed')
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('0 pieces placed')
     expect(screen.getByText(/Nothing placed yet/)).toBeInTheDocument()
 
     place('floor1', 0, 0)
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('1 tile placed')
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('1 piece placed')
 
     place('floor1', 2, 0)
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('2 tiles placed')
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('2 pieces placed')
   })
 
   it('dedupes by md5, not by tile id', () => {
@@ -789,7 +790,7 @@ describe('the bill of tiles', () => {
     place('twin', 2, 0)
     render(<BillHarness />)
 
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('2 tiles placed')
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('2 pieces placed')
     // One line, quantity two, and one file's bytes — not two.
     const rows = screen.getAllByRole('listitem')
     expect(rows).toHaveLength(1)
@@ -813,8 +814,13 @@ describe('the bill of tiles', () => {
     placeBoth('floor2', 'base2')
     render(<BillHarness />)
 
-    expect(screen.getByText(/1 tile placed/)).toBeInTheDocument()
-    expect(screen.getByText(/2 parts to print/)).toBeInTheDocument()
+    expect(screen.getByText(/1 piece placed/)).toBeInTheDocument()
+    // **Row C4: the subline is unconditional and names both figures.** The
+    // heading counts instances and this counts what they cost, so a reader never
+    // has to infer one from the other — and it was rendered only when
+    // `parts > placements`, which hid the part count for every one-part scene and
+    // for every scene whose instances have holes in them.
+    expect(screen.getByText(/2 parts to print, over 2 files/)).toBeInTheDocument()
 
     const rows = screen.getAllByRole('listitem')
     expect(rows).toHaveLength(2)
@@ -850,8 +856,131 @@ describe('the bill of tiles', () => {
     // Not behind the `<details>` the info notes live in, and the piece is still
     // on the plan — §3.2's "places anyway".
     expect(note?.closest('details')).toBeNull()
-    expect(screen.getByText(/1 tile placed/)).toBeInTheDocument()
-    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByText(/1 piece placed/)).toBeInTheDocument()
+
+    // **Row C4: and the roll-up now has a list behind it.** The note says *how
+    // many* slots are empty; before this block that was the whole of it, and a
+    // user was sent to look at a drawing that is one tab stop. This names the
+    // recipe, the slot and the cell.
+    const fault = screen.getByText(/panels-two-slot · wall · x 0, z 0/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/1 slot needs attention/)).toBeInTheDocument()
+    expect(screen.getByText(/The download is refused until each one holds a file/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing is in this slot/)).toBeInTheDocument()
+
+    // One bill row for the filled slot, one fault entry for the empty one.
+    expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+    expect(document.querySelectorAll('.of-bill-fault')).toHaveLength(1)
+  })
+
+  /**
+   * **The state row A3 created and row A8 could not surface: a fill that is
+   * wrong.**
+   *
+   * Rule 0 chose the file from a design, so there was nothing to disagree with —
+   * a placement resolved or it did not. A fill names an exact file, so
+   * `@/composition` can say the slot does not admit it, and `fill-off-slot` is
+   * the note. The note is a roll-up: it says how many slots hold a file they
+   * should not, and nothing about which. This block is the which.
+   *
+   * `STRICT_TEMPLATE` is the fixture that makes it reachable — the two A8
+   * recipes both declare `tags: {}`, and an empty require set admits every
+   * record, so no bill either of them produces can carry this note at all.
+   */
+  it('names the slot holding a file it does not admit, and does not refuse the download over it', () => {
+    act(() => {
+      // A wall in a slot that requires `shape|floor`. The record is real, the
+      // catalog holds it, and the slot does not admit it — which is exactly the
+      // population `fill-off-slot` describes: a pinned fill from outside the
+      // candidate set.
+      placeTemplate(aStrictInstance(FIXTURE_IDS.wallNoBase, { x: 3, z: 1 }))
+    })
+    render(<BillHarness />)
+
+    expect(screen.getByText(/1 filled slot holds a file it does not admit/)).toBeInTheDocument()
+    const fault = screen.getByText(/panels-floor-only · floor · x 3, z 1/)
+    // **Not blocking**, and that split is §7's: an unprintable pack is refused, a
+    // wrong build is disclosed. The piece prints; it will not fit.
+    expect(fault.closest('.of-bill-fault')).not.toHaveAttribute('data-blocking')
+    expect(screen.getByText(/These will print and will not fit/)).toBeInTheDocument()
+    expect(screen.getByText(/You pinned it; pick another file for the slot/)).toBeInTheDocument()
+
+    // The file is still billed — one part lost is not the instance, and this one
+    // is not even lost.
+    expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /Remove the piece with the faulty floor at x 3, z 1/ }))
+    expect(placementCount()).toBe(0)
+  })
+
+  it('tells a retired fill apart from an empty slot, and blocks the download over both', () => {
+    // The three states an explicitly-filled instance can be wrong in are
+    // `empty`, `retired` and `off-slot`, and the first two look identical to
+    // `BillOfTiles.complete` — the pack is one file short either way. They are
+    // not identical to a user: one slot was never filled, the other names a file
+    // that has left the archive, and `ResolvedSlotFill.admissible` is
+    // `undefined` for both because there is nothing to check.
+    act(() => {
+      placeTemplate(anInstance([FIXTURE_IDS.floor1, 'tiles/gone/away.stl'], { x: 2, z: 2 }))
+    })
+    render(<BillHarness />)
+
+    const fault = screen.getByText(/panels-two-slot · wall · x 2, z 2/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/has left the archive, so there is nothing to print for it/)).toBeInTheDocument()
+    // Not an orphan: the other slot resolved, so the instance is a row with a
+    // hole in it rather than a piece with nothing to print.
+    expect(screen.queryByText(/nothing this build can print/)).toBeNull()
+    expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+  })
+
+  it('gives an instance with nothing to print one block and one Remove, not two', () => {
+    // Both surfaces can describe an instance that resolved to no parts — the
+    // orphan block by cause, the fault block slot by slot — and two Remove
+    // buttons for one piece in a 302px column is worse than either. The orphan
+    // block wins because the whole piece has to go.
+    act(() => {
+      placeTemplate(anInstance([null, null], { x: 5, z: 5 }))
+    })
+    render(<BillHarness />)
+
+    expect(screen.getByText(/1 placed piece has nothing this build can print/)).toBeInTheDocument()
+    expect(screen.queryByText(/slots need attention/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: /^Remove/ })).toHaveLength(1)
+  })
+
+  it('says nothing at all when every fill belongs in its slot', () => {
+    // The negative, over the same strict recipe: a floor in a floor slot. Without
+    // it the assertion above would pass on a block that always renders.
+    act(() => {
+      placeTemplate(aStrictInstance(FIXTURE_IDS.floor1, { x: 3, z: 1 }))
+    })
+    render(<BillHarness />)
+
+    expect(screen.queryByText(/needs attention/)).toBeNull()
+    expect(document.querySelectorAll('.of-bill-fault')).toHaveLength(0)
+    expect(document.querySelectorAll('.of-bill-note[data-tone="warn"]')).toHaveLength(0)
+  })
+
+  /**
+   * **`BillLine.slots`' first consumer, and the reason A3 added the field.**
+   *
+   * Two slots of one instance resolving to the same md5 is a legitimate quantity
+   * of 2 — contract C-c, the md5 dedupe doing its job — and before this the row
+   * read `×2` with one placement under it and no way to account for the second
+   * copy. `tileIds` cannot carry it: it is one id per *catalog path*, so it
+   * cannot tell two askers of one path from one.
+   */
+  it('names both slots when one instance asks for one file twice', () => {
+    placeBoth('floor1', 'twin', 1, 1)
+    render(<BillHarness />)
+
+    // One line, quantity two, one instance.
+    const row = screen.getByRole('button', { expanded: false })
+    expect(row).toHaveTextContent('×2')
+    fireEvent.click(row)
+
+    expect(screen.getByText(/x 1, z 1 · floor \+ wall/)).toBeInTheDocument()
   })
 
   it('makes every placement reachable and removable from the panel', () => {
@@ -900,7 +1029,14 @@ describe('the bill of tiles', () => {
     render(<BillHarness />)
 
     expect(screen.getByText(/Over 512 MB to download/)).toBeInTheDocument()
-    expect(screen.getByText(/Expect a long transfer/)).toBeInTheDocument()
+    // **Row C4 changed this sentence's subject.** It said "expect a long
+    // transfer" and quoted the whole-corpus median; 512 MB is
+    // `download/save.ts#BLOB_FALLBACK_LIMIT_BYTES` to the byte, so for every
+    // browser without a streaming save it is a *refusal* rather than a slow
+    // download — which is the only part of it a user can act on.
+    expect(screen.getByText(/refuse it outright rather than slowing down/)).toBeInTheDocument()
+    expect(screen.getByText(/about fifty distinct files/)).toBeInTheDocument()
+    expect(screen.queryByText(/Expect a long transfer/)).toBeNull()
     expect(screen.getByText('600.0 MB', { selector: '.of-bill-bytes' })).toHaveAttribute(
       'data-verdict',
       'large',

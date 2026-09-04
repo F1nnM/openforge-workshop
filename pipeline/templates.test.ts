@@ -57,13 +57,17 @@ import { FixtureRow, fixtureFingerprint, fixturesDir, loadFixtureRows } from './
 import { emptyManifest } from './ordinals'
 import type { TemplateFixture } from './templates'
 import {
+  RECORDED_TAG_DEFECTS,
   TEMPLATES_MODULE_PATH,
+  checkTemplateTags,
   loadTemplateFixtures,
   printFixture,
   printTemplateModule,
   readTemplateFile,
+  tagDefectKey,
   templateConvention,
   templateSlug,
+  templateTagDefects,
 } from './templates'
 import { PAYLOAD_TIMESTAMP, SIZE_BUDGET_BYTES } from './version'
 
@@ -373,6 +377,188 @@ describeFixtures(title, () => {
         const source = readFileSync(module, 'utf8')
         expect(source, module).not.toContain("from './templates'")
         expect(source, module).not.toContain('src/template')
+      }
+    })
+  })
+
+  /* ------------------------------------------- row B6’s internal-corner defect */
+
+  describe('the upstream internal-corner tag defect', () => {
+    /** The one `shape|` tag each of the 40 carries. */
+    const shapeTagsOf = (entry: TemplateFixture): readonly string[] =>
+      entry.tags.filter((tag) => tag.startsWith('shape|'))
+
+    it('tags four of the 40 shape|corner where only two are corners', () => {
+      const tally = new Map<string, number>()
+      for (const entry of entries) {
+        const shape = shapeTagsOf(entry)
+        // Exactly one `shape|` tag each, which is what makes the tally a
+        // partition of the 40 rather than a count of tags.
+        expect(shape, entry.name).toHaveLength(1)
+        for (const tag of shape) tally.set(tag, (tally.get(tag) ?? 0) + 1)
+      }
+
+      expect(Object.fromEntries([...tally].sort())).toEqual({
+        'shape|corner': 4,
+        'shape|corner|low': 2,
+        'shape|internal_corner': 1,
+        'shape|internal_corner|low': 1,
+        'shape|wall': 32,
+      })
+    })
+
+    it('makes one internal corner tag-identical to an external one', () => {
+      /* The sharpest reading of the defect, and the reason a tag key cannot be
+         rescued by looking harder at the tags: these two templates carry the
+         same five strings in the same order and are not the same shape. */
+      const find = (name: string): TemplateFixture => {
+        const entry = entries.find((each) => each.name === name)
+        if (entry === undefined) throw new Error(`no template named ${name}`)
+        return entry
+      }
+      const internal = find('S2W: Wall on Tile: Internal Corner: Low (Modular)')
+      const external = find('S2W: Wall on Tile: Corner (Any, Modular)')
+
+      expect(internal.tags).toEqual(external.tags)
+      expect(internal.parts).toHaveLength(3)
+      expect(external.parts).toHaveLength(5)
+      // The low one loses its qualifier too: neither `internal_corner` nor `low`
+      // survives, though its column part still requires `shape|column|low`.
+      expect(internal.tags).toContain('shape|corner')
+      expect(
+        internal.parts.flatMap((part) => (part.tags.require ?? []).map((ref) => ref.tag)),
+      ).toContain('shape|column|low')
+    })
+
+    it('is detected from each fixture’s own parts, on 4 of 4 and 0 of the other 36', () => {
+      /* The signal the census is built on, measured in both directions. It has
+         to be independent of the tag it is checking, or the check is circular. */
+      const partsSayInternal = entries.filter((entry) =>
+        entry.parts.some((part) =>
+          (part.tags.require ?? []).some((ref) => ref.tag.split('|')[2] === 'internal_corner'),
+        ),
+      )
+
+      expect(partsSayInternal).toHaveLength(4)
+      expect(partsSayInternal.map((entry) => templateConvention(entry).id)).toEqual([
+        'internal-corner',
+        'internal-corner',
+        'internal-corner',
+        'internal-corner',
+      ])
+      // Every one of the four says so on its `floor` part; the two modular ones
+      // say it on their `base` part as well.
+      const requires = (entry: TemplateFixture, part: string): readonly string[] =>
+        (entry.parts.find((each) => each.name === part)?.tags.require ?? []).map((ref) => ref.tag)
+      for (const entry of partsSayInternal) {
+        expect(requires(entry, 'floor'), entry.name).toContain('shape|floor|internal_corner')
+      }
+      expect(
+        partsSayInternal.filter((entry) => requires(entry, 'base').includes('shape|base|internal_corner')),
+      ).toHaveLength(2)
+    })
+
+    it('censuses exactly the two recorded templates, both Modular and both wall-less', () => {
+      const defects = templateTagDefects(entries)
+
+      expect(defects.map(tagDefectKey).sort()).toEqual([...RECORDED_TAG_DEFECTS].sort())
+      for (const defect of defects) {
+        expect(defect.carries).toEqual(['shape|corner'])
+        expect(defect.part).toBe('floor')
+        expect(defect.requires).toBe('shape|floor|internal_corner')
+        expect(defect.name).toContain('Modular')
+      }
+      // Neither has a wall part, which is what a tag-keyed layout would have
+      // gone looking for after handing them the external corner's convention.
+      const named = defects.map((defect) => defect.name)
+      for (const entry of entries.filter((each) => named.includes(each.name))) {
+        expect(entry.parts.map((part) => part.name)).not.toContain('wall')
+      }
+    })
+
+    it('passes the pinned fixtures, which is the only reason the import runs', () => {
+      // `loadTemplateFixtures` calls this, so a red census fails
+      // `npm run import:catalog` before it rewrites the generated module.
+      expect(() => {
+        checkTemplateTags(entries)
+      }).not.toThrow()
+    })
+
+    it('fails, and says the defect is gone, when the census empties', () => {
+      /* The direction a hard-coded allow-list of two names could not see.
+         Upstream correcting either fixture is the good outcome and must still
+         stop the import, because the workaround and the guard both become dead
+         weight the moment it happens. */
+      const repaired = entries.map((entry) =>
+        entry.tags.includes('shape|corner') && entry.parts.every((part) => part.name !== 'wall')
+          ? { ...entry, tags: entry.tags.map((tag) => (tag === 'shape|corner' ? 'shape|internal_corner' : tag)) }
+          : entry,
+      )
+
+      expect(templateTagDefects(repaired)).toEqual([])
+      expect(() => {
+        checkTemplateTags(repaired)
+      }).toThrow(/is gone/)
+      expect(() => {
+        checkTemplateTags(repaired)
+      }).toThrow(/upstream fixing the data/)
+    })
+
+    it('fails, naming it, when a third template joins the census', () => {
+      const invented: TemplateFixture = {
+        source: 'blueprints.s2w.invented.yaml',
+        name: 'S2W: Wall on Tile: Internal Corner (Any, Modular)',
+        type: 'blueprint',
+        tags: ['object|tile', 'build|s2w', 'shape|corner'],
+        parts: [
+          { name: 'column', tags: { require: [{ tag: 'size|column_shape|L' }] } },
+          { name: 'floor', tags: { require: [{ tag: 'shape|floor|internal_corner' }] } },
+          { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
+        ],
+      }
+
+      expect(templateTagDefects([...entries, invented])).toHaveLength(3)
+      expect(() => {
+        checkTemplateTags([...entries, invented])
+      }).toThrow(/blueprints\.s2w\.invented\.yaml/)
+      expect(() => {
+        checkTemplateTags([...entries, invented])
+      }).toThrow(/census moved: 3 templates/)
+    })
+
+    it('is inherited by nothing, because those four templates carry no constrain', () => {
+      /* The one path a template's own tags reach candidate resolution by:
+         `assembly.ts` passes them to `resolveSlotTags` as the `parentTags` a
+         `constrain` entry inherits. If the two defective templates had a
+         `constrain` block, the wrong tag would be a live resolution bug rather
+         than a labelling one — and the answer here would have had to be a
+         normalisation. They do not. */
+      const constrainCount = (entry: TemplateFixture): number =>
+        entry.parts.reduce((total, part) => total + (part.tags.constrain ?? []).length, 0)
+      const internal = entries.filter((entry) => templateConvention(entry).id === 'internal-corner')
+
+      expect(internal).toHaveLength(4)
+      expect(internal.map(constrainCount)).toEqual([0, 0, 0, 0])
+      // And they are the only four of the 40 with none.
+      expect(entries.filter((entry) => constrainCount(entry) === 0)).toHaveLength(4)
+      const others = entries.filter((entry) => constrainCount(entry) > 0).map(constrainCount)
+      expect(others).toHaveLength(36)
+      expect(Math.min(...others)).toBe(3)
+      expect(Math.max(...others)).toBe(8)
+    })
+
+    it('leaves the emitted module carrying the fixtures’ own tags, defect included', () => {
+      /* The decision, asserted rather than described: the guard records the
+         defect and does not repair it, so the generated module is still
+         provably the fixtures' content. A normalisation would show up here. */
+      const occurrences = (text: string, needle: string): number => text.split(needle).length - 1
+      for (const text of [printTemplateModule(entries), readFileSync(TEMPLATES_MODULE_PATH, 'utf8')]) {
+        expect(text).toContain("name: 'S2W: Wall on Tile: Internal Corner: Low (Modular)'")
+        // The fixtures' own tally survives into the module: four `shape|corner`,
+        // one `shape|internal_corner|low`. A normalisation would read 2 and 2.
+        expect(occurrences(text, "'shape|corner'")).toBe(4)
+        expect(occurrences(text, "'shape|internal_corner|low'")).toBe(1)
+        expect(occurrences(text, "'shape|internal_corner'")).toBe(1)
       }
     })
   })

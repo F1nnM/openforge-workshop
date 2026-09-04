@@ -136,6 +136,21 @@
  *   - **`partAt(piece, point)`** — which slot a pick landed in, once `pieceAt`
  *     has said which instance.
  *
+ * ## Row A7: overlap reads the vertical axis
+ *
+ * `OverlapSubject` carries a `PlanLevel` — `elevationMm` from the part's own
+ * `SlotLayout`, plus a `heightMm` — and `subjectsConflict` rejects a pair whose
+ * intervals are disjoint before it tests the plan. So two stacked instances on
+ * one square are no longer a conflict once their slot rule lifts one of them.
+ *
+ * Two things about it are worth knowing before reading `overlap.ts`:
+ * `heightMm` is `0` on every catalog record because no height for one exists
+ * anywhere the app reads (a generated base's comes off its recipe), and
+ * `PlanBand` **did not** retire with the change — the shipped `SlotLayoutRule`
+ * puts every part at elevation 0, so the band is still the only thing that
+ * separates a wall from the floor it stands on. `overlap.ts` carries the
+ * measurement.
+ *
  * `PlanScene` grew a third omission list, **`unfilled`**: an instance with no
  * filled slots at all is legitimate (contract C-g, §3.2 *"places anyway"*) and
  * has nothing to draw, so it is reported rather than dropped or turned into a
@@ -223,8 +238,8 @@ export {
   sectorSubdivisions,
 } from './sector'
 
-export { findConflicts, partsOverlap, planBand, quadsOverlap } from './overlap'
-export type { OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
+export { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap } from './overlap'
+export type { OverlapCandidate, OverlapSubject, PlanBand, PlanLevel } from './overlap'
 
 export {
   buildPlanScene,

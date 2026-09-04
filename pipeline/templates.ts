@@ -105,6 +105,16 @@
  * `templates.test.ts` fails when the committed module is not byte-for-byte what
  * this file emits. The path is {@link TEMPLATES_MODULE_PATH} and it is a constant
  * of this module, not of the screen.
+ *
+ * ## One thing here is not a reader
+ *
+ * {@link checkTemplateTags} is row **B6**'s answer to an upstream tag defect:
+ * two of the four internal-corner templates carry `shape|corner`. The fixtures
+ * are pinned and read-only, so this repo records the defect rather than
+ * repairing it — and records it as a *census computed from each fixture's own
+ * parts*, so that upstream fixing the data fails the import as loudly as
+ * upstream breaking a third template would. The reasoning, and why a
+ * normalisation was declined, is beside {@link TemplateTagDefect}.
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -426,7 +436,196 @@ export function loadTemplateFixtures(dir: string = templateFixturesDir()): reado
     .filter((name) => name.endsWith('.yaml'))
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   if (files.length === 0) throw new Error(`no *.yaml fixtures in ${dir}`)
-  return files.flatMap((name) => readTemplateFile(name, readFileSync(join(dir, name), 'utf8')))
+  const entries = files.flatMap((name) => readTemplateFile(name, readFileSync(join(dir, name), 'utf8')))
+  /* The complete pinned set is the only place the tag-defect census means
+     anything, and this is the only function that has it. See below. */
+  checkTemplateTags(entries)
+  return entries
+}
+
+/* ------------------------------------------------ the internal-corner defect */
+
+/**
+ * The upstream tag defect this repo records rather than repairs.
+ *
+ * **Two of the four internal-corner templates carry `shape|corner`** where
+ * their siblings carry `shape|internal_corner`, and one of the two loses its
+ * `|low` qualifier with it. Measured over all 40, each of which carries exactly
+ * one `shape|` tag:
+ *
+ * | `shape|` tag | templates |
+ * | --- | ---: |
+ * | `shape\|wall` | 32 |
+ * | `shape\|corner` | **4** |
+ * | `shape\|corner\|low` | 2 |
+ * | `shape\|internal_corner` | 1 |
+ * | `shape\|internal_corner\|low` | 1 |
+ *
+ * Four templates are tagged `shape|corner` where only two are corners. The
+ * sharpest form of it: `S2W: Wall on Tile: Internal Corner: Low (Modular)`
+ * carries a tag list **identical, string for string, to
+ * `S2W: Wall on Tile: Corner (Any, Modular)`** — five tags, same order — while
+ * having three parts against the other's five. On tags alone those two
+ * templates are the same template.
+ *
+ * `shape|corner` is not a coarser reading of `shape|internal_corner`; the two
+ * are **siblings** under `shape|`, so this is a wrong answer rather than a
+ * partial one. The fixtures do also drop a *qualifier* twice — both
+ * `blueprints.s2w.wall.wall+low.yaml` entries carry plain `shape|wall` while
+ * requiring `shape|wall|low` on their wall part — and that is a defensible
+ * family root, which is why the check below is about the form and not about the
+ * qualifier.
+ *
+ * ## Why this is a guard and not a normalisation
+ *
+ * The tempting fix is to rewrite the tag on the way in. Declined, for three
+ * measured reasons and one structural one:
+ *
+ *   1. **It would falsify this module's central claim.** Everything here rests
+ *      on one property: `printFixture` re-emits the fixtures byte for byte and
+ *      {@link printTemplateModule}'s output is asserted byte-identical to the
+ *      committed module, so `src/screens/assemblies/templates.ts` is *provably*
+ *      the fixtures' content. Rewrite a tag and the shipped module carries a
+ *      string that appears in no fixture, with the normaliser as the only
+ *      witness that the difference is exactly the correction.
+ *   2. **Nothing reads a template's `shape|` tag, and the one path that could
+ *      is empty on exactly these four templates.** `AssembliesScreen` groups on
+ *      `build|s2w|single_piece` / `build|s2w|modular`; `measure.ts` and
+ *      `assemblies.test.ts` read tag *roots* only; every layout decision keys on
+ *      the part-name set, which is right on 40 of 40. The one path that reaches
+ *      candidate resolution is `assembly.ts`'s
+ *      `resolveSlotTags(part.tags, template.tags, ...)`, where a template's own
+ *      tags are the `parentTags` a `constrain` entry inherits — and **all four
+ *      internal-corner templates carry 0 `constrain` entries**, the only 4 of
+ *      the 40 that do; the other 36 carry between 3 and 8. So the wrong tag is
+ *      inherited by nothing, and the correction has no beneficiary today.
+ *   3. **It would erase two rows' evidence.** `src/template/rules.test.ts` and
+ *      `pipeline/templates.test.ts` both measure this defect off the fixtures to
+ *      justify keying on the part-name set. A normalisation turns both green by
+ *      vacuity, and both live in directories row B6 does not own.
+ *   4. The fixtures are pinned and read-only (`.github/fixtures.env`), so the
+ *      real repair belongs upstream and this repo's job is to notice.
+ *
+ * ## Why the predicate is the contradiction and not the spelling
+ *
+ * A hard-coded list of two `(source, name)` pairs cannot tell whether upstream
+ * fixed the data — it would keep passing over corrected fixtures for ever. A
+ * bare `count !== 2` cannot say which template moved. So the census below is
+ * computed from a signal **inside each fixture**: a template whose own parts
+ * require an `internal_corner` form while its own `shape|` tag names a
+ * different one. Measured over the 40, the parts say `internal_corner` on
+ * **4 of 4** internal corners and on **0 of the other 36** — every one of the
+ * four requires `shape|floor|internal_corner` on its `floor` part, and the two
+ * modular ones additionally require `shape|base|internal_corner`.
+ *
+ * That predicate fires in both directions. Upstream fixing either template
+ * drops the census below two and {@link checkTemplateTags} fails the import
+ * saying so; a third mis-tagged template raises it and fails naming that one.
+ */
+export interface TemplateTagDefect {
+  /** The fixture file. */
+  readonly source: string
+  /** The template's name, which is unique across all 40. */
+  readonly name: string
+  /** The `shape|` tag it carries — exactly one on all 40. */
+  readonly carries: readonly string[]
+  /** The part whose `require` contradicts it. */
+  readonly part: string
+  /** That part's contradicting `require` tag. */
+  readonly requires: string
+}
+
+/** The form segment of a `shape|`-rooted tag, or `undefined` for a bare root. */
+function shapeForm(tag: string, at: 1 | 2): string | undefined {
+  const parts = tag.split('|')
+  return parts[0] === 'shape' ? parts[at] : undefined
+}
+
+/**
+ * The tag-defect census over a set of templates.
+ *
+ * A template is a defect when one of its parts requires a `shape|<x>|<form>`
+ * tag whose `<form>` its own `shape|` tag does not name. Only
+ * `internal_corner` is treated as such a form, and deliberately: it is the one
+ * the fixtures contradict themselves about, and the one whose mis-spelling
+ * names a sibling rather than a coarser parent.
+ */
+export function templateTagDefects(entries: readonly TemplateFixture[]): readonly TemplateTagDefect[] {
+  const out: TemplateTagDefect[] = []
+  for (const entry of entries) {
+    const carries = entry.tags.filter((tag) => tag.startsWith('shape|'))
+    const claimed = new Set(carries.map((tag) => shapeForm(tag, 1)))
+    for (const part of entry.parts) {
+      const ref = (part.tags.require ?? []).find((each) => shapeForm(each.tag, 2) === 'internal_corner')
+      if (ref === undefined || claimed.has('internal_corner')) continue
+      out.push({ source: entry.source, name: entry.name, carries, part: part.name, requires: ref.tag })
+      break
+    }
+  }
+  return out
+}
+
+/**
+ * The two defects this repo has recorded, at `OPENFORGE_CATALOG_SHA`.
+ *
+ * Both are the `(Modular)` entry of their file, both carry `shape|corner`, and
+ * neither has a `wall` part at all — so a tag-keyed layout would hand an
+ * internal corner an external corner's two-wall convention and then look for
+ * `right wall` and `left wall` fills that cannot exist.
+ */
+export const RECORDED_TAG_DEFECTS: readonly string[] = [
+  'blueprints.s2w.internal_corner.low.yaml: S2W: Wall on Tile: Internal Corner: Low (Modular)',
+  'blueprints.s2w.internal_corner.yaml: S2W: Wall on Tile: Internal Corner (Modular)',
+]
+
+/** `source: name`, the form {@link RECORDED_TAG_DEFECTS} is written in. */
+export function tagDefectKey(defect: TemplateTagDefect): string {
+  return `${defect.source}: ${defect.name}`
+}
+
+const DEFECT_ADVICE =
+  'The fixtures are pinned and read-only, so this repo records the defect instead of repairing it: ' +
+  'see the census in pipeline/templates.ts, RECORDED_TAG_DEFECTS beside it, ' +
+  "and src/template/rules.test.ts's tag-key measurement."
+
+/**
+ * The guard: the census must be exactly {@link RECORDED_TAG_DEFECTS}, or the
+ * import fails saying which way it moved.
+ *
+ * Called from {@link loadTemplateFixtures}, because that is the only function
+ * that holds the complete pinned set and because it is what
+ * `npm run import:catalog` calls before it regenerates the module. A fixture
+ * refresh therefore lands on this rather than quietly rewriting
+ * `src/screens/assemblies/templates.ts` with a different census behind it.
+ *
+ * The empty case gets its own message, because it is the good news and reads as
+ * a failure otherwise: nothing to work around means the workaround and this
+ * guard should go.
+ */
+export function checkTemplateTags(entries: readonly TemplateFixture[]): void {
+  const found = templateTagDefects(entries).map(tagDefectKey).sort()
+  const expected = [...RECORDED_TAG_DEFECTS].sort()
+  if (found.length === expected.length && found.every((key, at) => key === expected[at])) return
+
+  if (found.length === 0) {
+    throw new Error(
+      'the upstream internal-corner tag defect is gone: no template contradicts its own parts, ' +
+        `where ${String(expected.length)} did at the pinned fixtures. This is upstream fixing the data. ` +
+        'Delete RECORDED_TAG_DEFECTS, this guard and its test, and the tag-key measurements in ' +
+        'pipeline/templates.test.ts and src/template/rules.test.ts that exist only because of it.',
+    )
+  }
+
+  const gone = expected.filter((key) => !found.includes(key))
+  const added = found.filter((key) => !expected.includes(key))
+  const subject = found.length === 1 ? 'template contradicts' : 'templates contradict'
+  throw new Error(
+    `the internal-corner tag defect census moved: ${String(found.length)} ${subject} their own ` +
+      `parts, against the ${String(expected.length)} recorded.` +
+      (added.length > 0 ? ` No longer recorded: ${added.join(' | ')}.` : '') +
+      (gone.length > 0 ? ` Recorded but no longer found: ${gone.join(' | ')}.` : '') +
+      ` ${DEFECT_ADVICE}`,
+  )
 }
 
 /* -------------------------------------------------------------- slot geometry */
