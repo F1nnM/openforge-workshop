@@ -17,14 +17,14 @@
  *
  * ```tsx
  * const tools = usePlanTools()
- * <Palette onSelect={tools.setSelectedDesign} selected={tools.selectedDesign} />
+ * <Palette onSelect={tools.setSelectedTemplate} selected={tools.selectedTemplate} />
  * <Toolbar tools={tools} onClear={clearPlacements} />
  * <Builder3DPanel catalog={catalog} scene={scene} tools={tools} />
  * ```
  */
 import { useCallback, useMemo, useState } from 'react'
 
-import type { DesignId } from '@/catalog'
+import type { TemplateId } from '@/store'
 
 import type { SnapMode } from './geometry'
 import { SNAP_STEP, nextRotation } from './geometry'
@@ -53,17 +53,25 @@ export interface PlanTools {
   /**
    * The palette's current selection, or `null` when nothing is armed.
    *
-   * An **item**, since row V4 — the same thing `Placement.design` holds, so the
-   * canvas can place what the palette armed without resolving anything. It was a
-   * `TileId` only because a placement was, and row V3 had to insert a
-   * resolve-to-arm hop (`palette.ts#armFile`) to bridge the two; V4 deleted the
-   * hop rather than moving it, so the palette now writes `item.design` straight
-   * in and the pressed row is `selected === item.design`.
+   * A **template family**, since row A1, and the retype is forced rather than
+   * cosmetic. §2.5: *"templates are the only placement unit"*, `placeTemplate` is
+   * the only placement action the store offers, and a `TemplateInstance` names a
+   * {@link TemplateId} — so a `DesignId` in this slot names nothing this app can
+   * put on the grid. §3.1's palette lists 52 template families, and
+   * `src/store/workshopStore.ts` states the same thing from the other end: *"the
+   * palette no longer lists the items a user kept — it lists 52 generated
+   * template families"*.
+   *
+   * Renamed as well as retyped, which is contract **C-h**'s reasoning applied to
+   * a field rather than to a deletion: `selectedDesign: TemplateId` would compile
+   * at every reader while saying the wrong word, and both id spaces are opaque
+   * strings that `src/store/schema.ts` measures as **not** lexically disjoint —
+   * so nothing would catch a reader that kept meaning a design.
    *
    * This state is renderer-agnostic and always was: nothing here touches the
    * DOM, so the rename is invisible to whichever surface draws the plan.
    */
-  readonly selectedDesign: DesignId | null
+  readonly selectedTemplate: TemplateId | null
   setTool: (tool: PlanTool) => void
   /**
    * Swap between `place` and `erase`, the two modes that are each other's
@@ -76,35 +84,39 @@ export interface PlanTools {
   /**
    * Turn the pending placement by one step.
    *
-   * The step is the *tile's own*, so the caller passes it —
-   * `rotationStepFor(record)`. A default of 90 here would be wrong for the 893
-   * tiles whose `size|angle` is not a multiple of 90.
+   * The step is the armed *thing's own*, so the caller passes it —
+   * `rotationStepFor(record)` for a single file, `pieceRotationStep(piece)` for a
+   * placed instance, whose parts may disagree and whose common step is their
+   * least common multiple. A default of 90 here would be wrong for the 893 tiles
+   * whose `size|angle` is not a multiple of 90.
    */
   rotate: (step: number, direction?: 1 | -1) => void
   setRotation: (rotation: number) => void
-  /** Arm an item. Resets the pending rotation; see below. */
-  setSelectedDesign: (design: DesignId | null) => void
+  /** Arm a template family. Resets the pending rotation; see below. */
+  setSelectedTemplate: (template: TemplateId | null) => void
 }
 
 export interface PlanToolDefaults {
   readonly tool?: PlanTool
   readonly snap?: SnapMode
-  readonly selectedDesign?: DesignId | null
+  readonly selectedTemplate?: TemplateId | null
 }
 
 export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
   const [tool, setTool] = useState<PlanTool>(defaults.tool ?? 'place')
   const [snap, setSnap] = useState<SnapMode>(defaults.snap ?? 'fine')
   const [rotation, setRotation] = useState(0)
-  const [selectedDesign, setSelected] = useState<DesignId | null>(defaults.selectedDesign ?? null)
+  const [selectedTemplate, setSelected] = useState<TemplateId | null>(defaults.selectedTemplate ?? null)
 
-  const setSelectedDesign = useCallback((design: DesignId | null) => {
-    setSelected(design)
-    // A pending angle is only meaningful against a tile's own step: carrying 45°
-    // over to a tile that turns in 90° increments would arm an angle that tile
-    // can never reach again, and the user would have no way to get back to 0
-    // except by cycling through eight steps. `rotStep` is a hoisted facet, so
-    // the step is a property of the *item* and this reset is well posed on one.
+  const setSelectedTemplate = useCallback((template: TemplateId | null) => {
+    setSelected(template)
+    // A pending angle is only meaningful against the armed thing's own step:
+    // carrying 45° over to a family that turns in 90° increments would arm an
+    // angle it can never reach again, and the user would have no way back to 0
+    // except by cycling through eight steps. Since row A1 a family's step is the
+    // least common multiple of its parts' (`scene.ts#pieceRotationStep`), which
+    // makes the reset *more* necessary rather than less: two families can differ
+    // in step even when every file in them is shared.
     setRotation(0)
   }, [])
 
@@ -126,15 +138,15 @@ export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
       snap,
       step: SNAP_STEP[snap],
       rotation,
-      selectedDesign,
+      selectedTemplate,
       setTool,
       toggleTool,
       setSnap,
       toggleSnap,
       rotate,
       setRotation,
-      setSelectedDesign,
+      setSelectedTemplate,
     }),
-    [tool, snap, rotation, selectedDesign, toggleTool, toggleSnap, rotate, setSelectedDesign],
+    [tool, snap, rotation, selectedTemplate, toggleTool, toggleSnap, rotate, setSelectedTemplate],
   )
 }

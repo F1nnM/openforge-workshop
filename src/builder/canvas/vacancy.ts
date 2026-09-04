@@ -32,7 +32,7 @@ import { footprintShape, planGeometry, snapTo } from './geometry'
 import type { OverlapSubject, PlanBand } from './overlap'
 import { subjectsConflict } from './overlap'
 import type { PlanScene } from './scene'
-import { scenePaintOrder } from './scene'
+import { sceneSubjects } from './scene'
 
 /**
  * How far out the search goes, in grid units.
@@ -63,7 +63,13 @@ export function freeCellFor(scene: PlanScene, foot: Footprint, band: PlanBand = 
   const shape = footprintShape(foot)
   if (shape === undefined) return clearOf(scene.bounds)
 
-  const occupied = scenePaintOrder(scene)
+  // Every drawn **part** of every piece, not every piece: since row A1 a
+  // placement is a template instance with a fill per slot, and a piece has no
+  // single band, box or outline for `subjectsConflict` to read. `sceneSubjects`
+  // is the same flattening `buildPlanScene`'s own conflict sweep uses, which is
+  // what keeps this function's promise — a cell it returns is a cell the scene
+  // will not mark in conflict.
+  const occupied = sceneSubjects(scene)
   const start = centreOfPlan(scene.bounds, foot)
 
   const fits = (at: PlanPoint): boolean => {
@@ -74,7 +80,7 @@ export function freeCellFor(scene: PlanScene, foot: Footprint, band: PlanBand = 
       parts: geometry.parts,
       axisAligned: geometry.axisAligned,
     }
-    return !occupied.some((piece) => subjectsConflict(piece, subject))
+    return !occupied.some((candidate) => subjectsConflict(candidate, subject))
   }
 
   // Ring by ring, so the answer is the *nearest* free cell rather than the first

@@ -4,11 +4,14 @@
  *
  * ## What a placement means geometrically
  *
- * A `Placement` carries `x`, `z` and `rotation` and nothing else — the footprint
- * lives on the `CatalogRecord` (`src/store/schema.ts` is explicit that copying it
- * into the placement would desynchronise on the next import). So every function
- * here takes the footprint separately, and the pair (placement, footprint) is
- * what has a box.
+ * A `TemplateInstance` carries `x`, `z`, `rotation` and a fill per named slot —
+ * the footprint lives on each fill's `CatalogRecord` (`src/store/schema.ts` is
+ * explicit that copying it into the placement would desynchronise on the next
+ * import, and that a *slot offset* would be wrong for most fills of the same slot
+ * because the `base` slot admits 25 distinct footprints). So every function here
+ * takes the footprint separately, and the triple (instance origin, slot layout,
+ * footprint) is what has a box — see {@link SlotLayout} and
+ * {@link slotGeometry}.
  *
  * **`x`/`z` are the box's minimum corner, not its centre**, and the choice is
  * forced by two independent constraints:
@@ -422,6 +425,177 @@ export function planGeometry(shape: PlanShape, rotation: number, x: number, z: n
     parts: planParts(shape, rotation, x, z),
     axisAligned: isAxisAligned(angle),
   }
+}
+
+/* ---------------------------------------------------------- slot geometry */
+
+/**
+ * Where one part sits inside its template, and how high it stands.
+ *
+ * Row **A1** made a placement a template instance with a fill per named slot, so
+ * a piece is no longer one primitive at one anchor: it is N primitives at N
+ * offsets from one origin. This is that offset, and it is the only new geometric
+ * quantity the change introduces.
+ *
+ * **This type is the shape row A4a expects and row B2 fills in.** B2 owns
+ * `src/template/**` and the `SlotRule` model, whose offsets are *computed at fill
+ * time from the fill's own footprint* — §1.4 measured the `base` slot admitting
+ * 25 distinct footprints and `wall` 14, so a stored quadruple would be wrong for
+ * most fills of the same slot. Nothing here evaluates a rule; the rule is passed
+ * in (`catalog.ts`'s `SlotLayoutRule`) and this is the answer it returns.
+ *
+ * ## Three facts the fields are shaped by
+ *
+ *   - **`dx`/`dz` land on multiples of 0.25 and deliberately do not snap.** §2.2:
+ *     the *origin* of an instance snaps to the 0.5 lattice (§7) and a slot offset
+ *     never does. So these are plain finite numbers and no lattice is enforced —
+ *     {@link snapTo} is for the origin and must not be applied here.
+ *   - **`rotation` is relative to the instance's own.** A template is *"placed
+ *     and rotated as one unit"* (§1), so there is exactly one stored angle;
+ *     `src/store/schema.ts#Rotation` says so outright. A part's yaw inside the
+ *     recipe — the right wall turned 90° from the left one — is a property of the
+ *     recipe, not of the placement, so it belongs here and is *added* to the
+ *     instance's rotation by {@link slotGeometry}.
+ *   - **`elevationMm` is normalised and is never read from the file.** §2.2, §9:
+ *     18.4% of measured `openforge` toppers are authored pre-lifted by exactly
+ *     6.0 mm and 77.5% are not, so a height taken off the mesh encodes that
+ *     inconsistency. The rule states the lift; the mesh does not get a vote. In
+ *     **millimetres**, and the unit is in the name because `dx`/`dz` are grid
+ *     units and the two must never be added.
+ */
+export interface SlotLayout {
+  /** Offset along `x` from the instance origin, in grid units, before its rotation. */
+  readonly dx: number
+  /** Offset along `z` from the instance origin, in grid units, before its rotation. */
+  readonly dz: number
+  /** The part's own yaw inside the recipe, in degrees. Added to the instance's. */
+  readonly rotation: number
+  /** How high the part stands above the plan, in millimetres. Normalised, never measured. */
+  readonly elevationMm: number
+}
+
+/**
+ * Every part at the origin, unturned and unlifted.
+ *
+ * **The layout in force until row B2's `SlotRule` lands**, and a real answer
+ * rather than a placeholder: it is exactly right for the slots that *are* at the
+ * origin, and those are the majority of the shipped corpus. Measured over
+ * `src/screens/assemblies/templates.ts` — 40 templates, 128 parts, 6 distinct
+ * part names:
+ *
+ * | slot                       | templates carrying it |
+ * | -------------------------- | --------------------: |
+ * | `floor`                    |             **40/40** |
+ * | `base`                     |             **40/40** |
+ * | `column`/`left`/`right`/`wall` |     the remaining 48 parts |
+ *
+ * 36 of the 40 templates have exactly **three** parts and 4 have five, so
+ * `floor` + `base` is 80 of the 128 parts — **62.5%** placed correctly by this
+ * rule, and the rest stacked at the same anchor. What it cannot do is separate
+ * the two walls of a corner.
+ *
+ * It is frozen because it is handed out by reference to every part of every
+ * instance in the scene.
+ */
+export const ORIGIN_LAYOUT: SlotLayout = Object.freeze({ dx: 0, dz: 0, rotation: 0, elevationMm: 0 })
+
+/**
+ * Turn an offset about the origin, exactly on the quarter turns.
+ *
+ * The quarter turns are computed by swapping and negating rather than by
+ * trigonometry, for {@link rotatedExtent}'s reason applied to a *position*
+ * instead of a size: `Math.cos(Math.PI / 2)` is 6.1e-17, so a 0.5-unit offset
+ * turned 90° by trig lands 3e-17 off the lattice — and a 3e-17 offset is
+ * precisely the value that makes two parts look flush and fail an equality test.
+ * Slot offsets are multiples of 0.25 (§2.2), so on a quarter turn the exact
+ * branch keeps them there.
+ *
+ * `+ 0` folds `-0`, which the negating branches really do produce from a zero
+ * offset — and `-0` survives in memory but not through `JSON.stringify`.
+ */
+export function turnOffset(dx: number, dz: number, rotation: number): PlanPoint {
+  if (isAxisAligned(rotation)) {
+    switch (Math.round(normalizeRotation(rotation) / 90) % 4) {
+      case 1:
+        return [-dz + 0, dx + 0]
+      case 2:
+        return [-dx + 0, -dz + 0]
+      case 3:
+        return [dz + 0, -dx + 0]
+      default:
+        return [dx + 0, dz + 0]
+    }
+  }
+  const radians = (rotation * Math.PI) / 180
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  return [dx * cos - dz * sin, dx * sin + dz * cos]
+}
+
+/**
+ * The world anchor corner of one part: its slot offset, turned with the
+ * instance, added to the instance origin.
+ *
+ * **The composition rule, stated once.** Corner anchoring does not compose under
+ * rotation on its own — this module's own note says rotation *preserves* the
+ * anchor corner and swaps the extents around it, which is the right convention
+ * for a piece turning in place and says nothing about a piece turning about
+ * something else. So the rule is spelled out: **the part turns about its own
+ * anchor corner, and that corner orbits the instance origin.** One rotation, two
+ * effects, and both of them are what a plan editor reads as "turn the whole
+ * thing".
+ *
+ * Row **B2** owns whether that is the right convention for a `SlotRule`, since it
+ * owns what `dx`/`dz` mean. This is the arithmetic A4a assumed in order to draw
+ * anything at all, and it is one function to change.
+ */
+export function slotAnchor(origin: PlanPoint, rotation: number, layout: SlotLayout): PlanPoint {
+  const [dx, dz] = turnOffset(layout.dx, layout.dz, rotation)
+  return [origin[0] + dx, origin[1] + dz]
+}
+
+/**
+ * One part's plan geometry: its footprint, at its slot's offset, turned with its
+ * instance.
+ *
+ * The per-part counterpart of {@link planGeometry} and the only place the two
+ * rotations are added. `rotation` is the *instance's* stored angle; the part's
+ * own yaw comes off `layout` and the footprint's intrinsic angle off `shape`, so
+ * a `diag` in a slot turned 90° in a template turned 45° is drawn at 180° and
+ * nothing has to know that but this line.
+ */
+export function slotGeometry(
+  shape: PlanShape,
+  layout: SlotLayout,
+  origin: PlanPoint,
+  rotation: number,
+): PlanGeometry {
+  const anchor = slotAnchor(origin, rotation, layout)
+  return planGeometry(shape, normalizeRotation(rotation + layout.rotation), anchor[0], anchor[1])
+}
+
+/**
+ * The axis-aligned box containing every one of these, or `undefined` for none.
+ *
+ * What an *instance* occupies, as against what one part does: a template has N
+ * boxes and the scene, the viewport and the move readouts all want one. Returns
+ * `undefined` rather than a degenerate box for the empty case, because an
+ * instance with nothing drawable is a thing the scene reports rather than draws
+ * — see `scene.ts`'s `unfilled` list.
+ */
+export function unionBox(boxes: readonly PlanBox[]): PlanBox | undefined {
+  if (boxes.length === 0) return undefined
+  let left = Infinity
+  let top = Infinity
+  let right = -Infinity
+  let bottom = -Infinity
+  for (const box of boxes) {
+    left = Math.min(left, box.x)
+    top = Math.min(top, box.z)
+    right = Math.max(right, box.x + box.w)
+    bottom = Math.max(bottom, box.z + box.d)
+  }
+  return { x: left, z: top, w: right - left, d: bottom - top }
 }
 
 /**

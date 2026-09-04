@@ -35,8 +35,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { DesignId } from '@/catalog'
-import { CatalogFile as CatalogFileSchema, DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
+import { DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
 import { baseFootprint } from '@/generator/panel/footprint'
 import { PANEL_ENTRIES, panelSchema } from '@/generator/panel/schemas'
 import { GENERATED_ROTATION_STEP_DEG } from '@/generator/placement/placement'
@@ -44,20 +43,42 @@ import type { PlacementId, WorkshopState } from '@/store'
 import { aGeneratedBase } from '@/store/fixture'
 
 import { createStyleResolver, planCatalogFromFile } from './catalog'
-import { FIXTURE_CATALOG, FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from './fixture'
+import {
+  FIXTURE_IDS,
+  FIXTURE_SLOTS,
+  FIXTURE_TEMPLATE,
+  fixtureCatalogFile,
+  fixtureFills,
+  fixtureInstance,
+  fixtureSlotLayout,
+} from './fixture'
 import { beginMove, previewMove } from './move'
-import { buildPlanScene, navigationOrder, pieceAt, pieceName, pieceRotationStep, scenePaintOrder } from './scene'
+import {
+  buildPlanScene,
+  describeTemplate,
+  navigationOrder,
+  pieceAt,
+  pieceName,
+  pieceRotationStep,
+  scenePaintOrder,
+} from './scene'
 import { VACANCY_STEP, freeCellFor } from './vacancy'
 
 const file = fixtureCatalogFile()
-const catalog = planCatalogFromFile(file)
+const catalog = planCatalogFromFile(file, fixtureSlotLayout)
 const styleOf = createStyleResolver(catalog)
 
-/** Catalog placements from `[key, tileId, x, z, rotation]` tuples, via `fixtureDesignOf`. */
+/**
+ * Catalog placements from `[key, tileId, x, z, rotation]` tuples.
+ *
+ * One-part template instances, filling the `floor` slot — whose fixture layout
+ * is `(0, 0)` unturned, so the geometry is exactly what a pre-A1 placement of the
+ * same file had and every cross-population assertion below carries over.
+ */
 function tiles(rows: readonly [string, string, number, number, number][]): WorkshopState['placements'] {
-  const placements: WorkshopState['placements'] = {}
+  const placements: Record<string, WorkshopState['placements'][PlacementId]> = {}
   for (const [key, tileId, x, z, rotation] of rows) {
-    placements[key as PlacementId] = { design: fixtureDesignOf(tileId), x, z, rotation }
+    placements[key] = fixtureInstance(key, fixtureFills([[FIXTURE_SLOTS.floor, tileId]]), { x, z, rotation })
   }
   return placements
 }
@@ -106,7 +127,11 @@ describe('the second list', () => {
     expect(piece?.band).toBe('area')
     expect(piece?.tiles).toBe(true)
     expect(piece?.caveat).toBeNull()
-    expect(piece?.parts).toHaveLength(1)
+    // `polygons`, not `parts`: `PlanPiece.parts` means its filled slots since row
+    // A1, and a generated base has none — it is one primitive, so `polygons`
+    // holds its single convex outline and the shared field name still lets one
+    // renderer draw both populations.
+    expect(piece?.polygons).toHaveLength(1)
     expect(piece?.name).toBe('Generated square base')
     expect(piece?.label).toContain('Generated square base')
   })
@@ -189,7 +214,11 @@ describe('paint order and hit testing', () => {
 
   it('names either population, so one readout serves the erase gesture and the bill', () => {
     const scene = sceneOf(tiles([['t1', FIXTURE_IDS.floor1, 0, 4, 0]]), bases([['g1', 0, 0]]))
-    expect(pieceName(scene.pieces[0]!)).toBe(catalog.record(fixtureDesignOf(FIXTURE_IDS.floor1))?.name)
+    // The catalog arm names the **family** since row A1, not a file: an instance
+    // is up to five files and `record.name` had no single answer. A caller that
+    // wants a file's name wants a part.
+    expect(pieceName(scene.pieces[0]!)).toBe(describeTemplate(FIXTURE_TEMPLATE))
+    expect(pieceName(scene.pieces[0]!)).toBe('Fixture corner')
     expect(pieceName(scene.generated[0]!)).toBe('Generated square base')
   })
 
@@ -274,44 +303,53 @@ describe('moving a generated base', () => {
     expect(preview?.conflict).toBe(true)
   })
 
-  it('does not confuse them even when the design id *is* the generated base id', () => {
+  it('does not confuse them even when the template id *is* the generated base id', () => {
     /*
-      **The case row V4 made reachable, and the one the test above cannot see.**
+      **The case row V4 made reachable, kept pointed at row A1's identity.**
 
       S5 proved the two spaces disjoint lexically: a `GeneratedBaseId` starts
       `gen:` and therefore fails `TileId`'s `^tiles/…` pattern. V4 put a
-      `DesignId` in the catalog slot and `DesignId` is `z.string().min(1)` — no
-      pattern — so nothing in the schemas stops a design id from being the exact
-      string a generated base uses. Over the live corpus none is (all 3,822 are
-      `d` plus twelve hex), but that is a measurement, and `move.ts#identityOf`
-      qualifies the id with its population so no measurement is load bearing.
+      `DesignId` in the catalog slot and `DesignId` carries no pattern, so
+      nothing in the schemas stopped a design id from being the exact string a
+      generated base uses. **A1 moved the slot again**: the catalog arm of
+      `identityOf` is now the *family* plus its fills, so the string that could
+      collide is a `TemplateId` — and `src/store/schema.ts` states outright that
+      `TemplateId` and `DesignId` are not lexically disjoint, so the lexical
+      proof is gone for good rather than merely weakened.
 
-      Verified capable of failing: with `identityOf` returning the bare id, this
-      test refuses the move as a `duplicate` and the previous one still passes.
-      That is exactly X9's symptom — the user drags a tile onto a free cell and
-      the builder refuses, for a reason nothing on screen can express.
+      `move.ts#identityOf` qualifies the id with its population instead, so no
+      measurement is load bearing. Here the instance's family *is* the generated
+      base's id and the move must still not be refused.
+
+      Verified capable of failing: with the `'catalog'` / `'generated'` prefixes
+      removed from `identityOf`, this test refuses the move as a `duplicate` and
+      the previous one still passes. That is exactly X9's symptom — the user
+      drags a piece onto a free cell and the builder refuses, for a reason
+      nothing on screen can express.
     */
     const collidingBase = aGeneratedBase({ x: 8, z: 0 })
-    const shadowed = CatalogFileSchema.parse({
-      ...FIXTURE_CATALOG,
-      records: FIXTURE_CATALOG.records.map((record, index) =>
-        index === 0 ? { ...record, design: collidingBase.base } : record,
-      ),
-    })
-    const shadowCatalog = planCatalogFromFile(shadowed)
     const scene = buildPlanScene(
-      { ['t1' as PlacementId]: { design: collidingBase.base as unknown as DesignId, x: 0, z: 0, rotation: 0 } },
-      shadowCatalog,
-      createStyleResolver(shadowCatalog),
+      {
+        ['t1' as PlacementId]: fixtureInstance(
+          't1',
+          fixtureFills([[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]]),
+          { template: collidingBase.base },
+        ),
+      },
+      catalog,
+      styleOf,
       { ['g1' as PlacementId]: collidingBase },
     )
     // Both populations drew, so the identities really are in play together.
     expect(scene.pieces).toHaveLength(1)
     expect(scene.generated).toHaveLength(1)
+    // And the two identity strings really are the same bare string, which is
+    // what makes this a test rather than a coincidence.
+    expect(scene.pieces[0]?.placement.template).toBe(scene.generated[0]?.placement.base)
 
-    // Dropped onto the tile's own cell at the tile's own angle, which is the
-    // only place a false twin can appear: `duplicateRefusal` needs the identity,
-    // the rotation *and* the anchor to agree.
+    // Dropped onto the instance's own cell at its own angle, which is the only
+    // place a false twin can appear: `duplicateRefusal` needs the identity, the
+    // rotation *and* the anchor to agree.
     const drag = beginMove(scene.generated[0]!, null)
     const preview = previewMove({ ...drag, anchor: [0, 0] }, scene)
     expect(preview?.refusal).toBeNull()

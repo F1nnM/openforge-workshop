@@ -95,13 +95,13 @@
  */
 import type { Footprint } from '@/catalog'
 import type { PlacementId } from '@/store'
+import { filledSlots } from '@/store'
 
-import type { PlanBox, PlanPart, PlanPoint } from './geometry'
-import { describeCell, formatUnits, planGeometry, snapTo } from './geometry'
-import type { OverlapSubject } from './overlap'
+import type { PlanBox, PlanPoint } from './geometry'
+import { describeCell, formatUnits, snapTo } from './geometry'
 import { subjectsConflict } from './overlap'
 import type { PlanScene, ScenePiece } from './scene'
-import { pieceName, scenePaintOrder } from './scene'
+import { pieceName, pieceSubjects, reanchorPiece, sceneSubjects, scenePaintOrder } from './scene'
 import { sectorCentre } from './sector'
 
 /* ----------------------------------------------------------------- the drag */
@@ -211,23 +211,35 @@ export interface MovePreview {
    * Either population. Row X9 widened this from `PlanPiece`, and the widening is
    * what makes a generated base movable *by the same code* rather than by a
    * second gesture: nothing in this module reads a `CatalogRecord` except the
-   * name in a readout and the footprint the concentric note is about, and both
-   * of those have an answer for a generated base.
+   * name in a readout and the footprints the concentric note is about, and both
+   * of those have an answer for either population.
    */
   readonly piece: ScenePiece
+  /**
+   * The piece as it would be if dropped here — **the same shape**, re-projected.
+   *
+   * Row **A1** is why this replaced the flat `box` / `parts` / `angle` /
+   * `axisAligned` quartet. A template instance has N parts at N offsets, so
+   * "where the piece would be" is no longer four numbers; it is a whole piece's
+   * worth of geometry, and those four fields could only ever have described one
+   * part of it. Publishing a re-projected {@link ScenePiece} means a renderer
+   * draws the preview with the code it already draws the scene with — box,
+   * polygons, per-part records, angles and elevations included — and there is no
+   * second shape to keep in step.
+   *
+   * `conflict` on it is this preview's verdict, so a renderer may read it
+   * directly. Built by `scene.ts#reanchorPiece`, which is pure geometry: no
+   * catalog lookup and no style resolution, which is what lets this run on every
+   * pointer event.
+   */
+  readonly moved: ScenePiece
   /** Where it was picked up from. */
   readonly from: PlanPoint
   /** The box it occupied there, for the leader line. */
   readonly fromBox: PlanBox
   /** The proposed anchor. What reaches `movePlacement`. */
   readonly anchor: PlanPoint
-  readonly box: PlanBox
-  readonly parts: readonly PlanPart[]
-  /** `placement.rotation + shape.angle` — the angle drawn. Unchanged by the move. */
-  readonly angle: number
-  /** Whether the drawn box is the shape. Read by the corner-junction exemption. */
-  readonly axisAligned: boolean
-  /** The pieces in this piece's own band that the drop would overlap. */
+  /** The pieces the drop would overlap, in either population. */
   readonly overlaps: readonly ScenePiece[]
   readonly conflict: boolean
   /** Whether the proposal is where the piece already is. */
@@ -254,71 +266,92 @@ export function previewMove(drag: MoveDrag, scene: PlanScene): MovePreview | und
   const piece = order.find((candidate) => candidate.id === drag.id)
   if (piece === undefined) return undefined
 
-  const geometry = planGeometry(piece.shape, piece.placement.rotation, drag.anchor[0], drag.anchor[1])
-  const subject: OverlapSubject = {
-    band: piece.band,
-    box: geometry.box,
-    parts: geometry.parts,
-    axisAligned: geometry.axisAligned,
-  }
-  // Every piece but this one: a piece cannot collide with, or duplicate, itself.
-  const others = order.filter((candidate) => candidate.id !== drag.id)
-  const overlaps = others.filter((candidate) => subjectsConflict(candidate, subject))
+  // The whole piece re-projected, not one primitive. `pieceSubjects` then hands
+  // the collision test one subject per part, and `sceneSubjects` is the same
+  // flattening `buildPlanScene`'s own conflict sweep uses — so a move and the
+  // scene cannot disagree about a drop, which is the property `ghost.ts` shares
+  // the predicate for.
+  const moved = reanchorPiece(piece, drag.anchor)
+  const subjects = pieceSubjects(moved)
+  // Every candidate but this piece's own parts: a piece cannot collide with, or
+  // duplicate, itself.
+  const hit = new Set(
+    sceneSubjects(scene)
+      .filter((candidate) => candidate.id !== drag.id)
+      .filter((candidate) => subjects.some((subject) => subjectsConflict(candidate, subject)))
+      .map((candidate) => candidate.id),
+  )
+  const overlaps = order.filter((candidate) => hit.has(candidate.id))
   const unchanged = same(drag.origin, drag.anchor)
+  const others = order.filter((candidate) => candidate.id !== drag.id)
   const refusal = duplicateRefusal(piece, others, drag.anchor)
 
   return {
     id: drag.id,
     piece,
+    moved: { ...moved, conflict: overlaps.length > 0 },
     from: drag.origin,
-    fromBox: planGeometry(piece.shape, piece.placement.rotation, drag.origin[0], drag.origin[1]).box,
+    fromBox: reanchorPiece(piece, drag.origin).box,
     anchor: drag.anchor,
-    box: geometry.box,
-    parts: geometry.parts,
-    angle: geometry.angle,
-    axisAligned: geometry.axisAligned,
     overlaps,
     conflict: overlaps.length > 0,
     unchanged,
     refusal,
-    // Provably `null` for a generated base rather than branched away: its grid
-    // footprint is a `rect`, and `concentricNote` returns `null` for every shape
-    // that is not an `arc`. Passing the footprint of either population is
-    // therefore one expression with one answer, and it stays correct on the day
-    // the generator learns to make a curve.
-    note: concentricNote(piece.kind === 'catalog' ? piece.record.foot : piece.foot.gridFootprint),
+    note: firstConcentricNote(piece),
     committable: !unchanged && refusal === null,
   }
 }
 
 /**
- * The one refusal: an identical tile, at an identical angle, already there.
+ * The concentric-snap disclosure for a piece, or `null`.
+ *
+ * Asked of every footprint the piece holds — a template's parts, or the one grid
+ * footprint of a generated base — and the first note wins.
+ *
+ * **One note rather than N**, because the thing being disclosed is a fact about
+ * *the instance's anchor*: §2.2's slot offsets are fixed by the recipe, so if one
+ * curve in a template cannot be made concentric with a curve in the next
+ * template, no arrangement of the anchor fixes it and saying so five times helps
+ * nobody.
+ *
+ * The generated arm is provably `null` rather than branched away: its grid
+ * footprint is a `rect` and {@link concentricNote} returns `null` for every shape
+ * that is not an `arc`, so asking is one expression with one answer and it stays
+ * correct on the day the generator learns to make a curve.
+ */
+function firstConcentricNote(piece: ScenePiece): MoveNote | null {
+  const feet: readonly Footprint[] =
+    piece.kind === 'catalog' ? piece.parts.map((part) => part.record.foot) : [piece.foot.gridFootprint]
+  for (const foot of feet) {
+    const note = concentricNote(foot)
+    if (note !== null) return note
+  }
+  return null
+}
+
+/**
+ * The one refusal: an identical **instance**, at an identical angle, already
+ * there.
  *
  * `ghost.ts` refuses the same thing on a placement and states the cost — two
- * identical tiles at the same coordinates are invisible on the plan and would
- * silently double a line in the bill of tiles, so the user prints two floors and
- * only ever sees one. A move can produce that just as easily as a second click
- * can, and the answer has to match or the two paths disagree about what a legal
- * scene is.
+ * identical pieces at the same coordinates are invisible on the plan and would
+ * silently double every line in the bill of tiles, so the user prints two floors
+ * and only ever sees one. A move can produce that just as easily as a second
+ * click can, and the answer has to match or the two paths disagree about what a
+ * legal scene is.
  *
- * It is also the invariant row A6's bill join is written against:
- * `billView.ts`'s `placementKey` is `design|x|z|rotation`, and its docblock
- * relies on that tuple being unique per scene. A move is the *only* operation
- * that can change three of those four fields at once, so it is the one that has
- * to hold the rule.
+ * Since row **A1** "identical" is a question about a fill map rather than about
+ * one design — see {@link identityOf}. It got *stronger*, not weaker: a template
+ * instance with five fills doubles five bill lines, so the rule earns five times
+ * what it used to.
  *
  * Note what the move leaves alone: `movePlacement` does not touch the identity,
  * and a `PlacementId` survives a move. Erase-then-place did neither — it retired
  * the id and minted a new one — so a move is strictly *safer* for anything keyed
- * on a placement, `bill.resolved` included, and `resolveVariant` cannot be
- * disturbed by it at all, since resolution is a function of the design and the
- * lock and knows nothing of coordinates.
+ * on a placement, and nothing that resolves a fill can be disturbed by it at
+ * all, since a fill names an exact file and knows nothing of coordinates.
  */
-function duplicateRefusal(
-  piece: ScenePiece,
-  others: readonly ScenePiece[],
-  anchor: PlanPoint,
-): MoveRefusal | null {
+function duplicateRefusal(piece: ScenePiece, others: readonly ScenePiece[], anchor: PlanPoint): MoveRefusal | null {
   const identity = identityOf(piece)
   const twin = others.find(
     (candidate) =>
@@ -331,38 +364,56 @@ function duplicateRefusal(
     code: 'duplicate',
     message:
       `${pieceName(piece)} is already placed at ${describeCell(anchor[0], anchor[1])} at the same angle, ` +
-      `so this move would hide one piece under the other and double its line in the bill. Put back.`,
+      `so this move would hide one piece under the other and double its lines in the bill. Put back.`,
   }
 }
 
 /**
- * What makes two pieces the same *thing* — a `DesignId` or a `GeneratedBaseId`.
+ * What makes two pieces the same *thing* — a filled template, or a base recipe.
  *
- * **Qualified by population, and row V4 is why.** S5 compared the two id spaces
- * as bare strings and proved that safe lexically: a `GeneratedBaseId` starts
- * `gen:` and therefore fails `TileId`'s `^tiles/…` pattern, so no generated base
- * could be mistaken for a catalogued tile here, and X9's warning was that
- * without the proof a missing kind check would be a false twin with no visible
- * cause.
+ * **Qualified by population**, and rows V4 and X9 are why. S5 compared the two id
+ * spaces as bare strings and proved that safe lexically: a `GeneratedBaseId`
+ * starts `gen:` and therefore fails `TileId`'s `^tiles/…` pattern, and without
+ * the proof a missing kind check would be a false twin with no visible cause.
+ * A1's `TemplateId` and `DesignId` are **not** lexically disjoint —
+ * `src/store/schema.ts` says so outright, a `DesignId` is `d` plus twelve hex and
+ * matches the slug pattern — so the lexical proof is gone for good. Prefixing the
+ * `kind` restores the theorem more cheaply than any schema could: `'catalog'` and
+ * `'generated'` come from a closed union and neither string is a prefix of the
+ * other, so two qualified ids are equal only if both the population and the
+ * identity are, and no measurement is load bearing.
  *
- * V4 put a `DesignId` in the catalog slot and **`DesignId` carries no pattern**
- * — it is `z.string().min(1)`, and tightening it to `d` plus twelve hex would
- * rewrite 208 fixture ids across 28 files to buy a theorem back. So the lexical
- * proof would have degraded into a measurement of the corpus, which is exactly
- * the kind of load-bearing measurement that goes stale in silence. Prefixing the
- * `kind` restores the theorem instead, and more cheaply than the schema could:
- * `'catalog'` and `'generated'` come from a closed union and neither string is a
- * prefix of the other, so two qualified ids are equal only if both the
- * population and the identity are. No measurement is load bearing and X9's false
- * twin is unreachable by construction.
+ * ## The catalog arm is the family **plus its fills**
  *
- * A generated base's id *is* its canonical recipe key, so two generated bases are
- * the same thing iff their recipes are equal, which is the same standard the
- * catalog arm applies: identical item, identical angle, identical cell.
+ * The family alone would be wrong in the direction that costs the user money:
+ * two instances of one template filled with different walls are different
+ * objects, print differently, and must both stay on the plan. The fills alone
+ * would be wrong the other way — two families can be filled identically and are
+ * still two recipes.
+ *
+ * `pinned` is deliberately **not** in the identity. It records *who chose* a
+ * file, which is provenance rather than substance: two instances holding the same
+ * five files print the same five files whether the solver or the user picked
+ * them, so an identical pair differing only in `pinned` is exactly the invisible
+ * doubled bill this rule exists to refuse.
+ *
+ * Sorted by slot, because `fills` is a map and its key order is whatever the
+ * writes happened in. Two instances filled in different orders are the same
+ * instance, and an unsorted join would call them different.
+ *
+ * Read off `placement.fills` and **not** off `piece.parts`, which is the same
+ * distinction `scene.ts` draws between a fill and a drawable part: a fill naming
+ * a retired file is in the map and not in the parts, so an identity taken from
+ * the parts would call an instance carrying one identical to an instance that
+ * never had it — and then refuse a move the user has every right to make.
  */
 function identityOf(piece: ScenePiece): string {
-  const identity = piece.kind === 'catalog' ? piece.placement.design : piece.placement.base
-  return `${piece.kind}:${identity}`
+  if (piece.kind === 'generated') return `generated:${piece.placement.base}`
+  const { fills } = piece.placement
+  const joined = filledSlots(fills)
+    .map((slot) => `${slot}=${fills[slot]?.tile ?? ''}`)
+    .sort((a, b) => a.localeCompare(b))
+  return JSON.stringify(['catalog', piece.placement.template, joined])
 }
 
 /* ------------------------------------------------------ the concentric limit */

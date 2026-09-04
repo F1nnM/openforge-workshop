@@ -42,6 +42,7 @@ import {
 import type { OverlapSubject, PlanBand } from './overlap'
 import { planBand, subjectsConflict } from './overlap'
 import type { PlanPiece, PlanScene } from './scene'
+import { sceneSubjects } from './scene'
 
 /**
  * The shape of the refusal marker: one cell, so it reads as a tile.
@@ -95,19 +96,38 @@ export interface PlanGhost {
 /** Tolerance for "the same coordinate", in grid units — a tenth of the finest snap. */
 const SAME_PLACE_EPS = 0.05
 
-function isDuplicate(scene: PlanScene, record: CatalogRecord, anchor: PlanPoint, rotation: number): boolean {
-  return scene.pieces.some(
-    (piece) =>
-      // The **item**, since row V4 — and `record` is a variant of the armed
-      // item, so `record.design` is that item. Comparing files would have gone
-      // wrong in exactly one direction the day a placement stopped naming one:
-      // two placements of one design under one preference resolve to the same
-      // file anyway, so the test is unchanged in behaviour and now says what it
-      // means.
-      piece.placement.design === record.design &&
-      piece.placement.rotation === rotation &&
-      Math.abs(piece.placement.x - anchor[0]) < SAME_PLACE_EPS &&
-      Math.abs(piece.placement.z - anchor[1]) < SAME_PLACE_EPS,
+/**
+ * Whether this exact file is already drawn at this exact corner and angle.
+ *
+ * **Compared against parts, not against placements, and that is row A1's whole
+ * effect on this rule.** The question the refusal exists for has not changed —
+ * two identical outlines in the same place are invisible on the plan and double
+ * a line in the bill — but the thing that can *be* in a place is now a part of a
+ * template rather than a placement of a tile, so the comparison has to be one
+ * level down. A ghost of `Cut stone wall 2` dropped exactly where a template's
+ * `right wall` already puts that same file is the same invisible double it always
+ * was, and comparing placements would have missed every one of them.
+ *
+ * The identity is the **file** and not the item, because a part's fill names a
+ * file (decision **D1**) and there is no aggregate left to hoist it to. Under V4
+ * the two agreed anyway — two placements of one design under one preference
+ * resolved to the same file — so this is not a change of behaviour, only of what
+ * there is to compare.
+ *
+ * The angle compared is the part's **drawn** angle, which is what the ghost's own
+ * `angle` is: it folds in the footprint's intrinsic 45° on a `diag` and the
+ * recipe's own yaw on a slot, and comparing against the *instance's* rotation
+ * would call a wall turned by its slot rule a twin of one that is not.
+ */
+function isDuplicate(scene: PlanScene, record: CatalogRecord, anchor: PlanPoint, angle: number): boolean {
+  return scene.pieces.some((piece) =>
+    piece.parts.some(
+      (part) =>
+        part.record.id === record.id &&
+        part.angle === angle &&
+        Math.abs(part.box.x - anchor[0]) < SAME_PLACE_EPS &&
+        Math.abs(part.box.z - anchor[1]) < SAME_PLACE_EPS,
+    ),
   )
 }
 
@@ -163,7 +183,7 @@ export function computeGhost(
   const anchor = anchorForShape(resolved, rotation, cursor[0], cursor[1], step)
   const geometry = planGeometry(resolved, rotation, anchor[0], anchor[1])
   const band = planBand(record)
-  const duplicate = isDuplicate(scene, record, anchor, rotation)
+  const duplicate = isDuplicate(scene, record, anchor, geometry.angle)
   const subject: OverlapSubject = {
     band,
     box: geometry.box,
@@ -184,13 +204,31 @@ export function computeGhost(
     band,
     refusal: null,
     caveat: placementCaveat(record) ?? null,
-    conflict: scene.pieces.some((piece) => subjectsConflict(piece, subject)),
+    conflict: sceneSubjects(scene).some((candidate) => subjectsConflict(candidate, subject)),
     duplicate,
     placeable: !duplicate,
   }
 }
 
-/** The pieces the ghost is in conflict with. For the readout. */
+/**
+ * The pieces the ghost is in conflict with. For the readout.
+ *
+ * Resolved through {@link sceneSubjects} and back, rather than by testing pieces:
+ * a piece has N parts and no single band or outline, so the test runs per part
+ * and the answer is de-duplicated to the *pieces* they belong to — which is what
+ * a readout counts, because "overlapping 3 pieces" is what the user can see and
+ * "overlapping 7 parts" is not.
+ *
+ * The generated population is deliberately absent, as it was before row A1: this
+ * returns {@link PlanPiece}, the readout it feeds names catalog pieces, and
+ * `move.ts` is the surface that speaks about both.
+ */
 export function ghostOverlaps(scene: PlanScene, ghost: PlanGhost): readonly PlanPiece[] {
-  return scene.pieces.filter((piece) => subjectsConflict(piece, subjectOf(ghost)))
+  const subject = subjectOf(ghost)
+  const hit = new Set(
+    sceneSubjects(scene)
+      .filter((candidate) => subjectsConflict(candidate, subject))
+      .map((candidate) => candidate.id),
+  )
+  return scene.pieces.filter((piece) => hit.has(piece.id))
 }
