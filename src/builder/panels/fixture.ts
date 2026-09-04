@@ -67,6 +67,19 @@ const TAGS = [
   'connection|openforge',
   'build|separate wall',
   'build|wall on tile',
+  /* Row C1's axes. The palette's rows are B4's generated families, keyed on
+     `(role, form, build)`, and its right-hand number is what `@/composition`
+     admits for that key — so a fixture with no `role|` tag makes every one of
+     the 91 rows count zero and the panel's numbers untestable. Two roles, one
+     form and two size pairs is the smallest set that gives three families a
+     non-zero count and one family a size position that narrows. */
+  'role|floor',
+  'role|wall',
+  'form|straight',
+  'size|width|1',
+  'size|depth|1',
+  'size|width|2',
+  'size|depth|2',
 ] as const
 
 const tag = (name: (typeof TAGS)[number]): number => TAGS.indexOf(name)
@@ -153,7 +166,7 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       build: 'separate wall',
       texture: 'dungeon_stone',
-      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock'), tag('role|floor'), tag('form|straight'), tag('size|width|1'), tag('size|depth|1')],
       foot: { shape: 'rect', w: 1, d: 1 },
     },
     {
@@ -172,7 +185,7 @@ export const FIXTURE_CATALOG = {
       layer: 'topper',
       build: 'separate wall',
       texture: 'dungeon_stone',
-      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openforge')],
+      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openforge'), tag('role|floor'), tag('form|straight'), tag('size|width|2'), tag('size|depth|2')],
       foot: { shape: 'rect', w: 2, d: 2 },
       sizeCode: 'A',
     },
@@ -212,7 +225,7 @@ export const FIXTURE_CATALOG = {
       layer: 'topper',
       build: 'wall on tile',
       texture: 'cave',
-      tags: [tag('shape|wall'), tag('texture|cave'), tag('connection|openforge')],
+      tags: [tag('shape|wall'), tag('texture|cave'), tag('connection|openforge'), tag('role|wall'), tag('form|straight')],
       foot: { shape: 'wall', length: 2 },
       sizeCode: 'ZZ',
     },
@@ -280,7 +293,7 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       build: 'separate wall',
       texture: 'dungeon_stone',
-      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock'), tag('role|floor'), tag('form|straight'), tag('size|width|1'), tag('size|depth|1')],
       foot: { shape: 'rect', w: 1, d: 1 },
     },
     {
@@ -299,7 +312,7 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       build: 'separate wall',
       texture: 'mine',
-      tags: [tag('shape|floor'), tag('connection|openlock')],
+      tags: [tag('shape|floor'), tag('connection|openlock'), tag('role|floor'), tag('form|straight')],
       foot: { shape: 'rect', w: 4, d: 4 },
     },
     {
@@ -318,7 +331,7 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       build: 'separate wall',
       texture: 'mine',
-      tags: [tag('shape|floor'), tag('connection|openlock')],
+      tags: [tag('shape|floor'), tag('connection|openlock'), tag('role|floor'), tag('form|straight')],
       foot: { shape: 'rect', w: 4, d: 4 },
     },
   ],
@@ -376,7 +389,7 @@ export const MIXED_INTEGRAL = {
   layer: 'integral',
   build: 'separate wall',
   texture: 'dungeon_stone',
-  tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+  tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock'), tag('role|floor'), tag('form|straight'), tag('size|width|2'), tag('size|depth|2')],
   foot: { shape: 'rect', w: 2, d: 2 },
   sizeCode: 'A',
 }

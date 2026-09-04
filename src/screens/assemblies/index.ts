@@ -78,24 +78,28 @@ export {
   stepCountSentence,
 } from './assembly'
 
-/**
- * The recipes and B4's generated families.
+/*
+ * The generated data, all three exports.
  *
- * `GENERATED_FAMILIES` and `GENERATED_FAMILY_SIZES` are exported here by row
- * **C3**, which is the first row that needs them outside the emitter: the
- * builder's template lookup has to answer for a placed generated family or the
- * bill reports it `unknown-template`, and the bare-base family `shape-base` is
- * what the generator's archived arm places into. 51 families over 10,380
- * records, with 350 size positions.
+ * `RECIPE_TEMPLATES` is the 40 read from the fixtures; row **B4** added the 51
+ * generated families and their size table beside it and owed this line.
+ * `GENERATED_FAMILIES` is a **second export** rather than 51 more entries in the
+ * first, because that array's length is asserted to be 40 in six suites and
+ * quoted on this screen as *"N recipes from the archive's own blueprint
+ * fixtures"* — which the families are not.
  *
- * `GENERATED_FAMILY_SIZES` is exported beside it for the **palette** (row C1),
- * where §3.1 puts size: a family is armed with a size position, and the position's
- * tags join the template's own `parentTags` so the slot's `constrain` block
- * collects them. It is deliberately *not* a control on a placed instance, and
- * `builder/panels/slots/slotEditor.ts` records the measurement that stops it
- * being one: `TemplateInstance` has no size field, so a size chosen after
- * placement has nowhere to persist and could only be re-derived from whichever
- * files ended up in the slots.
+ * Row C1's palette reads all three through `builder/panels/families.ts`, which
+ * imports `./templates` directly rather than this barrel: a value import of this
+ * module reaches `AssembliesScreen.tsx` and its stylesheet, and the palette
+ * needs two arrays and a table. Row **C3** consumes the same three the same way
+ * — `PLACEABLE_TEMPLATES` for the builder's recipe table, and the bare-base
+ * family `shape-base` for what the generator's archived arm places into.
+ *
+ * `GENERATED_FAMILY_SIZES` is the palette's domain and **not** a control on a
+ * placed instance; `builder/panels/slots/slotEditor.ts` carries the measurement
+ * that stops it being one, which is that `TemplateInstance` has no size field,
+ * so a size chosen after placement has nowhere to persist and could only be
+ * re-derived from whichever files ended up in the slots.
  */
 export { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from './templates'
 

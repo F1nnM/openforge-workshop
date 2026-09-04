@@ -50,8 +50,44 @@ export type {
   GeneratedDownload,
 } from './useArchiveDownload'
 
-export { MAX_SEARCH_ROWS, searchRows } from './palette'
-export type { PaletteLookup, PaletteRow, PaletteSource } from './palette'
+export {
+  ALL_FACETS,
+  MAX_RECENT,
+  candidateCount,
+  createCounter,
+  filterFamilies,
+  forgetRecentFamilies,
+  groupFamilies,
+  matchesQuery,
+  queryTokens,
+  reachableFacets,
+  recentArms,
+  rememberArm,
+} from './palette'
+export type { CandidateCounter, PaletteFacets, PaletteGroup, RecentArm } from './palette'
+
+/* Row C1's family model. `PLACEABLE_TEMPLATES` is the list a recipe table must
+   be built from now that the palette arms all 91 — see its own docblock, and
+   this row's report, for what happens to a placement whose id is not in it. */
+export {
+  ANY_SIZE_LABEL,
+  GROUP_LABEL,
+  GROUP_ORDER,
+  INSERT_DESIGNS,
+  NO_BUILD,
+  PLACEABLE_TEMPLATES,
+  TEMPLATE_FAMILIES,
+  axisLabel,
+  familyById,
+  positionOf,
+  sizeLabelOf,
+} from './families'
+export type { FamilyKind, GroupKey, SizePosition, TemplateFamily } from './families'
+
+/* The drawer's question, without the template table — `familyKey.ts` carries the
+   A/B build that says why those are two modules. */
+export { AXIS_LABEL, BASE_FAMILY, armForTags, armNameForTags, armRefusalFor, familyName, familySlug, sizeTagsOf } from './familyKey'
+export type { ArmRefusal, FamilyArm } from './familyKey'
 
 export { billInventory, noteCopy, thresholdLabel, verdictCopy } from './billView'
 export type { BillInventory, BillPlacement, BillRow, NoteCopy, VerdictCopy } from './billView'

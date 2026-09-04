@@ -96,13 +96,13 @@ export {
   useGeneratedMeshes,
 } from './meshes'
 
-export type { SelectionState } from './selection'
+export type { PendingArm, SelectionState } from './selection'
 export {
-  claimPendingDesign,
-  clearPendingDesign,
-  selectPendingDesign,
-  sendDesignToBuilder,
-  usePendingDesign,
+  armTemplateInBuilder,
+  claimPendingArm,
+  clearPendingArm,
+  selectPendingArm,
+  usePendingArm,
   useSelectionStore,
 } from './selection'
 

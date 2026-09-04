@@ -10,10 +10,19 @@
  *
  *   - the guided-assembly screen has a recipe and a file per part — a finished
  *     walk *is* an instance, so {@link placeOnPlan} is all it needs;
- *   - the tile drawer has one file and no recipe, so it asks
- *     {@link familyForRecord} first. B4's 51 generated families are one-slot
- *     each, keyed on `(role, form, build)`, so a file that is in one of those
- *     pools *is* a placeable instance of it.
+ *   - the tile drawer has one file and a family id, and asks
+ *     {@link placeFileAsFamily} to put the file in that family's one slot.
+ *
+ * **Which family a lone file belongs to is not asked here.** It was, and the
+ * rule was wrong: a `familyForRecord` that preferred the most specific family by
+ * `require` count mis-filed **1,963 of 1,963 `shape|base` records** — a base
+ * carries the role of the piece above it, so the three-ref `(role, form, build)`
+ * key always beat the one-ref `shape|base` and every base would have been placed
+ * as a wall. `builder/panels/familyKey.ts#armForTags` asks `shape|base` first
+ * and is the single answer both drawer actions read; the two agreed on the other
+ * 6,739 records and refused the same 285 inserts, so the whole disagreement was
+ * the defect. What is left here is the one question the tags cannot answer — the
+ * **name** of that family's single slot — and that is a table lookup.
  *
  * ## Why the cell comes from the plan's own collision predicate
  *
@@ -48,11 +57,11 @@ import {
   freeCellFor,
   planCatalogFromFile,
 } from '@/builder/canvas'
-import type { CatalogFile, CatalogRecord, Footprint, TileId } from '@/catalog'
-import { resolveTags } from '@/catalog'
-import type { RecipeTemplate } from '@/screens/assemblies'
-import { GENERATED_FAMILIES } from '@/screens/assemblies'
-import type { PlacementId, SlotFill, SlotName } from '@/store'
+/* The module and not `@/builder/panels`: that barrel is the bill panel, the
+   download hook and the archive planner, and this chunk needs one array. */
+import { PLACEABLE_TEMPLATES } from '@/builder/panels/families'
+import type { CatalogFile, Footprint, TileId } from '@/catalog'
+import type { PlacementId, SlotFill, SlotName, TemplateId } from '@/store'
 import { SlotName as SlotNameSchema, TemplateId as TemplateIdSchema, placeTemplate, useWorkshopStore } from '@/store'
 
 /** What to place: a family, and the file to pin into each of its slots. */
@@ -149,50 +158,43 @@ function largestFoot(catalog: CatalogFile, fills: Readonly<Record<string, TileId
 
 /* --------------------------------------------------------- one file's family */
 
-/** A one-slot family that admits a file, and the slot it admits it into. */
-export interface RecordFamily {
-  readonly template: RecipeTemplate
-  readonly slot: string
-}
-
 /**
- * The generated family a single file can be placed as, or `undefined`.
+ * Put one file on the plan as its family's single slot.
  *
- * Exact tag equality, which is what `@/composition` does — `require` is an
- * intersection over the interned tag table and `deny` a subtraction — so this
- * asks the same question a candidate walk would and needs no postings index for
- * a population of one. All 51 of B4's families carry exactly **one** part, so
- * there is no sibling to satisfy and nothing to solve.
+ * `template` comes from `familyKey.ts#armForTags`, which **constructs** the id
+ * from the record's own axes and never reads the table — that is what keeps the
+ * generated families out of the entry chunk (+5.95 kB gzip for every visitor,
+ * A/B measured by that module). All this adds is the slot's *name*, which no tag
+ * carries: `role|floor` says the family is `floor-straight`, and only the table
+ * says its one part is called `floor`.
  *
- * **The most specific family wins**, counted in `require` refs, then the id for
- * determinism. That matters on the bases: a base for a wall run carries
- * `shape|base` *and* `role|wall`, so it is in the pool of both `shape-base` and
- * a `wall-…` family, and the three-ref `(role, form, build)` key is the one that
- * says what the piece is for. A tie between two families of the same width
- * cannot happen on the shipped table — the keys are disjoint by construction —
- * and the id tie-break is there so that a future table cannot make the answer
- * depend on array order.
+ * Reading the table is free at this end because the drawer reaches this module
+ * through `await import()`, so it lands in the pressed chunk rather than the
+ * downloaded one — the catalog route's chunk is byte-identical with the button
+ * present.
  *
- * `undefined` is a real answer and the reason is measured: B5's 52 families
- * reach **99.0% of records**, the remainder being the 84 no square lattice can
- * place. A file this returns nothing for is one the builder genuinely cannot
- * hold, and the caller says so rather than inventing a family for it.
+ * `PLACEABLE_TEMPLATES` and not the two generated arrays, so there is one list:
+ * row C1 exports it as *"the list `BuilderScreen`'s recipe table must be built
+ * from"* and asserts its 91 members, and a second concatenation here is the
+ * copy that would go stale when B5 takes the families to 52. Imported from the
+ * module rather than from `@/builder/panels`, whose barrel is the bill panel and
+ * the download hook.
+ *
+ * `undefined` for an id this build ships no family for, and for one whose family
+ * declares anything other than a single part — a multi-slot recipe is not a
+ * thing one file can be placed as, and the caller with the fills for all of them
+ * calls {@link placeOnPlan} directly.
  */
-export function familyForRecord(catalog: CatalogFile, record: CatalogRecord): RecordFamily | undefined {
-  const tags = new Set(resolveTags(catalog, record))
-  let best: RecordFamily | undefined
-  let refs = -1
-
-  for (const family of GENERATED_FAMILIES) {
-    const part = family.parts[0]
-    if (part === undefined || family.parts.length !== 1) continue
-    const require = part.tags.require ?? []
-    if (!require.every((ref) => tags.has(ref.tag))) continue
-    if ((part.tags.deny ?? []).some((ref) => tags.has(ref.tag))) continue
-    if (require.length > refs || (require.length === refs && best !== undefined && family.id < best.template.id)) {
-      refs = require.length
-      best = { template: family, slot: part.name }
-    }
+export function placeFileAsFamily(
+  catalog: CatalogFile,
+  template: TemplateId,
+  tile: TileId,
+): (PlanPlaced & { readonly family: string }) | undefined {
+  const family = PLACEABLE_TEMPLATES.find((one) => one.id === (template as string))
+  const part = family?.parts[0]
+  if (family === undefined || part === undefined || family.parts.length !== 1) return undefined
+  return {
+    ...placeOnPlan(catalog, { template: family.id, fills: { [part.name]: tile } }),
+    family: family.name,
   }
-  return best
 }

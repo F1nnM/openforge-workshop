@@ -65,12 +65,11 @@ import { resolveMaterial } from '@/materials'
 import type { CatalogIndex } from '@/screens/catalog'
 import {
   TemplateId,
-  clearPendingDesign,
+  armTemplateInBuilder,
+  clearPendingArm,
   clearPersistedWorkshopState,
   placeTemplate,
   resetWorkshop,
-  sendDesignToBuilder,
-  setLockSystem,
   usePlacements,
   useSelectionStore,
   useWorkshopStore,
@@ -90,7 +89,7 @@ import {
   fixtureCatalogFile,
   mixedCatalogFile,
 } from './fixture'
-import { searchRows } from './palette'
+import { forgetRecentFamilies } from './palette'
 import { PalettePanel } from './PalettePanel'
 import { PlanToolbar } from './PlanToolbar'
 import { useArchiveDownload } from './useArchiveDownload'
@@ -117,6 +116,9 @@ let assembly: AssemblyIndex
 beforeEach(() => {
   resetWorkshop()
   clearPersistedWorkshopState()
+  // The RECENT ring is module-level session state (`palette.ts` argues why it is
+  // not in the store), so a family armed by one test is still in it for the next.
+  forgetRecentFamilies()
   file = fixtureCatalogFile()
   const engine = createSearchEngine(file)
   index = {
@@ -178,15 +180,16 @@ function placementCount(): number {
 /**
  * The palette, plus a readout of the tool state it writes.
  *
- * **The armed readout comes out of the DOM now, not out of `PlanTools`.** Row A8
- * reduced the panel: `usePlanTools` holds a `selectedTemplate` and this list
- * holds no template families, so the selection is the panel's own state and
- * `aria-pressed` is the only place it is observable. That is the honest place to
- * assert it from — it is also the only place a *user* can see it — and
- * {@link armedRow} is the reader.
+ * **The armed readout is `PlanTools` again.** Row A8 had reduced this panel to
+ * its own private selection, because the list was the archive and the surface
+ * places a family; row C1 replaced the list with the 91 templates, so
+ * `tools.selectedTemplate` is the armed value and the panel keeps no copy of it.
+ * {@link armedRow} reads the DOM for the same fact, which is where a *user* sees
+ * it, and the two agree on every assertion below.
  *
- * `tool` is still read from `PlanTools`, because forcing place mode is the one
- * write the panel still makes.
+ * `forgetRecentFamilies()` runs in this file's `beforeEach`: the RECENT ring is
+ * module-level session state (`palette.ts` argues why it is not in the store), so
+ * a family armed by one test would still be in it for the next.
  */
 function PaletteHarness({ query = '' }: { query?: string }) {
   const tools = usePlanTools({ tool: 'erase' })
@@ -204,160 +207,351 @@ function PaletteHarness({ query = '' }: { query?: string }) {
   )
 }
 
-/** The name on the pressed palette row, or `'none'`. */
+/** A palette row, as against a facet chip or a size chip — both are also buttons. */
+const isRow = (button: HTMLElement): boolean => button.className.includes('of-pal-pick')
+
+/** Every template row's accessible name, which is the family's **full** name. */
+function paletteRows(): string[] {
+  return screen
+    .queryAllByRole('button')
+    .filter(isRow)
+    .map((button) => button.getAttribute('aria-label') ?? '')
+}
+
+/** The full name on the pressed palette row, or `'none'`. */
 function armedRow(): string {
-  const pressed = screen.queryAllByRole('button', { pressed: true })
+  const pressed = screen.queryAllByRole('button', { pressed: true }).filter(isRow)
   const first = pressed[0]
-  return first === undefined ? 'none' : (first.textContent ?? '')
+  return first === undefined ? 'none' : (first.getAttribute('aria-label') ?? '')
+}
+
+/**
+ * One row, by the family's full name.
+ *
+ * The **last** match, because a family that is also in the RECENT ring has two
+ * rows and RECENT is rendered first — so this is always the row in the family's
+ * own group, which is the one a test means when it names a group's heading in
+ * the same breath.
+ */
+function row(name: string): HTMLElement {
+  const found = screen
+    .queryAllByRole('button')
+    .filter(isRow)
+    .filter((candidate) => (candidate.getAttribute('aria-label') ?? '').startsWith(`${name},`))
+  const last = found[found.length - 1]
+  if (last === undefined) throw new Error(`no palette row named "${name}"`)
+  return last
+}
+
+/** The pressed size chip's label, or `'none'`. */
+function armedSize(): string {
+  const group = screen.queryByRole('group', { name: /^Size for / })
+  if (group === null) return 'none'
+  const pressed = within(group).getAllByRole('button', { pressed: true })[0]
+  return pressed === undefined ? 'none' : (pressed.getAttribute('aria-label') ?? '')
 }
 
 describe('the palette', () => {
-  it('lists the archive on an empty query, which is the only list it has since row A0', () => {
-    // The panel used to hide the search block on an empty query and show the
-    // library instead. There is no library, so an empty query is a browse of the
-    // whole archive capped at `MAX_SEARCH_ROWS` — nine fixture items here, all of
-    // them, in the engine's own ranking.
+  it('lists the 91 templates this build ships, and nothing from the archive', () => {
+    // The list was the **library** until row A0 and the **archive search** until
+    // this row: 3,822 items, none of them placeable, which is why row A8 had to
+    // make the panel arm nothing at all. What is here now is B4's 51 generated
+    // families plus the 40 shipped recipes.
     render(<PaletteHarness />)
 
-    expect(screen.getAllByRole('listitem')).toHaveLength(Object.keys(FIXTURE_DESIGNS).length)
-    expect(screen.getByRole('heading', { name: /Archive 9/ })).toBeInTheDocument()
+    expect(paletteRows()).toHaveLength(91)
+    expect(screen.getByRole('heading', { name: /Templates 91/ })).toBeInTheDocument()
+    // Not the archive, and not the library before it.
+    expect(screen.queryByRole('heading', { name: /Archive/ })).toBeNull()
     expect(screen.queryByRole('heading', { name: /Library/ })).toBeNull()
+    // The fixture's nine items are 3,822's stand-in and not one of them is a row.
+    expect(screen.queryByText(FIXTURE_NAMES.floor1)).toBeNull()
   })
 
-  it('greys the tiles the plan cannot hold, and offers no control for them', () => {
-    render(<PaletteHarness query="cave column" />)
-
-    // The footprint-less column is not a control at all — see `PalettePanel.tsx`
-    // on why not a disabled button. Row W6 made the annular sector placeable, so
-    // `none` is the only case left greyed.
-    const rows = screen.getAllByRole('listitem')
-    const refused = rows.filter((row) => !row.hasAttribute('data-placeable'))
-    expect(refused).toHaveLength(1)
-    expect(refused[0]).toHaveTextContent(FIXTURE_NAMES.slab)
-    expect(within(refused[0] as HTMLElement).queryAllByRole('button')).toHaveLength(0)
-
-    expect(screen.getByText('no plan shape')).toBeInTheDocument()
-    // The canvas's own refusal sentence, so the two cannot disagree about why.
-    expect(screen.getByText(/no derivable footprint/)).toBeInTheDocument()
-  })
-
-  it('keeps the engine’s ranking rather than sinking the refused rows', () => {
-    // Row A0's one behavioural change to the ordering. The deleted `paletteRows`
-    // sank the unplaceable items into a block at the end, which was right for a
-    // library — a list the user assembled, with no ranking of its own — and is
-    // wrong for a search: the top hit for a query has to be at the top, and
-    // silently reordering a tenth of the answers would make the count beside the
-    // field disagree with the list.
+  it('groups by role, in corpus order, with the recipes in a group of their own', () => {
+    // §3.1's grouping. Ordered by records rather than by family count — wall
+    // 5,381, floor 2,162, riser 319, column 223, stair 206, roof 100, decor 26 —
+    // then the bare-base family, which A9 proved no `(role, form, build)` key can
+    // name, then the 40 authored recipes, which carry no role at all.
     render(<PaletteHarness />)
 
-    const rows = screen.getAllByRole('listitem')
-    const refusedAt = rows.findIndex((row) => !row.hasAttribute('data-placeable'))
-    expect(refusedAt).toBeGreaterThanOrEqual(0)
-    // Not last: the fixture's refused column sits mid-ranking, which is exactly
-    // what the deleted sort would have moved.
-    expect(refusedAt).toBeLessThan(rows.length - 1)
+    const headings = screen
+      .getAllByRole('heading', { level: 3 })
+      .map((heading) => heading.textContent ?? '')
+    expect(headings.map((heading) => heading.replace(/\d+$/, '').trim())).toEqual([
+      'Wall',
+      'Floor',
+      'Riser',
+      'Column',
+      'Stair',
+      'Roof',
+      'Decor',
+      'Base',
+      'S2W: Wall on Tile',
+    ])
+    // 19 wall families and 40 recipes, and the group heading carries the count.
+    expect(headings[0]).toContain('19')
+    expect(headings[8]).toContain('40')
+    // There is no `insert` group: `role|insert` is a perfect bijection with
+    // `layer === 'insert'` and 262 of those 285 records are already reachable as
+    // a fill for a host tile's accessory slot, so the panel says where they live.
+    expect(headings).not.toContain('Insert')
+    expect(screen.getByText(/inserts are not templates/i)).toBeInTheDocument()
   })
 
-  it('selects a row and forces place mode, and arms the surface with nothing', () => {
+  it('takes the role off a row name, because the heading already said it', () => {
+    render(<PaletteHarness />)
+
+    // `Wall: Straight (Separate Wall)` under a heading that says WALL spends a
+    // third of a 272px column repeating itself.
+    expect(within(row('Wall: Straight (Separate Wall)')).getByText('Straight (Separate Wall)')).toBeInTheDocument()
+    expect(screen.queryByText('Wall: Straight (Separate Wall)')).toBeNull()
+    // And the 40 recipes lose the prefix all 40 share.
+    expect(
+      within(row('S2W: Wall on Tile: Corner: Low (Single Piece)')).getByText('Corner: Low (Single Piece)'),
+    ).toBeInTheDocument()
+  })
+
+  it('arms a family, writes it to the tool state and forces place mode', () => {
+    // **Row A8's reduction, undone.** The panel wrote nothing to `PlanTools`
+    // because a `DesignId` in `selectedTemplate` would report every placement
+    // `unknown-template`; a family id is what the surface places.
     render(<PaletteHarness />)
 
     expect(armedRow()).toBe('none')
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
     expect(screen.getByTestId('tool')).toHaveTextContent('erase')
 
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) }))
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
 
-    expect(armedRow()).toContain(FIXTURE_NAMES.floor1)
-    // §3: "Sets the active tile and forces place mode." Still the panel's one
-    // write, and the reason it keeps the `tools` prop.
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('wall-straight-separate-wall')
+    expect(armedRow()).toContain('Wall: Straight (Separate Wall)')
+    // §3: "Sets the active tile and forces place mode."
     expect(screen.getByTestId('tool')).toHaveTextContent('place')
-    expect(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })).toHaveAttribute(
-      'aria-pressed',
-      'true',
+  })
+
+  it('disarms when the armed row is pressed again', () => {
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+
+    expect(armedRow()).toBe('none')
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
+  })
+
+  it('narrows on a query over names and axes, conjunctively', () => {
+    // Two words of one family's name is the interesting query, so the tokens are
+    // ANDed: an OR over `corner s2w` returns every corner and every S2W.
+    render(<PaletteHarness query="corner s2w" />)
+
+    const rows = paletteRows()
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every((text) => text.toLowerCase().includes('corner'))).toBe(true)
+    // `s2w` matches `build|s2w` on the rows whose visible name does not say it.
+    expect(screen.getByRole('status')).toHaveTextContent(`${String(rows.length)} of 91 templates`)
+  })
+
+  it('offers form and build as facets, and narrows to one value per axis', () => {
+    render(<PaletteHarness />)
+
+    const form = screen.getByRole('group', { name: 'Form' })
+    fireEvent.click(within(form).getByRole('button', { name: 'Octagon' }))
+
+    // Two octagon families: `wall|octagon|separate wall` and `floor|octagon`.
+    expect(paletteRows()).toHaveLength(2)
+    // A recipe carries no `form|` tag at all, so a form chip hides all 40.
+    expect(screen.queryByRole('heading', { level: 3, name: /S2W: Wall on Tile/ })).toBeNull()
+
+    // Re-pressing clears it, which is what `aria-pressed` promises.
+    fireEvent.click(within(screen.getByRole('group', { name: 'Form' })).getByRole('button', { name: 'Octagon' }))
+    expect(paletteRows()).toHaveLength(91)
+  })
+
+  it('keeps the 40 recipes under the build facet they all carry', () => {
+    render(<PaletteHarness />)
+
+    const build = screen.getByRole('group', { name: 'Build' })
+    fireEvent.click(within(build).getByRole('button', { name: 'S2W' }))
+
+    expect(screen.getByRole('heading', { level: 3, name: /S2W: Wall on Tile 40/ })).toBeInTheDocument()
+    expect(paletteRows().length).toBeGreaterThan(40)
+  })
+
+  it('counts what the resolver admits, and a size position narrows it', () => {
+    // **The number is `@/composition`'s own answer**, resolved through the same
+    // `resolveSlotTags` a fill will be, so the row cannot disagree with what the
+    // solver sees. Over the fixture, `floor|straight|-` admits five items — and
+    // its `1 wide by 1 deep` position admits the two 1x1s.
+    render(<PaletteHarness />)
+
+    expect(row('Floor: Straight').getAttribute('aria-label')).toBe('Floor: Straight, 5 tiles')
+
+    fireEvent.click(row('Floor: Straight'))
+    expect(armedSize()).toBe('any size, 5 tiles')
+
+    const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
+    fireEvent.click(within(sizes).getByRole('button', { name: /^1 wide by 1 deep/ }))
+
+    expect(armedSize()).toBe('1 wide by 1 deep, 2 tiles')
+    // The row's own number follows the chosen position, because that is the set
+    // a fill will come from.
+    expect(row('Floor: Straight').getAttribute('aria-label')).toBe('Floor: Straight, 2 tiles')
+  })
+
+  it('offers the size control on the armed family only', () => {
+    // 350 positions over 51 families: on all of them at once the column would be
+    // a wall of chips, and the control's subject is the family being armed.
+    render(<PaletteHarness />)
+    expect(screen.queryByRole('group', { name: /^Size for/ })).toBeNull()
+
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+    const sizes = screen.getByRole('group', { name: 'Size for Wall: Straight (Separate Wall)' })
+    // Eight positions, `any size` first and pressed.
+    expect(within(sizes).getAllByRole('button')).toHaveLength(8)
+    expect(armedSize()).toContain('any size')
+    // Exactly one control on screen: arming another family moves it.
+    fireEvent.click(row('Wall: Curve (Separate Wall)'))
+    expect(screen.getAllByRole('group', { name: /^Size for/ })).toHaveLength(1)
+    expect(screen.getByRole('group', { name: 'Size for Wall: Curve (Separate Wall)' })).toBeInTheDocument()
+  })
+
+  it('gives no size control to a family the archive tags no size for', () => {
+    // **8 families, not the 5 this row was briefed with**: B3's five empty
+    // domains plus three whose domain is real and inexpressible — `stair|curve`,
+    // `floor|curve|separate wall` and `column|corner|s2w`. Either way the emitted
+    // table holds one position, and a control with one position cannot be
+    // operated, so the row gets a sentence instead.
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Decor: Straight'))
+
+    expect(screen.queryByRole('group', { name: /^Size for/ })).toBeNull()
+    expect(screen.getByText(/archive tags no size for this family/)).toBeInTheDocument()
+    // And the family is armed all the same: `any size` is what it places at.
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('decor-straight')
+  })
+
+  it('counts parts rather than candidates on a recipe, and offers it no size', () => {
+    // A recipe has 2 to 5 slots, so one candidate count cannot answer "how many
+    // tiles fill this"; and its parts name their own `size|width|2`, so size is
+    // part of the recipe's identity rather than a parameter of the placement.
+    render(<PaletteHarness />)
+
+    const recipe = row('S2W: Wall on Tile: Corner: Low (Single Piece)')
+    expect(recipe.getAttribute('aria-label')).toContain('parts')
+    expect(recipe.textContent).toContain('parts')
+
+    fireEvent.click(recipe)
+    expect(screen.queryByRole('group', { name: /^Size for/ })).toBeNull()
+    expect(screen.getByTestId('selected-template')).toHaveTextContent(
+      's2w-wall-on-tile-corner-low-single-piece',
     )
   })
 
-  /**
-   * **Row A8's reduction, asserted so the next row finds it deliberate.**
-   *
-   * The work surface places a template **family** and this list holds the
-   * archive's individual files — 3,822 items, none of them a recipe. So a press
-   * here cannot arm anything, and the panel must neither pretend it did nor pass
-   * a `DesignId` off as a `TemplateId`: the two id spaces are measurably *not*
-   * lexically disjoint (`store/schema.ts#TemplateId`), so such a cast compiles
-   * and every resulting placement would be reported `unknown-template`.
-   *
-   * Row **C1** replaces the list with the generated families and restores the
-   * write. Until then this pins both halves: nothing reaches `PlanTools`, and the
-   * panel says so on screen rather than leaving the toolbar's "No recipe armed"
-   * plate as the only clue.
-   */
-  it('arms no template, and says so, until row C1 lands the family list', () => {
+  it('remembers what was armed, newest first, as a strip and not a tenth group', () => {
+    // RECENT **mitigates** the recognition cost and does not fix it — the
+    // research was explicit and `palette.ts` keeps the claim honest where the
+    // ring is implemented. Session state, so a reload starts it empty.
     render(<PaletteHarness />)
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) }))
+    expect(screen.queryByRole('group', { name: 'Recent' })).toBeNull()
 
-    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
-    expect(screen.getByText(/Placing is not wired to this list yet/)).toBeInTheDocument()
-    expect(screen.getByText(/selecting one shows what you picked and arms nothing/)).toBeInTheDocument()
-  })
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+    fireEvent.click(row('Wall: Curve (Separate Wall)'))
 
-  it('disarms when the armed row is selected again', () => {
-    render(<PaletteHarness />)
-    const row = () => screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })
-
-    fireEvent.click(row())
-    fireEvent.click(row())
-    expect(armedRow()).toBe('none')
-  })
-
-  it('narrows to the matching items and writes nothing when a row is picked', () => {
-    render(<PaletteHarness query="dungeon stone floor" />)
-
-    // Three fixture records match. It offered a "+ add" button on each row that
-    // was not already saved, and that button was the only store write in the
-    // panel; row A0 deleted it with the library. A row is now a pick and nothing
-    // else, so the whole store is untouched until something is placed.
-    const rows = screen.getAllByRole('listitem')
-    expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining(FIXTURE_NAMES.floor1),
-      expect.stringContaining(FIXTURE_NAMES.floor2),
-      expect.stringContaining(FIXTURE_NAMES.twin),
+    const recent = () => screen.getByRole('group', { name: 'Recent' })
+    expect(
+      within(recent())
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual([
+      'Wall: Curve (Separate Wall), any size',
+      'Wall: Straight (Separate Wall), any size',
     ])
-    expect(screen.queryAllByRole('button', { name: /^add / })).toHaveLength(0)
+    // **A strip, because a group would duplicate rows.** All 91 rows are always
+    // listed, so a RECENT group would put a second pressed row — and a second
+    // live size control — on screen for the same family.
+    expect(paletteRows()).toHaveLength(91)
+    expect(screen.getAllByRole('button', { pressed: true }).filter(isRow)).toHaveLength(1)
 
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.twin) }))
-    expect(armedRow()).toContain(FIXTURE_NAMES.twin)
-    expect(placementCount()).toBe(0)
+    // The ring is a set with an order: arming one twice does not spend two slots.
+    fireEvent.click(row('Wall: Curve (Separate Wall)'))
+    fireEvent.click(row('Wall: Curve (Separate Wall)'))
+    expect(within(recent()).getAllByRole('button')).toHaveLength(2)
   })
 
-  it('says how much of the archive it is showing, and nothing about a starter set', () => {
-    // §2.4's "Add a starter set" put six floors and walls of one texture into the
-    // library, and row A0 deleted both. Asserted as an absence because **row C1**
-    // replaces this whole panel with 52 generated template families, and a
-    // starter set — if it comes back — is a starter *room*.
+  it('remembers the size too, so re-placing a 2x2 floor is one press', () => {
+    // The ring holds *arms*, not families: a user who has just put down four 2x2
+    // floors wants the fifth at 2x2, and a chip that armed the family at `any
+    // size` would drop the only part of the choice they made twice.
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Floor: Straight'))
+    const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
+    fireEvent.click(within(sizes).getByRole('button', { name: /^2 wide by 2 deep/ }))
+    // Disarm, so the chip has something to restore.
+    fireEvent.click(row('Floor: Straight'))
+    expect(armedRow()).toBe('none')
+
+    const chip = within(screen.getByRole('group', { name: 'Recent' })).getByRole('button', {
+      name: 'Floor: Straight, 2 wide by 2 deep',
+    })
+    fireEvent.click(chip)
+
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
+    expect(armedSize()).toBe('2 wide by 2 deep, 1 tiles')
+    // Two sizes of one family are two arms, which is the point of holding the
+    // size at all.
+    fireEvent.click(within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', { name: /^any size/ }))
+    expect(
+      within(screen.getByRole('group', { name: 'Recent' })).getAllByRole('button'),
+    ).toHaveLength(2)
+  })
+
+  it('says nothing about a starter set, and nothing about placing being unwired', () => {
+    // §2.4's "Add a starter set" put six *tiles* in the library; row A0 deleted
+    // both and a starter set, if it comes back, is a starter room. Row A8's
+    // "placing is not wired to this list" note goes with the list it was about —
+    // asserted as an absence so nobody reinstates a disclaimer that is no longer
+    // true.
     render(<PaletteHarness />)
 
     expect(screen.queryByRole('button', { name: /Add a starter set/ })).toBeNull()
-    expect(screen.getByRole('heading', { name: /Archive 9/ })).toBeInTheDocument()
+    expect(screen.queryByText(/Placing is not wired to this list yet/)).toBeNull()
+    expect(screen.queryByText(/arms nothing/)).toBeNull()
+  })
+
+  it('says nothing matched, and where the archive went', () => {
+    render(<PaletteHarness query="dungeon stone" />)
+
+    expect(paletteRows()).toHaveLength(0)
+    // A texture is not a family axis: 91 rows x 36 reachable texture roots is
+    // 3,276, which is the recall cost §3.1 inverted. So the panel points at the
+    // surface that does index textures.
+    expect(screen.getByText(/search the catalog screen/i)).toBeInTheDocument()
   })
 })
 
 /* ----------------------------------------------- the "use in builder" handoff */
 
 /**
- * Row G5's reader side.
+ * Row G5's reader side, carrying row C1's arm.
  *
  * The channel is cleared around every test in this block rather than in the
  * file's shared `beforeEach`: it is not part of `WorkshopState`, so
  * `resetWorkshop()` does not touch it, and a value left in the box would arm a
  * palette in an unrelated test.
+ *
+ * **What arrives is a family and a size**, not a design — `store/selection.ts`
+ * carries the decision and the drawer's side of it is `detail.test.tsx`.
  */
 describe('the pre-selection handoff', () => {
   beforeEach(() => {
-    clearPendingDesign()
+    clearPendingArm()
   })
 
   afterEach(() => {
-    clearPendingDesign()
+    clearPendingArm()
   })
 
   /**
@@ -376,97 +570,113 @@ describe('the pre-selection handoff', () => {
     return view
   }
 
-  it('arms the item the catalog drawer sent, and forces place mode', () => {
-    // Exactly what `TileDrawer`'s action does, in its order: post it, then
-    // navigate — the navigation being this render. It filed the item in the
-    // library first, until row A0; the palette lists the archive now, so a row
-    // for the item exists without one.
+  it('arms the family the drawer sent, at the size it sent, and forces place mode', () => {
+    // Exactly what `TileDrawer`'s action does, in its order: post the arm, then
+    // navigate — the navigation being this render. It used to post an item and
+    // seed the palette's search with its name, because the list was the archive;
+    // a tile's name narrows a list of family names to nothing, so the arm is the
+    // whole handoff now.
     act(() => {
-      sendDesignToBuilder(design('floor1'))
+      armTemplateInBuilder({
+        template: 'floor-straight' as TemplateId,
+        size: ['size|width|1', 'size|depth|1'],
+      })
     })
 
     mountPalette()
 
-    expect(armedRow()).toContain(FIXTURE_NAMES.floor1)
-    // The harness opens in `erase`; selecting forces `place`, as a click does.
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
+    expect(armedRow()).toContain('Floor: Straight')
+    expect(armedSize()).toBe('1 wide by 1 deep, 2 tiles')
+    // The harness opens in `erase`; arming forces `place`, as a click does.
     expect(screen.getByTestId('tool')).toHaveTextContent('place')
-    expect(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
   })
 
-  it('claims the handoff once, so a re-mount does not re-arm a tile the user disarmed', () => {
+  it('claims the handoff once, so a re-mount does not re-arm a family the user disarmed', () => {
     act(() => {
-      sendDesignToBuilder(design('floor1'))
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: [] })
     })
 
     const first = mountPalette()
-    expect(armedRow()).toContain(FIXTURE_NAMES.floor1)
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
     expect(useSelectionStore.getState().pending).toBeNull()
 
     first.unmount()
     mountPalette()
-    expect(armedRow()).toBe('none')
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
     expect(screen.getByTestId('tool')).toHaveTextContent('erase')
   })
 
   it('takes the second press when two arrive with no claim between them', () => {
     act(() => {
-      sendDesignToBuilder(design('floor1'))
-      sendDesignToBuilder(design('floor2'))
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: [] })
+      armTemplateInBuilder({ template: 'wall-straight' as TemplateId, size: [] })
     })
 
     mountPalette()
-    expect(armedRow()).toContain(FIXTURE_NAMES.floor2)
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('wall-straight')
   })
 
-  it('arms nothing for an item the plan cannot hold, and the row says why', () => {
-    // The `none` footprint: 370 of 3,822 items, 726 of 8,702 files. Arming it
-    // would give the user an armed tile every click of which the canvas correctly
-    // refuses, which is the failure the greyed rows exist to avoid.
+  it('arms nothing for a family this build does not ship, and still claims the box', () => {
+    // The one reachable failure, and it is narrower than row A0's guard: that one
+    // also refused the 370 items with no footprint, which is a property of a
+    // *fill* and not of a family. A share link or a tab left open across a
+    // re-import is what reaches this.
     act(() => {
-      sendDesignToBuilder(design('slab'))
+      armTemplateInBuilder({ template: 'wall-retired-and-gone' as TemplateId, size: [] })
     })
 
     mountPalette()
 
-    expect(armedRow()).toBe('none')
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
     expect(screen.getByTestId('tool')).toHaveTextContent('erase')
-    // The explanation is already on screen, on the row itself, because the
-    // archive list holds every item — so the refusal costs no new copy. Row A0
-    // moved it there from a note under the library block, which counted the
-    // refused *saved* items and had nothing to count once the library went.
-    expect(screen.getByText('no plan shape')).toBeInTheDocument()
-    expect(screen.getByText(/no derivable footprint/)).toBeInTheDocument()
     // Claimed all the same: a handoff this palette will not act on must not sit
     // in the box waiting to arm the next mount.
     expect(useSelectionStore.getState().pending).toBeNull()
   })
 
-  it('arms nothing for a design this catalog build does not hold', () => {
+  it('falls back to any size when the position no longer exists', () => {
+    // A catalog re-import between the press and the claim can retire the cell a
+    // position named. `any size` is a real position — the slot's `constrain`
+    // collects nothing and the family admits every size — so this degrades
+    // rather than failing.
     act(() => {
-      sendDesignToBuilder('d-retired-and-gone' as DesignId)
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: ['size|width|99'] })
     })
 
     mountPalette()
-    expect(armedRow()).toBe('none')
-    expect(useSelectionStore.getState().pending).toBeNull()
+
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
+    expect(armedSize()).toBe('any size, 5 tiles')
   })
 
-  it('carries the item, and the bill prints exactly what the slots name', () => {
-    // The channel is a selection, never a resolution — and since row A3 nothing
-    // downstream resolves either. `floor2` is a `connection|openforge` topper, so
-    // this used to be the auto-insert case: one placement, **two** parts, with a
-    // base the resolver chose. A recipe declares its base as an ordinary slot, so
-    // a one-slot instance of the topper is one part and the base is absent
-    // because nobody filled a slot with one — not because the resolver declined.
+  it('clears a facet so the armed row is on screen', () => {
+    // A filter the user set ten minutes ago on another screen must not hide the
+    // row a press on a third screen just armed.
+    const view = mountPalette()
+    fireEvent.click(within(screen.getByRole('group', { name: 'Form' })).getByRole('button', { name: 'Octagon' }))
+    expect(paletteRows()).toHaveLength(2)
+    view.unmount()
+
     act(() => {
-      sendDesignToBuilder(design('floor2'))
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: [] })
+    })
+    mountPalette()
+
+    expect(paletteRows()).toHaveLength(91)
+    expect(armedRow()).toContain('Floor: Straight')
+  })
+
+  it('arms a family, and the bill prints exactly what the slots name', () => {
+    // The channel is a selection, never a resolution — and since row A3 nothing
+    // downstream resolves either. What the arm names is a family; what the bill
+    // prints is whatever file a *fill* names, which is row C2's choice to make.
+    act(() => {
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: [] })
     })
 
     mountPalette()
-    expect(armedRow()).toContain(FIXTURE_NAMES.floor2)
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
 
     const bill = buildBillOfTiles([anInstance([FIXTURE_IDS.floor2])], assembly, {
       ...fixtureContext(file),
@@ -475,41 +685,42 @@ describe('the pre-selection handoff', () => {
     expect(bill.placements).toBe(1)
     expect(bill.parts).toBe(1)
     expect(bill.lines.map((line) => line.tile.id)).toEqual([FIXTURE_IDS.floor2])
-    // And filling both slots of the two-slot recipe is what puts the base in the
-    // bill: the scene asks for it, so it is a line the user can account for.
-    const both = buildBillOfTiles([anInstance([FIXTURE_IDS.floor2, FIXTURE_IDS.base2])], assembly, {
-      ...fixtureContext(file),
-      lock: 'openlock',
-    })
-    expect(both.parts).toBe(2)
-    expect([...both.lines.map((line) => line.tile.id)].sort()).toEqual(
-      [FIXTURE_IDS.base2, FIXTURE_IDS.floor2].sort(),
-    )
   })
 })
 
 /* -------------------------------------------------------- the two-sided item */
 
 /**
- * The bug the owner reported, on the one item shape that can express it.
+ * The bug the owner reported, and what is left of it once the palette stops
+ * showing pictures.
  *
  * `MIXED_INTEGRAL` joins `floor2`'s design, so `d-floor-2` becomes the corpus's
  * `both` class: a `topper` that needs a base, and an `integral` that does not.
  * **931 live items (24.4%) are this shape and on all 931 the two rules disagree**
  * — `TileAggregate.preview` names the topper and `selectVariant` names the
- * integral. The palette asks both questions and this block pins each answer to
- * the right one:
+ * integral.
  *
- *   - the **thumb** renders the topper, because that mesh is the tile;
- *   - the **armed id** is the integral, because that is what this build prints.
+ * Rows V3 and V5 pinned that in *this file*, because the palette rendered one
+ * and armed the other. **Row C1 deleted both halves of that pairing**: a palette
+ * row is a family, a family has no picture, and picking a representative tile to
+ * show would put the owner's defect back in a new place (`palette.ts` argues it).
+ * So two of this block's four tests are gone rather than rewritten:
  *
- * Reversed, the row shows a tile welded to a base — which is what the owner
- * described seeing — or arms a topper and lets the bill charge for a base the
- * user could have skipped. Both are asserted, so neither can be reintroduced by
- * "simplifying" the two calls into one.
+ *   - *"renders the topper in the row, not the file the resolver would print"* —
+ *     the rendered half of the finding. **It has no home in this file any more**,
+ *     and the one surface that still renders `item.preview` is the catalog card;
+ *     this row's report names that as the place it should be re-asserted, because
+ *     nothing else in the suite renders a preview and compares it to the print.
+ *     The headless half survives in `palette.corpus.test.ts`, which measures the
+ *     disagreement on all 931 items under all three locks.
+ *   - *"keeps the row pressed when the lock preference changes under it"* —
+ *     there is no file in a palette row for a preference to move. The property is
+ *     now structural: `aria-pressed` compares two `TemplateId`s, and nothing in
+ *     the store can change either one.
  *
- * The index is swapped in this block's own `beforeEach`, which runs after the
- * file's: the outer one restores the nine-record fixture for every other block.
+ * What is kept is the premise (the item really is two-sided) and the bill's half
+ * of the identity, because that is the assertion a future row would otherwise
+ * have to reconstruct.
  */
 describe('the two-sided item', () => {
   let mixedAssembly: AssemblyIndex
@@ -526,7 +737,7 @@ describe('the two-sided item', () => {
     mixedAssembly = buildAssemblyIndex(mixedFile)
   })
 
-  /** The item really is two-sided, so the two assertions below are not vacuous. */
+  /** The item really is two-sided, so the assertion below is not vacuous. */
   it('is one item over two variants, previewing the topper', () => {
     const item = index.engine.aggregates.byDesign.get(design('floor2'))
     expect(item?.variantClass).toBe('both')
@@ -538,47 +749,24 @@ describe('the two-sided item', () => {
     expect(selectVariant(item!, { bottom: 'openlock' }).variant.id).toBe(MIXED_INTEGRAL.id)
   })
 
-  it('renders the topper in the row, not the file the resolver would print', () => {
-    // Narrowed to the two-sided item's own row: the palette lists the whole
-    // archive in ranking order since row A0, so index 0 is no longer this item.
-    render(<PaletteHarness query="dungeon stone floor 2x2" />)
-
-    const row = screen
-      .getAllByRole('listitem')
-      .find((candidate) => candidate.textContent?.includes(FIXTURE_NAMES.floor2)) as HTMLElement
-    expect(row).toBeDefined()
-    const image = within(row).getByRole('presentation', { hidden: true })
-    // The sprite URL is content-addressed, so the blob in it names the file the
-    // thumb is showing. `2…` is the topper's md5, `9…` the integral's.
-    expect(image).toHaveAttribute('src', expect.stringContaining('2'.repeat(32)))
-    expect(image.getAttribute('src')).not.toContain('9'.repeat(32))
-  })
-
   /**
-   * The row selects the item, and the bill prints whatever a slot names.
+   * The palette arms a family, and the bill prints whatever a slot names.
    *
    * **The two-sidedness has stopped reaching the bill at all, and that is the
-   * finding this test now carries.** V3's defect was that the palette armed a
-   * *file* and rule 0 then printed a different one, so the bill told the user it
-   * had printed something they did not place — measured on every one of the 931
-   * two-sided items. Both halves are gone: the palette selects an item and arms
-   * nothing (row A8), and a fill names an exact file (row A3), so the file in the
-   * bill is the file in the slot and no rule can move it.
-   *
-   * So the disagreement between `preview` and `selectVariant` survives only in
-   * the *thumbnail*, which the test above pins, and the bill's half of it is
-   * asserted here as an identity: place the integral, print the integral.
-   * Choosing which of an item's files fills a slot is row **C2**'s, and
-   * `selectVariantForLock` is still exported for it.
+   * finding this test carries.** V3's defect was that the palette armed a *file*
+   * and rule 0 then printed a different one, on every one of the 931 two-sided
+   * items. Both halves are gone: the palette arms a family (row C1) and a fill
+   * names an exact file (row A3), so the file in the bill is the file in the slot
+   * and no rule can move it. Choosing *which* file of an item fills a slot is row
+   * **C2**'s, and `selectVariantForLock` is still exported for it.
    */
-  it('selects the item, and the bill prints exactly the file the slot names', () => {
+  it('arms a family, and the bill prints exactly the file the slot names', () => {
     render(<PaletteHarness />)
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor2) }))
-
-    expect(armedRow()).toContain(FIXTURE_NAMES.floor2)
-    // The palette still writes nothing to the surface — the reduction holds on
-    // the one item shape where a wrong arming would have been invisible.
-    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
+    fireEvent.click(row('Floor: Straight'))
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
+    // Both files of the two-sided item are in that family's candidate set, and
+    // the family names neither of them: it is the *slot* that will.
+    expect(row('Floor: Straight').getAttribute('aria-label')).toBe('Floor: Straight, 5 tiles')
 
     for (const tile of [MIXED_INTEGRAL.id, FIXTURE_IDS.floor2]) {
       const bill = buildBillOfTiles([anInstance([tile])], mixedAssembly, {
@@ -591,35 +779,6 @@ describe('the two-sided item', () => {
       expect(bill.lines.map((line) => line.tile.id)).toEqual([tile])
       expect(bill.complete).toBe(true)
     }
-  })
-
-  /**
-   * The pressed row survives a change of lock preference.
-   *
-   * **This test is the same and its subject is gone.** Under V3 the palette armed
-   * a *file*, so the pressed state had to be decided by asking which design that
-   * file belonged to (`armedItem`); comparing `armFile(item, lock)` to the armed
-   * id would have un-pressed the row the moment the preference changed — the
-   * three locks disagree about the file for **37.1%** of items, so a common state
-   * and not a corner — leaving the canvas armed with nothing highlighted. After
-   * V4 the selected value *is* the row's key and there is nothing a preference
-   * can move. Kept as a regression on the behaviour, not on the mechanism.
-   */
-  it('keeps the row pressed when the lock preference changes under it', () => {
-    render(<PaletteHarness />)
-    const row = () => screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor2) })
-
-    fireEvent.click(row())
-    expect(row()).toHaveAttribute('aria-pressed', 'true')
-    const selected = armedRow()
-
-    act(() => {
-      setLockSystem('dragonlock')
-    })
-
-    expect(row()).toHaveAttribute('aria-pressed', 'true')
-    // And nothing else became pressed either.
-    expect(armedRow()).toBe(selected)
   })
 })
 
@@ -1539,31 +1698,3 @@ describe('the download action', () => {
   `selectVariantForLock` is exported for it: a candidate grid is an *item* grid
   and the file is picked from the item afterwards.
 */
-
-
-describe('the row drop rule', () => {
-  /**
-   * Asserted against `searchRows` directly, since row A0.
-   *
-   * It used to be a panel test: the library could name a design the current
-   * catalog build no longer holds — an entry outlives the import that retired its
-   * files — so the panel was rendered with one live key and one retired one and
-   * had to show a single row. There is no library, and the rows now come from the
-   * engine's own result, so **no render can reach the miss**. The rule itself is
-   * unchanged and still load-bearing: a row with no name, no size and no
-   * thumbnail is worse than no row, and row G5's selection channel still carries
-   * a design across a navigation that a re-import can have invalidated.
-   */
-  it('drops a design the lookup does not hold rather than making a nameless row', () => {
-    const items = index.engine.aggregates.aggregates
-    expect(items.length).toBeGreaterThan(1)
-
-    const live = items[0]!
-    const rows = searchRows(items, (id) =>
-      id === live.design ? { item: live, preview: index.engine.record(live.preview)! } : undefined,
-    )
-
-    expect(rows).toHaveLength(1)
-    expect(rows[0]?.item.design).toBe(live.design)
-  })
-})

@@ -92,7 +92,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { buildPlanScene, createStyleResolver, describeCell, freeCellFor, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
-import { BackupPanel, BillPanel, PalettePanel, PlanToolbar, useArchiveDownload } from '@/builder/panels'
+import {
+  BackupPanel,
+  BillPanel,
+  PLACEABLE_TEMPLATES,
+  PalettePanel,
+  PlanToolbar,
+  useArchiveDownload,
+} from '@/builder/panels'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 import type { SurfaceStatus } from '@/builder/three'
@@ -106,7 +113,6 @@ import { GeneratorPanel } from '@/generator/panel'
 import type { GeneratorPlaceHandler } from '@/generator/panel'
 import { buildGeneratedBill } from '@/generator/placement/bill'
 import type { RecipeTemplate } from '@/screens/assemblies'
-import { GENERATED_FAMILIES, RECIPE_TEMPLATES } from '@/screens/assemblies'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
 import { BASE_SLOT, compositionIndexFor } from '@/screens/detail/slots'
@@ -142,7 +148,7 @@ const builderApi = getRouteApi('/builder')
  * arriving in the store as an `unknown-template` placement.
  *
  * `templates` below is the lookup that answers for it; `recipes` includes
- * `GENERATED_FAMILIES`, which is what makes it resolvable at all.
+ * `PLACEABLE_TEMPLATES`, which is what makes it resolvable at all.
  */
 const BARE_BASE = TemplateId.parse('shape-base')
 
@@ -251,15 +257,22 @@ function Builder({ index }: { index: CatalogIndex }) {
    * paid.
    */
   const recipes = useMemo(
-    /* **Both tables, and row C3 is what joins them.** It was the 40 fixture
-       recipes alone, because nothing could place anything else. B4's 51
-       generated families are placeable now — C1's palette lists them and the
+    /* **All 91, and row C1's list rather than a second one.** It was the 40
+       fixture recipes alone, because nothing could place anything else; B4's 51
+       generated families are placeable now — C1's palette offers them and the
        generator's archived arm places `shape-base` below — and a family missing
        from this lookup is reported `unknown-template` by `resolveInstance`,
        which is a bill row and a refused download rather than a visible error.
-       Ids are disjoint across the two tables (`s2w-…` against `role-form-build`
-       slugs), so the `Map` cannot silently shadow a recipe with a family. */
-    () => new Map([...RECIPE_TEMPLATES, ...GENERATED_FAMILIES].map((recipe) => [recipe.id, recipe])),
+       C1 measured that failure rather than predicting it: against the 40-recipe
+       table all 51 families report `unknown-template` and 0 parts.
+
+       `PLACEABLE_TEMPLATES` is that row's export and is documented as *"the list
+       `BuilderScreen`'s recipe table must be built from"*, with its 91 members
+       asserted in `palette.corpus.test.ts`. This row briefly held
+       `[...RECIPE_TEMPLATES, ...GENERATED_FAMILIES]`, which is the same set —
+       measured identical, 91 ids, 0 either way — and one copy of it is one too
+       many: B5 takes the families to 52 and only one of the two would move. */
+    () => new Map(PLACEABLE_TEMPLATES.map((recipe) => [recipe.id, recipe])),
     [],
   )
   /* Typed on the **narrower** return, not on `TemplateLookup`. `RecipeTemplate`

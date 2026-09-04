@@ -1,154 +1,97 @@
 /**
- * The builder's left column — design-contract.md §2.4's palette.
+ * The builder's left column — design-contract.md §2.4's palette, as row C1
+ * rebuilt it: **the 91 templates this build can place**, grouped by role, with
+ * form and build as facets and size as a control on the armed family.
  *
- * A search box over the *whole* catalog and, under it, the matching items as a
- * selectable list with small thumbnails. Selecting a row arms the canvas.
+ * ## What it was, twice, and why neither survived
  *
- * ## It was two blocks and row A0 left one
- *
- * §2.4 wrote this column as "the library as a selectable list", with the search
+ * §2.4 wrote this column as "the library as a selectable list", with a search
  * above it offering "+ add" rows for items not saved yet. Row **A0** deleted the
- * library, and the two blocks collapse into the one that never needed it: the
- * archive itself, listed by the same engine and the same ranking, armed directly.
+ * library and the two blocks collapsed into the one that never needed it: the
+ * archive itself, listed by the same engine and the same ranking, armed
+ * directly. Row **A8** then had to make that list arm **nothing at all** and say
+ * so on screen, because the work surface places a `TemplateId` and the list held
+ * `DesignId`s — two id spaces `store/schema.ts` measures as *not* lexically
+ * disjoint, so passing one for the other compiles and would report every
+ * placement `unknown-template`.
  *
- * **The empty query is now a real state and it lists something.** It used to hide
- * the search block entirely and show the library instead; with nothing to show
- * instead, an empty query lists the first {@link MAX_SEARCH_ROWS} items the
- * engine returns for the unfiltered facet set. That is a browse rather than a
- * curated list, and the count beside the field says how much of the archive it is
- * a window onto.
+ * **This row makes it place templates.** The list is the 51 generated families
+ * plus the 40 shipped recipes, `arm()` writes `tools.setSelectedTemplate`, and
+ * A8's disclaimer is gone with the list it was about. `palette.ts` carries the
+ * argument for the shape of the list and `families.ts` for the rows themselves;
+ * this file is the control.
  *
- * What is gone with the library, rather than moved:
+ * ## 91 rows, nine groups, and the cost that inverts
  *
- *   - the **"+ add"** button on each row, which was the only store write in this
- *     file;
- *   - the **"Add a starter set"** empty state (`palette.ts#starterSet`), which
- *     put six floors and walls of one texture into the library;
- *   - the **note under the library block** counting the saved items the plan
- *     cannot hold. Unplaceable rows are still marked, individually, where the
- *     engine's ranking puts them — the note existed because the library's own
- *     ordering sank them into a block at the end, and a search must not reorder.
+ * The UX research measured the honest cost of a tag-predicated palette: from
+ * roughly 20 recognisable library rows to **3,862** entries, which is
+ * recognition becoming recall. Role-predicated families make it **91** — walls
+ * (19 families over 5,381 records), floors (17 / 2,162), risers, columns,
+ * stairs, roofs, decor, the one bare-base family, and the 40 `S2W: Wall on Tile`
+ * recipes in a group of their own. **RECENT mitigates what is left of that cost
+ * and does not fix it**; `palette.ts` says so where the ring is implemented,
+ * because that is the claim most likely to be quietly inflated later.
  *
- * **Row C1 replaces the whole of this with 52 generated template families**,
- * grouped by role with form and build as facets. This row's job was only to stop
- * the panel reading a field that is about to be deleted, and to leave the builder
- * usable in between: search, arm, place.
+ * There is no `insert` group and the panel says where inserts went instead: 285
+ * records, **262 of them already reachable through a tile's own accessory
+ * slots**, so a door is a fill and not a family.
  *
- * ## A row is an item
+ * ## Size is one control on the armed row, not a row per size
  *
- * Row V3. The panel used to render `PaletteRow.record` — a concrete file, and for
- * the 931 items that carry both an `integral` and a `topper` variant it was
- * whichever file the library happened to hold. That is the defect the owner
- * reported as *"a tile with an integrated base"* in the sidebar: the catalog card
- * showed the topper and the palette showed the integral, for the same tile.
+ * B3's measurement is the whole reason: keyed on `(role, form, build)` the
+ * corpus needs 51 families; with size in the key it needs 217 to 277. So a
+ * position is a parameter — a set of tags that joins the instance's `parentTags`
+ * where the slot's own `constrain` block collects them — and the control belongs
+ * to the *armed* family rather than to all 91 at once, which would be 350
+ * positions on a 272px column.
  *
- * Now a row is a {@link TileAggregate}: the name, the size and the placeability
- * come off the item, and the thumbnail renders `item.preview`, which since row V5
- * is a sprite-carrying **topper** wherever the item has one. `palette.ts` carries
- * the argument for each field.
+ * `any size` is the default and a real position: with nothing chosen the
+ * `constrain` collects nothing and the family admits every size. **8 families get
+ * no control at all** — 5 with no size domain and 3 whose domain no `size|` tag
+ * can express (`families.ts` enumerates both) — because a control with one
+ * position cannot be operated.
  *
- * ## The unplaceable items are marked, and they are not buttons
+ * ## What a row can say, and the one thing it no longer shows
  *
- * `isPlaceable` is false for the `none` footprint — **370 items, 9.7% of the
- * corpus** (726 files, 8.3% of them) — and the plan view refuses them visibly
- * rather than silently. Curves are **not** among them: row W6 made annular
- * sectors placeable, so the marker on a refused row names the missing footprint
- * and nothing else.
+ * A row carries the family's name and {@link candidateCount}'s number: how many
+ * archive tiles the slot admits at the chosen size, resolved by
+ * `@/composition`'s own `resolveSlotTags` so it is the number a fill will be
+ * chosen from rather than a second opinion about it. A recipe shows its part
+ * count instead, because 2 to 5 slots have no single answer.
  *
- * Offering a row that arms an item the canvas will then refuse would make a
- * correct refusal look like a broken palette, so those rows render as static
- * text with the reason beside them instead of as a control. Not a `disabled`
- * button: a disabled button is out of the tab order, and a keyboard user would
- * then meet a row they cannot reach and cannot read the reason from. Static text
- * is read by every screen reader and skipped by Tab, which is exactly the intent.
- *
- * **Refusing at item level is not an approximation.** `foot` is a hoisted facet:
- * over the emitted index, the number of items whose variants disagree about
- * `isPlaceable` is **0**, and the 370 refused items hold exactly the 726 refused
- * files. So a refusal is a property of the tile rather than of the print, which
- * is also why a variant swap cannot rescue one — there is no sibling with a
- * footprint to swap to. `palette.corpus.test.ts` re-measures both figures.
- *
- * ## Arming is **reduced**, and row C1 is what restores it
- *
- * `usePlanTools` no longer holds a `selectedDesign`. Row A1 made templates the
- * only placement unit, so the tool state is a `selectedTemplate: TemplateId` and
- * the work surface turns that into a `placeTemplate` call (`three/edits.ts`).
- * **This panel lists the archive's 3,822 items, and not one of them is a
- * template family** — a `TemplateId` names one of the 40 recipes in
- * `screens/assemblies/templates.ts`, and a `DesignId` is a catalog identity that
- * happens to match the same slug pattern (`store/schema.ts` measures that and
- * says why it is not a licence to pass one for the other).
- *
- * So row **A8 declined to arm anything from here.** Selecting a row keeps its
- * own selection — the press, the `aria-pressed` state and the disarm-on-repress
- * are unchanged, because they are the interaction row C1 rebuilds over the
- * families — and it writes nothing to `PlanTools`. The panel says so on screen,
- * in one line under the heading, rather than offering a control that quietly does
- * nothing: an item selected here cannot be placed, and the toolbar's own
- * "No tile armed" plate would otherwise be the only clue.
- *
- * The alternative was to pass the `DesignId` to `setSelectedTemplate`. It
- * compiles after a cast and it is a lie: `resolveInstance` would report every
- * placement `unknown-template`, the surface would draw a one-cell marker for a
- * recipe that does not exist, and the bill would fill with orphans. **Row C1
- * replaces the whole of this list with the generated template families**, at
- * which point the write comes back and the note goes.
- *
- * The G5 handoff below is reduced the same way and for the same reason: it still
- * claims the channel exactly once, so a stale item cannot sit in the box waiting
- * to arm a later mount, and it selects the row rather than arming the surface.
- *
- * **Nothing in this file knows a file id**, and the one place a file appears is
- * the thumbnail's `row.preview`, which is a picture. That was row V4's doing and
- * it survives the reduction: the thumb answers *what is this* — `preview`, a
- * sprite-carrying topper since V5 — and *what would I print* is not a question
- * this panel has ever answered. Since row A3 nothing answers it by resolution
- * either: a fill names an exact file, so the file is chosen when a slot is
- * filled, which is row C2's.
+ * **No thumbnail.** A family has no picture, and picking a representative would
+ * reintroduce the defect rows V3 and V5 spent two revisions removing — a palette
+ * row showing one file while the placement contains another. `palette.ts` has
+ * the argument.
  *
  * ## The handoff from "Use in builder"
  *
- * Row G5. The catalog drawer's third action posts an **item** into `@/store`'s
- * un-persisted selection channel and navigates here; this panel **claims** it
- * once, on mount, and arms it. That is the whole of the row's reader side, and it
- * is here rather than in the builder screen because this panel is already the one
- * component that writes the selection — a second writer would be two palettes.
+ * Row G5's channel, re-aimed by this row: the catalog drawer posts a
+ * {@link PendingArm} — a family and a size position, derived from the tile's own
+ * tags by `familyKey.ts#armForTags` — and this panel **claims** it once, on
+ * mount, and arms it. It is here rather than in the builder screen because this
+ * panel is already the one component that writes the selection; a second writer
+ * would be two palettes.
  *
- * V1 renamed the channel's five functions when it changed the box's kind, so
- * {@link claimPendingDesign} is the name this reader claims through; a reader
- * still compiling against `claimPendingTile` would be treating a design as a
- * file.
+ * The claim is guarded, and the guard is narrower than A0's was: a family is
+ * refused only when **this build ships no such template**, which is the one
+ * reachable failure (a share link or a stale tab against a re-imported catalog).
+ * A0's second case — the item's footprint — is gone from here, because a
+ * footprint is a property of a *fill* and a family has none; the plan view still
+ * refuses the 370 unplaceable items visibly, one level down, where the file is
+ * chosen.
  *
- * The claim is guarded, and the guard is the same doctrine as the paragraph
- * above: **an armed item the canvas will refuse is worse than no armed item.** So
- * the handoff arms an item only when this palette holds a *placeable* row for it,
- * and the two ways it can fail both resolve correctly without a word of new UI:
- *
- *   - **The design is not in the current catalog build.** There is no row and
- *     nothing is armed. The library screen used to be the surface that reported a
- *     retired id; row A0 deleted it, and what the user sees instead is a search
- *     for the item's name with no hit in it, which says the same thing in the
- *     place they are looking.
- *   - **The item has the `none` footprint** — 370 of 3,822. Nothing is armed, and
- *     the row itself is on screen, marked `no plan shape`, because the drawer
- *     seeded this panel's search with the item's name on its way here. A variant
- *     swap cannot rescue this case and must not be attempted, for the reason
- *     measured above: **no design in the corpus mixes placeable and unplaceable
- *     files.**
- *
- * What arrives is an item and never a resolution, and after V4 that is true all
- * the way to the store: nothing between the catalog drawer and
- * `WorkshopState.placements` picks a file. A6's rule 0 picks one when the bill is
- * built, and the three locks disagree for 37.1% of items, so a room shared under
- * openlock and reopened under magnetic is the same room and a different pack.
+ * Claiming also **clears the facets**, so the armed row is on screen rather than
+ * hidden behind a filter the user set ten minutes ago on another screen.
  *
  * ## Where the search comes from
  *
- * The whole `FacetSearch` from `/builder`, not just the text. `routeTree.tsx`
- * gives the builder route the facet schema precisely so this box is linkable, and
- * taking the whole object means a URL carrying `?kinds=wall` narrows the palette
- * for free rather than being validated and ignored.
+ * The whole `FacetSearch` from `/builder`, not just the text — `routeTree.tsx`
+ * gives the builder route the facet schema precisely so this box is linkable.
+ * **What it searches has changed**: `q` now narrows the 91 rows by name and axis
+ * (`palette.ts#queryTokens`), not 3,822 items, so `?kinds=wall` is carried by the
+ * route and no longer read here — there is nothing in a family for a catalog
+ * facet to narrow.
  *
  * The input holds a **draft** and commits it after {@link COMMIT_DELAY_MS}, with
  * `committed` as the discriminator that tells this field's own echo from a real
@@ -156,25 +99,41 @@
  * explains at length why the naive `useEffect(() => setDraft(q), [q])` silently
  * rewinds a fast typist mid-word. That component is not exported from the catalog
  * screen and its markup is a full-width 520px field with a result count beside
- * it, which is not this 272px column; the debounce logic is what is shared, and it
- * is thirty lines.
+ * it, which is not this 272px column; the debounce logic is what is shared, and
+ * it is thirty lines.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
-import { placementRefusal } from '@/builder/canvas'
 import type { PlanTools } from '@/builder/canvas'
-import type { CatalogAssets, DesignId, SpriteSheet, TileAggregate } from '@/catalog'
-import type { MaterialId } from '@/materials'
 import type { FacetSearch } from '@/search'
 import { MAX_QUERY_LENGTH } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
-import { countLabel, sizeLabel } from '@/screens/catalog'
-import { claimPendingDesign, usePendingDesign } from '@/store'
-import { Chip, Eyebrow, VisuallyHidden } from '@/ui/primitives'
-import { TileThumb } from '@/ui/thumb'
+import { countLabel } from '@/screens/catalog'
+import type { PendingArm } from '@/store'
+import { claimPendingArm, usePendingArm } from '@/store'
+import { Chip, Eyebrow } from '@/ui/primitives'
 
-import type { PaletteLookup, PaletteRow } from './palette'
-import { MAX_SEARCH_ROWS, searchRows } from './palette'
+import type { SizePosition, TemplateFamily } from './families'
+import {
+  ANY_SIZE_LABEL,
+  INSERT_DESIGNS,
+  NO_BUILD,
+  TEMPLATE_FAMILIES,
+  axisLabel,
+  familyById,
+  positionOf,
+  sizeLabelOf,
+} from './families'
+import type { CandidateCounter, PaletteFacets } from './palette'
+import {
+  ALL_FACETS,
+  createCounter,
+  filterFamilies,
+  groupFamilies,
+  reachableFacets,
+  recentArms,
+  rememberArm,
+} from './palette'
 
 import './panels.css'
 
@@ -186,124 +145,178 @@ export interface PalettePanelProps {
   /**
    * Shared with the toolbar and the surface.
    *
-   * **This panel no longer writes the selection** — see the module note on row
-   * A8's reduction. All it writes is `setTool('place')`, so that a press is not
-   * swallowed by the eraser. The prop stays because row C1 restores the write.
+   * **The selection is back in here, as row A8 said it would be.**
+   * `tools.selectedTemplate` is the armed family and this panel is its only
+   * writer; the panel keeps no copy of it, so there is nothing for the two to
+   * disagree about. The size position *is* panel state, because `PlanTools` has
+   * no field for it — see the `size` state inside the component.
    */
   readonly tools: PlanTools
-  /** `/builder`'s validated search. Only `q` is ever set by this screen. */
+  /** `/builder`'s validated search. Only `q` is read. */
   readonly search: FacetSearch
   readonly onQueryChange: (text: string) => void
 }
 
 export function PalettePanel({ index, tools, search, onQueryChange }: PalettePanelProps) {
-  const searchId = useId()
-
-  const result = useMemo(() => index.engine.search(search), [index, search])
+  const listId = useId()
 
   /**
-   * The row resolver, built over the one index this panel holds.
+   * The candidate counter, over the index this panel holds.
    *
-   * The `undefined` on the preview record is folded into the same drop as a
-   * retired design deliberately: `item.preview` is one of the item's own variant
-   * ids and the aggregate layer is derived from the same `CatalogFile` the engine
-   * indexes, so that half cannot miss. One drop rule, one reachable cause.
+   * `createCounter` reaches `compositionIndexFor`, whose `WeakMap` is keyed on
+   * the parsed file — so this is the same 409,432-byte inverted index the bill
+   * and C3's slot editor use, not a second one. The memo is per index and the
+   * cache inside it is per row and size.
    */
-  const lookup = useMemo<PaletteLookup>(() => {
-    const { byDesign } = index.engine.aggregates
-    return (design) => {
-      const item = byDesign.get(design)
-      if (item === undefined) return undefined
-      const preview = index.engine.record(item.preview)
-      return preview === undefined ? undefined : { item, preview }
-    }
-  }, [index])
+  const count = useMemo<CandidateCounter>(
+    () => createCounter(index.file, index.engine.aggregates),
+    [index],
+  )
 
-  const rows = useMemo(() => searchRows(result.items, lookup), [result, lookup])
-
+  const [facets, setFacets] = useState<PaletteFacets>(ALL_FACETS)
   /**
-   * The selected item — **local to this panel since row A8**, where it used to be
-   * `tools.selectedDesign`.
+   * The armed family's size position, as the position's own tags.
    *
-   * A `DesignId` cannot arm the work surface any more: the surface places a
-   * template family and this list holds no families. See the module note for why
-   * casting one to the other was refused. Row **C1** takes this state back into
-   * `PlanTools` as a `TemplateId` when it replaces the list.
+   * Panel state and not `PlanTools`, because `usePlanTools` holds
+   * `selectedTemplate: TemplateId | null` and nothing beside it. **The
+   * consequence is stated rather than hidden:** what reaches a placement today
+   * is the family alone (`three/edits.ts` places with `fills: {}`, contract
+   * C-g), so the position narrows the count on screen and is what row C2's fill
+   * solver has to be given. See this row's report for the two-line seam.
    */
-  const [armed, setArmed] = useState<DesignId | null>(null)
+  const [size, setSize] = useState<readonly string[]>([])
+  /** The RECENT ring, snapshotted — `palette.ts` owns the ring itself. */
+  const [recent, setRecent] = useState<readonly RecentEntry[]>(() => recentArms())
+
+  const armed = tools.selectedTemplate
 
   const arm = useCallback(
-    (item: TileAggregate) => {
-      setArmed(item.design)
-      // §3: selecting forces place mode. Selecting a tile while the eraser is up
-      // otherwise looks like the palette ignored the click — still true of the
-      // press, and the one thing here that still reaches `PlanTools`.
+    (family: TemplateFamily, position: readonly string[] = []) => {
+      tools.setSelectedTemplate(family.id)
+      setSize(position)
+      rememberArm({ template: family.id, size: position })
+      setRecent(recentArms())
+      // §3: selecting forces place mode. Arming a family while the eraser is up
+      // otherwise looks like the palette ignored the click.
       tools.setTool('place')
     },
     [tools],
   )
 
+  const disarm = useCallback(() => {
+    tools.setSelectedTemplate(null)
+    setSize([])
+  }, [tools])
+
+  /**
+   * Choose a size for the armed family.
+   *
+   * It goes into the ring as well as into the state, because the ring holds
+   * *arms*: a user who sizes a family after arming it has made the choice the
+   * strip exists to offer back, and a chip that came back at `any size` would
+   * drop the only part of it they made twice.
+   */
+  const chooseSize = useCallback(
+    (family: TemplateFamily, position: readonly string[]) => {
+      setSize(position)
+      rememberArm({ template: family.id, size: position })
+      setRecent(recentArms())
+    },
+    [],
+  )
+
   // Row G5's one call site. Claiming is read-and-clear, so this is a one-shot
   // handoff and not a piece of state two screens have to keep in step: a second
-  // run of this effect — a re-mount, or React's development double-invoke —
-  // claims `null` and does nothing, and an item the user has since disarmed is
-  // not re-armed behind their back. See the module note for the guard.
-  const pending = usePendingDesign()
+  // run — a re-mount, or React's development double-invoke — claims `null` and
+  // does nothing, and a family the user has since disarmed is not re-armed
+  // behind their back. See the module note for the guard.
+  const pending = usePendingArm()
   useEffect(() => {
     if (pending === null) return
-    const claimed = claimPendingDesign()
+    const claimed: PendingArm | null = claimPendingArm()
     if (claimed === null) return
-    const row = rows.find((candidate) => candidate.item.design === claimed)
-    if (row === undefined || !row.placeable) return
-    arm(row.item)
-  }, [pending, rows, arm])
+    const family = familyById(claimed.template)
+    if (family === undefined) return
+    setFacets(ALL_FACETS)
+    arm(family, positionOf(family, claimed.size))
+  }, [pending, arm])
+
+  const rows = useMemo(() => filterFamilies(TEMPLATE_FAMILIES, search.q, facets), [search.q, facets])
+  const groups = useMemo(() => groupFamilies(rows), [rows])
+  const reachable = useMemo(
+    () => reachableFacets(TEMPLATE_FAMILIES, search.q, facets),
+    [search.q, facets],
+  )
+  /** The strip only offers what the query and the facets have left. */
+  const recentRows = useMemo(
+    () => recent.filter((entry) => rows.includes(entry.family)),
+    [recent, rows],
+  )
 
   return (
     <aside className="of-palette" aria-label="Palette">
-      <PaletteSearch query={search.q} total={result.total} onQueryChange={onQueryChange} />
+      <PaletteSearch
+        query={search.q}
+        shown={rows.length}
+        total={TEMPLATE_FAMILIES.length}
+        onQueryChange={onQueryChange}
+      />
 
-      <section className="of-pal-block" aria-labelledby={searchId}>
-        <h2 className="of-pal-heading" id={searchId}>
-          <Eyebrow>Archive</Eyebrow> <Chip tone="count">{countLabel(result.total)}</Chip>
+      <FacetBar facets={facets} reachable={reachable} onChange={setFacets} />
+
+      <section className="of-pal-block" aria-labelledby={listId}>
+        <h2 className="of-pal-heading" id={listId}>
+          <Eyebrow>Templates</Eyebrow> <Chip tone="count">{countLabel(rows.length)}</Chip>
         </h2>
 
         {/*
-          **Row A8's reduction, said on screen.** The list is the archive and the
-          surface places template families, so a press here selects and cannot
-          arm — see the module note. Row C1 replaces the list with the families
-          and this line goes with it. It is a plain note rather than a warning
-          because nothing has gone wrong: the builder is mid-migration and this
-          says which half is missing.
+          One line about what a placement is today, because the alternative is a
+          user watching the bill say "needs a choice" with no idea why. It states
+          the present tense only: what a size position narrows is the number on
+          the row, which is on screen beside it.
         */}
         <p className="of-pal-note">
-          Placing is not wired to this list yet. The work surface places one of
-          the 40 template recipes, and these are the archive&rsquo;s individual
-          files — selecting one shows what you picked and arms nothing.
+          A placed family arrives with its slot empty and the bill reports it as needing a choice.
+          The number on a row is how many archive tiles could fill it.
         </p>
 
-        {result.total === 0 ? (
+        {rows.length === 0 ? (
           <p className="of-pal-note">
-            Nothing in the organised archive matches. Untagged tiles exist in storage and are not
-            reachable from here yet.
-          </p>
-        ) : (
-          <PaletteList
-            rows={rows}
-            index={index}
-            armed={armed}
-            disarm={() => {
-              setArmed(null)
-            }}
-            arm={arm}
-          />
-        )}
-
-        {result.total > rows.length ? (
-          <p className="of-pal-note">
-            The first {countLabel(MAX_SEARCH_ROWS)} of {countLabel(result.total)} — narrow the
-            search to see the rest.
+            No template matches. The 91 rows are families and recipes, not tiles — search the
+            catalog screen for a texture or a tile name, then use its &ldquo;Use in
+            builder&rdquo;.
           </p>
         ) : null}
+
+        {recentRows.length > 0 ? (
+          <RecentStrip rows={recentRows} armed={armed} size={size} arm={arm} />
+        ) : null}
+
+        {groups.map((group) => (
+          <PaletteList
+            key={group.key}
+            label={group.label}
+            rows={group.rows}
+            armed={armed}
+            size={size}
+            count={count}
+            arm={arm}
+            disarm={disarm}
+            onSize={chooseSize}
+          />
+        ))}
+
+        {/*
+          The one population no family can name, named. `role|insert` is a
+          perfect bijection with `layer === 'insert'` — the same 285 records —
+          and 262 of them are already reachable as a fill for a host tile's own
+          accessory slot, so listing 94 designs here that the grid cannot hold
+          would be worse than a sentence saying where they live.
+        */}
+        <p className="of-pal-note">
+          Doors, windows and other inserts are not templates: {countLabel(INSERT_DESIGNS)} designs
+          fit into a tile&rsquo;s own accessory slots instead, on the tile&rsquo;s page.
+        </p>
       </section>
     </aside>
   )
@@ -311,129 +324,325 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
 
 /* --------------------------------------------------------------------- rows */
 
+/**
+ * One group: a heading, its rows, and the size control under the armed one.
+ *
+ * The size control lives **inside the armed row's `<li>`** rather than in a
+ * panel of its own, for the reason the row itself is the control's subject: a
+ * separate block would have to name which family it belonged to, and a 272px
+ * column has no room to say "Size — Wall: Corner (S2W)" over a set of chips.
+ */
 function PaletteList({
+  label,
   rows,
-  index,
   armed,
-  disarm,
+  size,
+  count,
   arm,
+  disarm,
+  onSize,
 }: {
-  rows: readonly PaletteRow[]
-  index: CatalogIndex
-  /** The selected item, threaded down so a row can read as pressed. */
-  armed: DesignId | null
-  disarm: () => void
-  arm: (item: TileAggregate) => void
+  readonly label: string
+  readonly rows: readonly TemplateFamily[]
+  readonly armed: PlanTools['selectedTemplate']
+  readonly size: readonly string[]
+  readonly count: CandidateCounter
+  readonly arm: (family: TemplateFamily, position?: readonly string[]) => void
+  readonly disarm: () => void
+  readonly onSize: (family: TemplateFamily, position: readonly string[]) => void
 }) {
+  const headingId = useId()
   return (
-    <ul className="of-pal-list" role="list">
-      {rows.map((row) => (
-        <PaletteRowView
-          key={row.item.design}
-          row={row}
-          assets={index.file.assets}
-          sheet={index.file.sprite}
-          material={index.materialOf(row.preview)}
-          selected={armed === row.item.design}
-          onSelect={() => {
-            // Re-selecting the armed row disarms it, which is what `aria-pressed`
-            // promises.
-            if (armed === row.item.design) {
-              disarm()
-              return
-            }
-            arm(row.item)
-          }}
-        />
-      ))}
-    </ul>
-  )
-}
-
-function PaletteRowView({
-  row,
-  assets,
-  sheet,
-  material,
-  selected,
-  onSelect,
-}: {
-  row: PaletteRow
-  assets: CatalogAssets
-  sheet: SpriteSheet
-  /**
-   * The tint, from `CatalogIndex.materialOf` over the **preview** record. Row P3.
-   *
-   * A palette row is a tile the user is about to place, and the material is what
-   * distinguishes two rows whose names and sizes are identical — this panel is
-   * 272px wide, so the name is usually truncated and the 40px well is often the
-   * only thing telling two candidates apart.
-   */
-  material: MaterialId
-  selected: boolean
-  onSelect: () => void
-}) {
-  const { item, preview, placeable } = row
-
-  const body = (
-    <>
-      <TileThumb
-        blob={preview.blob}
-        sprite={preview.sprite}
-        thumb={preview.thumb}
-        assets={assets}
-        sheet={sheet}
-        material={material}
-        className="of-pal-thumb"
-      />
-      <span className="of-pal-name">{item.name}</span>
-      <span className="of-pal-size">
-        {placeable ? sizeLabel(item.foot, item.sizeCode) : REFUSAL_LABEL}
-      </span>
-    </>
-  )
-
-  return (
-    <li className="of-pal-row" data-selected={selected ? '' : undefined} data-placeable={placeable ? '' : undefined}>
-      {placeable ? (
-        <button type="button" className="of-pal-pick" aria-pressed={selected} onClick={onSelect}>
-          {body}
-        </button>
-      ) : (
-        <div className="of-pal-pick">
-          {body}
-          {/* The short mono marker is what fits the column; the full sentence is
-              the canvas's own refusal text, so the palette and the canvas cannot
-              disagree about why. The canvas asks it of a record and this asks it
-              of the item, and the answer is the same on all 3,822: `foot` and
-              `name` are both hoisted facets. */}
-          <VisuallyHidden>{placementRefusal(item)?.message ?? ''}</VisuallyHidden>
-        </div>
-      )}
-    </li>
+    <section className="of-pal-group" aria-labelledby={headingId}>
+      <h3 className="of-pal-heading of-pal-subheading" id={headingId}>
+        <Eyebrow>{label}</Eyebrow> <Chip tone="count">{countLabel(rows.length)}</Chip>
+      </h3>
+      <ul className="of-pal-list" role="list">
+        {rows.map((family) => {
+          const selected = armed === family.id
+          // The count follows the armed position, because that is the set a fill
+          // will be chosen from. An unarmed row counts what it admits at `any
+          // size`, which is what it will arm at.
+          const detail = rowDetail(family, count(family, selected ? size : []))
+          return (
+            <li key={family.id} className="of-pal-row" data-selected={selected ? '' : undefined}>
+              <button
+                type="button"
+                className="of-pal-pick"
+                aria-pressed={selected}
+                /* The **full** name and the noun, because the visible row drops
+                   both: the heading carries the role and the column has no width
+                   for `tiles`. Two families are called `Straight` — one under
+                   Wall and one under Floor — so without this a screen reader
+                   hears the same row name twice and a test cannot tell them
+                   apart either. */
+                aria-label={`${family.name}, ${detail}`}
+                onClick={() => {
+                  // Re-selecting the armed row disarms it, which is what
+                  // `aria-pressed` promises.
+                  if (selected) disarm()
+                  else arm(family)
+                }}
+              >
+                <span className="of-pal-name">{family.shortName}</span>
+                <span className="of-pal-size" aria-hidden="true">
+                  {family.kind === 'recipe' ? detail : countLabel(count(family, selected ? size : []) ?? 0)}
+                </span>
+              </button>
+              {selected ? (
+                <SizeControl family={family} size={size} count={count} onSize={onSize} />
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
 /**
- * The one footprint that cannot be drawn on the plan, in a dozen characters.
+ * The row's right-hand fact: candidates for a family, parts for a recipe.
  *
- * Was a two-case function while `arc` was refused; row W6 made all six drawable
- * cases placeable, so `none` is the whole of it. The label itself is unchanged by
- * row R4 and reads correctly without the 2D renderer: a tile with no plan shape
- * has nowhere to stand in the 3D room either, for the same arithmetic reason.
+ * A recipe has 2 to 5 slots, so one candidate count cannot answer *"how many
+ * tiles fill this"*; the part count is the honest figure and it is short enough
+ * to show whole. A family shows the number alone, because the noun is the same
+ * on every row of a group and the column is 272px — the noun is in the row's
+ * `aria-label`, where a screen reader needs it and where it costs no width.
+ * *"tiles"* rather than *"items"* is the whole app's noun for a design, and
+ * `screens/catalog`'s field says the same word over the same figures.
  */
-const REFUSAL_LABEL = 'no plan shape'
+function rowDetail(family: TemplateFamily, candidates: number | undefined): string {
+  if (family.kind === 'recipe') return `${family.slots} parts`
+  return `${countLabel(candidates ?? 0)} tiles`
+}
+
+/**
+ * The armed family's size control.
+ *
+ * A `role="group"` of `aria-pressed` buttons and not a `<select>`: B3 measured
+ * the domain at a **median of 4 cells and a maximum of 31** — a control, not a
+ * dropdown — and every position carries its own candidate count, which a
+ * `<select>` has nowhere to put. Wrapped rather than scrolled, because the
+ * longest domain is 32 positions and a horizontal scroller in a 272px column
+ * hides most of them behind a gesture.
+ *
+ * Renders **nothing** when there is nothing to choose: the 40 recipes name their
+ * own sizes in their parts, and 8 families have no expressible domain. Those 8
+ * get a sentence instead of a control, because a row that simply omits the
+ * control it has on its nineteen neighbours reads as a bug.
+ */
+function SizeControl({
+  family,
+  size,
+  count,
+  onSize,
+}: {
+  readonly family: TemplateFamily
+  readonly size: readonly string[]
+  readonly count: CandidateCounter
+  readonly onSize: (family: TemplateFamily, position: readonly string[]) => void
+}) {
+  if (family.sizes.length === 0) {
+    if (family.kind === 'recipe') return null
+    return (
+      <p className="of-pal-note of-pal-nosize">
+        The archive tags no size for this family — it places at any size.
+      </p>
+    )
+  }
+  return (
+    <div className="of-pal-sizes" role="group" aria-label={`Size for ${family.name}`}>
+      {family.sizes.map((position: SizePosition) => {
+        const chosen = position.tags.length === size.length && position.tags.every((tag) => size.includes(tag))
+        const candidates = count(family, position.tags) ?? 0
+        return (
+          <button
+            key={position.label}
+            type="button"
+            className="of-pal-sizebtn"
+            aria-pressed={chosen}
+            /* The authored label in full plus the count: the visible text is
+               abbreviated to fit, and a number with no noun beside it says
+               nothing on its own. */
+            aria-label={`${position.label}, ${countLabel(candidates)} tiles`}
+            onClick={() => {
+              onSize(family, position.tags)
+            }}
+          >
+            {sizeChipLabel(position.label)}
+            <span className="of-pal-sizecount">{countLabel(candidates)}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * A position's label, abbreviated to the width of a chip.
+ *
+ * *"2 wide by 2 deep"* is authored for a sentence and is 16 characters in a
+ * column that fits about 12; `2 x 2` is the same claim. **Lossless, and the
+ * distinction it must not lose is B4's own**: 251 positions are a *cell* (a
+ * width and a depth) and 48 are a *run* (a width, because the corpus does not
+ * tag a wall's depth), so *"2 wide"* stays *"2 wide"* rather than becoming
+ * `2 x ?`. `any size` is unchanged. The full label is on the button's
+ * `aria-label`.
+ */
+function sizeChipLabel(label: string): string {
+  if (label === ANY_SIZE_LABEL) return label
+  const pair = /^(.+) wide by (.+) deep$/.exec(label)
+  return pair === null ? label : `${pair[1]!} \u00d7 ${pair[2]!}`
+}
+
+/** What the RECENT strip holds: a family and the size it was armed at. */
+type RecentEntry = { readonly family: TemplateFamily; readonly size: readonly string[] }
+
+/**
+ * RECENT, as a strip of chips above the list.
+ *
+ * **A strip and not a tenth group**, because all 91 rows are always listed: a
+ * group would put a second row on screen for the same family, and since the size
+ * control lives inside the armed row it would put a second live copy of that
+ * control there too. `palette.ts#MAX_RECENT` carries the argument and the
+ * research's own caveat — this mitigates the recognition cost of 91 rows and
+ * does not fix it, which is why it is six chips and not a curated list.
+ *
+ * A chip carries the size as well as the family, because re-placing something is
+ * usually re-placing it *at the same size*: four 2x2 floors and then a fifth.
+ */
+function RecentStrip({
+  rows,
+  armed,
+  size,
+  arm,
+}: {
+  readonly rows: readonly RecentEntry[]
+  readonly armed: PlanTools['selectedTemplate']
+  readonly size: readonly string[]
+  readonly arm: (family: TemplateFamily, position?: readonly string[]) => void
+}) {
+  return (
+    <div className="of-pal-facet" role="group" aria-label="Recent">
+      <Eyebrow as="span">Recent</Eyebrow>
+      {rows.map((entry) => {
+        const pressed =
+          armed === entry.family.id &&
+          entry.size.length === size.length &&
+          entry.size.every((tag) => size.includes(tag))
+        return (
+          <button
+            key={`${entry.family.id} ${entry.size.join(' ')}`}
+            type="button"
+            className="of-pal-chip"
+            aria-pressed={pressed}
+            aria-label={`${entry.family.name}, ${sizeLabelOf(entry.family, entry.size)}`}
+            onClick={() => {
+              arm(entry.family, entry.size)
+            }}
+          >
+            {entry.family.shortName}
+            {entry.size.length > 0 ? ` ${sizeChipLabel(sizeLabelOf(entry.family, entry.size))}` : ''}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------- facets */
+
+/**
+ * §3.1's two facets: form and build.
+ *
+ * Single-select per axis and re-press to clear — `palette.ts#filterFamilies`
+ * carries the argument — and only the values that leave at least one row are
+ * offered, so no chip is a dead end. The axis is not shown at all when one value
+ * is all there is: with `?q=octagon` narrowing to two rows, a "form" row holding
+ * only "Octagon" is a control with nothing to choose.
+ */
+function FacetBar({
+  facets,
+  reachable,
+  onChange,
+}: {
+  readonly facets: PaletteFacets
+  readonly reachable: { readonly forms: readonly string[]; readonly builds: readonly string[] }
+  readonly onChange: (facets: PaletteFacets) => void
+}) {
+  return (
+    <div className="of-pal-facets">
+      <FacetRow
+        label="Form"
+        values={reachable.forms}
+        labelOf={axisLabel}
+        chosen={facets.form}
+        onPick={(value) => {
+          onChange({ ...facets, form: value })
+        }}
+      />
+      <FacetRow
+        label="Build"
+        values={reachable.builds}
+        labelOf={(value) => (value === NO_BUILD ? 'No system' : axisLabel(value))}
+        chosen={facets.build}
+        onPick={(value) => {
+          onChange({ ...facets, build: value })
+        }}
+      />
+    </div>
+  )
+}
+
+function FacetRow({
+  label,
+  values,
+  labelOf,
+  chosen,
+  onPick,
+}: {
+  readonly label: string
+  readonly values: readonly string[]
+  readonly labelOf: (value: string) => string
+  readonly chosen: string | undefined
+  readonly onPick: (value: string | undefined) => void
+}) {
+  if (values.length < 2) return null
+  return (
+    <div className="of-pal-facet" role="group" aria-label={label}>
+      <Eyebrow as="span">{label}</Eyebrow>
+      {values.map((value) => {
+        const pressed = chosen === value
+        return (
+          <button
+            key={value}
+            type="button"
+            className="of-pal-chip"
+            aria-pressed={pressed}
+            onClick={() => {
+              onPick(pressed ? undefined : value)
+            }}
+          >
+            {labelOf(value)}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 /* ------------------------------------------------------------------- search */
 
 function PaletteSearch({
   query,
+  shown,
   total,
   onQueryChange,
 }: {
-  query: string
-  total: number
-  onQueryChange: (text: string) => void
+  readonly query: string
+  readonly shown: number
+  readonly total: number
+  readonly onQueryChange: (text: string) => void
 }) {
   const inputId = useId()
   const [draft, setDraft] = useState(query)
@@ -464,7 +673,7 @@ function PaletteSearch({
   return (
     <div className="of-pal-search">
       <label className="of-sr-only" htmlFor={inputId}>
-        Search the catalog for tiles to add
+        Search the template families
       </label>
       <input
         id={inputId}
@@ -473,7 +682,7 @@ function PaletteSearch({
         autoComplete="off"
         spellCheck={false}
         maxLength={MAX_QUERY_LENGTH}
-        placeholder="Search the whole archive…"
+        placeholder="Search 91 templates…"
         value={draft}
         onChange={(event) => {
           const text = event.target.value
@@ -490,11 +699,7 @@ function PaletteSearch({
           keystroke, and an assertive region would interrupt the typing that
           caused it. */}
       <p className="of-pal-count" role="status">
-        {/* "tiles", not "items", and the count is a count of items either way:
-            `../../screens/catalog/SearchField.tsx` renders the same figure with
-            the same word, and two search fields over one engine disagreeing
-            about the noun would read as two different result sets. */}
-        {query.trim() === '' ? '' : `${countLabel(total)} ${total === 1 ? 'tile' : 'tiles'} match`}
+        {query.trim() === '' ? '' : `${countLabel(shown)} of ${countLabel(total)} templates`}
       </p>
     </div>
   )

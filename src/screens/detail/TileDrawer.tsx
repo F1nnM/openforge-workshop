@@ -123,29 +123,61 @@
  *
  * ## "Use in builder"
  *
- * The contract's third clause — "pre-selects the tile" — now has a channel. Row
- * G5 added `@/store`'s `sendDesignToBuilder`, an un-persisted one-shot mailbox
- * the builder's palette claims on mount, so the action asks the builder to arm
- * the **item**, navigates, and seeds the palette's search with the item's name.
+ * The contract's third clause — "pre-selects the tile" — has a channel, and row
+ * **C1** changed what travels down it. Row G5 added an un-persisted one-shot
+ * mailbox the builder's palette claims on mount; it used to carry the **item**,
+ * and this action also seeded the palette's search with the item's name so that
+ * a row for it was on screen when the claim happened.
  *
- * It was three writes and row **A0** removed the first: `addToLibrary`, which
- * came before the others because the palette listed the library and refused to
- * arm something it held no placeable row for. With the library gone the palette
- * lists the archive search instead, and the search this action seeds is what puts
- * the item in front of the claim — so the ordering constraint is satisfied by the
- * same navigation rather than by a store write. The navigation still comes last,
- * because the claim happens when the palette mounts.
+ * **Neither of those halves survives, because the palette no longer lists
+ * items.** After row A1 a placement is a template family with a fill per slot,
+ * and after row C1 the palette lists the 91 templates this build can place — so
+ * a `DesignId` in the box named nothing the reader could arm, and seeding the
+ * search with a tile's name now narrows a list of family names to nothing.
  *
- * **The item travels, not the shown variant and not a resolution.** Row V1
- * turned both the library and this channel over to designs, which reverses what
- * G5 decided here for the reason G5 gave: A6's rule 0 re-picks the variant at
- * bill time and the three locks disagree on the answer for **37.1% of items**,
- * so the file on screen is one of several prints of the thing the user chose and
- * not the choice itself. Sending the file froze which print the builder armed
- * according to whatever lock happened to be set when the button was pressed;
- * sending the design has nothing in it to freeze. The drawer still *shows* a
- * specific variant, and `/catalog?tile=…` still addresses one — this is about
- * what the builder is handed, not about what the drawer displays.
+ * What travels instead is a {@link PendingArm}: **the family that admits this
+ * tile, at this tile's own size.** `builder/panels/familyKey.ts#armForTags`
+ * derives it from the shown record's tags — `shape|base` first, then
+ * `(role, form, build)`, with the tile's own `size|` tags alongside — and the
+ * action navigates with no search at all. The *position* of the family's size
+ * control is chosen by the **palette**, which is the side that holds the domain;
+ * `familyKey.ts` measured that the table costs +5.95 kB gzip in the entry chunk
+ * if this file imports it, which is why the two halves are split that way.
+ *
+ * Three measurements make that honest rather than approximate:
+ *
+ *   - **3,728 of 3,822 designs (97.5%) resolve to a family**, which they must:
+ *     every record carries exactly one role and one form, so the families
+ *     partition the corpus. **3,206 of those (86.0%) also land on a real size
+ *     position** once the palette resolves the tags, so the press usually arms
+ *     *"Floor: Straight"* at *"2 wide by 2 deep"* and the rest arm the family at
+ *     `any size`, which is a real position and not a missing selection.
+ *   - **The 94 that resolve to nothing are all `role|insert`** — doors, windows,
+ *     grates. `role|insert` is a perfect bijection with `layer === 'insert'`, no
+ *     family is generated for it, and **262 of those 285 records are already
+ *     reachable as a fill for a host tile's own accessory slot** — which is the
+ *     `SlotFills` grid further down this very drawer. So the action is *replaced
+ *     by a sentence* for those, rather than arming a family that cannot admit
+ *     the tile on screen.
+ *   - **Reading the shown variant's tags rather than the item's is safe, and it
+ *     is measured**: over all 3,822 items, the number whose variants disagree
+ *     about either the family or the size position is **0**. Same shape as
+ *     `foot`'s hoisting argument, and the same reason the drawer is allowed to
+ *     ask a record a question about a tile.
+ *
+ * **The lossiness is real and it is disclosed on screen.** A family is not the
+ * tile: the fill solver may put a different print, or a different tile of the
+ * same family, in the slot. So the button says which family and size it will arm
+ * — the alternative is a press that silently means something weaker than it
+ * says. This is also *why* the map lives at this end of the channel rather than
+ * in the palette: the reader could do the same derivation, but it could not
+ * explain it to the person who pressed the button.
+ *
+ * What has not changed is that **nothing here resolves a file.** A6's rule 0
+ * re-picks a variant at bill time and the three locks disagree for **37.1% of
+ * items**, so the print on screen is one of several prints of the thing the user
+ * chose; a family and a size have no print in them to freeze. The navigation
+ * still comes last, because the claim happens when the palette mounts.
  */
 import { getRouteApi, useRouter } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
@@ -153,10 +185,18 @@ import { useEffect, useMemo, useState } from 'react'
 import { PRINT_OPTIONS } from '@/assembly'
 import type { AggregateIndex, CatalogFile, CatalogRecord, TileAggregate, TileId, TileVariant } from '@/catalog'
 import { buildAggregateIndex, resolveTags, selectVariant } from '@/catalog'
+/* Deep, and not through `@/builder/panels`: that barrel is the bill panel, the
+   download hook and the archive planner, none of which belongs in the catalog's
+   chunk. `familyKey.ts` imports `@/store` for one brand and nothing else —
+   **including not the template table**, which is the whole reason it is a
+   separate module from `families.ts`: an A/B build measured that table landing
+   in the entry chunk at +5.95 kB gzip for every visitor to every page. Its
+   docblock carries the figures. */
+import { armForTags, armNameForTags, armRefusalFor } from '@/builder/panels/familyKey'
 import { closeTileDrawer, resolveTileTarget } from '@/routes'
 import { resolveMaterial } from '@/materials'
-import { MAX_QUERY_LENGTH } from '@/search'
-import { sendDesignToBuilder, useLockChosen, useLockSystem } from '@/store'
+import type { PendingArm, TemplateId } from '@/store'
+import { armTemplateInBuilder, useLockChosen, useLockSystem } from '@/store'
 import { Tile3DPanel } from '@/three'
 import { Chip, Drawer, Eyebrow } from '@/ui/primitives'
 import { loadCatalogIndex } from '@/ui/shell'
@@ -367,6 +407,10 @@ function TileDetail({
   // `TEXTURE_ROOT_MATERIAL[record.texture]` — row P3 measured those two
   // disagreeing on 691 of 8,702 records (7.9%).
   const material = useMemo(() => resolveMaterial(tags, shown.file).material, [tags, shown.file])
+  /* The family that admits this tile, and the gate on both actions. See the
+     comment on the actions block, and `familyKey.ts` for why the derivation
+     lives at this end of the channel. */
+  const arm = useMemo(() => armForTags(tags), [tags])
   const footprint = footprintLabel({ foot: aggregate.foot, sizeCode: aggregate.sizeCode }, tags)
   const height = heightLabel(tags)
   const address = storageAddress(catalog.assets, shown)
@@ -411,25 +455,19 @@ function TileDetail({
 
       <div className="of-detail-actions">
         {/*
-          §2.5's first action, in row C3's verb: the library is gone and a
-          placement is what "I am going to print this" means now. The module
-          docblock argues the shape; `PlaceOnPlan` owns the press.
+          §2.5's two actions, and they are two verbs rather than one twice.
+          **Both are gated on the same answer** — `armForTags`, row C1's — so a
+          tile no family admits offers neither, and the refusal below is the only
+          one in this file. `arm` is derived twice (here and inside
+          {@link UseInBuilder}) and that is a second *call* and not a second
+          rule: the function is a pure walk of ten tags, both call sites memoise
+          it, and hoisting it would mean rewriting C1's component to take what it
+          can work out itself.
         */}
-        <PlaceOnPlanAction catalog={catalog} record={record} shown={shown} />
-        <button
-          type="button"
-          className="of-detail-action"
-          data-variant="ghost"
-          onClick={() => {
-            sendDesignToBuilder(aggregate.design)
-            void router.navigate({
-              to: '/builder',
-              search: { q: aggregate.name.slice(0, MAX_QUERY_LENGTH) },
-            })
-          }}
-        >
-          Use in builder →
-        </button>
+        {arm === undefined ? null : (
+          <PlaceOnPlanAction catalog={catalog} shown={shown} template={arm.template} />
+        )}
+        <UseInBuilder tags={tags} onGo={() => void router.navigate({ to: '/builder' })} />
       </div>
 
       <dl className="of-detail-specs">
@@ -480,6 +518,59 @@ function unitFor(basis: SpecValue<string>['basis']): string | undefined {
   return basis === 'rect' || basis === 'wall' ? 'in' : undefined
 }
 
+/**
+ * The second action, and what it says it will arm.
+ *
+ * Two states, and the second is not an error: a tile whose tags name no family
+ * cannot be armed, and all 94 such designs are inserts, which go in a host
+ * tile's accessory slot instead — the grid this same drawer renders further
+ * down. So the button is replaced by the sentence that says where to go, rather
+ * than disabled or left to arm something wrong. The module docblock carries the
+ * measurements.
+ *
+ * The armed family and size are named under the button because a press means
+ * something weaker than *"use this tile"*: the family admits this tile, and the
+ * fill solver may put another print of it — or another tile of the family — in
+ * the slot.
+ */
+function UseInBuilder({ tags, onGo }: { tags: readonly string[]; onGo: () => void }) {
+  const arm: PendingArm | undefined = useMemo(() => armForTags(tags), [tags])
+  const name = useMemo(() => armNameForTags(tags), [tags])
+
+  if (arm === undefined || name === undefined) {
+    // Two causes, and they are different sentences: an insert has somewhere else
+    // to go, and an unclassified tile has nowhere at all. `armRefusalFor` carries
+    // the measurement that the second is unreachable over the emitted index.
+    return (
+      <p className="of-detail-armnote">
+        {armRefusalFor(tags) === 'insert'
+          ? 'Inserts are not placed on their own — pick one in the accessory slots of the tile it goes into, below.'
+          : 'This build files no template family for this tile, so the builder cannot arm it.'}
+      </p>
+    )
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="of-detail-action"
+        data-variant="ghost"
+        onClick={() => {
+          armTemplateInBuilder(arm)
+          onGo()
+        }}
+      >
+        Use in builder &rarr;
+      </button>
+      <p className="of-detail-armnote">
+        Arms the <strong>{name}</strong> family, at this tile&rsquo;s size.
+      </p>
+    </>
+  )
+}
+
+
 /** One spec cell. `data-empty` marks a value that is a refusal, not a measurement. */
 function Spec({
   label,
@@ -505,39 +596,61 @@ function Spec({
 /* ------------------------------------------------------- place on the plan */
 
 /**
- * §2.5's first action: put this file on the plan as a one-slot instance.
+ * §2.5's first action: put **this file** on the plan, as one instance of the
+ * family that admits it.
  *
- * The whole closure it needs — the plan projection, the vacancy search and B4's
- * family table — arrives on the press through `await import('./placeOnPlan')`,
- * so the catalog route's chunk is unchanged by this button existing. That is the
- * same boundary `useArchiveDownload` draws around row S5's pack, and the reason
- * is the same: a module the user may never reach should not be in the bundle
- * they always download.
+ * The second verb beside {@link UseInBuilder}'s, and the difference is what each
+ * one keeps. Arming keeps the **family** and hands the print back to the fill
+ * solver, which C1 discloses on the button because it is lossy. This keeps the
+ * **file**: the family's one slot is filled with the variant on screen and
+ * pinned, so the piece on the plan is the piece in the preview well. That is
+ * §2.5's *"+ Add to library"* in the only verb left after row A0 — *these are
+ * the tiles I am going to print* is now *this piece is on my plan* — and it
+ * deliberately does **not** navigate, which is what keeps it a second action
+ * rather than a quieter copy of the first: the library toggle accumulated
+ * without leaving the catalog, and so does this.
  *
- * Four states and each is a different sentence, because they are four different
- * things: nothing pressed yet, the import in flight, placed at a named cell, and
- * **no family admits this file** — which is a fact about the archive (B5's
- * families reach 99.0% of records) and not a failure of the press.
+ * ## The family comes from `armForTags`, and row C3's own rule was wrong
  *
- * `record` may be `undefined` for a variant this index has no row for, which
- * `recordOf`'s docblock says is unreachable today and survives as the honest
- * absence: with no tags there is no family to resolve, so the button says so
- * rather than placing something unclassified.
+ * This took a `familyForRecord` in `./placeOnPlan.ts` that walked the generated
+ * table and preferred **the most specific family by `require` count**. Merging
+ * row C1 measured that rule against `familyKey.ts#armForTags` over the live
+ * index, and it is wrong on the bases — **1,963 of 1,963 `shape|base` records,
+ * zero exceptions**: a base carries the role of the piece it sits under (1,117
+ * are `role|wall`), so the three-ref `(role, form, build)` key always outranks
+ * the one-ref `shape|base`, and every base would have been placed as a wall.
+ * `armForTags` asks `shape|base` **first** for exactly that reason. On the other
+ * 6,739 records the two agreed exactly, and both refuse the same 285 insert
+ * records — so the whole disagreement was the defect. The function is deleted
+ * and this reads C1's answer, which is also the answer that reaches the channel,
+ * so the two actions cannot disagree about what this tile is.
+ *
+ * The **table** is still needed for one thing the tags cannot answer — the
+ * *name* of the family's single slot, which is where the file goes — and that is
+ * a lookup rather than a derivation. It happens inside `./placeOnPlan.ts`, which
+ * arrives through `await import()` on the press, so the +5.95 kB gzip entry-chunk
+ * cost `familyKey.ts` measured for importing the table here is not paid: the
+ * catalog route's chunk is byte-identical with this button present.
+ *
+ * Three states, and the fourth is gone: the caller only renders this when a
+ * family exists, so *"no family"* is C1's sentence beside the missing arm and
+ * not a refusal of its own. What is left is nothing pressed, the import in
+ * flight, and placed at a named cell.
  */
 function PlaceOnPlanAction({
   catalog,
-  record,
   shown,
+  template,
 }: {
   catalog: CatalogFile
-  record: CatalogRecord | undefined
   shown: TileVariant
+  /** The family `armForTags` derived. The caller has already gated on it. */
+  template: TemplateId
 }) {
   const [state, setState] = useState<
     | { readonly kind: 'idle' }
     | { readonly kind: 'placing' }
     | { readonly kind: 'placed'; readonly where: string; readonly family: string }
-    | { readonly kind: 'refused' }
   >({ kind: 'idle' })
 
   return (
@@ -545,35 +658,30 @@ function PlaceOnPlanAction({
       <button
         type="button"
         className="of-detail-action"
-        disabled={state.kind === 'placing' || record === undefined}
+        disabled={state.kind === 'placing'}
         onClick={() => {
-          if (record === undefined) return
           setState({ kind: 'placing' })
           void (async () => {
-            const { familyForRecord, placeOnPlan } = await import('./placeOnPlan')
-            const family = familyForRecord(catalog, record)
-            if (family === undefined) {
-              setState({ kind: 'refused' })
-              return
-            }
-            const placed = placeOnPlan(catalog, {
-              template: family.template.id,
-              fills: { [family.slot]: shown.id },
-            })
-            setState({ kind: 'placed', family: family.template.name, where: placed.where })
+            const { placeFileAsFamily } = await import('./placeOnPlan')
+            const placed = placeFileAsFamily(catalog, template, shown.id)
+            // `undefined` only if this build ships no such family, which the
+            // gate above has already ruled out — `armForTags` constructs the id
+            // and `families.test.ts` holds that construction to the emitter with
+            // 0 mismatches. Kept as a branch rather than asserted, because a
+            // press that silently did nothing would be worse than one that says
+            // nothing happened.
+            setState(placed === undefined ? { kind: 'idle' } : { kind: 'placed', ...placed })
           })()
         }}
       >
         {state.kind === 'placing' ? 'Placing…' : '+ Place on the plan'}
       </button>
 
-      {state.kind === 'idle' || state.kind === 'placing' ? null : (
+      {state.kind === 'placed' ? (
         <p className="of-detail-placed" role="status">
-          {state.kind === 'placed'
-            ? `Placed as ${state.family} at ${state.where}.`
-            : `No recipe in this build takes ${shown.file}. The builder places pieces as recipes, and this file is in no recipe's slot.`}
+          {`Placed as ${state.family} at ${state.where}.`}
         </p>
-      )}
+      ) : null}
     </>
   )
 }
