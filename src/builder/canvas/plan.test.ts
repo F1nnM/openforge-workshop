@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 import type { TileId } from '@/catalog'
 import type { PlacementId, WorkshopState } from '@/store'
 
-import { createStyleResolver, planCatalogFromFile } from './catalog'
+import { createStyleResolver, originSlotLayout, planCatalogFromFile } from './catalog'
 import {
   FIXTURE_IDS,
   FIXTURE_SLOTS,
@@ -31,7 +31,7 @@ import {
 } from './fixture'
 import { computeGhost, ghostOverlaps } from './ghost'
 import { SNAP_STEP, planBox, planQuad } from './geometry'
-import { findConflicts, partsOverlap, planBand, quadsOverlap } from './overlap'
+import { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap } from './overlap'
 import type { OverlapCandidate } from './overlap'
 import { buildPlanScene, navigationOrder, partAt, pieceAt, pieceRotationStep } from './scene'
 import type { PlanPiece } from './scene'
@@ -102,14 +102,44 @@ function onlyPart(placements: WorkshopState['placements']) {
   return part
 }
 
-const candidate = (id: string, band: 'area' | 'edge', x: number, z: number, w: number, d: number): OverlapCandidate => ({
+/**
+ * One axis-aligned candidate. `elevationMm` defaults to the ground, which is
+ * where the shipped layout rule puts every part.
+ */
+const candidate = (
+  id: string,
+  band: 'area' | 'edge',
+  x: number,
+  z: number,
+  w: number,
+  d: number,
+  elevationMm = 0,
+): OverlapCandidate => ({
   id: id as PlacementId,
   band,
+  level: levelAt(elevationMm),
   box: { x, z, w, d },
   parts: [planQuad({ w, d }, 0, x, z)],
   axisAligned: true,
 })
 
+
+/**
+ * A candidate with a real thickness — what a generated base is, and the only
+ * population that has one.
+ */
+const solid = (
+  id: string,
+  x: number,
+  z: number,
+  w: number,
+  d: number,
+  elevationMm: number,
+  heightMm: number,
+): OverlapCandidate => ({
+  ...candidate(id, 'area', x, z, w, d),
+  level: { elevationMm, heightMm },
+})
 
 describe('bands', () => {
   it('files a wall footprint as an edge piece', () => {
@@ -229,6 +259,46 @@ describe('overlap', () => {
     expect([...conflicts]).toEqual([])
   })
 
+  it('still needs that exemption after A7, because a corner is a same-level pair', () => {
+    /*
+      **Measured before deleting.** The brief's guess was that an exemption
+      excusing a false positive is dead weight once the elevation removes the
+      false positive. It is not: two walls meeting at a corner rest on the *same*
+      floor, so they carry the same `elevationMm` at every layout rule there
+      could be, and `levelsOverlap` passes them straight through to the geometry.
+      Here the two are given one explicit elevation and the exemption is still the
+      only thing standing between the drawing and a hatch on it.
+    */
+    const north = candidate('north', 'edge', 0, 0, 4, 0.5, 12.7)
+    const west = candidate('west', 'edge', 0, 0, 0.5, 4, 12.7)
+    expect(north.level).toEqual(west.level)
+    expect(findConflicts([north, west]).size).toBe(0)
+    // Lift one of them and it is not a corner any more — it is a wall crossing
+    // over another wall, and the interval alone answers that.
+    expect(findConflicts([north, candidate('west', 'edge', 0, 0, 0.5, 4, 25.4)]).size).toBe(0)
+  })
+
+  it('never reaches a mitre inside one template, so the exemption cannot misjudge one', () => {
+    /*
+      Row **B2** warned that `isCornerJunction` *"would read a corner's own
+      geometry as legal, and the 8 mitres as legal too"*. Measured, the
+      exemption is never asked: no call path tests two parts of one instance
+      against each other. `findConflicts` skips same-id pairs, `previewMove`
+      filters `candidate.id !== drag.id` before it tests anything, and a ghost is
+      a record in no instance at all.
+
+      These two walls are *parallel* and overlap by a half unit — the pair the
+      exemption explicitly refuses to excuse — and they are still not reported,
+      because they share an id. So the same-id rule and not the exemption is what
+      makes a template's own slots safe, whatever their geometry.
+    */
+    const conflicts = findConflicts([
+      candidate('corner', 'edge', 0, 0, 2, 0.5),
+      candidate('corner', 'edge', 1.5, 0, 2, 0.5),
+    ])
+    expect([...conflicts]).toEqual([])
+  })
+
   it('still flags two parallel walls overlapping by the same half unit', () => {
     // Same shared area as a corner, and no corner piece resolves it.
     const conflicts = findConflicts([
@@ -246,6 +316,50 @@ describe('overlap', () => {
     expect([...conflicts].sort()).toEqual(['a', 'b'])
   })
 
+  it('separates two stacked instances once the layout rule gives them elevations', () => {
+    /*
+      **The false positive row A4a left behind, and this row's whole subject.**
+      Two *different* instances on the same square: one part on the ground, one
+      lifted 6.35 mm by its slot rule. Both are `area`-band — the band is
+      identical on both sides, so nothing but the elevation can be separating
+      them — and A4a's same-id rule does not apply because the ids differ.
+    */
+    const conflicts = findConflicts([
+      candidate('under', 'area', 0, 0, 2, 2, 0),
+      candidate('over', 'area', 0, 0, 2, 2, 6.35),
+    ])
+    expect([...conflicts]).toEqual([])
+
+    // And the same pair on one level still fires, so the test above is about the
+    // height and not about the pair.
+    const level = findConflicts([
+      candidate('under', 'area', 0, 0, 2, 2, 0),
+      candidate('over', 'area', 0, 0, 2, 2, 0),
+    ])
+    expect([...level].sort()).toEqual(['over', 'under'])
+  })
+
+  it('reads a real thickness as an interval, so a riser reaching a level conflicts with it', () => {
+    // A generated base is the one piece with a height (`HEIGHT`, or a riser's `z`
+    // half-squares), and the interval is why: a 50.8 mm riser standing on the
+    // ground reaches the 12.7 mm level and a bare level comparison would miss it.
+    const wall = candidate('wall', 'area', 0, 0, 2, 2, 12.7)
+    expect([...findConflicts([solid('riser', 0, 0, 2, 2, 0, 50.8), wall])].sort()).toEqual(['riser', 'wall'])
+    // 6 mm of base does not reach it.
+    expect(findConflicts([solid('base', 0, 0, 2, 2, 0, 6), wall]).size).toBe(0)
+  })
+
+  it('treats a piece resting exactly on an interval as touching, not overlapping', () => {
+    // The vertical spelling of "a shared face is not a conflict": a floor whose
+    // slot rule puts it at exactly the top of a 6 mm base is resting on it.
+    expect(findConflicts([solid('base', 0, 0, 2, 2, 0, 6), candidate('floor', 'area', 0, 0, 2, 2, 6)]).size).toBe(0)
+    // A hair lower and it is inside the base, which must fire — the tolerance is
+    // 2.54e-5 mm and this is four orders of magnitude above it.
+    expect(
+      findConflicts([solid('base', 0, 0, 2, 2, 0, 6), candidate('floor', 'area', 0, 0, 2, 2, 5.9)]).size,
+    ).toBe(2)
+  })
+
   it('finds every conflict in a run of overlapping pieces', () => {
     const conflicts = findConflicts([
       candidate('a', 'area', 0, 0, 2, 1),
@@ -253,6 +367,95 @@ describe('overlap', () => {
       candidate('c', 'area', 6, 0, 2, 1),
     ])
     expect([...conflicts].sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('the band, and why row A7 could not delete it', () => {
+  /**
+   * The same fixture catalog under the rule the **app** actually uses.
+   *
+   * `BuilderScreen.tsx` calls `planCatalogFromFile(index.file)` with no layout
+   * argument, so `originSlotLayout` is in force everywhere in the shipped app and
+   * `ORIGIN_LAYOUT` puts every part of every placement at `elevationMm: 0`.
+   */
+  const grounded = planCatalogFromFile(file, originSlotLayout)
+  const groundedStyle = createStyleResolver(grounded)
+
+  /** One instance filling one slot with one file, at a cell. */
+  const oneSlot = (key: string, slot: string, tile: string, x: number, z: number) => ({
+    [key as PlacementId]: fixtureInstance(key, fixtureFills([[slot, tile]]), { x, z }),
+  })
+
+  it('puts every part on the ground under the shipped layout rule', () => {
+    // The measurement the rest of this block rests on, and the reason the band
+    // is still load bearing: row B2 authored the real elevation chain
+    // (`template/offsets.ts#slotElevationMm`) and nothing wires it, because it
+    // takes the resting part's height as an argument and the only implementation
+    // of that argument was the `bases.ts#baseElevationMm` row A4b deleted.
+    const scene = buildPlanScene(
+      {
+        ...oneSlot('p1', FIXTURE_SLOTS.base, FIXTURE_IDS.floor2, 0, 0),
+        ...oneSlot('p2', FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2, 4, 0),
+        ...oneSlot('p3', FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2, 8, 0),
+      },
+      grounded,
+      groundedStyle,
+    )
+    expect(scene.pieces.flatMap((piece) => piece.parts).map((part) => part.layout.elevationMm)).toEqual([0, 0, 0])
+  })
+
+  it('is the only thing separating a wall from a floor under the shipped layout rule', () => {
+    /*
+      **Row A4a's note said `planBand` and `PlanBand` retire with the interval.
+      Measured, they cannot.** A wall instance and a floor instance on the same
+      square are both at elevation 0 under `originSlotLayout`, so their intervals
+      are the same level and `levelsOverlap` is true — the band is the whole of
+      what keeps this quiet. Deleting it today would hatch every wall standing on
+      a floor, which is the exact false positive this module was built to remove.
+    */
+    const bands = buildPlanScene(
+      {
+        ...oneSlot('floor', FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2, 0, 0),
+        ...oneSlot('wall', FIXTURE_SLOTS.floor, FIXTURE_IDS.wall2, 0, 0),
+      },
+      grounded,
+      groundedStyle,
+    )
+    const parts = bands.pieces.flatMap((piece) => piece.parts)
+    expect(parts.map((part) => part.band).sort()).toEqual(['area', 'edge'])
+    expect(new Set(parts.map((part) => part.layout.elevationMm))).toEqual(new Set([0]))
+    expect(bands.conflicts.size).toBe(0)
+
+    // Two pieces of the *same* band on that one level are still reported, which
+    // is what makes the line above a statement about the band rather than about
+    // the geometry.
+    const stacked = buildPlanScene(
+      {
+        ...oneSlot('base', FIXTURE_SLOTS.base, FIXTURE_IDS.floor2, 0, 0),
+        ...oneSlot('floor', FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2, 0, 0),
+      },
+      grounded,
+      groundedStyle,
+    )
+    expect([...stacked.conflicts].sort()).toEqual(['base', 'floor'])
+  })
+
+  it('is not what separates them once a layout rule returns a real elevation', () => {
+    // The same two same-band instances under `fixtureSlotLayout`, whose `base`
+    // and `floor` slots are 6.35 mm apart. This is the case the app inherits the
+    // moment a `SlotLayoutRule` with real elevations is wired.
+    const scene = buildPlanScene(
+      {
+        ...oneSlot('base', FIXTURE_SLOTS.base, FIXTURE_IDS.floor2, 0, 0),
+        ...oneSlot('floor', FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2, 0, 0),
+      },
+      catalog,
+      styleOf,
+    )
+    const parts = scene.pieces.flatMap((piece) => piece.parts)
+    expect(parts.map((part) => part.band)).toEqual(['area', 'area'])
+    expect(parts.map((part) => part.layout.elevationMm).sort((a, b) => a - b)).toEqual([0, 6.35])
+    expect(scene.conflicts.size).toBe(0)
   })
 })
 
@@ -908,6 +1111,21 @@ describe('ghost', () => {
     expect(ghost.conflict).toBe(true)
     expect(ghost.placeable).toBe(true)
     expect(ghostOverlaps(scene, ghost).map((piece) => piece.id)).toEqual(['p1'])
+  })
+
+  it('is tested against every level, because it fills no slot and has no elevation', () => {
+    /*
+      A ghost is a bare `CatalogRecord` under the cursor: it belongs to no
+      template, so there is no slot rule to ask for a lift and `OverlapSubject`
+      carries `level: null`. `overlap.ts` reads that as *every* level rather than
+      *no* level, which keeps the prediction on the over-reporting side of the
+      module's one-directional error — the scene part here is lifted 6.35 mm by
+      the fixture rule and the ghost still fires against it.
+    */
+    const scene = buildPlanScene(sceneOf([['p1', FIXTURE_IDS.floor2, 0, 0, 0]]), catalog, styleOf)
+    expect(scene.pieces[0]?.parts[0]?.layout.elevationMm).toBe(6.35)
+    const ghost = computeGhost(record(FIXTURE_IDS.floor1), 0, [0.5, 0.5], SNAP_STEP.fine, scene)
+    expect(ghost.conflict).toBe(true)
   })
 
   it('does not predict a conflict for a wall over a floor', () => {

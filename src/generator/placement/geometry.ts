@@ -45,6 +45,13 @@
  * intact. It is a `rect`, so it takes the exact-quad path and no sector
  * decomposition is involved at all.
  *
+ * Since row **A7** the candidate also carries a vertical interval, and a
+ * generated base is the **only** piece in either population that can fill one in
+ * with a real number: {@link GeneratedFootprint.heightMm} is arithmetic over the
+ * recipe's parameters, where a catalog record has no height anywhere the app can
+ * read. So a 50.8 mm riser is 50.8 mm of interval and conflicts with everything
+ * it reaches, while a 6 mm base passes under a floor its slot rule has lifted.
+ *
  * What this cannot do is *draw* it. `PlanPiece` requires a `CatalogRecord` and a
  * `Placement`, and `src/builder/canvas/**` is not this row's to edit — see the
  * report for the one branch `scene.ts` needs. Collision, box, label and material
@@ -215,7 +222,19 @@ export function generatedPiece(id: PlacementId, placement: GeneratedPlacement): 
  */
 export function generatedOverlapCandidate(id: PlacementId, placement: GeneratedPlacement): OverlapCandidate {
   const piece = generatedPiece(id, placement)
-  return { id, band: piece.band, box: piece.box, parts: piece.parts, axisAligned: piece.axisAligned }
+  return {
+    id,
+    band: piece.band,
+    // The vertical interval row **A7** added, and the one population that can
+    // fill it in with a real number: `heightMm` is arithmetic over the recipe's
+    // parameters, so a 50.8 mm riser is 50.8 mm of interval here rather than the
+    // bare level a catalog record has to settle for. On the ground, because a
+    // generated base belongs to no template and so has no slot rule to lift it.
+    level: { elevationMm: 0, heightMm: piece.foot.heightMm },
+    box: piece.box,
+    parts: piece.parts,
+    axisAligned: piece.axisAligned,
+  }
 }
 
 /**

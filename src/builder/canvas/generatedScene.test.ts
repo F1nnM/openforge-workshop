@@ -71,14 +71,24 @@ const styleOf = createStyleResolver(catalog)
 /**
  * Catalog placements from `[key, tileId, x, z, rotation]` tuples.
  *
- * One-part template instances, filling the `floor` slot — whose fixture layout
- * is `(0, 0)` unturned, so the geometry is exactly what a pre-A1 placement of the
- * same file had and every cross-population assertion below carries over.
+ * One-part template instances, filling the **`base`** slot — whose fixture
+ * layout is `(0, 0)` unturned at `elevationMm: 0`, so the geometry is exactly
+ * what a pre-A1 placement of the same file had and every cross-population
+ * assertion below carries over.
+ *
+ * **It was the `floor` slot until row A7, and the slot is now load bearing.**
+ * `subjectsConflict` reads a vertical interval, the fixture rule lifts `floor` by
+ * 6.35 mm, and a generated base is 6 mm tall — so a base under a floor-slot part
+ * passes *under* it and is no longer a conflict, which is the whole point of the
+ * row and is asserted on its own below. Every test here that is about the
+ * *sweep* rather than about the vertical axis needs the two populations on one
+ * level to have anything to find, and the ground is where the shipped layout
+ * rule puts them anyway.
  */
 function tiles(rows: readonly [string, string, number, number, number][]): WorkshopState['placements'] {
   const placements: Record<string, WorkshopState['placements'][PlacementId]> = {}
   for (const [key, tileId, x, z, rotation] of rows) {
-    placements[key] = fixtureInstance(key, fixtureFills([[FIXTURE_SLOTS.floor, tileId]]), { x, z, rotation })
+    placements[key] = fixtureInstance(key, fixtureFills([[FIXTURE_SLOTS.base, tileId]]), { x, z, rotation })
   }
   return placements
 }
@@ -174,6 +184,40 @@ describe('one conflict sweep over both populations', () => {
   it('does not report abutting neighbours, so a base beside a floor is legal', () => {
     const scene = sceneOf(tiles([['t1', FIXTURE_IDS.floor2, 2, 0, 0]]), bases([['g1', 0, 0]]))
     expect(scene.conflicts.size).toBe(0)
+  })
+
+  it('does not report a 6 mm generated base under a part the layout rule lifted', () => {
+    /*
+      **Row A7's own case, across the two populations.** The same cells as the
+      test above, and the only difference is which slot the catalog part fills:
+      `floor` carries `elevationMm: 6.35` under `fixtureSlotLayout` and a
+      generated base is `HEIGHT` mm tall, 6 by default. So the base's interval is
+      [0, 6] and the part is the level 6.35 — disjoint, and a base under a floor
+      is what an OpenForge build *is*.
+
+      Before this row the two were both `area`-band pieces on one square and the
+      sweep reported both. Note what is doing the work: the band is identical on
+      both sides here, so this conflict can only be removed by the elevation.
+    */
+    const lifted = {
+      ['t1' as PlacementId]: fixtureInstance('t1', fixtureFills([[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]]), {
+        x: 0,
+        z: 0,
+      }),
+    }
+    const scene = sceneOf(lifted, bases([['g1', 0, 0]]))
+    expect(scene.pieces[0]?.parts[0]?.band).toBe('area')
+    expect(scene.generated[0]?.band).toBe('area')
+    expect(scene.pieces[0]?.parts[0]?.layout.elevationMm).toBe(6.35)
+    expect(scene.generated[0]?.foot.heightMm).toBe(6)
+    expect(scene.conflicts.size).toBe(0)
+
+    // And a riser tall enough to reach that level is a conflict again, which is
+    // why the subject carries an interval and not a bare level: the height comes
+    // off the recipe's own parameters.
+    const tall = sceneOf(lifted, bases([['g1', 0, 0, 0, { x: 2, y: 2, HEIGHT: 12 }]]))
+    expect(tall.generated[0]?.foot.heightMm).toBe(12)
+    expect([...tall.conflicts].sort()).toEqual(['g1', 't1'])
   })
 
   it('reports two generated bases on the same cells', () => {
@@ -332,7 +376,7 @@ describe('moving a generated base', () => {
       {
         ['t1' as PlacementId]: fixtureInstance(
           't1',
-          fixtureFills([[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]]),
+          fixtureFills([[FIXTURE_SLOTS.base, FIXTURE_IDS.floor2]]),
           { template: collidingBase.base },
         ),
       },
@@ -388,7 +432,9 @@ describe('choosing where a base with no cursor goes', () => {
       ['t4', FIXTURE_IDS.floor2, 2, 2, 0],
     ])
     const scene = sceneOf(placed)
-    const [x, z] = freeCellFor(scene, { shape: 'rect', w: 2, d: 2 })
+    // The recipe's own height, as `BuilderScreen` passes it: the search and the
+    // sweep have to test the same vertical interval or the promise is empty.
+    const [x, z] = freeCellFor(scene, { shape: 'rect', w: 2, d: 2 }, 6)
 
     const after = sceneOf(placed, bases([['g1', x, z]]))
     expect(after.conflicts.size).toBe(0)
