@@ -262,7 +262,9 @@ describe('liftMatrix', () => {
     const grounded = placedBounds(mesh, tileMatrix(mesh, geometry))
     const lifted = placedBounds(mesh, liftMatrix(tileMatrix(mesh, geometry), 6.002))
 
-    // 6.002 mm is the median auto-inserted base measured over 193 real ones.
+    // 6.002 mm is the median height measured over 193 real archive bases — a
+    // realistic slot elevation rather than a round number that could hide a
+    // rounding bug.
     expect(lifted.min.y).toBeCloseTo(grounded.min.y + 6.002, 6)
     expect(lifted.max.y).toBeCloseTo(grounded.max.y + 6.002, 6)
     expect(lifted.min.x).toBeCloseTo(grounded.min.x, 6)

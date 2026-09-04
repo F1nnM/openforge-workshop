@@ -4,12 +4,18 @@
  *
  * ## What these tests prove
  *
- *   - Repeat placements of one tile collapse into **one** `InstancedMesh` with N
- *     matrices, and different tiles do not.
+ *   - Repeat parts on one file collapse into **one** `InstancedMesh` with N
+ *     matrices, and different files do not.
+ *   - **A placement is N draws.** Row A4b's whole change: one instance with five
+ *     filled slots is five matrices across up to five groups, each lifted by its
+ *     own slot elevation, and the ids in a group name the *instance* rather than
+ *     the part — so an id repeats when two slots hold the same file.
+ *   - **Contract C-d**: the object set is derived once, by `roomBlobs`, and it is
+ *     the set `BuilderRoom` fetches as well as the set `buildRoom3D` groups.
  *   - **The 50-across-20 projection is run rather than asserted.** Twenty real
- *     designs out of the emitted index, fifty placements over them, and the
- *     answer counted: 20 groups, 50 instances, and the one material the
- *     registry actually collapses them to.
+ *     files out of the emitted index, fifty parts over them, and the answer
+ *     counted: 20 groups, 50 instances, and the one material the registry
+ *     actually collapses them to.
  *   - The design-versus-blob measurement that made `blob` the key: 3,822 designs
  *     over 8,353 md5s, 1,680 designs holding more than one and one holding
  *     sixteen. Keying an `InstancedMesh` on `design` would put up to sixteen
@@ -33,19 +39,28 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { buildPlanScene, createStyleResolver, planCatalogFromFile } from '@/builder/canvas'
 import type { PlanCatalog } from '@/builder/canvas'
-import type { BlobId, CatalogFile, CatalogRecord, DesignId } from '@/catalog'
+import type { BlobId, CatalogFile, CatalogRecord } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
-import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from '@/builder/canvas/fixture'
+import {
+  FIXTURE_SLOTS,
+  FIXTURE_IDS,
+  fixtureCatalogFile,
+  fixtureFills,
+  fixtureInstance,
+  fixtureSlotLayout,
+} from '@/builder/canvas/fixture'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
-import type { Placement, PlacementId, WorkshopState } from '@/store'
+import type { PlacementId, TemplateInstance, WorkshopState } from '@/store'
+import { filledSlots } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
 
-import { REPORT_DELTA_OVER_UNITS, buildRoom3D, instanceKey } from './instances'
+import { REPORT_DELTA_OVER_UNITS, buildRoom3D, instanceKey, roomBlobs } from './instances'
 import type { LodGeometry } from './loadLod'
 import { parseLodGlb } from './loadLod'
 import { lodObjectBudget } from './lod'
@@ -66,28 +81,59 @@ function glbBytes(): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
 }
 
-function placementsOf(entries: readonly (readonly [string, Placement])[]): WorkshopState['placements'] {
-  return Object.fromEntries(entries)
-}
-
 /**
- * A placement of the **item** this fixture file belongs to — `fixtureDesignOf`
- * since row V4, so the tuple still reads as the file whose blob the instancing
- * keys on.
- */
-function place(tileId: string, x: number, z: number, rotation = 0): Placement {
-  return { design: fixtureDesignOf(tileId), x, z, rotation }
-}
-
-/**
- * A placement of a design named directly.
+ * The slots a {@link Spec}'s files go into, in order.
  *
- * For the two cases {@link place} cannot serve: a design **no** catalog holds
- * (the retired-ordinal path), and the emitted-index test below, whose designs
- * are the corpus's rather than the eleven-record fixture's.
+ * The fixture family's own five names, and `floor` first because it is the slot
+ * **40 of the 40 shipped templates carry** — so a one-file spec describes the
+ * commonest instance there is rather than an unusual one. Two of the five contain
+ * a space, which is the property `src/store/schema.ts#SlotName` refuses a slug
+ * pattern over and the reason a test must not invent its own names.
  */
-function placeDesign(design: string, x: number, z: number, rotation = 0): Placement {
-  return { design: design as DesignId, x, z, rotation }
+const SLOT_ORDER = [
+  FIXTURE_SLOTS.floor,
+  FIXTURE_SLOTS.base,
+  FIXTURE_SLOTS.leftWall,
+  FIXTURE_SLOTS.rightWall,
+  FIXTURE_SLOTS.column,
+] as const
+
+/** What one instance holds: a file per slot, in {@link SLOT_ORDER}, and a pose. */
+interface Spec {
+  readonly tiles: readonly string[]
+  readonly x: number
+  readonly z: number
+  readonly rotation?: number
+}
+
+function placementsOf(entries: readonly (readonly [string, Spec])[]): WorkshopState['placements'] {
+  const map: Record<string, TemplateInstance> = {}
+  for (const [id, spec] of entries) {
+    const fills = fixtureFills(spec.tiles.map((tile, index) => [SLOT_ORDER[index] as string, tile] as const))
+    map[id] = fixtureInstance(id, fills, { x: spec.x, z: spec.z, rotation: spec.rotation })
+  }
+  return map
+}
+
+/**
+ * One instance with one file, in the `floor` slot.
+ *
+ * The shorthand almost every test here wants: the subject is the *instancing*,
+ * and one file per placement is the case that isolates it. `placeAll` is the
+ * multi-part form, and the tests about arity use it.
+ *
+ * The file id is named directly, which is all row A1 left to name: a `SlotFill`
+ * holds a `TileId` (decision **D1**) and there is no aggregate hop, so a file
+ * this catalog does not hold is the same call with a different string — the
+ * retired-id path below.
+ */
+function place(tile: string, x: number, z: number, rotation = 0): Spec {
+  return { tiles: [tile], x, z, rotation }
+}
+
+/** One instance with a file per slot, in {@link SLOT_ORDER}. Up to five. */
+function placeAll(tiles: readonly string[], x: number, z: number, rotation = 0): Spec {
+  return { tiles, x, z, rotation }
 }
 
 function resolverFor(catalog: PlanCatalog): (record: CatalogRecord) => Resolution {
@@ -105,11 +151,15 @@ function resolverFor(catalog: PlanCatalog): (record: CatalogRecord) => Resolutio
 async function roomFrom(
   file: CatalogFile,
   placements: WorkshopState['placements'],
-  options: { blobs?: readonly string[]; budget?: number } = {},
+  options: { blobs?: readonly string[]; budget?: number; layout?: boolean } = {},
 ) {
-  const catalog = planCatalogFromFile(file)
+  const catalog =
+    options.layout === true ? planCatalogFromFile(file, fixtureSlotLayout) : planCatalogFromFile(file)
   const scene = buildPlanScene(placements, catalog, createStyleResolver(catalog))
-  const blobs = options.blobs ?? [...new Set(scene.pieces.map((piece) => piece.record.blob))]
+  // `roomBlobs` and not a second walk of the scene — contract **C-d**, and the
+  // point of testing through it is that a test with its own derivation could not
+  // catch the two disagreeing.
+  const blobs = options.blobs ?? [...roomBlobs(scene)]
   return buildRoom3D(scene, {
     geometries: await geometryFor(blobs),
     resolve: resolverFor(catalog),
@@ -212,8 +262,8 @@ describe('buildRoom3D groups by shared geometry', () => {
       ['p1', place(FIXTURE_IDS.floor1, 0, 0)],
       // Footprint `none` — the 726 tiles the plan view refuses.
       ['p2', place(FIXTURE_IDS.shapeless, 2, 0)],
-      // Not in this build at all — a share link naming a retired ordinal.
-      ['p3', placeDesign('d-nothing-here', 4, 0)],
+      // Not in this build at all — a share link naming a file the index retired.
+      ['p3', place('tiles/nothing/here.stl', 4, 0)],
     ])
     const scene = buildPlanScene(placements, catalog, createStyleResolver(catalog))
     expect(scene.undrawable).toHaveLength(1)
@@ -243,6 +293,277 @@ describe('buildRoom3D groups by shared geometry', () => {
     // lot, including the annular sector and the diag's intrinsic 45°.
     expect(room.instances).toBe(7)
     expect(room.groups).toHaveLength(7)
+  })
+})
+
+/* ------------------------------------------------- a placement is N draws */
+
+describe('one instance, many parts — row A4b', () => {
+  const file = fixtureCatalogFile()
+
+  it('draws one matrix per filled slot, not one per placement', async () => {
+    const room = await roomFrom(
+      file,
+      placementsOf([
+        ['p1', placeAll([FIXTURE_IDS.floor2, FIXTURE_IDS.floor1, FIXTURE_IDS.wall2], 0, 0)],
+      ]),
+      { layout: true },
+    )
+    // One placement. Three files, so three geometries and three matrices — the
+    // arity change this row exists for. A room that counted placements would
+    // report 1 and draw 3.
+    expect(room.instances).toBe(3)
+    expect(room.groups).toHaveLength(3)
+    expect(room.objects).toBe(3)
+  })
+
+  it('names the instance in every group, so an id repeats across its slots', async () => {
+    // Two slots filled with the **same** file: one group, two matrices, and the
+    // same `PlacementId` twice. `LodInstanceGroup.placements` is *"one per
+    // matrix"*, and every gesture is addressed to a placement, so the repeat is
+    // the honest answer rather than a de-duplication bug.
+    const room = await roomFrom(
+      file,
+      placementsOf([['p1', placeAll([FIXTURE_IDS.wall2, FIXTURE_IDS.wall2], 0, 0)]]),
+      { layout: true },
+    )
+    expect(room.groups).toHaveLength(1)
+    expect(room.groups[0]?.count).toBe(2)
+    expect(room.groups[0]?.placements).toEqual(['p1', 'p1'])
+    expect(room.objects).toBe(1)
+  })
+
+  it('lifts each part by its own slot elevation and nothing else', async () => {
+    // The elevation that replaced rule 1's base inference. `fixtureSlotLayout`
+    // puts the base on the plan, the floor a quarter inch up and the right wall
+    // half an inch up — three distinct numbers — so a renderer applying one
+    // part's height to another, or applying none, is visible here.
+    const room = await roomFrom(
+      file,
+      placementsOf([
+        ['p1', { tiles: [FIXTURE_IDS.floor2], x: 0, z: 0 }],
+        ['p2', { tiles: [FIXTURE_IDS.floor2, FIXTURE_IDS.floor2], x: 0, z: 0 }],
+      ]),
+      { layout: true },
+    )
+    // One group — one file — holding p1's `floor`, then p2's `floor` and `base`.
+    expect(room.groups).toHaveLength(1)
+    const group = room.groups[0]
+    expect(group?.placements).toEqual(['p1', 'p2', 'p2'])
+
+    // The y translation of each matrix. It is the slot's elevation **plus**
+    // `tileMatrix`'s own `-upright.min.y`, which rests the mesh's lowest point on
+    // the plan — and on this fixture that is not exactly zero: the store's
+    // positions are quantized to int16 and dequantized through a float32 node
+    // scale, so the object's floor measures **-9.184e-5 mm** rather than 0. Worth
+    // seeing rather than rounding away; `contract.test.ts` records the same
+    // residue from the other end.
+    const lifts = (group?.matrices ?? []).map((matrix) => matrix.elements[13])
+    expect(lifts).toHaveLength(3)
+    const [p1Floor = 0, p2Base = 0, p2Floor = 0] = lifts
+    expect(Math.abs(p2Base)).toBeLessThan(1e-3)
+
+    // The **lift**, which is what this row applies: the difference against the
+    // part resting on the plan, where the mesh's own residue cancels exactly.
+    // `catalog.parts` sorts the slots by name, so p2's are `base` then `floor`.
+    expect(p1Floor - p2Base).toBeCloseTo(6.35, 9)
+    expect(p2Floor - p2Base).toBeCloseTo(6.35, 9)
+  })
+
+  it('rests every part on the plan when the layout declares no lift', async () => {
+    // `originSlotLayout` — the rule in force until row B2's lands — is zero for
+    // every slot, so the default catalog must produce no lift at all. That is
+    // what makes this row's change invisible to every test written before it.
+    const room = await roomFrom(
+      file,
+      placementsOf([['p1', placeAll([FIXTURE_IDS.floor2, FIXTURE_IDS.wall2], 0, 0)]]),
+    )
+    // Within the mesh's own rest residue of the plan — see the test above for
+    // where the 9.184e-5 mm comes from. Zero *lift*, which is the claim.
+    for (const group of room.groups) {
+      for (const matrix of group.matrices) expect(Math.abs(matrix.elements[13])).toBeLessThan(1e-3)
+    }
+  })
+
+  it('gaps a placement once per absent blob, however many slots want it', async () => {
+    // Two slots on one absent file. `absent[].placements` is what `BuilderRoom`
+    // counts outlined *pieces* with, so naming the instance twice would report
+    // two things the user sees as one.
+    const room = await roomFrom(
+      file,
+      placementsOf([['p1', placeAll([FIXTURE_IDS.wall2, FIXTURE_IDS.wall2], 0, 0)]]),
+      { blobs: [] },
+    )
+    expect(room.absent).toHaveLength(1)
+    expect(room.absent[0]?.placements).toEqual(['p1'])
+  })
+
+  it('places an instance with no filled slots and draws nothing for it', async () => {
+    // Contract **C-g**, and the state every placement lands in until row C2's
+    // fill solver runs. It must not be a group, must not be a gap, and must not
+    // take the room down: `buildPlanScene` reports it in `PlanScene.unfilled` and
+    // this module never sees it.
+    const catalog = planCatalogFromFile(file)
+    const placements = placementsOf([['p1', { tiles: [], x: 0, z: 0 }]])
+    const scene = buildPlanScene(placements, catalog, createStyleResolver(catalog))
+    expect(scene.pieces).toHaveLength(0)
+    expect(scene.unfilled).toHaveLength(1)
+
+    const room = await roomFrom(file, placements)
+    expect(room.groups).toHaveLength(0)
+    expect(room.absent).toHaveLength(0)
+    expect(room.instances).toBe(0)
+    expect(room.objects).toBe(0)
+    expect(room.refusal).toBeNull()
+  })
+})
+
+/* ------------------------------------- the composition, from the renderer */
+
+describe('a template is a rigid body under rotation', () => {
+  const file = fixtureCatalogFile()
+
+  /** The fixture corner: base, floor, two walls and a column, laid out for real. */
+  const CORNER = [
+    FIXTURE_IDS.floor2,
+    FIXTURE_IDS.floor2,
+    FIXTURE_IDS.wall2,
+    FIXTURE_IDS.wall2,
+    FIXTURE_IDS.column,
+  ]
+
+  async function boundsAt(rotation: number) {
+    const room = await roomFrom(
+      file,
+      placementsOf([['p1', placeAll(CORNER, 0, 0, rotation)]]),
+      { layout: true },
+    )
+    const size = room.bounds.getSize(new Vector3())
+    return { room, footprintMm2: size.x * size.z }
+  }
+
+  /**
+   * **This test is expected to fail, and that is the alarm.**
+   *
+   * `it.fails` asserts the body *does* throw today. When row **B2** changes the
+   * composition rule this test goes green, vitest reports *"expected to fail but
+   * passed"*, and whoever made it pass is pointed at this docblock — which is
+   * exactly the notification wanted, and strictly better than a test asserting
+   * the wrong numbers as though they were right.
+   *
+   * ## What is wrong, measured
+   *
+   * A template is *"placed and rotated as one unit"* (§1), so its footprint is a
+   * **rigid body**: a quarter turn may swap width for depth and must not change
+   * the area. `geometry.ts#slotAnchor` composes it as *"the part turns about its
+   * own anchor corner, and that corner orbits the instance origin"*, which A4a
+   * states outright is the arithmetic it assumed in order to draw anything and
+   * that **B2 owns whether it is right**. It is not, and the two effects do not
+   * compose: orbiting the min corner is correct for a *point*, but the part then
+   * still extends towards +x/+z from that orbited corner instead of in the
+   * direction the turn sent it, so a part at `dx: +1.5` lands at −1.5 and grows
+   * back over the origin.
+   *
+   * Measured on the five-part fixture corner, union footprint in grid units²:
+   *
+   * | instance rotation | union box | area |
+   * | ---: | --- | ---: |
+   * | 0°   | 2.00 × 2.00 at (0, 0)        | **4.00** |
+   * | 90°  | 3.50 × 2.00 at (−1.5, 0)     | 7.00 |
+   * | 180° | 3.50 × 3.50 at (−1.5, −1.5)  | **12.25** |
+   * | 270° | 2.00 × 3.50 at (0, −1.5)     | 7.00 |
+   *
+   * Only 0° is a 2 × 2 corner; at 180° the assembly covers **three times** the
+   * ground. Reinterpreting `dx`/`dz` as the part's **centre** offset — orbit the
+   * centre, then centre the rotated extent on it — is invariant at 7.56 units²
+   * across all four, which is what a rigid body looks like and is the one
+   * function B2 would change.
+   *
+   * The consequence is the renderer's, which is why the alarm lives here:
+   * `room.bounds` feeds `fitRoom`, so a room turned 180° frames a box three
+   * times too large and every mesh in it sits at the wrong offset. **Every
+   * single-slot instance is unaffected** — `dx`/`dz` are 0, so there is nothing
+   * to orbit — which is why no test written before this row could see it.
+   */
+  it.fails('keeps its footprint area across quarter turns — row B2 owns the fix', async () => {
+    const flat = await boundsAt(0)
+    for (const rotation of [90, 180, 270]) {
+      const turned = await boundsAt(rotation)
+      expect(turned.footprintMm2).toBeCloseTo(flat.footprintMm2, 3)
+    }
+  })
+
+  it('draws all five parts whichever way the instance is turned', async () => {
+    // What *is* true, and worth holding while the above is not: the arity, the
+    // grouping and the elevations survive a rotation even though the offsets do
+    // not, so the alarm above is about placement alone.
+    for (const rotation of [0, 90, 180, 270]) {
+      const { room } = await boundsAt(rotation)
+      expect(room.instances).toBe(5)
+      // Three files across five slots — the floor twice and the wall twice.
+      expect(room.groups).toHaveLength(3)
+      expect(room.refusal).toBeNull()
+    }
+  })
+})
+
+/* --------------------------------------------------------- contract C-d */
+
+describe('the object set is one derivation', () => {
+  const file = fixtureCatalogFile()
+
+  it('is every drawn part’s blob, deduplicated, and is what the budget counts', async () => {
+    const catalog = planCatalogFromFile(file)
+    const placements = placementsOf([
+      ['p1', placeAll([FIXTURE_IDS.floor2, FIXTURE_IDS.wall2], 0, 0)],
+      // The same two files again, in a second instance: no new objects.
+      ['p2', placeAll([FIXTURE_IDS.floor2, FIXTURE_IDS.wall2], 4, 0)],
+      ['p3', place(FIXTURE_IDS.floor1, 8, 0)],
+    ])
+    const scene = buildPlanScene(placements, catalog, createStyleResolver(catalog))
+
+    const blobs = roomBlobs(scene)
+    expect(blobs.size).toBe(3)
+    // Four parts on two files plus one more: five parts, three objects.
+    const parts = scene.pieces.reduce((sum, piece) => sum + piece.parts.length, 0)
+    expect(parts).toBe(5)
+
+    const room = await roomFrom(file, placements)
+    expect(room.objects).toBe(blobs.size)
+    expect(room.instances).toBe(parts)
+    expect(new Set(room.groups.map((group) => group.blob))).toEqual(blobs)
+  })
+
+  it('is a subset of what @/mesh warms, which is the safe direction', () => {
+    // A2 warms a blob for **every filled slot**; this asks for one per *drawn*
+    // part. The two differ by exactly the fills whose file has a `none`
+    // footprint — `PlanScene.undrawable` — and the difference is one-sided: every
+    // object the room asks for is one the warming pass has converted, so no blob
+    // can strand as "not in the store" through the two derivations disagreeing.
+    // The reverse difference costs a conversion nobody looks at.
+    const catalog = planCatalogFromFile(file)
+    const placements = placementsOf([
+      ['p1', placeAll([FIXTURE_IDS.floor2, FIXTURE_IDS.shapeless], 0, 0)],
+    ])
+    const scene = buildPlanScene(placements, catalog, createStyleResolver(catalog))
+
+    // A2's derivation, restated here because `src/mesh/**` is not this row's:
+    // every filled slot's file, resolved to a blob.
+    const warmed = new Set<string>()
+    for (const instance of Object.values(placements)) {
+      for (const slot of filledSlots(instance.fills)) {
+        const fill = instance.fills[slot]
+        if (fill === undefined) continue
+        const record = catalog.record(fill.tile)
+        if (record !== undefined) warmed.add(record.blob)
+      }
+    }
+
+    const asked = roomBlobs(scene)
+    expect(scene.undrawable).toHaveLength(1)
+    expect(warmed.size).toBe(2)
+    expect(asked.size).toBe(1)
+    for (const blob of asked) expect(warmed.has(blob)).toBe(true)
   })
 })
 
@@ -374,9 +695,10 @@ describe('fifty placements across twenty real designs', () => {
   it.runIf(file !== null)('is 20 instanced meshes, 50 instances and 1 shared material', async () => {
     const records = [...(file?.records ?? [])].sort((a, b) => a.ord - b.ord)
 
-    // One file per design — the lowest-ordinal placeable one, which is what a
-    // palette hands the builder — over the first twenty designs in display
-    // order.
+    // One file per design — the lowest-ordinal placeable one — over the first
+    // twenty designs in display order. Since row A1 a fill names the **file**
+    // directly (decision D1), so this is the id that reaches the store rather
+    // than a design the store would have to resolve.
     const perDesign = new Map<string, CatalogRecord>()
     for (const record of records) {
       if (record.foot.shape === 'none') continue
@@ -393,7 +715,7 @@ describe('fifty placements across twenty real designs', () => {
         if (record === undefined) throw new Error('no record')
         return [
           `p${String(i)}` as PlacementId,
-          placeDesign(record.design, (i % 10) * 4, Math.floor(i / 10) * 4),
+          place(record.id, (i % 10) * 4, Math.floor(i / 10) * 4),
         ] as const
       }),
     )
