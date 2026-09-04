@@ -78,6 +78,21 @@ export {
   stepCountSentence,
 } from './assembly'
 
-export { RECIPE_TEMPLATES } from './templates'
+/*
+ * The generated data, all three exports.
+ *
+ * `RECIPE_TEMPLATES` is the 40 read from the fixtures; row **B4** added the 51
+ * generated families and their size table beside it and owed this line.
+ * `GENERATED_FAMILIES` is a **second export** rather than 51 more entries in the
+ * first, because that array's length is asserted to be 40 in six suites and
+ * quoted on this screen as *"N recipes from the archive's own blueprint
+ * fixtures"* — which the families are not.
+ *
+ * Row C1's palette reads all three through `builder/panels/families.ts`, which
+ * imports `./templates` directly rather than this barrel: a value import of this
+ * module reaches `AssembliesScreen.tsx` and its stylesheet, and the palette
+ * needs two arrays and a table.
+ */
+export { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from './templates'
 
 export { AssembliesScreen } from './AssembliesScreen'
