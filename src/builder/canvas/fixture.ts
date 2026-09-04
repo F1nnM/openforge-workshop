@@ -33,11 +33,12 @@
  * real path through `CatalogFile.parse`, which is where a fixture that drifted
  * from the schema gets caught.
  */
-import type { CatalogFile, TileId } from '@/catalog'
+import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
 import type { PlacementId, SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
 
-import type { SlotLayout } from './geometry'
+import type { Extent, SlotLayout } from './geometry'
+import { footprintExtent } from './geometry'
 
 const TAGS = [
   'shape|floor',
@@ -360,6 +361,25 @@ export const FIXTURE_SLOTS = {
 }
 
 /**
+ * The cell {@link fixtureSlotLayout}'s four non-cell slots are laid out inside.
+ *
+ * The 2 x 2 floor, which is also the fixture's `floor2` footprint — the union
+ * every part of the corner nests inside, and the box the instance turns within.
+ *
+ * A **constant for four of the five slots, and read off the fill for the fifth**,
+ * and the split is a finding rather than a shortcut. B2's `TemplateLayout.cell`
+ * names the slot whose *resolved fill* is the cell — `floor` on all three
+ * conventions — but `catalog.ts#SlotLayoutRule` is
+ * `(template, slot, record) => SlotLayout` and hands over only the record of the
+ * slot being laid out. So a rule can resolve the cell exactly when the slot it
+ * is asked about *is* the cell slot, and for the other four it can do no better
+ * than the cell its own recipe describes. Wiring B2 to the canvas therefore needs
+ * that signature widened to the instance's whole fill map; see the note on
+ * `offsets.ts#slotOffset`.
+ */
+export const FIXTURE_CELL = Object.freeze({ w: 2, d: 2 })
+
+/**
  * A slot layout with **real offsets**, so a test can prove the composition.
  *
  * `originSlotLayout` — the rule in force until row B2's lands — puts every part
@@ -371,24 +391,38 @@ export const FIXTURE_SLOTS = {
  * edge, and the column in the corner where the two meet.
  *
  * **The numbers are a fixture, not a measurement**, and they are chosen to
- * exercise three facts rather than to describe a real recipe: the offsets are
+ * exercise four facts rather than to describe a real recipe: the offsets are
  * multiples of 0.25 and include values off the 0.5 snap lattice (§2.2),
  * `right wall` carries a yaw of its own so a part's angle is not its instance's,
- * and the elevations are distinct so a renderer reading one part's height for
- * another is visible. Row **B2** owns the real rule.
+ * the elevations are distinct so a renderer reading one part's height for
+ * another is visible, and every part **declares the same 2 x 2 cell** so the
+ * assembly is a rigid body under rotation ({@link SlotLayout.cell}). Row **B2**
+ * owns the real rule.
+ *
+ * The five offsets are the ones B2's own `external-corner` convention produces
+ * for this cell — `edge` is *"flush to the face and centred across it"* and
+ * `corner` is the square where two faces meet, so nothing overhangs and the
+ * union is the cell itself, 2 x 2 at the instance origin, at every rotation.
  */
-export function fixtureSlotLayout(_template: TemplateId, slot: SlotName): SlotLayout {
+export function fixtureSlotLayout(
+  _template: TemplateId,
+  slot: SlotName,
+  record?: CatalogRecord,
+): SlotLayout {
   switch (slot) {
     case FIXTURE_SLOTS.base:
-      return { dx: 0, dz: 0, rotation: 0, elevationMm: 0 }
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell: FIXTURE_CELL }
     case FIXTURE_SLOTS.floor:
-      return { dx: 0, dz: 0, rotation: 0, elevationMm: 6.35 }
+      // The cell slot, so its own fill *is* the cell — read rather than assumed,
+      // which is B2's rule and is what keeps a lone 2 x 1 floor anchored at the
+      // placement's own `x`/`z` instead of inside a 2 x 2 cell it does not fill.
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 6.35, cell: cellOf(record) }
     case FIXTURE_SLOTS.leftWall:
-      return { dx: 0, dz: 0, rotation: 0, elevationMm: 12.7 }
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 12.7, cell: FIXTURE_CELL }
     case FIXTURE_SLOTS.rightWall:
-      return { dx: 1.5, dz: 0, rotation: 90, elevationMm: 12.7 }
+      return { dx: 1.5, dz: 0, rotation: 90, elevationMm: 12.7, cell: FIXTURE_CELL }
     case FIXTURE_SLOTS.column:
-      return { dx: 1.5, dz: 1.5, rotation: 0, elevationMm: 12.7 }
+      return { dx: 1.5, dz: 1.5, rotation: 0, elevationMm: 12.7, cell: FIXTURE_CELL }
     default:
       // A slot this fixture has no rule for sits a quarter unit off the origin —
       // deliberately *off* the 0.5 lattice, since §2.2 says a slot offset never
@@ -397,6 +431,18 @@ export function fixtureSlotLayout(_template: TemplateId, slot: SlotName): SlotLa
       // a slot.
       return { dx: 0.25, dz: 0.25, rotation: 0, elevationMm: 25.4 }
   }
+}
+
+/**
+ * The cell of the slot that *is* the cell: its fill's own extent.
+ *
+ * {@link FIXTURE_CELL} when there is no record to read — a caller that asks for a
+ * layout without naming a fill, which `PlanCatalog` never does — and `undefined`
+ * for a fill with no placeable footprint, where the part is not drawn at all and
+ * the whole layout is moot.
+ */
+function cellOf(record: CatalogRecord | undefined): Extent | undefined {
+  return record === undefined ? FIXTURE_CELL : footprintExtent(record.foot)
 }
 
 /**

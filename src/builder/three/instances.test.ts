@@ -443,49 +443,62 @@ describe('a template is a rigid body under rotation', () => {
   }
 
   /**
-   * **This test is expected to fail, and that is the alarm.**
-   *
-   * `it.fails` asserts the body *does* throw today. When row **B2** changes the
-   * composition rule this test goes green, vitest reports *"expected to fail but
-   * passed"*, and whoever made it pass is pointed at this docblock — which is
-   * exactly the notification wanted, and strictly better than a test asserting
-   * the wrong numbers as though they were right.
-   *
-   * ## What is wrong, measured
+   * **The alarm row A4b armed, and row A10 disarmed by fixing the composition.**
    *
    * A template is *"placed and rotated as one unit"* (§1), so its footprint is a
    * **rigid body**: a quarter turn may swap width for depth and must not change
-   * the area. `geometry.ts#slotAnchor` composes it as *"the part turns about its
-   * own anchor corner, and that corner orbits the instance origin"*, which A4a
-   * states outright is the arithmetic it assumed in order to draw anything and
-   * that **B2 owns whether it is right**. It is not, and the two effects do not
-   * compose: orbiting the min corner is correct for a *point*, but the part then
-   * still extends towards +x/+z from that orbited corner instead of in the
-   * direction the turn sent it, so a part at `dx: +1.5` lands at −1.5 and grows
-   * back over the origin.
+   * the area. A4b wrote this as `it.fails` with the defect measured, because the
+   * fix was not its to make.
    *
-   * Measured on the five-part fixture corner, union footprint in grid units²:
+   * ## What was wrong, as A4b measured it
+   *
+   * `geometry.ts#slotAnchor` composed the placement as *"the part turns about its
+   * own anchor corner, and that corner orbits the instance origin"*. The two
+   * effects do not compose: orbiting the minimum corner is correct for a *point*,
+   * but the part then still extends towards +x/+z from that orbited corner
+   * instead of in the direction the turn sent it, so a part at `dx: +1.5` landed
+   * at -1.5 and grew back over the origin. Union footprint, in grid units²:
    *
    * | instance rotation | union box | area |
    * | ---: | --- | ---: |
-   * | 0°   | 2.00 × 2.00 at (0, 0)        | **4.00** |
-   * | 90°  | 3.50 × 2.00 at (−1.5, 0)     | 7.00 |
-   * | 180° | 3.50 × 3.50 at (−1.5, −1.5)  | **12.25** |
-   * | 270° | 2.00 × 3.50 at (0, −1.5)     | 7.00 |
+   * | 0°   | 2.00 x 2.00 at (0, 0)        | **4.00** |
+   * | 90°  | 3.50 x 2.00 at (-1.5, 0)     | 7.00 |
+   * | 180° | 3.50 x 3.50 at (-1.5, -1.5)  | **12.25** |
+   * | 270° | 2.00 x 3.50 at (0, -1.5)     | 7.00 |
    *
-   * Only 0° is a 2 × 2 corner; at 180° the assembly covers **three times** the
-   * ground. Reinterpreting `dx`/`dz` as the part's **centre** offset — orbit the
-   * centre, then centre the rotated extent on it — is invariant at 7.56 units²
-   * across all four, which is what a rigid body looks like and is the one
-   * function B2 would change.
+   * At 180° the assembly covered **three times** the ground, and `room.bounds`
+   * feeds `fitRoom`, so a room turned a half turn framed a box three times too
+   * large. **Every single-slot instance was unaffected** — `dx`/`dz` are 0, so
+   * there was nothing to orbit — which is why no test written before A4b could
+   * see it.
    *
-   * The consequence is the renderer's, which is why the alarm lives here:
-   * `room.bounds` feeds `fitRoom`, so a room turned 180° frames a box three
-   * times too large and every mesh in it sits at the wrong offset. **Every
-   * single-slot instance is unaffected** — `dx`/`dz` are 0, so there is nothing
-   * to orbit — which is why no test written before this row could see it.
+   * ## What the fix is, and what the invariant value is
+   *
+   * A4b proposed reinterpreting `dx`/`dz` as the part's **centre** offset, which
+   * it measured as invariant at 7.56 units². That figure is an artefact of the
+   * measurement rather than the footprint of a corner: `fixture.ts`'s five
+   * offsets are authored as *minimum corners* (the `right wall` at `dx: 1.5` with
+   * a 0.5 thickness is exactly the cell's east edge), so reading them as centres
+   * moves four of the five parts and pushes the union to 2.75 x 2.75 — a 2 x 2
+   * corner overhanging its own cell by three quarters of a unit on two sides.
+   *
+   * **The invariant value is 4.00**, and it comes from row B2's own conventions
+   * rather than from this fixture: `EXTERNAL_CORNER` anchors each wall `edge`
+   * — *"flush to one face and centred across it"* — and the column `corner`, and
+   * `offsets.ts#slotOffset` insets every one of them *inwards* by
+   * `-(cell - part) / 2`. Nothing overhangs, so the union of a 2 x 2 corner's
+   * five parts is the 2 x 2 cell. `template/offsets.test.ts` derives the five
+   * offsets from `slotOffset` and measures the union at 4.00 on all four
+   * quarters; `canvas/geometry.test.ts` measures the same on this fixture and
+   * also reproduces the 4 / 7 / 12.25 / 7 table above with the cell removed.
+   *
+   * So `slotAnchor` now turns the part's **box** about the instance origin and
+   * re-anchors the turned assembly by the cell's own turned corner — which keeps
+   * the area *and* keeps `x`/`z` the minimum corner of what the instance
+   * occupies, the convention `geometry.ts` derives from the 0.5 lattice and the
+   * share codec's quantum.
    */
-  it.fails('keeps its footprint area across quarter turns — row B2 owns the fix', async () => {
+  it('keeps its footprint area across quarter turns', async () => {
     const flat = await boundsAt(0)
     for (const rotation of [90, 180, 270]) {
       const turned = await boundsAt(rotation)
@@ -494,9 +507,9 @@ describe('a template is a rigid body under rotation', () => {
   })
 
   it('draws all five parts whichever way the instance is turned', async () => {
-    // What *is* true, and worth holding while the above is not: the arity, the
-    // grouping and the elevations survive a rotation even though the offsets do
-    // not, so the alarm above is about placement alone.
+    // The other half of "as one unit", and the half that was already true while
+    // the offsets were wrong: the arity, the grouping and the elevations survive
+    // a rotation, so A4b's alarm was about placement alone.
     for (const rotation of [0, 90, 180, 270]) {
       const { room } = await boundsAt(rotation)
       expect(room.instances).toBe(5)

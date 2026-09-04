@@ -17,6 +17,12 @@
  * exported because `pipeline/families.ts` will generate the family table from
  * the same two enums, and a second copy of a closed enum is how the two halves
  * of a key silently stop agreeing.
+ *
+ * Row B3 added `./size`, which is the third axis of that key's *complement*: the
+ * grid cell a slot predicates on, resolved per record and **emitted nowhere**.
+ * Keyed on `(role, form, build)` the corpus needs 52 families; with size in the
+ * key it needs 217 to 277, which is the whole reason size is a slot parameter.
+ * `src/template/size.ts` carries the predicate and the encoding decision.
  */
 export { MIN_DETECTION_RECALL, assertAggregation, measureAggregation } from './aggregate'
 export type { AggregateViolation, AggregationReport, DetectionScore } from './aggregate'
@@ -84,6 +90,8 @@ export {
 export type { OrdinalAssignment } from './ordinals'
 export { FORMS, ROLES, fileTokens, inferForm, inferRole, roleTags } from './role'
 export type { Confidence, Form, Inferred, Role, RoleInput, Signal } from './role'
+export { cellExtentUnits, resolveGridSize, sizeRefusalOf } from './size'
+export type { SizeRefusal } from './size'
 export {
   buildTagTable,
   hasTagPrefix,

@@ -21,7 +21,12 @@
  * corner →  (−(cellF.w − part.w) / 2, −(cellF.d − part.d) / 2) flush to −x and −z
  * ```
  *
- * and the result is turned back by `side` quarter-turns. At `side: 0` the
+ * and the result is turned back by `side` quarter-turns. Every one of those is
+ * an **inset** while the part is no larger than the face it lies on, so nothing
+ * overhangs the cell and a template's union *is* its cell — which is how row A10
+ * settled a 2 x 2 corner's footprint at 4.00 units². All four insets the corpus
+ * produces are `<= 0`; `offsets.test.ts` measures both that and what a part
+ * deeper than its own cell does instead. At `side: 0` the
  * `corner` line is `(−(W − 0.5) / 2, −(D − 0.5) / 2)` for every real fill,
  * because `{shape:'column'}` is the only footprint any of the 8 `corner` slots
  * admits and a column is exactly {@link WALL_THICKNESS_UNITS} square —
@@ -153,6 +158,29 @@ function quarterTurnExtent(extent: Extent, side: SlotSide): Extent {
  * `part` is the resolved extent of *this* slot's fill. Both come from
  * `footprintExtent`, so both are the piece's own-frame box and neither is a
  * guess.
+ *
+ * ## The frame the canvas wants, and why nothing converts yet
+ *
+ * This is a **centre-to-centre** offset: the cell is centred on the template
+ * origin, and every anchor is an inset from it. `geometry.ts#SlotLayout` states
+ * the same position as `dx`/`dz` to the part's **minimum corner** measured from
+ * the cell's minimum corner, because a corner is what the 0.5 lattice and the
+ * share codec's quantum both need. The conversion is exact and is one line —
+ *
+ * ```
+ * dx = offset.x − drawn.w / 2 + cell.w / 2      drawn = rotatedExtent(extent, yaw + angle)
+ * ```
+ *
+ * — and `offsets.test.ts` places all three conventions through the canvas's real
+ * `slotGeometry` with it, measuring a closing template's union as exactly its own
+ * cell on all four quarter turns. **Row A10 did not wire it**, and the reason is
+ * a signature rather than a preference: `catalog.ts#SlotLayoutRule` is
+ * `(template, slot, record) => SlotLayout` and hands over only the record of the
+ * slot being laid out, so a rule cannot resolve the *cell* slot's fill for any
+ * other slot — and the only party that composes one in production is
+ * `src/screens/builder/BuilderScreen.tsx`, which passes no rule at all. Wiring
+ * therefore needs the seam widened to the instance's whole fill map, in the two
+ * files that own it.
  */
 export function slotOffset(rule: SlotRule, cell: Extent, part: Extent): PlanPoint {
   if (rule.anchor === 'cell') return [0, 0]

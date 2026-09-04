@@ -124,7 +124,7 @@ import {
   unionBox,
 } from './geometry'
 import type { OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
-import { findConflicts, planBand } from './overlap'
+import { findConflicts, levelAt, planBand } from './overlap'
 
 /**
  * One drawable part of one template instance.
@@ -618,15 +618,37 @@ function subjectsOf(piece: PlanPiece): readonly OverlapCandidate[] {
   return piece.parts.map((part) => ({
     id: piece.id,
     band: part.band,
+    // `levelAt` and not an interval: the underside is the slot rule's
+    // `elevationMm`, and there is no thickness to add because no height for a
+    // catalog record exists anywhere the app reads — `overlap.ts` counts the
+    // 14.8% of records a dev-tool sidecar covers and the zero that reach
+    // `catalog.json`. A part is the level it stands at.
+    level: levelAt(part.layout.elevationMm),
     box: part.box,
     parts: part.polygons,
     axisAligned: part.axisAligned,
   }))
 }
 
-/** A generated base as the overlap test sees it — one primitive, one candidate. */
+/**
+ * A generated base as the overlap test sees it — one primitive, one candidate.
+ *
+ * **The one piece in either population with a real height.** `foot.heightMm` is
+ * arithmetic over the recipe's own parameters (`HEIGHT` for a base, `z`
+ * half-squares for a riser), so a 50.8 mm riser is a 50.8 mm interval here and
+ * not a level — which is the whole reason `PlanLevel` carries a thickness at all.
+ * Its underside is the ground: a generated base is placed on the plan directly
+ * and belongs to no template, so there is no slot rule to lift it.
+ */
 function subjectOf(piece: GeneratedPlanPiece): OverlapCandidate {
-  return { id: piece.id, band: piece.band, box: piece.box, parts: piece.polygons, axisAligned: piece.axisAligned }
+  return {
+    id: piece.id,
+    band: piece.band,
+    level: { elevationMm: 0, heightMm: piece.foot.heightMm },
+    box: piece.box,
+    parts: piece.polygons,
+    axisAligned: piece.axisAligned,
+  }
 }
 
 /**

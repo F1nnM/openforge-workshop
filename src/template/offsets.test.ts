@@ -29,11 +29,19 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { SNAP_STEP, rotatedExtent, snapTo } from '@/builder/canvas'
-import type { Extent } from '@/builder/canvas'
+import {
+  SNAP_STEP,
+  footprintShape,
+  rotatedExtent,
+  slotGeometry,
+  snapTo,
+  unionBox,
+} from '@/builder/canvas'
+import type { Extent, PlanBox, SlotLayout } from '@/builder/canvas'
 import type { Footprint } from '@/catalog'
 import { WALL_THICKNESS_UNITS } from '@/catalog'
 
+import type { SlotPlacement } from './offsets'
 import {
   edgeRun,
   placeTemplateSlots,
@@ -60,6 +68,15 @@ const WALL_2X2 = feetOf([
   ['base', rect(2, 2)],
   ['floor', rect(2, 2)],
   ['wall', wall(2)],
+])
+
+/** A 2 x 2 external corner: two 2-unit walls and a column on a 2 x 2 cell. */
+const CORNER_2X2 = feetOf([
+  ['base', rect(2, 2)],
+  ['floor', rect(2, 2)],
+  ['right wall', wall(2)],
+  ['left wall', wall(2)],
+  ['column', column],
 ])
 
 /**
@@ -545,5 +562,266 @@ describe('slotDoubtSentence', () => {
     expect(slotDoubtSentence({ part: 'left wall', code: 'over-run', want: 4, got: 4.5 })).toBe(
       'The left wall part needs a choice: this edge is 4 units and the pieces on it come to 4.5.',
     )
+  })
+})
+
+/* ------------------------------------ the two rotation models — row A10 */
+
+/**
+ * **This file's offsets, read through the canvas's own placement.**
+ *
+ * There are two implementations of one idea. This module states a slot's
+ * position as an offset from the **template's centre**, computed at fill time;
+ * `src/builder/canvas/geometry.ts` states it as a `SlotLayout` whose `dx`/`dz`
+ * locate the part's **minimum corner** in the template's own frame, and places it
+ * with `slotAnchor`. Nothing wires the first to the second yet — see the note on
+ * {@link slotOffset} — so the agreement has to be measured rather than assumed,
+ * and this block measures it.
+ *
+ * ## What it settles
+ *
+ * Row **A4b** measured a placed template's footprint growing to three times its
+ * ground at a half turn, and proposed reading `dx`/`dz` as the part's *centre*
+ * offset, which it measured as invariant at **7.56 units²** — including at 0°,
+ * where its own table says a 2 x 2 corner covers 4.00. The two readings
+ * disagreeing about the *unrotated* footprint is what row A10 had to settle, and
+ * this is the answer: **4.00 is right and 7.56 is an artefact.** A 2 x 2 corner
+ * covers its cell and nothing more, because every offset this module produces is
+ * an *inset* — `edge` is `-(cellF.d - part.d) / 2`, flush to one face and inside
+ * the other three; `corner` is `-(cellF.w - part.w) / 2` on both axes, the square
+ * where two faces meet. Nothing overhangs at any anchor, so the union of a
+ * template's parts is the cell, and 2 x 2 is 4.00. The 7.56 comes from reading
+ * `fixture.ts`'s *corner* offsets as centres, which moves four of five parts
+ * outward and unions to 2.75 x 2.75.
+ *
+ * The conversion below is the arithmetic the seam will need, and it is stated
+ * once: a centre `o` in the cell-centre frame is the minimum corner
+ * `o - E / 2 + cell / 2` in the cell-corner frame, where `E` is the part's extent
+ * as drawn — `rotatedExtent(extent, yaw + intrinsic angle)`, so a `diag`'s own
+ * 45° is carried too.
+ */
+describe('the offsets, placed by the canvas', () => {
+  const QUARTERS = [0, 90, 180, 270] as const
+
+  /** One of this module's placements, read into the canvas's `SlotLayout`. */
+  function layoutOf(placement: SlotPlacement, cell: Extent, foot: Footprint): SlotLayout {
+    const shape = footprintShape(foot)
+    if (shape === undefined) throw new Error(`${placement.part} has no shape`)
+    const drawn = rotatedExtent(shape.extent, placement.yaw + shape.angle)
+    return {
+      dx: placement.offset[0] - drawn.w / 2 + cell.w / 2,
+      dz: placement.offset[1] - drawn.d / 2 + cell.d / 2,
+      rotation: placement.yaw,
+      elevationMm: 0,
+      cell,
+    }
+  }
+
+  /** Every placed slot's plan box, at one instance rotation, anchored at the origin. */
+  function boxesAt(
+    layout: TemplateLayout,
+    feet: ReadonlyMap<SlotName, Footprint>,
+    rotation: number,
+  ): readonly PlanBox[] {
+    const placed = placeTemplateSlots(layout, feet)
+    const cell = placed.cell
+    if (cell === undefined) throw new Error('the cell must resolve')
+    return placed.slots.map((slot) => {
+      const foot = feet.get(slot.part)
+      if (foot === undefined) throw new Error(`${slot.part} has no fill`)
+      const shape = footprintShape(foot)
+      if (shape === undefined) throw new Error(`${slot.part} has no shape`)
+      return slotGeometry(shape, layoutOf(slot, cell, foot), [0, 0], rotation).box
+    })
+  }
+
+  function unionAt(
+    layout: TemplateLayout,
+    feet: ReadonlyMap<SlotName, Footprint>,
+    rotation: number,
+  ): PlanBox {
+    const union = unionBox(boxesAt(layout, feet, rotation))
+    if (union === undefined) throw new Error('a placed template must have a box')
+    return union
+  }
+
+  it('lays a closing 2 x 2 wall-on-tile inside its own cell, at every quarter turn', () => {
+    /* The 96-part convention, on the fills that close it — the run of the wall
+       equals the width of the floor cell on 980 of the 1,143 walked wall
+       combinations, which is what a piece spanning exactly one face looks like.
+       Exact equality on the box, not a comparison of areas: the union *is* the
+       cell, at the instance origin, whichever way the instance is turned. */
+    for (const rotation of QUARTERS) {
+      expect(unionAt(WALL_ON_TILE, WALL_2X2, rotation), `rotation ${String(rotation)}`).toEqual({
+        x: 0,
+        z: 0,
+        w: 2,
+        d: 2,
+      })
+    }
+  })
+
+  it('is 4.00 units² for a 2 x 2 corner, not 7.56', () => {
+    /* The figure row A10 had to settle, measured from the conventions rather
+       than from a fixture. The external corner's two 2-unit walls earn
+       `over-run` doubts on a 2 x 2 floor — the 8 documented failures, since two
+       2-unit runs and a 0.5 column cannot share two 2-unit edges — so the three
+       parts that *do* place are the base, the floor and the column, and they
+       union to the cell. Nothing overhangs it at 0°, so 7.56 could not have been
+       the unrotated footprint of a 2 x 2 anything. */
+    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_2X2)
+    expect(placed.doubts.map((doubt) => doubt.code)).toEqual(['over-run', 'over-run'])
+    expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'column'])
+
+    for (const rotation of QUARTERS) {
+      const union = unionAt(EXTERNAL_CORNER, CORNER_2X2, rotation)
+      expect(union, `rotation ${String(rotation)}`).toEqual({ x: 0, z: 0, w: 2, d: 2 })
+      expect(union.w * union.d).toBe(4)
+    }
+  })
+
+  it('turns the column to a different corner of the same cell on each quarter', () => {
+    /* The union being invariant would also be satisfied by ignoring the rotation
+       entirely, so this pins the part that moves. `corner`, `side: 0` is the
+       `(-x, -z)` square of the cell, and a quarter turn carries it round the
+       four corners in the order `place` rotates: +x onto +z. */
+    const corners = QUARTERS.map((rotation) => {
+      const boxes = boxesAt(EXTERNAL_CORNER, CORNER_2X2, rotation)
+      const box = boxes[boxes.length - 1]
+      if (box === undefined) throw new Error('the column must place')
+      return [box.x, box.z]
+    })
+    expect(corners).toEqual([
+      [0, 0],
+      [1.5, 0],
+      [1.5, 1.5],
+      [0, 1.5],
+    ])
+  })
+
+  it('lays every closing wall-on-tile inside its cell, over six cells and their runs', () => {
+    /* The general property rather than one number: for a wall whose run spans
+       the cell's own face — the closing case, and 980 of 1,143 real ones — the
+       union is exactly the cell at the origin on all four quarters, for every
+       cell the corpus's 8 floor sizes cover and both wall thicknesses the
+       measurements carry (0.5 on 3,079 walls, and the 1.5 `thick wall`).
+
+       `thickness <= d` is a real condition and not a convenience: `edge`'s
+       `-(cellF.d - part.d) / 2` is an *inset* only while the part is no deeper
+       than the face it lies on, and the block below measures what happens when
+       it is not. Every inset the corpus produces is <= 0 — see the four measured
+       values above — so no real combination crosses it. */
+    for (const [w, d] of [
+      [1, 1],
+      [2, 2],
+      [3, 3],
+      [4, 2],
+      [2, 4],
+      [8, 8],
+    ] as const) {
+      for (const thickness of [WALL_THICKNESS_UNITS, 1.5].filter((value) => value <= d)) {
+        const feet = feetOf([
+          ['base', rect(w, d)],
+          ['floor', rect(w, d)],
+          ['wall', rect(w, thickness)],
+        ])
+        expect(placeTemplateSlots(WALL_ON_TILE, feet).verdict).toBe('closes')
+        for (const rotation of QUARTERS) {
+          // The cell, at the origin, with `w` and `d` swapped on an odd quarter
+          // — which is the whole of "may swap width for depth, must not change
+          // the area".
+          const swapped = rotation % 180 !== 0
+          expect(unionAt(WALL_ON_TILE, feet, rotation), `${w}x${d} t${thickness} @${rotation}`).toEqual({
+            x: 0,
+            z: 0,
+            w: swapped ? d : w,
+            d: swapped ? w : d,
+          })
+        }
+      }
+    }
+  })
+
+  it('overhangs the cell, symmetrically, when a part is deeper than the face it lies on', () => {
+    /* The boundary of *"nothing overhangs"*, measured rather than assumed. A
+       1.5-unit `thick wall` on a 1 x 1 cell has an inset of `+0.25`, so it
+       stands 0.25 outside each of the two faces it does not lie along and the
+       union is 1 x 1.5 rather than 1 x 1. The rigid body still holds — the
+       union's area is 1.5 at every quarter and the extents swap — so this is a
+       fact about the *convention* and not about the rotation.
+
+       It is also where `x`/`z` stops being the minimum corner of the union: the
+       canvas re-anchors by the *cell's* turned corner, so the overhang lands
+       outside the origin on the two quarters that send it to -x or -z. The two
+       readings coincide exactly when nothing overhangs, which is every
+       combination the corpus produces: the four insets it yields are -1.25,
+       -0.75, -0.25 and 0, all of them <= 0. */
+    const feet = feetOf([
+      ['base', rect(1, 1)],
+      ['floor', rect(1, 1)],
+      ['wall', rect(1, 1.5)],
+    ])
+    expect(slotOffset(ruleOf(WALL_ON_TILE, 'wall'), { w: 1, d: 1 }, { w: 1, d: 1.5 })).toEqual([0, 0.25])
+    for (const rotation of QUARTERS) {
+      const union = unionAt(WALL_ON_TILE, feet, rotation)
+      expect(union.w * union.d, `rotation ${String(rotation)}`).toBe(1.5)
+    }
+    expect(unionAt(WALL_ON_TILE, feet, 0)).toEqual({ x: 0, z: 0, w: 1, d: 1.5 })
+    expect(unionAt(WALL_ON_TILE, feet, 90)).toEqual({ x: -0.5, z: 0, w: 1.5, d: 1 })
+  })
+
+  it('centres an edge across the whole face, which a closing corner then overlaps', () => {
+    /* **A disagreement inside this module, measured and not repaired here.**
+
+       The closure check subtracts a `corner`-anchored sibling's span from the
+       face — `cornerSpan`, 0.5 on all 8 real corner slots — but `slotOffset`'s
+       `edge` line has `dx: 0`, so the wall is centred across the *whole* face
+       rather than across what the column leaves. The two therefore disagree
+       whenever a corner recipe closes: two 1.5-unit walls and a 0.5 column on a
+       2 x 2 cell is `closes` with no doubts, and the wall then runs through the
+       column for 0.25 units and leaves a 0.25 gap at the far end.
+
+       It is unreachable on the corpus, which is why it is pinned rather than
+       fixed: all 34 walked combinations of the four external-corner recipes are
+       `fails` (8) or `undecidable` (26), so no real fill set closes an edge
+       alongside a column. Repairing it would move an offset on every one of the
+       1,006 closing combinations and is row **B2**'s authored convention to
+       settle, not this row's rotation fix. */
+    const closing = feetOf([
+      ['base', rect(2, 2)],
+      ['floor', rect(2, 2)],
+      ['right wall', wall(1.5)],
+      ['left wall', wall(1.5)],
+      ['column', column],
+    ])
+    const placed = placeTemplateSlots(EXTERNAL_CORNER, closing)
+    expect(placed.verdict).toBe('closes')
+    expect(placed.doubts).toEqual([])
+
+    const boxes = boxesAt(EXTERNAL_CORNER, closing, 0)
+    const wallBox = boxes[2]
+    const columnBox = boxes[4]
+    // The north wall spans x [0.25, 1.75] and the column x [0, 0.5]: they share
+    // a quarter unit, and the wall stops a quarter unit short of the east face.
+    expect(wallBox).toEqual({ x: 0.25, z: 0, w: 1.5, d: 0.5 })
+    expect(columnBox).toEqual({ x: 0, z: 0, w: 0.5, d: 0.5 })
+    // The union is still the cell and still rigid, which is what this row owns.
+    for (const rotation of QUARTERS) {
+      expect(unionAt(EXTERNAL_CORNER, closing, rotation)).toEqual({ x: 0, z: 0, w: 2, d: 2 })
+    }
+  })
+
+  it('keeps every part on the quarter-unit lattice through a full circle', () => {
+    /* The hazard this file's first block names, carried through the placement:
+       three of the four measured insets are odd multiples of 0.25, and the
+       canvas's re-anchoring is a *subtraction*, so it is the step that could
+       reintroduce the 6.1e-17 the exact quarter-turn branches exist to avoid. */
+    for (const rotation of QUARTERS) {
+      for (const box of boxesAt(WALL_ON_TILE, WALL_2X2, rotation)) {
+        for (const value of [box.x, box.z, box.w, box.d]) {
+          expect(Number.isInteger(value * 4), `${String(value)} at ${String(rotation)}`).toBe(true)
+        }
+      }
+    }
   })
 })
