@@ -11,7 +11,34 @@
  * and wrong for most of the others. What is authored is a **rule**; the numbers
  * are arithmetic over the fill's own footprint at fill time.
  *
- * Three files now. Row **B3** added the third:
+ * Five files now. Row **C2** added the last two, and they are the row this
+ * directory was always pointing at:
+ *
+ *   - `fill.ts` — **the default-fill solver**. Walk a template's parts in
+ *     declared order and take the first candidate that does not empty a
+ *     still-open sibling, preferring the room's design family, then
+ *     `selectVariant`'s preferred variant, then ascending item address; rank a
+ *     `base` slot with `@/assembly`'s `rankBases` instead. Re-measured against
+ *     the live archive: the obvious walk completes **24 of the 40** shipped
+ *     recipes and this one completes **40**, and all sixteen of the greedy
+ *     walk's failures are the `base` slot of the sixteen modular wall recipes.
+ *     Consumes `@/composition`, `@/assembly` and B3's `size.ts` and reimplements
+ *     none of them.
+ *   - `relock.ts` — **the lock re-solve**, which is what keeps `SlotFill.pinned`
+ *     meaningful: the three lock systems disagree about which file to print for
+ *     1,419 of 3,822 items, so a toggle has to rewrite every `auto` fill and
+ *     honour every `pinned` one. It is the one file here that writes, through
+ *     `@/store`'s `fillSlot` — and the plan's §11 asks for it to be measured at
+ *     scene scale, which turns out to say more about the store than about the
+ *     solver.
+ *
+ * `measure.ts` is the fourth-and-a-half: the policy comparison, the
+ * backtracking control and the scene-scale timing, imported only by the tests
+ * and therefore in no bundle. It is deliberately **not** in this barrel — unlike
+ * `@/composition`'s, which exports its measurements because `pipeline/build.ts`
+ * runs them — because nothing outside this directory's tests has a reason to.
+ *
+ * And three files from before. Row **B3** added the third:
  *
  *   - `size.ts` — **the size predicate**, which is what makes size a *parameter*
  *     of a placed instance rather than part of B4's family key: keyed on
@@ -62,11 +89,11 @@
  *     elevation comes in as a parameter rather than as an import from row A4b's
  *     `bases.ts`, which row A2 reports may be deleted outright.
  *
- * Nothing in the app reads this directory yet: row **C2** (the fill solver) and
- * row **A4b** (rendering an instance's parts) are its first consumers. The tests
- * are therefore the whole of the row's evidence, which is why `corpus.test.ts`
- * recomputes every figure in these docblocks against the live archive instead of
- * restating it.
+ * Nothing in the app reads this directory yet: rows **C1** (the palette) and
+ * **C3** (the right-click slot editor) are `fill.ts`'s consumers and row **A4b**
+ * (rendering an instance's parts) is `offsets.ts`'s. The tests are therefore the
+ * whole of both rows' evidence, which is why `corpus.test.ts` recomputes every
+ * figure in these docblocks against the live archive instead of restating it.
  */
 export type {
   SlotAnchor,
@@ -106,6 +133,25 @@ export {
   slotSizePredicate,
   snapToLattice,
 } from './size'
+
+export type {
+  FillContext,
+  FillReason,
+  SlotDecision,
+  SlotGap,
+  TemplateFill,
+} from './fill'
+export { SOLVE_QUERIES, solveTemplateFills } from './fill'
+
+export type {
+  FillWriter,
+  InstanceReSolve,
+  PinLockWarning,
+  SceneFillContext,
+  SceneReSolve,
+  UnfilledReport,
+} from './relock'
+export { reSolveScene } from './relock'
 
 export type { PlacedTemplate, SlotDoubt, SlotDoubtCode, SlotPlacement, SlotVerdict } from './offsets'
 export {
