@@ -39,7 +39,7 @@ import type { CatalogRecord, Footprint } from '@/catalog'
 import { CatalogFile } from '@/catalog'
 import type { AssemblyChoice, RecipeIndex, RecipeTemplate } from '@/screens/assemblies/assembly'
 import { assemblyState, createRecipeIndex } from '@/screens/assemblies/assembly'
-import { RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
+import { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
 
 import { buildAggregateIndex } from '@/catalog'
 import type { AssemblyIndex, AssemblyTemplate } from '@/assembly'
@@ -1034,6 +1034,57 @@ describeCorpus(
       expect(verdicts).toEqual({ closes: 34, fails: 2, undecidable: 4 })
       expect(doubts).toEqual({ 'over-run': 4 })
       expect(failing.every((id) => id.includes('corner') && id.endsWith('-single-piece'))).toBe(true)
+    })
+
+    /* ------------------------------------------------- row B4's 51 families */
+
+    it('has no convention for any of B4’s 51 generated families, which is why size arrives as refs', () => {
+      /* The merge finding, and it corrects this row rather than B4. Every one of
+         B4's generated families has **exactly one part** — 19 `wall`, 17
+         `floor`, 6 `column`, 3 `stair`, 2 `riser`, 2 `roof`, 1 `decor`, 1
+         `base` — and it declines a layout deliberately, with four measurements
+         behind it. So none of them has a part-name set `rules.ts` has a
+         convention for, there is no anchor, and B3's per-slot derivation cannot
+         fire: `FillContext.cell` narrows **nothing** on any palette row C1 is
+         building. `FillContext.size` is what this measurement bought. */
+      expect(GENERATED_FAMILIES).toHaveLength(51)
+      expect(GENERATED_FAMILIES.filter((family) => family.parts.length !== 1)).toEqual([])
+      expect(
+        GENERATED_FAMILIES.filter(
+          (family) => conventionFor(family.parts.map((part) => part.name)) !== undefined,
+        ),
+      ).toEqual([])
+      // And the 40 shipped recipes are untouched by B4's arrival: a separate
+      // export, still 40 templates over 128 parts.
+      expect(RECIPE_TEMPLATES).toHaveLength(40)
+      expect(RECIPE_TEMPLATES.flatMap((template) => template.parts)).toHaveLength(128)
+    })
+
+    it('fills all 51 generated families, at every one of their 350 size options', () => {
+      const { index, context: ctx } = ready()
+      let options = 0
+      const unfilled: string[] = []
+
+      for (const family of GENERATED_FAMILIES) {
+        // With no size asked for at all — the palette's own default.
+        if (!solveTemplateFills(family, index, ctx).complete) unfilled.push(`${family.id} / no size`)
+        for (const option of GENERATED_FAMILY_SIZES[family.id] ?? []) {
+          options += 1
+          const fill = solveTemplateFills(family, index, { ...ctx, size: option.tags })
+          if (!fill.complete) unfilled.push(`${family.id} / ${option.label}`)
+        }
+      }
+
+      /* The acceptance measurement for C1's palette: every row, at every size
+         its control offers, places filled. 350 options over 51 families, and
+         8 of those families offer nothing but *any size* — an empty domain,
+         which B3 predicted for 5 — so the no-tags option is exercised 51 times
+         over. */
+      expect(options).toBe(350)
+      expect(unfilled).toEqual([])
+      expect(
+        Object.values(GENERATED_FAMILY_SIZES).filter((sizes) => sizes.length === 1),
+      ).toHaveLength(8)
     })
 
     /* --------------------------------------------------------- the scene scale */
