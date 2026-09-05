@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { GRID_UNIT_MM, WALL_THICKNESS_UNITS } from '@/catalog'
 import type { SlotName } from '@/store'
 
+import type { SlotRecords } from './catalog'
 import { FIXTURE_CELL, FIXTURE_IDS, FIXTURE_SLOTS, FIXTURE_TEMPLATE, fixtureCatalogFile, fixtureSlotLayout } from './fixture'
 import {
   DIAGONAL_ANGLE_DEG,
@@ -516,6 +517,14 @@ describe('a template is a rigid body under rotation', () => {
     [FIXTURE_SLOTS.column, FIXTURE_IDS.column],
   ] as const
 
+  /**
+   * The five slots as a {@link SlotRecords} map — the whole instance, which is
+   * what the rule takes since row **C6** widened the seam. `fixtureSlotLayout`
+   * reads the cell off the `floor` entry of it for all five slots, so a caller
+   * that handed over one record at a time could no longer get an answer.
+   */
+  const CORNER_FILLS: SlotRecords = new Map(CORNER.map(([slot, id]) => [slot, record(id)]))
+
   function shapeOf(id: string): PlanShape {
     const shape = footprintShape(record(id).foot)
     if (shape === undefined) throw new Error(`no shape for ${id}`)
@@ -525,7 +534,7 @@ describe('a template is a rigid body under rotation', () => {
   /** The union of the five parts' boxes, at one instance rotation. */
   function cornerBox(rotation: number, over: Partial<SlotLayout> = {}): PlanBox {
     const boxes = CORNER.map(([slot, id]) => {
-      const layout = { ...fixtureSlotLayout(FIXTURE_TEMPLATE, slot, record(id)), ...over }
+      const layout = { ...fixtureSlotLayout(FIXTURE_TEMPLATE, slot, CORNER_FILLS), ...over }
       return slotGeometry(shapeOf(id), layout, [0, 0], rotation).box
     })
     const union = unionBox(boxes)
@@ -554,7 +563,7 @@ describe('a template is a rigid body under rotation', () => {
     // The north wall becomes the east wall, the east wall becomes the south, and
     // the south-east column becomes the south-west one.
     const boxOf = (slot: SlotName, id: string, rotation: number) =>
-      slotGeometry(shapeOf(id), fixtureSlotLayout(FIXTURE_TEMPLATE, slot, record(id)), [0, 0], rotation).box
+      slotGeometry(shapeOf(id), fixtureSlotLayout(FIXTURE_TEMPLATE, slot, CORNER_FILLS), [0, 0], rotation).box
 
     expect(boxOf(FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2, 0)).toEqual({ x: 0, z: 0, w: 2, d: 0.5 })
     expect(boxOf(FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2, 90)).toEqual({ x: 1.5, z: 0, w: 0.5, d: 2 })
@@ -572,7 +581,7 @@ describe('a template is a rigid body under rotation', () => {
     // every part must still be an exact multiple of 0.25.
     for (const rotation of QUARTERS) {
       for (const [slot, id] of CORNER) {
-        const layout = fixtureSlotLayout(FIXTURE_TEMPLATE, slot, record(id))
+        const layout = fixtureSlotLayout(FIXTURE_TEMPLATE, slot, CORNER_FILLS)
         const { box } = slotGeometry(shapeOf(id), layout, [0, 0], rotation)
         for (const value of [box.x, box.z, box.w, box.d]) {
           expect(Number.isInteger(value * 4), `${slot} at ${String(rotation)}: ${String(value)}`).toBe(true)
@@ -593,10 +602,11 @@ describe('a template is a rigid body under rotation', () => {
     expect(areas).toEqual([4, 7, 12.25, 7])
   })
 
-  it('is rigid without a cell when every part is at the origin, which is the shipped rule', () => {
-    // `ORIGIN_LAYOUT` is production's only layout until B2's rule is wired, and
-    // it needs no cell: N boxes sharing one corner union to (max w) x (max d),
-    // and a quarter turn preserves that product.
+  it('is rigid without a cell when every part is at the origin, which is the fallback', () => {
+    // `ORIGIN_LAYOUT` was production's only layout until row C6 wired B2's rule,
+    // and it is still the answer for a template with no convention — B4's 51
+    // one-slot families. It needs no cell: N boxes sharing one corner union to
+    // (max w) x (max d), and a quarter turn preserves that product.
     const areas = QUARTERS.map((rotation) => {
       const boxes = CORNER.map(([, id]) => slotGeometry(shapeOf(id), ORIGIN_LAYOUT, [0, 0], rotation).box)
       const union = unionBox(boxes)
@@ -612,7 +622,7 @@ describe('a template is a rigid body under rotation', () => {
     // rotated about the instance origin. The *box* is 41% larger, which is a
     // property of an axis-aligned box around a turned rectangle and not of this
     // composition.
-    const layout = fixtureSlotLayout(FIXTURE_TEMPLATE, FIXTURE_SLOTS.column, record(FIXTURE_IDS.column))
+    const layout = fixtureSlotLayout(FIXTURE_TEMPLATE, FIXTURE_SLOTS.column, CORNER_FILLS)
     const flat = slotGeometry(shapeOf(FIXTURE_IDS.column), layout, [0, 0], 0)
     const turned = slotGeometry(shapeOf(FIXTURE_IDS.column), layout, [0, 0], 45)
     const centre = boxCentre(flat.box)

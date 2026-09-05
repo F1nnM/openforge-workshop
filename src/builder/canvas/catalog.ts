@@ -72,34 +72,245 @@ import { resolveMaterial } from '@/materials'
 import type { SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
 import { filledSlots } from '@/store'
 
+import type { Footprint } from '@/catalog'
+import type { SlotName as PartName } from '@/template/rules'
+import { layoutFor } from '@/template/rules'
+import { placeTemplateSlots, slotElevationMm } from '@/template/offsets'
+
 import type { SlotLayout } from './geometry'
-import { ORIGIN_LAYOUT } from './geometry'
+import { ORIGIN_LAYOUT, footprintShape, rotatedExtent } from './geometry'
 
 /**
- * How one part of one template is laid out, given the file that fills it.
+ * Every **filled** slot of one instance whose file this build holds, by slot.
  *
- * **The seam row B2 lands in.** B2 owns `src/template/**` and the `SlotRule`
- * model; its offsets are computed at fill time *from the fill's own footprint*,
- * which is why the record is an argument and not just the slot name — §1.4
- * measured the `base` slot admitting 25 distinct footprints and `wall` 14, so
- * `('base', anything)` has no single answer.
+ * **The seam widened, and row A10 named the reason before row C6 needed it.**
+ * The rule used to receive one {@link CatalogRecord} — the fill of the slot
+ * being laid out — and that is not enough information to place it. B2's
+ * arithmetic insets a part from the template's *cell*, and the cell is the
+ * resolved footprint of a **different** slot (`TemplateLayout.cell`, `floor` on
+ * all three conventions): an `edge` inset is `-(cellD - partD) / 2` and a
+ * `corner` inset is the same on both axes, so laying out a `wall` requires the
+ * `floor` fill. Row A10 stated it as *"the seam must widen to the instance's
+ * whole fill map"* and `fixture.ts#FIXTURE_CELL` is that limitation surfacing in
+ * a fixture. This is the widening.
+ *
+ * Filled-and-resolved only: a slot whose fill names a file this index has
+ * retired is {@link StrandedSlotPart} and is deliberately absent, because a
+ * base that is not in this build is not there to stand on either. So a rule
+ * reading this map sees exactly what the canvas can draw.
+ */
+export type SlotRecords = ReadonlyMap<SlotName, CatalogRecord>
+
+/**
+ * How one part of one template is laid out, given the whole instance's fills.
+ *
+ * **The seam row B2 lands in, and row C6 wired.** B2 owns `src/template/**` and
+ * the `SlotRule` model; its offsets are computed at fill time *from the fills'
+ * own footprints*, which is why the records are an argument and not just the
+ * slot name — §1.4 measured the `base` slot admitting 25 distinct footprints and
+ * `wall` 14, so `('base', anything)` has no single answer.
  *
  * A function rather than an import, for this module's third reason: the family
- * table is beside a screen and B2's rule will need it, and the canvas must reach
- * neither. The builder screen composes them and passes the result here, exactly
- * as it already does for the catalog file itself.
+ * table is beside a screen, {@link templateSlotLayout} needs the part names off
+ * it, and the canvas must reach neither. The builder screen composes them and
+ * passes the result here, exactly as it already does for the catalog file
+ * itself.
  */
-export type SlotLayoutRule = (template: TemplateId, slot: SlotName, record: CatalogRecord) => SlotLayout
+export type SlotLayoutRule = (template: TemplateId, slot: SlotName, fills: SlotRecords) => SlotLayout
 
 /**
- * The rule in force until row B2's lands: every part at the instance origin.
+ * Every part at the instance origin — the answer for a template with no
+ * convention.
  *
  * See {@link ORIGIN_LAYOUT} for what it is right about and what it is not. It is
- * the default so that a test with six records, and the landing hero, need no
- * template knowledge at all — neither has any.
+ * still the default so that a test with eleven records, and the landing hero,
+ * need no template knowledge at all — neither has any — and it is what
+ * {@link templateSlotLayout} itself returns for the 51 generated families, which
+ * is why this row is a **no-op** for them: C2 measured 0 of 51 with a part-name
+ * set `rules.ts` has a convention for, and a one-slot family needs none, because
+ * `slotOffset` answers `[0, 0]` for a `cell` anchor before it ever reads a cell.
  */
 export function originSlotLayout(): SlotLayout {
   return ORIGIN_LAYOUT
+}
+
+/**
+ * How high one base lifts whatever stands on it: **6 mm**, normalised.
+ *
+ * The only elevation quantity the three shipped conventions ever ask for. Every
+ * `restsOn` in `rules.ts` is either `null` or `base` — `base` rests on the
+ * ground, and the `floor`, `wall`, `column` and left/right-wall slots all rest
+ * on the `base` — so `slotElevationMm` calls its height reader **exactly once
+ * per lifted part, always for the `base` slot**, over all 128 parts of all 40
+ * recipes. `plan.test.ts` asserts that over `SLOT_CONVENTIONS` rather than
+ * restating it, so a fourth convention that rested a part on something else
+ * fails there.
+ *
+ * ## Measured, and the measurement is committed
+ *
+ * `src/template/corpus.test.ts` — *"puts every measured base on z = 0 at about
+ * 6 mm, which is what a floor is lifted by"* — joins the 1,963 `layer: 'base'`
+ * records to `tools/measure/measurements.json` and finds **343 measured**, all
+ * 343 authored on z = 0, **279 (81.3%) within 0.015 mm of 6.000 mm** and 295
+ * (86.0%) below 6.1 mm; the remaining 48 are 12 each at 12.70, 25.40, 38.10 and
+ * 50.80, which are stacked bases and risers rather than a slab. The same file
+ * measures the other side of the same 6 mm independently: of 583 measured
+ * `topper` records, **107 (18.4%) are authored already one base thickness up**,
+ * at a median of exactly 6.0000 mm.
+ *
+ * ## Why it is one number and not a lookup
+ *
+ * Because there is nothing to look up. `catalog.json` carries **no height at
+ * all** — a record holds `foot`, `kinds`, `layer` and 14 further fields and not
+ * one of them is a `y` extent — and the sidecar that does is a 952 kB dev-tool
+ * artefact covering **1,284 of 8,702 records (14.8%)** that nothing under
+ * `src/**` reads. So for the other 85.2% there is no measurement to prefer, and
+ * a rule that read the sidecar where it existed would place two congruent bases
+ * at two different heights depending on whether row W1 happened to have fetched
+ * them.
+ *
+ * It would also be the *wrong* number even where it exists: §2.2 and §9 measured
+ * 18.4% of `openforge` toppers authored pre-lifted by exactly this 6 mm and
+ * 77.5% not, so a lift taken off a mesh encodes that inconsistency into the
+ * room. Row **A4b** deleted `three/bases.ts#baseElevationMm` — which read the
+ * resting mesh's own upright height — precisely so that
+ * {@link SlotLayout.elevationMm} would be the single elevation source, and
+ * `place.ts` normalising each mesh to `-upright.min.y` before applying the lift
+ * is what makes one normalised number sound. This is that number, and there is
+ * no second.
+ */
+export const BASE_LIFT_MM = 6
+
+/**
+ * B2's conventions, composed with the canvas's own placement: **the rule the app
+ * runs.**
+ *
+ * `parts` is the part-name list of one template, or `undefined` when this build
+ * ships no such recipe. Injected rather than imported for the module note's
+ * third reason — the 91-entry family table lives beside a screen
+ * (`src/screens/assemblies/templates.ts`), `BuilderScreen.tsx` already holds a
+ * lookup over it for the bill and for `reSolveScene`, and the canvas must not
+ * reach a sibling screen. It is the *only* thing this rule needs that the canvas
+ * cannot see.
+ *
+ * ## The three answers, and where each comes from
+ *
+ *   - **`dx`/`dz`** — `placeTemplateSlots` returns a **centre-to-centre** offset
+ *     from the template's centre and {@link SlotLayout} wants the part's
+ *     **minimum corner** measured from the cell's. The conversion is exact and is
+ *     the one `offsets.test.ts` states and measures:
+ *     `dx = offset.x - drawn.w / 2 + cell.w / 2`, where `drawn` is
+ *     `rotatedExtent(extent, yaw + intrinsic angle)` so a `diag`'s own 45° is
+ *     carried. **Never snapped** — §2.2: every offset is a multiple of 0.25, the
+ *     `edge` inset takes the four values `-1.25`, `-0.75`, `-0.25`, `0` over the
+ *     1,006 closing combinations, and three of the four are off the 0.5 lattice
+ *     the *origin* snaps to. `snapTo(-0.75, 0.5)` is `-0.5`, and a quarter unit
+ *     is the difference between a wall flush against a floor and a wall a quarter
+ *     unit inside it.
+ *   - **`rotation`** — `slotYaw`, i.e. `side * 90`, straight off the placement.
+ *   - **`elevationMm`** — `slotElevationMm` walking `restsOn` to the ground, with
+ *     {@link BASE_LIFT_MM} supplied for a resting slot that is **filled** and 0
+ *     for one that is not. That second half is a real behaviour rather than a
+ *     guard; see {@link liftOf}.
+ *
+ * Every layout also carries {@link SlotLayout.cell}, the same extent for
+ * every part of the instance, which is what makes the template a rigid body
+ * under rotation — row A10's invariant, and `three/instances.test.ts`'s *"keeps
+ * its footprint area across quarter turns"* is the guard on it.
+ *
+ * ## What it does with a slot B2 refuses to place
+ *
+ * `placeTemplateSlots` is partial by design: a slot with no footprint, no
+ * straight run along its face, or fills that over-run the face earns a
+ * `SlotDoubt` and **no coordinate**. The app really does reach it: over the 40
+ * recipes as C2's solver fills them, 38 raise no doubt and the 2 external-corner
+ * `single_piece` recipes raise **4 `over-run` doubts** — two 2-unit walls and a
+ * 0.5 column cannot share two 2-unit edges, `want 2 got 2.5` — which
+ * `src/template/corpus.test.ts` prints on every run.
+ * Such a slot is laid out at `dx = dz = 0` — the cell's own corner, where it
+ * draws today — **but with the instance's `cell` declared**, so it turns with
+ * the rest of the assembly instead of pivoting on itself. Giving it the
+ * fabricated offset that would make it fit is what the plan forbids outright
+ * (*"the mitre is in no tag and no measurement. Do not silently write 1.5."*),
+ * and dropping the `cell` instead would reintroduce exactly the non-rigid case
+ * A10 measured at three times its own ground. The doubt is disclosed where a
+ * user can act on it — `three/fills.ts` announces it on the click and C3's slot
+ * editor mounts `slotDoubtSentence` — not by moving geometry.
+ *
+ * ## Cost
+ *
+ * `placeTemplateSlots` is a linear walk over at most five rules, and
+ * {@link planCatalogFromFile} memoises this rule per `(instance fills, slot)`
+ * for the life of the catalog view. So a room of forty instances evaluates it
+ * once per distinct fill map per slot — five walks per configuration, ever — not
+ * once per frame.
+ */
+export function templateSlotLayout(
+  parts: (template: TemplateId) => readonly PartName[] | undefined,
+): SlotLayoutRule {
+  return (template, slot, fills) => {
+    const names = parts(template)
+    const layout = names === undefined ? undefined : layoutFor(names)
+    // No recipe, or a recipe with no convention — B4's 51 one-slot families, and
+    // `rules.ts` is explicit that a missing convention has no fallback. Every
+    // part at the origin is what this build already draws for them, and it is
+    // right: one slot is its own cell.
+    if (layout === undefined) return ORIGIN_LAYOUT
+
+    const elevationMm = slotElevationMm(layout, slot, (resting) => liftOf(fills.get(resting as SlotName)))
+    const placed = placeTemplateSlots(layout, footprintsOf(fills))
+    const cell = placed.cell
+    const placement = placed.slots.find((one) => one.part === slot)
+    const record = fills.get(slot)
+    const shape = record === undefined ? undefined : footprintShape(record.foot)
+    if (cell === undefined || placement === undefined || shape === undefined) {
+      return { dx: 0, dz: 0, rotation: 0, elevationMm, cell }
+    }
+
+    // The one line row A10 wrote out and did not wire: a centre `o` in the
+    // cell-centre frame is the minimum corner `o - E / 2 + cell / 2` in the
+    // cell-corner frame, where `E` is the part's extent **as drawn**.
+    const drawn = rotatedExtent(shape.extent, placement.yaw + shape.angle)
+    return {
+      dx: placement.offset[0] - drawn.w / 2 + cell.w / 2,
+      dz: placement.offset[1] - drawn.d / 2 + cell.d / 2,
+      rotation: placement.yaw,
+      elevationMm,
+      cell,
+    }
+  }
+}
+
+/**
+ * How high the fill of one resting slot lifts what stands on it.
+ *
+ * {@link BASE_LIFT_MM} when that slot is filled, **0 when it is not** — which is
+ * a real behaviour and not a guard, and it is the whole reason the reader takes
+ * the fills rather than a constant: a `wall-on-tile` instance whose `base` slot
+ * needs a choice has nothing under its floor, and drawing the floor 6 mm up
+ * would be a picture of a base nobody chose.
+ *
+ * **It does not read the record**, and that is deliberate. The *recipe* says
+ * what a resting slot holds: every non-null `restsOn` over all three conventions
+ * names `base`, `rules.ts` derives that slot's anchor from *"every candidate is
+ * `layer === 'base'`"* on 40 of 40 templates, and row **A9** measured
+ * `layer === 'base'` exactly coextensive with `shape|base` at 1,963 records both
+ * ways. So a record read here would be a second opinion able to disagree with
+ * the convention, and it would be wrong in exactly one direction: a fill the
+ * recipe put in a base slot that this reader declined to call a base would drop
+ * the floor into it. `plan.test.ts` pins the `restsOn === 'base'` invariant, so a
+ * fourth convention that rested a part on something else fails loudly instead of
+ * silently collecting a base's thickness.
+ */
+function liftOf(record: CatalogRecord | undefined): number {
+  return record === undefined ? 0 : BASE_LIFT_MM
+}
+
+/** The fills as `placeTemplateSlots` wants them: one footprint per filled slot. */
+function footprintsOf(fills: SlotRecords): ReadonlyMap<PartName, Footprint> {
+  const feet = new Map<PartName, Footprint>()
+  for (const [slot, record] of fills) feet.set(slot, record.foot)
+  return feet
 }
 
 /** What every part carries, resolved or not: which slot, and what filled it. */
@@ -172,10 +383,16 @@ export interface PlanCatalog {
  * and nothing about this view goes stale when the preference changes.
  *
  * `layout` is the {@link SlotLayoutRule}, defaulting to
- * {@link originSlotLayout}. It is memoised per `(template, slot, file)` triple
- * rather than per call: the canvas re-projects the whole scene on every store
- * write, and a room of 40 instances at 5 parts each would otherwise evaluate 200
- * rules per frame.
+ * {@link originSlotLayout} — {@link templateSlotLayout} is the one the app runs.
+ * It is memoised per `(instance fills, slot)` rather than per call: the canvas
+ * re-projects the whole scene on every store write, and a room of 40 instances at
+ * 5 parts each would otherwise evaluate 200 rules per frame.
+ *
+ * **The key is the whole fill map since row C6**, and it has to be: the rule's
+ * answer for the `wall` slot is a function of the `floor` fill, so a key of
+ * `(template, slot, file)` would hand a 2 x 2 corner's wall the inset computed
+ * for the 4 x 4 corner placed before it. Twenty placements of one configuration
+ * are still one evaluation per slot, which is what the memo is for.
  */
 export function planCatalogFromFile(file: CatalogFile, layout: SlotLayoutRule = originSlotLayout): PlanCatalog {
   const byId = new Map<string, CatalogRecord>(file.records.map((record) => [record.id, record]))
@@ -201,24 +418,40 @@ export function planCatalogFromFile(file: CatalogFile, layout: SlotLayoutRule = 
       // row R4 deleted the 2D painter and a pick in 3D is a raycast, so the
       // nearest hit wins by geometry rather than by list position.
       const slots = filledSlots(instance.fills).sort((a, b) => a.localeCompare(b))
-      const parts: PlanSlotPart[] = []
+      // Resolved *before* the layout loop, because the rule is a function of the
+      // whole map and not of one entry — see {@link SlotRecords}. A stranded fill
+      // is absent from it rather than present as a hole, so a rule cannot mistake
+      // a retired base for a base that is there.
+      const records = new Map<SlotName, CatalogRecord>()
       for (const slot of slots) {
         const fill = instance.fills[slot]
         if (fill === undefined) continue
         const record = view.record(fill.tile)
+        if (record !== undefined) records.set(slot, record)
+      }
+      // The instance's own half of the memo key, computed once for its five
+      // slots. JSON-encoded rather than joined on a separator: two of the six
+      // shipped part names contain a space and a `TileId` is a path with slashes,
+      // dots and percent signs in it, so there is no punctuation character left
+      // that is provably absent from all three. `slots` is already sorted, so two
+      // instances of one configuration produce one string.
+      const signature = JSON.stringify([instance.template, slots.map((slot) => [slot, records.get(slot)?.id])])
+
+      const parts: PlanSlotPart[] = []
+      for (const slot of slots) {
+        const fill = instance.fills[slot]
+        if (fill === undefined) continue
+        const record = records.get(slot)
         if (record === undefined) {
           parts.push({ kind: 'stranded', slot, fill })
           continue
         }
-        // The key is the triple the rule is a function of, JSON-encoded rather
-        // than joined on a separator: two of the six shipped part names contain a
-        // space and a `TileId` is a path with slashes, dots and percent signs in
-        // it, so there is no punctuation character left that is provably absent
-        // from all three.
-        const key = JSON.stringify([instance.template, slot, fill.tile])
+        // `NUL`-joined onto the signature, which is JSON and so holds no raw
+        // control byte of its own — written as the escape and never as the byte.
+        const key = `${signature}\u0000${slot}`
         let resolved = layouts.get(key)
         if (resolved === undefined) {
-          resolved = layout(instance.template, slot, record)
+          resolved = layout(instance.template, slot, records)
           layouts.set(key, resolved)
         }
         parts.push({ kind: 'resolved', slot, fill, record, layout: resolved })
