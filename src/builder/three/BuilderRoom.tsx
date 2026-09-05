@@ -93,6 +93,7 @@ import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
 import type { MeshTask } from '@/mesh'
 import { meshQueue, useMeshQueue } from '@/mesh'
+import type { PlacementId, SlotName } from '@/store'
 import { useLockSystem } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
 import { AO_RADIUS, Stage } from '@/three/Stage'
@@ -183,12 +184,21 @@ export interface BuilderRoomProps {
    * than an index and a prop would let the two drift.
    */
   readonly fill: FillAuthorities
+  /**
+   * Row **C8**: the owner's right click, passed straight through to the surface.
+   *
+   * Nothing is done to it here and nothing can be — the dialog it opens is
+   * `builder/panels/slots/`'s and lives outside this directory, which is
+   * `builder/panels/boundary.test.ts`'s line and not an inconvenience. So the
+   * room is a wire, and the state it would otherwise hold is `BuilderScreen`'s.
+   */
+  readonly onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
 }
 
-export function BuilderRoom({ catalog, scene, tools, assets, fill, onStatus, fetchImpl }: BuilderRoomProps) {
+export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, onStatus, fetchImpl }: BuilderRoomProps) {
   /**
    * The armed **family**, straight off the shared tool state.
    *
@@ -399,6 +409,7 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onStatus, fet
               tools={tools}
               armed={armed}
               fill={filler}
+              {...(onEditSlots === undefined ? {} : { onEditSlots })}
               onStatus={publish}
               announce={announce}
               keyHelpId={KEY_HELP_ID}
@@ -426,9 +437,10 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onStatus, fet
       <RoomReadout room={room} store={store} scene={scene} waiting={waiting} />
 
       <p className="of-b3d-keys" id={KEY_HELP_ID}>
-        Drag to orbit, drag with the middle button or with Ctrl to pan across the plan, and scroll to zoom. Click the
-        plan to place the armed tile and click a tile to remove it in Erase mode. Arrow keys move the plan cursor by
-        the snap step, Shift for four steps; Enter places the armed tile, Delete removes the one under the cursor and R
+        Drag to orbit, drag with the right or middle button or with Ctrl to pan across the plan, and scroll to zoom.
+        Click the plan to place the armed tile and click a tile to remove it in Erase mode. Right-click a piece to
+        choose what goes in its slots, or use the Pieces on the plan list beside the drawing. Arrow keys move the plan
+        cursor by the snap step, Shift for four steps; Enter places the armed tile, Delete removes the one under the cursor and R
         turns it. Shift and Enter together pick the tile under the cursor up to move it; the arrow keys then carry it,
         Enter drops it and Escape puts it back. Square brackets step through the placed tiles. G switches snap between
         half a unit and one unit, and P, E and M switch between place, erase and move.

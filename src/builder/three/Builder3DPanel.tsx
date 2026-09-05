@@ -76,6 +76,7 @@ import { Suspense, lazy } from 'react'
 
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
 import type { CatalogAssets } from '@/catalog'
+import type { PlacementId, SlotName } from '@/store'
 
 import type { SurfaceStatus } from './edits'
 import type { FillAuthorities } from './fills'
@@ -114,6 +115,23 @@ export interface Builder3DPanelProps {
    * own memos.
    */
   readonly fill: FillAuthorities
+  /**
+   * Row **C8**: open the slot editor on one placed instance, with the slot the
+   * pointer was over pre-selected.
+   *
+   * The owner's right click, arriving from the piece on the plan rather than
+   * from its row in the bill column. Two primitives and not an object, which is
+   * what keeps this prop free at the lazy boundary: `PlacementId` and `SlotName`
+   * are branded strings out of `@/store`, so nothing about the signature reaches
+   * the dialog, the assembly index or the renderer, and `boundary.test.ts` walks
+   * the same graph it did before.
+   *
+   * Optional, because it is a destination rather than an input: with no handler
+   * the surface never records a secondary press at all, so a right-drag pans and
+   * a right-click does nothing — which is the behaviour every caller had before
+   * this row.
+   */
+  readonly onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
   /** The surface's readout, for the toolbar and the corner plates. */
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
@@ -126,6 +144,7 @@ export function Builder3DPanel({
   tools,
   assets,
   fill,
+  onEditSlots,
   onStatus,
   fetchImpl,
 }: Builder3DPanelProps) {
@@ -138,6 +157,7 @@ export function Builder3DPanel({
           tools={tools}
           assets={assets}
           fill={fill}
+          {...(onEditSlots === undefined ? {} : { onEditSlots })}
           {...(onStatus === undefined ? {} : { onStatus })}
           {...(fetchImpl === undefined ? {} : { fetchImpl })}
         />

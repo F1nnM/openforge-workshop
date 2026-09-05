@@ -162,7 +162,7 @@ export {
   lodObjectBudget,
 } from './lod'
 
-export type { SurfaceEdit, SurfaceStatus } from './edits'
+export type { SlotEditGesture, SurfaceEdit, SurfaceStatus } from './edits'
 /* Row C5. **Types only, and that is not the usual erasure argument** — the
    values in `fills.ts` reach C2's solver, and the screen has no reason to call
    them: it holds the three indexes and hands them over, and `BuilderRoom` builds

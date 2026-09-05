@@ -23,6 +23,15 @@
  * rebuilt to be equivalent. `SlotsPanel.tsx` gives every piece a real
  * `<button>` as well, so the whole editor is reachable by `Tab` and `Enter`.
  *
+ * ## The row it opens on is the row the user pointed at, when there was one
+ *
+ * Row **C8** put the gesture on the drawing, where a click lands on a *part* and
+ * not just on an instance — so {@link SlotEditorProps.initialSlot} arrives with
+ * it and the editor opens on that slot. Without one, the rule is unchanged and
+ * is the guided-assembly screen's: the first slot still needing a choice, then
+ * the first slot. The panel row passes nothing, because a row names a piece and
+ * has no point to resolve.
+ *
  * ## The design filter is a filter and it is stated in items
  *
  * §1.6's measurement is the argument for having one at all: **394 (part, family)
@@ -73,7 +82,7 @@ import {
   stepCountSentence,
 } from '@/screens/assemblies'
 import { compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
-import type { TemplateInstance } from '@/store'
+import type { SlotName, TemplateInstance } from '@/store'
 import { clearFill, pinFill, useLockSystem } from '@/store'
 import type { BaseGap } from '@/assembly'
 import { slotDoubtSentence } from '@/template'
@@ -98,10 +107,28 @@ export interface SlotEditorProps {
   readonly instance: TemplateInstance
   /** The recipe the instance names. The caller holds the table; see `SlotsPanel`. */
   readonly template: RecipeTemplate
+  /**
+   * The slot to open on, when the caller knows which one — row **C8**.
+   *
+   * A right click on the drawing lands on a *part*, and `partAt` names the slot
+   * that part fills, so the gesture already says which row the user meant. Only
+   * an initial value: the slot list is still the way to change rows, and the
+   * fall-through below is unchanged when this is absent, which is the panel
+   * row's case.
+   *
+   * A name that this build's recipe does not carry is not a failure state — the
+   * `shown` fall-through simply answers as it would have without it. That
+   * matters because the two names come from different walks: this one from a
+   * drawn part's `slot`, the list's from `template.parts`. They agree today
+   * because a fill is keyed by the recipe's own part name, and if they ever stop
+   * agreeing the editor opens on the first slot needing a choice rather than on
+   * nothing.
+   */
+  readonly initialSlot?: SlotName | undefined
   readonly onClose: () => void
 }
 
-export function SlotEditor({ catalog, index, instance, template, onClose }: SlotEditorProps) {
+export function SlotEditor({ catalog, index, instance, template, initialSlot, onClose }: SlotEditorProps) {
   /* The shared indexes, not second copies: `compositionIndexFor` is a `WeakMap`
      on the parsed file, so the drawer's picker, the bill and this editor are
      readers of one 409,432-byte inverted index. */
@@ -126,7 +153,7 @@ export function SlotEditor({ catalog, index, instance, template, onClose }: Slot
     [catalog, index, instance, template, recipes],
   )
 
-  const [openSlot, setOpenSlot] = useState<string | null>(null)
+  const [openSlot, setOpenSlot] = useState<string | null>(initialSlot ?? null)
   const [design, setDesign] = useState<string | undefined | null>(null)
   const [refused, setRefused] = useState<string | null>(null)
 
