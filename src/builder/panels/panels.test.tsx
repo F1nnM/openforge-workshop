@@ -63,9 +63,11 @@ import { BlobFetchError, PreviewMeshRefusedError } from '@/download'
 import { createSearchEngine, defaultFacetSearch } from '@/search'
 import { resolveMaterial } from '@/materials'
 import type { CatalogIndex } from '@/screens/catalog'
+import type { PlacementId } from '@/store'
 import {
   TemplateId,
   armTemplateInBuilder,
+  clearFill,
   clearPendingArm,
   clearPersistedWorkshopState,
   placeTemplate,
@@ -83,6 +85,7 @@ import {
   FIXTURE_NAMES,
   MIXED_INTEGRAL,
   ONE_SLOT_TEMPLATE_ID,
+  TWO_SLOTS,
   aStrictInstance,
   anInstance,
   fixtureContext,
@@ -1030,6 +1033,49 @@ describe('the bill of tiles', () => {
     // One bill row for the filled slot, one fault entry for the empty one.
     expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
     expect(document.querySelectorAll('.of-bill-fault')).toHaveLength(1)
+  })
+
+  /**
+   * **Row A11: the same hole, reached by emptying a slot that was filled.**
+   *
+   * Before `clearFill` this state was unreachable from inside the app —
+   * `fillSlot` and `pinFill` both write a tile, so a complete instance stayed
+   * complete and `relock.ts` could only *report* a stale fill it could not
+   * remove. The assertion is the one brief point 1 asks for: clearing must make
+   * the download refuse, so the pack cannot ship a piece one part short.
+   *
+   * `bill.complete` is asserted directly as well as through the panel, because
+   * that boolean is what `useArchiveDownload` refuses on — the copy is what the
+   * user reads and the flag is what stops the bytes.
+   */
+  it('refuses the download once a slot is cleared, and names the slot', () => {
+    let id = '' as PlacementId
+    act(() => {
+      id = placeTemplate(anInstance([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2], { x: 1, z: 2 }))
+    })
+    render(<BillHarness />)
+
+    const billNow = (): BillOfTiles =>
+      buildBillOfTiles(Object.values(useWorkshopStore.getState().placements), assembly, {
+        ...fixtureContext(file),
+        lock: 'openlock',
+      })
+
+    // Both slots filled: nothing to fault and nothing refused.
+    expect(billNow().complete).toBe(true)
+    expect(document.querySelectorAll('.of-bill-fault')).toHaveLength(0)
+
+    act(() => {
+      expect(clearFill(id, TWO_SLOTS[1]!)).toBe('cleared')
+    })
+
+    // C-g: the piece is still on the plan, and the *pack* is what refuses.
+    expect(billNow().complete).toBe(false)
+    expect(screen.getByText(/1 piece placed/)).toBeInTheDocument()
+    expect(screen.getByText(/1 slot is still empty/)).toBeInTheDocument()
+    const fault = screen.getByText(/panels-two-slot · wall · x 1, z 2/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/Nothing is in this slot/)).toBeInTheDocument()
   })
 
   /**

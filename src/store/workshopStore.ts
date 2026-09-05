@@ -318,13 +318,193 @@ export function fillSlot(id: PlacementId, slot: SlotName, tile: TileId): FillOut
  * reason*. Neither is expressible here, because both need the candidate sets and
  * therefore the catalog.
  *
- * **There is no `unpinFill`, and its absence is a known gap rather than a
- * decision.** Nothing in §3.3 offers a user a way to hand a slot back to the
- * lock preference, so no caller exists to write one for; if C3 wants "reset this
- * slot", it is one more action here and not a change of shape.
+ * **{@link unpinFill} closes the gap this docblock used to name.** The sentence
+ * here was *"there is no `unpinFill`, and its absence is a known gap rather than
+ * a decision"*, and it was right that the fix was one more action and not a
+ * change of shape: C3's editor exists now, so the caller exists, and the action
+ * below is a sibling of this one rather than a parameter on it. {@link clearFill}
+ * is the second half — a user who wants the slot *empty* rather than back under
+ * the preference. C3's sibling-invalidation refusal, named above, is unchanged
+ * and is now a **policy** rather than a missing capability: `clearFill` could
+ * repair such a pick and must not, because doing so would throw away a file the
+ * user chose in order to let an unrelated press succeed.
  */
 export function pinFill(id: PlacementId, slot: SlotName, tile: TileId): FillOutcome {
   return writeFill(id, slot, { tile, pinned: true }, false)
+}
+
+/* ------------------------------------------------------ giving a slot back */
+
+/**
+ * What a clear attempt did.
+ *
+ * **Three states, and the missing fourth is the point.** {@link FillOutcome} has
+ * four because `fillSlot` can *refuse* — a pinned slot is left alone and
+ * `'kept-pinned'` is how a re-solve counts the deliberate choices it honoured.
+ * {@link clearFill} refuses nothing (see its docblock on why it has no guarded
+ * twin), so there is no such state to name, and inventing one would be a token no
+ * branch can produce.
+ *
+ * `'unchanged'` is the same word A1 used for the same fact — *"the state I would
+ * have produced is already there"* — spelled once for the whole store rather
+ * than once per action, because a slot that is already empty and a fill that is
+ * already what would be written are one condition seen from two actions.
+ * `'unknown-placement'` is a stale gesture or a race, which is a bug in the
+ * caller rather than an outcome of the room.
+ */
+export type ClearOutcome = 'cleared' | 'unchanged' | 'unknown-placement'
+
+/**
+ * **Empty a slot** — take the fill out and leave the instance on the grid.
+ *
+ * Contract **C-g** is what makes this legal rather than destructive:
+ * `placeTemplate` deliberately accepts an incomplete `fills` map and §3.2 is
+ * explicit that a template with no candidate for a part *"places anyway"*,
+ * marked *needs a choice*. So an absent key is an ordinary state of an instance
+ * and this action produces exactly it — the piece stays in the room, the drawing
+ * loses one part, and row C4's `billView.ts#slotFaults` reports the slot as
+ * `empty`, which **refuses the download** (`blocksDownload`, and §7's line: an
+ * unprintable pack is refused where a wrong build is merely disclosed).
+ *
+ * ## Why there is one of these and not a guarded pair
+ *
+ * `fillSlot` and `pinFill` are two actions because there are two callers with
+ * opposite rights: the solver must not overwrite a pinned fill and the user must
+ * always be able to. **Clearing has one caller.** The user says "empty this",
+ * and no solver clears anything — C2's `reSolveScene` walks a slot it can no
+ * longer fill and *reports* it as `UnfilledReport.stale` rather than removing
+ * the stale answer, deliberately, because a driver that silently deleted a
+ * user's pin on a candidate-set change would be C-k's failure with a delete key.
+ * So a `clearAutoFill` guarded twin would have no call site, which is the state
+ * `reSolveScene` itself spent two rows in and the thing this row exists to stop.
+ * If a solver-side clear is ever wanted it is a second *named* action here, not
+ * a boolean on this one.
+ *
+ * The same reasoning is why this **does not refuse a pinned fill**: emptying a
+ * slot you chose is the strongest form of "I no longer want my choice", and it
+ * is strictly a superset of {@link unpinFill} in intent but not in effect — that
+ * one keeps a printable file and hands the choice back, this one leaves a hole
+ * that stops the pack.
+ *
+ * ## `delete`, and never `fills[slot] = undefined`
+ *
+ * Under `noUncheckedIndexedAccess` the two read identically at every `fills[slot]`
+ * site, so nothing in the type system separates them — and three readers walk
+ * the map's **keys** rather than reading a slot they already name:
+ * `canvas/catalog.ts#parts` draws one part per key, `share/link.ts` encodes one
+ * wire fill per key, and `migrations.ts#salvageFills` parses one entry per key on
+ * the way back in. A key holding `undefined` survives all three as a fill that
+ * is not there: nothing to draw, a `pinned` bit encoded for no file, and an entry
+ * that fails the schema on the next hydration. `filledSlots` is `Object.keys`,
+ * which is the one line that decides it.
+ *
+ * ## A cleared slot is not permanent, and that is the lock's rule not an oversight
+ *
+ * An empty slot carries no `pinned` bit, so the next lock re-solve **fills it** —
+ * `fillSlot` on an absent key writes. That is §2.1 read literally: the lock owns
+ * every slot the user has not pinned, and a slot the user emptied is not pinned.
+ * Until then the slot reads *needs a choice* and the download refuses, which is
+ * the honest state for "I have taken this out and not yet said what goes in".
+ * A caller wanting a hole the lock will not fill is asking for a fourth
+ * persisted state and would have to say so in `schema.ts`.
+ */
+export function clearFill(id: PlacementId, slot: SlotName): ClearOutcome {
+  let outcome: ClearOutcome = 'unknown-placement'
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    if (current.fills[slot] === undefined) {
+      outcome = 'unchanged'
+      return state
+    }
+    outcome = 'cleared'
+    const fills = { ...current.fills }
+    // See the docblock: `= undefined` would leave a key three readers walk.
+    delete fills[slot]
+    return { placements: { ...state.placements, [id]: { ...current, fills } } }
+  })
+  return outcome
+}
+
+/**
+ * What an unpin attempt did.
+ *
+ * Three states for {@link ClearOutcome}'s reason — nothing refuses, so nothing
+ * is kept — and `'unchanged'` deliberately covers **both** of the two ways a
+ * slot can already be the lock's: a fill the solver put there, and no fill at
+ * all. That is not the collapse A1 warned about. A1 split `false` because three
+ * *different* facts wore it and a caller had to tell them apart; these two are
+ * one fact — *the lock decides this slot on its next pass* — reached from either
+ * side, and `fillSlot` writes to both alike. Naming them apart would be two
+ * spellings of one state, and the caller that read them apart would have nothing
+ * different to do.
+ */
+export type UnpinOutcome = 'unpinned' | 'unchanged' | 'unknown-placement'
+
+/**
+ * **Hand a slot back to the lock preference** — drop the `pinned` bit and keep
+ * the file.
+ *
+ * This is the action rows **A1**, **C2** and **C3** each asked for and each
+ * declined to add: A1's `pinFill` records *"there is no `unpinFill`, and its
+ * absence is a known gap rather than a decision"*, C2's `relock.ts` calls it the
+ * first of its three gaps around the `pinned` bit, and C3 called it *"the
+ * highest-value missing action"*. Without it `pinFill` is a one-way door:
+ * nothing in the app writes `false` over a `true`, so **the first pin makes that
+ * slot permanently deaf to the lock toggle** — and the lock is a live preference
+ * worth 1,419 of 3,822 items (37.1%), not a one-time setting.
+ *
+ * It is also what makes C2's {@link import('@/template').PinLockWarning}
+ * actionable. That warning already names the sibling variant of the same design
+ * that *would* print under the current preference; before this action a user
+ * could read it and had no way to say "then use that one" short of finding the
+ * file by hand.
+ *
+ * ## It keeps the tile, and that is the whole difference from {@link clearFill}
+ *
+ * Two actions rather than one with a mode, for contract **C-k**'s reason applied
+ * to a second axis: they leave the room in states that differ in whether the
+ * pack can be built. Unpinning leaves a **printable** file in the slot and moves
+ * only the authority over it; clearing leaves a hole and refuses the download.
+ * A single `releaseSlot(id, slot, keepTile)` would put those one boolean apart,
+ * which is exactly the shape A1 refused for `pinned` itself.
+ *
+ * ## It does not re-solve, and it cannot — so the caller must
+ *
+ * Dropping the bit does not change the file, so on its own this action leaves
+ * the slot showing whatever was pinned until something re-solves it. The store
+ * cannot do that re-solve: it needs the candidate sets and therefore the
+ * catalog and the template table, which is the dependency `schema.ts` spends its
+ * `TemplateId` docblock refusing to let into the store's file closure.
+ *
+ * So the write is the store's and the repair is the caller's, and the caller
+ * must actually do it — `slotEditor.ts#handSlotToLock` is the one that does,
+ * with the argument for why an unpin that only waited for the next lock change
+ * would be worse than no unpin at all. Row A2's finding is what makes the
+ * caller's re-solve sufficient rather than only necessary: `planSceneMeshes` is
+ * lock-free and reconciles on the **placements**, so the fill this action's
+ * caller writes is the whole route to the drawing, the bill and mesh conversion.
+ * This action alone changes no file the scene names, so it warms no mesh — by
+ * design, not by omission.
+ */
+export function unpinFill(id: PlacementId, slot: SlotName): UnpinOutcome {
+  let outcome: UnpinOutcome = 'unknown-placement'
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    const existing = current.fills[slot]
+    if (existing === undefined || !existing.pinned) {
+      outcome = 'unchanged'
+      return state
+    }
+    outcome = 'unpinned'
+    const updated: TemplateInstance = {
+      ...current,
+      fills: { ...current.fills, [slot]: { tile: existing.tile, pinned: false } },
+    }
+    return { placements: { ...state.placements, [id]: updated } }
+  })
+  return outcome
 }
 
 /* ----------------------------------------------------------- generated bases */

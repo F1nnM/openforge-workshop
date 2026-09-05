@@ -53,12 +53,16 @@
  * `x`, `z`, `rotation` and `fills`, and A1's schema states the omission as
  * deliberate (*"No footprint, size or colour"*). So a size choice can only exist
  * as the sizes of the files that happen to be in the slots — derived, never
- * stored — and a control that re-solved an instance at a new cell would, on the
- * slots the new cell empties, leave the **old fill in place**: `fillSlot` and
- * `pinFill` both write a tile and A1's surface has no delete
- * (`relock.ts`'s fourth gap, `InstanceReSolve.stale`). That is the one input C2
- * measured as able to empty a filled slot, so offering it before there is a
- * clear-fill action would ship exactly the stale answer the gap describes.
+ * stored — and **that argument is untouched by row A11**.
+ *
+ * The *second* reason this note used to give is now spent, and it is recorded
+ * rather than deleted because it is the argument that produced the action: a
+ * control that re-solved an instance at a new cell would, on the slots the new
+ * cell empties, have left the **old fill in place**, because `fillSlot` and
+ * `pinFill` both write a tile and A1's surface had no delete (`relock.ts`'s
+ * fourth gap, `InstanceReSolve.stale`). `@/store`'s `clearFill` closes that, so
+ * a size control would no longer ship a stale answer — it would still have
+ * nowhere to write the size, which is the reason that decides it.
  *
  * What is offered instead is the honest half: {@link EditorSlot.size} names what
  * the slot wants of a fill — B3's predicate over the instance's own resolved
@@ -77,9 +81,17 @@ import { assemblyState, createRecipeIndex, resolvePart } from '@/screens/assembl
    and its sprite rotator into the builder's chunk to format one string. */
 import { textureSetLabel } from '@/screens/detail/labels'
 import { compositionIndexFor } from '@/screens/detail/slots'
-import type { PlacementId, SlotFill, SlotName, TemplateInstance } from '@/store'
-import type { SlotDoubt, SlotVerdict } from '@/template'
-import { cornerSpanOf, layoutFor, placeTemplateSlots, sizeSentence, slotSizePredicate } from '@/template'
+import type { LockSystem, PlacementId, SlotFill, SlotName, TemplateInstance } from '@/store'
+import { unpinFill, useWorkshopStore } from '@/store'
+import type { SceneReSolve, SlotDoubt, SlotVerdict } from '@/template'
+import {
+  cornerSpanOf,
+  layoutFor,
+  placeTemplateSlots,
+  reSolveScene,
+  sizeSentence,
+  slotSizePredicate,
+} from '@/template'
 
 /* ------------------------------------------------------------------ the filter */
 
@@ -357,11 +369,15 @@ export interface Invalidation {
  * rather than a repair.
  *
  * *"A pick that invalidates a sibling's existing fill is refused with the reason
- * rather than silently repaired."* The reason it cannot be a repair is that both
- * available repairs are wrong: re-solving the sibling would discard a file the
- * user may have pinned, and there is no store action that can **clear** it
- * (`relock.ts`'s fourth gap), so a slot whose new candidate set holds nothing
- * would keep the old answer and read as filled.
+ * rather than silently repaired."* Both available repairs are still wrong, and
+ * since row A11 that is a **policy** rather than a missing capability: re-solving
+ * the sibling would discard a file the user may have pinned, and `clearFill` —
+ * which did not exist when this was written (`relock.ts`'s fourth gap) — would
+ * silently throw that same file away. Emptying a slot on the user's behalf to
+ * make an unrelated press succeed is the destruction §3.3 refuses; emptying it
+ * because the user said so is {@link handSlotToLock}'s neighbour on the same
+ * dialog. So the refusal names the slot, and the user now has a button that acts
+ * on it.
  *
  * {@link AssemblyOption.empties} is the same question asked of still-**open**
  * parts and is already on every card; this is the filled ones. C2 measured the
@@ -416,4 +432,83 @@ export function refusalSentence(
     `${name} cannot go in the ${slot} slot: it would leave ${named} outside what that slot admits. ` +
     'Change that slot first — nothing here will rewrite a choice you have already made.'
   )
+}
+
+/* -------------------------------------------------- handing a slot back */
+
+/**
+ * Unpin one slot and immediately re-solve the instance it is on.
+ *
+ * ## Why the re-solve is immediate, rather than left to the next lock change
+ *
+ * `unpinFill` moves the *authority* over a slot and never the file, so on its
+ * own the press leaves the drawing, the bill and the pack byte-for-byte
+ * identical. C2's `reSolveScene` is the only thing that repairs that, and row
+ * C3 wired it to a lock **change** in `BuilderScreen` — which means an unpin
+ * with no re-solve of its own would sit unrepaired until the user toggled the
+ * lock for an unrelated reason.
+ *
+ * That is not merely a delayed repair, it is a **regression**, and the
+ * measurement is C2's own surface: `PinLockWarning` is emitted from
+ * `relock.ts#pinsOf`, which walks the *pinned* fills only. So an unpin removes
+ * the slot from the pin set, the warning that named the mismatch stops firing —
+ * and the mismatched file is still in the slot and still in the pack. The
+ * `off-slot` fault does not cover it either: the lock is not one of the tags a
+ * slot predicates on (`relock.ts`: *"the candidate set is lock-free"*), so a
+ * lock-wrong fill is perfectly admissible and `billView.ts#slotFaults` says
+ * nothing about it. A gesture whose only visible effect is to silence the
+ * warning about the thing it did not fix is worse than no gesture.
+ *
+ * ## Why it is `reSolveScene` over one instance and not a second walk
+ *
+ * The slot's new answer is a function of the preference, the template and the
+ * instance's **remaining** pins, which is exactly `solveTemplateFills`' input —
+ * and `reSolveScene` is the driver that assembles it, honours the pins that are
+ * left through `fillSlot`'s refusal, and reports what it did. One instance is
+ * one solve: C2 measures 40 solves and 8–9 ms for a 250-instance room, so a
+ * single-instance call is the memo's best case and not a scene-scale cost.
+ *
+ * It re-solves the instance rather than the one slot, and that is the driver's
+ * granularity rather than a choice made here — a template's slots narrow each
+ * other, so the answer for the unpinned slot is only correct alongside its
+ * siblings'. The siblings that are pinned come back `'kept-pinned'` and the ones
+ * that are not are re-solved against the current preference, which is a repair
+ * of a room filled under an older lock rather than a surprise.
+ *
+ * ## The instance is read back out of the store
+ *
+ * `instance` is the render's copy, from **before** the unpin, so its `fills`
+ * still carry `pinned: true` for this slot — and `reSolveScene` reads its pins
+ * off the instance it is handed. Passing the stale copy would put the file that
+ * was just unpinned back in as a fixed preset, the solver would return it
+ * unchanged, and the whole call would be a no-op that looked like a repair.
+ * `useWorkshopStore.getState()` is the truth after a synchronous `setState`, and
+ * this is the one place that needs it.
+ *
+ * `undefined` when there was nothing to unpin — an already-auto slot, an empty
+ * one, or a placement that has left the grid under the open dialog — because
+ * re-solving an instance the user did not touch is a write nobody asked for, and
+ * `unpinFill`'s three-state return is what makes that distinguishable.
+ */
+export function handSlotToLock(
+  index: AssemblyIndex,
+  recipes: RecipeIndex,
+  template: RecipeTemplate,
+  instance: TemplateInstance,
+  slot: SlotName,
+  lock: LockSystem,
+): SceneReSolve | undefined {
+  if (unpinFill(instance.id, slot) !== 'unpinned') return undefined
+  const now = useWorkshopStore.getState().placements[instance.id]
+  if (now === undefined) return undefined
+  return reSolveScene([now], index, {
+    // The one recipe the editor was opened on. A caller holding the whole table
+    // would pass it, but this dialog is opened *on* an instance and `SlotsPanel`
+    // has already resolved its family — so the honest lookup is the one that
+    // answers for that id and for nothing else, rather than a second copy of the
+    // table reaching into a screen from `src/builder/**`.
+    templates: (id) => (id === now.template ? template : undefined),
+    composition: recipes.composition,
+    lock,
+  })
 }

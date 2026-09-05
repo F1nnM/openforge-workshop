@@ -54,9 +54,10 @@ export { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migra
 
 export { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 
-export type { FillOutcome, NewTemplateInstance } from './workshopStore'
+export type { ClearOutcome, FillOutcome, NewTemplateInstance, UnpinOutcome } from './workshopStore'
 export {
   acknowledgeLockSystem,
+  clearFill,
   clearPlacements,
   fillSlot,
   moveGeneratedPlacement,
@@ -76,6 +77,7 @@ export {
   selectPlacementCount,
   selectPlacements,
   setLockSystem,
+  unpinFill,
   useGeneratedPlacements,
   useLockChosen,
   useLockSystem,
