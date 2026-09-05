@@ -93,12 +93,15 @@ import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
 import type { MeshTask } from '@/mesh'
 import { meshQueue, useMeshQueue } from '@/mesh'
+import { useLockSystem } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
 import { AO_RADIUS, Stage } from '@/three/Stage'
 import { Eyebrow } from '@/ui/primitives'
 
 import type { SurfaceStatus } from './edits'
 import { describeSurface } from './edits'
+import type { FillAuthorities } from './fills'
+import { createPlacementFiller } from './fills'
 import type { Room3D } from './instances'
 import { buildRoom3D, roomBlobs } from './instances'
 import { LOD_ROOM_BUDGET_BYTES, lodObjectBudget } from './lod'
@@ -164,23 +167,66 @@ export interface BuilderRoomProps {
    * passes the whole `catalogFile.assets`, so nothing changed but the type.
    */
   readonly assets: Pick<CatalogAssets, 'lod' | 'models'>
+  /**
+   * The three authorities row **C5**'s fill solve needs, and not one more.
+   *
+   * `BuilderScreen` already holds all three, memoised, for the bill and for the
+   * lock re-solve: `buildAssemblyIndex` over 8,702 records, a `TemplateLookup`
+   * over `PLACEABLE_TEMPLATES`' 91 families, and `compositionIndexFor`'s shared
+   * 409,432-byte inverted index. Passing them is what keeps the room, the bill
+   * and the slots panel answering about one archive; deriving them here would
+   * build a second assembly index for an identical answer.
+   *
+   * **Required, so the wiring cannot be forgotten silently.** The lock
+   * preference is deliberately *not* here — it is read from the store below, the
+   * same store `BuilderScreen` reads it from, because it is a preference rather
+   * than an index and a prop would let the two drift.
+   */
+  readonly fill: FillAuthorities
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
 }
 
-export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl }: BuilderRoomProps) {
+export function BuilderRoom({ catalog, scene, tools, assets, fill, onStatus, fetchImpl }: BuilderRoomProps) {
   /**
    * The armed **family**, straight off the shared tool state.
    *
-   * No resolution left to do, and that is row A1's doing rather than a
+   * No resolution left to do *here*, and that is row A1's doing rather than a
    * simplification: the palette arms a `TemplateId` (§2.5 — *"templates are the
    * only placement unit"*), and turning one into the files that fill its slots is
-   * row **C2**'s solver. There is no lock hop either — a `SlotFill` names an exact
-   * file (decision **D1**), so `planCatalogFromFile` takes no `lock` and this
-   * component has no preference to read.
+   * row **C2**'s solver, which {@link filler} below calls on the click. There is
+   * no lock hop for the *drawing* — a `SlotFill` names an exact file (decision
+   * **D1**), so `planCatalogFromFile` takes no `lock`.
    */
   const armed = tools.selectedTemplate
+
+  /**
+   * The click's fill solver, memoised on everything that can change its answer.
+   *
+   * The lock is read from the store rather than taken as a prop, and read
+   * **unconditionally** rather than through `useLockChosen`: `buildBillOfTiles`
+   * and `reSolveScene` both take `lock` as it stands, so a filler that declined
+   * the default preference would place files the bill prices differently and the
+   * next lock change would rewrite every one of them under the user.
+   *
+   * `family` — the room's texture preference — is deliberately absent. It is a
+   * `FillContext` field with no control anywhere in the app yet, and passing a
+   * guess would reorder every candidate list by a preference nobody expressed.
+   *
+   * One `useMemo`, so the memo table inside the filler survives re-renders: a
+   * room built by clicking the same palette row twenty times is **one** solve and
+   * nineteen hits.
+   */
+  const lock = useLockSystem()
+  const filler = useMemo(
+    () =>
+      createPlacementFiller({
+        index: fill.index,
+        context: { templates: fill.templates, composition: fill.composition, lock },
+      }),
+    [fill.index, fill.templates, fill.composition, lock],
+  )
 
   /**
    * The objects to load: every drawn part's, and nothing else.
@@ -195,10 +241,16 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
    * **The armed item is no longer in it, and that follows from what "armed"
    * means now.** Row R2 added the armed tile's own blob here so the first ghost
    * had geometry before the first placement; since row A1 the armed thing is a
-   * family, its files are row **C2**'s to choose, and the marker
-   * `edits.ts#templateGhost` draws needs no mesh at all. When C2 lands, its
-   * solved fill map is one more source to union in here — and the ghost gets its
-   * geometry back in the same change.
+   * family, its files are the fill solver's to choose, and the marker
+   * `edits.ts#templateGhost` draws needs no mesh at all.
+   *
+   * Row **C5** makes that a *choice* rather than a limit: {@link filler} can
+   * answer for the armed family before the click, memoised, so its blobs could be
+   * unioned in here and prefetched. They are not, deliberately — the marker draws
+   * no mesh, so the fetch would warm a cache for a placement the user may never
+   * make, and the placement's own blobs arrive through `scene` the instant it
+   * lands. The union is one line the day the ghost draws geometry, which is
+   * `RoomSurface`'s note on B2's layout rule.
    *
    * Templates make this cheaper rather than dearer: 40 of the 40 shipped families
    * carry both a `floor` and a `base`, so 80 of their 128 parts draw out of a
@@ -346,6 +398,7 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
               fit={fit}
               tools={tools}
               armed={armed}
+              fill={filler}
               onStatus={publish}
               announce={announce}
               keyHelpId={KEY_HELP_ID}
@@ -524,23 +577,27 @@ function SurfaceNotice({
   }
 
   /*
-     Row A4b's own line, and it is last because it is the least alarming of the
-     five and the only one the user can fix from here.
+     Row A4b's own line, re-worded by row **C5** and kept last for the same
+     reason: it is the least alarming of the five and the only one the user can
+     act on from here.
 
-     An instance with no filled slot is a **legitimate** state — contract C-g,
-     §3.2 *"places anyway"* — and it is the state every placement lands in until
-     row C2's fill solver runs, so it is by far the commonest thing this notice
-     will say. What makes it worth a sentence rather than silence is that there is
-     nothing on screen at all: the room draws no geometry, no plate and no marker
-     for it (`PlanScene.unfilled` carries no coordinates to draw one at), so
-     without this line a click on the plan looks like a click that did nothing.
+     **What changed is how often it is true.** A4b wrote it as *"the state every
+     placement lands in until row C2's fill solver runs"*, and it was — the click
+     wrote `fills: {}`. C5 solves the fills on the click, so an instance reaches
+     `PlanScene.unfilled` only when the solver could fill **nothing**: a size
+     nothing in the archive carries (C2's `no-candidate`, which no sibling change
+     can reopen), a family this build ships no recipe for, or a room restored from
+     before its parts were chosen. Still legitimate — contract C-g, §3.2 *"places
+     anyway"* — and still worth a sentence rather than silence, because there is
+     nothing on screen at all for it: no geometry, no plate and no marker
+     (`PlanScene.unfilled` carries no coordinates to draw one at).
   */
   if (unfilled > 0) {
     return (
       <p className="of-b3d-plate" role="status">
-        {unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts chosen
-        yet, so {unfilled === 1 ? 'it draws' : 'they draw'} nothing. Fill their slots to give{' '}
-        {unfilled === 1 ? 'it' : 'them'} something to build.
+        {unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts the
+        archive could fill, so {unfilled === 1 ? 'it draws' : 'they draw'} nothing. Open{' '}
+        {unfilled === 1 ? 'its slots' : 'their slots'} to choose parts, or try another size.
       </p>
     )
   }
@@ -595,6 +652,12 @@ function RoomReadout({
         whether it is ten templates or thirty. The unfilled count sits here rather
         than beside `Drawn` because those instances contribute no part at all —
         they are placements with nothing in them.
+
+        Since row **C5** that count is an exception rather than the rule: a click
+        carries C2's solve, so a placement lands with its parts and this tail
+        appears only for an instance the archive could fill no slot of. It is kept
+        for exactly that case — a zero here and a non-zero `Drawn` is the reading
+        that says every placement is real geometry.
       */}
       {placements === 0 ? null : (
         <div>

@@ -578,6 +578,24 @@ function Builder({ index }: { index: CatalogIndex }) {
           scene={scene}
           tools={tools}
           assets={index.file.assets}
+          /*
+            Row **C5**: the three authorities the click's fill solve needs, and
+            the same three objects the bill and the lock re-solve above are built
+            from rather than second copies — `buildAssemblyIndex` is 8,702
+            records and `compositionIndexFor` is a 409,432-byte inverted index
+            this screen has already paid for. Passed as a literal because
+            `BuilderRoom` memoises its filler on the three leaves, which are
+            memos of this component; the lock it reads from the store itself.
+
+            **This is the one edit row C5 made outside its own files**, and it
+            had to be here: `Builder3DPanel` takes no catalog file, so nothing
+            behind the `lazy` line can reach an index, and without these three
+            props every placement would keep landing with `fills: {}`. The prop
+            is required rather than optional for exactly that reason — a forgotten
+            wiring is a compile error instead of a builder that silently draws
+            nothing.
+          */
+          fill={{ index: assembly, templates, composition }}
           onStatus={setStatus}
         />
 

@@ -17,10 +17,21 @@
  *
  * So the tests for them are deleted with them rather than weakened into
  * assertions about a marker, and what replaces them is the pair of properties
- * that *are* still true and are load-bearing: a click places an instance with **no
- * fills** — contract **C-g** — and the anchor it places at is the anchor the
- * marker was drawn at, from one call. The refusals that remain are `move.ts`'s,
- * and every one of those is checked against the reason it exists.
+ * that *are* still true and are load-bearing: the anchor a click places at is the
+ * anchor the marker was drawn at, from one call, and the fills it places with are
+ * the ones the verdict was handed. The refusals that remain are `move.ts`'s, and
+ * every one of those is checked against the reason it exists.
+ *
+ * ## Row C5: the click carries a fill, and A4b's `fills: {}` is now a *state*
+ *
+ * A4b asserted that a placement lands with **no fills** — contract C-g, and true
+ * of every placement at the time because nothing solved one. Row C5 wires C2's
+ * solver to the click, so the assertion splits in two: a click **with** a
+ * {@link PlacementFill} places what the solver chose and announces it, and a
+ * click without one — the landing hero, a component test, any caller with no
+ * catalog — still places with nothing, which is C-g intact rather than C-g
+ * deleted. The solve itself is `fills.test.ts`'s subject; what is asserted here
+ * is that this module carries an answer and never invents one.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -42,10 +53,32 @@ import {
   removalOf,
   templateGhost,
 } from './edits'
+import type { PlacementFill } from './fills'
 import { sceneOf } from './fixture'
 
 const CATALOG = planCatalogFromFile(fixtureCatalogFile())
 const FINE = 0.5
+
+/**
+ * A solved fill, as `fills.ts` hands one over.
+ *
+ * Hand-built rather than solved, and that is the separation this module is
+ * shaped for: `planPlacement` is pure, so its tests state *what it does with an
+ * answer* and never re-measure the answer. `fills.test.ts` solves real ones over
+ * a real index.
+ */
+function solved(over: Partial<PlacementFill> = {}): PlacementFill {
+  return {
+    fills: { floor: { tile: FIXTURE_IDS.floor2, pinned: false } } as PlacementFill['fills'],
+    slots: 2,
+    filled: 1,
+    needsChoice: [],
+    doubts: [],
+    known: true,
+    queries: 7,
+    ...over,
+  }
+}
 
 /* -------------------------------------------------------------------- placing */
 
@@ -63,24 +96,68 @@ describe('placing', () => {
     expect(edit.message).toContain('Placed')
   })
 
-  it('places with no fills at all, which is contract C-g rather than a stub', () => {
+  it('places the fills it was handed, and writes nothing of its own', () => {
+    // Row C5's seam in one assertion: the solver's map reaches the verdict
+    // unchanged, so `RoomSurface` writes what was solved rather than an empty
+    // literal — which is what it wrote, for every placement, until this row.
+    const fill = solved()
+    const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0, 0], FINE, fill)
+    expect(edit.kind).toBe('place')
+    if (edit.kind !== 'place') return
+    expect(edit.fills).toBe(fill.fills)
+    expect(filledSlots(edit.fills)).toEqual(['floor'])
+  })
+
+  it('places with no fills when the caller has no catalog, which is contract C-g', () => {
     // §3.2 places a template with no candidate for a part *"anyway"*, and the
     // store accepts it — `placeTemplate` has deliberately no completeness
-    // argument. Until row C2's solver exists this is the state **every**
-    // placement lands in, so it has to be a placement and not a refusal.
+    // argument. A caller with no index cannot honestly say anything about the
+    // parts, so this has to be a placement and not a refusal.
     const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0, 0], FINE)
     expect(edit.kind).toBe('place')
     if (edit.kind !== 'place') return
     expect(filledSlots(edit.fills)).toEqual([])
-  })
-
-  it('says so in the message, because an empty cell otherwise looks broken', () => {
-    // The one thing the surface owes a user who has just clicked and seen
-    // nothing appear. Load-bearing rather than polite: without it a correct
-    // placement is indistinguishable from a dead canvas.
-    const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0, 0], FINE)
     expect(edit.message).toMatch(/no parts chosen/i)
     expect(edit.message).toMatch(/slots/i)
+  })
+
+  it('discloses the auto-fill rather than reading like a room the user chose', () => {
+    // §3.4's seventh cost — *"a plausible room nobody chose"*. The count of
+    // parts chosen **for** the user is the disclosure, and it is in the sentence
+    // the surface announces rather than in a panel they may never open.
+    const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0, 0], FINE, solved({ filled: 3, slots: 3 }))
+    expect(edit.message).toContain('3 of 3 parts chosen for you')
+  })
+
+  it('names the slot that still needs a choice, and why', () => {
+    const edit = planPlacement(
+      FIXTURE_TEMPLATE,
+      0,
+      [0, 0],
+      FINE,
+      solved({ needsChoice: [{ slot: 'right wall', gap: 'no-candidate' } as never] }),
+    )
+    expect(edit.message).toContain('The right wall part needs a choice')
+    expect(edit.message).toContain('nothing in the archive is this size')
+  })
+
+  it('surfaces B2’s doubt on a one-click placement, so it cannot look clean', () => {
+    /* C2 composed its own fills with B2's geometry and measured 4 `over-run`
+       walls on the 2 external-corner `single_piece` recipes, whose mitre is in
+       no tag and no measured mesh. C3 mounts `slotDoubtSentence` in the editor;
+       a one-click placement has to say the same thing, in the same words. */
+    const edit = planPlacement(
+      FIXTURE_TEMPLATE,
+      0,
+      [0, 0],
+      FINE,
+      solved({
+        filled: 2,
+        slots: 2,
+        doubts: [{ part: 'right wall', code: 'over-run', want: 2, got: 2.5 }],
+      }),
+    )
+    expect(edit.message).toContain('this edge is 2 units and the pieces on it come to 2.5')
   })
 
   it('names the family the way a readout does, not by its slug', () => {
@@ -270,9 +347,12 @@ describe('turning', () => {
   })
 
   it('turns the armed family by the corpus default when nothing is under the pointer', () => {
-    // A family's step is a fact about the files in its parts and row C2 has not
-    // chosen them, so this is `DEFAULT_ROTATION_STEP_DEG` by name — the one place
-    // the default is written down — rather than a literal in this file.
+    // A family's step is a fact about the files in its parts, and `R` is pressed
+    // *before* the click that solves them — so this is
+    // `DEFAULT_ROTATION_STEP_DEG` by name, the one place the default is written
+    // down, rather than a literal in this file. Row C5 makes a finer answer
+    // reachable (solve on the keypress, memoised) and declines to change what a
+    // key press means as a side effect of wiring the click; `edits.ts` says so.
     const edit = planTurn(sceneOf(CATALOG, []), null, undefined, FIXTURE_TEMPLATE, 0)
     expect(edit.kind).toBe('arm')
     if (edit.kind !== 'arm') return
@@ -337,7 +417,12 @@ describe('the contextual line', () => {
       waiting: 2,
       unfilled: 1,
     })
-    expect(hint).toMatch(/no parts chosen/i)
+    /* Re-worded by row C5 and still ordered above the mesh line, which is the
+       property this test is about. What changed is the claim: an instance with
+       nothing in it is no longer the stage every placement passes through, it is
+       the archive having nothing for its slots — so the line says that and
+       offers the choice rather than describing a solver that had not run. */
+    expect(hint).toMatch(/no parts the archive could fill/i)
     expect(hint).not.toMatch(/no mesh yet/)
   })
 

@@ -26,12 +26,36 @@
  * `fixtureDesignOf` is gone with the field it bridged to. A test names the file
  * it means and {@link recordOf} looks it up directly, because since A1
  * `PlanCatalog.record` takes a `TileId` (decision **D1**).
+ *
+ * ## Row C5: a third input, because placing now solves a fill
+ *
+ * `RoomSurface` and `BuilderRoom` take the three authorities C2's solver walks,
+ * and they are **required** props precisely so a caller cannot forget them — so
+ * every test that mounts either needs one. {@link fixtureAuthorities} builds a
+ * real one over the eleven-record catalog: a real `buildAssemblyIndex`, a real
+ * `createCompositionIndex` and a two-slot template, so a fixture click exercises
+ * the same solve the app does rather than a stub that always answers the same
+ * thing. Eleven records is 0.1 ms of index build, which is why a real one is
+ * affordable where the archive's 8,702 would not be.
  */
+import type { AssemblyTemplate } from '@/assembly'
+import { buildAssemblyIndex } from '@/assembly'
 import type { PlanCatalog, PlanScene, PlanTools, SnapMode } from '@/builder/canvas'
 import { SNAP_STEP, buildPlanScene, createStyleResolver } from '@/builder/canvas'
-import { FIXTURE_SLOTS, fixtureFills, fixtureInstance } from '@/builder/canvas/fixture'
-import type { CatalogRecord, TileId } from '@/catalog'
+import {
+  FIXTURE_SLOTS,
+  FIXTURE_TEMPLATE,
+  fixtureCatalogFile,
+  fixtureFills,
+  fixtureInstance,
+} from '@/builder/canvas/fixture'
+import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
+import { buildAggregateIndex } from '@/catalog'
+import { createCompositionIndex } from '@/composition'
 import type { TemplateId, TemplateInstance, WorkshopState } from '@/store'
+
+import type { FillAuthorities, PlacementFiller } from './fills'
+import { createPlacementFiller } from './fills'
 
 /**
  * A fixture id as the branded `TileId` the catalog and the store want.
@@ -123,6 +147,8 @@ export interface ToolCalls {
   readonly tool: string[]
   readonly snap: SnapMode[]
   readonly selected: (string | null)[]
+  /** Row C5: the size positions the palette armed. */
+  readonly armedSize: (readonly string[])[]
   toggledSnap: number
 }
 
@@ -134,12 +160,12 @@ export interface ToolCalls {
  * `FIXTURE_TEMPLATE` should not have to say so twice.
  */
 export function planTools(
-  overrides: Partial<Pick<PlanTools, 'tool' | 'snap' | 'rotation'>> & {
+  overrides: Partial<Pick<PlanTools, 'tool' | 'snap' | 'rotation' | 'armedSize'>> & {
     readonly selectedTemplate?: string | null | undefined
   } = {},
 ): PlanTools & { readonly calls: ToolCalls } {
   const snap: SnapMode = overrides.snap ?? 'fine'
-  const calls: ToolCalls = { rotate: [], tool: [], snap: [], selected: [], toggledSnap: 0 }
+  const calls: ToolCalls = { rotate: [], tool: [], snap: [], selected: [], armedSize: [], toggledSnap: 0 }
   const selected = overrides.selectedTemplate ?? null
   return {
     tool: overrides.tool ?? 'place',
@@ -147,6 +173,11 @@ export function planTools(
     step: SNAP_STEP[snap],
     rotation: overrides.rotation ?? 0,
     selectedTemplate: selected === null ? null : (selected as TemplateId),
+    /* Row C5's other half of *what is armed*. A plain field, defaulting to the
+       palette's `any size` position — which is `[]` and a real position rather
+       than an absence, so a test that says nothing about size still exercises
+       the path a user who never touched the control takes. */
+    armedSize: overrides.armedSize ?? [],
     setTool: (next) => calls.tool.push(next),
     toggleTool: () => calls.tool.push('toggle'),
     setSnap: (next) => calls.snap.push(next),
@@ -156,6 +187,65 @@ export function planTools(
     rotate: (step, direction = 1) => calls.rotate.push({ step, direction }),
     setRotation: () => undefined,
     setSelectedTemplate: (id) => calls.selected.push(id),
+    setArmedSize: (size) => calls.armedSize.push(size),
     calls,
   }
+}
+
+/* -------------------------------------------------------------- the fill solve */
+
+/**
+ * A two-slot template for {@link FIXTURE_TEMPLATE}, over the fixture's own tags.
+ *
+ * `floor` and `right wall`, in that order, because those are the two `shape|`
+ * tags the
+ * eleven records carry more than one of — so the walk has something to order and
+ * something to skip. **No `base`**, deliberately: the fixture has no
+ * `shape|base` record, and a slot that could never fill would make every fixture
+ * placement report a gap that says nothing about the test.
+ *
+ * The second name **contains a space**, which is the property the canvas fixture
+ * exists to keep in play — 8 of the corpus's 128 parts carry one — and it is
+ * what a memo key joined on a printable delimiter would get wrong.
+ *
+ * `{ floor, right wall }` is also not a part-name set `rules.ts` has a
+ * convention for,
+ * so `layoutFor` answers `undefined` and a fixture fill carries no B2 doubts.
+ * That is the right default here: the doubts are C2's own measurement and
+ * `fills.test.ts` exercises them against a template that *has* a layout.
+ */
+export const FIXTURE_FILL_TEMPLATE: AssemblyTemplate = {
+  id: FIXTURE_TEMPLATE,
+  tags: ['object|tile'],
+  parts: [
+    { name: FIXTURE_SLOTS.floor, tags: { require: [{ tag: 'shape|floor' }] } },
+    { name: FIXTURE_SLOTS.rightWall, tags: { require: [{ tag: 'shape|wall' }] } },
+  ],
+}
+
+/**
+ * The three authorities a surface needs, over the eleven-record catalog.
+ *
+ * Real indexes and a real lookup rather than stubs — see the module note. Only
+ * {@link FIXTURE_TEMPLATE} resolves, so a test can also exercise the
+ * `unknown-template` arm by arming `OTHER_FIXTURE_TEMPLATE`, which is a state
+ * C1 measured over the real table (all 51 generated families report it against
+ * the 40-recipe one) rather than an invented failure.
+ */
+export function fixtureAuthorities(file: CatalogFile = fixtureCatalogFile()): FillAuthorities {
+  const composition = createCompositionIndex(file, buildAggregateIndex(file))
+  return {
+    index: buildAssemblyIndex(file),
+    templates: (id) => (id === FIXTURE_TEMPLATE ? FIXTURE_FILL_TEMPLATE : undefined),
+    composition,
+  }
+}
+
+/** {@link fixtureAuthorities} as the filler `RoomSurface` takes. */
+export function fixtureFiller(file?: CatalogFile): PlacementFiller {
+  const authorities = file === undefined ? fixtureAuthorities() : fixtureAuthorities(file)
+  return createPlacementFiller({
+    index: authorities.index,
+    context: { templates: authorities.templates, composition: authorities.composition },
+  })
 }

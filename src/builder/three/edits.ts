@@ -38,23 +38,38 @@
  *     and commits** because `overlap.ts` is emphatic about that.
  *   - **Placing has almost nothing left to refuse**, and that is not a
  *     simplification — it is the honest consequence of what an armed template
- *     *is*. Turning a family into files is row **C2**'s fill solver and it does
- *     not exist, so at the moment of the click this module knows the family, the
- *     cursor and the pending angle, and it does not know a footprint. Every
- *     refusal `computeGhost` produced was a fact about a footprint: `none` has
- *     nothing to draw, an identical file at an identical corner and angle is an
- *     invisible double, an outline overlaps, a band rule is unmeasured. **None of
- *     those four is answerable about a family**, and inventing an answer — say by
+ *     *is*. Every refusal `computeGhost` produced was a fact about a footprint:
+ *     `none` has nothing to draw, an identical file at an identical corner and
+ *     angle is an invisible double, an outline overlaps, a band rule is
+ *     unmeasured. **None of those four is answerable about a family** from the
+ *     cursor and the pending angle alone, and inventing an answer — say by
  *     picking the first file the palette happens to hold — would refuse
  *     placements the app will accept and permit ones it will not.
  *
- * So {@link planPlacement} places, and contract **C-g** is what makes that
- * correct rather than lax: `fills` may name *no* slots, §3.2 places a template
- * with no candidate for a part *"anyway"*, and `PlanScene.unfilled` is the state
- * the instance lands in. `workshopStore.ts` states it from the store's end —
- * *"an unfilled slot is an ordinary state of an instance, not a degraded one"*.
- * The one thing the surface owes the user is to **say** so, which is why the
- * message names the empty slots instead of reading like a completed placement.
+ * ## Row C5: the click carries a **fill**, and that is the whole of the row
+ *
+ * A4b wrote *"turning a family into files is row C2's fill solver and it does not
+ * exist"*, and it did not. It does now, and until this row it was wired to a lock
+ * change and to nothing else — so `planPlacement` wrote `fills: {}` and, since
+ * nothing draws for an unfilled instance, **placing a template drew nothing**.
+ * The three surfaces below that said so were correct when they were written and
+ * are re-worded here, because a sentence that describes a defect after the defect
+ * is fixed is just a wrong sentence.
+ *
+ * What changed is one parameter. {@link planPlacement} takes a
+ * {@link PlacementFill} — `fills.ts` composes C2's solver, C1's armed size and
+ * B2's closure check into it — and this module stays pure: it decides *what the
+ * click means* and never solves anything itself. The verdict carries the store's
+ * own fill map, so `RoomSurface` still writes what the verdict says.
+ *
+ * Contract **C-g** did not stop mattering; it stopped being the *usual* case.
+ * `fills` may still name no slots, §3.2 still places a template with no candidate
+ * for a part *"anyway"*, `PlanScene.unfilled` is still where such an instance
+ * appears, and `workshopStore.ts` still states it from the store's end — *"an
+ * unfilled slot is an ordinary state of an instance, not a degraded one"*. The
+ * one thing the surface owes the user is to **say** what it did: how many parts
+ * were chosen for them, which slots still need a choice, and any doubt B2 has
+ * about the ones that were chosen.
  *
  * {@link templateGhost} is the marker that goes with it, and `ghost.ts`'s
  * `computeGhost` is deliberately not called: it takes one `CatalogRecord` and
@@ -94,6 +109,9 @@ import {
 import { DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
 import type { PlacementId, TemplateId, TemplateInstance } from '@/store'
 
+import type { PlacementFill } from './fills'
+import { describePlacementFill } from './fills'
+
 /**
  * A gesture's outcome: at most one store write, and the sentence to say.
  *
@@ -118,13 +136,13 @@ export type SurfaceEdit =
       readonly anchor: PlanPoint
       readonly rotation: number
       /**
-       * The slots this instance is placed with — **none**, until row C2 lands.
+       * The slots this instance is placed with, every one `pinned: false`.
        *
-       * Carried as a field rather than left implicit so the caller writes what
-       * the verdict says instead of an empty literal of its own, and so the day
-       * C2's solver produces a fill map this arm needs no new shape. Contract
-       * **C-g**: an instance with no filled slot is legitimate, and
-       * `PlanScene.unfilled` reports it.
+       * C2's solve, carried through unchanged. A4b carried the field before
+       * there was anything to put in it *"so the day C2's solver produces a fill
+       * map this arm needs no new shape"* — row C5 is that day, and the arm
+       * needed no new shape. It may still name **no** slots: contract **C-g**,
+       * and `PlanScene.unfilled` reports the instance when it does.
        */
       readonly fills: TemplateInstance['fills']
       readonly message: string
@@ -172,9 +190,18 @@ export function writes(edit: SurfaceEdit): boolean {
  *
  * Not a claim about the family's size, and it must not be read as one — the
  * `s2w` corner families are 2 × 2 and the corridors are longer still. It is the
- * *cursor's* own cell, which is the only thing the surface can honestly draw
- * before a fill solver has said which files the instance will hold. See
- * {@link templateGhost}.
+ * *cursor's* own cell.
+ *
+ * **Row C5 solves the fills on the click and still draws one cell**, which is a
+ * decision rather than an omission. The footprint is the union of the parts'
+ * own boxes *placed by B2's rule*, and that rule is not wired to the canvas:
+ * `BuilderScreen` builds its `PlanCatalog` with `originSlotLayout`, so every
+ * part of a placed instance is drawn at the instance's origin today. A marker
+ * that claimed a union the renderer does not yet draw would be wrong in the one
+ * direction that matters — it would promise a shape. Wiring
+ * `catalog.ts#SlotLayoutRule` needs its signature widened to the instance's whole
+ * fill map (`builder/canvas/fixture.ts#FIXTURE_CELL` measures why), which is a
+ * row of its own. See {@link templateGhost}.
  */
 const MARKER_EXTENT = { w: 1, d: 1 } as const
 
@@ -191,9 +218,9 @@ const MARKER_EXTENT = { w: 1, d: 1 } as const
  * ## What the marker claims, and what it does not
  *
  * It is a **1 × 1 cell outline at the snapped anchor** and nothing more. Not the
- * instance's footprint — a family's footprint is the union of its parts' and the
- * parts are what row **C2**'s fill solver decides, so there is nothing to take a
- * union over yet. Not turned by `rotation` either, and that is deliberate rather
+ * instance's footprint — a family's footprint is the union of its parts' boxes
+ * *as B2's rule places them*, and that rule does not reach the canvas yet; see
+ * {@link MARKER_EXTENT}. Not turned by `rotation` either, and that is deliberate rather
  * than unfinished: the anchor is the *minimum corner* the store receives, which
  * `slotAnchor` keeps invariant under rotation for a real instance, and a square
  * marker is already its own bounding box — so turning it could only move it away
@@ -237,38 +264,47 @@ export function templateGhost(
 }
 
 /**
- * What a click at `at` would place.
+ * What a click at `at` would place, with the fills it would place it with.
  *
  * Two outcomes rather than the old five, and the module note sets out why: with
  * an armed *family* there is no footprint to refuse, duplicate, overlap or
  * disclose a band rule about. So this refuses exactly one thing — an empty
  * palette — and otherwise places.
  *
- * The instance goes down with **no fills**, which is contract **C-g** and not a
- * shortcut, and the sentence says so: a user who has just placed a template and
- * sees an empty cell needs to be told the parts are chosen next, or the room
- * looks broken. `PlanScene.unfilled` is where the instance then appears, and the
- * panel that renders that list offers the Remove.
+ * `fill` is `fills.ts`'s answer for the armed family at the armed size, and it
+ * is a **parameter** rather than a call, which is what keeps this module pure and
+ * testable: the solver needs an 8,702-record assembly index and a 409,432-byte
+ * inverted index, and no test in this repo could mount a surface that built them
+ * itself. `RoomSurface` holds the memoised filler and hands over one answer.
+ *
+ * **It is optional, and the absent case is a real one rather than a fallback**:
+ * a caller with no catalog — the landing hero, a component test — arms a family
+ * over six records and can honestly say nothing about its parts. That placement
+ * *does* draw nothing, and the sentence says so, which is A4b's wording kept
+ * exactly where it is still true.
  */
 export function planPlacement(
   template: TemplateId | null,
   rotation: number,
   at: PlanPoint,
   step: number,
+  fill?: PlacementFill,
 ): SurfaceEdit {
   if (template === null) {
     return { kind: 'none', message: 'No template is armed. Choose one in the palette first.' }
   }
   const ghost = templateGhost(template, rotation, at, step)
+  const placed = `Placed ${ghost.name} at ${describeCell(ghost.anchor[0], ghost.anchor[1])}`
   return {
     kind: 'place',
     template,
     anchor: ghost.anchor,
     rotation: ghost.rotation,
-    fills: {},
+    fills: fill?.fills ?? {},
     message:
-      `Placed ${ghost.name} at ${describeCell(ghost.anchor[0], ghost.anchor[1])} with no parts chosen yet. ` +
-      'Fill its slots to give it something to draw.',
+      fill === undefined
+        ? `${placed} with no parts chosen yet. Fill its slots to give it something to draw.`
+        : `${placed}: ${describePlacementFill(fill)}`,
   }
 }
 
@@ -371,10 +407,14 @@ export function describeAbandon(drag: MoveDrag, scene: PlanScene): string {
  * placed template is exact.
  *
  * For an armed **family** it is {@link ARMED_TURN_STEP_DEG}, because a family's
- * step is a fact about its parts' files and row **C2** has not chosen them yet.
- * It is `DEFAULT_ROTATION_STEP_DEG` by name rather than a literal 90, so the one
- * place the corpus's default is written down is still the only place — and so
- * the day a solver can answer this, one constant is what changes.
+ * step is a fact about its parts' files and `R` is pressed *before* the click
+ * that solves them. Row **C5** makes a finer answer reachable — the filler is
+ * memoised, so `pieceRotationStep` over a solved fill would cost nothing on the
+ * second press — and declines to take it, because changing what a key press
+ * means is a decision about the gesture rather than a consequence of wiring the
+ * click. It is `DEFAULT_ROTATION_STEP_DEG` by name rather than a literal 90, so
+ * the one place the corpus's default is written down is still the only place, and
+ * one constant is still what changes.
  */
 export function planTurn(
   scene: PlanScene,
@@ -469,11 +509,15 @@ export interface SurfaceHintInput {
   /**
    * Instances with no filled slot at all — `PlanScene.unfilled.length`.
    *
-   * **The state a fresh placement lands in**, until row C2's fill solver runs, so
-   * it is the single most important thing this line can say: a user who clicks
-   * the plan gets an instance in the store, a marker over the cell and no
-   * geometry, and without a sentence naming that the app looks broken. Contract
-   * **C-g** makes it legitimate; this makes it legible.
+   * **No longer the state a fresh placement lands in.** Until row C5 it was: the
+   * click wrote `fills: {}` and every placement landed here, which is why A4b
+   * made it the line's highest-priority sentence. The click now carries C2's
+   * solve, so an instance reaches this list only when the solver could fill
+   * *nothing* — a size the archive has no tag for, or a family this build has no
+   * recipe for — or when it was restored from a room saved before its parts were
+   * chosen. That makes it rarer and **more** worth naming, because it is now a
+   * fact about the archive rather than a stage every placement passes through.
+   * Contract **C-g** makes it legitimate; this makes it legible.
    */
   readonly unfilled: number
 }
@@ -521,9 +565,9 @@ export function describeSurfaceHint(input: SurfaceHintInput): string {
   const name = describeTemplate(armed)
   if (unfilled > 0) {
     return (
-      `${unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts ` +
-      `chosen yet, so ${unfilled === 1 ? 'it draws' : 'they draw'} nothing. Fill their slots, or click to place ` +
-      `${name}.`
+      `${unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts the ` +
+      `archive could fill, so ${unfilled === 1 ? 'it draws' : 'they draw'} nothing. Choose ` +
+      `${unfilled === 1 ? 'its' : 'their'} parts, or click to place ${name}.`
     )
   }
   if (waiting > 0) {

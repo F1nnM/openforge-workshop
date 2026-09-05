@@ -399,10 +399,12 @@ describe('one instance, many parts — row A4b', () => {
   })
 
   it('places an instance with no filled slots and draws nothing for it', async () => {
-    // Contract **C-g**, and the state every placement lands in until row C2's
-    // fill solver runs. It must not be a group, must not be a gap, and must not
-    // take the room down: `buildPlanScene` reports it in `PlanScene.unfilled` and
-    // this module never sees it.
+    // Contract **C-g**. Since row C5 the click solves its fills, so this is the
+    // *exception* — an archive with nothing for the family's slots, or a restored
+    // room — rather than the state every placement lands in. It must still not be
+    // a group, must not be a gap, and must not take the room down:
+    // `buildPlanScene` reports it in `PlanScene.unfilled` and this module never
+    // sees it.
     const catalog = planCatalogFromFile(file)
     const placements = placementsOf([['p1', { tiles: [], x: 0, z: 0 }]])
     const scene = buildPlanScene(placements, catalog, createStyleResolver(catalog))

@@ -202,6 +202,10 @@ function PaletteHarness({ query = '' }: { query?: string }) {
         onQueryChange={() => undefined}
       />
       <p data-testid="selected-template">{tools.selectedTemplate ?? 'none'}</p>
+      {/* Row C5: the armed **size**, as `PlanTools` now carries it. The chip on
+          screen is the same fact rendered by the panel; this is the fact the 3D
+          surface reads to solve the fills, and the two must not diverge. */}
+      <p data-testid="armed-size">{tools.armedSize.join(' ') || 'any'}</p>
       <p data-testid="tool">{tools.tool}</p>
     </div>
   )
@@ -506,6 +510,46 @@ describe('the palette', () => {
     expect(
       within(screen.getByRole('group', { name: 'Recent' })).getAllByRole('button'),
     ).toHaveLength(2)
+  })
+
+  it('hands the armed size to `PlanTools`, which is what the click solves with', () => {
+    /* **Row C5's handoff.** The size position was `PalettePanel`'s own state
+       while nothing read it, and C1 wrote down the consequence: *2 wide by 2
+       deep* narrowed a count on screen and the placement got the solver's
+       default, because `three/edits.ts` placed with `fills: {}`. The position now
+       lives beside the family in `PlanTools`, which is the only object the
+       palette and the 3D surface share. */
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Floor: Straight'))
+    expect(screen.getByTestId('armed-size')).toHaveTextContent('any')
+
+    const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
+    fireEvent.click(within(sizes).getByRole('button', { name: /^2 wide by 2 deep/ }))
+
+    // The exact `size|` spelling `FillContext.size` takes, so the palette and
+    // B4's `GENERATED_FAMILY_SIZES` cannot drift into two vocabularies.
+    expect(screen.getByTestId('armed-size')).toHaveTextContent('size|width|2 size|depth|2')
+    expect(armedSize()).toBe('2 wide by 2 deep, 1 tiles')
+  })
+
+  it('drops the armed size when a different family is armed', () => {
+    /* A position is a list of `size|` tags and B4's domains differ per family —
+       8 of the 51 have none at all. Carrying 2x2 across would hand the solver a
+       size the new family's candidates may not carry, which C2 classifies
+       `no-candidate` (*nothing in the archive is this size*) for a size the user
+       chose for a different row. */
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Floor: Straight'))
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', {
+        name: /^2 wide by 2 deep/,
+      }),
+    )
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+
+    expect(screen.getByTestId('armed-size')).toHaveTextContent('any')
   })
 
   it('says nothing about a starter set, and nothing about placing being unwired', () => {

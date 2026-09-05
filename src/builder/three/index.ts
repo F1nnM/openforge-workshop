@@ -163,6 +163,13 @@ export {
 } from './lod'
 
 export type { SurfaceEdit, SurfaceStatus } from './edits'
+/* Row C5. **Types only, and that is not the usual erasure argument** — the
+   values in `fills.ts` reach C2's solver, and the screen has no reason to call
+   them: it holds the three indexes and hands them over, and `BuilderRoom` builds
+   the memoised filler on the far side of the `lazy` line, where the solve
+   belongs. Exporting `createPlacementFiller` here would invite a second filler
+   with a second memo answering the same question. */
+export type { FillAuthorities, PlacementFill, PlacementFillInput, PlacementFiller } from './fills'
 export type { FootprintDisagreement, LodGap, LodInstanceGroup, Room3D } from './instances'
 export type { RoomSurfaceProps } from './RoomSurface'
 export type { Ndc, SurfaceFit, SurfacePick } from './surface'

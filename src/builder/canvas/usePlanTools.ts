@@ -10,14 +10,16 @@
  * already lives in the store.
  *
  * It is a hook rather than canvas-internal state because three components share
- * it and none of them owns the others: row 18's palette writes the selection,
+ * it and none of them owns the others: row 18's palette writes the selection
+ * **and, since row C5, the armed size** — the two halves of *what is armed*, and
+ * the surface has to read both to place a filled instance;
  * row 18's toolbar writes the mode and the snap and triggers a rotation, and the
- * canvas reads all four and writes the rotation and the mode back from its
+ * canvas reads all five and writes the rotation and the mode back from its
  * keyboard shortcuts. So row 18's screen calls this once and passes it down.
  *
  * ```tsx
  * const tools = usePlanTools()
- * <Palette onSelect={tools.setSelectedTemplate} selected={tools.selectedTemplate} />
+ * <Palette tools={tools} />   // writes selectedTemplate and armedSize
  * <Toolbar tools={tools} onClear={clearPlacements} />
  * <Builder3DPanel catalog={catalog} scene={scene} tools={tools} />
  * ```
@@ -72,6 +74,32 @@ export interface PlanTools {
    * DOM, so the rename is invisible to whichever surface draws the plan.
    */
   readonly selectedTemplate: TemplateId | null
+  /**
+   * The armed family's **size**, as the size position's own `size|` tags.
+   *
+   * `['size|width|2', 'size|depth|2']` for *2 wide by 2 deep*, and `[]` for the
+   * palette's `any size` — which is a real position and not an absence: with no
+   * tags the `constrain` collects nothing and the family admits every size.
+   *
+   * **Here rather than in the palette, because the click is what consumes it.**
+   * Row C1 built the size control and held the position in `PalettePanel`'s own
+   * state, which was the only place it could live while nothing read it; the
+   * consequence C1 wrote down was that a user who picked *2 wide by 2 deep* got
+   * the solver's default, because `three/edits.ts` placed with `fills: {}` and
+   * the surface never saw the position. Row **C5** solves the fills on the click,
+   * so the position has to travel the same route the family does — and this hook
+   * is that route: the palette writes it, the surface reads it, and neither holds
+   * a copy of the other's.
+   *
+   * The spelling is `size|width|<n>` / `size|depth|<n>`, exactly
+   * `GENERATED_FAMILY_SIZES` and `size.ts#sizeRefs`, because it is handed
+   * straight to `FillContext.size` and the two paths must not drift into two
+   * vocabularies.
+   *
+   * Ephemeral like everything else here: it is a property of what is *armed*,
+   * not of the room, so it is not in the store and a reload arms nothing.
+   */
+  readonly armedSize: readonly string[]
   setTool: (tool: PlanTool) => void
   /**
    * Swap between `place` and `erase`, the two modes that are each other's
@@ -92,14 +120,25 @@ export interface PlanTools {
    */
   rotate: (step: number, direction?: 1 | -1) => void
   setRotation: (rotation: number) => void
-  /** Arm a template family. Resets the pending rotation; see below. */
+  /** Arm a template family. Resets the pending rotation and the armed size; see below. */
   setSelectedTemplate: (template: TemplateId | null) => void
+  /**
+   * Choose the armed family's size position.
+   *
+   * Separate from {@link setSelectedTemplate} because the two gestures are
+   * separate: §3.1's control sits *inside* the armed row, so a user sizes a
+   * family they have already armed, and C1's palette also arms a family
+   * *at* a size from the RECENT strip. That second case is the two calls in
+   * order, which is why arming resets rather than preserves.
+   */
+  setArmedSize: (size: readonly string[]) => void
 }
 
 export interface PlanToolDefaults {
   readonly tool?: PlanTool
   readonly snap?: SnapMode
   readonly selectedTemplate?: TemplateId | null
+  readonly armedSize?: readonly string[]
 }
 
 export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
@@ -107,9 +146,18 @@ export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
   const [snap, setSnap] = useState<SnapMode>(defaults.snap ?? 'fine')
   const [rotation, setRotation] = useState(0)
   const [selectedTemplate, setSelected] = useState<TemplateId | null>(defaults.selectedTemplate ?? null)
+  const [armedSize, setArmedSize] = useState<readonly string[]>(defaults.armedSize ?? [])
 
   const setSelectedTemplate = useCallback((template: TemplateId | null) => {
     setSelected(template)
+    // The size goes with the family for the same reason the angle does, and more
+    // sharply: a position is a list of `size|` tags, and B4's domains differ per
+    // family — `GENERATED_FAMILY_SIZES` is 350 options over 51 families, 8 of
+    // which have no expressible domain at all. Carrying `2 x 2` over to a family
+    // whose candidates carry no `size|width|2` would leave the solver with a slot
+    // nothing matches, classified `no-candidate` (C2's note for C1: *nothing in
+    // the archive is this size*), for a size the user chose for a different row.
+    setArmedSize([])
     // A pending angle is only meaningful against the armed thing's own step:
     // carrying 45° over to a family that turns in 90° increments would arm an
     // angle it can never reach again, and the user would have no way back to 0
@@ -139,6 +187,7 @@ export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
       step: SNAP_STEP[snap],
       rotation,
       selectedTemplate,
+      armedSize,
       setTool,
       toggleTool,
       setSnap,
@@ -146,7 +195,18 @@ export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
       rotate,
       setRotation,
       setSelectedTemplate,
+      setArmedSize,
     }),
-    [tool, snap, rotation, selectedTemplate, toggleTool, toggleSnap, rotate, setSelectedTemplate],
+    [
+      tool,
+      snap,
+      rotation,
+      selectedTemplate,
+      armedSize,
+      toggleTool,
+      toggleSnap,
+      rotate,
+      setSelectedTemplate,
+    ],
   )
 }
