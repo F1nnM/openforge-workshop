@@ -37,6 +37,7 @@ import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
 import type { PlacementId, SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
 
+import type { SlotRecords } from './catalog'
 import type { Extent, SlotLayout } from './geometry'
 import { footprintExtent } from './geometry'
 
@@ -348,34 +349,85 @@ export const FIXTURE_IDS = {
  */
 export const FIXTURE_TEMPLATE = 'fixture-corner' as TemplateId
 
-/** A second family, for the tests about telling two apart. */
+/**
+ * A second family, for the tests about telling two apart — and, since row C6,
+ * the fixture's `wall-on-tile`: `base`, `floor`, `wall`. See
+ * {@link fixtureTemplateParts}.
+ */
 export const OTHER_FIXTURE_TEMPLATE = 'fixture-corridor' as TemplateId
 
-/** The five slots, in the shipped family's own declared order. */
+/** The five slots, in the shipped family's own declared order, plus `wall`. */
 export const FIXTURE_SLOTS = {
   column: 'column' as SlotName,
   rightWall: 'right wall' as SlotName,
   leftWall: 'left wall' as SlotName,
   floor: 'floor' as SlotName,
   base: 'base' as SlotName,
+  /**
+   * The 32-recipe convention's third part — {@link OTHER_FIXTURE_TEMPLATE}'s.
+   *
+   * Not one of {@link FIXTURE_TEMPLATE}'s five: `wall-on-tile` and
+   * `external-corner` are different part-name **sets** and that is exactly what
+   * `rules.ts` keys a convention on, so a fixture that wanted both conventions
+   * needed a second family and a sixth name.
+   */
+  wall: 'wall' as SlotName,
 }
 
 /**
- * The cell {@link fixtureSlotLayout}'s four non-cell slots are laid out inside.
+ * The part names of the two fixture families, as {@link templateSlotLayout}
+ * wants them.
+ *
+ * The one thing the real rule needs that the canvas cannot see: a convention is
+ * keyed on the part-name **set**, the 91-entry family table lives beside a
+ * screen, and `catalog.ts` sets out why this directory must not reach one. So a
+ * canvas test that wants the *production* rule over these eleven records builds
+ * it as `templateSlotLayout(fixtureTemplateParts)`.
+ *
+ * The two sets are chosen to be `rules.ts`'s two wall-bearing conventions
+ * verbatim — {@link FIXTURE_TEMPLATE} is `external-corner`'s five names and
+ * {@link OTHER_FIXTURE_TEMPLATE} is `wall-on-tile`'s three — because a set that
+ * matched neither would answer {@link ORIGIN_LAYOUT} for every slot and a test
+ * over it could not tell the wiring from its absence. Any other id answers
+ * `undefined`, which is the *"this build has no such recipe"* case and is a
+ * state a real room reaches: C1 measured all 51 generated families reporting
+ * `unknown-template` against a 40-recipe table.
+ */
+export function fixtureTemplateParts(template: TemplateId): readonly string[] | undefined {
+  if (template === FIXTURE_TEMPLATE) {
+    return [
+      FIXTURE_SLOTS.base,
+      FIXTURE_SLOTS.column,
+      FIXTURE_SLOTS.floor,
+      FIXTURE_SLOTS.leftWall,
+      FIXTURE_SLOTS.rightWall,
+    ]
+  }
+  if (template === OTHER_FIXTURE_TEMPLATE) {
+    return [FIXTURE_SLOTS.base, FIXTURE_SLOTS.floor, FIXTURE_SLOTS.wall]
+  }
+  return undefined
+}
+
+/**
+ * The cell {@link fixtureSlotLayout}'s slots are laid out inside.
  *
  * The 2 x 2 floor, which is also the fixture's `floor2` footprint — the union
  * every part of the corner nests inside, and the box the instance turns within.
  *
- * A **constant for four of the five slots, and read off the fill for the fifth**,
- * and the split is a finding rather than a shortcut. B2's `TemplateLayout.cell`
- * names the slot whose *resolved fill* is the cell — `floor` on all three
- * conventions — but `catalog.ts#SlotLayoutRule` is
- * `(template, slot, record) => SlotLayout` and hands over only the record of the
- * slot being laid out. So a rule can resolve the cell exactly when the slot it
- * is asked about *is* the cell slot, and for the other four it can do no better
- * than the cell its own recipe describes. Wiring B2 to the canvas therefore needs
- * that signature widened to the instance's whole fill map; see the note on
- * `offsets.ts#slotOffset`.
+ * **It used to be a constant for four of the five slots and read off the fill for
+ * the fifth, and row C6 closed that split.** The reason for it was a signature:
+ * `catalog.ts#SlotLayoutRule` was `(template, slot, record) => SlotLayout` and
+ * handed over only the record of the slot being laid out, so a rule could resolve
+ * the cell exactly when the slot it was asked about *was* the cell slot, and for
+ * the other four could do no better than the cell its own recipe describes. The
+ * rule now takes the instance's whole {@link SlotRecords} map, so this fixture
+ * reads the `floor` fill's own extent for **all five** — which is B2's rule and
+ * is what keeps a lone 2 x 1 floor anchored at the placement's own `x`/`z`
+ * instead of inside a 2 x 2 cell it does not fill.
+ *
+ * It survives as the fallback for an instance with no `floor` fill at all, where
+ * there is no cell to read and the offsets below are the ones this 2 x 2 implies.
  */
 export const FIXTURE_CELL = Object.freeze({ w: 2, d: 2 })
 
@@ -403,43 +455,52 @@ export const FIXTURE_CELL = Object.freeze({ w: 2, d: 2 })
  * for this cell — `edge` is *"flush to the face and centred across it"* and
  * `corner` is the square where two faces meet, so nothing overhangs and the
  * union is the cell itself, 2 x 2 at the instance origin, at every rotation.
+ *
+ * **It is still authored, and that is deliberate now rather than forced.**
+ * `catalog.ts#templateSlotLayout` is the real composition and the app runs it;
+ * this stays a fixture so that a canvas test measures the *canvas* — one rule
+ * whose numbers are written down, against `slotGeometry` — rather than measuring
+ * B2's arithmetic a second time, which `src/template/offsets.test.ts` already
+ * does over all three conventions.
  */
 export function fixtureSlotLayout(
   _template: TemplateId,
   slot: SlotName,
-  record?: CatalogRecord,
+  fills: SlotRecords = new Map(),
 ): SlotLayout {
+  // The cell slot's own fill *is* the cell, for every slot and not just for the
+  // cell slot itself — which is what the widened seam bought. See
+  // {@link FIXTURE_CELL}.
+  const cell = cellOf(fills.get(FIXTURE_SLOTS.floor))
   switch (slot) {
     case FIXTURE_SLOTS.base:
-      return { dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell: FIXTURE_CELL }
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell }
     case FIXTURE_SLOTS.floor:
-      // The cell slot, so its own fill *is* the cell — read rather than assumed,
-      // which is B2's rule and is what keeps a lone 2 x 1 floor anchored at the
-      // placement's own `x`/`z` instead of inside a 2 x 2 cell it does not fill.
-      return { dx: 0, dz: 0, rotation: 0, elevationMm: 6.35, cell: cellOf(record) }
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 6.35, cell }
     case FIXTURE_SLOTS.leftWall:
-      return { dx: 0, dz: 0, rotation: 0, elevationMm: 12.7, cell: FIXTURE_CELL }
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 12.7, cell }
     case FIXTURE_SLOTS.rightWall:
-      return { dx: 1.5, dz: 0, rotation: 90, elevationMm: 12.7, cell: FIXTURE_CELL }
+      return { dx: 1.5, dz: 0, rotation: 90, elevationMm: 12.7, cell }
     case FIXTURE_SLOTS.column:
-      return { dx: 1.5, dz: 1.5, rotation: 0, elevationMm: 12.7, cell: FIXTURE_CELL }
+      return { dx: 1.5, dz: 1.5, rotation: 0, elevationMm: 12.7, cell }
     default:
       // A slot this fixture has no rule for sits a quarter unit off the origin —
       // deliberately *off* the 0.5 lattice, since §2.2 says a slot offset never
       // snaps. Total rather than throwing, because `PlanCatalog.parts` walks
       // whatever the instance's fill map holds and a test is entitled to invent
-      // a slot.
+      // a slot. No cell either, because a slot no recipe declares belongs to no
+      // cell.
       return { dx: 0.25, dz: 0.25, rotation: 0, elevationMm: 25.4 }
   }
 }
 
 /**
- * The cell of the slot that *is* the cell: its fill's own extent.
+ * The cell of the slot that *is* the cell: the `floor` fill's own extent.
  *
- * {@link FIXTURE_CELL} when there is no record to read — a caller that asks for a
- * layout without naming a fill, which `PlanCatalog` never does — and `undefined`
- * for a fill with no placeable footprint, where the part is not drawn at all and
- * the whole layout is moot.
+ * {@link FIXTURE_CELL} when the instance has no `floor` fill to read — a caller
+ * that asks for a layout without one, and an instance that has not filled it —
+ * and `undefined` for a fill with no placeable footprint, where the part is not
+ * drawn at all and the whole layout is moot.
  */
 function cellOf(record: CatalogRecord | undefined): Extent | undefined {
   return record === undefined ? FIXTURE_CELL : footprintExtent(record.foot)

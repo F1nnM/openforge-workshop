@@ -71,28 +71,45 @@
  * ## What did *not* retire, against A4a's note: the band
  *
  * A4a's plan was that {@link planBand} and {@link PlanBand} retire with this
- * change, the two bands being a two-valued approximation of the interval.
- * **Measured, they cannot, and the measurement is one line:**
- * `planCatalogFromFile` is called with no layout rule everywhere in the app
- * (`screens/builder/BuilderScreen.tsx`), so the rule in force is
- * `catalog.ts#originSlotLayout` → `ORIGIN_LAYOUT` → **`elevationMm: 0` on every
- * part of every placement**. Row **B2** authored the real chain,
- * `template/offsets.ts#slotElevationMm`, and nothing wires it: it takes the
- * resting part's height as an argument and the only implementation of that
- * argument was the `baseElevationMm` A4b deleted. `template/index.ts` says as
- * much outright — *"nothing in the app reads this directory yet"*.
+ * change, the two bands being a two-valued approximation of the interval. Row A7
+ * measured that they could not, on the ground that nothing wired an elevation:
+ * `planCatalogFromFile` was called with no layout rule everywhere in the app, so
+ * `catalog.ts#originSlotLayout` → `ORIGIN_LAYOUT` → `elevationMm: 0` on every
+ * part of every placement.
  *
- * So under the shipped rule every part is on the ground, every level is the same
- * level, and an interval test separates nothing. Deleting the band today would
- * flag a wall standing on a floor — the three junctions of the landing hero's own
- * chamber included — which is the exact false positive this module exists to
- * remove. The band therefore stays as what it always was: a **two-valued level
- * index over tag data**, sound where the elevation rule is silent, and the first
- * thing to delete when a `SlotLayoutRule` lands that returns a real elevation.
- * *"is the only thing separating a wall from a floor under the shipped layout
- * rule"* in `plan.test.ts` pins that dependency so the band cannot be deleted by
- * accident, and *"separates two stacked instances once the layout rule gives
- * them elevations"* pins the half that is already live.
+ * **Row C6 wired the rule and re-measured. The band still cannot retire, and the
+ * reason is now arithmetic rather than circumstantial.** Two measurements, both
+ * in `plan.test.ts`:
+ *
+ *   1. **A wall and a floor come out at the same height.** B2's three
+ *      conventions rest the `floor` **and** the `wall` on the `base` — not the
+ *      wall on the floor — so `slotElevationMm` gives both exactly one base
+ *      thickness and `levelsOverlap` is true between them wherever they meet.
+ *      Both supports for that are measured: the single-piece recipes give the
+ *      wall part `fulfills: [{part: base}]`, and of the 107 measured toppers
+ *      authored pre-lifted by exactly one base thickness **59 are walls and 27
+ *      are floors**. So the interval cannot separate the one pair the band
+ *      exists for.
+ *   2. **B4's 51 one-slot families have no elevation at all.** C2 measured 0 of
+ *      51 with a part-name set `rules.ts` has a convention for, so the wired rule
+ *      answers `ORIGIN_LAYOUT` for every one of them. C1's palette offers all 91
+ *      families, so a one-slot wall family placed on a one-slot floor family is
+ *      two `elevationMm: 0` parts on one square — A7's false positive verbatim,
+ *      still live.
+ *
+ * What the wired elevation *does* separate is a base from what stands on it, and
+ * that is **inside** one instance: an instance's chain starts at its own base, so
+ * a second instance on the same square starts at 0 too and its base genuinely
+ * collides. There is no cross-instance pair the elevation separates that A4a's
+ * same-id rule did not already exempt.
+ *
+ * The band therefore stays as what it always was: a **two-valued level index over
+ * tag data**, sound where the elevation rule is silent. It becomes deletable when
+ * a convention rests a wall on a *floor*, or when a one-slot family gains one —
+ * not before. `plan.test.ts`'s *"does not retire, because a wall and a floor come
+ * out at the same height"* and *"does not retire for the 51 one-slot families
+ * either"* pin both halves, and *"separates two stacked instances once the layout
+ * rule gives them elevations"* keeps the interval itself honest.
  *
  * ## Flag, not prevent
  *
@@ -240,8 +257,9 @@ function isWallThickness(foot: CatalogRecord['foot']): boolean {
  * **A level index, not a height, and that is why row A7 kept it.** The band says
  * *which* of two levels a piece is on and never how thick it is, so it is not a
  * second answer to {@link PlanLevel}'s question and cannot disagree with one.
- * What it is, is the only answer available while `originSlotLayout` is the rule
- * in force — see the module docblock.
+ * What it is, is the only answer available for a wall over a floor: row C6 wired
+ * a real elevation and B2's conventions put the two at the same height — see the
+ * module docblock.
  */
 export function planBand(record: Pick<CatalogRecord, 'foot' | 'kinds'>): PlanBand {
   if (isWallThickness(record.foot)) return 'edge'

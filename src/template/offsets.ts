@@ -79,8 +79,8 @@
  */
 import type { Footprint } from '@/catalog'
 import { WALL_THICKNESS_UNITS } from '@/catalog'
-import type { Extent, PlanPoint } from '@/builder/canvas'
-import { footprintExtent } from '@/builder/canvas'
+import type { Extent, PlanPoint } from '@/builder/canvas/geometry'
+import { footprintExtent } from '@/builder/canvas/geometry'
 
 import type { SlotAnchor, SlotName, SlotRule, SlotSide, TemplateLayout } from './rules'
 import { ruleFor } from './rules'
@@ -173,14 +173,27 @@ function quarterTurnExtent(extent: Extent, side: SlotSide): Extent {
  *
  * — and `offsets.test.ts` places all three conventions through the canvas's real
  * `slotGeometry` with it, measuring a closing template's union as exactly its own
- * cell on all four quarter turns. **Row A10 did not wire it**, and the reason is
- * a signature rather than a preference: `catalog.ts#SlotLayoutRule` is
- * `(template, slot, record) => SlotLayout` and hands over only the record of the
- * slot being laid out, so a rule cannot resolve the *cell* slot's fill for any
- * other slot — and the only party that composes one in production is
- * `src/screens/builder/BuilderScreen.tsx`, which passes no rule at all. Wiring
- * therefore needs the seam widened to the instance's whole fill map, in the two
- * files that own it.
+ * cell on all four quarter turns.
+ *
+ * **Row C6 wired it, and the seam it needed is the one A10 named.**
+ * `catalog.ts#SlotLayoutRule` was `(template, slot, record) => SlotLayout` and
+ * handed over only the record of the slot being laid out, so a rule could not
+ * resolve the *cell* slot's fill for any other slot. It is now
+ * `(template, slot, fills) => SlotLayout` over the instance's whole fill map, and
+ * `catalog.ts#templateSlotLayout` is the rule that composes this module with the
+ * canvas — one line of it is the conversion above.
+ *
+ * ## The one edit row C6 made to this file, and why it had to
+ *
+ * The two imports below read `@/builder/canvas/geometry` rather than the
+ * `@/builder/canvas` barrel. That is not tidying: `templateSlotLayout` lives in
+ * `builder/canvas/catalog.ts`, which the barrel re-exports, so a barrel import
+ * here would close `canvas/index.ts` → `catalog.ts` → `template/offsets.ts` →
+ * `canvas/index.ts` — the barrel-mediated cycle row A7 flagged, and a TDZ trap
+ * on `footprintExtent`, which is the one *value* this module takes from there.
+ * `geometry.ts` imports only `@/catalog` and `@/store` and imports nothing from
+ * this directory, so naming the leaf breaks the cycle at its only edge and costs
+ * nothing: `footprintExtent` is defined there, not merely re-exported.
  */
 export function slotOffset(rule: SlotRule, cell: Extent, part: Extent): PlanPoint {
   if (rule.anchor === 'cell') return [0, 0]

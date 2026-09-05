@@ -22,7 +22,10 @@
  *      `buildAssemblyIndex` and `planCatalogFromFile` are memoised here on
  *      `index.file` — both are deterministic functions of a versioned build
  *      artefact, so that is the correct lifetime rather than a cache with an
- *      invalidation problem.
+ *      invalidation problem. Since row **C6** the plan catalog is memoised on the
+ *      **slot-layout rule** as well, because it caches that rule's answers: this
+ *      screen is the one party that can compose `@/template`'s conventions with
+ *      `@/builder/canvas`'s placement, and `slotLayout` below is where it does.
  *   4. **Where a generated base lands, and nothing else about one.** Row S4's
  *      drawer decides *what* — it holds the recipe and the resolution the strip is
  *      showing — and calls row S5's `placeRecipe` itself; this screen answers
@@ -91,7 +94,15 @@ import { getRouteApi } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
-import { buildPlanScene, createStyleResolver, describeCell, freeCellFor, planCatalogFromFile, usePlanTools } from '@/builder/canvas'
+import {
+  buildPlanScene,
+  createStyleResolver,
+  describeCell,
+  freeCellFor,
+  planCatalogFromFile,
+  templateSlotLayout,
+  usePlanTools,
+} from '@/builder/canvas'
 import {
   BackupPanel,
   BillPanel,
@@ -219,17 +230,6 @@ function Builder({ index }: { index: CatalogIndex }) {
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
 
-  /**
-   * The canvas's view of the catalog — **memoised on the index alone**, since
-   * row A4a.
-   *
-   * It was memoised on the lock as well, because a placement named an item and
-   * `planCatalogFromFile` resolved each design through `selectVariantForLock`.
-   * A fill names an exact **file** (decision D1), so there is no variant to
-   * choose, the function no longer takes a lock or an aggregate index, and
-   * nothing about this view goes stale when the preference changes.
-   */
-  const planCatalog = useMemo(() => planCatalogFromFile(index.file), [index])
   const assembly = useMemo(() => buildAssemblyIndex(index.file), [index])
 
   /**
@@ -286,6 +286,58 @@ function Builder({ index }: { index: CatalogIndex }) {
     () => (id: TemplateId): RecipeTemplate | undefined => recipes.get(id),
     [recipes],
   )
+  /**
+   * **Row B2's slot conventions, wired.** The one thing the canvas cannot see.
+   *
+   * `templateSlotLayout` composes `@/template`'s three authored conventions with
+   * `@/builder/canvas`'s own placement, and the only input it needs from outside
+   * both is the **part-name list** of a template — which is what keys a
+   * convention (`rules.ts`: the part-name set classifies 40 of 40, where the
+   * `shape|` tag is wrong on 2 of 40 because two `internal_corner` fixtures are
+   * tagged `shape|corner`). That list lives in the family table beside
+   * `src/screens/assemblies/`, which `catalog.ts` sets out at length that the
+   * canvas must not reach, so this screen — which already holds `templates` for
+   * the bill, `reSolveScene` and the slots panel — hands it over. Composing here
+   * is also what keeps `@/builder/canvas` and `@/template` out of each other's
+   * import closures.
+   *
+   * **Without it every part of a multi-part template drew at the instance
+   * origin.** `originSlotLayout` is right for the 80 `base` and `floor` parts,
+   * which are cell-anchored at yaw 0. What it cost on the other 48 is *not* one
+   * thing, and row C6 measured it rather than repeating it:
+   *
+   *   - the 8 `column` and 8 left/right-wall parts of the corner recipes were
+   *     wrong at **every** rotation — a corner's two walls carry the same
+   *     footprint, so at yaw 0 they drew the *same box*, one on top of the other,
+   *     and the column sat under both;
+   *   - the 32 `wall` parts were right at rotation 0 and at 270 and wrong at 90
+   *     and 180. A wall whose run equals the face it lies on is already flush
+   *     along that face when it is anchored at the cell's own minimum corner, so
+   *     its `dx`/`dz` do not move; what `originSlotLayout` could not do is *turn*
+   *     it, because with no declared cell each part re-anchors to itself and the
+   *     wall stayed at `(0, 0)` where it belongs at `(1.5, 0)` and `(0, 1.5)`.
+   *
+   * And on all 128 parts it cost the **elevation**: every `floor`, `wall` and
+   * `column` standing on a filled `base` slot is one base thickness up
+   * (`BASE_LIFT_MM`, 6 mm) and was on the ground.
+   */
+  const slotLayout = useMemo(
+    () => templateSlotLayout((id) => templates(id)?.parts.map((part) => part.name)),
+    [templates],
+  )
+  /**
+   * The canvas's view of the catalog — **memoised on the index and the rule**.
+   *
+   * It was memoised on the lock, because a placement named an item and
+   * `planCatalogFromFile` resolved each design through `selectVariantForLock`.
+   * A fill names an exact **file** (decision D1), so there is no variant to
+   * choose, the function no longer takes a lock or an aggregate index, and
+   * nothing about this view goes stale when the preference changes. It memoises
+   * the layout rule per `(fills, slot)`, so the rule belongs in the key: a
+   * catalog view built with one rule must not survive into a render with
+   * another.
+   */
+  const planCatalog = useMemo(() => planCatalogFromFile(index.file, slotLayout), [index, slotLayout])
   const composition = useMemo(
     () => compositionIndexFor(index.file, index.engine.aggregates),
     [index],

@@ -53,8 +53,14 @@
  *     returns one entry per filled slot, each with the slot, the fill, the record
  *     and its `SlotLayout`. **It no longer takes a `lock`**, because a
  *     `SlotFill` names an exact file (decision D1) and there is no variant left
- *     to choose; `catalog.ts` has the argument. `layout` is the `SlotLayoutRule`
- *     row **B2** will supply, and it defaults to `originSlotLayout`.
+ *     to choose; `catalog.ts` has the argument. `layout` is the `SlotLayoutRule`,
+ *     and since row **C6** the screen supplies a real one:
+ *     `templateSlotLayout((id) => templates(id)?.parts.map((part) => part.name))`
+ *     composes row B2's three conventions with this directory's own placement, so
+ *     a corner's two walls stand on the edges of its floor instead of stacking on
+ *     it. It still defaults to `originSlotLayout` — every part at the instance
+ *     origin — which is what a test with eleven records and the landing hero
+ *     want, neither having a template.
  *   - **`usePlanTools()`** is the shared tool state: mode, snap, pending
  *     rotation, palette selection (a **template family** since row A1, not an
  *     item and not a file — §2.5 makes templates the only placement unit). Call
@@ -146,10 +152,12 @@
  * Two things about it are worth knowing before reading `overlap.ts`:
  * `heightMm` is `0` on every catalog record because no height for one exists
  * anywhere the app reads (a generated base's comes off its recipe), and
- * `PlanBand` **did not** retire with the change — the shipped `SlotLayoutRule`
- * puts every part at elevation 0, so the band is still the only thing that
- * separates a wall from the floor it stands on. `overlap.ts` carries the
- * measurement.
+ * `PlanBand` **did not** retire — not before row C6 wired a real elevation, and
+ * not after it either. B2's three conventions rest the `floor` **and** the
+ * `wall` on the `base`, so a wall and a floor land at the *same* elevation and
+ * the interval separates nothing between two instances on one square. What the
+ * elevation does separate is a base from what stands on it. `overlap.ts` carries
+ * both measurements.
  *
  * `PlanScene` grew a third omission list, **`unfilled`**: an instance with no
  * filled slots at all is legitimate (contract C-g, §3.2 *"places anyway"*) and
@@ -165,7 +173,13 @@
 export { usePlanTools } from './usePlanTools'
 export type { PlanTool, PlanToolDefaults, PlanTools } from './usePlanTools'
 
-export { createStyleResolver, originSlotLayout, planCatalogFromFile } from './catalog'
+export {
+  BASE_LIFT_MM,
+  createStyleResolver,
+  originSlotLayout,
+  planCatalogFromFile,
+  templateSlotLayout,
+} from './catalog'
 export type {
   PlanCatalog,
   PlanSlotPart,
@@ -173,6 +187,7 @@ export type {
   PlanStyle,
   ResolvedSlotPart,
   SlotLayoutRule,
+  SlotRecords,
   StrandedSlotPart,
 } from './catalog'
 

@@ -17,19 +17,23 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TileId } from '@/catalog'
-import type { PlacementId, WorkshopState } from '@/store'
+import type { PlacementId, SlotName, TemplateId, WorkshopState } from '@/store'
 
-import { createStyleResolver, originSlotLayout, planCatalogFromFile } from './catalog'
+import { BASE_LIFT_MM, createStyleResolver, originSlotLayout, planCatalogFromFile, templateSlotLayout } from './catalog'
 import {
   FIXTURE_CELL,
   FIXTURE_IDS,
   FIXTURE_SLOTS,
   FIXTURE_TEMPLATE,
+  OTHER_FIXTURE_TEMPLATE,
   fixtureCatalogFile,
   fixtureFills,
   fixtureInstance,
   fixtureSlotLayout,
+  fixtureTemplateParts,
 } from './fixture'
+import { SLOT_CONVENTIONS } from '@/template/rules'
+
 import { computeGhost, ghostOverlaps } from './ghost'
 import { SNAP_STEP, planBox, planQuad } from './geometry'
 import { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap } from './overlap'
@@ -42,6 +46,24 @@ const file = fixtureCatalogFile()
 /** The real layout rule for these tests — see `fixture.ts#fixtureSlotLayout`. */
 const catalog = planCatalogFromFile(file, fixtureSlotLayout)
 const styleOf = createStyleResolver(catalog)
+
+/**
+ * The same fixture catalog under `originSlotLayout`.
+ *
+ * **This was *"the rule the app actually uses"* and since row C6 it is not.**
+ * `BuilderScreen.tsx` now calls
+ * `planCatalogFromFile(index.file, templateSlotLayout(...))`, so the shipped rule
+ * returns real offsets and real elevations. `originSlotLayout` survives as the
+ * answer for a template with no convention — B4's 51 one-slot families — and the
+ * two tests that pin it are kept because they are still true of it and because
+ * they are the baseline the wired ones are measured against.
+ */
+const grounded = planCatalogFromFile(file, originSlotLayout)
+const groundedStyle = createStyleResolver(grounded)
+
+/** The **shipped** rule, over the fixture's two families. */
+const wired = planCatalogFromFile(file, templateSlotLayout(fixtureTemplateParts))
+const wiredStyle = createStyleResolver(wired)
 
 /**
  * The record a fixture file id names.
@@ -83,6 +105,25 @@ function instancesOf(
   const placements: Record<string, WorkshopState['placements'][PlacementId]> = {}
   for (const [key, fills, x, z, rotation] of rows) {
     placements[key] = fixtureInstance(key, fixtureFills(fills), { x, z, rotation })
+  }
+  return placements
+}
+
+/**
+ * The same, on a **named** family.
+ *
+ * Row C6's rule keys a convention on the template's part-name set, which it
+ * looks up by id (`fixtureTemplateParts`), so a test about the wired layout has
+ * to say which family an instance belongs to. `instancesOf` uses
+ * {@link FIXTURE_TEMPLATE}, the fixture's five-slot corner.
+ */
+function familyOf(
+  template: string,
+  rows: readonly (readonly [string, readonly (readonly [string, string])[], number, number, number])[],
+): WorkshopState['placements'] {
+  const placements: Record<string, WorkshopState['placements'][PlacementId]> = {}
+  for (const [key, fills, x, z, rotation] of rows) {
+    placements[key] = fixtureInstance(key, fixtureFills(fills), { x, z, rotation, template })
   }
   return placements
 }
@@ -371,23 +412,14 @@ describe('overlap', () => {
   })
 })
 
-describe('the band, and why row A7 could not delete it', () => {
-  /**
-   * The same fixture catalog under the rule the **app** actually uses.
-   *
-   * `BuilderScreen.tsx` calls `planCatalogFromFile(index.file)` with no layout
-   * argument, so `originSlotLayout` is in force everywhere in the shipped app and
-   * `ORIGIN_LAYOUT` puts every part of every placement at `elevationMm: 0`.
-   */
-  const grounded = planCatalogFromFile(file, originSlotLayout)
-  const groundedStyle = createStyleResolver(grounded)
+describe('the band, and why row A7 could not delete it — re-measured under row C6', () => {
 
   /** One instance filling one slot with one file, at a cell. */
   const oneSlot = (key: string, slot: string, tile: string, x: number, z: number) => ({
     [key as PlacementId]: fixtureInstance(key, fixtureFills([[slot, tile]]), { x, z }),
   })
 
-  it('puts every part on the ground under the shipped layout rule', () => {
+  it('puts every part on the ground under originSlotLayout', () => {
     // The measurement the rest of this block rests on, and the reason the band
     // is still load bearing: row B2 authored the real elevation chain
     // (`template/offsets.ts#slotElevationMm`) and nothing wires it, because it
@@ -405,7 +437,7 @@ describe('the band, and why row A7 could not delete it', () => {
     expect(scene.pieces.flatMap((piece) => piece.parts).map((part) => part.layout.elevationMm)).toEqual([0, 0, 0])
   })
 
-  it('is the only thing separating a wall from a floor under the shipped layout rule', () => {
+  it('is the only thing separating a wall from a floor under originSlotLayout', () => {
     /*
       **Row A4a's note said `planBand` and `PlanBand` retire with the interval.
       Measured, they cannot.** A wall instance and a floor instance on the same
@@ -441,22 +473,371 @@ describe('the band, and why row A7 could not delete it', () => {
     expect([...stacked.conflicts].sort()).toEqual(['base', 'floor'])
   })
 
-  it('is not what separates them once a layout rule returns a real elevation', () => {
-    // The same two same-band instances under `fixtureSlotLayout`, whose `base`
-    // and `floor` slots are 6.35 mm apart. This is the case the app inherits the
-    // moment a `SlotLayoutRule` with real elevations is wired.
+  it('is what separates a base from what stands on it, once the rule lifts one', () => {
+    /*
+      **The half of A7's expectation row C6 does discharge, and it is smaller
+      than A7 thought.** One `wall-on-tile` instance, base and floor and wall all
+      filled: the base is on the ground and the two toppers are one base up. So
+      the interval is real, and it is real *inside* an instance.
+
+      That is also the whole of it, and the reason is `restsOn`. An instance's
+      chain starts at its own base, so a second instance on the same square
+      starts at 0 too — its base collides with the first one's, which is a true
+      conflict and not a false positive. There is no cross-instance pair the
+      elevation separates that A4a's same-id rule did not already exempt.
+    */
     const scene = buildPlanScene(
-      {
-        ...oneSlot('base', FIXTURE_SLOTS.base, FIXTURE_IDS.floor2, 0, 0),
-        ...oneSlot('floor', FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2, 0, 0),
-      },
-      catalog,
-      styleOf,
+      familyOf(OTHER_FIXTURE_TEMPLATE, [
+        [
+          'piece',
+          [
+            [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.wall, FIXTURE_IDS.wall2],
+          ],
+          0,
+          0,
+          0,
+        ],
+      ]),
+      wired,
+      wiredStyle,
     )
     const parts = scene.pieces.flatMap((piece) => piece.parts)
-    expect(parts.map((part) => part.band)).toEqual(['area', 'area'])
-    expect(parts.map((part) => part.layout.elevationMm).sort((a, b) => a - b)).toEqual([0, 6.35])
+    const elevationOf = (slot: SlotName) => parts.find((part) => part.slot === slot)?.layout.elevationMm
+    expect(elevationOf(FIXTURE_SLOTS.base)).toBe(0)
+    expect(elevationOf(FIXTURE_SLOTS.floor)).toBe(BASE_LIFT_MM)
+    expect(elevationOf(FIXTURE_SLOTS.wall)).toBe(BASE_LIFT_MM)
+    // Under `originSlotLayout` all three are on the ground — that is the test at
+    // the top of this block, and it is what makes this one a statement about the
+    // rule rather than about the fills.
     expect(scene.conflicts.size).toBe(0)
+  })
+
+  it('does not retire, because a wall and a floor come out at the same height', () => {
+    /*
+      **The measurement row C6 owes A7, and it says the band stays.** A7 pinned
+      the band on the premise that no rule was wired. The premise is gone and the
+      conclusion survives, for a reason that is arithmetic rather than
+      circumstantial: B2's conventions rest the `floor` **and** the `wall` on the
+      `base` — not the wall on the floor — so the two land at the *same*
+      elevation and `levelsOverlap` is true between them wherever they meet. The
+      two supports for resting both on the base are measured: the single-piece
+      recipes give the wall part `fulfills: [{part: base}]`, and of the 107
+      measured toppers authored pre-lifted by exactly one base thickness **59 are
+      walls and 27 are floors**.
+
+      So the band is still the whole of what keeps a wall over a floor quiet, and
+      deleting it would hatch every one of them.
+    */
+    const parts = buildPlanScene(
+      familyOf(OTHER_FIXTURE_TEMPLATE, [
+        [
+          'piece',
+          [
+            [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.wall, FIXTURE_IDS.wall2],
+          ],
+          0,
+          0,
+          0,
+        ],
+      ]),
+      wired,
+      wiredStyle,
+    ).pieces.flatMap((piece) => piece.parts)
+    const wall = parts.find((part) => part.slot === FIXTURE_SLOTS.wall)
+    const floor = parts.find((part) => part.slot === FIXTURE_SLOTS.floor)
+    expect(wall?.layout.elevationMm).toBe(floor?.layout.elevationMm)
+    // And the bands differ, which is what does the separating.
+    expect(wall?.band).toBe('edge')
+    expect(floor?.band).toBe('area')
+  })
+
+  it('does not retire for the 51 one-slot families either, which have no elevation at all', () => {
+    /*
+      The second and larger half of the same answer, and the reachable one: C2
+      measured **0 of 51** generated families with a part-name set `rules.ts` has
+      a convention for, so `templateSlotLayout` answers `ORIGIN_LAYOUT` for every
+      one of them and every part of every one is on the ground. A one-slot wall
+      family placed on a one-slot floor family is therefore two `elevationMm: 0`
+      parts on one square — A7's exact false positive, still live, still quiet
+      only because the bands differ.
+    */
+    const scene = buildPlanScene(
+      familyOf('shape-base', [
+        ['floor-only', [[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]], 0, 0, 0],
+        ['wall-only', [[FIXTURE_SLOTS.floor, FIXTURE_IDS.wall2]], 0, 0, 0],
+      ]),
+      wired,
+      wiredStyle,
+    )
+    const parts = scene.pieces.flatMap((piece) => piece.parts)
+    expect(new Set(parts.map((part) => part.layout.elevationMm))).toEqual(new Set([0]))
+    expect(parts.map((part) => part.band).sort()).toEqual(['area', 'edge'])
+    expect(scene.conflicts.size).toBe(0)
+
+    // Two of the same band on that one level are still reported, so the line
+    // above is about the band and not about the geometry.
+    const same = buildPlanScene(
+      familyOf('shape-base', [
+        ['a', [[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]], 0, 0, 0],
+        ['b', [[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]], 0, 0, 0],
+      ]),
+      wired,
+      wiredStyle,
+    )
+    expect([...same.conflicts].sort()).toEqual(['a', 'b'])
+  })
+})
+
+/**
+ * **Row C6: row B2's conventions, as the app runs them.**
+ *
+ * `templateSlotLayout` is the only rule production uses. Every number below is
+ * arithmetic over `@/template`'s three authored conventions, so this block is
+ * not a second implementation of them — it is the measurement that the
+ * composition, the centre-to-corner conversion and the elevation chain arrive
+ * intact at a `SlotLayout`.
+ */
+describe('the wired slot layout', () => {
+  const layout = templateSlotLayout(fixtureTemplateParts)
+  /** The five records of a filled 2 x 2 corner, as the rule receives them. */
+  const CORNER = new Map([
+    [FIXTURE_SLOTS.base, record(FIXTURE_IDS.floor2)],
+    [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
+    [FIXTURE_SLOTS.rightWall, record(FIXTURE_IDS.wall2)],
+    [FIXTURE_SLOTS.leftWall, record(FIXTURE_IDS.wall2)],
+    [FIXTURE_SLOTS.column, record(FIXTURE_IDS.column)],
+  ])
+  const at = (slot: SlotName, fills = CORNER) => layout(FIXTURE_TEMPLATE, slot, fills)
+
+  it('lays a 2 x 2 corner’s five slots out, and two of the five refuse a coordinate', () => {
+    /*
+      **The table this row is judged on.** The 2-unit walls are the corpus's own
+      8 `single_piece` mitres: two 2-unit runs plus a 0.5 column cannot share two
+      2-unit edges, `placeTemplateSlots` answers `over-run want 2 got 2.5`, and
+      the plan forbids inventing the number that would make them fit. So they
+      keep the cell's own corner — where they draw today — and gain the cell, so
+      the assembly is still rigid.
+    */
+    expect(at(FIXTURE_SLOTS.base)).toEqual({ dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell: FIXTURE_CELL })
+    expect(at(FIXTURE_SLOTS.floor)).toEqual({
+      dx: 0,
+      dz: 0,
+      rotation: 0,
+      elevationMm: BASE_LIFT_MM,
+      cell: FIXTURE_CELL,
+    })
+    expect(at(FIXTURE_SLOTS.column)).toEqual({
+      dx: 0,
+      dz: 0,
+      rotation: 0,
+      elevationMm: BASE_LIFT_MM,
+      cell: FIXTURE_CELL,
+    })
+    for (const wall of [FIXTURE_SLOTS.rightWall, FIXTURE_SLOTS.leftWall]) {
+      expect(at(wall), wall).toEqual({
+        dx: 0,
+        dz: 0,
+        rotation: 0,
+        elevationMm: BASE_LIFT_MM,
+        cell: FIXTURE_CELL,
+      })
+    }
+  })
+
+  it('asks for one height and always the base’s, which is what makes 6 mm a constant', () => {
+    /*
+      The invariant `catalog.ts#liftOf` rests on, asserted over B2's own table
+      rather than restated. Every non-null `restsOn` in every shipped convention
+      names `base`, so the height reader is called with `base` and nothing else,
+      and a normalised base thickness is the only measurement the chain needs. A
+      fourth convention resting a part on a `floor` would fail here, which is the
+      loud failure this assertion exists to buy.
+    */
+    const resting = SLOT_CONVENTIONS.flatMap((convention) =>
+      convention.slots.map((rule) => rule.restsOn).filter((part) => part !== null),
+    )
+    expect(new Set(resting)).toEqual(new Set(['base']))
+    // And the base itself is on the ground in all three, which is what makes the
+    // chain one step long rather than N.
+    expect(
+      SLOT_CONVENTIONS.map((convention) => convention.slots.find((rule) => rule.part === 'base')?.restsOn),
+    ).toEqual([null, null, null])
+  })
+
+  it('is a no-op for a family with no convention, and for a family this build lacks', () => {
+    // B4's 51 generated families: C2 measured 0 of 51 with a part-name set
+    // `rules.ts` has a convention for, and a one-slot family needs none.
+    const bare = new Map([[FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)]])
+    expect(layout('shape-base' as TemplateId, FIXTURE_SLOTS.floor, bare)).toEqual({
+      dx: 0,
+      dz: 0,
+      rotation: 0,
+      elevationMm: 0,
+    })
+  })
+
+  it('lifts nothing when the base slot has no fill, because nothing is under it', () => {
+    // Not a guard: a `wall-on-tile` instance whose base needs a choice has
+    // nothing beneath its floor, and drawing it 6 mm up would be a picture of a
+    // base nobody chose.
+    const noBase = new Map([
+      [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
+      [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.wall2)],
+    ])
+    const wallLayout = layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase)
+    expect(wallLayout.elevationMm).toBe(0)
+    // And with a base in the map it is one base up.
+    noBase.set(FIXTURE_SLOTS.base, record(FIXTURE_IDS.floor2))
+    expect(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase).elevationMm).toBe(BASE_LIFT_MM)
+  })
+
+  it('reads the cell off the cell slot, so a 2 x 1 floor is not laid out in a 2 x 2', () => {
+    // The seam's whole purpose: `TemplateLayout.cell` names `floor`, and the
+    // rule now has the `floor` fill in hand when it is asked about the `wall`.
+    const small = new Map([
+      [FIXTURE_SLOTS.base, record(FIXTURE_IDS.angled)],
+      [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.angled)],
+      [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.wall2)],
+    ])
+    expect(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, small).cell).toEqual({ w: 2, d: 1 })
+    expect(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.base, small).cell).toEqual({ w: 2, d: 1 })
+  })
+
+  it('never snaps an offset, and never lands off the 0.25 lattice either', () => {
+    // §2.2 in both directions: a slot offset is a multiple of 0.25 and three of
+    // the four `edge` insets the corpus produces are off the 0.5 lattice the
+    // *origin* snaps to. `snapTo(-0.75, 0.5)` is `-0.5`.
+    expect(SNAP_STEP.fine).toBe(0.5)
+    for (const slot of CORNER.keys()) {
+      const one = at(slot)
+      expect(Number.isInteger(one.dx * 4), `${slot} dx`).toBe(true)
+      expect(Number.isInteger(one.dz * 4), `${slot} dz`).toBe(true)
+    }
+  })
+
+  it('keeps a wired instance’s footprint at its own cell on every quarter turn', () => {
+    // A10's invariant, through the *production* rule rather than through the
+    // fixture's authored numbers: a corner covers 4.00 units² and nothing more,
+    // at every rotation, because every offset the conventions produce is an
+    // inset.
+    for (const rotation of [0, 90, 180, 270]) {
+      const scene = buildPlanScene(
+        instancesOf([
+          [
+            'corner',
+            [
+              [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+              [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+              [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2],
+              [FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2],
+              [FIXTURE_SLOTS.column, FIXTURE_IDS.column],
+            ],
+            0,
+            0,
+            rotation,
+          ],
+        ]),
+        wired,
+        wiredStyle,
+      )
+      const piece = scene.pieces[0]
+      expect(piece, `rotation ${String(rotation)}`).toBeDefined()
+      expect(piece?.box, `rotation ${String(rotation)}`).toEqual({ x: 0, z: 0, w: 2, d: 2 })
+    }
+  })
+
+  it('turns a wall onto the cell’s other faces, which originSlotLayout could not', () => {
+    /*
+      **What the wiring actually buys for the 32 `wall-on-tile` recipes, measured
+      rather than assumed — and the brief for this row was wrong about it.** A
+      2-unit wall on a 2 x 2 floor has minimum corner `(0, 0)` under *both*
+      rules at rotation 0: a wall whose run equals the face is already flush
+      along it when it is anchored at the cell's own corner. What
+      `originSlotLayout` could not do is turn it: with no declared cell each part
+      re-anchors to itself, so the wall stayed at `(0, 0)` at 90° and 180° where
+      it belongs at `(1.5, 0)` and `(0, 1.5)`. Two of the four quarters, not
+      four.
+    */
+    const wallBoxAt = (rotation: number, view = wired, style = wiredStyle) => {
+      const scene = buildPlanScene(
+        familyOf(OTHER_FIXTURE_TEMPLATE, [
+          [
+            'w',
+            [
+              [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+              [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+              [FIXTURE_SLOTS.wall, FIXTURE_IDS.wall2],
+            ],
+            0,
+            0,
+            rotation,
+          ],
+        ]),
+        view,
+        style,
+      )
+      const part = scene.pieces[0]?.parts.find((one) => one.slot === FIXTURE_SLOTS.wall)
+      if (part === undefined) throw new Error('the wall must draw')
+      return part.box
+    }
+
+    expect(wallBoxAt(0)).toEqual({ x: 0, z: 0, w: 2, d: 0.5 })
+    expect(wallBoxAt(90)).toEqual({ x: 1.5, z: 0, w: 0.5, d: 2 })
+    expect(wallBoxAt(180)).toEqual({ x: 0, z: 1.5, w: 2, d: 0.5 })
+    expect(wallBoxAt(270)).toEqual({ x: 0, z: 0, w: 0.5, d: 2 })
+
+    // The same four under `originSlotLayout`: the wall never leaves the corner.
+    expect(wallBoxAt(0, grounded, groundedStyle)).toEqual({ x: 0, z: 0, w: 2, d: 0.5 })
+    expect(wallBoxAt(90, grounded, groundedStyle)).toEqual({ x: 0, z: 0, w: 0.5, d: 2 })
+    expect(wallBoxAt(180, grounded, groundedStyle)).toEqual({ x: 0, z: 0, w: 2, d: 0.5 })
+    expect(wallBoxAt(270, grounded, groundedStyle)).toEqual({ x: 0, z: 0, w: 0.5, d: 2 })
+  })
+
+  it('keys its memo on the whole fill map, so one slot answers per configuration', () => {
+    /*
+      The memo used to be `(template, slot, file)`. It cannot be: the answer for
+      the `wall` slot is a function of the `floor` fill, so a 2 x 1 floor and a
+      2 x 2 floor with the *same* wall file must give the wall two different
+      cells — and under the old key the second placement would have got the
+      first one's.
+    */
+    const scene = buildPlanScene(
+      familyOf(OTHER_FIXTURE_TEMPLATE, [
+        [
+          'wide',
+          [
+            [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.wall, FIXTURE_IDS.wall2],
+          ],
+          0,
+          0,
+          0,
+        ],
+        [
+          'narrow',
+          [
+            [FIXTURE_SLOTS.base, FIXTURE_IDS.angled],
+            [FIXTURE_SLOTS.floor, FIXTURE_IDS.angled],
+            [FIXTURE_SLOTS.wall, FIXTURE_IDS.wall2],
+          ],
+          6,
+          0,
+          0,
+        ],
+      ]),
+      wired,
+      wiredStyle,
+    )
+    const cellOf = (id: string) =>
+      scene.pieces.find((piece) => piece.id === id)?.parts.find((one) => one.slot === FIXTURE_SLOTS.wall)
+        ?.layout.cell
+    expect(cellOf('wide')).toEqual({ w: 2, d: 2 })
+    expect(cellOf('narrow')).toEqual({ w: 2, d: 1 })
   })
 })
 
