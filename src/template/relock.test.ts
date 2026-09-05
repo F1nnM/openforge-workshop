@@ -364,6 +364,20 @@ describe('a fill the re-solve can no longer make', () => {
 
 /* ------------------------------------------------------------- the scene scale */
 
+/**
+ * The scene-scale block builds a 250-instance room, re-solves it five times and
+ * writes 750 fills through the real store. That is seconds of real work, and
+ * vitest's 5,000 ms default is not enough for it under contention: it times out
+ * on a whole-suite run that takes 2-3.6x its usual wall-clock, and passes in
+ * isolation (27 of 27 in 7.4 s) and in CI twice over.
+ *
+ * The same argument and the same fix as `src/composition/corpus.test.ts`'s
+ * `SLOW_CORPUS_MS` and `src/share/capacity.test.ts`'s `SLOW_CAPACITY_MS`. What
+ * the block asserts is unchanged — the *ratio* between the solver and the store
+ * write, which contention scales together — so only the wall-clock cap moves.
+ */
+const SLOW_RESOLVE_MS = 120_000
+
 describe('the scene-scale re-solve', () => {
   /**
    * Forty recipes, 250 instances — the plan's own room size.
@@ -499,7 +513,7 @@ describe('the scene-scale re-solve', () => {
     // Not an assertion about the store's speed — an assertion that the two
     // halves are not the same size, which is the finding.
     expect(stored).toBeGreaterThan(solver)
-  })
+  }, SLOW_RESOLVE_MS)
 
   it('writes through the store’s own guard, so a fill it refuses stays refused', () => {
     const { index, context } = harness({ lock: 'openlock' }, TEMPLATES)
