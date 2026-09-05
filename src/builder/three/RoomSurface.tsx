@@ -29,13 +29,21 @@
  *      union of its parts' — so there was no mesh to draw and no footprint to
  *      fall back to. `edits.ts#templateGhost` states exactly what the marker
  *      claims. **This is the one place the surface got less capable in A4b**, and
- *      row **C5** moved the blocker rather than clearing it: the fill *is* solved
- *      now, on the click and memoised, so a ghost could ask for one on hover —
- *      but the union of a solved fill's boxes needs B2's layout rule, and that
- *      rule does not reach the canvas (`BuilderScreen` builds its `PlanCatalog`
- *      with `originSlotLayout`, so every part draws at the instance origin). One
- *      call still restores it — `computeGhost` over a solved fill map through
- *      `reanchorPiece`, which is what A4a suggests — behind that rule.
+ *      it has been unblocked in two steps since. Row **C5** moved the blocker
+ *      rather than clearing it: the fill *is* solved now, on the click and
+ *      memoised, so a ghost could ask for one on hover — but the union of a
+ *      solved fill's boxes needs B2's layout rule, and that rule did not reach
+ *      the canvas. **Row C6 wired it**: `BuilderScreen` composes
+ *      `templateSlotLayout` over the family table, so a projected instance's
+ *      parts now stand where the recipe says. Nothing about the ghost is waiting
+ *      on a rule any more. What is left is two shapes rather than two unknowns —
+ *      a hover would pay the solve `actAt` deliberately pays on the click (1 to
+ *      19 queries, up to 3.3 ms cold, memoised on `(family, size)`), and
+ *      projecting the piece needs a `PlanCatalog`, which this component is not
+ *      given: it takes a `scene`. One call still restores it — `computeGhost`
+ *      over a solved fill map through `reanchorPiece`, which is what A4a
+ *      suggests — and it is now a row of its own rather than a row behind
+ *      another.
  *   3. **The parts rise by the recipe's own elevations, and by nothing else.**
  *      The mockup lifts a wall 0.25 units when a floor is under it, and it can,
  *      because it stores a `y` with every placement. A `TemplateInstance` has no

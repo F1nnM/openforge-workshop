@@ -33,12 +33,23 @@
  * in this corpus run to 8 units across, so "no other placement is at this
  * coordinate" is not the same claim as "nothing overlaps here".
  *
- * The height is **0** and that is a real limitation rather than a default worth
- * hiding: `freeCellFor` tests a vertical interval, and a wall placed at height 0
- * competes for cells with a floor where the room's own sweep would let them
- * share one. It is the conservative direction — it can decline a cell that would
- * have worked, never accept one that would not — and closing it needs the
- * instance's parts resolved through B2's elevation rule, which is `@/builder/three`'s.
+ * **The scene is projected with the rule the builder draws with.** Since row C7
+ * that is {@link SLOT_LAYOUT} and not `planCatalogFromFile`'s `originSlotLayout`
+ * default — see that constant for why it is threaded even though C6 and C7 both
+ * measured the vacancy answer *invariant* between the two rules.
+ *
+ * The probe's height is **0**, and that limitation outlived the wiring with a
+ * different cause. `freeCellFor` takes a `heightMm` and fixes the probe's
+ * underside at `elevationMm: 0`, so the probe is the ground level; and no
+ * catalog record carries a height at all, which `overlap.ts` states as
+ * *"`heightMm` is `0` on every catalog record"*. So the parts B2 lifts one base
+ * thickness are invisible to it. That is **not** the conservative direction — a
+ * lifted floor cannot decline a cell — and what keeps it sound is the
+ * ground-level identity {@link largestFoot} measures. Even where that failed,
+ * `buildPlanScene`'s own sweep hatches the result, so the error would surface as
+ * a visible conflict rather than a silent overlap. Closing it needs a probe that
+ * can be placed vertically, which is `freeCellFor`'s signature to widen and
+ * `@/builder/canvas`'s to own.
  *
  * ## The whole closure is behind a dynamic import for one of the two callers
  *
@@ -56,6 +67,7 @@ import {
   footprintExtent,
   freeCellFor,
   planCatalogFromFile,
+  templateSlotLayout,
 } from '@/builder/canvas'
 /* The module and not `@/builder/panels`: that barrel is the bill panel, the
    download hook and the archive planner, and this chunk needs one array. */
@@ -63,6 +75,61 @@ import { PLACEABLE_TEMPLATES } from '@/builder/panels/families'
 import type { CatalogFile, Footprint, TileId } from '@/catalog'
 import type { PlacementId, SlotFill, SlotName, TemplateId } from '@/store'
 import { SlotName as SlotNameSchema, TemplateId as TemplateIdSchema, placeTemplate, useWorkshopStore } from '@/store'
+
+/** The 91 placeable families by id — one lookup for both of this module's uses. */
+const RECIPES = new Map(PLACEABLE_TEMPLATES.map((one) => [one.id, one]))
+
+/**
+ * **Row B2's conventions, as this module's second composition site.**
+ *
+ * `BuilderScreen.tsx` composes the same rule from the same table, and until row
+ * C7 this module composed nothing: `planCatalogFromFile` defaulted to
+ * `originSlotLayout`, so the scene a drop was tested against put every part of
+ * every placement at its instance's origin while the surface drew them where
+ * B2's conventions say they stand. C6 named that and could not reach it.
+ *
+ * ## Threading it changes no answer, and that is measured rather than assumed
+ *
+ * The vacancy answer is **invariant** between the two rules. Over a sequential
+ * walk placing all 91 families C1's palette offers — each solved at `any size`
+ * through `three/fills.ts#createPlacementFiller`, each committed to the plan
+ * before the next is searched for — the two rules chose **the same cell 91 times
+ * out of 91**, spread over 75 distinct cells. Two arithmetic facts carry it, and
+ * both are the reason rather than a coincidence:
+ *
+ *   - **A piece's union box is the same either way** — 0 mismatches over all 91
+ *     families at all four quarter turns. Of those 364 projections **344 draw a
+ *     piece**; the other 20 are 5 one-slot families whose solved fill is a
+ *     footprint-less record, and they draw nothing under either rule.
+ *     `templateSlotLayout` insets each part *within* the instance's declared
+ *     `cell`, which is the `floor` fill's footprint on all three conventions, so
+ *     the union cannot grow past the box the concentric parts already spanned.
+ *   - **A wired instance's ground level still covers that whole box** — 344 of
+ *     those 344, none of them with no ground-level part at all. That is what
+ *     makes the elevation-0 probe of the module note sound: the `base` is the
+ *     slot B2 rests on the ground, and it is the slot that carries the cell.
+ *
+ * **So the rule is threaded for the seam and not for the answer.** The two facts
+ * above are properties of these 40 recipes and this solver's choices — a fourth
+ * convention, or a base a user picks narrower than its floor through C3's slot
+ * editor, would break the second one. With the rule threaded, that changes what
+ * this module tests and what the surface draws *together*, and neither has to be
+ * re-measured against the other. It also costs all but nothing:
+ * `templateSlotLayout`, `@/template/rules` and `@/template/offsets` were already
+ * in this chunk through the `@/builder/canvas` barrel, so `placeOnPlan-*.js`
+ * goes **99.76 → 99.83 kB, 13.66 → 13.68 kB gzip** — 70 bytes, which is the
+ * composition itself and not a new edge. The catalog route's chunk is
+ * **byte-identical** (`catalog-DmjWqxvD.js`, 99.56 kB), which is what the
+ * `await import()` below is for.
+ *
+ * The part-name list is the one thing `templateSlotLayout` needs that the canvas
+ * cannot see — `catalog.ts` sets out at length why it must not reach the family
+ * table beside a screen — and this module already holds that table for
+ * {@link placeFileAsFamily}. Composed once at module scope rather than per call:
+ * it closes over {@link RECIPES} alone, and `planCatalogFromFile` builds the
+ * per-`(fills, slot)` memo that actually matters on each call anyway.
+ */
+const SLOT_LAYOUT = templateSlotLayout((id) => RECIPES.get(id)?.parts.map((part) => part.name))
 
 /** What to place: a family, and the file to pin into each of its slots. */
 export interface PlanRequest {
@@ -95,7 +162,7 @@ export interface PlanPlaced {
  */
 export function placeOnPlan(catalog: CatalogFile, request: PlanRequest): PlanPlaced {
   const state = useWorkshopStore.getState()
-  const planCatalog = planCatalogFromFile(catalog)
+  const planCatalog = planCatalogFromFile(catalog, SLOT_LAYOUT)
   const scene = buildPlanScene(
     state.placements,
     planCatalog,
@@ -131,12 +198,28 @@ export function placeOnPlan(catalog: CatalogFile, request: PlanRequest): PlanPla
 /**
  * The biggest footprint among the fills, which is the instance's own.
  *
- * B2's slot offsets are not applied by the canvas yet — `originSlotLayout` puts
- * every part at the template's origin — so an instance covers exactly the union
- * of its parts at one point, and the union of concentric boxes is the largest of
- * them. Falls back to a 1 x 1 cell when nothing has a placeable footprint (32 of
- * 1,215 fills, `{ shape: 'none' }`), because a vacancy search still has to
- * return somewhere for a piece the plan cannot draw.
+ * **B2's slot offsets *are* applied now — row C6 wired them and
+ * {@link SLOT_LAYOUT} threads them here — and this is still the instance's
+ * footprint.** It was written when `originSlotLayout` put every part at the
+ * template's origin, where the union of concentric boxes is trivially the
+ * largest of them. The wired rule insets each part inside the instance's
+ * declared `cell`, which is the `floor` fill's own footprint on all three
+ * conventions, so it can only ever shrink a part's reach inside a box the
+ * concentric layout already spanned. Measured rather than argued: **0 union-box
+ * mismatches** between the two rules over all 91 placeable families at all four
+ * quarter turns.
+ *
+ * The same measurement covers the elevation-0 probe the module note relies on:
+ * the union of an instance's **ground-level** parts equals its whole union box
+ * on 344 of 344 (86 fillable families x 4 rotations), because the slot B2 rests
+ * on the ground is the `base` and the base carries the cell.
+ *
+ * Falls back to a 1 x 1 cell when nothing has a placeable footprint (32 of 1,215
+ * fills, `{ shape: 'none' }`), because a vacancy search still has to return
+ * somewhere for a piece the plan cannot draw. It compares *areas* through
+ * `footprintExtent` and returns the {@link Footprint} — not the extent — so
+ * `freeCellFor` tests the real outline: on the one `diag` family among the 91,
+ * `run: 2.828`, the bounding extent is 2.353 and the drawn quad is neither.
  */
 function largestFoot(catalog: CatalogFile, fills: Readonly<Record<string, TileId>>): Footprint {
   const byId = new Map(catalog.records.map((record) => [record.id, record]))
@@ -178,7 +261,9 @@ function largestFoot(catalog: CatalogFile, fills: Readonly<Record<string, TileId
  * from"* and asserts its 91 members, and a second concatenation here is the
  * copy that would go stale when B5 takes the families to 52. Imported from the
  * module rather than from `@/builder/panels`, whose barrel is the bill panel and
- * the download hook.
+ * the download hook. Read through {@link RECIPES}, which is the same list keyed
+ * by id — {@link SLOT_LAYOUT} needs a lookup over it per `(fills, slot)` and two
+ * scans of one array would be two chances to disagree.
  *
  * `undefined` for an id this build ships no family for, and for one whose family
  * declares anything other than a single part — a multi-slot recipe is not a
@@ -190,7 +275,7 @@ export function placeFileAsFamily(
   template: TemplateId,
   tile: TileId,
 ): (PlanPlaced & { readonly family: string }) | undefined {
-  const family = PLACEABLE_TEMPLATES.find((one) => one.id === (template as string))
+  const family = RECIPES.get(template)
   const part = family?.parts[0]
   if (family === undefined || part === undefined || family.parts.length !== 1) return undefined
   return {

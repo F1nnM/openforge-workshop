@@ -193,15 +193,31 @@ export function writes(edit: SurfaceEdit): boolean {
  * *cursor's* own cell.
  *
  * **Row C5 solves the fills on the click and still draws one cell**, which is a
- * decision rather than an omission. The footprint is the union of the parts'
- * own boxes *placed by B2's rule*, and that rule is not wired to the canvas:
- * `BuilderScreen` builds its `PlanCatalog` with `originSlotLayout`, so every
- * part of a placed instance is drawn at the instance's origin today. A marker
- * that claimed a union the renderer does not yet draw would be wrong in the one
- * direction that matters — it would promise a shape. Wiring
- * `catalog.ts#SlotLayoutRule` needs its signature widened to the instance's whole
- * fill map (`builder/canvas/fixture.ts#FIXTURE_CELL` measures why), which is a
- * row of its own. See {@link templateGhost}.
+ * decision rather than an omission — and row **C6 replaced the reason for it
+ * without changing the answer.**
+ *
+ * The footprint is the union of the parts' own boxes *placed by B2's rule*. C5
+ * wrote that the rule was not wired at all: `BuilderScreen` built its
+ * `PlanCatalog` with `originSlotLayout`, so every part of a placed instance drew
+ * at the instance's origin, and a marker claiming a union the renderer did not
+ * draw would have been wrong in the one direction that matters — it would have
+ * promised a shape. **C6 wired it.** It widened `catalog.ts#SlotLayoutRule` to
+ * the instance's whole fill map, which is exactly what
+ * `builder/canvas/fixture.ts#FIXTURE_CELL` measured it needed, and the screen
+ * composes `templateSlotLayout` over the family table. The renderer draws the
+ * union now.
+ *
+ * What still stops *this* marker claiming it is not the rule but **the fills**.
+ * The union is a function of them — the `cell` every part is inset within is the
+ * `floor` fill's own footprint — and {@link templateGhost} is handed a family,
+ * an angle, a cursor and a snap step, and nothing else. {@link planPlacement}
+ * takes C5's `PlacementFill` as an *optional* parameter precisely so this module
+ * stays clear of the 8,702-record assembly index the solver needs, and its
+ * absent case is a real caller: the landing hero arms a family over six records
+ * and can honestly say nothing about its parts. So a marker claiming the union
+ * would have to run the solver on every pointer move and would *still* have
+ * nothing to draw for that caller. It remains a row of its own; it is now a
+ * different one.
  */
 const MARKER_EXTENT = { w: 1, d: 1 } as const
 
@@ -219,8 +235,10 @@ const MARKER_EXTENT = { w: 1, d: 1 } as const
  *
  * It is a **1 × 1 cell outline at the snapped anchor** and nothing more. Not the
  * instance's footprint — a family's footprint is the union of its parts' boxes
- * *as B2's rule places them*, and that rule does not reach the canvas yet; see
- * {@link MARKER_EXTENT}. Not turned by `rotation` either, and that is deliberate rather
+ * *as B2's rule places them*, and since row C6 the scene really is drawn that
+ * way; what this function has not got is the fills the union is a function of.
+ * {@link MARKER_EXTENT} carries the whole argument. Not turned by `rotation`
+ * either, and that is deliberate rather
  * than unfinished: the anchor is the *minimum corner* the store receives, which
  * `slotAnchor` keeps invariant under rotation for a real instance, and a square
  * marker is already its own bounding box — so turning it could only move it away

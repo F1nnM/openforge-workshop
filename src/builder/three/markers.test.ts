@@ -235,9 +235,19 @@ describe('the geometries', () => {
  * piece — that the parts are separately plated, and that each one is flat at its
  * **own** slot elevation rather than at a shared one.
  *
- * Through `fixtureSlotLayout`, which is the canvas fixture's rule with real
- * offsets and three distinct elevations in it; `originSlotLayout` stacks every
- * part at one anchor and could not tell the two implementations apart.
+ * Through `fixtureSlotLayout`, and **not** through the rule the app runs, which
+ * since row C6 is `catalog.ts#templateSlotLayout`. `originSlotLayout` is out for
+ * the obvious reason — it stacks every part at one anchor and could not tell the
+ * two implementations apart — but the shipped rule is out for a sharper one: its
+ * three conventions rest the `floor` **and** the `wall` on the `base`, so it
+ * produces only **two** distinct elevations (0 and `BASE_LIFT_MM`) and a
+ * renderer that read one part's height for another would be invisible on the one
+ * pair it is most likely to confuse. The fixture's rule declares **three** —
+ * base on the plan, floor 6.35 mm up, walls and column 12.7 mm up — and real
+ * offsets with them. `fixture.ts` states the same split from its own end: the
+ * authored rule stays so that a renderer test measures the *renderer* rather than
+ * re-measuring B2's arithmetic, which `template/offsets.test.ts` already does
+ * over all three conventions.
  */
 describe('a plate per part', () => {
   const laidOut = planCatalogFromFile(fixtureCatalogFile(), fixtureSlotLayout)

@@ -371,9 +371,14 @@ describe('one instance, many parts — row A4b', () => {
   })
 
   it('rests every part on the plan when the layout declares no lift', async () => {
-    // `originSlotLayout` — the rule in force until row B2's lands — is zero for
-    // every slot, so the default catalog must produce no lift at all. That is
-    // what makes this row's change invisible to every test written before it.
+    // `originSlotLayout` — `planCatalogFromFile`'s default, and since row C6 no
+    // longer the rule the app runs — declares `elevationMm: 0` for every slot,
+    // so a catalog built without a rule must produce no lift at all. It is still
+    // a live case rather than a legacy one: the landing hero and every test with
+    // no template pass no rule, and `templateSlotLayout` itself answers
+    // `ORIGIN_LAYOUT` for B4's 51 one-slot families. The claim is that this
+    // module reads the layout's number and never invents one, which is why the
+    // sibling test above passes `{ layout: true }` and this one does not.
     const room = await roomFrom(
       file,
       placementsOf([['p1', placeAll([FIXTURE_IDS.floor2, FIXTURE_IDS.wall2], 0, 0)]]),

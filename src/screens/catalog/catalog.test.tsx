@@ -29,9 +29,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { VirtuosoGridMockContext } from 'react-virtuoso'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { selectVariantForLock } from '@/assembly'
+import { CatalogFile as CatalogFileSchema, buildAggregateIndex } from '@/catalog'
 import { createWorkshopRouter } from '@/routes'
 import type { CatalogSearch } from '@/search'
-import { clearPersistedWorkshopState, resetWorkshop } from '@/store'
+import { clearPersistedWorkshopState, resetWorkshop, setLockSystem } from '@/store'
 import { CatalogStatsProvider } from '@/ui/shell'
 import { resetCatalogIndexCache } from '@/ui/shell'
 
@@ -421,6 +423,60 @@ describe('the card', () => {
     expect(frame?.style.getPropertyValue('--of-sheet-x')).toBe('0%')
     expect(frame?.style.getPropertyValue('--of-sheet-y')).toBe('0%')
     expect(frame?.style.getPropertyValue('--of-sheet-cols')).toBe('5')
+  })
+
+  /**
+   * **The preview is not the print, asserted on a rendered card.** Row C7.
+   *
+   * The guard exists because of a shipped defect rows V3 and V5 both fixed: a
+   * card showed one file and the placement contained another.
+   * `builder/panels/palette.corpus.test.ts` measures the disagreement headlessly
+   * over the whole corpus — 931 two-sided items, all three locks — but nothing
+   * has rendered `item.preview` and compared it to the print since the library's
+   * item rows were deleted, and row C1 named this screen as the only surface
+   * left that renders it.
+   *
+   * The fixture's merged pair is the one item that can show it: ord 1 is the
+   * `openlock` topper and ord 6 the `dragonlock` base-integrated print of the
+   * same design, so under a `dragonlock` preference the two answers differ. The
+   * print is **derived** here rather than written down, so this stays true if
+   * `selectVariantForLock`'s ranking moves.
+   *
+   * Two halves, because a card can show the right file and still hand the wrong
+   * one on: the thumbnail's sheet, and the ordinal `?tile=` opens the drawer at —
+   * which is where `placeOnPlan.ts#placeFileAsFamily` gets the file it pins.
+   */
+  it('renders the preview file, and opens on it, whatever the lock would print', async () => {
+    setLockSystem('dragonlock')
+    const file = CatalogFileSchema.parse(FIXTURE_CATALOG)
+    const index = buildAggregateIndex(file)
+    const byId = new Map(file.records.map((record) => [record.id, record]))
+    const item = index.aggregates.find((one) => one.variantClass === 'both')
+    if (item === undefined) throw new Error('the fixture lost its merged pair')
+
+    const preview = byId.get(item.preview)
+    const print = byId.get(selectVariantForLock(item, 'dragonlock').variant.id)
+    expect(preview).toBeDefined()
+    expect(print).toBeDefined()
+    // The premise. Without it the two assertions below would both pass on a card
+    // that read the lock, which is the bug they exist to catch.
+    expect(print?.id).not.toBe(preview?.id)
+
+    await renderCatalog()
+    const card = screen
+      .getByRole('heading', { level: 2, name: FIXTURE_NAMES[1] })
+      .closest('.of-card')
+    expect(card).not.toBeNull()
+
+    const sheet = card?.querySelector<HTMLImageElement>('.of-thumb-sheet')
+    expect(sheet?.getAttribute('src')).toContain(preview?.blob)
+    expect(sheet?.getAttribute('src')).not.toContain(print?.blob)
+
+    // `?tile=` is a `ManifestOrdinal`, so the drawer opens on the variant the
+    // card drew and the place button pins that file rather than the lock's.
+    const open = card?.querySelector<HTMLAnchorElement>('.of-card-open')
+    expect(open?.getAttribute('href')).toContain(`tile=${preview?.ord}`)
+    expect(open?.getAttribute('href')).not.toContain(`tile=${print?.ord}`)
   })
 
   it('renders the one tile with no sprite sheet without a broken image', async () => {

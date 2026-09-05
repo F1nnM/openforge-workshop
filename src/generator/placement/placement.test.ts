@@ -311,9 +311,15 @@ describe('reaching the plan view’s collision', () => {
       id: idOf(2),
       band: 'area' as const,
       // A catalog part is the level it stands at — there is no height for one
-      // anywhere the app reads — and the shipped layout rule puts it on the
-      // ground. The generated base's own interval starts there and is 6 mm tall,
-      // so the two share vertical space and the sweep reaches the geometry.
+      // anywhere the app reads. `levelAt(0)` is the **ground-level** part of an
+      // instance, which since row C6's real layout rule means its `base`: that
+      // rule rests the base on the plan and lifts the `floor`, `wall` and
+      // `column` one base thickness (`BASE_LIFT_MM`, 6 mm) above it. A base is
+      // what a generated base competes with for a square anyway, and it is the
+      // part that carries the instance's whole cell, so this is the pair worth
+      // asserting rather than the easy one. The generated base's own interval
+      // starts at the ground and is 6 mm tall, so the two share vertical space
+      // and the sweep reaches the geometry.
       level: levelAt(0),
       box: overlapping.box,
       parts: overlapping.parts,

@@ -33,9 +33,10 @@
  * do.
  *
  * It also means **a size change is the dangerous re-solve, not a lock change**:
- * a cell that no candidate matches empties a slot that was filled, and there is
- * no store action that can clear a stale fill — see the gaps at the bottom of
- * this docblock.
+ * a cell that no candidate matches empties a slot that was filled, and this
+ * driver leaves the stale fill where it is rather than taking it out. Row A11
+ * shipped the action that can — `@/store#clearFill` — and no solver calls it, on
+ * purpose; see the gaps at the bottom of this docblock.
  *
  * ## The scene-scale cost, and why it is not instances times slots
  *
@@ -96,18 +97,31 @@
  * cost above is the cost of a toggle that changes *nothing* as much as of one
  * that changes everything.
  *
- * ## Three gaps around the `pinned` bit
+ * ## Three gaps around the `pinned` bit — and row **A11** closed two of them
  *
  * The plan's §11 records three as owned by nobody and hands the third here.
- * This row's answers:
+ * This row's answers, with A11's where this row could only report:
  *
  *   1. **There is no unpin, and this solver needs one** — not to re-solve (it
  *      honours pins by design) but to *act* on the warning below. A pinned fill
- *      that has become unprintable can only be repaired today by making another
+ *      that has become unprintable could only be repaired by making another
  *      deliberate choice, which is not what the user wants to say: they want to
- *      hand the slot back to the lock preference. That is one action in A1's
- *      file (`writeFill(id, slot, …, false)` with the fill deleted) and this row
- *      does not own it.
+ *      hand the slot back to the lock preference.
+ *
+ *      **`@/store#unpinFill` is that action, and A11 shipped it.** It refined
+ *      the shape this row guessed at: not one `writeFill(id, slot, …, false)`
+ *      with the fill deleted, but **two named actions**, because dropping the
+ *      bit and emptying the slot leave the room in states that differ in whether
+ *      the pack can be built — `unpinFill` keeps a printable file and moves only
+ *      the authority over it, `clearFill` leaves a hole and refuses the
+ *      download. The store cannot do the re-solve that makes an unpin visible,
+ *      needing the candidate sets and therefore the catalog and the template
+ *      table `schema.ts` keeps out of its closure — so the repair is the
+ *      caller's, and **`builder/panels/slots/slotEditor.ts#handSlotToLock`** is
+ *      the caller that does it. It does it through {@link reSolveScene} over the
+ *      one instance — this module's own driver, at the memo's best case — with
+ *      the instance re-read out of the store after the unpin, so the pin that
+ *      was just dropped is not handed back to the solver as a preset.
  *   2. **A pinned fill can become unprintable under a new lock, and now it
  *      warns.** {@link PinLockWarning} is that comparison, and it is made here
  *      because here is where both halves are in hand: the fill's own record, and
@@ -118,12 +132,23 @@
  *      at all is lock-agnostic and not a mismatch.
  *   3. **The re-solve is measured at scene scale**, above.
  *
- * A fourth, found here: **there is no way to clear a fill.** `fillSlot` and
- * `pinFill` both write a tile and A1's surface has no delete, so a re-solve that
- * can no longer fill a slot leaves the previous answer in place. It is
- * unreachable through the lock (the candidate set is lock-free, above) and
- * reachable through a size change, which is why {@link InstanceReSolve.stale}
- * reports it rather than papering over it.
+ * A fourth, found here: **there was no way to clear a fill.** `fillSlot` and
+ * `pinFill` both write a tile and A1's surface had no delete, so a re-solve that
+ * can no longer fill a slot left the previous answer in place with nothing able
+ * to take it out.
+ *
+ * **`@/store#clearFill` is that action, and A11 shipped it too** — the second of
+ * the pair described above, the one that leaves a hole and refuses the download.
+ * **This driver still does not call it**, and that is now a decision rather than
+ * a missing action: `clearFill`'s own docblock is where the argument lives, and
+ * it names this function — a driver that silently deleted a user's fill on a
+ * candidate-set change would be contract **C-k**'s failure with a delete key, so
+ * clearing has exactly one caller and it is the user. What this function does
+ * instead is unchanged and is the honest half: the stale answer stays, and
+ * {@link InstanceReSolve.stale} and {@link UnfilledReport.stale} report it so
+ * the surface that *does* have the user in front of it can offer the clear.
+ * Still unreachable through the lock (the candidate set is lock-free, above) and
+ * reachable through a size change.
  */
 import type { CatalogRecord, TileId } from '@/catalog'
 import type { AssemblyIndex, TemplateLookup } from '@/assembly'
@@ -205,10 +230,11 @@ export interface UnfilledReport {
   readonly slot: SlotName
   readonly gap: SlotGap
   /**
-   * A fill that is still in the store for this slot, which the re-solve can
-   * neither replace nor remove.
+   * A fill that is still in the store for this slot, which the re-solve cannot
+   * replace and **will not** remove.
    *
-   * The fourth gap in the module docblock. `undefined` for the ordinary case of
+   * The fourth gap in the module docblock, where row A11's `clearFill` and the
+   * reason no solver calls it are set out. `undefined` for the ordinary case of
    * a slot that was empty and stays empty.
    */
   readonly stale: TileId | undefined
@@ -222,7 +248,7 @@ export interface InstanceReSolve {
   readonly fill: TemplateFill | undefined
   /** Pinned slots this instance carried into the re-solve. */
   readonly pinned: readonly SlotName[]
-  /** Slots whose stored fill the re-solve cannot rewrite and cannot clear. */
+  /** Slots whose stored fill the re-solve cannot rewrite and will not clear. */
   readonly stale: readonly SlotName[]
   /** `true` when this instance's answer came out of the memo rather than the solver. */
   readonly cached: boolean
