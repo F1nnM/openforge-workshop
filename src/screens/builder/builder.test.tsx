@@ -42,7 +42,7 @@ import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type * as BuilderThree from '@/builder/three'
@@ -85,9 +85,41 @@ import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
  * stage. One assertion changed for it and the change is recorded at the call
  * site: nothing in this file can any longer see a `role="application"`.
  */
+/**
+ * Row **C8**'s gesture, as a value a test can set — the canvas cannot fire it.
+ *
+ * `vi.hoisted` because `vi.mock`'s factory is hoisted above every `const` in
+ * this file, so a plain module-level object would be in its temporal dead zone
+ * when the stub below is constructed.
+ */
+const gesture = vi.hoisted(() => ({ placement: '', slot: undefined as string | undefined }))
+
 vi.mock('@/builder/three', async () => {
   const actual = await vi.importActual<typeof BuilderThree>('@/builder/three')
-  return { ...actual, Builder3DPanel: () => <div data-testid="builder-3d" /> }
+  return {
+    ...actual,
+    /*
+      Row **C8** gave the panel one more seam and it is stubbed the way the
+      generator drawer's `onPlace` is, one block down: a real `<button>` that
+      fires the callback with what the real surface would have resolved. What
+      that buys is the **screen's** half of the round trip — `onEditSlots` →
+      `setEditing` → `SlotsPanel` → the dialog — which is the one hop no test in
+      `src/builder/three/**` can reach, because the state lifted out of the panel
+      landed here.
+    */
+    Builder3DPanel: ({ onEditSlots }: BuilderThree.Builder3DPanelProps) => (
+      <div data-testid="builder-3d">
+        <button
+          onClick={() => {
+            onEditSlots?.(gesture.placement as never, gesture.slot as never)
+          }}
+          type="button"
+        >
+          right-click the piece
+        </button>
+      </div>
+    ),
+  }
 })
 
 /**
@@ -305,6 +337,81 @@ describe('the builder screen', () => {
     // open slots are reported instead.
     expect(screen.queryByText(/nothing this build can print/)).toBeNull()
     expect(screen.getByText(/4 slots are still empty/)).toBeInTheDocument()
+  })
+
+  /**
+   * The owner's right click, from the drawing all the way to the dialog.
+   *
+   * *"The menu to customize the slots of a template should come up with a right
+   * click."* Row C3 built the editor and could only open it from the piece's row
+   * in this column; row **C8** put the gesture on the piece and lifted the open
+   * state here, because two surfaces open one dialog. This is the hop that lift
+   * created: the surface reports a placement and a slot, this screen turns them
+   * into `SlotsPanel`'s `editing`, and the editor opens **on the slot the
+   * pointer was over** rather than on the recipe's first gap.
+   *
+   * `right wall` is the slot fired, and the assertion is that the editor's card
+   * grid is filling *it* — `floor` is filled and the other four are open, so the
+   * editor's own rule would have opened on `base`, the first slot needing a
+   * choice. The two answers differ, which is what makes this an assertion about
+   * the pre-selection rather than about the dialog existing.
+   */
+  it('opens the slot editor from the drawing, on the slot the pointer was over', async () => {
+    await renderBuilder()
+
+    act(() => {
+      placeTemplate({
+        template: TemplateId.parse('s2w-wall-on-tile-corner-low-single-piece'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('floor')]: { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: false } },
+      })
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    const [placement] = Object.keys(useWorkshopStore.getState().placements)
+    gesture.placement = placement ?? ''
+    gesture.slot = 'right wall'
+
+    act(() => {
+      screen.getByRole('button', { name: 'right-click the piece' }).click()
+    })
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('group', { name: 'Fill the right wall slot' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('group', { name: 'Fill the base slot' })).toBeNull()
+  })
+
+  it('opens on the recipe’s first gap when the gesture names no slot', async () => {
+    // The panel row's own case, through the same lifted state: a row names a
+    // piece and has no point to resolve, so the editor applies its own rule.
+    await renderBuilder()
+
+    act(() => {
+      placeTemplate({
+        template: TemplateId.parse('s2w-wall-on-tile-corner-low-single-piece'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('floor')]: { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: false } },
+      })
+    })
+
+    const [placement] = Object.keys(useWorkshopStore.getState().placements)
+    gesture.placement = placement ?? ''
+    gesture.slot = undefined
+
+    act(() => {
+      screen.getByRole('button', { name: 'right-click the piece' }).click()
+    })
+
+    // `column` and not `base`: it is the first of this recipe's declared parts
+    // that has no fill, which is the editor's own rule, read off the shipped
+    // table rather than guessed.
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('group', { name: 'Fill the column slot' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('group', { name: 'Fill the right wall slot' })).toBeNull()
   })
 
   /**

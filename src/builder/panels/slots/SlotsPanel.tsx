@@ -8,27 +8,41 @@
  * subject, and **what the files in those slots themselves hold**, which is the
  * question one step further in.
  *
- * ## The right click is here, and not on the 3D surface — say why
+ * ## The right click is on the drawing **and** here, and both are load-bearing
  *
  * §3.3 asks for *"a popover on the placed instance"*, and the placed instance is
- * drawn by `builder/three/RoomSurface.tsx`. That file is row **A4b**'s and this
- * row does not own it, and the seam it would need is genuinely one line: `onDown`
- * begins `if (event.button !== 0) return`, so a secondary press is not seen at
- * all today, and the 5 px discriminator that separates a click from a camera
- * drag — `surface.ts#isClickGesture`, `DRAG_THRESHOLD_PX` — is inside a module
- * that imports three.js and is exported from `@/builder/three` **type-only**, by
- * a boundary test that exists to keep the renderer out of the entry chunk. So
- * there is no way to reuse the discriminator outside `src/builder/three/**`, and
- * re-declaring five pixels here would be a second copy of the number the owner's
- * reference was felt with.
+ * drawn by `builder/three/RoomSurface.tsx`. Row C3 could not put the gesture
+ * there and said exactly why: `onDown` began `if (event.button !== 0) return`,
+ * so a secondary press was never seen at all, and the 5 px discriminator that
+ * separates a click from a camera drag — `surface.ts#isClickGesture`,
+ * `DRAG_THRESHOLD_PX` — is inside a module that imports three.js and is exported
+ * from `@/builder/three` **type-only**, by a boundary test that keeps the
+ * renderer out of the entry chunk. Re-declaring five pixels here would have been
+ * a second copy of the number the owner's reference was felt with.
  *
- * What this row does instead is put the gesture where it can be complete: every
- * piece on the plan is a real `<button>` in this panel, `onContextMenu` opens
- * its editor, and so do `Enter` and `Space` — so the editor is reachable by
- * right click *and* by keyboard, which §3.3's second requirement asks for and
- * which a context menu on a canvas would still have needed a keyboard route
- * for. The report names the `RoomSurface` prop that would add the same gesture
- * on the drawing itself.
+ * Row **C8** built the seam on the far side instead — a `RoomSurface` prop that
+ * fires from `pointerup`, so the discriminator is reused where it lives and this
+ * panel never sees a pixel. What that changes here is the *state*, and only the
+ * state: which piece's editor is open is now `BuilderScreen`'s, because two
+ * surfaces open it and neither can hold the other's. Everything else about this
+ * panel is unchanged.
+ *
+ * **The panel route stays, and deleting it would have been a regression twice
+ * over.** A right click has no keyboard equivalent every platform agrees on, so
+ * the drawing's gesture is pointer-only by construction — the canvas is a
+ * `role="application"` with its own key map and no `contextmenu` key binding.
+ * Every piece on the plan is a real `<button>` here, `onContextMenu` opens its
+ * editor and so do `Enter` and `Space`, which is §3.3's second requirement.
+ *
+ * The second reason is not about the keyboard at all and is worth writing down,
+ * because it is invisible from the drawing: **a right click can only reach what
+ * is drawn.** `PlanScene.unfilled` is *"one per instance with no filled slots at
+ * all"*, and neither `RoomSurface`'s plates nor its instanced meshes walk it —
+ * both walk `scene.pieces` and `scene.generated` — so an instance holding
+ * nothing occupies no pixels and there is nothing on the plan to right-click.
+ * {@link planPieces} walks the **placements map**, so those pieces are rows in
+ * this list, and this list is the only way to fill them. Row C5's solve makes
+ * that the uncommon case rather than the normal one, not an impossible one.
  *
  * ## A pick writes a `SlotFill`, and only a template slot can hold one
  *
@@ -66,14 +80,14 @@
  * three. There is nothing to virtualise, and the empty state is the normal state
  * — which is why it states the 11.5% rather than just saying "nothing here".
  */
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 
 import type { AssemblyIndex } from '@/assembly'
 import { describeCell } from '@/builder/canvas'
 import type { CatalogFile } from '@/catalog'
 import type { RecipeTemplate } from '@/screens/assemblies'
 import { SlotFills } from '@/screens/detail/slots'
-import type { PlacementId, TemplateId, TemplateInstance } from '@/store'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 import { Chip, Eyebrow } from '@/ui/primitives'
 
 import type { PlanPiece } from './planSlots'
@@ -104,9 +118,45 @@ export interface SlotsPanelProps {
   readonly templates: (id: TemplateId) => RecipeTemplate | undefined
   /** `WorkshopState.placements`, passed straight through from the screen. */
   readonly placements: Readonly<Record<string, TemplateInstance>>
+  /**
+   * Which piece's editor is open, and on which slot — `null` for none.
+   *
+   * **Lifted out of this component by row C8**, and the lift is what the row
+   * needed rather than a tidy-up: the same editor now opens from a right click
+   * on the drawing, and two components cannot each own the one dialog's open
+   * state. `BuilderScreen` holds it because it is the only thing that renders
+   * both surfaces.
+   */
+  readonly editing: SlotEditTarget | null
+  /** Open an editor, or close the open one with `null`. */
+  readonly onEdit: (target: SlotEditTarget | null) => void
 }
 
-export function SlotsPanel({ catalog, assembly, templates, placements }: SlotsPanelProps) {
+/**
+ * One open slot editor: whose slots, and which row it opens on.
+ *
+ * The panel's own type and deliberately not `@/builder/three`'s
+ * `SlotEditGesture`, which is the same two fields plus a sentence to announce.
+ * `builder/panels/boundary.test.ts` is the line between them and a `import type`
+ * across it would be free in bytes and wrong in meaning — the panel would then
+ * read as depending on the 3D surface's vocabulary, when in fact the drawing is
+ * one of *two* callers and the panel row is the other. `BuilderScreen` converts
+ * the surface's two primitives into this on the way past.
+ */
+export interface SlotEditTarget {
+  readonly placement: PlacementId
+  /**
+   * The slot to open on, or `undefined` to let the editor choose.
+   *
+   * `undefined` is what the panel row passes, because a row names a piece and
+   * not a point — and the editor's own rule is the better answer there: it opens
+   * on the first slot still needing a choice. A right click on the drawing has a
+   * point, so it names the slot whose part was under it.
+   */
+  readonly slot?: SlotName | undefined
+}
+
+export function SlotsPanel({ catalog, assembly, templates, placements, editing, onEdit }: SlotsPanelProps) {
   const pieces = useMemo(
     () => planPieces(catalog, placements, templates),
     [catalog, placements, templates],
@@ -120,9 +170,7 @@ export function SlotsPanel({ catalog, assembly, templates, placements }: SlotsPa
   // the preference does.
   const inventory = useMemo(() => planSlots(catalog, placements), [catalog, placements])
 
-  /** Which piece's editor is open, by placement key. */
-  const [editing, setEditing] = useState<PlacementId | null>(null)
-  const open = pieces.find((piece) => piece.placement === editing)
+  const open = pieces.find((piece) => piece.placement === editing?.placement)
 
   const unknown = pieces.filter((piece) => piece.template === undefined)
   const gaps = pieces.reduce((total, piece) => total + piece.needsChoice.length, 0)
@@ -142,13 +190,15 @@ export function SlotsPanel({ catalog, assembly, templates, placements }: SlotsPa
       {pieces.length === 0 ? (
         <p className="of-planslots-note">
           Nothing is placed yet. Every piece on the plan is a recipe with named slots, and each
-          one&rsquo;s slots can be changed here or with a right click.
+          one&rsquo;s slots can be changed by right-clicking it on the plan or by pressing its row
+          here.
         </p>
       ) : (
         <>
           <p className="of-planslots-note">
             {`${String(pieces.length)} ${pieces.length === 1 ? 'piece' : 'pieces'} placed. `}
-            Right-click a piece — or press it — to choose what goes in its slots.
+            Right-click a piece on the plan to choose what goes in the slot you clicked, or press a
+            row below for all of its slots.
             {gaps === 0 ? '' : ` ${String(gaps)} ${gaps === 1 ? 'slot needs' : 'slots need'} a choice.`}
           </p>
 
@@ -161,15 +211,22 @@ export function SlotsPanel({ catalog, assembly, templates, placements }: SlotsPa
                   data-gap={piece.needsChoice.length === 0 ? undefined : ''}
                   disabled={piece.template === undefined}
                   onClick={() => {
-                    setEditing(piece.placement)
+                    onEdit({ placement: piece.placement })
                   }}
                   onContextMenu={(event) => {
-                    // The gesture §3.3 asks for. `preventDefault` so the
-                    // browser's own menu does not cover the editor it opens; the
-                    // event is not stopped from propagating, because nothing
+                    // The gesture §3.3 asks for, on the row. `preventDefault` so
+                    // the browser's own menu does not cover the editor it opens;
+                    // the event is not stopped from propagating, because nothing
                     // above this panel listens for one.
+                    //
+                    // No slot named, and that is the row's honest answer rather
+                    // than a missing feature: a row is a piece and a piece has
+                    // every slot in it. The editor's own rule — open on the
+                    // first slot still needing a choice — is a better guess than
+                    // any this list could make. The drawing's right click is the
+                    // gesture that *has* a point, and row C8 gives it the slot.
                     event.preventDefault()
-                    setEditing(piece.placement)
+                    onEdit({ placement: piece.placement })
                   }}
                   type="button"
                 >
@@ -205,10 +262,21 @@ export function SlotsPanel({ catalog, assembly, templates, placements }: SlotsPa
           catalog={catalog}
           index={assembly}
           instance={open.instance}
-          key={open.placement}
+          /*
+            The slot in the key as well as the placement, since row C8. The
+            editor holds its own *shown row* in state, so a second right click on
+            a different part of the **same** piece would otherwise change
+            `initialSlot` and change nothing on screen — the state initialised on
+            the first open would still be the one deciding. Remounting is the
+            right answer rather than a `useEffect` that pushes the prop into
+            state: the user pointed somewhere new, which is a new question, and
+            the design filter and the refusal notice should start clean too.
+          */
+          key={`${open.placement}:${editing?.slot ?? ''}`}
           onClose={() => {
-            setEditing(null)
+            onEdit(null)
           }}
+          {...(editing?.slot === undefined ? {} : { initialSlot: editing.slot })}
           template={open.template}
         />
       )}

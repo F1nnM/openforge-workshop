@@ -111,6 +111,7 @@ import {
   PlanToolbar,
   useArchiveDownload,
 } from '@/builder/panels'
+import type { SlotEditTarget } from '@/builder/panels/slots'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 import type { SurfaceStatus } from '@/builder/three'
@@ -127,6 +128,7 @@ import type { RecipeTemplate } from '@/screens/assemblies'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
 import { BASE_SLOT, compositionIndexFor } from '@/screens/detail/slots'
+import type { PlacementId } from '@/store'
 import {
   SlotName,
   TemplateId,
@@ -226,6 +228,37 @@ function Builder({ index }: { index: CatalogIndex }) {
    * sentence in the hint plate below is for.
    */
   const [status, setStatus] = useState<SurfaceStatus | null>(null)
+
+  /**
+   * Which placed instance's slot editor is open, and on which slot — row **C8**.
+   *
+   * **Held here because two surfaces open it and neither can hold the other's
+   * state.** `SlotsPanel` owned it until this row, which was correct while a
+   * piece's row in the bill column was the only way in; the owner asked for the
+   * editor to *"come up with a right click"* on the piece, so the 3D surface now
+   * opens it too, and a `useState` inside the panel is unreachable from inside
+   * `<Builder3DPanel>`. This is the same lift the surface `status` above got for
+   * the same reason, one row earlier.
+   *
+   * `slot` is what makes the drawing's route better than the panel's rather than
+   * merely equivalent: a right click lands on a *part*, so `partAt` names the
+   * slot the user pointed at and the editor opens on that row. The panel row
+   * passes no slot, because a row names a piece and has no point to resolve.
+   */
+  const [editing, setEditing] = useState<SlotEditTarget | null>(null)
+
+  /**
+   * The surface's two primitives, as the panel's open state.
+   *
+   * `exactOptionalPropertyTypes` is why this is a conditional and not a spread
+   * of `{ placement, slot }`: with no part resolved the field must be *absent*
+   * rather than present-and-undefined, and that is a real distinction here —
+   * absent is what the panel row passes and what makes the editor pick the first
+   * slot needing a choice.
+   */
+  const editSlots = useCallback((placement: PlacementId, slot?: SlotName) => {
+    setEditing(slot === undefined ? { placement } : { placement, slot })
+  }, [])
 
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
@@ -648,6 +681,14 @@ function Builder({ index }: { index: CatalogIndex }) {
             nothing.
           */
           fill={{ index: assembly, templates, composition }}
+          /*
+            Row **C8**. The owner's right click, arriving from the piece on the
+            plan: `RoomSurface` resolves the pick to a placement and to the slot
+            whose part it hit, and this screen turns that into the open state
+            `SlotsPanel` renders the editor from. The panel's own row keeps its
+            gesture — it is the only pointer-free way in.
+          */
+          onEditSlots={editSlots}
           onStatus={setStatus}
         />
 
@@ -719,6 +760,8 @@ function Builder({ index }: { index: CatalogIndex }) {
         <SlotsPanel
           assembly={assembly}
           catalog={index.file}
+          editing={editing}
+          onEdit={setEditing}
           placements={placements}
           templates={templates}
         />

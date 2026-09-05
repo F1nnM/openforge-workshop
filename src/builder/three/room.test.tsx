@@ -87,6 +87,8 @@ const surfaceCalls: {
      the pointer path itself is unreachable from jsdom (`edits.ts` states that
      limitation) and this is the closest a test gets to the click. */
   fill: PlacementFiller
+  /** Row C8: whether the room carried the screen's slot-editor handler through. */
+  edits: boolean
 }[] = []
 
 vi.mock('@/three/Stage', async () => {
@@ -122,6 +124,7 @@ vi.mock('./RoomSurface', () => ({
     tools,
     geometries,
     fill,
+    onEditSlots,
   }: {
     room: {
       groups: { count: number; matrices: unknown[]; resolution: { family: { id: string } } }[]
@@ -131,6 +134,7 @@ vi.mock('./RoomSurface', () => ({
     tools: { selectedDesign: string | null }
     geometries: ReadonlyMap<string, unknown>
     fill: PlacementFiller
+    onEditSlots?: unknown
   }) => {
     surfaceCalls.push({
       groups: room.groups.length,
@@ -141,6 +145,7 @@ vi.mock('./RoomSurface', () => ({
       armed: tools.selectedDesign,
       loaded: geometries.size,
       fill,
+      edits: onEditSlots !== undefined,
     })
     return <div data-testid="surface" />
   },
@@ -578,6 +583,46 @@ describe('what a click would place — row C5', () => {
 })
 
 describe('the keyboard path exists in the document', () => {
+  it('carries row C8’s handler through to the surface when the screen passes one', async () => {
+    // `Builder3DPanel` is asserted at its own boundary in `panel.test.tsx`; this
+    // is the second hop, and the room does nothing to the handler but pass it —
+    // the dialog it opens is outside this directory entirely.
+    surfaceCalls.length = 0
+    render(
+      <BuilderRoom
+        assets={ASSETS}
+        catalog={CATALOG}
+        fetchImpl={notFound}
+        fill={AUTHORITIES}
+        onEditSlots={() => undefined}
+        scene={scene([FIXTURE_IDS.floor1])}
+        tools={planTools()}
+      />,
+    )
+    await waitFor(() => {
+      expect(surfaceCalls.length).toBeGreaterThan(0)
+    })
+    expect(surfaceCalls.at(-1)?.edits).toBe(true)
+  })
+
+  it('passes none when the screen passes none, so the prop stays optional', async () => {
+    surfaceCalls.length = 0
+    render(
+      <BuilderRoom
+        assets={ASSETS}
+        catalog={CATALOG}
+        fetchImpl={notFound}
+        fill={AUTHORITIES}
+        scene={scene([FIXTURE_IDS.floor1])}
+        tools={planTools()}
+      />,
+    )
+    await waitFor(() => {
+      expect(surfaceCalls.length).toBeGreaterThan(0)
+    })
+    expect(surfaceCalls.at(-1)?.edits).toBe(false)
+  })
+
   it('publishes a key map for the canvas to point at', async () => {
     // The canvas's `aria-describedby` names this paragraph, and `RoomSurface`
     // sets the attribute on the `<canvas>` element itself. The element cannot be
@@ -603,6 +648,18 @@ describe('the keyboard path exists in the document', () => {
     expect(keys?.textContent).toMatch(/Drag to orbit/)
     expect(keys?.textContent).toMatch(/Arrow keys move the plan cursor/)
     expect(keys?.textContent).toMatch(/Escape puts it back/)
+    /*
+      Row **C8**. The right click is on the drawing now, so the key map has to
+      say so — and it has to say the *other* route in the same breath, because a
+      right click has no keyboard equivalent every platform agrees on and this
+      paragraph is what the canvas's `aria-describedby` points at. The second
+      sentence is the panel's list, named as the pointer-free way in.
+    */
+    expect(keys?.textContent).toMatch(/Right-click a piece to choose what goes in its slots/)
+    expect(keys?.textContent).toMatch(/Pieces on the plan list/)
+    // And the right button is a pan, which is the interaction the 5 px
+    // threshold protects — the sentence used to name only the middle one.
+    expect(keys?.textContent).toMatch(/drag with the right or middle button/)
     // And a live region for the announcements, polite and atomic.
     const live = document.querySelector('[aria-live="polite"]')
     expect(live).not.toBeNull()

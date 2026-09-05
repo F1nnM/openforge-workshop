@@ -64,15 +64,26 @@ import { describe, expect, it, vi } from 'vitest'
 import { planCatalogFromFile } from '@/builder/canvas'
 import type { PlanScene, PlanTools } from '@/builder/canvas'
 import { FIXTURE_IDS, OTHER_FIXTURE_TEMPLATE, fixtureCatalogFile } from '@/builder/canvas/fixture'
+import type { PlacementId, SlotName } from '@/store'
 
 import { Builder3DPanel } from './Builder3DPanel'
 import { fixtureAuthorities, planTools, sceneOf } from './fixture'
 
 vi.mock('./BuilderRoom', () => ({
-  default: ({ scene, tools }: { scene: PlanScene; tools: PlanTools }) => (
+  default: ({
+    scene,
+    tools,
+    onEditSlots,
+  }: {
+    scene: PlanScene
+    tools: PlanTools
+    onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
+  }) => (
     <div data-testid="room">
       <span>room of {scene.pieces.length}</span>
       <span data-testid="armed">{tools.selectedTemplate ?? 'nothing'}</span>
+      {/* Row C8's handler, as a fact the boundary either carried or dropped. */}
+      <span data-testid="edits">{onEditSlots === undefined ? 'no' : 'yes'}</span>
     </div>
   ),
 }))
@@ -150,6 +161,33 @@ describe('what reaches the room', () => {
     // same expression that
     // was armed, so this proves the hand-over rather than a literal.
     expect(await screen.findByTestId('armed')).toHaveTextContent(OTHER_FIXTURE_TEMPLATE)
+  })
+})
+
+describe('row C8’s handler crosses the lazy line', () => {
+  it('carries it, and omits it when the screen passes none', async () => {
+    /*
+      The handler is `BuilderScreen`'s and the dialog it opens is
+      `builder/panels/slots`'s, so this panel is a wire — but a wire that
+      silently dropped an optional prop would leave the owner's right click doing
+      nothing on the drawing with nothing failing. Both directions asserted,
+      because a component that always rendered `yes` would pass the first half.
+    */
+    const { unmount } = render(
+      <Builder3DPanel
+        assets={ASSETS}
+        catalog={CATALOG}
+        fill={AUTHORITIES}
+        onEditSlots={() => undefined}
+        scene={scene(1)}
+        tools={planTools()}
+      />,
+    )
+    expect(await screen.findByTestId('edits')).toHaveTextContent('yes')
+    unmount()
+
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(1)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
+    expect(await screen.findByTestId('edits')).toHaveTextContent('no')
   })
 })
 

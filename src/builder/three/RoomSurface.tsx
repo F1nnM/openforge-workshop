@@ -77,11 +77,45 @@
  * `previewMove` are the whole move. `pieceAt` resolves every pick, and it
  * resolves it to a **placement** — which is the right arity for all four
  * gestures, because erase, move and turn each act on one `PlacementId` and a
- * template is placed and rotated as one unit. `partAt` is the other half of a
- * pick and is deliberately not called here: it names the *slot* a point landed
- * in, which is the slot editor's question rather than the surface's.
+ * template is placed and rotated as one unit. The right click is the one gesture
+ * with a second level to it, and the section below says what it does with it.
  * `subjectsConflict` is reached only through `pieceAt` and the move. There is no
  * second geometry in this file and no second opinion about where anything is.
+ *
+ * `partAt` **is** now reached, and row C8 is the change: it names the *slot* a
+ * point landed in, which used to be the slot editor's question and not the
+ * surface's, because the editor opened from a row in a panel where there is no
+ * point to name. With the gesture on the drawing the point is the whole of what
+ * the user said, so the pick resolves both levels — the instance through
+ * `pieceAt`, the slot through `partAt` — and it does so inside
+ * `edits.ts#planSlotEdit` rather than here, because *what a gesture means* has
+ * been that module's since row A4b and a right click is not an exception.
+ *
+ * ## The right click, and why it is a `pointerup` and not a `contextmenu`
+ *
+ * The owner asked for the slot editor to *"come up with a right click"*. Row C3
+ * built the editor and could not put the gesture on the drawing: `onDown` began
+ * `if (event.button !== 0) return`, so a secondary press was never seen here at
+ * all. It is seen now, and the two decisions that make it safe are both about
+ * the camera.
+ *
+ * **The press is never claimed.** `OrbitControls` binds the right button to
+ * `MOUSE.PAN` and `Stage` passes `enablePan` for this surface, so a right-drag
+ * pans across the plan — which is the gesture `surface.ts`'s own note calls the
+ * way to reach the rest of a 96-unit lattice. The secondary press is recorded
+ * and propagated, so three's controls get it exactly as before.
+ *
+ * **The release asks the 5 px question.** `isClickGesture` and
+ * {@link DRAG_THRESHOLD_PX} are the mockup's own threshold and they are already
+ * what separates a left-click from an orbit; a right-click and a right-pan are
+ * the same physical distinction, so they get the same test rather than a second
+ * one. This is why a bare `contextmenu` listener is the wrong seam and not
+ * merely a different one: that event fires from the mouse *down* on X11 and
+ * macOS, before any travel exists to measure, so it would open a dialog at the
+ * start of every pan.
+ *
+ * The browser's own menu is suppressed on the canvas and only there — see
+ * `onContextMenu` below for why that is two reasons rather than one taste.
  *
  * ## Row A4b: everything drawn is a **part**, and the preview is a whole piece
  *
@@ -130,7 +164,7 @@ import {
   snapTo,
 } from '@/builder/canvas'
 import { GRID_UNIT_MM } from '@/catalog'
-import type { PlacementId, TemplateId } from '@/store'
+import type { PlacementId, SlotName, TemplateId } from '@/store'
 import {
   moveGeneratedPlacement,
   movePlacement,
@@ -150,6 +184,7 @@ import {
   planGrab,
   planPlacement,
   planRemoval,
+  planSlotEdit,
   planTurn,
   removalOf,
   templateGhost,
@@ -172,6 +207,16 @@ import {
 
 /** How many snap steps a shifted arrow key travels. `PlanCanvas`'s own. */
 const FAST_STEPS = 4
+
+/**
+ * `PointerEvent.button` for the secondary button — the right one, by name.
+ *
+ * Two, from the UI Events spec's own table, and written down because `2` appears
+ * three times in the gesture below and every one of them means the same thing.
+ * The `button` value and not `buttons`: `button` names the one button whose state
+ * *changed*, which is the question a press and a release each ask.
+ */
+const SECONDARY_BUTTON = 2
 
 /** The accent, as three cannot read a CSS custom property. `--acc` in `tokens.css`. */
 const ACCENT = '#8f5b21'
@@ -209,6 +254,24 @@ export interface RoomSurfaceProps {
    * placements is one solve.
    */
   readonly fill: PlacementFiller
+  /**
+   * Open the slot editor on one instance — the owner's right click, arriving on
+   * the piece rather than on its row in the panel.
+   *
+   * **Optional, and it is the one prop in this file that should be.** Every other
+   * prop here is something the surface cannot draw without; this one is a
+   * *destination*, and the destination is a dialog that lives in
+   * `builder/panels/slots/` — on the far side of the boundary
+   * `builder/panels/boundary.test.ts` keeps. So the surface reports two
+   * primitives and knows nothing about what opens: `BuilderScreen` holds the
+   * open state and hands it to `SlotsPanel`, which is also still the *only*
+   * pointer-free way in and stays exactly as it was.
+   *
+   * `slot` is the slot whose part the pick landed in, pre-selected in the editor.
+   * `edits.ts#planSlotEdit` is the whole of the decision and carries why a
+   * secondary press resolves through the same `pieceAt` erase does.
+   */
+  readonly onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
   readonly onStatus: (status: SurfaceStatus) => void
   readonly announce: (text: string) => void
   /** Id of the paragraph holding the key map, for the canvas's `aria-describedby`. */
@@ -224,6 +287,7 @@ export function RoomSurface({
   tools,
   armed,
   fill,
+  onEditSlots,
   onStatus,
   announce,
   keyHelpId,
@@ -402,8 +466,8 @@ export function RoomSurface({
    * mid-gesture — so they read this rather than closing over state. `PlanCanvas`
    * needs the same thing for the same reason.
    */
-  const latest = useRef({ scene, tools, armed, fill, drag, heightOf, fit, apply, say })
-  latest.current = { scene, tools, armed, fill, drag, heightOf, fit, apply, say }
+  const latest = useRef({ scene, tools, armed, fill, drag, heightOf, fit, apply, say, onEditSlots })
+  latest.current = { scene, tools, armed, fill, drag, heightOf, fit, apply, say, onEditSlots }
 
   /** The pick under a pointer event, or `null` when the ray misses the plan. */
   const pickAt = useCallback(
@@ -449,6 +513,26 @@ export function RoomSurface({
   /** The press being tracked, or `null`. `claimed` means the surface took it. */
   const press = useRef<{ x: number; y: number; button: number; claimed: boolean } | null>(null)
 
+  /**
+   * Where a **secondary** press started, or `null`. Its own ref, deliberately.
+   *
+   * Two refs rather than one with a `button` field, and the second one is worth
+   * a paragraph because the alternative reintroduced a bug. `press` is read by
+   * `onUp` *whatever button was released*, so with a right press recorded in the
+   * same slot a chorded gesture would resolve as the wrong one — and that is not
+   * hypothetical, it is the shape of the bug that was already there: press the
+   * primary button, then right-click without releasing it, and today's `onUp`
+   * takes the *primary* press it finds, passes the 5 px test against the
+   * secondary release and **places a tile**. Keeping the two presses apart makes
+   * each release read only its own press, so the primary path below is unchanged
+   * line for line and the chord no longer places.
+   *
+   * There is no `claimed` on this one and there never can be: claiming a
+   * secondary press would take the camera pan away from the right button, which
+   * is the interaction the 5 px test exists to protect.
+   */
+  const secondary = useRef<{ x: number; y: number } | null>(null)
+
   useEffect(() => {
     const canvas = gl.domElement
     // The capture-phase host: see the docblock. `parentElement` is r3f's own
@@ -457,7 +541,45 @@ export function RoomSurface({
     // which is the behaviour without this listener at all.
     const host = canvas.parentElement ?? canvas
 
+    /**
+     * A secondary release: the slot editor, if the gesture was a click.
+     *
+     * The 5 px test first and the pick second, in that order, because the pick
+     * is a raycast against every occupied elevation and a pan gesture must not
+     * pay for it. `planSlotEdit` decides the rest — including both arms that
+     * open nothing, each of which still says so.
+     */
+    const openSlotsAt = (event: PointerEvent) => {
+      const started = secondary.current
+      secondary.current = null
+      const open = latest.current.onEditSlots
+      if (started === null || open === undefined) return
+      if (!isClickGesture(started, { x: event.clientX, y: event.clientY })) return
+      const pick = pickAt(event.clientX, event.clientY)
+      if (pick === null) return
+      const asked = planSlotEdit(latest.current.scene, pick.point)
+      latest.current.say(asked.message)
+      if (asked.placement !== null) open(asked.placement, asked.slot)
+    }
+
     const onDown = (event: PointerEvent) => {
+      if (event.button === SECONDARY_BUTTON) {
+        // **Never claimed**, so the event goes on to `OrbitControls` and a
+        // right-*drag* still pans the camera exactly as it did. All this press
+        // does is remember where it started, so `onUp` can ask the mockup's own
+        // 5 px question — which is the whole of the click/drag distinction and
+        // the reason a bare `contextmenu` listener would be wrong: that event
+        // fires on the press on X11 and macOS, before any travel exists to
+        // measure, so it would claim every pan gesture in the app.
+        //
+        // Dropped while a piece is in the air: a chorded press mid-carry is not
+        // a request to open a dialog over the drag it would interrupt.
+        secondary.current =
+          latest.current.onEditSlots === undefined || press.current?.claimed === true
+            ? null
+            : { x: event.clientX, y: event.clientY }
+        return
+      }
       if (event.button !== 0) return
       const { scene: current, tools: state } = latest.current
       const pick = pickAt(event.clientX, event.clientY)
@@ -510,6 +632,10 @@ export function RoomSurface({
     }
 
     const onUp = (event: PointerEvent) => {
+      if (event.button === SECONDARY_BUTTON) {
+        openSlotsAt(event)
+        return
+      }
       const started = press.current
       press.current = null
       if (started === null) return
@@ -539,6 +665,7 @@ export function RoomSurface({
     }
 
     const onCancel = (event: PointerEvent) => {
+      secondary.current = null
       const started = press.current
       press.current = null
       if (started?.claimed !== true) return
@@ -550,17 +677,40 @@ export function RoomSurface({
       }
     }
 
+    /**
+     * The browser's own menu, suppressed — **on the canvas and nowhere else**.
+     *
+     * Needed for two reasons and each on its own would be enough. The menu would
+     * cover the editor it is meant to open; and on Windows `contextmenu` fires
+     * from the mouse *up*, so a native menu grabbing focus there can swallow the
+     * `pointerup` this row's whole gesture is measured on.
+     *
+     * `OrbitControls` also calls `preventDefault` here, and this listener is not
+     * therefore redundant: it does so only while `controls.enabled` is true and
+     * only as long as it stays connected to this element, neither of which is
+     * this row's to promise. Two `preventDefault`s on one event cost nothing.
+     *
+     * Scoped to `canvas` rather than `host` or `document` on purpose — a user
+     * right-clicking the panel, the bill or the page still gets their browser's
+     * menu, because nothing outside this surface has claimed the gesture.
+     */
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault()
+    }
+
     host.addEventListener('pointerdown', onDown, true)
     canvas.addEventListener('pointermove', onMove)
     canvas.addEventListener('pointerup', onUp)
     canvas.addEventListener('pointerleave', onLeave)
     canvas.addEventListener('pointercancel', onCancel)
+    canvas.addEventListener('contextmenu', onContextMenu)
     return () => {
       host.removeEventListener('pointerdown', onDown, true)
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointerup', onUp)
       canvas.removeEventListener('pointerleave', onLeave)
       canvas.removeEventListener('pointercancel', onCancel)
+      canvas.removeEventListener('contextmenu', onContextMenu)
     }
   }, [actAt, gl, invalidate, pickAt])
 

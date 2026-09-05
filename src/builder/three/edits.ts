@@ -97,6 +97,7 @@ import {
   describeTemplate,
   formatUnits,
   nextRotation,
+  partAt,
   pieceAt,
   pieceName,
   pieceRotationStep,
@@ -107,7 +108,7 @@ import {
   snapTo,
 } from '@/builder/canvas'
 import { DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
-import type { PlacementId, TemplateId, TemplateInstance } from '@/store'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 
 import type { PlacementFill } from './fills'
 import { describePlacementFill } from './fills'
@@ -351,6 +352,91 @@ export function removalOf(piece: ScenePiece): SurfaceEdit {
     id: piece.id,
     generated: piece.kind === 'generated',
     message: `Removed ${pieceName(piece)} from ${describeCell(piece.placement.x, piece.placement.z)}.`,
+  }
+}
+
+/* ---------------------------------------------------------------- customising */
+
+/** What a right click on the drawing asks the slot editor to open. */
+export interface SlotEditGesture {
+  /**
+   * The instance, by its key in `WorkshopState.placements` — or `null` when the
+   * click opens nothing.
+   *
+   * Flat rather than a nested target object, so there is exactly **one** name
+   * for this shape in the repository. The state the editor opens from is
+   * `builder/panels/slots`'s `SlotEditTarget`, on the far side of a boundary
+   * this module must not be imported across, and two identically-named types
+   * either side of that line would read as one type that had been shared.
+   */
+  readonly placement: PlacementId | null
+  /**
+   * The slot whose **part** the click landed in, for the editor to open on.
+   *
+   * `undefined` means *open on the instance and let it choose the row* — which
+   * is exactly what the panel-row route asks for, since a row names a placement
+   * and no point. From a pick it is effectively always present, because a
+   * catalog piece the pick resolved to always resolves to one of its parts:
+   * `PlanPiece.polygons` **is** `parts.flatMap((part) => part.polygons)`, so the
+   * union `pieceAt` tests is the same polygons `partAt` walks. It stays optional
+   * because that identity is `scene.ts`'s to keep and not this module's to
+   * assume, and because the fallback is a real behaviour rather than a guard.
+   */
+  readonly slot: SlotName | undefined
+  /** What to announce. Never empty — see below. */
+  readonly message: string
+}
+
+/**
+ * What a right click at `at` customises — the instance, and the slot it hit.
+ *
+ * The owner asked for the editor to *"come up with a right click"* and row C3
+ * put the gesture on the panel row instead, because a secondary press never
+ * reached the surface. This is the other half, and it resolves through the same
+ * `pieceAt` erase and move resolve through — so the piece a right click opens is
+ * the piece a left click in Erase mode would remove, and the two gestures cannot
+ * disagree about which of two stacked instances the pointer is on. **Last in
+ * paint order wins**, which for two overlapping instances is the one placed most
+ * recently; `scenePaintOrder` is the single statement of that and this adds no
+ * second one.
+ *
+ * Where the two gestures *do* differ is one level down: erase takes a whole
+ * `PlacementId`, and this takes {@link partAt} as well, because the request was
+ * *"customize the slots"* and a user who has just pointed at a wall has already
+ * said which slot they mean.
+ *
+ * A `message` on every arm, for {@link SurfaceEdit}'s own reason: the two arms
+ * that open nothing — bare ground, and a generated base, which names no recipe
+ * and therefore has no slots — would otherwise be indistinguishable from a
+ * surface that had not heard the click. There is no store write on any arm,
+ * which is why this does not return a `SurfaceEdit`: opening a dialog is the
+ * caller's, and the caller is the only thing here that knows a dialog exists.
+ */
+export function planSlotEdit(scene: PlanScene, at: PlanPoint): SlotEditGesture {
+  const piece = pieceAt(scene, at)
+  if (piece === undefined) {
+    return { placement: null, slot: undefined, message: `Nothing to customise at ${describeCell(at[0], at[1])}.` }
+  }
+  if (piece.kind === 'generated') {
+    // A generated base is `x` by `y` of arithmetic over parameters the user set
+    // in the generator drawer. It is a placement and it can be moved and
+    // removed, but it names no recipe, so `TemplateInstance.fills` has no key
+    // for it and there is nothing for the editor to list.
+    return {
+      placement: null,
+      slot: undefined,
+      message: `${pieceName(piece)} was generated from parameters, so it has no recipe slots to change.`,
+    }
+  }
+  const part = partAt(piece, at)
+  const where = describeCell(piece.placement.x, piece.placement.z)
+  return {
+    placement: piece.id,
+    slot: part?.slot,
+    message:
+      part === undefined
+        ? `Slots for ${pieceName(piece)} at ${where}.`
+        : `The ${part.slot} slot of ${pieceName(piece)} at ${where}.`,
   }
 }
 

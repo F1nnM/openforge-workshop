@@ -44,6 +44,7 @@
  * inventory block is what pins that.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildAssemblyIndex } from '@/assembly'
@@ -61,6 +62,7 @@ import {
 } from '@/store'
 
 import { planPieces, planSlots } from './planSlots'
+import type { SlotEditTarget } from './SlotsPanel'
 import { SlotsPanel } from './SlotsPanel'
 
 /** Built once: it is a pure function of the fixture and scans every record. */
@@ -127,16 +129,37 @@ const MITRE_TEMPLATE: RecipeTemplate = {
 const TEMPLATES = (id: string): RecipeTemplate | undefined =>
   [EDITOR_TEMPLATE, MITRE_TEMPLATE].find((one) => one.id === id)
 
-/** The panel with the two indexes the builder screen hands it. */
-function panel(placements: Record<string, TemplateInstance>) {
-  return render(
-    <SlotsPanel
-      assembly={ASSEMBLY}
-      catalog={SLOT_CATALOG}
-      placements={placements}
-      templates={TEMPLATES}
-    />,
-  )
+/**
+ * The panel with the two indexes the builder screen hands it — and the open
+ * state row **C8** lifted out of it.
+ *
+ * A host component holding `editing` rather than a fixed prop, and the
+ * difference is not cosmetic: since C8 the editor's open state is
+ * `BuilderScreen`'s, because the same dialog opens from a right click on the 3D
+ * drawing, so every assertion below about the editor appearing is now an
+ * assertion about the **round trip** — the panel asks through `onEdit`, the
+ * owner of the state answers, the panel renders. Passing `editing={null}` with a
+ * no-op `onEdit` would leave all of them passing while the editor never opened.
+ *
+ * `start` is what a right click on the *drawing* hands over: a placement and the
+ * slot whose part was under the pointer. It defaults to `null`, so every test
+ * written before this row exercises exactly the path it did.
+ */
+function panel(placements: Record<string, TemplateInstance>, start: SlotEditTarget | null = null) {
+  function Host() {
+    const [editing, setEditing] = useState<SlotEditTarget | null>(start)
+    return (
+      <SlotsPanel
+        assembly={ASSEMBLY}
+        catalog={SLOT_CATALOG}
+        editing={editing}
+        onEdit={setEditing}
+        placements={placements}
+        templates={TEMPLATES}
+      />
+    )
+  }
+  return render(<Host />)
 }
 
 /**
@@ -454,6 +477,34 @@ describe('the slot editor', () => {
     expect(dialog).toHaveAccessibleName('Fixture: Secret Door')
     // Both slots listed, and it opens on the one still needing a choice.
     expect(within(dialog).getByRole('group', { name: 'Fill the base slot' })).toBeInTheDocument()
+  })
+
+  it('opens on the slot the drawing’s right click landed in, not on the first gap', () => {
+    /*
+      Row **C8**, and the assertion is the *difference* rather than the mere
+      presence of a dialog: `top` is filled and `base` is empty, so the editor's
+      own rule — first slot needing a choice — opens on `base`. A right click on
+      the drawing lands on a part, `partAt` names `top`, and the row the user
+      pointed at wins. Without `initialSlot` the group below reads
+      *Fill the base slot*, which is what the test above asserts.
+    */
+    panel({ a: piece({ top: FILL.topWall }) }, { placement: KEY, slot: TOP })
+
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('group', { name: 'Fill the top slot' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('group', { name: 'Fill the base slot' })).toBeNull()
+  })
+
+  it('falls back to the first gap when the named slot is not one this recipe has', () => {
+    // The two slot names come from different walks — a drawn part's `slot` and
+    // `template.parts` — and they agree today because a fill is keyed by the
+    // recipe's own part name. If they ever stop agreeing the editor must open on
+    // its own rule rather than on nothing.
+    panel({ a: piece({ top: FILL.topWall }) }, { placement: KEY, slot: SlotName.parse('no such slot') })
+
+    expect(
+      within(screen.getByRole('dialog')).getByRole('group', { name: 'Fill the base slot' }),
+    ).toBeInTheDocument()
   })
 
   it('opens on a plain press too, so it is reachable without a pointer', () => {

@@ -36,9 +36,24 @@
 import { describe, expect, it } from 'vitest'
 
 import type { PlanPoint } from '@/builder/canvas'
-import { beginMove, describeTemplate, dragMoveTo, planCatalogFromFile } from '@/builder/canvas'
-import { FIXTURE_IDS, FIXTURE_TEMPLATE, OTHER_FIXTURE_TEMPLATE, fixtureCatalogFile } from '@/builder/canvas/fixture'
-import { filledSlots } from '@/store'
+import {
+  beginMove,
+  buildPlanScene,
+  createStyleResolver,
+  describeTemplate,
+  dragMoveTo,
+  planCatalogFromFile,
+} from '@/builder/canvas'
+import {
+  FIXTURE_IDS,
+  FIXTURE_SLOTS,
+  FIXTURE_TEMPLATE,
+  OTHER_FIXTURE_TEMPLATE,
+  fixtureCatalogFile,
+  fixtureSlotLayout,
+} from '@/builder/canvas/fixture'
+import { PlacementId, filledSlots } from '@/store'
+import { aGeneratedBase } from '@/store/fixture'
 
 import {
   ARMED_TURN_STEP_DEG,
@@ -49,6 +64,7 @@ import {
   planGrab,
   planPlacement,
   planRemoval,
+  planSlotEdit,
   planTurn,
   removalOf,
   templateGhost,
@@ -226,6 +242,120 @@ describe('erasing', () => {
     expect(edit.kind).toBe('remove')
     if (edit.kind !== 'remove') return
     expect(edit.generated).toBe(false)
+  })
+})
+
+/* ---------------------------------------------------------------- customising */
+
+/**
+ * The layout rule with **real offsets**, because this row's whole subject is
+ * which of a template's parts a point landed in.
+ *
+ * `CATALOG` above uses `originSlotLayout`, which stacks every part on the
+ * instance origin — so a two-part instance built with it has two parts occupying
+ * one square and no point that distinguishes them. `fixtureSlotLayout` puts the
+ * right wall at `dx: 1.5` turned a quarter, which is what gives the test two
+ * points with two answers.
+ */
+const LAID_OUT = planCatalogFromFile(fixtureCatalogFile(), fixtureSlotLayout)
+
+/** A two-part corner at the origin: a 2 x 2 floor and a wall down its east edge. */
+function corner() {
+  return sceneOf(LAID_OUT, [
+    {
+      fills: [
+        [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+        [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2],
+      ],
+      x: 0,
+      z: 0,
+    },
+  ])
+}
+
+describe('customising, which is the right click', () => {
+  it('names the instance the point is on', () => {
+    const scene = corner()
+    const asked = planSlotEdit(scene, [0.5, 0.5])
+    expect(asked.placement).toBe(scene.pieces[0]?.id)
+  })
+
+  it('names the slot whose part was hit, which is what “customize the slots” asks for', () => {
+    // The two points differ by 1.2 units on one axis and land on two different
+    // parts of one instance — the floor at `dx 0` and the wall at `dx 1.5`. A
+    // gesture that resolved only to the placement would answer the same thing
+    // twice, and the user would have to find the row they had just pointed at.
+    const scene = corner()
+    expect(planSlotEdit(scene, [0.3, 1]).slot).toBe(FIXTURE_SLOTS.floor)
+    expect(planSlotEdit(scene, [1.6, 1]).slot).toBe(FIXTURE_SLOTS.rightWall)
+  })
+
+  it('puts the slot in the sentence, so the announcement says which row opened', () => {
+    expect(planSlotEdit(corner(), [1.6, 1]).message).toMatch(/^The right wall slot of /)
+  })
+
+  it('opens nothing over bare ground, and says so rather than going silent', () => {
+    // The defined answer for the case the brief asked about. `null` is the whole
+    // behaviour — no dialog — and the sentence is what stops it being
+    // indistinguishable from a surface that never saw the press.
+    const asked = planSlotEdit(corner(), [40, 40])
+    expect(asked.placement).toBeNull()
+    expect(asked.slot).toBeUndefined()
+    expect(asked.message).toMatch(/Nothing to customise at/)
+  })
+
+  it('opens nothing on a generated base, because it names no recipe', () => {
+    // A generated base is arithmetic over the generator drawer's parameters, so
+    // `TemplateInstance.fills` has no key for it and there are no slots to list.
+    // It is still a placement — it can be moved and removed — which is exactly
+    // why saying so beats a silent no-op.
+    const scene = buildPlanScene({}, LAID_OUT, createStyleResolver(LAID_OUT), {
+      [PlacementId.parse('g0')]: aGeneratedBase({ x: 0, z: 0 }),
+    })
+    expect(scene.generated).toHaveLength(1)
+    const asked = planSlotEdit(scene, [0.2, 0.2])
+    expect(asked.placement).toBeNull()
+    expect(asked.message).toMatch(/generated from parameters/)
+  })
+
+  it('takes the same piece an erase would, so two stacked instances cannot disagree', () => {
+    // The brief asked which of two overlapping instances wins. There is no
+    // second rule for it: both gestures resolve through `pieceAt`, so the answer
+    // is `scenePaintOrder`'s — last in insertion order, the one just placed.
+    const scene = sceneOf(LAID_OUT, [
+      { fills: [[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]], x: 0, z: 0 },
+      { fills: [[FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2]], x: 0, z: 0 },
+    ])
+    const at: PlanPoint = [1, 1]
+    const removal = planRemoval(scene, at)
+    expect(removal.kind).toBe('remove')
+    if (removal.kind !== 'remove') return
+    expect(planSlotEdit(scene, at).placement).toBe(removal.id)
+    expect(planSlotEdit(scene, at).placement).toBe(scene.pieces[scene.pieces.length - 1]?.id)
+  })
+
+  it('resolves a part for every point that resolves a catalog piece', () => {
+    /*
+      `SlotEditGesture.slot` is optional and the docblock claims a pick always
+      fills it, because `PlanPiece.polygons` **is** `parts.flatMap(part =>
+      part.polygons)` — so the union `pieceAt` tests is the same polygons
+      `partAt` walks. Asserted over a lattice rather than argued: 1,600 points
+      across the instance's own box, every one of which either misses the piece
+      or names one of its two slots, and never the third state.
+    */
+    const scene = corner()
+    const id = scene.pieces[0]?.id
+    let hits = 0
+    for (let x = 0; x <= 2; x += 0.05) {
+      for (let z = 0; z <= 2; z += 0.05) {
+        const asked = planSlotEdit(scene, [x, z])
+        if (asked.placement === null) continue
+        hits += 1
+        expect(asked.placement).toBe(id)
+        expect(asked.slot).not.toBeUndefined()
+      }
+    }
+    expect(hits).toBeGreaterThan(1_000)
   })
 })
 
