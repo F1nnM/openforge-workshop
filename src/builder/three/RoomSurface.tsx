@@ -26,12 +26,16 @@
  *      `tileMatrix` call the placed instance would use and falling back to the
  *      tagged footprint as a plate. Since row **A1** the armed thing is a
  *      **template family** rather than a file, and a family's geometry is the
- *      union of parts row **C2**'s fill solver has not chosen yet — so there is
- *      no mesh to draw and no footprint to fall back to.
- *      `edits.ts#templateGhost` states exactly what the marker claims. **This is
- *      the one place the surface got less capable this row**, and it is temporary
- *      in the precise sense that one call restores it: `computeGhost` over a
- *      solved fill map, fed through `reanchorPiece`, which is what A4a suggests.
+ *      union of its parts' — so there was no mesh to draw and no footprint to
+ *      fall back to. `edits.ts#templateGhost` states exactly what the marker
+ *      claims. **This is the one place the surface got less capable in A4b**, and
+ *      row **C5** moved the blocker rather than clearing it: the fill *is* solved
+ *      now, on the click and memoised, so a ghost could ask for one on hover —
+ *      but the union of a solved fill's boxes needs B2's layout rule, and that
+ *      rule does not reach the canvas (`BuilderScreen` builds its `PlanCatalog`
+ *      with `originSlotLayout`, so every part draws at the instance origin). One
+ *      call still restores it — `computeGhost` over a solved fill map through
+ *      `reanchorPiece`, which is what A4a suggests — behind that rule.
  *   3. **The parts rise by the recipe's own elevations, and by nothing else.**
  *      The mockup lifts a wall 0.25 units when a floor is under it, and it can,
  *      because it stores a `y` with every placement. A `TemplateInstance` has no
@@ -130,6 +134,7 @@ import {
 } from '@/store'
 
 import type { SurfaceEdit, SurfaceStatus, TemplateGhost } from './edits'
+import type { PlacementFiller } from './fills'
 import {
   describeAbandon,
   describeSurfaceHint,
@@ -180,10 +185,22 @@ export interface RoomSurfaceProps {
    * A `TemplateId` since row A1, because §2.5 makes templates the only placement
    * unit and there is no file for the palette to arm. It is still a prop rather
    * than read off `tools` inside the component so that the one place the armed
-   * thing is *resolved* stays the caller's, which is where it will have to be
-   * when row C2's fill solver turns a family into a fill map.
+   * thing is *resolved* stays the caller's — which is where row **C5** put it:
+   * see {@link RoomSurfaceProps.fill}.
    */
   readonly armed: TemplateId | null
+  /**
+   * What the armed family is filled with, solved at the click.
+   *
+   * **Required, and that is contract C-k's shape applied to placing.** An
+   * optional filler would mean a caller that forgot to pass one still compiles
+   * and still places — with `fills: {}`, drawing nothing, silently, which is
+   * precisely the state row C5 exists to end. `BuilderRoom` builds it in a
+   * `useMemo` over the three authorities `BuilderScreen` already holds, so the
+   * memo inside it survives every re-render and a room of twenty identical
+   * placements is one solve.
+   */
+  readonly fill: PlacementFiller
   readonly onStatus: (status: SurfaceStatus) => void
   readonly announce: (text: string) => void
   /** Id of the paragraph holding the key map, for the canvas's `aria-describedby`. */
@@ -198,6 +215,7 @@ export function RoomSurface({
   fit,
   tools,
   armed,
+  fill,
   onStatus,
   announce,
   keyHelpId,
@@ -327,10 +345,9 @@ export function RoomSurface({
    * families, anchors and angles.
    *
    * `placeTemplate` since row A1 — the only placement action the store offers —
-   * and the fills come off the verdict rather than being written here, so the day
-   * row C2 solves them this line does not change. `edits.ts` sets out why they
-   * are empty today and why contract **C-g** makes that a placement rather than a
-   * failure.
+   * and the fills come off the verdict rather than being written here, which is
+   * why row **C5** changed this function by **not one line**: C2's solve reaches
+   * the store through `edit.fills`, exactly where A4b left the field for it.
    */
   const apply = useCallback(
     (edit: SurfaceEdit): boolean => {
@@ -377,8 +394,8 @@ export function RoomSurface({
    * mid-gesture — so they read this rather than closing over state. `PlanCanvas`
    * needs the same thing for the same reason.
    */
-  const latest = useRef({ scene, tools, armed, drag, heightOf, fit, apply, say })
-  latest.current = { scene, tools, armed, drag, heightOf, fit, apply, say }
+  const latest = useRef({ scene, tools, armed, fill, drag, heightOf, fit, apply, say })
+  latest.current = { scene, tools, armed, fill, drag, heightOf, fit, apply, say }
 
   /** The pick under a pointer event, or `null` when the ray misses the plan. */
   const pickAt = useCallback(
@@ -390,11 +407,31 @@ export function RoomSurface({
     [camera, gl],
   )
 
+  /**
+   * The gesture, resolved and applied.
+   *
+   * **The one place the fill is solved**, and it is solved here rather than on
+   * hover for a measured reason: a cold solve is 1 to 19 candidate queries and up
+   * to 3.3 ms over the live archive (`fills.test.ts`), and a pointer move fires
+   * hundreds of times a second where a click fires once. The filler memoises on
+   * `(family, size)` anyway, so the second placement of the same row costs
+   * nothing — but paying it on the gesture that writes is the shape that cannot
+   * degrade into a per-frame cost.
+   *
+   * The armed **size** comes off `PlanTools` beside the family, which is row C1's
+   * control finally reaching the piece that lands: before row C5 `PlanTools` held
+   * `selectedTemplate` alone and *2 wide by 2 deep* changed only a number on
+   * screen.
+   */
   const actAt = useCallback(
     (at: PlanPoint) => {
-      const { scene: current, tools: state, armed: family, apply: run } = latest.current
-      if (state.tool === 'erase') run(planRemoval(current, at))
-      else run(planPlacement(family, state.rotation, at, state.step))
+      const { scene: current, tools: state, armed: family, fill: solve, apply: run } = latest.current
+      if (state.tool === 'erase') {
+        run(planRemoval(current, at))
+        return
+      }
+      const solved = family === null ? undefined : solve(family, state.armedSize)
+      run(planPlacement(family, state.rotation, at, state.step, solved))
     },
     [],
   )

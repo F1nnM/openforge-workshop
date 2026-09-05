@@ -66,7 +66,7 @@ import type { PlanScene, PlanTools } from '@/builder/canvas'
 import { FIXTURE_IDS, OTHER_FIXTURE_TEMPLATE, fixtureCatalogFile } from '@/builder/canvas/fixture'
 
 import { Builder3DPanel } from './Builder3DPanel'
-import { planTools, sceneOf } from './fixture'
+import { fixtureAuthorities, planTools, sceneOf } from './fixture'
 
 vi.mock('./BuilderRoom', () => ({
   default: ({ scene, tools }: { scene: PlanScene; tools: PlanTools }) => (
@@ -78,6 +78,10 @@ vi.mock('./BuilderRoom', () => ({
 }))
 
 const CATALOG = planCatalogFromFile(fixtureCatalogFile())
+/* Row C5's required prop. The mocked room ignores it — this file's subject is
+   the `lazy` boundary — but the panel's type demands it, which is the point:
+   nothing can mount the surface without saying what fills a placement. */
+const AUTHORITIES = fixtureAuthorities()
 const ASSETS = {
   lod: 'https://objects.openforge.tools/lod',
   models: 'https://objects.openforge.tools/models',
@@ -95,7 +99,7 @@ describe('with an empty plan', () => {
     // The inverse of the assertion this file used to make. A surface that
     // refused to open until something had been placed could never be the thing
     // the first placement happened on.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(0)} tools={planTools()} assets={ASSETS} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(0)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
     expect(await screen.findByTestId('room')).toHaveTextContent('room of 0')
     expect(screen.queryByRole('button', { name: /build in 3d/i })).toBe(null)
   })
@@ -116,7 +120,7 @@ describe('the boundary', () => {
     // fail on test order. The mechanism is asserted where it is stable, by
     // reading the source: `boundary.test.ts` checks the `lazy(() => import(…))`
     // and checks that `BuilderRoom` is outside the static closure.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
     expect(await screen.findByTestId('room')).toBeInTheDocument()
   })
 })
@@ -126,7 +130,7 @@ describe('what reaches the room', () => {
     // The room never sees a `TemplateInstance` map: every piece of geometry,
     // every conflict and every omission arrives already projected, so a change
     // to what a placement *is* reaches the canvas and stops there.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(4)} tools={planTools()} assets={ASSETS} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(4)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
     expect(await screen.findByTestId('room')).toHaveTextContent('room of 4')
   })
 
@@ -137,11 +141,13 @@ describe('what reaches the room', () => {
         scene={scene(1)}
         tools={planTools({ selectedTemplate: OTHER_FIXTURE_TEMPLATE })}
         assets={ASSETS}
+        fill={AUTHORITIES}
       />,
     )
     // The **family**, not a file and not a design: since row A1 the tool state
     // arms a `TemplateId` (§2.5 — templates are the only placement unit) and
-    // turning one into files is row C2's. Asserted as the same expression that
+    // turning one into files is row C2's solver, on the click. Asserted as the
+    // same expression that
     // was armed, so this proves the hand-over rather than a literal.
     expect(await screen.findByTestId('armed')).toHaveTextContent(OTHER_FIXTURE_TEMPLATE)
   })
@@ -149,7 +155,7 @@ describe('what reaches the room', () => {
 
 describe('what row R4 took away', () => {
   it('offers no control that leaves the surface, because there is nowhere to go', async () => {
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
     await screen.findByTestId('room')
 
     // The three names the retired plate and its button went by. Queried rather

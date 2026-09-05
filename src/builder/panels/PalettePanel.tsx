@@ -148,8 +148,9 @@ export interface PalettePanelProps {
    * **The selection is back in here, as row A8 said it would be.**
    * `tools.selectedTemplate` is the armed family and this panel is its only
    * writer; the panel keeps no copy of it, so there is nothing for the two to
-   * disagree about. The size position *is* panel state, because `PlanTools` has
-   * no field for it — see the `size` state inside the component.
+   * disagree about. **Row C5 put the size position in the same object** —
+   * `tools.armedSize` — for the identical reason, and this panel is its only
+   * writer too.
    */
   readonly tools: PlanTools
   /** `/builder`'s validated search. Only `q` is read. */
@@ -177,14 +178,19 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
   /**
    * The armed family's size position, as the position's own tags.
    *
-   * Panel state and not `PlanTools`, because `usePlanTools` holds
-   * `selectedTemplate: TemplateId | null` and nothing beside it. **The
-   * consequence is stated rather than hidden:** what reaches a placement today
-   * is the family alone (`three/edits.ts` places with `fills: {}`, contract
-   * C-g), so the position narrows the count on screen and is what row C2's fill
-   * solver has to be given. See this row's report for the two-line seam.
+   * **`PlanTools` since row C5, and that is this row's whole handoff.** It was
+   * panel state, because `usePlanTools` held `selectedTemplate` and nothing
+   * beside it, and C1 wrote the consequence down rather than hiding it: what
+   * reached a placement was the family alone (`three/edits.ts` placed with
+   * `fills: {}`), so the position narrowed the count on screen and nothing else.
+   * C5 solves the fills on the click and hands the position to
+   * `FillContext.size`, so *2 wide by 2 deep* now decides what lands. Nothing
+   * else in this file changes: `size` still reads the position and `setSize`
+   * still writes it, and the state simply lives one level up where the surface
+   * can see it.
    */
-  const [size, setSize] = useState<readonly string[]>([])
+  const size = tools.armedSize
+  const setSize = tools.setArmedSize
   /** The RECENT ring, snapshotted — `palette.ts` owns the ring itself. */
   const [recent, setRecent] = useState<readonly RecentEntry[]>(() => recentArms())
 
@@ -222,7 +228,7 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
       rememberArm({ template: family.id, size: position })
       setRecent(recentArms())
     },
-    [],
+    [setSize],
   )
 
   // Row G5's one call site. Claiming is read-and-clear, so this is a one-shot
