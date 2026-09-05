@@ -23,12 +23,13 @@ import type { TileId } from '@/catalog'
 import { ANOTHER_TILE, A_TEMPLATE, A_TILE, aFullFillMap, aTemplateInstance } from './fixture'
 import { STORE_VERSION } from './migrations'
 import type { PlacementId, TemplateId } from './schema'
-import { DEFAULT_LOCK_SYSTEM, SlotName as SlotNameSchema, WorkshopState } from './schema'
+import { DEFAULT_LOCK_SYSTEM, SlotName as SlotNameSchema, WorkshopState, filledSlots } from './schema'
 import { armTemplateInBuilder, claimPendingArm } from './selection'
 import { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 import { WORKSHOP_EXPORT_KIND, WorkshopExport, exportWorkshop, importWorkshop } from './transfer'
 import {
   acknowledgeLockSystem,
+  clearFill,
   clearPlacements,
   fillSlot,
   movePlacement,
@@ -40,6 +41,7 @@ import {
   selectLockChosen,
   selectPlacementCount,
   setLockSystem,
+  unpinFill,
   useWorkshopStore,
 } from './workshopStore'
 
@@ -324,6 +326,163 @@ describe('filling slots', () => {
 
     expect(state().placements[id]?.fills[FLOOR]?.pinned).toBe(false)
     expect(state().placements[id]?.fills[WALL]?.pinned).toBe(true)
+  })
+})
+
+/* ------------------------------------------------ clearing and unpinning */
+
+/**
+ * Row **A11**'s two actions, and the two facts they exist for.
+ *
+ * `clearFill` is the only thing in the app that makes a filled slot empty
+ * again — `fillSlot` and `pinFill` both write a tile — so before it a re-solve
+ * that could no longer fill a slot left the previous answer in place
+ * (`relock.ts`'s fourth gap, `InstanceReSolve.stale`).
+ *
+ * `unpinFill` is the only thing that writes `false` over a `true`, so before it
+ * **the first pin made a slot permanently deaf to the lock toggle**. The test
+ * named `re-exposes an unpinned slot to the lock` is the one to read: it is the
+ * whole of contract C-k's missing half, and it fails by `fillSlot` returning
+ * `'kept-pinned'` for a slot the user has handed back.
+ */
+describe('clearing and unpinning a fill', () => {
+  it('clears a fill and removes the key, rather than setting it to undefined', () => {
+    // The distinction the type system cannot make and three readers can:
+    // `canvas/catalog.ts#parts`, `share/link.ts` and `migrations.ts#salvageFills`
+    // all walk `Object.keys(fills)`, so a key holding `undefined` would draw
+    // nothing, encode a `pinned` bit for no file, and fail the schema on the way
+    // back in.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    expect(clearFill(id, FLOOR)).toBe('cleared')
+
+    const fills = state().placements[id]?.fills ?? {}
+    expect(Object.keys(fills)).not.toContain(FLOOR)
+    // `filledSlots` is `Object.keys`, so it is the one line that decides it.
+    expect([...filledSlots(fills)].sort()).toEqual(['base', 'column', 'left wall', 'right wall'])
+    expect(FLOOR in fills).toBe(false)
+  })
+
+  it('leaves the instance on the grid — contract C-g', () => {
+    // §3.2's "places anyway": an empty slot reads *needs a choice* and the room
+    // still holds the piece, so clearing is not a shorthand for removing.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    clearFill(id, FLOOR)
+    expect(selectPlacementCount(state())).toBe(1)
+    expect(state().placements[id]?.template).toBe(A_TEMPLATE)
+    expect(state().placements[id]?.fills[WALL]).toEqual({ tile: A_TILE, pinned: false })
+  })
+
+  it('clears a fill the user pinned, because clearing is the user own action', () => {
+    // `clearFill` has no pinned guard and no guarded twin: the only caller is
+    // the user, and emptying a slot you chose is the strongest form of "I no
+    // longer want my choice". No solver clears anything — C2's `reSolveScene`
+    // reports `UnfilledReport.stale` instead.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+    expect(clearFill(id, FLOOR)).toBe('cleared')
+    expect(state().placements[id]?.fills[FLOOR]).toBeUndefined()
+  })
+
+  it('is unchanged on a slot that is already empty, and wakes no subscriber', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    const before = state().placements
+    expect(clearFill(id, FLOOR)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('reports an unknown placement rather than writing', () => {
+    const gone = 'not-on-the-grid' as PlacementId
+    expect(clearFill(gone, FLOOR)).toBe('unknown-placement')
+    expect(unpinFill(gone, FLOOR)).toBe('unknown-placement')
+    expect(state().placements[gone]).toBeUndefined()
+  })
+
+  it('re-exposes an unpinned slot to the lock, which is C-k missing half', () => {
+    // The headline. `pinFill` is a one-way door without this: nothing else in
+    // the app writes `false` over a `true`, so the slot would answer
+    // `'kept-pinned'` to every re-solve for the life of the room — and the lock
+    // is a live preference, disagreeing about which file to print for 1,419 of
+    // 3,822 items (37.1%).
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+    expect(fillSlot(id, FLOOR, ANOTHER_TILE)).toBe('kept-pinned')
+
+    expect(unpinFill(id, FLOOR)).toBe('unpinned')
+
+    expect(fillSlot(id, FLOOR, ANOTHER_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: ANOTHER_TILE, pinned: false })
+  })
+
+  it('keeps the file when it unpins, which is the whole difference from clearing', () => {
+    // Two actions rather than one with a mode, and this is the state that
+    // separates them: unpinning leaves a printable file and moves only the
+    // authority over it, where clearing leaves a hole that stops the pack.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+    unpinFill(id, FLOOR)
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: A_TILE, pinned: false })
+  })
+
+  it('is unchanged on a slot the lock already owns, whether filled or empty', () => {
+    // Both spellings of one fact — *the lock decides this slot on its next
+    // pass* — which is why `UnpinOutcome` does not name them apart. `fillSlot`
+    // writes to both alike, so a caller reading them apart would have nothing
+    // different to do.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+
+    let before = state().placements
+    expect(unpinFill(id, FLOOR)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+
+    before = state().placements
+    expect(unpinFill(id, WALL)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('touches one slot and one instance', () => {
+    const first = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    const second = placeTemplate(aTemplateInstance({ x: 4, fills: aFullFillMap() }))
+    pinFill(first, FLOOR, A_TILE)
+    const otherInstance = state().placements[second]
+    const otherSlot = state().placements[first]?.fills[WALL]
+
+    unpinFill(first, FLOOR)
+    expect(state().placements[second]).toBe(otherInstance)
+    expect(state().placements[first]?.fills[WALL]).toBe(otherSlot)
+
+    clearFill(first, FLOOR)
+    expect(state().placements[second]).toBe(otherInstance)
+    expect(state().placements[first]?.fills[WALL]).toBe(otherSlot)
+  })
+
+  it('leaves a cleared slot absent across a persist round trip', () => {
+    // The wire and the storage blob agree with the map: an absent slot is
+    // already the representation of *unfilled* on both, so a cleared slot needs
+    // nothing new from `share/link.ts` and no migration from `migrations.ts`.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    clearFill(id, FLOOR)
+    pinFill(id, WALL, A_TILE)
+
+    const payload = storedPayload()
+    resetWorkshop()
+    writeStored(payload)
+    void useWorkshopStore.persist.rehydrate()
+
+    expect(state().placements[id]?.fills[FLOOR]).toBeUndefined()
+    expect(FLOOR in (state().placements[id]?.fills ?? {})).toBe(false)
+    expect(state().placements[id]?.fills[WALL]).toEqual({ tile: A_TILE, pinned: true })
+  })
+
+  it('lets the next re-solve fill a cleared slot, because an empty slot is not pinned', () => {
+    // §2.1 read literally, and `clearFill`'s docblock states it: the lock owns
+    // every slot the user has not pinned, and a slot the user emptied is not
+    // pinned. So clearing is "I have taken this out and not yet said what goes
+    // in", and the download refuses until then rather than for ever.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    clearFill(id, FLOOR)
+    expect(fillSlot(id, FLOOR, A_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: A_TILE, pinned: false })
   })
 })
 

@@ -310,6 +310,16 @@
   color: var(--ink);
 }
 
+/* Row A11's two actions. A `<p>` rather than a `<ul>`: two controls are not a
+   list a screen reader benefits from counting, and the wrapping is what the
+   narrow drawer needs. */
+.of-sloted-fillacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
 .of-sloted-cards {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

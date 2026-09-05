@@ -610,4 +610,72 @@ describe('the slot editor', () => {
     fireEvent.contextMenu(pieceRow())
     expect(screen.getByText(/2 of these slots need a choice: top, base/)).toBeInTheDocument()
   })
+
+  /* --------------------------------------------------- row A11's two actions */
+
+  it('empties a slot on the user’s say-so, and the piece stays on the plan', () => {
+    // Contract C-g from the editor's end: `clearFill` removes the fill and not
+    // the instance, so the slot reads *needs a choice* and the download refuses
+    // until it is filled. `panels.test.tsx` carries the refusal itself, because
+    // that needs a bill.
+    useWorkshopStore.setState({ placements: { [KEY]: piece({ top: FILL.topWall }) } })
+    panel(useWorkshopStore.getState().placements)
+    fireEvent.contextMenu(pieceRow())
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^top —/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: /^Empty the top slot/ }))
+
+    const fills = useWorkshopStore.getState().placements[KEY]?.fills ?? {}
+    expect(fills[TOP]).toBeUndefined()
+    // The key is gone rather than set to `undefined` — see `clearFill`.
+    expect(TOP in fills).toBe(false)
+    expect(useWorkshopStore.getState().placements[KEY]?.template).toBeDefined()
+  })
+
+  it('offers nothing to empty on a slot that is already empty', () => {
+    panel({ a: piece({}) })
+    fireEvent.contextMenu(pieceRow())
+    expect(screen.queryByRole('button', { name: /^Empty the/ })).toBeNull()
+  })
+
+  it('offers no hand-back on a slot the solver filled, only on one the user chose', () => {
+    // The preference already owns an `auto` fill, so the control would claim to
+    // do something it cannot — and `unpinFill` would answer `'unchanged'`.
+    useWorkshopStore.setState({ placements: { [KEY]: piece({ top: FILL.topWall }) } })
+    panel(useWorkshopStore.getState().placements)
+    fireEvent.contextMenu(pieceRow())
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^top —/ }))
+
+    expect(screen.getByRole('button', { name: /^Empty the top slot/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Hand the top slot back/ })).toBeNull()
+  })
+
+  it('hands a pinned slot back to the lock and re-solves it in the same press', () => {
+    // Row A11's headline, and the reason the re-solve cannot wait for the next
+    // lock change: `relock.ts#pinsOf` walks the *pinned* fills only, so an unpin
+    // with no re-solve would remove the slot from C2's `PinLockWarning` while
+    // leaving the file it warned about in the pack.
+    //
+    // The pin is the **towne** top, which the solver would never choose with
+    // `base` open — no base in this fixture is towne, so it is the greying
+    // walk's dead end. That makes the assertion below prove three things at
+    // once: the bit was dropped, the solver actually ran, and it ran against the
+    // instance as the store holds it *after* the unpin. Passing the render's
+    // copy would have handed the towne top back as a fixed preset and the whole
+    // press would have been a no-op that looked like a repair.
+    const pinned = piece({ top: FILL.topTowne })
+    useWorkshopStore.setState({
+      placements: { [KEY]: { ...pinned, fills: { [TOP]: { tile: FILL.topTowne as TileId, pinned: true } } } },
+    })
+    panel(useWorkshopStore.getState().placements)
+    fireEvent.contextMenu(pieceRow())
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^top —/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: /^Hand the top slot back/ }))
+
+    expect(useWorkshopStore.getState().placements[KEY]?.fills[TOP]).toEqual({
+      tile: FILL.topWall,
+      pinned: false,
+    })
+  })
 })

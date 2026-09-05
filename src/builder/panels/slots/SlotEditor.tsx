@@ -74,14 +74,20 @@ import {
 } from '@/screens/assemblies'
 import { compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
 import type { TemplateInstance } from '@/store'
-import { pinFill } from '@/store'
+import { clearFill, pinFill, useLockSystem } from '@/store'
 import type { BaseGap } from '@/assembly'
 import { slotDoubtSentence } from '@/template'
 import { Button, Chip, Dialog, Eyebrow } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
 import type { EditorSlot } from './slotEditor'
-import { filterByDesign, invalidatedBy, refusalSentence, slotEditorModel } from './slotEditor'
+import {
+  filterByDesign,
+  handSlotToLock,
+  invalidatedBy,
+  refusalSentence,
+  slotEditorModel,
+} from './slotEditor'
 
 import './slots.css'
 
@@ -104,6 +110,13 @@ export function SlotEditor({ catalog, index, instance, template, onClose }: Slot
     [catalog],
   )
   const materialOf = useMemo(() => tileMaterials(catalog), [catalog])
+  /* Read here rather than passed, and it is one primitive: `handSlotToLock`
+     re-solves the instance the moment a pin is released, so the preference is an
+     argument to that call and not a prop this dialog's two parents would both
+     have to thread. `SlotsPanel` takes no `lock` for `planSlots`' own reason — a
+     fill names an exact file — so adding one to its props for this would say the
+     panel depends on the preference when only this press does. */
+  const lock = useLockSystem()
 
   // Recomputed on every store write to this instance, because that is the row:
   // a pick narrows its siblings, so a candidate set is correct only until the
@@ -184,6 +197,15 @@ export function SlotEditor({ catalog, index, instance, template, onClose }: Slot
             setDesign(next)
             setRefused(null)
           }}
+          onClear={() => {
+            setRefused(null)
+            // No re-solve, and that is the difference from the press below: the
+            // user asked for the slot to be *empty*, and a re-solve would fill
+            // it again in the same tick. It reads *needs a choice* and the
+            // download refuses until they say what goes in — §3.2 and
+            // `clearFill`'s own docblock.
+            clearFill(instance.id, shown.name)
+          }}
           onPick={(tile, name) => {
             const invalid = invalidatedBy(recipes, template, instance, shown.name, tile)
             const refusal = refusalSentence(shown.name, name, invalid)
@@ -195,6 +217,14 @@ export function SlotEditor({ catalog, index, instance, template, onClose }: Slot
             // `pinFill` and not `fillSlot`: a press here *is* the user choosing.
             // See the module note on contract C-k.
             pinFill(instance.id, shown.name, tile)
+          }}
+          onUnpin={() => {
+            setRefused(null)
+            // Unpin *and* re-solve, in one press. `slotEditor.ts#handSlotToLock`
+            // carries the argument for why the re-solve cannot wait for the next
+            // lock change: an unpin on its own removes the slot from C2's pin
+            // warning while leaving the mismatched file in the pack.
+            handSlotToLock(index, recipes, template, instance, shown.name, lock)
           }}
           refused={refused}
           slot={shown}
@@ -248,16 +278,20 @@ function SlotGrid({
   catalog,
   design,
   materialOf,
+  onClear,
   onDesign,
   onPick,
+  onUnpin,
   refused,
   slot,
 }: {
   catalog: CatalogFile
   design: string | undefined | null
   materialOf: (id: TileId) => MaterialId
+  onClear: () => void
   onDesign: (family: string | undefined | null) => void
   onPick: (tile: TileId, name: string) => void
+  onUnpin: () => void
   refused: string | null
   slot: EditorSlot
 }) {
@@ -274,6 +308,42 @@ function SlotGrid({
       <Eyebrow as="p" className="of-sloted-head">
         {`Fill the ${slot.name} slot`}
       </Eyebrow>
+
+      {/*
+        The two actions row A11 exists for, and they are offered only where they
+        mean something: nothing to empty in an empty slot, and nothing to hand
+        back in a slot the preference already owns. Both are `Button`s beside the
+        grid rather than affordances on the slot row, because the slot row is a
+        `<button>` that opens the grid and a control inside a control is not
+        reachable by `Tab`.
+
+        Each `aria-label` says what the press *costs*, following this file's rule
+        for the cards: a screen-reader user hears the accessible name alone, and
+        "Empty this slot" without "the download is refused until it is filled" is
+        a button whose consequence is only visible in the bill.
+      */}
+      {slot.fill === undefined ? null : (
+        <p className="of-sloted-fillacts">
+          <Button
+            aria-label={`Empty the ${slot.name} slot — the piece stays on the plan, and the download is refused until this slot is filled again`}
+            onClick={onClear}
+            size="sm"
+            tone="secondary"
+          >
+            Empty this slot
+          </Button>
+          {slot.fill.pinned ? (
+            <Button
+              aria-label={`Hand the ${slot.name} slot back to the lock preference — it is filled again now, and re-solved whenever the joinery system changes`}
+              onClick={onUnpin}
+              size="sm"
+              tone="secondary"
+            >
+              Hand back to the lock
+            </Button>
+          ) : null}
+        </p>
+      )}
 
       {/*
         The counts and the narrowing come from `assembly.ts`'s own wording rather
