@@ -1,0 +1,160 @@
+name: PR Preview
+
+# Builds every PR's frontend and uploads it as a Worker *version* — never a
+# deployment — so a reviewer gets a live URL without touching staging's or
+# production's traffic. `wrangler versions upload` is Cloudflare's own
+# mechanism for exactly this: a version is visible only at its preview URL
+# until something explicitly promotes it with `wrangler versions deploy`,
+# which nothing in this workflow does.
+#
+# It reuses the `staging` Worker and its GitHub Environment secrets rather than
+# provisioning a third Worker — versions never go live on their own, so
+# uploading one against `openforge-workshop-staging` cannot disturb what
+# staging actually serves. This is the same choice Cloudflare's own dashboard
+# Git integration makes for non-production branches.
+#
+# `ci.yml` already runs on every pull request and gates lint, typecheck, the
+# full test suite and a build — this workflow does not repeat any of that. Its
+# job is "show a reviewer what this looks like", not "prove it's correct", and
+# `npm run build` still fails outright on a type error, so a broken PR gets no
+# preview rather than a silently stale one.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+# A push to the same PR supersedes its own in-flight preview build, so the
+# older one is cancelled rather than left to finish and post a stale comment
+# after the newer one already has.
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    # `pull_request` (not `pull_request_target`) withholds repository secrets
+    # from a fork's PRs regardless of this environment, so a fork PR builds
+    # nothing here rather than running untrusted code against real
+    # credentials. That is the safe default, not a gap to close.
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v5
+
+      # Same pin CI and the deploy job use, for the same reason: with the
+      # clock pinned to the commit, `version.built` is a property of the
+      # commit rather than of when this job happened to run.
+      - name: Pin the build clock
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - uses: jdx/mise-action@v3
+
+      - run: npm ci
+
+      # Lifted from `ci.yml` and `deploy.yml`: `public/catalog/catalog.json` is
+      # gitignored and derived, so a checkout never carries it, and building
+      # without it ships a preview with an empty catalog — a worse failure than
+      # no preview at all, because it looks like a working deploy.
+      - name: Fetch catalog fixtures
+        run: |
+          set -euo pipefail
+          . .github/fixtures.env
+          DEST="${RUNNER_TEMP}/openforge-catalog"
+          git clone --quiet --filter=blob:none --no-checkout --sparse \
+            "https://github.com/${OPENFORGE_CATALOG_REPO}.git" "$DEST"
+          git -C "$DEST" sparse-checkout set --no-cone "${OPENFORGE_FIXTURES_PATH}"
+          git -C "$DEST" checkout --quiet "${OPENFORGE_CATALOG_SHA}"
+          FIXTURES="${DEST}/${OPENFORGE_FIXTURES_PATH}"
+          test -d "$FIXTURES"
+          echo "OPENFORGE_FIXTURES=${FIXTURES}" >> "$GITHUB_ENV"
+          echo "OPENFORGE_FIXTURES_COMMIT=${OPENFORGE_CATALOG_SHA}" >> "$GITHUB_ENV"
+
+      - name: Regenerate and stamp the derived artefacts
+        run: npm run stamp
+
+      - name: Build
+        run: npm run build
+
+      # The alias is the PR number, so the URL is stable across every push to
+      # this PR — a reviewer bookmarks it once. Wrangler's own machine-readable
+      # log (`WRANGLER_OUTPUT_FILE_PATH`) is read for the URL rather than
+      # scraping the human-readable console output: it is the interface
+      # Cloudflare documents for exactly this, and it survives a wording change
+      # to the printed summary that would otherwise silently break a regex.
+      #
+      # Filtered on the alias prefix rather than taken as "the first URL in the
+      # file": a version upload emits *two* preview URLs (the version-specific
+      # one and the alias), and only the alias is the stable link this step
+      # hands to the comment step below.
+      #
+      # `npx wrangler` directly rather than `cloudflare/wrangler-action`, which
+      # `deploy.yml` uses: that job's `deploy` never needs anything back beyond
+      # its own exit code, where this one has to read a specific field out of
+      # the run, and `WRANGLER_OUTPUT_FILE_PATH` is the documented way to get
+      # one regardless of what invokes wrangler. Auth is the same two secrets
+      # either way, just read from the environment instead of the action's
+      # `apiToken`/`accountId` inputs.
+      - name: Upload a preview version
+        id: upload
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-output.jsonl
+        run: |
+          set -euo pipefail
+          alias="pr-${{ github.event.pull_request.number }}"
+          npx wrangler versions upload --env staging --preview-alias "$alias"
+
+          # `-m1` rather than `| head -1`: piping into `head` under `set -o
+          # pipefail` risks grep dying to SIGPIPE once `head` closes its end,
+          # which `pipefail` would then report as this step's exit code.
+          # `|| true` keeps a no-match from tripping `set -e` before the
+          # friendly error below gets to run.
+          url=$(grep -m1 -oE "https://${alias}-[a-zA-Z0-9.-]*\.workers\.dev" \
+            "$WRANGLER_OUTPUT_FILE_PATH" || true)
+          if [ -z "$url" ]; then
+            echo "::error::no preview alias URL found in wrangler's output log"
+            exit 1
+          fi
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      # One comment per PR, updated in place across pushes — the marker is
+      # what `github-script` searches for. Cloudflare's own dashboard
+      # integration does the same thing for a connected repo; this is the
+      # equivalent for a repo that deploys through GitHub Actions instead.
+      - name: Comment the preview URL on the PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- pr-preview-bot -->'
+            const url = ${{ toJSON(steps.upload.outputs.url) }}
+            const body = `${marker}\n**Preview:** ${url}\n\nUpdates automatically on every push to this PR.`
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            })
+            const existing = comments.find((comment) => comment.body?.includes(marker))
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              })
+            }
