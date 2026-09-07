@@ -18,14 +18,35 @@ name: PR Preview
 # job is "show a reviewer what this looks like", not "prove it's correct", and
 # `npm run build` still fails outright on a type error, so a broken PR gets no
 # preview rather than a silently stale one.
+#
+# ## What happens when the PR closes, and what does not
+#
+# **There is no way to take the preview itself down, on this PR or any other.**
+# Checked directly rather than assumed: neither `wrangler versions` /
+# `wrangler deployments` nor the Workers REST API (`GET`/`POST` only on
+# `.../versions`, no `DELETE`, and no endpoint for a preview alias at all)
+# exposes a way to delete or disable one version or one alias. A version, once
+# uploaded, is permanent; the only related lever is disabling Preview URLs for
+# the *whole* Worker, which would take every PR's preview down at once, or
+# Cloudflare Access in front of all of them. Neither is a per-PR action, so
+# neither belongs in this workflow.
+#
+# What the `close` job below does instead is the honest version of "take it
+# down": it edits the same sticky comment to say the preview is closed, so a
+# reviewer scrolling the PR later does not mistake a stale build for a current
+# one. The URL itself keeps resolving — until its alias eventually ages out of
+# the 1,000 most recently deployed, which Cloudflare evicts automatically —
+# and that is a documented platform limit, not an oversight here.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, closed]
     branches: [main]
 
 # A push to the same PR supersedes its own in-flight preview build, so the
 # older one is cancelled rather than left to finish and post a stale comment
-# after the newer one already has.
+# after the newer one already has. Closing the PR falls in the same group, so
+# a build already running when the PR closes does not race the comment the
+# `close` job is about to make stale.
 concurrency:
   group: pr-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -36,6 +57,10 @@ permissions:
 
 jobs:
   preview:
+    # Only the four events that mean "build and show me this PR". `closed` is
+    # the fifth member of the trigger above and belongs to the `close` job
+    # below instead.
+    if: github.event.action != 'closed'
     # `pull_request` (not `pull_request_target`) withholds repository secrets
     # from a fork's PRs regardless of this environment, so a fork PR builds
     # nothing here rather than running untrusted code against real
@@ -158,3 +183,50 @@ jobs:
                 body,
               })
             }
+
+  # Runs on merge and on a plain close alike — both mean this PR's preview is
+  # no longer the thing to look at. See the module note above for what this
+  # can and cannot do: Cloudflare gives no way to take the version or its alias
+  # down, so this edits the same sticky comment to say so rather than leaving
+  # a stale "here's your preview" sitting on a closed PR looking current.
+  close:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Mark the preview comment closed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- pr-preview-bot -->'
+            const merged = ${{ toJSON(github.event.pull_request.merged) }}
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            })
+            // Nothing to mark closed if no preview ever posted — a fork PR, or
+            // one closed before its first build finished.
+            const existing = comments.find((comment) => comment.body?.includes(marker))
+            if (!existing) return
+
+            // The URL the last successful build posted, pulled back out of
+            // that comment rather than re-derived, so this job needs no
+            // Cloudflare credentials of its own. Kept and still linked, just
+            // relabelled: the URL still resolves (Cloudflare gives no way to
+            // stop it — see the workflow's own note) and hiding it here would
+            // only make it harder to find, not less live.
+            const match = existing.body.match(/\*\*Preview:\*\* (\S+)/)
+            const url = match?.[1] ?? '(URL not found in the previous comment)'
+            const body = `${marker}\n**Preview closed** — this PR was ${merged ? 'merged' : 'closed'}, ` +
+              `so ${url} is no longer maintained and will not update. It may still resolve — ` +
+              `Cloudflare has no way to take a specific preview down — but nothing here keeps it in sync with \`main\`.`
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            })
