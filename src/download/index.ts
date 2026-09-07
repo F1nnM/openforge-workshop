@@ -85,6 +85,9 @@ export type {
 } from './plan'
 export { EmptyArchiveError, GENERATED_PREFIX, GeneratedDigestCollisionError, buildArchivePlan, defaultFilename } from './plan'
 
+export { ArchivePartTooLargeError, SPLIT_OVERHEAD_BYTES, splitArchivePlans } from './split'
+export type { SplitArchiveOptions } from './split'
+
 export type { SaveEnvironment, SaveFileHandle, SaveFilePickerOptions, SaveResult, SaveVia, ShowSaveFilePicker } from './save'
 export {
   ArchiveTooLargeToBufferError,
