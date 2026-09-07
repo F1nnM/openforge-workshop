@@ -717,6 +717,21 @@ function printFixturePart(part: PartSlot): string[] {
 /* ------------------------------------------------------------ the shipped data */
 
 /**
+ * The line that separates the fixture entries from row **E3**'s authored ones
+ * inside `RECIPE_TEMPLATES`.
+ *
+ * A marker and not a comment for a reader's convenience: it is what
+ * `templates.test.ts` cuts the array on to assert that **the 40 are emitted byte
+ * for byte with and without the authored table** — row B4's guard for the 47
+ * generated families, applied to the second merge into the same module. Without
+ * a cut point the guard could only compare whole regions, and an emitter change
+ * that interleaved the two would pass it while destroying the claim that
+ * everything above the mark is provably the fixtures' content.
+ */
+export const AUTHORED_MARKER =
+  '  /* ---- authored in this repo, derived from the fixtures above: pipeline/authored.ts ---- */'
+
+/**
  * A template's id: a slug of its name.
  *
  * Derived from the name rather than from the file, because the two entries in a
@@ -775,22 +790,34 @@ function printModulePart(part: PartSlot): string[] {
  * transcription of it. `npm run import:catalog` rewrites it, which is the only
  * thing that should: the header says so and the test enforces it.
  *
- * ## Two sources, three exports, one file
+ * ## Three sources, three exports, one file
  *
  * The 40 come from YAML and are validated part-by-part against `PartSlot`; the
  * families come from the *corpus*, keyed on the `(role, form, build)` tags
- * `pipeline/build.ts` already interned. They meet only here, and they meet as
- * the same emitted type: `RecipeTemplate` covers both without a field to spare,
- * because a family's `tags` are the `parentTags` its size positions are joined
- * against and its `source` is the corpus key it was derived from.
+ * `pipeline/build.ts` already interned; row **E3**'s two come from
+ * `pipeline/authored.ts`, which derives them from named slots of the YAML. They
+ * meet only here, and they meet as the same emitted type: `RecipeTemplate` covers
+ * all three without a field to spare, because a family's `tags` are the
+ * `parentTags` its size positions are joined against and its `source` is the
+ * corpus key it was derived from.
  *
- * They stay **separate arrays**, and that is not tidiness. `RECIPE_TEMPLATES`
- * is asserted to hold exactly 40 entries in six suites and
- * `AssembliesScreen` quotes its length as *"N recipes from the archive's own
- * blueprint fixtures"* — which a generated family is not. `families` is a
- * required parameter rather than a defaulted one for the same reason: a default
- * of `[]` would let a caller silently emit an empty family table, and the whole
- * of B4 is in that table.
+ * The **families** stay a separate array, and that is not tidiness: a family has
+ * one slot, no layout convention and its own size control, and `families.ts`
+ * gives it a role heading in the single-tile section of the palette. The
+ * **authored two** are `RECIPE_TEMPLATES` entries, and that is not tidiness
+ * either — it is measured. `src/builder/panels/families.ts` keys the palette's
+ * assemblies *section* on which of the two arrays a template came from, and
+ * nothing else; an authored assembly emitted anywhere but `RECIPE_TEMPLATES`
+ * reaches the browser as a one-slot single-tile row under a role heading, which
+ * is the exact defect the owner reported and row D2 repaired. So they are
+ * appended, after {@link AUTHORED_MARKER}, and `templates.test.ts` asserts
+ * everything above the marker is byte-identical with and without them.
+ *
+ * `families` is a required parameter where `authored` is defaulted, and the
+ * asymmetry is deliberate: a default of `[]` for the families would let a caller
+ * silently emit an empty family table and the whole of B4 is in that table, while
+ * `authored: []` is exactly what the byte-identity guard needs to be able to ask
+ * for.
  *
  * The `id` namespace is shared, though, and checked as one: {@link templateSlug}
  * and `families.ts#familySlug` are the same construction and a collision between
@@ -806,18 +833,21 @@ function printModulePart(part: PartSlot): string[] {
 export function printTemplateModule(
   entries: readonly TemplateFixture[],
   families: readonly GeneratedFamily[],
+  authored: readonly TemplateFixture[] = [],
 ): string {
   const seen = new Set<string>()
   const body: string[] = []
 
-  for (const entry of entries) {
+  const emit = (entry: TemplateFixture): void => {
     const id = templateSlug(entry.name)
     if (seen.has(id)) throw new Error(`two templates slug to ${id}`)
     seen.add(id)
     /* Row B2's gate, run here because this is what `npm run import:catalog`
        calls. It emits nothing — the conventions ship in the bundle and the index
        gains 0 B — so the bytes below are unchanged by it, and a fixture with an
-       unknown part set fails the import rather than the browser. */
+       unknown part set fails the import rather than the browser. Row E3's two
+       authored entries go through the same gate, which is why the corridor's
+       convention has to be in `SLOT_CONVENTIONS` before its template exists. */
     templateConvention(entry)
     body.push(
       '  {',
@@ -830,6 +860,12 @@ export function printTemplateModule(
       '    ],',
       '  },',
     )
+  }
+
+  for (const entry of entries) emit(entry)
+  if (authored.length > 0) {
+    body.push(AUTHORED_MARKER)
+    for (const entry of authored) emit(entry)
   }
 
   const familyBody: string[] = []
@@ -858,19 +894,26 @@ export function printTemplateModule(
         .join(', ')}],`,
   )
 
+  const allRecipes = [...entries, ...authored]
   return `${[
     '/**',
-    ` * The ${String(entries.length)} recipe templates and the ${String(families.length)} generated families, as data.`,
+    ` * The ${String(allRecipes.length)} recipe templates and the ${String(families.length)} generated families, as data.`,
     ' *',
     ' * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`',
-    ' * fixtures beside the JSON, `pipeline/families.ts` derives the families from the',
-    ' * built corpus, and this file is what the two emit; `npm run import:catalog`',
-    ' * writes it and `pipeline/templates.test.ts` asserts the committed bytes are',
-    ' * exactly `printTemplateModule(loadTemplateFixtures(), deriveFamilies(file))`, so',
-    ' * an edit here fails the suite rather than drifting quietly.',
+    ' * fixtures beside the JSON, `pipeline/authored.ts` derives this repo’s own two',
+    ' * from named slots of those fixtures, `pipeline/families.ts` derives the families',
+    ' * from the built corpus, and this file is what the three emit;',
+    ' * `npm run import:catalog` writes it and `pipeline/templates.test.ts` asserts the',
+    ' * committed bytes are exactly what the emitter returns, so an edit here fails the',
+    ' * suite rather than drifting quietly.',
     ' *',
-    ' * `RECIPE_TEMPLATES` is the 40 read from the fixtures — all of them',
-    ' * `S2W: Wall on Tile`, reaching 35.4% of the corpus. `GENERATED_FAMILIES` is one',
+    ` * \`RECIPE_TEMPLATES\` is the ${String(entries.length)} read from the fixtures — all of them`,
+    ' * `S2W: Wall on Tile`, reaching 35.4% of the corpus — followed, below the marker,',
+    ` * by the ${String(authored.length)} row **E3** authored here: a wall recipe whose floor slot is widened`,
+    ' * off the shipped `(Any, Modular)` one, taking the section to 51.0% of the records',
+    ' * and 49.5% of the designs, and a corridor, whose two walls sit on opposite faces.',
+    ' * Everything above the marker is byte-identical with and without them.',
+    ' * `GENERATED_FAMILIES` is one',
     ' * family per `(role, form, build)` key the emitted tags already carry, each with',
     ' * one required slot denying `shape|base`, plus the bare-base family no such key',
     ' * can name and which requires it.',
@@ -888,7 +931,9 @@ export function printTemplateModule(
     ' *',
     ` * ${String(entries.length)} templates over ${String(new Set(entries.map((entry) => entry.source)).size)} fixture files, ${String(
       entries.reduce((total, entry) => total + entry.parts.length, 0),
-    )} parts.`,
+    )} parts; ${String(authored.length)} authored over ${String(
+      authored.reduce((total, entry) => total + entry.parts.length, 0),
+    )} more.`,
     ` * ${String(families.length)} generated families over ${String(
       families.reduce((total, family) => total + family.records, 0),
     )} records, ${String(families.reduce((total, family) => total + family.sizes.length, 0))} size positions.`,

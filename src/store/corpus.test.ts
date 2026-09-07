@@ -79,26 +79,28 @@ function loadCatalog(): CatalogFileType {
 /* ------------------------------------------------------------- the templates */
 
 describe('the persisted shape against the shipped templates', () => {
-  it('accepts all 40 shipped template ids', () => {
+  it('accepts all 42 shipped template ids', () => {
     // The test that stops the pattern being tightened into something the
     // generator cannot satisfy. `pipeline/templates.ts#templateSlug` is
     // `toLowerCase().replace(/[^a-z0-9]+/g, '-')` with the ends trimmed, so this
     // is the *generator's* whole range checked against the *schema's*.
-    expect(RECIPE_TEMPLATES).toHaveLength(40)
+    // 42 since row **E3** appended two assemblies authored in this repo, whose
+    // ids come from the same slug construction and have to pass the same pattern.
+    expect(RECIPE_TEMPLATES).toHaveLength(42)
     for (const template of RECIPE_TEMPLATES) {
       expect(TemplateId.safeParse(template.id).success, template.id).toBe(true)
     }
-    expect(new Set(RECIPE_TEMPLATES.map((template) => template.id)).size).toBe(40)
+    expect(new Set(RECIPE_TEMPLATES.map((template) => template.id)).size).toBe(42)
   })
 
-  it('does not require the hyphen that all 40 happen to have', () => {
-    // All 40 ids carry at least one hyphen, and requiring one would have bought
+  it('does not require the hyphen that all 42 happen to have', () => {
+    // All 42 ids carry at least one hyphen, and requiring one would have bought
     // lexical disjointness from a `DesignId` (`d` + twelve hex, no hyphen). It is
     // deliberately not required: `templateSlug` produces a single segment from a
     // one-word family name, and row B4 generates 52 families from
     // `(role, form, build)` whose names this row cannot see. Refusing a
     // legitimate id is the worse failure — see `schema.ts#TemplateId`.
-    expect(RECIPE_TEMPLATES.filter((template) => template.id.includes('-'))).toHaveLength(40)
+    expect(RECIPE_TEMPLATES.filter((template) => template.id.includes('-'))).toHaveLength(42)
     expect(TemplateId.safeParse('wall').success).toBe(true)
     expect(TemplateId.safeParse('d4c2a57740b65').success).toBe(true)
   })
@@ -124,14 +126,17 @@ describe('the persisted shape against the shipped templates', () => {
     // 128 parts over six distinct names — `column`, `right wall`, `left wall`,
     // `floor`, `base`, `wall` — and **8 parts carry one of the two names with a
     // space in it**. So a `TemplateId`-style pattern on a slot name would refuse
-    // 8 of 128 shipped parts outright, which is why `SlotName` is `min(1)` and
-    // the *meaning* check belongs to whoever holds the template.
+    // 10 of 135 shipped parts outright, which is why `SlotName` is `min(1)` and
+    // the *meaning* check belongs to whoever holds the template. Row **E3**'s
+    // corridor added two more spaced names and no new one: it reuses the
+    // external corner's `right wall` / `left wall`, which is what makes it
+    // distinguishable from a corner on the part *set* and nothing else.
     const parts = RECIPE_TEMPLATES.flatMap((template) => template.parts)
-    expect(parts).toHaveLength(128)
+    expect(parts).toHaveLength(135)
 
     const names = new Set(parts.map((part) => part.name))
     expect([...names].sort()).toEqual(['base', 'column', 'floor', 'left wall', 'right wall', 'wall'])
-    expect(parts.filter((part) => part.name.includes(' '))).toHaveLength(8)
+    expect(parts.filter((part) => part.name.includes(' '))).toHaveLength(10)
     expect([...names].filter((name) => name.includes(' '))).toHaveLength(2)
 
     for (const name of names) {
@@ -143,11 +148,12 @@ describe('the persisted shape against the shipped templates', () => {
   it('bounds a fill map at five entries, which is where “~5x” comes from', () => {
     // §3.4, item 6: "slot fills become room state, so `SHARE_FORMAT_VERSION`
     // bumps and share fragments grow ~5x". This is that factor, measured: every
-    // one of the 40 templates has either 3 or 5 parts, so a persisted instance
+    // one of the 42 templates has 3, 4 or 5 parts, so a persisted instance
     // carries at most five fills where a version 5 placement carried one
-    // identity. It is the bound on the payload rather than the mean of it.
+    // identity. It is the bound on the payload rather than the mean of it, which
+    // is why row **E3**'s four-slot corridor moves the *set* and not the bound.
     const counts = new Set(RECIPE_TEMPLATES.map((template) => template.parts.length))
-    expect([...counts].sort()).toEqual([3, 5])
+    expect([...counts].sort()).toEqual([3, 4, 5])
     expect(Math.max(...RECIPE_TEMPLATES.map((template) => template.parts.length))).toBe(5)
   })
 })

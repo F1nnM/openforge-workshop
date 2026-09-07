@@ -265,7 +265,12 @@ interface Combination {
  */
 function walk(recipes: RecipeIndex, byId: ReadonlyMap<string, CatalogRecord>): readonly Combination[] {
   const out: Combination[] = []
-  for (const template of RECIPE_TEMPLATES) {
+  /* The 40 read from the fixtures, and not row **E3**'s two authored beside
+     them: this whole block is a comparison against *B2's own* 1,006 / 33 / 176,
+     and folding two more templates into the population would silently redefine
+     what the comparison is about. `src/template/corpus.test.ts` walks the
+     authored pair separately. */
+  for (const template of RECIPE_TEMPLATES.filter((one) => !one.source.startsWith('authored:'))) {
     const layout = conventionFor(template.parts.map((part) => part.name))
     if (layout === undefined) throw new Error(`no convention for ${template.id}`)
     const first = template.parts[0]
@@ -419,7 +424,8 @@ describeCorpus(corpusTitle, () => {
     if (recipes === undefined) return
     let poolTotal = 0
     const runs = new Map<string, number>()
-    for (const template of RECIPE_TEMPLATES) {
+    // The 40 fixtures, as everything in this block is — see `walk` above.
+    for (const template of RECIPE_TEMPLATES.filter((one) => !one.source.startsWith('authored:'))) {
       const layout = conventionFor(template.parts.map((part) => part.name))
       if (layout === undefined) continue
       for (const step of assemblyState(recipes, template, {}).steps) {

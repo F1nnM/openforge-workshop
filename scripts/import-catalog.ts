@@ -21,7 +21,7 @@
  *     record of which integer every share link means.
  *   - `src/screens/assemblies/templates.ts` — **checked in, and generated**. The
  *     40 recipe templates, read out of the 20 `*.yaml` fixtures the index
- *     deliberately skips, **and** row B4's 51 generated families, derived from
+ *     deliberately skips, row **E3**'s two authored beside them, **and** row B4's 51 generated families, derived from
  *     the built corpus's own `(role, form, build)` tags. Neither is a record —
  *     no template carries `file_metadata` — and neither is in `catalog.json`;
  *     `pipeline/templates.ts` carries the +1,260 B measurement behind that and
@@ -49,6 +49,7 @@ import { join } from 'node:path'
 import {
   TEMPLATES_MODULE_PATH,
   assertWithinBudget,
+  deriveAuthored,
   buildCatalog,
   compressCatalog,
   deriveFamilies,
@@ -86,8 +87,9 @@ function main(): number {
   const json = serialiseCatalog(result.file)
   const size = measureCatalog(json)
   const families = deriveFamilies(result.file)
-  const module = printTemplateModule(templates, families)
-  report(dir, result, size, dryRun, inventory, templates, families, module)
+  const authored = deriveAuthored(templates)
+  const module = printTemplateModule(templates, families, authored)
+  report(dir, result, size, dryRun, inventory, templates, authored, families, module)
 
   if (!dryRun) {
     mkdirSync(OUT_DIR, { recursive: true })
@@ -109,6 +111,7 @@ function report(
   dryRun: boolean,
   inventory: ReturnType<typeof readThumbInventory>,
   templates: ReturnType<typeof loadTemplateFixtures>,
+  authored: ReturnType<typeof deriveAuthored>,
   families: ReturnType<typeof deriveFamilies>,
   module: string,
 ): void {
@@ -136,6 +139,11 @@ function report(
     `templates     ${String(templates.length)} recipes over ${String(new Set(templates.map((entry) => entry.source)).size)} yaml fixtures · ` +
       `${String(templates.reduce((total, entry) => total + entry.parts.length, 0))} parts · ` +
       `${formatBytes(Buffer.byteLength(module, 'utf8'))} raw of generated module, 0 B of the index`,
+    /* Row E3's two, counted apart from the fixtures' because the whole point of
+       `pipeline/authored.ts` is that the line between them is visible. */
+    `authored      ${String(authored.length)} derived in this repo · ` +
+      `${String(authored.reduce((total, entry) => total + entry.parts.length, 0))} parts · ` +
+      authored.map((entry) => entry.name).join(' · '),
     /* The whole sum, not the keyed families' own: since row D1 took the bases
        out of the keyed families the 47 populations are disjoint, so the sum *is*
        the union. Slicing the base family off used to avoid double-counting its

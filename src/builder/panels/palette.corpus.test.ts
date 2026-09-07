@@ -234,26 +234,32 @@ describeCorpus('the row shows one file and the build prints another', () => {
   })
 })
 
-/* ------------------------------------------- 4. the 87 rows, and their ids */
+/* ------------------------------------------- 4. the 89 rows, and their ids */
 
-describeCorpus('the palette lists 87 templates and can arm every one of them', () => {
-  it('is B4’s 47 families plus the 40 shipped recipes, with distinct ids', () => {
-    expect(TEMPLATE_FAMILIES).toHaveLength(87)
+describeCorpus('the palette lists 89 templates and can arm every one of them', () => {
+  it('is B4’s 47 families plus the 40 shipped recipes and row E3’s 2, with distinct ids', () => {
+    /* 89 since row **E3** authored two assemblies in this repo. They arrive as
+       `RECIPE_TEMPLATES` entries because this module keys the assemblies section
+       on which of the emitted module's two arrays a template came from, and
+       nothing else — `pipeline/authored.ts` records the measurement. So they are
+       `kind: 'recipe'`, groupless, and above the single tiles, with no change to
+       this directory. */
+    expect(TEMPLATE_FAMILIES).toHaveLength(89)
     expect(TEMPLATE_FAMILIES.filter((family) => family.kind === 'family')).toHaveLength(47)
-    expect(TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe')).toHaveLength(40)
-    expect(new Set(TEMPLATE_FAMILIES.map((family) => family.id)).size).toBe(87)
+    expect(TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe')).toHaveLength(42)
+    expect(new Set(TEMPLATE_FAMILIES.map((family) => family.id)).size).toBe(89)
     // `PLACEABLE_TEMPLATES` is the same set as the resolver's own type, in the
     // same order, so a screen can build one lookup from it.
-    expect(PLACEABLE_TEMPLATES).toHaveLength(87)
+    expect(PLACEABLE_TEMPLATES).toHaveLength(89)
   })
 
   it('parses every id as a TemplateId, which is what row A8’s refusal rested on', () => {
     // A8 declined to arm anything because the list held `DesignId`s and a
-    // `DesignId` is a brand over `z.string().min(1)`: **all 87 template ids
+    // `DesignId` is a brand over `z.string().min(1)`: **all 89 template ids
     // satisfy it**, so the compiler could not have caught the cast and every
     // placement would have been reported `unknown-template`. The discrimination
     // runs the other way and is what makes this list armable — a `TemplateId` is
-    // a lowercase hyphenated slug, and the generator emits 87 of them.
+    // a lowercase hyphenated slug, and the generator emits 89 of them.
     expect(TEMPLATE_FAMILIES.filter((family) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(family.id))).toEqual([])
     // And no design in the corpus collides with one, which is the other half of
     // "not lexically disjoint but disjoint in fact".
@@ -289,10 +295,11 @@ describeCorpus('the palette lists 87 templates and can arm every one of them', (
     expect(counts).toEqual([17, 15, 2, 6, 3, 2, 1, 1])
     // No `insert` group, although 285 records carry the role: `SKIPPED_ROLES`.
     expect(GROUP_ORDER).not.toContain('insert')
-    // And **no ninth group for the 40 assemblies** — row D2 made the kind of
+    // And **no ninth group for the 42 assemblies** — row D2 made the kind of
     // thing a row is a section rather than a group, so they carry no role and no
-    // group at all. `GROUP_ORDER` covers the single tiles exactly.
-    expect(TEMPLATE_FAMILIES.filter((family) => family.group === undefined)).toHaveLength(40)
+    // group at all. `GROUP_ORDER` covers the single tiles exactly. Row E3's two
+    // are groupless for the same reason and by the same code path.
+    expect(TEMPLATE_FAMILIES.filter((family) => family.group === undefined)).toHaveLength(42)
     expect(counts.reduce((total, one) => total + one, 0)).toBe(47)
   })
 })
@@ -389,9 +396,14 @@ describeCorpus('the query the owner ran', () => {
     const slots = TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe').map(
       (family) => family.slots,
     )
-    expect([...new Set(slots)].sort()).toEqual([3, 5])
+    /* Three slot counts since row E3: its widened wall is a 3, and its corridor
+       is the build's only **4** — `(base, floor, left wall, right wall)`, a
+       corner's part set minus the column. A row that says 4 is a row the owner
+       can tell from both a 3 and a 5, which is the whole point of the count. */
+    expect([...new Set(slots)].sort()).toEqual([3, 4, 5])
     expect(slots.filter((count) => count === 5)).toHaveLength(4)
-    expect(slots.filter((count) => count === 3)).toHaveLength(36)
+    expect(slots.filter((count) => count === 4)).toHaveLength(1)
+    expect(slots.filter((count) => count === 3)).toHaveLength(37)
   })
 })
 

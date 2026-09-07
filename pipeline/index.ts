@@ -29,6 +29,13 @@
  * placed instance. They ride into the browser through the *same* generated
  * module as the 40 — `./templates` merges the two sources and emits one file —
  * so the index still gains 0 B and the tag table is still 930 strings.
+ *
+ * Row E3 added `./authored`, the third source `./templates` merges: the two
+ * assemblies this repo authors, each declared as the **difference from a named
+ * shipped fixture slot** and checked against it at import time, so a fixture
+ * refresh that moves one of those slots fails the build naming the ref rather
+ * than leaving a stale copy. The fixtures themselves are never rewritten and
+ * still round-trip byte for byte.
  */
 export { MIN_DETECTION_RECALL, assertAggregation, measureAggregation } from './aggregate'
 export type { AggregateViolation, AggregationReport, DetectionScore } from './aggregate'
@@ -118,6 +125,7 @@ export {
   tagValue,
 } from './tags'
 export {
+  AUTHORED_MARKER,
   TEMPLATES_MODULE_PATH,
   loadTemplateFixtures,
   printFixture,
@@ -127,6 +135,8 @@ export {
   templateSlug,
 } from './templates'
 export type { TemplateFixture } from './templates'
+export { AUTHORED_RECIPES, AUTHORED_SOURCE_PREFIX, deriveAuthored, isAuthoredSource } from './authored'
+export type { AuthoredRecipe, SlotDerivation } from './authored'
 export {
   THUMB_INVENTORY_PATH,
   THUMB_INVENTORY_VERSION,
