@@ -67,7 +67,7 @@ export {
 export type { CandidateCounter, PaletteFacets, PaletteGroup, RecentArm } from './palette'
 
 /* Row C1's family model. `PLACEABLE_TEMPLATES` is the list a recipe table must
-   be built from now that the palette arms all 91 — see its own docblock, and
+   be built from now that the palette arms all 87 — see its own docblock, and
    this row's report, for what happens to a placement whose id is not in it. */
 export {
   ANY_SIZE_LABEL,

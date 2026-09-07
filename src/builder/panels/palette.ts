@@ -3,12 +3,12 @@
  *
  * **A row is a template family, not an item and no longer a file** — row C1,
  * finishing §2.5's *"templates are the only placement unit"* on the one surface
- * that still listed the archive. `families.ts` holds the 91 rows and the axes;
+ * that still listed the archive. `families.ts` holds the 87 rows and the axes;
  * this module is the three questions a panel asks of them — *which rows does
  * this query leave*, *which group does each one go in*, and *how many archive
  * tiles would fill it* — plus the session's RECENT ring.
  *
- * ## It was a search over 3,822 items and row C1 left a list of 91
+ * ## It was a search over 3,822 items and row C1 left a list of 87
  *
  * The history is worth keeping because two of the three functions that used to
  * be here died of a *measurement* rather than of a redesign:
@@ -36,7 +36,7 @@
  * virtualised grid and the drawer, and the drawer's *"Use in builder"* is the
  * bridge back — which after this row hands over a family and a size instead of a
  * design that nothing could arm (`familyKey.ts#armForTags`, `store/selection.ts`).
- * The **search field** survives, repointed at the 91 rows it now lists, so
+ * The **search field** survives, repointed at the 87 rows it now lists, so
  * `/builder?q=corner` still narrows the palette and the URL is still linkable.
  *
  * ## No thumbnails, and that is the one thing that gets worse
@@ -53,7 +53,7 @@
  * — the three locks disagree for 37.1% of items), so a representative thumbnail
  * would show a tile the placement does not contain. What a row carries instead
  * is the family's name and {@link candidateCount}: a number the resolver itself
- * produced. Recognition rests on 91 *names*, which is the claim §3.1 actually
+ * produced. Recognition rests on 87 *names*, which is the claim §3.1 actually
  * makes; the pictures live one level down, in C3's slot editor, where a choice of
  * file is what is being made.
  *
@@ -68,7 +68,7 @@
  * choice belongs here rather than in the editor — but not as a facet on this
  * list:
  *
- *   - **Not a facet.** A texture is not an axis of a family: 91 rows over 36
+ *   - **Not a facet.** A texture is not an axis of a family: 87 rows over 36
  *     reachable roots is **3,276** rows, which is the recall cost §3.1 inverted
  *     back on itself. Every family admits tiles of many textures, so a texture
  *     chip would narrow *what a row's number counts*, not which rows exist.
@@ -88,13 +88,13 @@
  * ## RECENT mitigates the recognition cost; it does not fix it
  *
  * The UX research was explicit about that and this module is where the honesty
- * has to live, because the ring is the cheapest thing here to overclaim. 91 rows
+ * has to live, because the ring is the cheapest thing here to overclaim. 87 rows
  * in nine groups is still recall for anyone who does not already know the axis
  * names, and a ring of the last {@link MAX_RECENT} families the user armed helps
  * exactly the case where they are placing the same three families repeatedly —
  * which is most of building a room, and none of finding a family the first time.
  *
- * It is a **strip of chips and not a tenth group of rows**, because all 91 rows
+ * It is a **strip of chips and not a tenth group of rows**, because all 87 rows
  * are always listed and a group would put a second row on screen for the same
  * family — two rows reading as pressed, and two live copies of the size control
  * that lives inside the armed row. {@link MAX_RECENT} carries that argument.
@@ -152,7 +152,7 @@ export function groupFamilies(families: readonly TemplateFamily[]): readonly Pal
  * every corner *and* every S2W.
  *
  * **Not the facet engine.** `@/search` ranks 3,822 items by text score over an
- * interned vocabulary; this is a substring test over 91 short strings, and
+ * interned vocabulary; this is a substring test over 87 short strings, and
  * borrowing the engine would mean indexing a second corpus that is not in the
  * catalog. What the two do share is the field the user types into, and `/builder`
  * still validates and carries `q` for it.
@@ -202,7 +202,7 @@ export const ALL_FACETS: PaletteFacets = { form: undefined, build: undefined }
  * The rows a query and a pair of facets leave, in `TEMPLATE_FAMILIES` order.
  *
  * The facets are **single-select per axis** rather than multi-select, and the
- * reason is the row count: 91 rows over 7 forms and 6 build values means the
+ * reason is the row count: 87 rows over 7 forms and 6 build values means the
  * average chip narrows to 13, so a second chip on the same axis is almost always
  * a way to build an empty intersection by accident. Re-pressing the chosen chip
  * clears it, which is what `aria-pressed` promises and what the palette's rows
@@ -302,7 +302,7 @@ function order(values: readonly string[], canonical: readonly string[]): readonl
  * `parentTags` exactly the way a placed instance's do — so the number on the row
  * is the number the fill solver will choose from and cannot drift from it. B4's
  * emitter proved the refs mean what the key means (0 over-admissions and 0
- * under-admissions over all 51 families at all 299 sized positions); this is
+ * under-admissions over all 47 families at all 257 sized positions); this is
  * that same resolution, live, against whatever index the app loaded.
  *
  * **Items, not files** — `SlotCandidates.items` — because the noun on screen is
@@ -312,7 +312,7 @@ function order(values: readonly string[], canonical: readonly string[]): readonl
  *
  * `undefined` for the 40 recipes rather than 0: a recipe has 2 to 5 slots, so one
  * number cannot answer *"how many tiles fill this"*, and the row shows its part
- * count instead. Measured over the emitted index, **all 51 families and all 350
+ * count instead. Measured over the emitted index, **all 47 families and all 304
  * positions admit at least one tile** — the 0 case is only reachable on a partial
  * catalog build, and such a row is still armed rather than refused, because §3.2
  * places a template whose slot has no candidate and reports the slot as *needs a
@@ -336,7 +336,7 @@ export type CandidateCounter = (family: TemplateFamily, size?: readonly string[]
 /**
  * A counter memoised per index, for the panel's render.
  *
- * 91 rows measure 7 ms over the real corpus and every keystroke re-renders the
+ * 87 rows measure 7 ms over the real corpus and every keystroke re-renders the
  * list, so the panel must not re-resolve on each one. The inverted index behind
  * it is `compositionIndexFor`'s, which is the **same instance** `BuilderScreen`
  * built for the bill and C3's slot editor built for its candidate grids — 10.7 ms
@@ -363,7 +363,7 @@ export function createCounter(file: CatalogFile, aggregates: AggregateIndex): Ca
  *
  * Six. It is a strip of chips above the list rather than a tenth group of rows,
  * and that shape is a consequence rather than a style choice: **a group would
- * duplicate rows.** All 91 rows are always listed, so a RECENT *group* puts a
+ * duplicate rows.** All 87 rows are always listed, so a RECENT *group* puts a
  * second row on screen for the same family — two rows reading as pressed, and,
  * because the size control lives inside the armed row, two live copies of one
  * control. A chip is visibly a shortcut to a row rather than a second row, and

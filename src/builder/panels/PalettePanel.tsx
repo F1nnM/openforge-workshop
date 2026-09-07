@@ -1,6 +1,6 @@
 /**
  * The builder's left column — design-contract.md §2.4's palette, as row C1
- * rebuilt it: **the 91 templates this build can place**, grouped by role, with
+ * rebuilt it: **the 87 templates this build can place**, grouped by role, with
  * form and build as facets and size as a control on the armed family.
  *
  * ## What it was, twice, and why neither survived
@@ -15,18 +15,18 @@
  * disjoint, so passing one for the other compiles and would report every
  * placement `unknown-template`.
  *
- * **This row makes it place templates.** The list is the 51 generated families
+ * **This row makes it place templates.** The list is the 47 generated families
  * plus the 40 shipped recipes, `arm()` writes `tools.setSelectedTemplate`, and
  * A8's disclaimer is gone with the list it was about. `palette.ts` carries the
  * argument for the shape of the list and `families.ts` for the rows themselves;
  * this file is the control.
  *
- * ## 91 rows, nine groups, and the cost that inverts
+ * ## 87 rows, nine groups, and the cost that inverts
  *
  * The UX research measured the honest cost of a tag-predicated palette: from
  * roughly 20 recognisable library rows to **3,862** entries, which is
- * recognition becoming recall. Role-predicated families make it **91** — walls
- * (19 families over 5,381 records), floors (17 / 2,162), risers, columns,
+ * recognition becoming recall. Role-predicated families make it **87** — walls
+ * (17 families over 5,381 records), floors (15 / 2,162), risers, columns,
  * stairs, roofs, decor, the one bare-base family, and the 40 `S2W: Wall on Tile`
  * recipes in a group of their own. **RECENT mitigates what is left of that cost
  * and does not fix it**; `palette.ts` says so where the ring is implemented,
@@ -39,15 +39,15 @@
  * ## Size is one control on the armed row, not a row per size
  *
  * B3's measurement is the whole reason: keyed on `(role, form, build)` the
- * corpus needs 51 families; with size in the key it needs 217 to 277. So a
+ * corpus needs 47 families; with size in the key it needs 217 to 277. So a
  * position is a parameter — a set of tags that joins the instance's `parentTags`
  * where the slot's own `constrain` block collects them — and the control belongs
- * to the *armed* family rather than to all 91 at once, which would be 350
+ * to the *armed* family rather than to all 87 at once, which would be 304
  * positions on a 272px column.
  *
  * `any size` is the default and a real position: with nothing chosen the
- * `constrain` collects nothing and the family admits every size. **8 families get
- * no control at all** — 5 with no size domain and 3 whose domain no `size|` tag
+ * `constrain` collects nothing and the family admits every size. **7 families get
+ * no control at all** — 5 with no size domain and 2 whose domain no `size|` tag
  * can express (`families.ts` enumerates both) — because a control with one
  * position cannot be operated.
  *
@@ -88,7 +88,7 @@
  *
  * The whole `FacetSearch` from `/builder`, not just the text — `routeTree.tsx`
  * gives the builder route the facet schema precisely so this box is linkable.
- * **What it searches has changed**: `q` now narrows the 91 rows by name and axis
+ * **What it searches has changed**: `q` now narrows the 87 rows by name and axis
  * (`palette.ts#queryTokens`), not 3,822 items, so `?kinds=wall` is carried by the
  * route and no longer read here — there is nothing in a family for a catalog
  * facet to narrow.
@@ -288,9 +288,9 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
 
         {rows.length === 0 ? (
           <p className="of-pal-note">
-            No template matches. The 91 rows are families and recipes, not tiles — search the
-            catalog screen for a texture or a tile name, then use its &ldquo;Use in
-            builder&rdquo;.
+            No template matches. The {TEMPLATE_FAMILIES.length} rows are families and recipes,
+            not tiles — search the catalog screen for a texture or a tile name, then use its
+            &ldquo;Use in builder&rdquo;.
           </p>
         ) : null}
 
@@ -507,11 +507,11 @@ type RecentEntry = { readonly family: TemplateFamily; readonly size: readonly st
 /**
  * RECENT, as a strip of chips above the list.
  *
- * **A strip and not a tenth group**, because all 91 rows are always listed: a
+ * **A strip and not a tenth group**, because all 87 rows are always listed: a
  * group would put a second row on screen for the same family, and since the size
  * control lives inside the armed row it would put a second live copy of that
  * control there too. `palette.ts#MAX_RECENT` carries the argument and the
- * research's own caveat — this mitigates the recognition cost of 91 rows and
+ * research's own caveat — this mitigates the recognition cost of 87 rows and
  * does not fix it, which is why it is six chips and not a curated list.
  *
  * A chip carries the size as well as the family, because re-placing something is
@@ -688,7 +688,7 @@ function PaletteSearch({
         autoComplete="off"
         spellCheck={false}
         maxLength={MAX_QUERY_LENGTH}
-        placeholder="Search 91 templates…"
+        placeholder={`Search ${String(TEMPLATE_FAMILIES.length)} templates…`}
         value={draft}
         onChange={(event) => {
           const text = event.target.value

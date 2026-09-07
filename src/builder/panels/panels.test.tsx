@@ -185,7 +185,7 @@ function placementCount(): number {
  *
  * **The armed readout is `PlanTools` again.** Row A8 had reduced this panel to
  * its own private selection, because the list was the archive and the surface
- * places a family; row C1 replaced the list with the 91 templates, so
+ * places a family; row C1 replaced the list with the 87 templates, so
  * `tools.selectedTemplate` is the armed value and the panel keeps no copy of it.
  * {@link armedRow} reads the DOM for the same fact, which is where a *user* sees
  * it, and the two agree on every assertion below.
@@ -259,15 +259,16 @@ function armedSize(): string {
 }
 
 describe('the palette', () => {
-  it('lists the 91 templates this build ships, and nothing from the archive', () => {
+  it('lists the 87 templates this build ships, and nothing from the archive', () => {
     // The list was the **library** until row A0 and the **archive search** until
     // this row: 3,822 items, none of them placeable, which is why row A8 had to
-    // make the panel arm nothing at all. What is here now is B4's 51 generated
-    // families plus the 40 shipped recipes.
+    // make the panel arm nothing at all. What is here now is B4's 47 generated
+    // families plus the 40 shipped recipes. (51 families until row D1 dropped
+    // the four whose whole population was bases.)
     render(<PaletteHarness />)
 
-    expect(paletteRows()).toHaveLength(91)
-    expect(screen.getByRole('heading', { name: /Templates 91/ })).toBeInTheDocument()
+    expect(paletteRows()).toHaveLength(87)
+    expect(screen.getByRole('heading', { name: /Templates 87/ })).toBeInTheDocument()
     // Not the archive, and not the library before it.
     expect(screen.queryByRole('heading', { name: /Archive/ })).toBeNull()
     expect(screen.queryByRole('heading', { name: /Library/ })).toBeNull()
@@ -296,8 +297,8 @@ describe('the palette', () => {
       'Base',
       'S2W: Wall on Tile',
     ])
-    // 19 wall families and 40 recipes, and the group heading carries the count.
-    expect(headings[0]).toContain('19')
+    // 17 wall families and 40 recipes, and the group heading carries the count.
+    expect(headings[0]).toContain('17')
     expect(headings[8]).toContain('40')
     // There is no `insert` group: `role|insert` is a perfect bijection with
     // `layer === 'insert'` and 262 of those 285 records are already reachable as
@@ -356,7 +357,7 @@ describe('the palette', () => {
     expect(rows.length).toBeGreaterThan(0)
     expect(rows.every((text) => text.toLowerCase().includes('corner'))).toBe(true)
     // `s2w` matches `build|s2w` on the rows whose visible name does not say it.
-    expect(screen.getByRole('status')).toHaveTextContent(`${String(rows.length)} of 91 templates`)
+    expect(screen.getByRole('status')).toHaveTextContent(`${String(rows.length)} of 87 templates`)
   })
 
   it('offers form and build as facets, and narrows to one value per axis', () => {
@@ -372,7 +373,7 @@ describe('the palette', () => {
 
     // Re-pressing clears it, which is what `aria-pressed` promises.
     fireEvent.click(within(screen.getByRole('group', { name: 'Form' })).getByRole('button', { name: 'Octagon' }))
-    expect(paletteRows()).toHaveLength(91)
+    expect(paletteRows()).toHaveLength(87)
   })
 
   it('keeps the 40 recipes under the build facet they all carry', () => {
@@ -475,10 +476,10 @@ describe('the palette', () => {
       'Wall: Curve (Separate Wall), any size',
       'Wall: Straight (Separate Wall), any size',
     ])
-    // **A strip, because a group would duplicate rows.** All 91 rows are always
+    // **A strip, because a group would duplicate rows.** All 87 rows are always
     // listed, so a RECENT group would put a second pressed row — and a second
     // live size control — on screen for the same family.
-    expect(paletteRows()).toHaveLength(91)
+    expect(paletteRows()).toHaveLength(87)
     expect(screen.getAllByRole('button', { pressed: true }).filter(isRow)).toHaveLength(1)
 
     // The ring is a set with an order: arming one twice does not spend two slots.
@@ -538,7 +539,7 @@ describe('the palette', () => {
 
   it('drops the armed size when a different family is armed', () => {
     /* A position is a list of `size|` tags and B4's domains differ per family —
-       8 of the 51 have none at all. Carrying 2x2 across would hand the solver a
+       7 of the 47 have none at all. Carrying 2x2 across would hand the solver a
        size the new family's candidates may not carry, which C2 classifies
        `no-candidate` (*nothing in the archive is this size*) for a size the user
        chose for a different row. */
@@ -572,8 +573,8 @@ describe('the palette', () => {
     render(<PaletteHarness query="dungeon stone" />)
 
     expect(paletteRows()).toHaveLength(0)
-    // A texture is not a family axis: 91 rows x 36 reachable texture roots is
-    // 3,276, which is the recall cost §3.1 inverted. So the panel points at the
+    // A texture is not a family axis: 87 rows x 36 reachable texture roots is
+    // 3,132, which is the recall cost §3.1 inverted. So the panel points at the
     // surface that does index textures.
     expect(screen.getByText(/search the catalog screen/i)).toBeInTheDocument()
   })
@@ -710,7 +711,7 @@ describe('the pre-selection handoff', () => {
     })
     mountPalette()
 
-    expect(paletteRows()).toHaveLength(91)
+    expect(paletteRows()).toHaveLength(87)
     expect(armedRow()).toContain('Floor: Straight')
   })
 

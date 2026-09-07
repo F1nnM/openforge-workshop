@@ -477,7 +477,10 @@ describeCorpus('the click path over the live archive', () => {
           `${String(empty.length)} do not\n`,
       )
 
-      expect(results.length).toBeGreaterThan(300)
+      // 297 positions over the 40 families that have a control. The bound stays
+      // loose because the domain is the corpus's rather than this row's; it was
+      // 342 over 43 families until row D1's `shape|base` deny shrank both.
+      expect(results.length).toBeGreaterThan(290)
       // Every position that fails does so as `no-candidate` — *nothing in the
       // archive is this size* — and not as a sibling having closed it, which is
       // C2's note for C1 and the only honest sentence for a one-slot family.
