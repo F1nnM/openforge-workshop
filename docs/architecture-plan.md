@@ -358,7 +358,7 @@ that facet needs a first-class "unspecified". **Zero bases carry `build|wall on 
 
 ```
                     ┌──────────────────────────────────────────────┐
-   Browser ───────► │ workshop.openforge.tools                     │  static assets only,
+   Browser ───────► │ openforge-workshop.mfinn.de                  │  static assets only,
                     │  static SPA + catalog index                  │  no Worker script
                     │                                              │  (SPA fallback routing)
                     │  ┌────────────────────────────────────────┐  │

@@ -25,11 +25,16 @@
       "name": "openforge-workshop",
       // The Worker is the origin for this hostname: Cloudflare creates the DNS
       // record and manages the certificate, no separate zone config needed
-      // beyond `openforge.tools` already being an active zone (it is —
-      // `objects.openforge.tools` already lives there). Scoped to production
+      // beyond `mfinn.de` already being an active Cloudflare zone (it is — its
+      // nameservers are rajeev/melany.ns.cloudflare.com). Scoped to production
       // only: `routes` is per-environment, and staging has no domain of its
       // own, so it stays on its `*.workers.dev` URL.
-      "routes": [{ "pattern": "workshop.openforge.tools", "custom_domain": true }]
+      //
+      // Note that this hostname is not vacant: it answers 200 today with an
+      // unrelated page, from the zone's apex addresses. Attaching the custom
+      // domain takes the name over, which is the intent — it is recorded here
+      // because the takeover is invisible in this diff otherwise.
+      "routes": [{ "pattern": "openforge-workshop.mfinn.de", "custom_domain": true }]
     }
   }
 }
