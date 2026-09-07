@@ -785,8 +785,8 @@ of any byte counter we can write* — in the browser's download manager, where w
 it. An unverifiable streaming path is worse than an honest refusal, so the chosen path uses
 no service worker at all and that failure mode does not exist. iOS Safari has no
 `showSaveFilePicker`, so it always buffers and refuses above 512 MB; a gigabyte-scale room
-cannot be downloaded as one file on an iPhone from a static site, and the Worker fallback
-and URL list are the answers there.
+cannot be downloaded as one file on an iPhone from a static site, and splitting it into
+several smaller archives, or falling back to a URL list, are the answers there.
 
 Because STORE makes the predicted length exact, the stream counts its own bytes and fails if
 they differ in either direction. That catches a short body behind an HTTP 200 — the classic
