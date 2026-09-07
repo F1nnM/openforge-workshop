@@ -1,20 +1,15 @@
 /**
- * The 42 recipe templates and the 47 generated families, as data.
+ * The 40 recipe templates and the 47 generated families, as data.
  *
  * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`
- * fixtures beside the JSON, `pipeline/authored.ts` derives this repo’s own two
- * from named slots of those fixtures, `pipeline/families.ts` derives the families
- * from the built corpus, and this file is what the three emit;
+ * fixtures beside the JSON, `pipeline/families.ts` derives the families
+ * from the built corpus, and this file is what the two emit;
  * `npm run import:catalog` writes it and `pipeline/templates.test.ts` asserts the
  * committed bytes are exactly what the emitter returns, so an edit here fails the
  * suite rather than drifting quietly.
  *
- * `RECIPE_TEMPLATES` is the 40 read from the fixtures — all of them
- * `S2W: Wall on Tile`, reaching 35.4% of the corpus — followed, below the marker,
- * by the 2 row **E3** authored here: a wall recipe whose floor slot is widened
- * off the shipped `(Any, Modular)` one, taking the section to 51.0% of the records
- * and 49.5% of the designs, and a corridor, whose two walls sit on opposite faces.
- * Everything above the marker is byte-identical with and without them.
+ * `RECIPE_TEMPLATES` is the 40 read from the fixtures and nothing else — all
+ * of them `S2W: Wall on Tile`, reaching 35.4% of the corpus.
  * `GENERATED_FAMILIES` is one
  * family per `(role, form, build)` key the emitted tags already carry, each with
  * one required slot denying `shape|base`, plus the bare-base family no such key
@@ -31,7 +26,7 @@
  * strings. The reason both live in the bundle is that the recipe list is the one
  * part of this screen that renders before the index lands.
  *
- * 40 templates over 20 fixture files, 128 parts; 2 authored over 7 more.
+ * 40 templates over 20 fixture files, 128 parts.
  * 47 generated families over 8417 records, 303 size positions.
  */
 import type { RecipeTemplate } from './assembly'
@@ -1440,86 +1435,6 @@ export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
           require: [{ tag: 'shape|base' }, { tag: 'shape|base|wall' }, { tag: 'build|s2w' }],
           deny: [{ tag: 'shape|base|corner' }, { tag: 'shape|option|notch' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }, { tag: 'connection', siblings: ['wall'] }, { filter: 'connection|side' }, { filter: 'connection|openforge' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  /* ---- authored in this repo, derived from the fixtures above: pipeline/authored.ts ---- */
-  {
-    id: 'wall-on-tile-wall-any-modular-any-floor',
-    name: 'Wall on Tile: Wall (Any, Modular, Any Floor)',
-    source: 'authored:blueprints.s2w.wall.yaml',
-    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|modular', 'shape|wall'],
-    parts: [
-      {
-        name: 'wall',
-        tags: {
-          require: [{ tag: 'build|separate wall' }, { tag: 'shape|wall' }],
-          deny: [{ tag: 'shape|curved' }, { tag: 'size|width|1.5' }, { tag: 'shape|base' }],
-          constrain: [{ tag: 'size|width' }],
-        },
-        fulfills: [],
-      },
-      {
-        name: 'floor',
-        tags: {
-          require: [{ tag: 'shape|floor' }],
-          deny: [{ tag: 'shape|base' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-      {
-        name: 'base',
-        tags: {
-          require: [{ tag: 'shape|base' }, { tag: 'shape|base|wall' }, { tag: 'build|s2w' }],
-          deny: [{ tag: 'shape|base|corner' }, { tag: 'shape|option|notch' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }, { tag: 'connection', siblings: ['wall'] }, { filter: 'connection|side' }, { filter: 'connection|openforge' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  {
-    id: 'wall-on-tile-corridor-any-modular',
-    name: 'Wall on Tile: Corridor (Any, Modular)',
-    source: 'authored:blueprints.s2w.wall.yaml',
-    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|modular', 'shape|hallway'],
-    parts: [
-      {
-        name: 'right wall',
-        tags: {
-          require: [{ tag: 'build|separate wall' }, { tag: 'shape|wall' }],
-          deny: [{ tag: 'shape|curved' }, { tag: 'size|width|1.5' }, { tag: 'shape|base' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'connection|side', siblings: ['left wall'] }],
-        },
-        fulfills: [],
-      },
-      {
-        name: 'left wall',
-        tags: {
-          require: [{ tag: 'build|separate wall' }, { tag: 'shape|wall' }],
-          deny: [{ tag: 'shape|curved' }, { tag: 'size|width|1.5' }, { tag: 'shape|base' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'connection|side', siblings: ['right wall'] }],
-        },
-        fulfills: [],
-      },
-      {
-        name: 'floor',
-        tags: {
-          require: [{ tag: 'shape|floor' }],
-          deny: [{ tag: 'shape|base' }, { tag: 'size|depth|0.5' }, { tag: 'size|depth|1' }, { tag: 'size|depth|1.5' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-      {
-        name: 'base',
-        tags: {
-          require: [{ tag: 'shape|base' }, { tag: 'shape|base|hallway' }],
-          deny: [{ tag: 'shape|base|corner' }, { tag: 'shape|option|notch' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }, { tag: 'connection', siblings: ['right wall', 'left wall'] }, { filter: 'connection|side' }, { filter: 'connection|openforge' }],
         },
         fulfills: [],
       },

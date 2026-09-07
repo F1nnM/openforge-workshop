@@ -350,6 +350,14 @@ the one that justified generating 51 families, and it is why the recommendation 
 
 ## 10. The alternative: hand-author a few, and the first one is worth more than the generator
 
+> **Superseded — H1 shipped as #136 and was withdrawn by #143.** Lifting `build|s2w` off the floor
+> slot is the move all four candidates share and it is the defect: an `s2w` floor is the tile *minus*
+> the strip its separately printed wall stands on, measuring 0.5 less on each walled axis than its
+> size tags say. A floor slot in a recipe whose walls stand *beside* the floor must keep the ref, or
+> it admits full-tile floors that overlap the walls. The pools and closure verdicts below are
+> reproducible; the recommendation is not. See `src/template/rules.ts#SlotAnchor` and
+> `docs/templates-plan.md` §7.
+
 Four candidates, hand-authored, each one the shipped `S2W: Wall on Tile: Wall` recipe with the
 `build|s2w` ref lifted off the **floor** slot and the floor re-predicated. All four use the existing
 `(wall, floor, base)` part-name set, so all four get `wall-on-tile` for free.

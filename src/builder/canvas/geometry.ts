@@ -240,6 +240,24 @@ function straight(shape: Footprint['shape'], extent: Extent, angle = 0): PlanSha
 }
 
 /**
+ * The shape of a box the *rule* produced rather than a footprint — the one thing
+ * {@link SlotLayout.residual} needs and {@link footprintShape} cannot give it.
+ *
+ * A residual is not a `Footprint`: no tag names it and no record carries it. It
+ * is the part of a cell an `s2w` recipe's separately printed walls do not stand
+ * on, computed in `template/offsets.ts#residualBox` from the walls' own
+ * footprints, and it is always an axis-aligned rectangle at angle 0 because the
+ * slot it narrows is the cell slot and `cellExtentOf` admits nothing else.
+ *
+ * Exported so `scene.ts` can draw that box without a second copy of
+ * {@link straight}, which stays private because every other shape in this module
+ * comes from a footprint.
+ */
+export function boxShape(extent: Extent): PlanShape {
+  return straight('rect', extent)
+}
+
+/**
  * The plan geometry of a footprint, or `undefined` when there is none to draw.
  *
  * The one `switch` over `Footprint` in this module, and the only place a case's
@@ -509,6 +527,31 @@ export interface SlotLayout {
    * field cannot be quietly dropped.
    */
   readonly cell?: Extent | undefined
+  /**
+   * The box this part is **drawn at**, when the rule narrows it below its fill's
+   * own footprint. Absent on every other part, which is almost all of them.
+   *
+   * A statement about the *shape* on an interface that is otherwise about
+   * position, and it is here because the rule is the only thing that can make
+   * it. `template/rules.ts`'s `residual` anchor gives the floor of an `s2w`
+   * recipe the part of the cell its separately printed walls do not stand on, and
+   * the size of that part follows from the walls — which no single slot knows and
+   * no tag records. The floor's own tags name the size of its **tile**
+   * (`size|width|2 + size|depth|2` on a slab that measures 1.5 × 1.5), so a
+   * renderer that drew it at its tagged extent would put a quarter unit of it
+   * under each wall; `template/offsets.ts#residualBox` carries the meshes that
+   * measure the difference.
+   *
+   * `scene.ts` derives the part's `PlanShape` from this rather than from the
+   * record's footprint when it is present, so the narrowing reaches the box, the
+   * polygons, the overlap check, `place.ts#tileMatrix`'s centring **and**
+   * `reanchorPiece`'s re-projection through one value. `dx`/`dz` are the minimum
+   * corner of *this* box, not of the tagged one.
+   *
+   * Always a `rect` at rotation 0: a narrowed slot is the cell slot, and
+   * `offsets.ts#cellExtentOf` admits nothing but a `rect` as a cell.
+   */
+  readonly residual?: Extent | undefined
 }
 
 /**

@@ -46,9 +46,9 @@ import { brotliCompressSync, constants as zlibConstants } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 
 import type { Extent, PlanPart } from '@/builder/canvas'
-import { footprintShape, partsOverlap, planBand, planParts, rotatedExtent } from '@/builder/canvas'
+import { boxShape, footprintShape, partsOverlap, planBand, planParts, rotatedExtent } from '@/builder/canvas'
 import type { CatalogRecord, Footprint } from '@/catalog'
-import { CatalogFile } from '@/catalog'
+import { CatalogFile, GRID_UNIT_MM, WALL_THICKNESS_UNITS, resolveTags } from '@/catalog'
 import type { AssemblyChoice, RecipeIndex, RecipeTemplate } from '@/screens/assemblies/assembly'
 import { assemblyState, createRecipeIndex } from '@/screens/assemblies/assembly'
 import { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
@@ -73,7 +73,7 @@ import {
   measureSolver,
 } from './measure'
 import type { PlacedTemplate, SlotDoubtCode } from './offsets'
-import { cornerReservation, placeTemplateSlots, slotOffset } from './offsets'
+import { cornerReservation, edgeInsets, placeTemplateSlots, residualBox, slotOffset } from './offsets'
 import type { SlotName, TemplateLayout } from './rules'
 import { SLOT_CONVENTIONS, conventionFor, ruleFor } from './rules'
 
@@ -308,23 +308,24 @@ describeCorpus(corpusTitle, () => {
 
   /* ------------------------------------------------- the census of the 128 */
 
-  it('is 40 fixture recipes over 128 parts in 3 part-name sets, plus row E3\u2019s two', () => {
+  it('is 40 fixture recipes over 128 parts in 3 part-name sets, and nothing beside them', () => {
     expect(FIXTURE_RECIPES).toHaveLength(40)
     expect(parts).toHaveLength(128)
     const sets = new Set(FIXTURE_RECIPES.map((template) => template.parts.map((part) => part.name).join('|')))
     expect(sets.size).toBe(3)
 
-    /* Four conventions for four part-name sets, and the fourth is reached by
-       exactly one template in the build: the widened wall is a `wall-on-tile`,
-       because only its floor slot's admissions differ from the shipped
-       recipe's. */
-    expect(RECIPE_TEMPLATES).toHaveLength(42)
-    expect(AUTHORED).toHaveLength(2)
-    expect(SLOT_CONVENTIONS).toHaveLength(4)
-    expect(AUTHORED.map((template) => conventionFor(template.parts.map((part) => part.name))?.id)).toEqual([
-      'wall-on-tile',
-      'corridor',
-    ])
+    /* Three conventions for three part-name sets, and every one of them reached
+       by a fixture. Row E3's two authored templates and its `corridor` convention
+       are withdrawn, so `RECIPE_TEMPLATES` and `FIXTURE_RECIPES` are now the same
+       array — which is what makes every figure in this file a measurement of
+       upstream's recipes rather than of a population this repo half-authored. */
+    expect(RECIPE_TEMPLATES).toHaveLength(40)
+    expect(AUTHORED).toEqual([])
+    expect(SLOT_CONVENTIONS).toHaveLength(3)
+    const reached = FIXTURE_RECIPES.map(
+      (template) => conventionFor(template.parts.map((part) => part.name))?.id,
+    )
+    expect(new Set(reached)).toEqual(new Set(SLOT_CONVENTIONS.map((convention) => convention.id)))
   })
 
   it(
@@ -390,12 +391,16 @@ describeCorpus(corpusTitle, () => {
       expect(records.every((record) => record.kinds.includes('floor'))).toBe(true)
     }
 
-    // And the anchors those derivations imply.
+    /* And the anchors those derivations imply. The 80 derived parts split in two
+       since the `residual` anchor: the 40 `base` slots fill the cell and the 40
+       `floor` slots fill what the walls leave. Both halves are still *derived* —
+       nothing was authored to move them — and the 48 authored parts are
+       unmoved. */
     const anchors = parts.map(
       ({ template, part }) =>
         ruleFor(conventionFor(template.parts.map((one) => one.name)) as TemplateLayout, part)?.anchor,
     )
-    expect(tally(anchors)).toEqual({ cell: 80, edge: 40, corner: 8 })
+    expect(tally(anchors)).toEqual({ cell: 40, residual: 40, edge: 40, corner: 8 })
   })
 
   it('gives the cell slot a rectangle on every candidate, which the base slot cannot promise', () => {
@@ -420,7 +425,7 @@ describeCorpus(corpusTitle, () => {
   /* ------------------------------------------------------------ the closure */
 
   it(
-    'closes on 1,014 of 1,215 combinations, fails on 25 and cannot decide 176',
+    'closes on 1,013 of 1,215 combinations, fails on 26 and cannot decide 176',
     () => {
       /* **Row D9 moved this split, and the movement is exactly the 8 mitres.**
          D8 left it at 1,006 / 33 / 176 on purpose, because settling it meant
@@ -431,14 +436,18 @@ describeCorpus(corpusTitle, () => {
          nothing else moves at all. `undecidable` is byte-identical at 176: the
          `diag`, `tri` and `no-footprint` refusals are untouched by a wall run.
 
-         82.8% to **83.5%**, and the remaining 25 failures are one population
-         rather than two — see the itemisation below. */
+         82.8% to 83.5%, and then to **83.4%**: the `residual` anchor moved one
+         combination the other way, and it is the only one it moved. `no-walk`
+         used to compare an *opposed pair* of edges and now compares the residual
+         itself, so an axis eaten from one end is checked for the first time —
+         and one is empty. The itemisation below names it; `undecidable` is
+         byte-identical at 176 through both movements. */
       expect(combinations).toHaveLength(1215)
       const verdicts = tally(combinations.map((one) => one.placed.verdict))
       process.stdout.write(`\n[template] closure ${JSON.stringify(verdicts)}\n`)
-      expect(verdicts).toEqual({ closes: 1014, fails: 25, undecidable: 176 })
-      expect(1014 / 1215).toBeCloseTo(0.835, 3)
-      expect(25 / 1215).toBeCloseTo(0.021, 3)
+      expect(verdicts).toEqual({ closes: 1013, fails: 26, undecidable: 176 })
+      expect(1013 / 1215).toBeCloseTo(0.834, 3)
+      expect(26 / 1215).toBeCloseTo(0.021, 3)
       expect(176 / 1215).toBeCloseTo(0.145, 3)
     },
     SLOW_MS,
@@ -456,7 +465,7 @@ describeCorpus(corpusTitle, () => {
        `cornerReservation` is 0 on every one of them and not a coordinate moved.
        `external-corner` is where the whole movement lives: **34 of 34 close**,
        where D8 measured 8 `fails` and 26 `closes`. */
-    expect(per.get('wall-on-tile')).toEqual({ closes: 980, fails: 25, undecidable: 138 })
+    expect(per.get('wall-on-tile')).toEqual({ closes: 979, fails: 26, undecidable: 138 })
     expect(per.get('external-corner')).toEqual({ closes: 34, fails: 0, undecidable: 0 })
     /* All 38 internal-corner combinations, and every one of them undecidable:
        with no wall part there is no anchored face and so no closure to check.
@@ -464,18 +473,35 @@ describeCorpus(corpusTitle, () => {
     expect(per.get('internal-corner')).toEqual({ closes: 0, fails: 0, undecidable: 38 })
   })
 
-  it('itemises the 25 failures as one population: a column filling a wall slot', () => {
-    /* **What row D9 emptied.** This used to read *25 columns in a wall slot and
-       the 8 single-piece mitres*, and the 8 were the whole of §9's *"do not
-       silently write 1.5"*. They are gone from this list because the 1.5 was
-       measured rather than written: two 1.5 walls and a 0.5 column tile two
-       2-unit faces, so all 34 external-corner combinations close.
+  it('itemises the 26 failures as two populations, and names the one the residual found', () => {
+    /* **What row D9 emptied, plus the one the `residual` anchor added.** This
+       used to read *25 columns in a wall slot and the 8 single-piece mitres*, and
+       the 8 were the whole of §9's *"do not silently write 1.5"*. They left the
+       list because the 1.5 was measured rather than written: two 1.5 walls and a
+       0.5 column tile two 2-unit faces, so all 34 external-corner combinations
+       close.
 
-       What is left is one population and no corner among it — asserted below in
-       both directions, because "the mitres closed" and "the mitres stopped being
-       counted" would look the same from the count alone. */
+       The 26th is new and is not a mitre. Generalising `no-walk` from an opposed
+       *pair* of edges to the residual itself made an axis eaten from one end
+       checkable, and one combination has nothing left on it. Both populations are
+       asserted in both directions, because "the mitres closed" and "the mitres
+       stopped being counted" would look the same from a count. */
     const failures = combinations.filter((one) => one.placed.verdict === 'fails')
-    expect(failures).toHaveLength(25)
+    expect(failures).toHaveLength(26)
+
+    /* **The one the residual found.** A 1 x 1 cell whose `wall` slot resolves to
+       `rough_stone#column+low.I.openforge.stl` — a `rect 1x1`, not a half-unit
+       run. Its run tiles the 1-unit face exactly, so `over-run` never saw it, and
+       with one edge slot the old paired check never looked at the axis: it came
+       out `closes` with no doubts for the life of row E3. The doubt names the
+       **cell** slot, because the wall is not wrong and the floor is the part with
+       nothing left. */
+    const noWalk = failures.filter((one) => one.placed.doubts.some((doubt) => doubt.code === 'no-walk'))
+    expect(noWalk).toHaveLength(1)
+    expect(noWalk[0]?.placed.doubts).toEqual([{ part: 'floor', code: 'no-walk', want: 1, got: 1 }])
+    expect(noWalk[0]?.placed.cell).toEqual({ w: 1, d: 1 })
+    expect(noWalk[0]?.fills.get('wall')?.file).toBe('rough_stone#column+low.I.openforge.stl')
+    expect(noWalk[0]?.feet.get('wall')).toEqual({ shape: 'rect', w: 1, d: 1 })
 
     const columnsAsWalls = failures.filter((one) => one.feet.get('wall')?.shape === 'column')
     expect(columnsAsWalls).toHaveLength(25)
@@ -486,10 +512,14 @@ describeCorpus(corpusTitle, () => {
       expect(one.placed.doubts).toEqual([{ part: 'wall', code: 'over-run', want: 2, got: 0.5 }])
       expect(one.layout).toBe(SLOT_CONVENTIONS[0])
     }
-    // No external corner fails at all any more, and no `single_piece` recipe
-    // does either — the two spellings of the same fact.
+    /* No external corner fails at all any more, which is row D9's claim and is
+       still exact. Its second spelling — *"and no `single_piece` recipe does
+       either"* — no longer holds and is not repaired: the 26th failure is a
+       `single_piece` **wall** recipe, so the two statements have come apart and
+       the corner one is the one D9 was about. Asserted as a mitre census rather
+       than as a build-tag census, which is what it always meant. */
     expect(failures.filter((one) => one.layout === SLOT_CONVENTIONS[1])).toEqual([])
-    expect(failures.filter((one) => one.template.tags.includes('build|s2w|single_piece'))).toEqual([])
+    expect(failures.filter((one) => one.template.tags.includes('build|s2w|single_piece'))).toEqual(noWalk)
   })
 
   it('closes the 8 single-piece mitres on the measured 1.5, with all five parts placed', () => {
@@ -641,11 +671,17 @@ describeCorpus(corpusTitle, () => {
         for (const value of slot.offset) expect(Number.isInteger(value * 4)).toBe(true)
       }
     }
-    /* 1,014 closing combinations: 980 wall recipes at 3 slots and **34** corners
-       at 5 — row D9 moved 8 of them out of `fails`. Every coordinate of every one
-       is on the quarter-unit lattice, and the template origin is the only thing
-       that ever gets snapped. */
-    expect(offsets).toBe(980 * 3 + 34 * 5)
+    /* 1,013 closing combinations: **979** wall recipes at 3 slots and 34 corners
+       at 5. Row D9 moved 8 corners out of `fails` and the `residual` anchor moved
+       one wall recipe into it, which is the 980 → 979.
+
+       Every coordinate of every one is on the quarter-unit lattice, and the
+       residual keeps it there for the reason the `edge` inset does: its offset is
+       `(minX - maxX) / 2` over dimensions that are all multiples of 0.5, so it is
+       a multiple of 0.25 — three of the four values it takes are *off* the 0.5
+       snap, and the template origin stays the only thing that ever gets
+       snapped. */
+    expect(offsets).toBe(979 * 3 + 34 * 5)
   })
 
   it('recomputes the same offset from the rule and from the footprints, for all of them', () => {
@@ -660,13 +696,21 @@ describeCorpus(corpusTitle, () => {
         const foot = one.feet.get(slot.part)
         const shape = foot === undefined ? undefined : footprintShape(foot)
         if (rule === undefined || shape === undefined) continue
-        /* The fourth argument is row D9's, and passing it here is the point:
-           `placeTemplateSlots` computes the face's own reservation from the
-           layout and the fills, and `slotOffset` must reproduce the same
-           coordinate from the same three inputs plus that one number. Omitting
-           it would silently compare a corner edge against its pre-D9 centre. */
+        /* The fourth and fifth arguments are the point of the whole case. Both
+           are context `placeTemplateSlots` resolves from the layout and the
+           fills, and `slotOffset` must reproduce the same coordinate from the
+           same three inputs plus those two — so both are passed, and each has a
+           default that would make omitting it a silent pass:
+
+             - `reserved` is row D9's corner reservation. Omitted, a corner's edge
+               would be compared against its pre-D9 centre.
+             - `insets` is what the `edge` slots take off each face. Omitted, every
+               `residual` slot would be compared against the cell's own centre,
+               which is exactly the defect this anchor replaced — the whole 40
+               would pass while the floors were drawn a quarter unit wrong. */
         const reserved = cornerReservation(one.layout, one.feet, rule.side)
-        expect(slotOffset(rule, cell, shape.extent, reserved)).toEqual(slot.offset)
+        const insets = edgeInsets(one.layout, one.feet)
+        expect(slotOffset(rule, cell, shape.extent, reserved, insets)).toEqual(slot.offset)
       }
     }
   })
@@ -715,8 +759,15 @@ describeCorpus(corpusTitle, () => {
     const partsAt = (x: number, z: number): readonly PlanPart[] =>
       (closing?.placed.slots ?? []).flatMap((slot) => {
         const foot = closing?.feet.get(slot.part)
-        const shape = foot === undefined ? undefined : footprintShape(foot)
-        if (shape === undefined) return []
+        const own = foot === undefined ? undefined : footprintShape(foot)
+        if (own === undefined) return []
+        /* `boxShape` where the rule narrowed the slot, as `scene.ts` does it. The
+           substitution has to reach the *shape* and not only the offset: drawing
+           a `residual` slot at its fill's tagged extent from the residual's own
+           centre pushes it a quarter unit past the cell, which is how this case
+           first failed — a template three units away reported a collision it does
+           not have. */
+        const shape = slot.residual === undefined ? own : boxShape(slot.residual)
         const turned = rotatedExtent(shape.extent, slot.yaw + shape.angle)
         return planParts(shape, slot.yaw, x + slot.offset[0] - turned.w / 2, z + slot.offset[1] - turned.d / 2)
       })
@@ -760,6 +811,76 @@ describeCorpus(corpusTitle, () => {
     for (const { records } of withMesh) {
       expect(records.filter((record) => measured[record.blob]?.extent !== undefined).length).toBeGreaterThan(0)
     }
+  })
+
+  it('reproduces every measured s2w floor’s extent as the residual its walls leave', () => {
+    /* **The evidence the `residual` anchor rests on, joined rather than quoted.**
+       An `s2w` floor is the tile minus the strip its separately printed wall
+       stands on, so its mesh is 0.5 short on each walled axis while its tags name
+       the whole tile. The residual is derived from the *walls'* footprints and
+       knows nothing about any mesh — so agreeing with the sidecar is a real
+       check, and it is the only one available: no floor slot of any of the 40 has
+       a measured candidate (the case above), which is exactly why a `cell`-
+       anchored floor could be wrong for the life of the project.
+
+       Read over every measured `build|s2w` floor rather than over the walked
+       combinations, because the walk never reaches one. Each mesh's *walled axes*
+       are read off the mesh itself — an axis is walled when the tag over-states
+       it — and the residual is then computed for a layout with that many
+       half-unit walls. The claim is that the two agree exactly. */
+    const measured = measuredExtents()
+    const s2wFloors = (file?.records ?? []).filter((record) => {
+      const tags = new Set(resolveTags(file as CatalogFile, record))
+      return tags.has('build|s2w') && tags.has('shape|floor') && record.foot.shape === 'rect'
+    })
+
+    const rows: { file: string; tagged: number; mesh: number; residual: number }[] = []
+    for (const record of s2wFloors) {
+      const extent = measured[record.blob]?.extent
+      if (extent === undefined || record.foot.shape !== 'rect') continue
+      const cell: Extent = { w: record.foot.w, d: record.foot.d }
+      const mesh = {
+        w: ((extent.maxMm[0] ?? 0) - (extent.minMm[0] ?? 0)) / GRID_UNIT_MM,
+        d: ((extent.maxMm[1] ?? 0) - (extent.minMm[1] ?? 0)) / GRID_UNIT_MM,
+      }
+      /* One `WALL_THICKNESS_UNITS` off an axis the mesh is short on, none off an
+         axis it fills — which is what a `wall` floor (one wall) and a `corner`
+         floor (two, on adjacent faces) respectively look like. Sides 0 and 3 are
+         the two the external corner uses, so this is the shipped geometry. */
+      const insets = {
+        minZ: cell.d - mesh.d > 0.25 ? WALL_THICKNESS_UNITS : 0,
+        minX: cell.w - mesh.w > 0.25 ? WALL_THICKNESS_UNITS : 0,
+        maxX: 0,
+        maxZ: 0,
+      }
+      const residual = residualBox(cell, insets).extent
+      rows.push({ file: record.file, tagged: cell.w, mesh: mesh.w, residual: residual.w })
+      /* `toBeCloseTo` at 2 decimals and not exact equality: the meshes are real
+         geometry, and the `curved` floors' outer edge is a chord rather than a
+         face — `…+curved+inverted.2x2` reads 1.646 where the 4x4 reads exactly
+         3.500, because a convex quarter-round's bounding box corner is cut on the
+         diagonal at 0.5/√2 = 0.354. So the residual is right to within the
+         curve's own sagitta, and 0.25 — half of what the anchor was wrong by
+         before — is the tolerance that distinguishes "the wall's half unit" from
+         "the wrong box". */
+      expect(residual.w, `${record.file} w`).toBeCloseTo(mesh.w, 0.25)
+      expect(residual.d, `${record.file} d`).toBeCloseTo(mesh.d, 0.25)
+    }
+
+    /* The seven the archive has read, and the two that pin the arithmetic
+       exactly: a tagged 2 x 2 measuring 1.5 and a tagged 4 x 4 measuring 3.5. */
+    expect(rows).toHaveLength(7)
+    /* "Exactly" to within 0.001 units — 0.025 mm — because these are real
+       measurements of real geometry and not catalog arithmetic:
+       `…+curved.2x2` reads 38.0981 mm where 1.5 units is 38.1, which is 3.4 µm of
+       print tolerance and not a disagreement about where the wall goes. */
+    const exact = rows.filter((row) => Math.abs(row.mesh - row.residual) < 1e-3)
+    expect(exact).toHaveLength(5)
+    expect(rows.filter((row) => row.tagged === 2 && Math.abs(row.mesh - 1.5) < 1e-3).length).toBe(2)
+    expect(rows.filter((row) => row.tagged === 4 && Math.abs(row.mesh - 3.5) < 1e-3).length).toBe(3)
+    process.stdout.write(
+      `\n[template] s2w floors: ${String(rows.length)} measured, ${String(exact.length)} reproduced exactly by the residual\n`,
+    )
   })
 
   it('has no measured mesh at all for the corner families, so the mitre cannot be settled', () => {
@@ -840,7 +961,7 @@ describeCorpus(corpusTitle, () => {
   /* -------------------------------------------------------- the byte price */
 
   it(
-    'would cost the index +541 B to ship the rule as 135 rows, so it ships in the bundle',
+    'would cost the index a few hundred bytes to ship the rule as 128 rows, so it ships in the bundle',
     () => {
       /* The counterfactual, measured with `emit.ts`'s own brotli-11 instrument
          over the **shipped artefact at the payload epoch** — the construction
@@ -879,7 +1000,7 @@ describeCorpus(corpusTitle, () => {
       const withTable = brotli(JSON.stringify({ ...atEpoch, layouts }))
 
       process.stdout.write(
-        `\n[template] index ${String(baseline)} B · with a 135-row layouts key ${String(withTable)} B ` +
+        `\n[template] index ${String(baseline)} B · with a 128-row layouts key ${String(withTable)} B ` +
           `(+${String(withTable - baseline)})\n`,
       )
       /* 366,768 B before row **D9**. The corrected corner footprint writes
@@ -888,19 +1009,19 @@ describeCorpus(corpusTitle, () => {
          a fact about one artefact at one epoch, never a rate, exactly as B1
          recorded. */
       expect(baseline).toBe(366_682)
-      /* 135 rows since row **E3**, not 128: the shipped bundle carries 42
-         templates and the counterfactual has to price what would actually be
-         emitted. The delta is asserted as a *bound* and printed as a number,
-         because the number is a fact about one artefact at one epoch and never a
-         rate — D4 measured +4/+8/+12/+40 entries at +227/+3/+115/+176 B, **not
-         monotone**, over a 5.9 MB payload. What the assertion has to say is that
-         the table is small against the 146 kB of headroom. **+102 B at 128 rows
-         and +541 B at 135 is that non-monotonicity again, from the other side:
-         seven more rows cost 5.3x the previous 128, because the two authored ids
-         are strings the index has never seen while the 40 fixture ids appear in
-         nothing it compresses against either — brotli is not additive.** */
-      expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(135)
-      expect(withTable - baseline).toBe(541)
+      /* 128 rows again, row E3's 7 having gone with its two templates. The
+         counterfactual prices what would actually be emitted, so it moves when the
+         bundle does — and the delta is asserted as an exact number *and* bounded
+         as a fraction, because the number is a fact about one artefact at one
+         epoch and never a rate. D4 measured +4/+8/+12/+40 entries at
+         +227/+3/+115/+176 B, **not monotone**, over a 5.9 MB payload; the same
+         table has now priced at +102 B, +541 B and this figure without a row
+         changing meaning. What the assertion has to say is that the table is small
+         against the 146 kB of headroom, and the exact value is pinned so that a
+         drift is noticed rather than absorbed. */
+      expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
+      expect(withTable - baseline).toBe(295)
+      expect(withTable - baseline).toBeLessThan(1024)
       expect(baseline / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
     },
     SLOW_MS,
@@ -1212,12 +1333,13 @@ describeCorpus(
         ),
       ).toEqual([])
       // And the 40 shipped recipes are untouched by B4's arrival: a separate
-      // export, still 40 templates over 128 parts. Row E3 appended two more to
-      // `RECIPE_TEMPLATES`, which is a different merge and asserted separately.
+      // export, still 40 templates over 128 parts — and since row E3's
+      // withdrawal, nothing is appended to `RECIPE_TEMPLATES` either, so the two
+      // arrays below are the same one.
       expect(FIXTURE_RECIPES).toHaveLength(40)
       expect(FIXTURE_RECIPES.flatMap((template) => template.parts)).toHaveLength(128)
-      expect(RECIPE_TEMPLATES).toHaveLength(42)
-      expect(RECIPE_TEMPLATES.flatMap((template) => template.parts)).toHaveLength(135)
+      expect(RECIPE_TEMPLATES).toHaveLength(40)
+      expect(RECIPE_TEMPLATES.flatMap((template) => template.parts)).toHaveLength(128)
     })
 
     it('fills all 47 generated families, at every one of their 303 size options', () => {
@@ -1310,589 +1432,5 @@ describeCorpus(
       // it (53-65 ms in isolation, 149.6 ms contended).
       expect(memoised?.ms).toBeLessThan(40)
     })
-  },
-)
-
-/* ============================================================== row E3's half */
-
-/**
- * The **two authored assemblies** against the same archive.
- *
- * Row E3 shares this directory with B2's slot geometry and C2's fill solver and
- * shares its populations with neither, for the reason the module docblock gives:
- * every figure above is a measurement of upstream's 40, and this block is a
- * measurement of the two this repo authored. `pipeline/authored.test.ts` proves
- * they are exactly the documented difference from a shipped fixture slot; this is
- * where they meet the corpus.
- *
- * ## The gate, and why it is the whole block
- *
- * An assembly that ships without being resolved against the real archive is a
- * palette row that may arrive broken — row B4's own lesson, and the shape it used:
- * resolve every authored slot through `src/composition`'s postings, **compare the
- * admitted set to what was meant**, then run it through the greedy walk, the
- * greying walk, `solveTemplateFills` and `placeTemplateSlots`, requiring
- * `complete` and a non-`fails` verdict. All five are below, in that order.
- *
- * The comparison is the part that cannot be skipped. Every other step would pass
- * on a slot that admits twice what its author intended — the fill completes, the
- * layout closes, and the palette row silently offers 1,963 bases where twelve were
- * meant. So each admitted set is recomputed straight off the tag table here and
- * compared by identity, not by count.
- */
-describeCorpus(
-  hasCatalog
-    ? "row E3's two authored assemblies against the live archive"
-    : `row E3's two authored assemblies — SKIPPED, no ${CATALOG} (run \`npm run import:catalog\`)`,
-  () => {
-    const catalog = hasCatalog ? CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8'))) : undefined
-    const composition =
-      catalog === undefined ? undefined : createCompositionIndex(catalog, buildAggregateIndex(catalog))
-    const assembly = catalog === undefined ? undefined : buildAssemblyIndex(catalog)
-    const recipes = catalog === undefined ? undefined : createRecipeIndex(catalog)
-    const byIdE3 = new Map<string, CatalogRecord>((catalog?.records ?? []).map((one) => [one.id, one]))
-
-    const ready = (): { index: AssemblyIndex; context: FillContext } => {
-      if (assembly === undefined || composition === undefined) throw new Error('no catalog')
-      return { index: assembly, context: { composition, lock: 'openlock' as const } }
-    }
-
-    const WIDENED = 'wall-on-tile-wall-any-modular-any-floor'
-    const CORRIDOR_ID = 'wall-on-tile-corridor-any-modular'
-    const authoredById = (id: string): RecipeTemplate => {
-      const found = AUTHORED.find((template) => template.id === id)
-      if (found === undefined) throw new Error(`no authored template ${id}`)
-      return found
-    }
-
-    /**
-     * The tag id one string interns to, or `undefined`.
-     *
-     * Built once. A per-call sweep of the 930-string table inside a loop over
-     * 8,702 records is a minute of work for an answer that never changes, and
-     * this block already pays for two walked populations.
-     */
-    const idOfTag = new Map<string, number>((catalog?.tags ?? []).map((tag, id) => [tag, id]))
-    const carries = (record: CatalogRecord, tag: string): boolean => {
-      const id = idOfTag.get(tag)
-      return id !== undefined && record.tags.includes(id as never)
-    }
-    /** The records a predicate over tag strings selects, as an id set. */
-    const meant = (predicate: (tags: ReadonlySet<string>) => boolean): ReadonlySet<string> => {
-      const table = catalog?.tags ?? []
-      return new Set(
-        (catalog?.records ?? [])
-          .filter((record) => predicate(new Set(record.tags.map((id) => table[id] ?? ''))))
-          .map((record) => record.id),
-      )
-    }
-    /** What one slot of one authored template really admits, cold. */
-    const admits = (template: RecipeTemplate, part: SlotName): ReadonlySet<string> => {
-      const slot = template.parts.find((one) => one.name === part)
-      if (slot === undefined || composition === undefined) throw new Error(`no slot ${part}`)
-      return new Set(composition.candidatesFor(resolveSlotTags(slot.tags, template.tags, [])).tiles)
-    }
-    /** Every record any slot of these templates admits, and its designs. */
-    const reachOf = (templates: readonly RecipeTemplate[]): { records: number; designs: number } => {
-      const ids = new Set<string>()
-      for (const template of templates) {
-        for (const part of template.parts) for (const tile of admits(template, part.name)) ids.add(tile)
-      }
-      return {
-        records: ids.size,
-        designs: new Set([...ids].map((id) => byIdE3.get(id)?.design ?? id)).size,
-      }
-    }
-
-    /* ------------------------------------------------------------- the reach */
-
-    it(
-      'takes the assemblies section from 3,079 / 905 to 4,453 / 1,895, and the widened floor is 1,362 of it',
-      () => {
-        /* **Both ends re-derived rather than quoted**, which is what D10 asked
-           of whoever built this. Its recommendation was priced at 4,441 / 1,893
-           and that reproduces to the record; the extra **+12 records over 2
-           designs** are the corridor's, and they are the only records in this row
-           that the widened floor slot does not already reach — the twelve
-           `plain#base+hallway.2x2` bases. **0 of the 40 fixture base slots reach
-           one**, measured, and structurally: between them the 40 require exactly
-           four `shape|base|` qualifiers — `corner`, `internal_corner`, `square`
-           and `wall` — and none of the twelve carries any of them. */
-        const forty = reachOf(FIXTURE_RECIPES)
-        const widened = reachOf([...FIXTURE_RECIPES, authoredById(WIDENED)])
-        const both = reachOf(RECIPE_TEMPLATES)
-
-        expect(forty).toEqual({ records: 3079, designs: 905 })
-        expect(widened).toEqual({ records: 4441, designs: 1893 })
-        expect(both).toEqual({ records: 4453, designs: 1895 })
-
-        expect(widened.records - forty.records).toBe(1362)
-        expect(widened.designs - forty.designs).toBe(988)
-        expect(both.records - widened.records).toBe(12)
-        expect(both.designs - widened.designs).toBe(2)
-
-        const total = catalog?.records.length ?? 1
-        const designs = new Set((catalog?.records ?? []).map((one) => one.design)).size
-        expect(forty.records / total).toBeCloseTo(0.354, 3)
-        expect(both.records / total).toBeCloseTo(0.512, 3)
-        expect(forty.designs / designs).toBeCloseTo(0.237, 3)
-        expect(both.designs / designs).toBeCloseTo(0.496, 3)
-
-        process.stdout.write(
-          `\n[E3] assemblies reach ${String(forty.records)}/${String(forty.designs)} -> ` +
-            `${String(both.records)}/${String(both.designs)}\n`,
-        )
-      },
-      SLOW_MS,
-    )
-
-    it('adds nothing for `shape|base|square` on the widened base, which D10 flagged as the one exception', () => {
-      /* D10 §4 measured A8 and A9 reaching 281 and 75 records A1 does not, and
-         flagged `shape|base|square` as possibly the one base predicate worth
-         having. **Re-measured on this tree it is not**: it widens the base pool
-         from 48 files to 337 and adds **+0 records and +0 designs**, because those
-         bases are already the single-piece wall recipe's own base slot. It also
-         costs something: the solver's pick becomes a **2 x 1** cell where the
-         shipped base gives 2 x 2, so the default a click produces is a sliver. So
-         the base slot comes across from the fixture unchanged. */
-      const widened = authoredById(WIDENED)
-      const square: RecipeTemplate = {
-        ...widened,
-        id: 'a8-probe',
-        parts: widened.parts.map((part) =>
-          part.name === 'base'
-            ? {
-                ...part,
-                tags: {
-                  ...part.tags,
-                  require: [{ tag: 'shape|base' }, { tag: 'shape|base|square' }],
-                },
-              }
-            : part,
-        ),
-      }
-      const forty = reachOf(FIXTURE_RECIPES)
-      expect(reachOf([...FIXTURE_RECIPES, square])).toEqual(reachOf([...FIXTURE_RECIPES, widened]))
-      expect(reachOf([...FIXTURE_RECIPES, square]).records - forty.records).toBe(1362)
-      expect(admits(square, 'base').size).toBe(337)
-      expect(admits(widened, 'base').size).toBe(48)
-    })
-
-    /* ------------------------------- the gate, step 1: what the slots admit */
-
-    it('admits exactly what each authored slot means, on all 7 of them', () => {
-      const widened = authoredById(WIDENED)
-      const corridor = authoredById(CORRIDOR_ID)
-      const shipped = FIXTURE_RECIPES.find(
-        (template) => template.name === 'S2W: Wall on Tile: Wall (Any, Modular)',
-      )
-      if (shipped === undefined) throw new Error('no shipped (Any, Modular)')
-
-      /* The wall predicate, shared by all three wall slots in this row: the
-         shipped `(Any, Modular)` wall plus D1's `deny shape|base`. 1,330 files,
-         and the 278 the deny costs are the whole difference from the shipped
-         slot's 1,608 — **not** the `connection|side` constrain, which D10 §3.3
-         credits and which cannot narrow a cold pool at all: a `constrain` block
-         collects from the parent and the siblings, cold there are no siblings, and
-         a template parent carries no `connection|` tag on any of the 42. */
-      const wallPool = meant(
-        (tags) =>
-          tags.has('build|separate wall') &&
-          tags.has('shape|wall') &&
-          !tags.has('shape|curved') &&
-          !tags.has('size|width|1.5') &&
-          !tags.has('shape|base'),
-      )
-      expect(admits(widened, 'wall')).toEqual(wallPool)
-      expect(admits(corridor, 'right wall')).toEqual(wallPool)
-      expect(admits(corridor, 'left wall')).toEqual(wallPool)
-      expect(wallPool.size).toBe(1330)
-      expect(admits(shipped, 'wall').size).toBe(1608)
-      expect([...admits(shipped, 'wall')].filter((id) => !wallPool.has(id))).toHaveLength(278)
-
-      /* The widened floor: `shape|floor` denying `shape|base`, and nothing else.
-         88 files on the shipped slot, 1,496 here — the whole of the row's gain. */
-      expect(admits(widened, 'floor')).toEqual(
-        meant((tags) => tags.has('shape|floor') && !tags.has('shape|base')),
-      )
-      expect(admits(widened, 'floor').size).toBe(1496)
-      expect(admits(shipped, 'floor').size).toBe(88)
-
-      // The base comes across unchanged, so it must admit the identical set.
-      expect(admits(widened, 'base')).toEqual(admits(shipped, 'base'))
-      expect(admits(widened, 'base').size).toBe(48)
-
-      /* The corridor's base: upstream's own corridor piece. 12 records, and the
-         predicate reaches all 12 and nothing else. */
-      expect(admits(corridor, 'base')).toEqual(
-        meant(
-          (tags) =>
-            tags.has('shape|base') &&
-            tags.has('shape|base|hallway') &&
-            !tags.has('shape|base|corner') &&
-            !tags.has('shape|option|notch'),
-        ),
-      )
-      expect(admits(corridor, 'base').size).toBe(12)
-
-      /* And the corridor's floor: the widened pool minus the three sub-2 depths. */
-      expect(admits(corridor, 'floor')).toEqual(
-        meant(
-          (tags) =>
-            tags.has('shape|floor') &&
-            !tags.has('shape|base') &&
-            !tags.has('size|depth|0.5') &&
-            !tags.has('size|depth|1') &&
-            !tags.has('size|depth|1.5'),
-        ),
-      )
-      expect(admits(corridor, 'floor').size).toBe(1218)
-    })
-
-    /* ------------- the gate, steps 2 to 5: it fills, it walks, and it closes */
-
-    it(
-      'fills and closes both, under the solver and under both walks',
-      () => {
-        const { index, context } = ready()
-        for (const template of AUTHORED) {
-          const layout = conventionFor(template.parts.map((part) => part.name))
-          if (layout === undefined) throw new Error(`no convention for ${template.id}`)
-
-          const fill = solveTemplateFills(template, index, context)
-          expect(fill.complete, template.id).toBe(true)
-          expect(measureGreying([template], context.composition).completed, template.id).toBe(1)
-
-          const feet = new Map<SlotName, Footprint>()
-          for (const [slot, tile] of Object.entries(fill.fills)) {
-            const record = index.byId.get(tile)
-            if (record !== undefined) feet.set(slot, record.foot)
-          }
-          const placed = placeTemplateSlots(layout, feet)
-          expect(placed.verdict, template.id).toBe('closes')
-          expect(placed.doubts, template.id).toEqual([])
-          expect(placed.cell, template.id).toEqual({ w: 2, d: 2 })
-          expect(placed.slots.map((slot) => slot.part), template.id).toEqual(
-            layout.slots.map((rule) => rule.part),
-          )
-        }
-
-        /* The two differ on the *first-candidate* walk, and the difference is
-           worth naming: the corridor completes on it (its 12-record base is
-           pinned to 2 x 2, so the greying rule has nothing left to refuse) while
-           the widened wall needs greying, exactly as its shipped parent does —
-           16 of the 40 fixtures fail the blind walk on the base slot and this is
-           a seventeenth of the same kind. */
-        expect(measureGreedy([authoredById(CORRIDOR_ID)], ready().context.composition).completed).toBe(1)
-        expect(measureGreedy([authoredById(WIDENED)], ready().context.composition).completed).toBe(0)
-      },
-      SLOW_MS,
-    )
-
-    it(
-      'walks 263 closes of 323 on the widened wall and 143 of 200 on the corridor',
-      () => {
-        /* The honest number rather than the solver's single pick, over each row's
-           own first-part population — the same walk the 40 are measured on above.
-
-           **D10 measured the corridor at 263 / 25 / 94 of 382 and that figure is
-           gone, because it used §3.3's base and floor predicates and both are
-           corrected here.** Requiring `shape|base|hallway` takes the walked
-           population from 382 to **200**: the 12 hallway bases are all
-           `rect 2x2`, so the greying rule refuses every first-part pick that
-           would empty the base, and the 59 combinations D10 counted as
-           `base: unfilled` and the 123 that resolved to a non-2x2 cell are not
-           walked at all. What is left closes at **71.5%**, against `wall-on-tile`'s
-           85.7% and `internal-corner`'s 0%, so the shape is a member of the same
-           population rather than an easy case.
-
-           The widened wall's 263 is D10's 263 by coincidence of population rather
-           than of predicate: its 323 walked combinations are the shipped
-           `(Any, Modular)` row's, and re-flooring does not change which wall
-           candidates are live. */
-        if (recipes === undefined) throw new Error('no catalog')
-        const per = new Map<string, Record<string, number>>()
-        const cells = new Map<string, Record<string, number>>()
-        for (const template of AUTHORED) {
-          const one = walk(recipes, byIdE3, [template])
-          per.set(template.id, tally(one.map((each) => each.placed.verdict)))
-          cells.set(
-            template.id,
-            tally(one.map((each) => (each.placed.cell === undefined ? '—' : `${String(each.placed.cell.w)}x${String(each.placed.cell.d)}`))),
-          )
-        }
-        expect(per.get(WIDENED)).toEqual({ closes: 263, fails: 25, undecidable: 35 })
-        expect(per.get(CORRIDOR_ID)).toEqual({ closes: 143, fails: 25, undecidable: 32 })
-        expect(263 / 323).toBeCloseTo(0.814, 3)
-        expect(143 / 200).toBeCloseTo(0.715, 3)
-
-        /* Every walked corridor is a 2 x 2 cell, and that is the base doing it:
-           its twelve candidates are all `rect 2x2` and its `constrain` collects
-           `size|width` and `size|depth` from the walls and the floor, so any pick
-           that would make the cell another size empties it and is refused. */
-        expect(cells.get(CORRIDOR_ID)).toEqual({ '2x2': 200 })
-        expect(cells.get(WIDENED)).toEqual({ '2x2': 200, '3x3': 51, '4x2': 69, '4x4': 3 })
-
-        process.stdout.write(
-          `\n[E3] walked closure ${JSON.stringify(Object.fromEntries(per))}\n`,
-        )
-      },
-      SLOW_MS,
-    )
-
-    /* --------------------------------------------- the corridor's base slot */
-
-    it('reaches upstream’s own corridor piece, which §3.3’s predicate structurally could not', () => {
-      /* The twelve `plain#base+hallway.2x2` bases: `rect 2x2` on all twelve,
-         `size|width|2 + size|depth|2` with the inferred `role|floor` and
-         `form|straight`, over the connection variants and two designs (the plain
-         run and the `+electronics` one). **0 of the 12 carry `shape|base|wall`**,
-         which is the tag §3.3's base predicate requires — so that predicate could
-         not have reached the one piece in the archive built for this shape, at any
-         pool size. */
-      const hallway = [...admits(authoredById(CORRIDOR_ID), 'base')].map((id) => byIdE3.get(id))
-      expect(hallway).toHaveLength(12)
-      expect(new Set(hallway.map((record) => record?.design)).size).toBe(2)
-      expect(hallway.filter((record) => record !== undefined && carries(record, 'shape|base|wall'))).toEqual([])
-      for (const record of hallway) {
-        expect(record?.layer).toBe('base')
-        expect(record?.foot).toEqual({ shape: 'rect', w: 2, d: 2 })
-      }
-      /* And **no fixture base slot reaches one**, which is the structural half of
-         why this row's 12 records are new: between them the 40 require exactly
-         four `shape|base|` qualifiers and `hallway` is not among them. */
-      const corridorBases = admits(authoredById(CORRIDOR_ID), 'base')
-      for (const template of FIXTURE_RECIPES) {
-        const base = template.parts.find((part) => part.name === 'base')
-        if (base === undefined) continue
-        expect(
-          [...admits(template, 'base')].filter((id) => corridorBases.has(id)),
-          template.id,
-        ).toEqual([])
-      }
-      const qualifiers = new Set(
-        FIXTURE_RECIPES.flatMap((template) => template.parts)
-          .filter((part) => part.name === 'base')
-          .flatMap((part) => (part.tags.require ?? []).map((ref) => ref.tag))
-          .filter((tag) => tag.startsWith('shape|base|')),
-      )
-      expect([...qualifiers].sort()).toEqual([
-        'shape|base|corner',
-        'shape|base|internal_corner',
-        'shape|base|square',
-        'shape|base|wall',
-      ])
-    })
-
-    it('has no expressible fallback to `shape|base|wall`, because `require` is an intersection', () => {
-      /* Asked for as *"is admitting `shape|base|wall` as a fallback better or
-         merely wider"*, and the answer is that it is **neither, because it is not
-         expressible**. `candidates.ts` sorts the posting lists and intersects
-         them, so a slot's `require` is a conjunction and `hallway OR wall` has no
-         form in this grammar. The two things that *are* expressible:
-
-           - `shape|base|hallway` — 12 files, the corridor bases;
-           - `shape|base|wall` — 305 files, and **0 of them a corridor base**;
-
-         and their intersection is empty, which is the measurement that makes
-         "fallback" impossible rather than unwise. The only widening available is
-         dropping the qualifier to bare `shape|base`, which is a different slot:
-         1,918 files after the shipped denies, none of them chosen for a corridor,
-         and it takes this row's marginal reach from +12 records to +2,251 by
-         admitting every square and corner base in the archive as a corridor
-         floor's support. */
-      const hallway = meant((tags) => tags.has('shape|base|hallway'))
-      const wall = meant((tags) => tags.has('shape|base|wall'))
-      expect(hallway.size).toBe(12)
-      expect(wall.size).toBe(305)
-      expect([...hallway].filter((id) => wall.has(id))).toEqual([])
-    })
-
-    /* ------------------------------------------ the corridor's floor slot */
-
-    it('has 270 rect floors over 187 designs that close a solid block of wall', () => {
-      /* **The check that decides whether this row is honest.** Over the widened
-         floor pool — 1,496 records, 1,224 `rect` and 272 not — the depth axis
-         splits like this, and the walkable width is `depth - 1` because two
-         half-unit walls eat one unit of depth between them:
-
-         | depth | rect floors | designs | walkable across |
-         | ---: | ---: | ---: | ---: |
-         | 1 | **270** | 187 | **0.0 — the two walls meet** |
-         | 2 | 564 | 455 | 1.0 (25.4 mm, one 25 mm mini base) |
-         | 3 | 103 | 80 | 2.0 |
-         | 4 | 252 | 199 | 3.0 |
-         | 6 | 20 | 8 | 5.0 |
-         | 8 | 15 | 5 | 7.0 |
-
-         So **954 of the 1,224 rect floors, over 747 designs, are usable** — and
-         the axis has to be *depth* and not the smallest dimension. A `1 x 2` floor
-         has a smallest dimension of 1 and is a one-unit corridor segment; a
-         `2 x 1` is the solid one. The min-dimension reading gives **943 / 736** and
-         is wrong. */
-      const floors = (catalog?.records ?? []).filter(
-        (record) => carries(record, 'shape|floor') && !carries(record, 'shape|base'),
-      )
-      expect(floors).toHaveLength(1496)
-      const rects = floors.filter((record) => record.foot.shape === 'rect')
-      expect(rects).toHaveLength(1224)
-      expect(tally(floors.filter((record) => record.foot.shape !== 'rect').map((record) => record.foot.shape))).toEqual(
-        { none: 163, arc: 56, wall: 44, tri: 9 },
-      )
-      expect(tally(rects.map((record) => (record.foot.shape === 'rect' ? record.foot.d : 0)))).toEqual({
-        '1': 270,
-        '2': 564,
-        '3': 103,
-        '4': 252,
-        '6': 20,
-        '8': 15,
-      })
-
-      const usable = rects.filter((record) => record.foot.shape === 'rect' && record.foot.d > 1)
-      expect(usable).toHaveLength(954)
-      expect(new Set(usable.map((record) => record.design)).size).toBe(747)
-
-      // The reading #135 corrects, kept because the two disagree and the
-      // disagreement is the finding.
-      const minDim = rects.filter(
-        (record) => record.foot.shape === 'rect' && Math.min(record.foot.w, record.foot.d) > 1,
-      )
-      expect(minDim).toHaveLength(943)
-      expect(new Set(minDim.map((record) => record.design)).size).toBe(736)
-    })
-
-    it('agrees between a floor’s depth tag and its footprint on 1,224 of 1,224, circularly', () => {
-      /* `docs/tile-sizing.md`'s closing rule is that *a size tag is a claim about
-         a piece; only a mesh is a measurement of one*, and the deny this row ships
-         is a **tag** predicate. So: does the tag agree with the footprint? On every
-         rect floor in the pool, with no exception and none missing a depth tag.
-
-         **And the agreement is partly circular, which is the honest half.**
-         `pipeline/footprint.ts` derives a `rect`'s `d` *from* `size|depth`, so this
-         measures that the derivation is total over this population rather than that
-         the archive's meshes are 2 units deep. D9's mesh-versus-tag exception was
-         corner **walls** — `footprint.ts#cornerWallRun`, where 245 records tagged
-         `size|width|2` measure 1.500 — and it is a wall correction: no floor
-         footprint is measured anywhere in this pipeline, so floors carry no such
-         exception and the deny is exactly as good as the tag. */
-      const table = catalog?.tags ?? []
-      let checked = 0
-      for (const record of catalog?.records ?? []) {
-        if (!carries(record, 'shape|floor') || carries(record, 'shape|base')) continue
-        if (record.foot.shape !== 'rect') continue
-        const depth = record.tags
-          .map((id) => table[id] ?? '')
-          .filter((tag) => tag.startsWith('size|depth|'))
-          .map((tag) => Number(tag.slice('size|depth|'.length)))
-        expect(depth, record.id).toHaveLength(1)
-        expect(depth[0], record.id).toBe(record.foot.d)
-        checked += 1
-      }
-      expect(checked).toBe(1224)
-    })
-
-    it('cannot see the 272 non-rect floors, and does not need to', () => {
-      /* The deny removes only the **8** non-`rect` floors that happen to carry
-         `size|depth|1`; 264 survive it. That is sound rather than lucky:
-         `cellExtentOf` refuses anything but a `rect` as a cell, so a corridor
-         filled with one of them is `undecidable` on `floor: no-cell` (or
-         `no-footprint` for the 163 `{shape:'none'}`) and can never be a false
-         `closes`. The deny is about the population the closure check *can* be
-         fooled by. */
-      const corridorFloors = [...admits(authoredById(CORRIDOR_ID), 'floor')].map((id) => byIdE3.get(id))
-      expect(corridorFloors).toHaveLength(1218)
-      const nonRect = corridorFloors.filter((record) => record?.foot.shape !== 'rect')
-      expect(nonRect).toHaveLength(264)
-
-      const layout = conventionFor(authoredById(CORRIDOR_ID).parts.map((part) => part.name))
-      if (layout === undefined) throw new Error('no corridor convention')
-      const verdicts = nonRect.map((record) => {
-        const feet = new Map<SlotName, Footprint>([
-          ['base', { shape: 'rect', w: 2, d: 2 }],
-          ['floor', record?.foot ?? { shape: 'none' }],
-          ['right wall', { shape: 'wall', length: 2 }],
-          ['left wall', { shape: 'wall', length: 2 }],
-        ])
-        return placeTemplateSlots(layout, feet).verdict
-      })
-      expect(new Set(verdicts)).toEqual(new Set(['undecidable']))
-    })
-
-    /* ----------------------------------------- the convention-level check */
-
-    it('raises `no-walk` on every unusable floor the deny would let through, and on none it keeps', () => {
-      /* The two mechanisms, each measured with the other removed — which is what
-         says neither is load-bearing alone. Take every candidate the floor slot
-         admits, put a wall as wide as the floor on each of the two `z` faces, and
-         ask `placeTemplateSlots`:
-
-           - **without the deny**, 270 of the 1,496 come out `no-walk` — exactly
-             the depth-1 rect floors, over 187 designs. Every one of them would
-             otherwise be `closes` with an empty doubt list.
-           - **with it**, 0 of the 1,218 do.
-
-         So the predicate is enough to ship correctly, and the convention-level
-         check is what makes any *future* convention with two opposed edges safe
-         without anybody re-deriving this table. */
-      const layout = conventionFor(authoredById(CORRIDOR_ID).parts.map((part) => part.name))
-      if (layout === undefined) throw new Error('no corridor convention')
-
-      const census = (pool: ReadonlySet<string>): { noWalk: number; designs: number; closes: number } => {
-        let noWalk = 0
-        let closes = 0
-        const designs = new Set<string>()
-        for (const id of pool) {
-          const record = byIdE3.get(id)
-          if (record === undefined) continue
-          const run = record.foot.shape === 'rect' ? record.foot.w : 2
-          const placed = placeTemplateSlots(
-            layout,
-            new Map<SlotName, Footprint>([
-              ['base', { shape: 'rect', w: 2, d: 2 }],
-              ['floor', record.foot],
-              ['right wall', { shape: 'wall', length: run }],
-              ['left wall', { shape: 'wall', length: run }],
-            ]),
-          )
-          if (placed.doubts.some((doubt) => doubt.code === 'no-walk')) {
-            noWalk += 1
-            designs.add(record.design)
-          } else if (placed.verdict === 'closes') closes += 1
-        }
-        return { noWalk, designs: designs.size, closes }
-      }
-
-      const widenedFloors = admits(authoredById(WIDENED), 'floor')
-      const corridorFloors = admits(authoredById(CORRIDOR_ID), 'floor')
-      const without = census(widenedFloors)
-      const with_ = census(corridorFloors)
-
-      expect(without.noWalk).toBe(270)
-      expect(without.designs).toBe(187)
-      expect(with_.noWalk).toBe(0)
-
-      process.stdout.write(
-        `\n[E3] no-walk: ${String(without.noWalk)} of ${String(widenedFloors.size)} floors without the deny, ` +
-          `${String(with_.noWalk)} of ${String(corridorFloors.size)} with it\n`,
-      )
-    })
-
-    it(
-      'cannot fire on any of the 1,215 combinations of the 40 fixtures',
-      () => {
-        /* Structural rather than lucky, and asserted against the archive rather
-           than against the conventions: `no-walk` needs two `edge` slots two
-           quarter-turns apart, and no shipped convention has one. So this check
-           moves nothing that was measured before it — the 1,014 / 25 / 176 split
-           above is byte-identical with and without it. */
-        if (recipes === undefined) throw new Error('no catalog')
-        const fixtures = walk(recipes, byIdE3, FIXTURE_RECIPES)
-        expect(fixtures).toHaveLength(1215)
-        expect(
-          fixtures.filter((one) => one.placed.doubts.some((doubt) => doubt.code === 'no-walk')),
-        ).toEqual([])
-      },
-      SLOW_MS,
-    )
   },
 )

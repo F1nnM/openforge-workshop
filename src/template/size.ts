@@ -391,10 +391,28 @@ export function faceSpan(cell: GridSize, side: SlotSide): number {
  * stored per-slot size would be a second source that could disagree with the
  * first, which is the same argument `rules.ts` makes about a stored offset one
  * level down.
+ *
+ * ## `residual` asks for the **cell**, and that is the whole point of it
+ *
+ * A `residual` slot is drawn at what the walls leave — 1.5 × 1.5 inside a 2 × 2
+ * corner — and it is *selected* by the cell, 2 × 2, because that is what its tags
+ * say. An `s2w` floor carries `size|width|2 + size|depth|2` on a slab that
+ * measures 1.5 × 1.5: the tag names the **tile**, which is the right answer for
+ * which pieces fit this recipe and for where the piece sits on the grid, and the
+ * wrong one for where the slab sits inside its cell.
+ *
+ * So this function gives `residual` the same answer as `cell` deliberately, and
+ * the divergence lives entirely in `offsets.ts#residualBox`. Reading the residual
+ * extent here instead would ask the archive for a `size|width|1.5` floor to fill a
+ * 2 × 2 recipe, and there is none — the 88 `shape|floor|wall` and 41
+ * `shape|floor|corner` records are all tagged at their tile size. `size.test.ts`
+ * asserts the two anchors agree rather than leaving the shared branch to look
+ * like an oversight.
  */
 export function slotSizePredicate(rule: SlotRule, cell: GridSize, cornerSpanUnits = 0): SizePredicate {
   switch (rule.anchor) {
     case 'cell':
+    case 'residual':
       return { kind: 'cell', w: cell.w, d: cell.d }
     case 'edge':
       return { kind: 'run', run: faceSpan(cell, rule.side) - cornerSpanUnits }

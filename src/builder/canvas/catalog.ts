@@ -308,16 +308,26 @@ export function templateSlotLayout(
       return { refused: refusalFor(placed, slot) }
     }
 
-    // The one line row A10 wrote out and did not wire: a centre `o` in the
-    // cell-centre frame is the minimum corner `o - E / 2 + cell / 2` in the
-    // cell-corner frame, where `E` is the part's extent **as drawn**.
-    const drawn = rotatedExtent(shape.extent, placement.yaw + shape.angle)
+    /* The one line row A10 wrote out and did not wire: a centre `o` in the
+       cell-centre frame is the minimum corner `o - E / 2 + cell / 2` in the
+       cell-corner frame, where `E` is the part's extent **as drawn**.
+
+       `placement.residual` is that extent when the rule narrows the slot below
+       its fill's own footprint, which is the `residual` anchor and nothing else:
+       an `s2w` floor is tagged with the size of its *tile* and measures 0.5 less
+       on each walled axis, so drawing it at `shape.extent` puts a quarter unit of
+       it under each wall — the defect the project owner reported on a placed s2w
+       corner. It needs no `rotatedExtent`: a residual slot is the cell slot,
+       `cellExtentOf` admits only a `rect`, and its yaw is 0, so there is no
+       intrinsic angle and no quarter turn to fold in. */
+    const drawn = placement.residual ?? rotatedExtent(shape.extent, placement.yaw + shape.angle)
     return {
       dx: placement.offset[0] - drawn.w / 2 + cell.w / 2,
       dz: placement.offset[1] - drawn.d / 2 + cell.d / 2,
       rotation: placement.yaw,
       elevationMm,
       cell,
+      ...(placement.residual === undefined ? {} : { residual: placement.residual }),
     }
   }
 }

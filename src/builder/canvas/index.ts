@@ -203,6 +203,7 @@ export {
   anchorFor,
   anchorForShape,
   boxCentre,
+  boxShape,
   describeCell,
   describeExtent,
   describeFootprint,

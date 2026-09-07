@@ -16,12 +16,18 @@
  * aligned, because the part is yawed by exactly `side * 90`. So:
  *
  * ```
- * cell   →  (0, 0)
- * edge   →  (reserved / 2, −(cellF.d − part.d) / 2)             flush to −z, centred on what the corner leaves
- * corner →  (−(cellF.w − part.w) / 2, −(cellF.d − part.d) / 2)  flush to −x and −z
+ * cell     →  (0, 0)
+ * edge     →  (reserved / 2, −(cellF.d − part.d) / 2)             flush to −z, centred on what the corner leaves
+ * corner   →  (−(cellF.w − part.w) / 2, −(cellF.d − part.d) / 2)  flush to −x and −z
+ * residual →  ((minX − maxX) / 2, (minZ − maxZ) / 2)              what the edges leave, in the cell's own frame
  * ```
  *
- * and the result is turned back by `side` quarter-turns. The `z` term is always
+ * and the result is turned back by `side` quarter-turns — except the `residual`
+ * line, which is stated against all four faces at once and so has no side to turn
+ * by. It is the one anchor whose **extent** the rule supplies as well as its
+ * position; see {@link residualBox} for why the fill's own footprint is not it.
+ *
+ * The `z` term is always
  * an **inset** while the part is no deeper than the face it lies on, so nothing
  * overhangs the cell and a template's union *is* its cell — which is how row A10
  * settled a 2 x 2 corner's footprint at 4.00 units²; `offsets.test.ts` measures
@@ -218,18 +224,136 @@ function quarterTurnExtent(extent: Extent, side: SlotSide): Extent {
  * `geometry.ts` imports only `@/catalog` and `@/store` and imports nothing from
  * this directory, so naming the leaf breaks the cycle at its only edge and costs
  * nothing: `footprintExtent` is defined there, not merely re-exported.
+ *
+ * ## The last two arguments default, and both defaults are traps
+ *
+ * `reserved` and `insets` are *context*: quantities {@link placeTemplateSlots}
+ * resolves from the layout and the whole fill map, which this function cannot
+ * see from one rule. Each defaults to nothing taken, and each default is the
+ * pre-existing wrong answer for the anchor it belongs to — a corner's edge
+ * centred across the whole face, a residual centred on the whole cell.
+ *
+ * They default anyway because most of the four anchors read neither, and a
+ * caller holding one rule and two extents is the common case in tests. What
+ * makes that safe is that the *only* production caller is
+ * {@link placeTemplateSlots}, in this file, which supplies both; and
+ * `corpus.test.ts` re-derives every offset of every walked combination through
+ * this function with both supplied, so a default silently taken in production
+ * would have to survive that comparison, and it cannot.
  */
 export function slotOffset(
   rule: SlotRule,
   cell: Extent,
   part: Extent,
   reserved: number = 0,
+  insets: EdgeInsets = NO_INSETS,
 ): PlanPoint {
   if (rule.anchor === 'cell') return [0, 0]
+  if (rule.anchor === 'residual') return residualBox(cell, insets).offset
   const inFrame = quarterTurnExtent(cell, rule.side)
   const dz = -(inFrame.d - part.d) / 2
   const dx = rule.anchor === 'corner' ? -(inFrame.w - part.w) / 2 : reserved / 2
   return quarterTurn([dx, dz], rule.side)
+}
+
+/* ------------------------------------------------------------- the residual */
+
+/**
+ * How deep each of the cell's four faces is built on, in grid units.
+ *
+ * Named by the **face**, not by the axis, because that is what an `edge` rule
+ * carries and because two faces of one axis are eaten independently:
+ * `minZ` is face 0 (`−z`), `maxX` is face 1, `maxZ` is face 2 and `minX` is
+ * face 3, which is {@link SlotSide}'s own `−z → +x → +z → −x` order read as four
+ * names.
+ */
+export interface EdgeInsets {
+  readonly minX: number
+  readonly maxX: number
+  readonly minZ: number
+  readonly maxZ: number
+}
+
+/** Nothing built on any face — the answer for a layout with no `edge` slot. */
+export const NO_INSETS: EdgeInsets = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 }
+
+/**
+ * What the layout's `edge` slots take off each face of the cell.
+ *
+ * One pass over the rules, reading each `edge` fill's own footprint. The depth a
+ * wall takes off its face is its own frame's `d` — **not** a quarter-turned
+ * quantity — because {@link slotYaw} turns the part by `side * 90`, so its own
+ * `d` always lies across the face it is anchored to. That is the same reading
+ * {@link slotOffset}'s `dz` term makes, which is what keeps the residual and the
+ * walls from being two conventions.
+ *
+ * A slot with no fill, or a fill with no extent, contributes **0** rather than a
+ * guess. That is the honest answer and it is also the useful one: an unfilled
+ * wall slot leaves the floor the whole cell, which is exactly what the room
+ * shows while the user has not chosen a wall yet, and the slot's own `unfilled`
+ * doubt is what says the template is incomplete.
+ *
+ * A fill with no *run* along the face — `diag`, `tri`, `arc`, the 104 of 1,215
+ * combinations {@link SlotDoubtCode}'s `no-run` refuses a coordinate — is
+ * likewise 0. Its bounding box says nothing about how much of the cell's axis it
+ * takes, which is the same correction row E3 made to the walkability check for
+ * the same reason: a part the rule declined to place must not silently move
+ * another part.
+ */
+export function edgeInsets(layout: TemplateLayout, feet: ReadonlyMap<SlotName, Footprint>): EdgeInsets {
+  const insets = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 }
+  for (const rule of layout.slots) {
+    if (rule.anchor !== 'edge') continue
+    const foot = feet.get(rule.part)
+    if (foot === undefined || edgeRun(foot) === null) continue
+    const extent = footprintExtent(foot)
+    if (extent === undefined) continue
+    switch (rule.side) {
+      case 0:
+        insets.minZ += extent.d
+        break
+      case 1:
+        insets.maxX += extent.d
+        break
+      case 2:
+        insets.maxZ += extent.d
+        break
+      case 3:
+        insets.minX += extent.d
+        break
+    }
+  }
+  return insets
+}
+
+/**
+ * The box the cell's `edge` slots leave, as a centre offset and an extent.
+ *
+ * The whole of the `residual` anchor. In the cell's own corner frame the
+ * remainder runs `x ∈ [minX, cell.w − maxX]` and `z ∈ [minZ, cell.d − maxZ]`, so
+ * its extent is the cell less both insets on each axis and its centre sits
+ * `(minX − maxX) / 2` from the cell's — an exact half-difference, on the same
+ * 0.25 lattice as every other offset this module produces and for the same
+ * reason, and **never snapped** (§2.2).
+ *
+ * The extent is returned alongside the offset because the fill's own footprint
+ * is **not** it, and that is the point of the anchor rather than an
+ * inconvenience: an `s2w` floor is tagged with the size of its *tile* and
+ * measures 0.5 less on each walled axis, so a caller that drew it at its tagged
+ * extent would put a quarter unit of it under each wall. {@link SlotPlacement}
+ * carries this extent as `residual` and `builder/canvas/catalog.ts` draws it
+ * instead of the tagged one.
+ *
+ * On a layout with no `edge` slot the insets are all 0 and this is exactly the
+ * cell at offset `[0, 0]` — the `cell` anchor's answer, reached by arithmetic
+ * rather than by a special case, which is why `rules.ts#INTERNAL_CORNER` can carry
+ * the same anchor as the other two.
+ */
+export function residualBox(cell: Extent, insets: EdgeInsets): { offset: PlanPoint; extent: Extent } {
+  return {
+    offset: [(insets.minX - insets.maxX) / 2 + 0, (insets.minZ - insets.maxZ) / 2 + 0],
+    extent: { w: cell.w - insets.minX - insets.maxX, d: cell.d - insets.minZ - insets.maxZ },
+  }
 }
 
 /**
@@ -351,22 +475,21 @@ export type SlotDoubtCode =
   /** The fills along one face do not sum to it. 33 of 1,215. */
   | 'over-run'
   /**
-   * Two **opposed** `edge` slots consume the cell's whole extent across
-   * themselves, so nothing is left to walk on. Row **E3**.
+   * The `edge` slots consume the cell's whole extent on one axis, so the
+   * `residual` has no area and nothing is left to walk on. Row **E3**, widened.
    *
    * The one doubt that is not about a position. Every other code says *this part
    * cannot be placed* or *these runs do not tile this face*; this one says the
-   * arithmetic is flawless and the result is a solid block of stone. A 1 x 1
-   * corridor with a 0.5-deep wall on each `z` face has zero overlapping pairs, a
-   * union exactly equal to its cell and an area exact to A10's invariant — and it
-   * is a wall, not a corridor.
+   * arithmetic is flawless and the result is a solid block of stone — zero
+   * overlapping pairs, a union exactly equal to the cell, an area exact to A10's
+   * invariant, and a wall where a floor was asked for.
    *
-   * **0 of the 1,215 combinations of the 40 shipped fixtures can reach it**, and
-   * that is structural rather than lucky: no shipped convention has two edge
-   * slots two quarter-turns apart. `wall-on-tile` has one edge; `external-corner`
-   * has two at sides 0 and 3, which are adjacent; `internal-corner` has none. The
-   * corridor is the first layout in which two slots eat the same axis, which is
-   * why the check arrives with it and not before.
+   * E3 wrote it for its corridor and compared an **opposed pair** of edges, on
+   * which 0 of the 1,215 combinations of the 40 could reach it. It now compares
+   * the residual itself, so an axis eaten from one end is checked too, and
+   * **1 of the 1,215 reaches it**: a 1 x 1 cell whose `wall` slot resolves to
+   * `rough_stone#column+low.I.openforge.stl`, a `rect 1x1` rather than a
+   * {@link WALL_THICKNESS_UNITS}-deep run. See {@link walkability}.
    */
   | 'no-walk'
 
@@ -400,9 +523,9 @@ export interface SlotDoubt {
    * The cell edge the fills have to sum to, in grid units.
    *
    * `over-run` and `no-walk`. On `no-walk` it is the cell's extent along the axis
-   * the two opposed edges eat, and {@link got} is what they eat between them — so
-   * `want - got` is what is left to walk on and the doubt fires when it is zero
-   * or less.
+   * the `edge` slots eat, and {@link got} is what they take of it — so
+   * `want - got` is the residual on that axis, and the doubt fires when it is
+   * zero or less.
    */
   readonly want?: number
   /** What they do sum to, in grid units. `over-run` and `no-walk` only. */
@@ -419,6 +542,27 @@ export interface SlotPlacement {
   /** Degrees, template-local. Add the placement's own rotation. */
   readonly yaw: number
   readonly restsOn: SlotName | null
+  /**
+   * The extent the rule narrows this slot to, present on `residual` and on
+   * nothing else.
+   *
+   * A caller draws the slot at **this** extent rather than at its fill's own
+   * footprint. The two differ because an `s2w` floor's tags name the size of its
+   * *tile* — `size|width|2 + size|depth|2` on a slab that measures 1.5 × 1.5 —
+   * and the tile is the right answer for where the piece sits on the grid and the
+   * wrong one for where the slab sits inside it. {@link residualBox} carries the
+   * measurements.
+   *
+   * Optional rather than always-present, and rather than a second field on every
+   * anchor, because for the other three the fill's own footprint really is the
+   * box and a duplicate of it here would be a second source for the same
+   * quantity — with the rotation question answered in two places. `residual` is
+   * the cell slot and `cellExtentOf` admits only a `rect`, so this extent is
+   * always axis-aligned at yaw 0 and needs no `rotatedExtent` to read; a `diag`'s
+   * intrinsic 45° cannot reach it. `builder/canvas/catalog.ts` prefers it where
+   * present and falls back to the rotated footprint otherwise.
+   */
+  readonly residual?: Extent
 }
 
 /** A layout resolved against one set of fills. */
@@ -435,8 +579,8 @@ export interface PlacedTemplate {
    */
   readonly slots: readonly SlotPlacement[]
   /**
-   * Empty when the template is fully placed, every face tiles **and** every axis
-   * two opposed edges eat has something left between them.
+   * Empty when the template is fully placed, every face tiles **and** the
+   * residual the `edge` slots leave has area on both axes.
    */
   readonly doubts: readonly SlotDoubt[]
   readonly verdict: SlotVerdict
@@ -463,21 +607,14 @@ export function placeTemplateSlots(
 ): PlacedTemplate {
   const slots: SlotPlacement[] = []
   const doubts: SlotDoubt[] = []
-  /* How deep each `edge` slot with a real run lies across its own face, so the
-     walkability check below reads the same depths the offsets were computed
-     from rather than resolving every footprint a second time.
-
-     **Only slots that survived the `no-run` refusal are in here**, and that is
-     the correction rather than an optimisation. A `diag`, `tri` or `arc` fill
-     does not lie along the face at all — which is exactly why it is refused a
-     coordinate — so its bounding box says nothing about how much of the cell's
-     axis it takes. Measured: including them made a 2-unit-deep corridor filled
-     with a 2.828 `diag` report `no-walk` on top of the `no-run` it already
-     reported, which is one wrong sentence about a fill the rule had already
-     declined to place. */
-  const edgeDepth = new Map<SlotName, number>()
 
   const cell = cellExtentOf(layout, feet, doubts)
+  /* What the walls take off each face, resolved once before the loop because the
+     `residual` slot needs *every* edge slot's answer and the declared order puts
+     the floor before the walls — a `restsOn` order, which is the right one for
+     elevation and says nothing about who is resolvable first. */
+  const insets = edgeInsets(layout, feet)
+  const residual = cell === undefined ? undefined : residualBox(cell, insets)
 
   for (const rule of layout.slots) {
     const foot = feet.get(rule.part)
@@ -536,97 +673,94 @@ export function placeTemplateSlots(
       if (Math.abs(run + taken - span) > CLOSURE_EPS) {
         doubts.push({ part: rule.part, code: 'over-run', want: span, got: run + taken })
       }
-      /* Its depth *across* the face, which is the axis {@link walkability} adds
-         up. An `over-run` still counts — the part is placed and it really is on
-         that face; only a refused run is silent. */
-      edgeDepth.set(rule.part, part.d)
     }
     slots.push({
       part: rule.part,
       anchor: rule.anchor,
       side: rule.side,
-      offset: slotOffset(rule, cell, part, reserved),
+      offset: slotOffset(rule, cell, part, reserved, insets),
       yaw: slotYaw(rule),
       restsOn: rule.restsOn,
+      ...(rule.anchor === 'residual' && residual !== undefined ? { residual: residual.extent } : {}),
     })
   }
 
-  if (cell !== undefined) doubts.push(...walkability(layout, cell, edgeDepth))
+  if (cell !== undefined) doubts.push(...walkability(layout.cell, cell, insets))
 
   return { slots, doubts, verdict: verdictOf(layout, doubts), cell }
 }
 
 /**
- * The axis pairs a convention can eat: face 0 against face 2, and 1 against 3.
+ * Whether the residual leaves anything to walk on.
  *
- * Two quarter-turns apart is the whole definition of *opposed*, and it is the
- * only relation that matters here — adjacent edges take from two different axes
- * and can never meet each other.
- */
-const OPPOSED_FACES: readonly (readonly [SlotSide, SlotSide])[] = [
-  [0, 2],
-  [1, 3],
-]
-
-/**
- * Whether anything is left to walk on, for each axis two opposed `edge` slots eat.
+ * **Row E3 wrote this check for the corridor and it outlived the corridor**, in a
+ * simpler form and over a wider population. E3's version compared each axis's
+ * extent against the sum of the *opposed* pair of `edge` depths, because the
+ * corridor was the first layout in which two slots ate the same axis. With the
+ * `residual` anchor the subtraction has already been done, on all four faces at
+ * once, so the question is just whether the box that came out has any area:
+ * **the residual's extent must be positive on both axes.**
  *
- * **Row E3, and the check that decides whether the corridor is honest.**
- * `placeTemplateSlots` proves that parts do not overlap and that they cover the
- * cell. It cannot prove that anything is left to walk on, and until the corridor
- * there was no layout in which two slots ate the same axis — so a 1 x 1 corridor
- * with a 0.5-deep wall on each `z` face came out `closes`, area exact, doubts
- * empty, and drew a solid block of stone. 270 rect floors over 187 designs are
- * that case.
+ * That is strictly more than E3 could ask. Its pairing meant an axis eaten from
+ * one end only was never checked at all — a 0.5-deep cell under a 0.5-deep wall
+ * came out `closes`, with the floor a slab of zero extent — and a residual has no
+ * end to be exempt.
  *
- * The rule belongs with the *convention* rather than with the slot, because any
- * future convention with two opposed edges inherits the same blindness — and
- * because it is expressible without a number: **the cell's extent along the eaten
- * axis must exceed the sum of the opposed edges' depths.** Both walls are yawed
- * by `side * 90`, so each one's consumption of its axis is its own frame's `d`,
- * exactly as {@link slotOffset}'s `dz` term reads it.
+ * The signature takes the cell and the insets rather than the residual extent
+ * itself, so the doubt can name the two numbers a reader needs; see the comment
+ * in the body.
  *
- * ## Three things it deliberately does not do
+ * ## Three things it deliberately does not do, all three unchanged from E3
  *
  *   - **It does not touch {@link cornerReservation}.** That function is wrong for
  *     a face flanked by two corners — D10 §3.4 measured the verdict inverting,
  *     `fails` on the run that tiles and `closes` on the run that overlaps — and
  *     repairing it is a different decision with its own measurement. It is not
  *     needed here: a corner reservation is a span *along* a face and this check is
- *     across one, and the corridor has no `corner`-anchored slot at all.
- *   - **It needs two filled edges, not one.** A single wall on a 1 x 1 cell
- *     leaves 0.5 of walkable depth and is a perfectly ordinary wall tile — 980 of
- *     the 1,143 `wall-on-tile` combinations close on exactly that arrangement. So
- *     an unfilled or extentless opposed sibling makes the pair silent rather than
- *     doubtful; the sibling's own `unfilled` doubt is the honest report there.
+ *     across one.
+ *   - **An unfilled or runless wall is silent, not doubtful.** {@link edgeInsets}
+ *     contributes 0 for it, so the residual is the whole cell and has area; the
+ *     slot's own `unfilled` or `no-run` doubt is the honest report. A single wall
+ *     on a 1 x 1 cell leaves 0.5 of walkable depth and is a perfectly ordinary
+ *     wall tile — 980 of the 1,143 `wall-on-tile` combinations close on exactly
+ *     that arrangement.
  *   - **It does not refuse the placement.** Like `over-run`, the parts have
  *     positions and the union really is the cell; what is wrong is the result, not
  *     the arithmetic. So the slots are placed and the doubt is raised, which is
  *     the shape row D8 settled for the same reason.
+ *
+ * **1 of the 1,215 walked combinations of the 40 reaches it, and E3's version
+ * reached none.** The one is
+ * `S2W: Wall on Tile: Wall (Any, Single Piece)` on a 1 x 1 cell whose `wall`
+ * slot resolves to `rough_stone#column+low.I.openforge.stl` — a `rect 1x1`, not
+ * a {@link WALL_THICKNESS_UNITS}-deep run — so the wall eats the cell's whole
+ * depth and the floor is a slab of zero extent. Under E3's pairing that
+ * combination had **no doubts at all** and came out `closes`: one edge is never
+ * half of an opposed pair, so the axis was never checked. `corpus.test.ts` names
+ * the combination rather than only counting it.
+ *
+ * Its run *does* tile the face — `edgeRun` of a `rect 1x1` is 1 on a 1-unit
+ * span — so `over-run` was never going to catch it either. That is the point of
+ * having both: one asks whether the pieces tile the face, this one asks whether
+ * anything is left over.
  */
-function walkability(
-  layout: TemplateLayout,
-  cell: Extent,
-  edgeDepth: ReadonlyMap<SlotName, number>,
-): readonly SlotDoubt[] {
-  const doubts: SlotDoubt[] = []
-  for (const faces of OPPOSED_FACES) {
-    const opposed = layout.slots.filter(
-      (rule) => rule.anchor === 'edge' && faces.includes(rule.side) && edgeDepth.has(rule.part),
-    )
-    if (opposed.length < 2) continue
-    const eaten = opposed.reduce((total, rule) => total + (edgeDepth.get(rule.part) ?? 0), 0)
-    /* The cell seen from either face of the pair: face 0 and face 2 both look
-       along the cell's own `d`, faces 1 and 3 along its `w`. One
-       {@link quarterTurnExtent} call says it without a second convention. */
-    const span = quarterTurnExtent(cell, faces[0]).d
-    if (span - eaten > CLOSURE_EPS) continue
-    /* Named on the **cell** slot and not on either wall. Neither wall is wrong —
-       each is flush to its own face and inside the cell — and the part that has
-       nothing left is the floor. `slotDoubtSentence` reads accordingly. */
-    doubts.push({ part: layout.cell, code: 'no-walk', want: span, got: eaten })
-  }
-  return doubts
+function walkability(part: SlotName, cell: Extent, insets: EdgeInsets): readonly SlotDoubt[] {
+  const axes = [
+    { span: cell.w, eaten: insets.minX + insets.maxX },
+    { span: cell.d, eaten: insets.minZ + insets.maxZ },
+  ]
+  /* `want` and `got` are the **cell edge** and **what the walls take of it**, not
+     the residual and zero, because those are the two numbers
+     {@link slotDoubtSentence} has to be able to name and they are the two the
+     user can act on. `want - got` is the residual, so the doubt fires on exactly
+     the condition the docblock states.
+
+     Named on the **cell** slot and not on any wall. No wall is wrong — each is
+     flush to its own face and inside the cell — and the part that has nothing
+     left is the floor, which is the cell slot on all three conventions. */
+  return axes
+    .filter((axis) => axis.span - axis.eaten <= CLOSURE_EPS)
+    .map((axis) => ({ part, code: 'no-walk' as const, want: axis.span, got: axis.eaten }))
 }
 
 /**

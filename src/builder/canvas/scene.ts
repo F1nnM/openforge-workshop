@@ -114,6 +114,7 @@ import type {
 } from './geometry'
 import {
   boxCentre,
+  boxShape,
   describeCell,
   describeFootprint,
   footprintShape,
@@ -437,6 +438,28 @@ interface PlanOmissionOf {
 }
 
 /**
+ * The shape one slot is drawn as: its fill's footprint, or the box the rule
+ * narrowed it to.
+ *
+ * {@link SlotLayout.residual} is present on the `floor` slot of an `s2w` recipe
+ * and on nothing else, and it is a smaller `rect` than the fill's own footprint —
+ * the part of the cell the separately printed walls do not stand on. Substituting
+ * the shape here, rather than adjusting a box downstream, is what makes the
+ * narrowing reach every consumer through one value: the box, the polygons,
+ * `overlap.ts`, `place.ts#tileMatrix`'s mesh centring, `instances.ts`'s footprint
+ * disagreement, and {@link reanchorPiece}, which re-projects from
+ * `PlanPiecePart.shape` and so carries it for free.
+ *
+ * Takes the already-derived shape rather than the footprint, so the *drawability*
+ * question — a `none` fill has no shape and earns its own sentence — is still
+ * settled before the layout is consulted, which is the ordering the loop below
+ * depends on and comments.
+ */
+function drawnShape(shape: PlanShape, layout: SlotLayout): PlanShape {
+  return layout.residual === undefined ? shape : boxShape(layout.residual)
+}
+
+/**
  * Resolve one instance into a piece, or say why it is not one.
  *
  * Returns the piece **and** its omissions, because the two are one walk over the
@@ -501,7 +524,8 @@ function resolveInstance(
       })
       continue
     }
-    parts.push(placePart(slot, shape, slotGeometry(shape, slot.layout, origin, instance.rotation), style))
+    const drawn = drawnShape(shape, slot.layout)
+    parts.push(placePart(slot, drawn, slotGeometry(drawn, slot.layout, origin, instance.rotation), style))
   }
 
   const box = unionBox(parts.map((part) => part.box))

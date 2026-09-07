@@ -506,14 +506,14 @@ describe('the fixtures are the shipped table', () => {
 
     // The **maximum** arity is the whole reason `MAX_SHARE_FILLS` is
     // `MAX_SHARE_PLACEMENTS * 5` and not some other multiple, so a new arity has
-    // to fail here rather than quietly change what the ceiling means. Row **E3**
-    // added the middle one — its corridor has four slots, `(base, floor, left
-    // wall, right wall)` — and the ceiling is unmoved because 5 is still the max.
-    expect(ARITIES).toEqual([3, 4, 5])
+    // to fail here rather than quietly change what the ceiling means. Row E3's
+    // corridor briefly added a middle one at four slots and is withdrawn; the
+    // ceiling never moved, because 5 was the max throughout.
+    expect(ARITIES).toEqual([3, 5])
     expect(Math.max(...ARITIES)).toBe(5)
     expect(names.size).toBe(6)
-    expect(FAMILIES.length).toBe(42)
-    expect(parts).toBe(135)
+    expect(FAMILIES.length).toBe(40)
+    expect(parts).toBe(128)
   })
 })
 

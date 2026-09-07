@@ -1,31 +1,30 @@
 /**
- * The four authored conventions, and the key they hang on.
+ * The three authored conventions, and the key they hang on.
  *
- * These need no `catalog.json`: the 42 recipes ship as generated data in
+ * These need no `catalog.json`: the 40 recipes ship as generated data in
  * `src/screens/assemblies/templates.ts`, so the classification claim — **the
- * part-name set is right on 42 of 42 and the template's own `shape|` tag is
- * wrong on 2 of the 40 fixtures** — is computable from the bundle alone and is
- * asserted here rather than in `corpus.test.ts`. What needs the archive is
- * everything about *fills*, and that is the other file.
+ * part-name set is right on 40 of 40 and the template's own `shape|` tag is
+ * wrong on 2 of them** — is computable from the bundle alone and is asserted
+ * here rather than in `corpus.test.ts`. What needs the archive is everything
+ * about *fills*, and that is the other file.
  *
  * The internal consistency of the conventions is asserted as a **property**
  * wherever a property exists, because the alternative is restating the numbers
  * the table already carries. The two walls of an external corner being on
  * adjacent faces and the column being in the corner they share is a property; a
- * table saying `0`, `3`, `0` is not. Row **E3**'s corridor adds the one property
- * the other three do not need: its two walls are **opposite**, which is what
- * makes it not a corner.
+ * table saying `0`, `3`, `0` is not.
  *
- * ## 42, and the two that are not fixtures
+ * ## 40, and the two rows that are gone
  *
- * Row E3 authored two assemblies in this repo — a wall recipe whose floor slot is
- * widened off the shipped `(Any, Modular)` one, and the corridor — and
- * `pipeline/authored.ts` says why they are `RECIPE_TEMPLATES` entries rather than
- * a third export. They are distinguishable by `source`, and the measurements
- * below that are claims about *the fixtures* use {@link FIXTURE_RECIPES} while
- * the ones that are claims about *the layout model* use all 42. Which is which is
- * the point: `conventionFor` classifying 42 of 42 is the model's business, and
- * two internal corners carrying `shape|corner` is upstream's.
+ * Row E3 authored two assemblies in this repo — a wall recipe whose floor slot
+ * was widened off the shipped `(Any, Modular)` one, and a corridor — and both
+ * have been withdrawn along with `pipeline/authored.ts` and the `CORRIDOR`
+ * convention. `rules.ts#SLOT_CONVENTIONS` carries why: both rested on a floor
+ * slot that admitted floors which are not `s2w`, and an `s2w` recipe's floor has
+ * to be an `s2w` floor or the slab does not fit the cell its walls leave. So
+ * `RECIPE_TEMPLATES` is the fixtures and nothing else, and the split between
+ * *claims about the fixtures* and *claims about the layout model* that this file
+ * used to have to draw is gone with it — the two populations are the same 40.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -35,7 +34,6 @@ import { RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
 
 import type { SlotConvention, SlotName, SlotRule, SlotSide } from './rules'
 import {
-  CORRIDOR,
   EXTERNAL_CORNER,
   INTERNAL_CORNER,
   SLOT_CONVENTIONS,
@@ -53,16 +51,6 @@ function cornerFaces(side: SlotSide): readonly number[] {
 
 const namesOf = (template: { parts: readonly { name: string }[] }): readonly SlotName[] =>
   template.parts.map((part) => part.name)
-
-/**
- * The 40 read from the fixtures, without row E3's two.
- *
- * The prefix is `pipeline/authored.ts#AUTHORED_SOURCE_PREFIX`, spelled here
- * rather than imported: that module is in the node project and this file is in
- * the app project, the same boundary `corpus.test.ts` writes `PAYLOAD_TIMESTAMP`
- * across, and a drift shows up as a count that no longer matches.
- */
-const FIXTURE_RECIPES = RECIPE_TEMPLATES.filter((template) => !template.source.startsWith('authored:'))
 
 describe('the key a convention hangs on', () => {
   it('is the part-name set, so declaration order cannot change it', () => {
@@ -87,30 +75,37 @@ describe('the key a convention hangs on', () => {
     expect(conventionFor(['floor'])).toBeUndefined()
     expect(conventionFor(['wall', 'floor', 'base', 'ceiling'])).toBeUndefined()
     expect(layoutFor([])).toBeUndefined()
-    /* The corridor's set minus one wall is the shape D10 §8 was right about and
-       generalised wrongly from: `(wall, base)` has no cell, so no edge, so no
-       closure — and no convention either. */
+    /* One wall short of an external corner, and one part short of it: `(base,
+       floor, left wall)` has a cell and an edge but no column, and no convention
+       claims it. This used to be row E3's `CORRIDOR` minus a wall; with that
+       convention withdrawn the four-part set is unclaimed too, which the next
+       case pins so its return cannot be silent. */
     expect(conventionFor(['base', 'floor', 'left wall'])).toBeUndefined()
+    expect(conventionFor(['base', 'floor', 'left wall', 'right wall'])).toBeUndefined()
   })
 
-  it('tells the corridor from the external corner on the part set alone', () => {
-    /* The two are one part apart — the corner's column — and they are the only
-       two conventions in the table whose sets are in a subset relation. A key
-       that dropped the column would hand a corridor the corner's mitred layout. */
-    expect(conventionFor(['base', 'floor', 'left wall', 'right wall'])).toBe(CORRIDOR)
+  it('claims the external corner only with its column, so no set falls through to it', () => {
+    /* The external corner is the only five-part convention and the only one whose
+       set strictly contains another candidate's. A key that ignored the column
+       would hand any two-wall recipe the corner's mitred layout — which is what a
+       `shape|`-tag key does to two internal corners, measured below. */
     expect(conventionFor(['base', 'column', 'floor', 'left wall', 'right wall'])).toBe(EXTERNAL_CORNER)
+    expect(conventionFor(['base', 'column', 'floor', 'right wall'])).toBeUndefined()
   })
 })
 
-describe('the four conventions against the 42 shipped recipes', () => {
-  it('classifies 42 of 42 on the part-name set, of which 40 are the fixtures’', () => {
+describe('the three conventions against the 40 shipped recipes', () => {
+  it('classifies 40 of 40 on the part-name set, and the 40 are the fixtures’', () => {
     const classified = RECIPE_TEMPLATES.filter((template) => conventionFor(namesOf(template)) !== undefined)
-    expect(RECIPE_TEMPLATES).toHaveLength(42)
-    expect(classified).toHaveLength(42)
-    expect(FIXTURE_RECIPES).toHaveLength(40)
+    expect(RECIPE_TEMPLATES).toHaveLength(40)
+    expect(classified).toHaveLength(40)
+    /* Every one of them read from a fixture: nothing in this build is authored
+       here any more, which is what withdrawing row E3 means and what makes every
+       measurement in this file a measurement of upstream's recipes. */
+    expect(RECIPE_TEMPLATES.filter((template) => template.source.startsWith('authored:'))).toEqual([])
   })
 
-  it('covers the 42 in the measured 33 / 4 / 4 / 1 split, over 135 parts', () => {
+  it('covers the 40 in the measured 32 / 4 / 4 split, over 128 parts', () => {
     const byConvention = new Map<string, number>()
     let parts = 0
     for (const template of RECIPE_TEMPLATES) {
@@ -125,20 +120,16 @@ describe('the four conventions against the 42 shipped recipes', () => {
         [...namesOf(template)].sort(),
       )
     }
-    /* 128 fixture parts, plus row E3's 3 + 4. The widened wall is a
-       `wall-on-tile` — its layout is the shipped recipe's and only its floor
-       slot's admissions differ — so the corridor is the only member of the
-       fourth convention in the whole build. */
-    expect(parts).toBe(135)
+    /* The 128 the 20 fixtures declare, and nothing beside them. */
+    expect(parts).toBe(128)
     expect(Object.fromEntries(byConvention)).toEqual({
-      'wall-on-tile': 33,
+      'wall-on-tile': 32,
       'external-corner': 4,
       'internal-corner': 4,
-      corridor: 1,
     })
   })
 
-  it('is wrong on 2 of the 40 fixtures if it keys on the template’s own shape tag instead', () => {
+  it('is wrong on 2 of the 40 if it keys on the template’s own shape tag instead', () => {
     /* The whole reason the key is the part-name set.
        `blueprints.s2w.internal_corner.yaml` and `.low.yaml` each carry one
        `Modular` entry tagged `shape|corner` rather than
@@ -158,11 +149,10 @@ describe('the four conventions against the 42 shipped recipes', () => {
       return undefined
     }
 
-    /* Over the fixtures, because the claim is about **upstream's** tags: row
-       E3's corridor carries `shape|hallway`, which no tag-keyed rule has ever had
-       a branch for, and counting it here would inflate a census that exists to
-       measure a defect in another repository. */
-    const wrong = FIXTURE_RECIPES.filter(
+    /* Over all 40, which since row E3's withdrawal is the same population as
+       *upstream's own* — the claim is about another repository's tags and there is
+       nothing of this repo's left in the array to inflate the census with. */
+    const wrong = RECIPE_TEMPLATES.filter(
       (template) => byShapeTag(shapeTagOf(template)) !== conventionFor(namesOf(template)),
     )
     expect(wrong).toHaveLength(2)
@@ -178,25 +168,26 @@ describe('the four conventions against the 42 shipped recipes', () => {
     }
   })
 
-  it('gives the 135 parts 84 cell anchors, 43 edges and 8 corners', () => {
-    const tally = { cell: 0, edge: 0, corner: 0 }
+  it('gives the 128 parts 40 cell anchors, 40 residuals, 40 edges and 8 corners', () => {
+    const tally = { cell: 0, edge: 0, corner: 0, residual: 0 }
     for (const template of RECIPE_TEMPLATES) {
       for (const slot of conventionFor(namesOf(template))?.slots ?? []) tally[slot.anchor] += 1
     }
-    /* The 80 / 48 split of the plan, from the other side, plus row E3's 7: 84
-       parts are `cell`-anchored and derived — every `base` and every `floor` —
-       and the 51 that are not are exactly the 43 edges plus the 8 corners. The
-       corridor adds **two** edges to one template, which no shipped recipe does
-       and which is the whole of what is new about it. */
-    expect(tally).toEqual({ cell: 84, edge: 43, corner: 8 })
-    expect(tally.edge + tally.corner).toBe(51)
+    /* The 80 / 48 split of the plan, from the other side, and with the 80
+       derived half now split in two: the 40 `base` slots are `cell`-anchored and
+       the 40 `floor` slots are `residual`, which is the whole of this change.
+       The 48 that were authored are unmoved — 40 edges plus 8 corners. */
+    expect(tally).toEqual({ cell: 40, residual: 40, edge: 40, corner: 8 })
+    expect(tally.cell + tally.residual).toBe(80)
+    expect(tally.edge + tally.corner).toBe(48)
 
-    // The fixtures' own share is unmoved, which is what says E3 appended.
-    const fixtures = { cell: 0, edge: 0, corner: 0 }
-    for (const template of FIXTURE_RECIPES) {
-      for (const slot of conventionFor(namesOf(template))?.slots ?? []) fixtures[slot.anchor] += 1
+    /* And the split is by *slot name*, not by convention: every `base` is `cell`
+       and every `floor` is `residual`, on all three. A convention that anchored
+       one floor differently would be a second rule for one derived quantity. */
+    for (const convention of SLOT_CONVENTIONS) {
+      expect(ruleFor(convention, 'base')?.anchor, convention.id).toBe('cell')
+      expect(ruleFor(convention, 'floor')?.anchor, convention.id).toBe('residual')
     }
-    expect(fixtures).toEqual({ cell: 80, edge: 40, corner: 8 })
   })
 })
 
@@ -205,21 +196,22 @@ describe('each convention, as a property rather than a table', () => {
     for (const convention of SLOT_CONVENTIONS) assertion(convention)
   }
 
-  it('names a cell slot that is itself cell-anchored', () => {
+  it('names a cell slot that is the residual — the cell it defines, less its walls', () => {
     each((convention) => {
       const cell = ruleFor(convention, convention.cell)
       expect(cell, convention.id).toBeDefined()
-      expect(cell?.anchor).toBe('cell')
+      /* The cell slot's *footprint* is the cell and its *position* is the
+         residual, and those are not in tension: `offsets.ts#cellExtentOf` reads
+         the fill's tagged extent as the cell and `residualBox` subtracts the
+         walls from it. An `s2w` floor is tagged at the size of its tile and
+         measures 0.5 less per walled axis, so the two readings are the two
+         truths the tag conflates. */
+      expect(cell?.anchor, convention.id).toBe('residual')
     })
-    /* `floor` on all four, and measured rather than chosen: the `floor` slot's
+    /* `floor` on all three, and measured rather than chosen: the `floor` slot's
        candidates are rect on 2,996 of 2,996 files where the `base` slot's 25
        footprints include five `wall` runs. `corpus.test.ts` recomputes both. */
-    expect(SLOT_CONVENTIONS.map((convention) => convention.cell)).toEqual([
-      'floor',
-      'floor',
-      'floor',
-      'floor',
-    ])
+    expect(SLOT_CONVENTIONS.map((convention) => convention.cell)).toEqual(['floor', 'floor', 'floor'])
   })
 
   it('rests every slot on the ground through exactly one root', () => {
@@ -248,16 +240,33 @@ describe('each convention, as a property rather than a table', () => {
     })
   })
 
-  it('ignores the side of every cell anchor by keeping it 0', () => {
+  it('ignores the side of every whole-cell anchor by keeping it 0', () => {
     each((convention) => {
       for (const slot of convention.slots) {
-        if (slot.anchor === 'cell') expect(slot.side, `${convention.id}/${slot.part}`).toBe(0)
+        /* `cell` and `residual` are both stated against the whole cell rather
+           than against one face, so neither reads its side and both must carry
+           0 — a non-zero side on one of them would be a number with no meaning
+           that a later reader could mistake for one. */
+        if (slot.anchor === 'cell' || slot.anchor === 'residual') {
+          expect(slot.side, `${convention.id}/${slot.part}`).toBe(0)
+        }
       }
     })
   })
+
+  it('leaves the internal corner’s residual equal to its cell, having no edge to subtract', () => {
+    /* Why one anchor covers all three rather than the internal corner keeping
+       `cell` as an exception. A residual is the cell less what the `edge` slots
+       take, this convention has no `edge` slot, so the subtraction is empty and
+       the floor gets the whole cell — which is the right answer for a piece whose
+       18 candidates are all `rect 2x2` with the column's square cut out of the
+       run rather than off an edge. `offsets.test.ts` measures the identity on the
+       arithmetic; this is the structural fact underneath it. */
+    expect(INTERNAL_CORNER.slots.filter((slot) => slot.anchor === 'edge')).toEqual([])
+  })
 })
 
-describe('the corner conventions and the corridor, where the sides are not free', () => {
+describe('the corner conventions, where the sides are not free', () => {
   const edgesOf = (convention: SlotConvention): readonly SlotRule[] =>
     convention.slots.filter((slot) => slot.anchor === 'edge')
   const cornersOf = (convention: SlotConvention): readonly SlotRule[] =>
@@ -303,41 +312,15 @@ describe('the corner conventions and the corridor, where the sides are not free'
     expect(cornersOf(WALL_ON_TILE)).toEqual([])
   })
 
-  it('puts the corridor’s two walls on **opposite** faces, which is what makes it not a corner', () => {
-    /* Row **E3**'s one assertion the other three conventions do not need. A gap
-       of 1 or 3 is {@link EXTERNAL_CORNER} without its column — adjacent walls
-       meeting at a mitre nobody has measured — and a gap of 0 is two walls on one
-       face. Two quarter-turns is the shape, and the *only* shape. */
-    const [right, left] = edgesOf(CORRIDOR)
-    expect(right?.part).toBe('right wall')
-    expect(left?.part).toBe('left wall')
-    expect(((left?.side ?? 0) - (right?.side ?? 0) + 4) % 4).toBe(2)
-
-    /* And it has no `corner` slot at all, which is why it needs none of the
-       repair `offsets.ts#cornerReservation` wants for a face flanked by two
-       corners: with no corner-anchored sibling the reservation is 0 on all four
-       faces, exactly as it is on all 40 `wall-on-tile` edges. */
-    expect(cornersOf(CORRIDOR)).toEqual([])
-  })
-
-  it('keeps the corridor’s chirality consistent with the external corner’s', () => {
-    /* Which of the two walls is *right* is the one positional thing the corpus
-       carries — `shape|corner|right` / `left`, 133 tiles each — and it carries a
-       mirror class rather than a mapping to a face. So the assignment is authored,
-       and the only thing available to be consistent with is the convention that
-       already made it: `right wall` takes side 0 on both. */
-    const [cornerRight] = edgesOf(EXTERNAL_CORNER)
-    const [corridorRight] = edgesOf(CORRIDOR)
-    expect(cornerRight?.part).toBe('right wall')
-    expect(corridorRight?.part).toBe('right wall')
-    expect(corridorRight?.side).toBe(cornerRight?.side)
-  })
-
-  it('is the only convention whose two edges eat one axis', () => {
-    /* The property `offsets.ts`'s `no-walk` doubt exists for, stated where the
-       conventions are: an opposed pair of edges takes from the same axis of the
-       cell, and until the corridor no layout had one. This is also why **0 of the
-       1,215 walked combinations of the 40 fixtures** can reach that doubt. */
+  it('has no convention whose two edges eat one axis, which is why no-walk is unreachable', () => {
+    /* The property `offsets.ts`'s `no-walk` doubt was written for, stated where
+       the conventions are. Row E3's corridor was the one layout with an opposed
+       pair of edges — two walls taking from the same axis of the cell — and with
+       it withdrawn no convention has one. The doubt is *not* dead code: the
+       residual is now checked on both axes for every convention, so a single wall
+       as deep as its own cell reaches it too — and one of the 1,215 walked
+       combinations of the 40 does, which E3's pairing could not see.
+       `corpus.test.ts` names it. What is gone is the *opposed* case. */
     const opposedPairs = (convention: SlotConvention): number => {
       const sides = new Set(edgesOf(convention).map((slot) => slot.side))
       return [
@@ -345,6 +328,6 @@ describe('the corner conventions and the corridor, where the sides are not free'
         [1, 3],
       ].filter(([a, b]) => sides.has(a as SlotSide) && sides.has(b as SlotSide)).length
     }
-    expect(SLOT_CONVENTIONS.map(opposedPairs)).toEqual([0, 0, 0, 1])
+    expect(SLOT_CONVENTIONS.map(opposedPairs)).toEqual([0, 0, 0])
   })
 })

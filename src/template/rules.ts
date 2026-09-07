@@ -52,16 +52,15 @@
  * `src/builder/three/place.ts` — *"nothing in the data links the STL's second
  * axis to the plan's depth direction … so the tile takes a canonical
  * orientation"*. Edge assignment is a **builder convention**, and
- * {@link SLOT_CONVENTIONS} is where this project writes its four down — three
- * read off the 40 shipped fixtures and, since row **E3**, one
- * ({@link CORRIDOR}) that no fixture asks for.
+ * {@link SLOT_CONVENTIONS} is where this project writes its three down, all
+ * three read off the 40 shipped fixtures.
  *
  * ## 80 of 128 parts need no authoring; the other 48 need three decisions
  *
  * | slot | parts | derivation | verdict |
  * | --- | ---: | --- | --- |
  * | `base` | 40 | every candidate is `layer === 'base'` → anchor `cell`, side 0, on the ground | **derived** |
- * | `floor` | 40 | every candidate is a `topper` whose `kinds` include `floor` → anchor `cell`, side 0, resting on the base | **derived** |
+ * | `floor` | 40 | every candidate is an `s2w` `topper` whose `kinds` include `floor` → anchor `residual`, side 0, resting on the base | **derived** |
  * | `wall` | 32 | nothing | **authored** (1 decision) |
  * | `column` | 8 | one footprint on 8 of 8, and `size|column_shape|L` types the junction as `corner` — which fixes the rotation up to the cell's 4-fold symmetry and not further | **authored** (1 decision) |
  * | `right wall` + `left wall` | 8 | chirality only | **authored** (1 decision) |
@@ -83,7 +82,7 @@
  * business; this module only needs the two facts that make the `base` anchor
  * derivable, and both hold under either spelling.
  *
- * ## Why there are four rules and not a 135-row table
+ * ## Why there are three rules and not a 135-row table
  *
  * A 128-row table is the same information with 125 more places to disagree with
  * itself, and it costs bytes nobody needs to spend. Measured with
@@ -137,19 +136,68 @@
 export type SlotName = string
 
 /**
- * Which face or corner of a template's own cell a slot is anchored to.
+ * Which face, corner or remainder of a template's own cell a slot is anchored
+ * to.
  *
- *   - `cell` — the slot fills the template's footprint. 80 of 128 parts, and
+ *   - `cell` — the slot fills the template's footprint. The 40 `base` slots, and
  *     the only anchor that needs no authored side.
  *   - `edge` — the slot runs along one face, flush to it and centred across it.
  *     40 parts.
  *   - `corner` — the slot occupies the square where two faces meet. 8 parts, all
  *     of them `column`, all with exactly one footprint.
+ *   - `residual` — the slot fills **what the `edge` slots leave**. The 40 `floor`
+ *     slots. Like `cell` it needs no side, because it is defined against all four
+ *     faces at once.
  *
  * Not a coordinate, for the reason in the module docblock: the offset is
  * arithmetic over the fill's own footprint and the offset is what varies.
+ *
+ * ## Why the floor is `residual` and not `cell`, and the meshes that settled it
+ *
+ * A `cell`-anchored floor was **wrong on every one of the 36 wall and corner
+ * recipes**, and it was wrong in a way no test could see: 4 of the 128 parts have
+ * even one candidate with a measured bounding box, so nothing ever held the
+ * tagged footprint and the real mesh in memory at once.
+ *
+ * Every floor slot of every one of the 40 requires `build|s2w`, and **an `s2w`
+ * floor is the tile minus the strip its separately printed wall stands on.**
+ * Measured in `tools/measure/measurements.json`, the seven `s2w` floors the
+ * archive has read:
+ *
+ * | file | tagged | mesh | mesh spans |
+ * | --- | --- | --- | --- |
+ * | `…#floor+s2w+curved.2x2` | 2 × 2 | **1.5 × 1.5** | [0, 1.5]² |
+ * | `…#floor+s2w+curved.4x4` | 4 × 4 | **3.5 × 3.5** | [0, 3.5]² |
+ * | `…#floor+s2w+curved+inverted.4x4` | 4 × 4 | **3.5 × 3.5** | [0.5, 4]² |
+ *
+ * Exactly 0.5 short per walled axis, and authored *in place* in the nominal cell.
+ * The tag cannot say so — `size|width|2 + size|depth|2` is the **tile**, which is
+ * the right answer for where the piece sits on the grid and the wrong one for
+ * where the slab sits inside it — so a `cell` anchor gave the floor the whole
+ * 2 × 2, and `place.ts` (*"the mesh is centred on the footprint box"*) then
+ * centred the 1.5 slab in it: a quarter unit under each wall and a quarter unit
+ * short of each open edge. That is the defect the project owner reported.
+ *
+ * **The residual needs no measurement of its own.** It is the cell, from the
+ * floor's own tag, minus the depth each `edge` slot takes off the face it is
+ * anchored to, from that wall's own footprint. On a 2 × 2 corner with two
+ * half-unit walls that is 1.5 × 1.5 and on a 4 × 4 it is 3.5 × 3.5 — the measured
+ * numbers above, reproduced rather than assumed. `corpus.test.ts` joins all seven
+ * measured `s2w` floors to the sidecar and finds the residual reproduces **5 of
+ * 7 to within 0.001 units**; the two that do not are the `…+curved+inverted.2x2`
+ * pair, whose outer edge is a chord rather than a face, so their bounding box
+ * corner is cut on the diagonal at 0.5/√2 = 0.354 and reads 1.646 against the
+ * residual's 1.5. That is the curve's own sagitta and not a disagreement about
+ * where the wall goes — and it is a quarter of what the `cell` anchor was wrong
+ * by.
+ *
+ * It also makes the template a **tiling** for the first time. Under `cell` the
+ * floor's box overlapped every wall and the union test passed only because the
+ * floor covered the cell on its own; under `residual` the floor and the walls are
+ * pairwise disjoint and sum to exactly the cell, which is a far stronger claim
+ * and the one `offsets.test.ts` now makes.
  */
-export type SlotAnchor = 'cell' | 'edge' | 'corner'
+export type SlotAnchor = 'cell' | 'edge' | 'corner' | 'residual'
 
 /**
  * Which quarter-turn of the template's reference face a slot is anchored to.
@@ -161,8 +209,9 @@ export type SlotAnchor = 'cell' | 'edge' | 'corner'
  * `(−z, x)`), so `side * 90` composes with a placement's own rotation by
  * addition and nothing else.
  *
- * Ignored when the anchor is `cell`, and 0 on every `cell` rule so that one
- * formula covers all three anchors.
+ * Ignored when the anchor is `cell` or `residual` — both are defined against the
+ * whole cell rather than against one face — and 0 on every such rule so that one
+ * formula covers all four anchors.
  */
 export type SlotSide = 0 | 1 | 2 | 3
 
@@ -220,15 +269,15 @@ export interface TemplateLayout {
 /**
  * One authored convention: a part-name set and the layout it implies.
  *
- * Three of them covered the 40 shipped fixtures and row **E3** added a fourth
- * for the corridor, which is the first layout in this project with two walls on
- * **opposite** faces. Each one is a *decision with no measurement behind it* —
- * the module docblock's second section — so each carries the reasoning that
- * constrains it below.
+ * Three of them, and they cover the 40 shipped fixtures exactly. Each one is a
+ * *decision with no measurement behind it* — the module docblock's second
+ * section — so each carries the reasoning that constrains it below. The one
+ * thing that is not a decision is where the floor goes: {@link SlotAnchor}'s
+ * `residual` is derived, and the meshes in its docblock check it.
  */
 export interface SlotConvention extends TemplateLayout {
   /** Stable, and safe in a test name or a disclosure string. */
-  readonly id: 'wall-on-tile' | 'external-corner' | 'internal-corner' | 'corridor'
+  readonly id: 'wall-on-tile' | 'external-corner' | 'internal-corner'
   /** The part-name set this convention is keyed on, sorted. */
   readonly parts: readonly SlotName[]
 }
@@ -281,7 +330,7 @@ export const WALL_ON_TILE: SlotConvention = {
   cell: 'floor',
   slots: [
     { part: 'base', anchor: 'cell', side: 0, restsOn: null },
-    { part: 'floor', anchor: 'cell', side: 0, restsOn: 'base' },
+    { part: 'floor', anchor: 'residual', side: 0, restsOn: 'base' },
     { part: 'wall', anchor: 'edge', side: 0, restsOn: 'base' },
   ],
 }
@@ -316,7 +365,7 @@ export const EXTERNAL_CORNER: SlotConvention = {
   cell: 'floor',
   slots: [
     { part: 'base', anchor: 'cell', side: 0, restsOn: null },
-    { part: 'floor', anchor: 'cell', side: 0, restsOn: 'base' },
+    { part: 'floor', anchor: 'residual', side: 0, restsOn: 'base' },
     { part: 'right wall', anchor: 'edge', side: 0, restsOn: 'base' },
     { part: 'left wall', anchor: 'edge', side: 3, restsOn: 'base' },
     { part: 'column', anchor: 'corner', side: 0, restsOn: 'base' },
@@ -343,6 +392,16 @@ export const EXTERNAL_CORNER: SlotConvention = {
  * With no wall part there is no closure to check, so all **38** walked
  * combinations of these four recipes are `undecidable` rather than closing, and
  * `offsets.ts` reports them as such rather than passing them as fits.
+ *
+ * **Its floor is `residual` like the other two, and on this convention that is
+ * provably the same thing as `cell`.** A residual is the cell minus what the
+ * `edge` slots take, and this convention has no `edge` slot, so the subtraction
+ * is empty: the floor gets the whole cell, which is the right answer for a piece
+ * whose 18 candidates are all `rect 2x2` with the column's square cut out of the
+ * middle of the run rather than off an edge. Written as one anchor across all
+ * three rather than as an exception, because an exception would have to be
+ * justified per convention and the identity does not: `rules.test.ts` asserts it
+ * instead of restating it.
  */
 export const INTERNAL_CORNER: SlotConvention = {
   id: 'internal-corner',
@@ -350,73 +409,25 @@ export const INTERNAL_CORNER: SlotConvention = {
   cell: 'floor',
   slots: [
     { part: 'base', anchor: 'cell', side: 0, restsOn: null },
-    { part: 'floor', anchor: 'cell', side: 0, restsOn: 'base' },
+    { part: 'floor', anchor: 'residual', side: 0, restsOn: 'base' },
     { part: 'column', anchor: 'corner', side: 2, restsOn: 'base' },
   ],
 }
 
 /**
- * **Authored convention 4 of 4 — the corridor, authored in this repo.**
+ * The three, in the order they cover the 40 shipped fixtures — 96 parts, then 20,
+ * then 12.
  *
- * `base`, `floor`, `left wall`, `right wall`. Two walls on **opposite** faces, no
- * column and no mitre — which is the whole reason it is cheap, and the one thing
- * that makes it not a corner. Row **E3**; `pipeline/authored.ts` carries the
- * predicate and `docs/assembly-candidates.md` §3 the enumeration it came from.
- *
- * **The first three conventions were read off 40 shipped fixtures. This one has
- * no fixture at all**, so it is authored twice over: the layout here and the slot
- * predicate beside it. What constrains it:
- *
- *   - **Sides 0 and 2, and nothing else.** Two quarter-turns apart is the
- *     definition of the shape; at a gap of 1 or 3 it is
- *     {@link EXTERNAL_CORNER} without its column, and `rules.test.ts` asserts the
- *     opposition rather than restating the numbers. `cornerReservation` correctly
- *     returns **0 on all four faces** — there is no `corner`-anchored slot to
- *     reserve anything — so this convention needs none of the repair
- *     `offsets.ts#cornerReservation` wants for a face flanked by two corners
- *     (D10 §3.4), and does not wait on it.
- *   - **`right wall` takes side 0 and `left wall` side 2**, which is
- *     {@link EXTERNAL_CORNER}'s assignment kept: chirality is the one positional
- *     thing the corpus carries and it carries a mirror class, not a mapping to a
- *     face, so keeping the two conventions consistent is the only thing available
- *     to be consistent with.
- *   - **Both walls rest on the `base`**, as every wall in every convention does,
- *     for the two reasons {@link WALL_ON_TILE} gives.
- *   - **`floor` is the cell**, as on all four. Measured on this shape:
- *     `cellExtentOf` refuses a non-`rect` fill, and 272 of the 1,496 floors the
- *     slot admits are non-`rect` — so the refusal is what keeps 163 `{shape:none}`
- *     floors from being read as a cell they have not got.
- *   - **Two slots eat the same axis, which is new.** The walls are pinned to the
- *     two `z` faces, so they consume one unit of the cell's **depth** between
- *     them. On a 1-deep cell they meet and the piece is solid stone — and
- *     `placeTemplateSlots` calls it `closes`, correctly, because it proves that
- *     parts do not overlap and that they cover the cell and has never had to
- *     prove that anything is left to walk on. 270 rect floors over 187 designs
- *     are that case. `offsets.ts`'s `no-walk` doubt is the convention-level answer
- *     and the slot's `deny size|depth|1` is the predicate-level one; both ship,
- *     and `corpus.test.ts` measures each with the other removed.
- *
- * Drawn through the canvas's own arithmetic on a 2 x 2 cell with two 2-unit
- * walls: `base` and `floor` at x ∈ [0, 2] z ∈ [0, 2], `right wall` at
- * x ∈ [0, 2] z ∈ [0, 0.5], `left wall` at x ∈ [0, 2] z ∈ [1.5, 2]. Zero
- * overlapping pairs, nothing outside the cell, union = cell, area **4.00
- * units²** — row A10's rigid body, and `offsets.test.ts` recomputes it.
- */
-export const CORRIDOR: SlotConvention = {
-  id: 'corridor',
-  parts: ['base', 'floor', 'left wall', 'right wall'],
-  cell: 'floor',
-  slots: [
-    { part: 'base', anchor: 'cell', side: 0, restsOn: null },
-    { part: 'floor', anchor: 'cell', side: 0, restsOn: 'base' },
-    { part: 'right wall', anchor: 'edge', side: 0, restsOn: 'base' },
-    { part: 'left wall', anchor: 'edge', side: 2, restsOn: 'base' },
-  ],
-}
-
-/**
- * The four, the first three in the order they cover the 40 shipped fixtures — 96
- * parts, then 20, then 12 — and the corridor last, which covers none of them.
+ * **A fourth was here and has been withdrawn.** Row E3's `CORRIDOR` put two walls
+ * on opposite faces, and it could only ever be filled by a floor that covers the
+ * whole cell: a corridor's floor has to be 0.5 short on each of two *opposed*
+ * faces, and the archive's entire `s2w` floor vocabulary is `wall` (one face, 88
+ * records), `corner` (two adjacent, 41), `internal_corner` (18), `curved` (17)
+ * and 12 bare — **not one of the five is inset on two opposed faces.** So the
+ * convention was expressible only against the widened floor slot that
+ * `pipeline/authored.ts` shipped alongside it, and that slot is the defect this
+ * change removes. An s2w corridor is two `wall-on-tile` cells side by side, not
+ * one recipe.
  *
  * There is deliberately no fallback entry. A part-name set with no convention is
  * a template this project cannot lay out, and the honest answer is
@@ -429,7 +440,6 @@ export const SLOT_CONVENTIONS: readonly SlotConvention[] = [
   WALL_ON_TILE,
   EXTERNAL_CORNER,
   INTERNAL_CORNER,
-  CORRIDOR,
 ]
 
 const BY_PARTS = new Map<string, SlotConvention>(

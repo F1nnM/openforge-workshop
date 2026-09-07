@@ -1,5 +1,23 @@
 # Every assembly worth hand-authoring, enumerated and priced
 
+> **Superseded. Both recommendations shipped as #136 and were withdrawn by #143.** The
+> measurements below stand — every count is reproducible against the pinned index — but the
+> **decision** they lead to is wrong, and the reason is a fact this document never measured: an
+> `s2w` floor is the tile *minus* the strip its separately printed wall stands on, so it measures
+> 0.5 less on each walled axis than its `size|width` / `size|depth` tags say
+> (`…#floor+s2w+curved.2x2` is **1.5 × 1.5**, the `4x4` is **3.5 × 3.5**).
+>
+> Every floor slot of every one of the 40 requires `build|s2w` for that reason. §1's recommended
+> edit lifts it, so the widened slot admits floors that fill the whole cell while the walls stand
+> beside them — and §3's corridor needs a floor 0.5 short on two *opposed* faces, which the archive
+> does not contain in any of its five `s2w` floor kinds. `src/template/rules.ts#SlotAnchor` and
+> `#SLOT_CONVENTIONS` carry the measurement and the withdrawal;
+> `docs/templates-plan.md` §7 carries the history.
+>
+> Read this document as *"what the floor axis looks like if the floor is a full tile"* — which is
+> what §4's nesting finding is really about, and which is still true of a floor slot that does not
+> stand walls beside its fill.
+
 **Row D10 — measurement. Seventeen candidates enumerated across three tiers, and the recommendation
 is one edit to one existing fixture.** The row authors nothing: no fixture, no fourth layout
 convention, no regenerated template module.
