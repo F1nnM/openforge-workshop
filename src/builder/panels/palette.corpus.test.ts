@@ -66,7 +66,7 @@ import {
   positionOf,
 } from './families'
 import { armForTags, armNameForTags, armRefusalFor, familyName, familySlug } from './familyKey'
-import { candidateCount } from './palette'
+import { candidateCount, paletteSections, rankFamilies } from './palette'
 
 
 const CATALOG_PATH =
@@ -261,7 +261,7 @@ describeCorpus('the palette lists 87 templates and can arm every one of them', (
     expect(items.filter((item) => ids.has(item.design)).map((item) => item.name)).toEqual([])
   })
 
-  it('groups the 47 by role in the order the corpus puts them', () => {
+  it('groups the 47 single tiles by role in the order the corpus puts them', () => {
     const records51 = new Map<string, number>()
     for (const record of records) {
       const role = resolveTags(loaded!, record).find((tag) => tag.startsWith('role|'))?.slice(5)
@@ -286,9 +286,112 @@ describeCorpus('the palette lists 87 templates and can arm every one of them', (
     const counts = GROUP_ORDER.map(
       (key) => TEMPLATE_FAMILIES.filter((family) => family.group === key).length,
     )
-    expect(counts).toEqual([17, 15, 2, 6, 3, 2, 1, 1, 40])
+    expect(counts).toEqual([17, 15, 2, 6, 3, 2, 1, 1])
     // No `insert` group, although 285 records carry the role: `SKIPPED_ROLES`.
     expect(GROUP_ORDER).not.toContain('insert')
+    // And **no ninth group for the 40 assemblies** — row D2 made the kind of
+    // thing a row is a section rather than a group, so they carry no role and no
+    // group at all. `GROUP_ORDER` covers the single tiles exactly.
+    expect(TEMPLATE_FAMILIES.filter((family) => family.group === undefined)).toHaveLength(40)
+    expect(counts.reduce((total, one) => total + one, 0)).toBe(47)
+  })
+})
+
+/* ------------------------------------- 4b. what the owner's own query returns */
+
+/**
+ * Row **D2**, against the shipped corpus rather than the nine-item fixture.
+ *
+ * The defect was a *palette* defect and the numbers behind it are all in the
+ * generated template module, so these are measurements of the real 87 rows: how
+ * many of them the word *corner* reaches, which kinds they are, and where the
+ * assembly the owner described lands once the section and the ranking are
+ * applied. The brief for this row said eleven one-slot rows contain the word; it
+ * was sixteen when D2 measured it and is **fourteen** now that row D1 has
+ * dropped the two corner families whose whole population was bases
+ * (`Wall: Corner (Separate Wall)` and `Wall: Internal Corner (S2W)`). The first
+ * assertion is the measured figure, whatever it is.
+ */
+describeCorpus('the query the owner ran', () => {
+  const ASSEMBLY = 'S2W: Wall on Tile: Corner (Any, Single Piece)'
+
+  it('reaches 14 one-slot rows and 8 assemblies, not the 11 the brief claimed', () => {
+    const corner = TEMPLATE_FAMILIES.filter((family) =>
+      [family.name, family.role, family.form, family.build]
+        .filter((part) => part !== undefined)
+        .join(' ')
+        .toLowerCase()
+        .replace(/_/g, ' ')
+        .includes('corner'),
+    )
+    expect(corner.filter((family) => family.kind === 'family')).toHaveLength(14)
+    expect(corner.filter((family) => family.kind === 'recipe')).toHaveLength(8)
+    // C1's list was in `GROUP_ORDER`, so all 8 assemblies were below all 14.
+    expect(corner.map((family) => family.kind).lastIndexOf('family')).toBeLessThan(
+      corner.map((family) => family.kind).indexOf('recipe'),
+    )
+  })
+
+  it('puts the 5-slot corner assembly first of all 22', () => {
+    const sections = paletteSections(TEMPLATE_FAMILIES, 'corner')
+    expect(sections.map((section) => section.key)).toEqual(['assemblies', 'tiles'])
+    expect(sections.flatMap((section) => section.rows)[0]?.name).toBe(ASSEMBLY)
+    expect(sections.flatMap((section) => section.rows)).toHaveLength(22)
+
+    // Where it was: row 50 of 87 in the declared order, thirty-eight rows below
+    // the `Wall: Corner (Wall on Tile)` the owner actually found at row 12.
+    expect(TEMPLATE_FAMILIES.findIndex((family) => family.name === ASSEMBLY)).toBe(49)
+    expect(
+      TEMPLATE_FAMILIES.findIndex((family) => family.name === 'Wall: Corner (Wall on Tile)'),
+    ).toBe(11)
+
+    // And it is the one the owner described: a floor, two walls and a column.
+    const assembly = TEMPLATE_FAMILIES.find((family) => family.name === ASSEMBLY)
+    expect(assembly?.template.parts.map((part) => part.name)).toEqual([
+      'column',
+      'right wall',
+      'left wall',
+      'floor',
+      'base',
+    ])
+    expect(assembly?.slots).toBe(5)
+  })
+
+  it('is a ranking and not a preference for the shortest label', () => {
+    // The tiebreak that puts `Corner (Any, …)` above `Corner: Low (…)` is length
+    // normalisation: the qualifier the query did not ask for costs the row. Ask
+    // for it and the order inverts.
+    const low = rankFamilies(
+      TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe'),
+      'corner low',
+    )
+    expect(low[0]?.name).toBe('S2W: Wall on Tile: Corner: Low (Single Piece)')
+  })
+
+  it('reorders nothing at all with an empty query', () => {
+    // Ranking is something a query does. With nothing typed the 40 stay in
+    // fixture order and the 47 in the corpus order §3.1 argued for.
+    expect(rankFamilies(TEMPLATE_FAMILIES, '')).toBe(TEMPLATE_FAMILIES)
+    expect(paletteSections(TEMPLATE_FAMILIES, '').flatMap((section) => section.rows)).toEqual([
+      ...TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe'),
+      ...TEMPLATE_FAMILIES.filter((family) => family.kind === 'family'),
+    ])
+  })
+
+  it('states a slot count no other reading of the template could contradict', () => {
+    // The owner's complaint was a row that claimed one thing and behaved as
+    // another, so the number is `parts.length` and never a count of the parts
+    // that still need a choice — the 20 parts declaring `fulfills` cover a
+    // *nested* blueprint's slots, with no sibling impact.
+    for (const family of TEMPLATE_FAMILIES) {
+      expect(family.slots).toBe(family.template.parts.length)
+    }
+    const slots = TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe').map(
+      (family) => family.slots,
+    )
+    expect([...new Set(slots)].sort()).toEqual([3, 5])
+    expect(slots.filter((count) => count === 5)).toHaveLength(4)
+    expect(slots.filter((count) => count === 3)).toHaveLength(36)
   })
 })
 

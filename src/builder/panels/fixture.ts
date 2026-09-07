@@ -70,7 +70,7 @@ const TAGS = [
   /* Row C1's axes. The palette's rows are B4's generated families, keyed on
      `(role, form, build)`, and its right-hand number is what `@/composition`
      admits for that key — so a fixture with no `role|` tag makes every one of
-     the 91 rows count zero and the panel's numbers untestable. Two roles, one
+     the palette's rows count zero and the panel's numbers untestable. Two roles, one
      form and two size pairs is the smallest set that gives three families a
      non-zero count and one family a size position that narrows. */
   'role|floor',

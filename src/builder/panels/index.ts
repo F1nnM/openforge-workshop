@@ -53,22 +53,36 @@ export type {
 export {
   ALL_FACETS,
   MAX_RECENT,
+  SECTION_LABEL,
   candidateCount,
   createCounter,
   filterFamilies,
   forgetRecentFamilies,
   groupFamilies,
   matchesQuery,
+  paletteSections,
   queryTokens,
+  rankFamilies,
   reachableFacets,
   recentArms,
   rememberArm,
+  rowScore,
 } from './palette'
-export type { CandidateCounter, PaletteFacets, PaletteGroup, RecentArm } from './palette'
+export type {
+  CandidateCounter,
+  PaletteFacets,
+  PaletteGroup,
+  PaletteSection,
+  RecentArm,
+  SectionKey,
+} from './palette'
 
-/* Row C1's family model. `PLACEABLE_TEMPLATES` is the list a recipe table must
-   be built from now that the palette arms all 87 — see its own docblock, and
-   this row's report, for what happens to a placement whose id is not in it. */
+/* Row C1's family model, with row D2's two kinds. `PLACEABLE_TEMPLATES` is the
+   list a recipe table must be built from now that the palette arms all 87 — see
+   its own docblock, and C1's report, for what happens to a placement whose id is
+   not in it; it still holds all 87, because splitting the *palette* into two
+   sections splits nothing the resolver looks up. `GROUP_ORDER` is the eight
+   single-tile groups: an assembly has no role and therefore no group. */
 export {
   ANY_SIZE_LABEL,
   GROUP_LABEL,
