@@ -215,6 +215,18 @@
   max-width: calc(100% - 2 * var(--of-stage-gutter));
 }
 
+/* Row **D6** put a *third* control in this band — the room design toggle, beside
+   `PlanToolbar` and the lock toggle — and the two rules above are what make that
+   safe without new geometry. `flex-wrap: wrap` plus the gutter cap means a row
+   too wide for the band wraps to a second line **inside** the gutter rather than
+   spilling under a side plate, so the arithmetic guarantee is unchanged and what
+   a third occupant costs is vertical: about one control's height of drawing, at
+   the stage widths where the row no longer fits on one line. That is the right
+   direction to fail in — row L1's measured defect in this band was a control
+   painted over and unclickable, not a control on a second line — and it is the
+   honest limit of what can be claimed from here: jsdom reports every element as
+   0 x 0, so no test in the repo can tell which stage widths now wrap. */
+
 /* Below about a 600px stage the band cannot hold the toolbar between the two
    plates however the gutter is divided, because `PlanToolbar`'s `Place / Erase /
    Move` toggle is a segmented control that will not shrink below its own text.
