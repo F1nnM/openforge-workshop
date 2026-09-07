@@ -83,7 +83,7 @@ export type {
   GeneratedArchiveMesh,
   GeneratedArchiveSection,
 } from './plan'
-export { EmptyArchiveError, GENERATED_PREFIX, GeneratedDigestCollisionError, buildArchivePlan } from './plan'
+export { EmptyArchiveError, GENERATED_PREFIX, GeneratedDigestCollisionError, buildArchivePlan, defaultFilename } from './plan'
 
 export type { SaveEnvironment, SaveFileHandle, SaveFilePickerOptions, SaveResult, SaveVia, ShowSaveFilePicker } from './save'
 export {
