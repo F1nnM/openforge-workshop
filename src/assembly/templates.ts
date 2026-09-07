@@ -24,12 +24,12 @@
  * measured at +1,260 B brotli and declined. Every ref the families emit is a tag
  * the corpus already carries, so the index gains 0 B and the tag table stays at 930
  * strings. The reason both live in the bundle is that the recipe list is the one
- * part of this screen that renders before the index lands.
+ * part of the builder’s palette that renders before the index lands.
  *
  * 40 templates over 20 fixture files, 128 parts.
  * 47 generated families over 8417 records, 303 size positions.
  */
-import type { RecipeTemplate } from './assembly'
+import type { RecipeTemplate } from './recipeWalk'
 
 export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
   {

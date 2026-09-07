@@ -663,11 +663,11 @@ export function groupKindOf(kinds: readonly string[]): string {
  * median tile is 10.36 MB and p95 is 32.89 MB, so sixty saved walls is
  * comfortably past a gigabyte and `1640.0 MB` is a number a reader has to
  * convert before it means anything. The unit is therefore chosen from the value,
- * which is the same call — and the same reasoning — as
- * `src/screens/landing/stats.ts#formatBytes`; not shared with that one either,
- * because it rounds MB to whole numbers, which is right for a 108 GB corpus
- * figure and wrong for a three-item total reading `29 MB` beside cards that show
- * a decimal.
+ * which was the same call — and the same reasoning — as the landing screen's own
+ * `formatBytes`, deleted with that screen by the sidebar row; it was never shared
+ * with this one, because it rounded MB to whole numbers, which is right for a
+ * 108 GB corpus figure and wrong for a three-item total reading `29 MB` beside
+ * cards that show a decimal.
  *
  * Decimal units (10⁶, 10⁹) throughout, matching every other size in the app and
  * what the OS reports for the same file.

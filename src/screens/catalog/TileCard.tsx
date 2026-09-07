@@ -119,7 +119,7 @@ export function TileCard({ item, preview, tags, assets, sheet }: TileCardProps) 
         handed to a param expecting an ordinal — an aggregate can split, and a
         link that persisted a derived grouping's identity would rot.
       */}
-      <Link className="of-card-open" to="/catalog" search={(prev) => ({ ...prev, tile: preview.ord })}>
+      <Link className="of-card-open" to="/" search={(prev) => ({ ...prev, tile: preview.ord })}>
         {/*
           `material.material` is the same resolution the swatch below uses, so
           the dot and the tint cannot disagree about what this tile is made of —

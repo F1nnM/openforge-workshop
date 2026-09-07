@@ -34,7 +34,6 @@ import { CatalogFile as CatalogFileSchema, buildAggregateIndex } from '@/catalog
 import { createWorkshopRouter } from '@/routes'
 import type { CatalogSearch } from '@/search'
 import { clearPersistedWorkshopState, resetWorkshop, setLockSystem } from '@/store'
-import { CatalogStatsProvider } from '@/ui/shell'
 import { resetCatalogIndexCache } from '@/ui/shell'
 
 import { resetCatalogSearchIndex } from './catalogIndex'
@@ -68,16 +67,14 @@ function stubFetch(): void {
   )
 }
 
-async function renderCatalog(path = '/catalog') {
+async function renderCatalog(path = '/') {
   window.scrollTo = () => undefined
 
   const router = createWorkshopRouter({ history: createMemoryHistory({ initialEntries: [path] }) })
   const result = render(
-    <CatalogStatsProvider value={null}>
-      <VirtuosoGridMockContext.Provider value={VIEWPORT}>
-        <RouterProvider router={router} />
-      </VirtuosoGridMockContext.Provider>
-    </CatalogStatsProvider>,
+    <VirtuosoGridMockContext.Provider value={VIEWPORT}>
+      <RouterProvider router={router} />
+    </VirtuosoGridMockContext.Provider>,
   )
 
   await act(async () => {
@@ -186,7 +183,7 @@ describe('facet state comes from the URL', () => {
   })
 
   it('applies a multi-select kind filter from the URL', async () => {
-    await renderCatalog('/catalog?kinds=wall')
+    await renderCatalog('/?kinds=wall')
 
     // Three tiles are in the `wall` bucket, one of them in `floor` as well.
     expect(cardTitles()).toEqual([FIXTURE_NAMES[1], FIXTURE_NAMES[2], FIXTURE_NAMES[3]])
@@ -196,7 +193,7 @@ describe('facet state comes from the URL', () => {
   })
 
   it('ORs two values of one facet rather than intersecting them', async () => {
-    await renderCatalog('/catalog?kinds=base~floor')
+    await renderCatalog('/?kinds=base~floor')
 
     expect(cardTitles()).toEqual([FIXTURE_NAMES[0], FIXTURE_NAMES[3], FIXTURE_NAMES[5]])
     expect(facet('Component', 'Bases')).toBeChecked()
@@ -204,7 +201,7 @@ describe('facet state comes from the URL', () => {
   })
 
   it('matches a texture root by prefix, including its deeper paths', async () => {
-    await renderCatalog('/catalog?tex=dungeon_stone')
+    await renderCatalog('/?tex=dungeon_stone')
 
     // Record 1 carries only `texture|dungeon_stone|eroded`, never the bare root.
     expect(cardTitles()).toContain(FIXTURE_NAMES[1])
@@ -212,7 +209,7 @@ describe('facet state comes from the URL', () => {
   })
 
   it('treats an absent build tag as a filter value', async () => {
-    await renderCatalog('/catalog?build=%21none')
+    await renderCatalog('/?build=%21none')
 
     expect(cardTitles()).toEqual([FIXTURE_NAMES[2], FIXTURE_NAMES[4]])
     expect(facet('Build system', 'Unspecified')).toBeChecked()
@@ -220,13 +217,13 @@ describe('facet state comes from the URL', () => {
   })
 
   it('surfaces the tiles in no kind bucket under "Other"', async () => {
-    await renderCatalog('/catalog?kinds=%21other')
+    await renderCatalog('/?kinds=%21other')
 
     expect(cardTitles()).toEqual([FIXTURE_NAMES[4]])
   })
 
   it('degrades a rotted filter to an empty result with a control that clears it', async () => {
-    await renderCatalog('/catalog?kinds=nonsense')
+    await renderCatalog('/?kinds=nonsense')
 
     expect(cardTitles()).toHaveLength(0)
     // The unknown value still gets a bucket, so the filter narrowing the results
@@ -240,7 +237,7 @@ describe('facet state comes from the URL', () => {
 
 describe('facet counts are live and disjunctive', () => {
   it('does not zero a facet’s siblings when one of its values is selected', async () => {
-    await renderCatalog('/catalog?tex=dungeon_stone')
+    await renderCatalog('/?tex=dungeon_stone')
 
     // The texture facet's own counts are computed with the texture filter
     // excluded, so its siblings still say what selecting them would yield.
@@ -250,7 +247,7 @@ describe('facet counts are live and disjunctive', () => {
   })
 
   it('narrows the other facets’ counts, which is the half that must not be disjunctive', async () => {
-    await renderCatalog('/catalog?tex=cave')
+    await renderCatalog('/?tex=cave')
 
     // Only the cave corner wall survives, so `wall` is the only live kind.
     expect(facetCount('Component', 'Walls')).toBe(1)
@@ -259,7 +256,7 @@ describe('facet counts are live and disjunctive', () => {
   })
 
   it('counts the corpus, not the result set, on the clear-facet row', async () => {
-    await renderCatalog('/catalog?kinds=wall')
+    await renderCatalog('/?kinds=wall')
 
     const all = within(group('Component')).getByRole('button', { name: /All components/ })
     expect(all).toHaveTextContent('6')
@@ -316,7 +313,7 @@ describe('the sidebar writes the URL', () => {
   })
 
   it('clears everything from the "Clear filters" button', async () => {
-    const { router } = await renderCatalog('/catalog?kinds=wall&tex=cave')
+    const { router } = await renderCatalog('/?kinds=wall&tex=cave')
 
     fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }))
 
@@ -366,7 +363,7 @@ describe('the search field', () => {
   })
 
   it('follows the URL when the query changes from outside the field', async () => {
-    const { router } = await renderCatalog('/catalog?q=cave')
+    const { router } = await renderCatalog('/?q=cave')
 
     const input = screen.getByRole('searchbox', { name: 'Search the catalog' })
     expect(input).toHaveValue('cave')
@@ -380,7 +377,7 @@ describe('the search field', () => {
   })
 
   it('renders the contract’s empty state when nothing matches', async () => {
-    await renderCatalog('/catalog?q=nothinglikethis')
+    await renderCatalog('/?q=nothinglikethis')
 
     expect(screen.getByText('Nothing in the organized archive matches.')).toBeInTheDocument()
     expect(
@@ -406,7 +403,7 @@ describe('the card', () => {
   })
 
   it('shows frame 0 of the sprite sheet with explicit dimensions and lazy loading', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     const sheet = document.querySelector<HTMLImageElement>('.of-thumb-sheet')
     expect(sheet).not.toBeNull()
@@ -480,7 +477,7 @@ describe('the card', () => {
   })
 
   it('renders the one tile with no sprite sheet without a broken image', async () => {
-    await renderCatalog('/catalog?kinds=%21other')
+    await renderCatalog('/?kinds=%21other')
 
     expect(screen.getByRole('heading', { level: 2, name: FIXTURE_NAMES[4] })).toBeInTheDocument()
     expect(screen.getByText('no render')).toBeInTheDocument()
@@ -490,27 +487,27 @@ describe('the card', () => {
   })
 
   it('shows the size chip and file size as measured facts', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     expect(screen.getByText('1×3')).toBeInTheDocument()
     expect(screen.getByText('838 KB')).toBeInTheDocument()
   })
 
   it('falls back to the openlock size code when there is no footprint', async () => {
-    await renderCatalog('/catalog?tex=cave')
+    await renderCatalog('/?tex=cave')
 
     expect(screen.getByText('IL')).toBeInTheDocument()
   })
 
   it('links to the tile’s detail drawer by manifest ordinal', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     const link = screen.getByRole('link', { name: FIXTURE_NAMES[5] })
-    expect(link).toHaveAttribute('href', '/catalog?kinds=base&tile=5')
+    expect(link).toHaveAttribute('href', '/?kinds=base&tile=5')
   })
 
   it('links by the preview variant’s ordinal, never by the aggregate’s address', async () => {
-    await renderCatalog('/catalog?tex=wood')
+    await renderCatalog('/?tex=wood')
 
     // Row A4 types `?tile=` as a `ManifestOrdinal` and A1 brands
     // `AggregateAddress` so it cannot be handed to one. The address happens to
@@ -518,7 +515,7 @@ describe('the card', () => {
     // lowest is the only case that can tell the two apart — this one's preview is
     // its only variant, and the assertion is that the number is an `ord` at all.
     const link = screen.getByRole('link', { name: FIXTURE_NAMES[3] })
-    expect(link).toHaveAttribute('href', '/catalog?tex=wood&tile=3')
+    expect(link).toHaveAttribute('href', '/?tex=wood&tile=3')
   })
 })
 
@@ -526,7 +523,7 @@ describe('the card', () => {
 
 describe('a card is an item, not a file', () => {
   it('renders one card for the two files of one design', async () => {
-    await renderCatalog('/catalog?tex=dungeon_stone%7Ceroded')
+    await renderCatalog('/?tex=dungeon_stone%7Ceroded')
 
     // Ord 1 and ord 6 are one design, so they are one card — with one title,
     // not two.
@@ -535,7 +532,7 @@ describe('a card is an item, not a file', () => {
   })
 
   it('states the byte range across the item’s variants, not one file’s size', async () => {
-    await renderCatalog('/catalog?tex=dungeon_stone%7Ceroded')
+    await renderCatalog('/?tex=dungeon_stone%7Ceroded')
 
     // 4.5 MB (the dragonlock print) to 15.9 MB (the topper). One figure here
     // would be an assertion the data does not support: A1 measured the max/min
@@ -544,7 +541,7 @@ describe('a card is an item, not a file', () => {
   })
 
   it('collapses the range to one figure for a single-variant item', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     expect(screen.getByText('838 KB')).toBeInTheDocument()
     expect(document.querySelector('.of-card-bytes')?.textContent).not.toContain('–')
@@ -559,7 +556,7 @@ describe('a card is an item, not a file', () => {
   })
 
   it('drops the file clause when every match is a single file', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     expect(screen.getByRole('status')).toHaveTextContent('1 tile match')
     expect(screen.getByRole('status').textContent).not.toContain('files')
@@ -570,7 +567,7 @@ describe('a card is an item, not a file', () => {
 
 describe('the availability chips', () => {
   it('says a base is needed, and names the lock the tile carries on its sides', async () => {
-    await renderCatalog('/catalog?tex=wood')
+    await renderCatalog('/?tex=wood')
 
     // A topper with `connection|side|openlock` and no bottom system: two parts to
     // print, and the openlock is between it and its neighbours rather than
@@ -581,14 +578,14 @@ describe('the availability chips', () => {
   })
 
   it('says no base is needed and marks the lock as self-sufficient', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     expect(chipLabels()).toEqual(['No base needed', 'OpenLOCK'])
     expect(chipStates()).toEqual(['base:have', 'lock:underside'])
   })
 
   it('says the base is optional for the merged pair — the point of aggregating', async () => {
-    await renderCatalog('/catalog?tex=dungeon_stone%7Ceroded')
+    await renderCatalog('/?tex=dungeon_stone%7Ceroded')
 
     // The topper needs a base, the dragonlock print does not, and the item offers
     // both. 931 live items read this way.
@@ -597,14 +594,14 @@ describe('the availability chips', () => {
   })
 
   it('reports an insert rather than inventing a lock for it', async () => {
-    await renderCatalog('/catalog?kinds=%21other')
+    await renderCatalog('/?kinds=%21other')
 
     expect(chipLabels()).toEqual(['No base needed', 'Insert'])
     expect(chipStates()).toEqual(['base:have', 'note:note'])
   })
 
   it('reports untagged joinery as unknown, not as incompatible', async () => {
-    await renderCatalog('/catalog?tex=cave')
+    await renderCatalog('/?tex=cave')
 
     // The cave corner wall needs no base and records nothing about what it
     // connects with. 93 live items are in this state and 33 of them name a lock
@@ -623,7 +620,7 @@ describe('the availability chips', () => {
   })
 
   it('carries the claim in full in each chip’s accessible name', async () => {
-    await renderCatalog('/catalog?tex=wood')
+    await renderCatalog('/?tex=wood')
 
     // The fill difference between `underside` and `sides` is the only visual
     // difference, so a reader who cannot see it gets the sentence instead.
@@ -644,7 +641,7 @@ describe('the availability chips', () => {
   })
 
   it('offers no legend above the empty state, where it would key nothing', async () => {
-    await renderCatalog('/catalog?q=nothinglikethis')
+    await renderCatalog('/?q=nothinglikethis')
 
     expect(document.querySelector('.of-avail-legend')).toBeNull()
   })
@@ -654,7 +651,7 @@ describe('the availability chips', () => {
 
 describe('the filename token', () => {
   it('distinguishes a card without putting the raw filename on it', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     // `dungeon_stone%base+square.1x3.openlock.stl` → `1x3`. 131 live display
     // names are shared by 323 items, and this is the field that separates them.
@@ -662,7 +659,7 @@ describe('the filename token', () => {
   })
 
   it('skips the connection segment, so it names the design and not one variant', async () => {
-    await renderCatalog('/catalog?tex=dungeon_stone%7Ceroded')
+    await renderCatalog('/?tex=dungeon_stone%7Ceroded')
 
     // The preview is the openforge topper, whose filename tail is
     // `4x#Q,90.openlock` — but the token stops at the first segment that is not
@@ -684,7 +681,7 @@ describe('the filename token', () => {
 
 describe('the tag chips', () => {
   it('shows a tag the title does not already carry', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     // `dungeon_stone%base+square.1x3.openlock.stl` carries `shape|base`,
     // `texture|dungeon_stone`, `build|separate wall` and `connection|openlock`.
@@ -702,7 +699,7 @@ describe('the tag chips', () => {
     // the scroll position. jsdom reports every box as 0x0, so what this proves is
     // that the element is rendered — **not** that it occupies 15px. Only a real
     // engine can show that, and `catalog.css` is where the height is declared.
-    await renderCatalog('/catalog?tex=wood')
+    await renderCatalog('/?tex=wood')
 
     expect(tagLabels()).toEqual([])
     expect(document.querySelector('.of-card .of-card-tags')).toBeInTheDocument()
@@ -724,7 +721,7 @@ describe('the tag chips', () => {
   })
 
   it('carries the tag’s own path in the chip’s accessible name', async () => {
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     // "Separate wall" alone does not say what kind of fact it is. The clipped
     // hint is the segments above the label — here just `build`.
@@ -743,7 +740,7 @@ describe('the detail drawer', () => {
     // URL changed and nothing opened — and because nothing imported the
     // component, the whole of §2.5 was tree-shaken out of `dist/`. This is the
     // assertion that would have caught it.
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
 
     fireEvent.click(screen.getByRole('link', { name: new RegExp(FIXTURE_NAMES[5]) }))
 
@@ -763,7 +760,7 @@ describe('the detail drawer', () => {
     // a `lazy()` chunk that constructs a `WebGLRenderer`, and jsdom has no WebGL
     // and rasterises nothing. `src/three/panel.test.tsx` covers the panel's own
     // states and `src/three/gate.test.ts` the corpus split behind the gate.
-    await renderCatalog('/catalog?kinds=base')
+    await renderCatalog('/?kinds=base')
     fireEvent.click(screen.getByRole('link', { name: new RegExp(FIXTURE_NAMES[5]) }))
 
     await waitFor(() => {
@@ -797,14 +794,12 @@ describe('the screen without an index', () => {
     )
 
     const router = createWorkshopRouter({
-      history: createMemoryHistory({ initialEntries: ['/catalog'] }),
+      history: createMemoryHistory({ initialEntries: ['/'] }),
     })
     render(
-      <CatalogStatsProvider value={null}>
-        <VirtuosoGridMockContext.Provider value={VIEWPORT}>
-          <RouterProvider router={router} />
-        </VirtuosoGridMockContext.Provider>
-      </CatalogStatsProvider>,
+      <VirtuosoGridMockContext.Provider value={VIEWPORT}>
+        <RouterProvider router={router} />
+      </VirtuosoGridMockContext.Provider>,
     )
     await act(async () => {
       await router.load()
@@ -836,14 +831,12 @@ describe('the screen without an index', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const router = createWorkshopRouter({
-      history: createMemoryHistory({ initialEntries: ['/catalog'] }),
+      history: createMemoryHistory({ initialEntries: ['/'] }),
     })
     render(
-      <CatalogStatsProvider value={null}>
-        <VirtuosoGridMockContext.Provider value={VIEWPORT}>
-          <RouterProvider router={router} />
-        </VirtuosoGridMockContext.Provider>
-      </CatalogStatsProvider>,
+      <VirtuosoGridMockContext.Provider value={VIEWPORT}>
+        <RouterProvider router={router} />
+      </VirtuosoGridMockContext.Provider>,
     )
     await act(async () => {
       await router.load()

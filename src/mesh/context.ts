@@ -55,9 +55,9 @@
  *
  * ## `loadCatalogIndex` is injectable, and no test ever reaches the network
  *
- * The default is `@/ui/shell/catalogStats`'s memoised fetch — imported by deep
+ * The default is `@/ui/shell/loadCatalog`'s memoised fetch — imported by deep
  * path rather than through `@/ui/shell`, so this module does not pull `AppFrame`
- * and the header into whatever chunk it lands in. That is `queue.ts`'s own
+ * and the rail into whatever chunk it lands in. That is `queue.ts`'s own
  * pattern with `@/download/source`, and for the same reason. That loader's own
  * docblock says it belongs in `src/catalog/`; when it moves, this import moves
  * with it and nothing else changes.
@@ -66,7 +66,7 @@ import type { AssemblyIndex } from '@/assembly'
 import { buildAssemblyIndex } from '@/assembly'
 import type { AggregateIndex, CatalogFile } from '@/catalog'
 import { buildAggregateIndex } from '@/catalog'
-import { loadCatalogIndex } from '@/ui/shell/catalogStats'
+import { loadCatalogIndex } from '@/ui/shell/loadCatalog'
 
 /** What a caller needs to turn a scene's fills into meshes. */
 export interface MeshContext {

@@ -56,7 +56,7 @@
  * writes.
  */
 import type { CatalogFile, TileId } from '@/catalog'
-import type { RecipeTemplate } from '@/screens/assemblies'
+import type { RecipeTemplate } from '@/assembly'
 import type { SlotState } from '@/screens/detail/slots'
 import { compositionIndexFor, slotStates } from '@/screens/detail/slots'
 import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'

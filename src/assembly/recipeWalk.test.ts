@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { TileId } from '@/catalog'
 
-import type { RecipeTemplate } from './assembly'
+import type { RecipeTemplate } from './recipeWalk'
 import {
   STEP_PAGE,
   assemblyState,
@@ -30,7 +30,7 @@ import {
   narrowingSentence,
   resolvePart,
   stepCountSentence,
-} from './assembly'
+} from './recipeWalk'
 import { fixtureCatalog } from './catalogFixture'
 import { RECIPE_TEMPLATES } from './templates'
 

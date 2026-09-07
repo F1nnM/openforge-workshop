@@ -154,30 +154,27 @@ describe('there is one class name for a button', () => {
     expect(offenders).toEqual([])
   })
 
-  it('spells every button through Button or buttonProps at the four call sites', () => {
-    // The two files that had grown their own copy of the block. Counted, so a
-    // regression is a number a reviewer can see: two on the landing hero, and two
-    // in the backup block.
+  it('spells every button through Button or buttonProps at the two call sites', () => {
+    // The file that had grown its own copy of the block. Counted, so a
+    // regression is a number a reviewer can see: two in the backup block.
     //
-    // **It was seven across three files until row A0.** The library screen's own
-    // three — two `Link`s and a real `<button>` — went with the screen; its
-    // backup block is the file below, relocated to `@/builder/panels` because it
-    // is the app's only export/import of the workshop and §13 makes that
-    // load-bearing. The property this test holds in place is unchanged, and so is
-    // the reason it counts rather than greps: `.of-lib-action` was a 45-line
-    // duplicate of `.of-action`, and the way that comes back is one call site at
-    // a time.
+    // **It was seven across three files until row A0, and four across two until
+    // the sidebar row.** The library screen's own three — two `Link`s and a real
+    // `<button>` — went with the screen in A0; its backup block is the file below,
+    // relocated to `@/builder/panels` because it is the app's only export/import
+    // of the workshop and §13 makes that load-bearing. The landing hero's two
+    // were `Link`s carrying `buttonProps({ size: 'lg' })`, and they went with the
+    // landing page — which also means `lg` now has no call site at all, and
+    // `Button.tsx` says so rather than pretending it has three live sizes.
+    //
+    // The property this test holds in place is unchanged, and so is the reason it
+    // counts rather than greps: `.of-lib-action` was a 45-line duplicate of
+    // `.of-action`, and the way that comes back is one call site at a time.
     const read = (path: string) => withoutComments(readFileSync(resolve(REPO_ROOT, path), 'utf8'))
-    const landing = read('src/screens/landing/Landing.tsx')
     const backup = read('src/builder/panels/BackupPanel.tsx')
 
     const uses = (source: string) =>
       (source.match(/buttonProps\(\{/g) ?? []).length + (source.match(/<Button[\s/>]/g) ?? []).length
-
-    // The hero's two are `Link`s, so both are `buttonProps` — and both name the
-    // `lg` size, which used to arrive implicitly through the `.of-action` alias.
-    expect(uses(landing)).toBe(2)
-    expect(landing.match(/size: 'lg'/g) ?? []).toHaveLength(2)
 
     // One real `<button>` and one `<label>` wrapping a clipped file input.
     expect(uses(backup)).toBe(2)

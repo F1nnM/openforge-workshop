@@ -2,9 +2,11 @@
    OpenForge Workshop — the catalog screen.
 
    design-contract.md §2.2, transcribed. The load-bearing numbers are the
-   contract's own and are marked where they appear: a **238px** sidebar, a grid at
+   contract's own and are marked where they appear: a grid at
    **repeat(auto-fill, minmax(215px, 1fr))** with a **16px** gap, and a search
-   input capped at **520px**.
+   input capped at **520px**. The contract's third number — a **238px** facet
+   sidebar — is not here any more: the sidebar row moved the facets into the
+   frame's rail, which is 265px, and the groups below size themselves to it.
 
    Hand-written CSS rather than Tailwind utilities, following `../../ui/shell/
    shell.css`: this file holds two things a utility string states badly — a fixed
@@ -42,15 +44,18 @@
    tokens.css: Parchment is the committed direction.
    ──────────────────────────────────────────────────────────────────────────── */
 
-/* ── Page ────────────────────────────────────────────────────────────────── */
+/* ── Page ────────────────────────────────────────────────────────────────────
+   One column since the sidebar row: the facets render into the frame's rail
+   through `<RailSlot>`, so what is left here is the search field, the legend and
+   the grid. It was `grid-template-columns: 238px minmax(0, 1fr)` — the
+   contract's 238px sidebar beside the cards — and `.of-catalog` is still a grid
+   rather than a plain block because the results column's `min-width: 0` is what
+   stops the card grid's own minimum widening the page.
+   ──────────────────────────────────────────────────────────────────────────── */
 
 .of-catalog {
   display: grid;
-  /* 238px is the contract's sidebar. `minmax(0, 1fr)` and not `1fr`: a grid
-     track's default `min-width: auto` would let the card grid's own minimum
-     widen the column and push the sidebar off. */
-  grid-template-columns: 238px minmax(0, 1fr);
-  gap: 26px;
+  grid-template-columns: minmax(0, 1fr);
   padding: 22px 26px 48px;
   align-items: start;
 }
@@ -59,20 +64,23 @@
   min-width: 0;
 }
 
-/* ── Facet sidebar ───────────────────────────────────────────────────────── */
+/* ── Facet sidebar ───────────────────────────────────────────────────────────
+   Rendered inside `.of-rail-slot`, which is the scroll container and the sticky
+   one. This was `position: sticky` with `top: calc(var(--of-header-h) + 22px)`
+   and a `max-height` in the same terms, because the sidebar was a column of the
+   page and had to hold itself under the 60px header; the rail is viewport-tall
+   and scrolls its own slot, so the sticky positioning, the cap and the header
+   variable all go with it.
+   ──────────────────────────────────────────────────────────────────────────── */
 
 .of-facets {
   display: flex;
   flex-direction: column;
   gap: 22px;
-  /* Sticky under the real header rather than under a repeated 60px. The frame
-     publishes `--of-header-h` for exactly this. */
-  position: sticky;
-  top: calc(var(--of-header-h) + 22px);
-  max-height: calc(100dvh - var(--of-header-h) - 44px);
-  overflow-y: auto;
-  /* Room for the focus ring on the rightmost pill in a wrapped row. */
-  padding-right: 4px;
+  /* The rail's own gutter. `padding-right` is 16px rather than 20px to leave
+     room for the focus ring on the rightmost pill in a wrapped row, which is
+     what the old 4px was for. */
+  padding: 20px 16px 28px 20px;
 }
 
 .of-facet-group {
@@ -596,27 +604,20 @@
 }
 
 /* ── Narrow viewports ────────────────────────────────────────────────────────
-   The contract's catalog is a desktop two-column layout and does not specify a
-   phone treatment. Below the point where a 238px sidebar plus one 215px card no
-   longer fit, the sidebar stops being sticky and stacks above the grid — filters
-   first, which is the reading order the markup already has.
+   The contract's catalog is a desktop layout and does not specify a phone
+   treatment. Only the gutters change here now: the rail is what stacks above the
+   screen at the same breakpoint, and it caps its own slot — the argument for
+   that cap, and the ~1,000px of stacked filter groups behind it, is in
+   `../../ui/shell/shell.css` with the rule.
    ──────────────────────────────────────────────────────────────────────────── */
 
 @media (max-width: 700px) {
   .of-catalog {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 20px;
     padding: 18px 16px 40px;
   }
 
-  /* Capped with its own scroll rather than allowed to run the document's full
-     height. Stacked, the four groups come to roughly 1,000px, so an uncapped
-     sidebar puts the first tile a whole screen below the fold and a phone
-     visitor meets 35 filter controls before ever seeing a tile. */
   .of-facets {
-    position: static;
-    max-height: 42dvh;
-    overflow-y: auto;
+    padding: 16px 14px 22px;
   }
 }
 

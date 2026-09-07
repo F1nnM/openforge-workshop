@@ -49,7 +49,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildAssemblyIndex } from '@/assembly'
 import type { TileId } from '@/catalog'
-import type { RecipeTemplate } from '@/screens/assemblies'
+import type { RecipeTemplate } from '@/assembly'
 import { FILL, PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
 import type { TemplateInstance } from '@/store'
 import {

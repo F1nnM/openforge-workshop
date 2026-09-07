@@ -49,7 +49,7 @@ import { tileOrdinal } from './tileAddress'
 export async function openTileDrawer(router: WorkshopRouter, subject: TileSubject): Promise<void> {
   const tile = tileOrdinal(subject)
   await router.navigate({
-    to: '/catalog',
+    to: '/',
     search: (prev) => ({ ...prev, tile }),
   })
 }
@@ -63,7 +63,7 @@ export async function openTileDrawer(router: WorkshopRouter, subject: TileSubjec
 export async function showTileInDrawer(router: WorkshopRouter, subject: TileSubject): Promise<void> {
   const tile = tileOrdinal(subject)
   await router.navigate({
-    to: '/catalog',
+    to: '/',
     search: (prev) => ({ ...prev, tile }),
     replace: true,
   })
@@ -83,7 +83,7 @@ export async function closeTileDrawer(router: WorkshopRouter): Promise<void> {
   // Cold load of a shared `?tile=` link: there is no entry to consume, so drop
   // the param in place rather than pushing a "closed" entry that Back would undo.
   await router.navigate({
-    to: '/catalog',
+    to: '/',
     search: (prev) => ({ ...prev, tile: null }),
     replace: true,
   })

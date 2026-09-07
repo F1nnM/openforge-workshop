@@ -2,11 +2,24 @@
  * `/builder` — design-contract.md §2.4, and the screen that makes the builder
  * reachable at all.
  *
- * Three columns at `calc(100dvh - var(--of-header-h))` with no page scroll: a
- * 272px palette, a flexible stage, a 302px bill of tiles. This component owns
- * the layout, the URL, and the three derivations everything else reads from —
- * and nothing else. Every panel, the 3D surface, the bill and the download are
- * already-landed modules that are *called* here rather than reimplemented.
+ * Two columns at `100dvh` with no page scroll — a flexible stage and a 302px
+ * bill of tiles — with the palette in the frame's rail beside them. This
+ * component owns the layout, the URL, and the three derivations everything else
+ * reads from — and nothing else. Every panel, the 3D surface, the bill and the
+ * download are already-landed modules that are *called* here rather than
+ * reimplemented.
+ *
+ * **It was three columns, and the palette was the first of them.** §2.4's 272px
+ * palette is now the builder's contribution to the rail — it renders through
+ * `<RailSlot>`, which is a portal, so this component still owns it, still hands
+ * it `tools` and the search params, and `AppFrame` never sees it. Two things
+ * follow that are worth stating rather than discovering: the rail is 265px where
+ * the column was 272px, and the palette's scroll container is now the rail's
+ * slot rather than the panel itself.
+ *
+ * The height lost its arithmetic with the header. It was `calc(100dvh -
+ * var(--of-header-h))` because 60px of chrome sat above the screen; the chrome
+ * is beside it now, so the work area is the viewport.
  *
  * ## The four things this screen actually decides
  *
@@ -124,7 +137,7 @@ import { ARMED_TURN_STEP_DEG } from '@/builder/three/edits'
 import { GeneratorPanel } from '@/generator/panel'
 import type { GeneratorPlaceHandler } from '@/generator/panel'
 import { buildGeneratedBill } from '@/generator/placement/bill'
-import type { RecipeTemplate } from '@/screens/assemblies'
+import type { RecipeTemplate } from '@/assembly'
 import type { CatalogIndex } from '@/screens/catalog'
 import { useCatalogIndex } from '@/screens/catalog'
 import { BASE_SLOT, compositionIndexFor } from '@/screens/detail/slots'
@@ -147,6 +160,7 @@ import { reSolveScene } from '@/template'
 import { DesignToggle } from '@/ui/design-picker'
 import { LockNotice, LockToggle } from '@/ui/lock-picker'
 import { Button, Eyebrow } from '@/ui/primitives'
+import { RailSlot } from '@/ui/shell'
 
 import './builder.css'
 
@@ -622,19 +636,24 @@ function Builder({ index }: { index: CatalogIndex }) {
     <section className="of-builder" aria-label="Builder">
       <h1 className="of-sr-only">Builder</h1>
 
-      <PalettePanel
-        index={index}
-        tools={tools}
-        search={search}
-        onQueryChange={(text) => {
-          // The catalog screen's rule, for the catalog screen's reason: the first
-          // character of a new search is worth a history entry so Back returns to
-          // the unfiltered palette, and every later one replaces it so Back does
-          // not walk the word backwards a letter at a time.
-          const push = search.q === '' && text !== ''
-          void navigate({ search: (prev) => ({ ...prev, q: text }), replace: !push })
-        }}
-      />
+      {/* Into the frame's rail, under the nav — §2.4's first column, moved by
+          the sidebar row. Everything about it except where its DOM lands is
+          unchanged, including that this screen owns `tools`. */}
+      <RailSlot>
+        <PalettePanel
+          index={index}
+          tools={tools}
+          search={search}
+          onQueryChange={(text) => {
+            // The catalog screen's rule, for the catalog screen's reason: the
+            // first character of a new search is worth a history entry so Back
+            // returns to the unfiltered palette, and every later one replaces it
+            // so Back does not walk the word backwards a letter at a time.
+            const push = search.q === '' && text !== ''
+            void navigate({ search: (prev) => ({ ...prev, q: text }), replace: !push })
+          }}
+        />
+      </RailSlot>
 
       <div className="of-builder-stage">
         <div className="of-builder-toolbar-slot">

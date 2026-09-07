@@ -12,8 +12,8 @@
  * | route      | placeholder        | replaced by                              |
  * | ---------- | ------------------ | ---------------------------------------- |
  * | root frame | *landed*              | PR 12 — `src/ui/shell/AppFrame.tsx`    |
- * | `/`        | `LandingPlaceholder`  | PR 16 — `src/screens/landing/`         |
- * | `/catalog` | *landed*              | PR 13 — `src/screens/catalog/` (+ PR 15's drawer) |
+ * | `/`        | *landed, then deleted, then reused* | PR 16 — `src/screens/landing/`, deleted by the sidebar row, whose catalog took the path |
+ * | `/catalog` | *landed, then moved to `/`* | PR 13 — `src/screens/catalog/` (+ PR 15's drawer) |
  * | `/library` | *landed, then deleted* | PR 14 — `src/screens/library/`, removed by row A0 |
  * | `/builder` | *landed*              | PR 18 — `src/screens/builder/`         |
  *
@@ -60,7 +60,7 @@ export function NotFoundPlaceholder() {
         Nothing is routed at <code>{pathname}</code>.
       </p>
       <p className="mt-4 text-sm">
-        <Link to="/catalog">Browse the catalog</Link>
+        <Link to="/">Browse the catalog</Link>
       </p>
     </div>
   )

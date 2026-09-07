@@ -74,8 +74,8 @@
 import type { AssemblyIndex, BaseGap } from '@/assembly'
 import { baseGap } from '@/assembly'
 import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
-import type { AssemblyChoice, AssemblyOption, AssemblyStep, RecipeIndex, RecipeTemplate } from '@/screens/assemblies'
-import { assemblyState, createRecipeIndex, resolvePart } from '@/screens/assemblies'
+import type { AssemblyChoice, AssemblyOption, AssemblyStep, RecipeIndex, RecipeTemplate } from '@/assembly'
+import { assemblyState, createRecipeIndex, resolvePart } from '@/assembly'
 /* The leaf module and not `@/screens/detail`: that barrel exports `TileDrawer`,
    so importing the label through it would pull the catalog drawer, its 3D panel
    and its sprite rotator into the builder's chunk to format one string. */

@@ -53,7 +53,7 @@ import { isPlaceable } from '@/builder/canvas'
 import type { CatalogFile, CatalogRecord, TileAggregate } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, buildAggregateIndex, resolveTags } from '@/catalog'
 import { createCompositionIndex, resolveSlotTags } from '@/composition'
-import { RECIPE_TEMPLATES } from '@/screens/assemblies'
+import { RECIPE_TEMPLATES } from '@/assembly'
 import type { PlacementId, TemplateId, TemplateInstance } from '@/store'
 import { LockSystem } from '@/store'
 

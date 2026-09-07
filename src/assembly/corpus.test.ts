@@ -41,7 +41,7 @@ import { describe, expect, it } from 'vitest'
 
 import { CatalogFile } from '@/catalog'
 
-import { STEP_PAGE, assemblyState, createRecipeIndex } from './assembly'
+import { STEP_PAGE, assemblyState, createRecipeIndex } from './recipeWalk'
 import { assertTemplates, measureTemplates } from './measure'
 import { RECIPE_TEMPLATES } from './templates'
 

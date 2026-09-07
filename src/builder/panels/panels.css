@@ -25,9 +25,16 @@
 @import '../../screens/catalog/catalog.css';
 
 /* ── The palette ─────────────────────────────────────────────────────────────
-   272px, and its own scroll container. Two independently scrolling columns
-   either side of a fixed canvas is the whole point of the layout: a builder
-   whose palette scrolls the drawing off screen is unusable.
+   §2.4's first column until the sidebar row, at 272px with its own scroll
+   container. It renders in the frame's rail now — `<RailSlot>`, from
+   `BuilderScreen` — so the rail's slot supplies the width (265px), the scroll
+   container, the `bg2` ground and the border down its right-hand side. What is
+   left here is the panel's own stack.
+
+   The point that survives the move: a builder whose palette scrolls the drawing
+   off screen is unusable, and the drawing must not move when the palette is
+   scrolled. That is now two scroll containers — the rail's slot and the bill —
+   either side of a fixed canvas, where it was three columns.
    ──────────────────────────────────────────────────────────────────────────── */
 
 .of-palette {
@@ -41,14 +48,11 @@
      which means it escapes every `overflow: hidden` between here and the root and
      contributes its offset to `documentElement.scrollHeight`. With a hundred
      palette rows that was measured at 2,809px of page scroll on a 900px viewport,
-     on a screen specified to have none. `.of-backup` carries the same rule for
-     the same reason — see the note on it below. */
+     on a screen specified to have none. `.of-rail-slot` declares it too, for the
+     same reason and as the backstop for anything else a screen puts in the rail;
+     `.of-backup` carries it as well — see the note on it below. */
   position: relative;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 14px 12px 24px;
-  background: var(--bg2);
-  border-right: 1px solid var(--line);
 }
 
 .of-pal-search {

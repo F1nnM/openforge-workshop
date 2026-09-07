@@ -72,7 +72,7 @@ import { useMemo, useState } from 'react'
 import type { AssemblyIndex } from '@/assembly'
 import type { CatalogFile, TileId } from '@/catalog'
 import type { MaterialId } from '@/materials'
-import type { AssemblyOption, RecipeIndex, RecipeTemplate } from '@/screens/assemblies'
+import type { AssemblyOption, RecipeIndex, RecipeTemplate } from '@/assembly'
 import {
   STEP_PAGE,
   createRecipeIndex,
@@ -80,7 +80,7 @@ import {
   emptyStepSentence,
   narrowingSentence,
   stepCountSentence,
-} from '@/screens/assemblies'
+} from '@/assembly'
 import { compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
 import type { SlotName, TemplateInstance } from '@/store'
 import { clearFill, pinFill, useLockSystem, useRoomDesign } from '@/store'

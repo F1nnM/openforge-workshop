@@ -2,9 +2,14 @@
    OpenForge Workshop — the builder screen's layout.
 
    design-contract.md §2.4: three columns, `calc(100vh - 60px)`, no page scroll.
-   The 60px is not restated — `../../ui/shell/shell.css` publishes the header's
-   height as `--of-header-h` for exactly this, so a change to the header cannot
-   silently push the builder past the viewport.
+   **Two of those numbers have gone.** The sidebar row moved §2.4's first column
+   — the 272px palette — into the frame's rail, and deleted the 60px header the
+   subtraction was for, so this screen is a stage and a bill at the full
+   viewport height. It used `var(--of-header-h)` rather than a restated 60px,
+   and the variables it uses now are the same idea: below 700px the rail stacks
+   above this screen instead of standing beside it, and it publishes what it
+   takes — see the `.of-builder` rule and the narrow-viewport note in
+   `../../ui/shell/shell.css`.
 
    `100dvh`, not `100vh`: on mobile Safari `100vh` is the *largest* viewport
    height, so a page sized to it is scrollable by the height of the collapsing
@@ -15,12 +20,14 @@
 
    "No page scroll" is a structural requirement, not a `overflow: hidden` on the
    body. Three things have to hold at once: the drawing must fill the height it is
-   given and never move, either sidebar must be able to hold a hundred rows, and
-   the bill's download action must stay on screen when it does. A grid with fixed
-   outer tracks and `minmax(0, 1fr)` in the middle gives all three — the `0`
-   minimum is what stops a long tile name in the palette from widening its track
-   and pushing the canvas out of the viewport, which is the default behaviour of
-   a grid item and the single commonest way a layout like this breaks.
+   given and never move, the bill must be able to hold a hundred rows, and its
+   download action must stay on screen when it does. A grid with a fixed outer
+   track and `minmax(0, 1fr)` beside it gives all three — the `0` minimum is what
+   stops a long tile name from widening its track and pushing the canvas out of
+   the viewport, which is the default behaviour of a grid item and the single
+   commonest way a layout like this breaks. The palette's own scroll container is
+   the rail's slot now, and `../../ui/shell/shell.css` carries the same rule for
+   the same reason.
 
    Hand-written rather than Tailwind utilities, for the reason at the top of
    `../../ui/shell/shell.css`. The panel styling lives with the panels, in
@@ -38,9 +45,16 @@
      this is the backstop for anything added later. */
   position: relative;
   display: grid;
-  /* §2.4's widths. The middle track takes what is left. */
-  grid-template-columns: 272px minmax(0, 1fr) 302px;
-  height: calc(100dvh - var(--of-header-h));
+  /* §2.4's bill width. The stage takes what is left. */
+  grid-template-columns: minmax(0, 1fr) 302px;
+  /* The viewport, less whatever the rail takes from it. Both custom properties
+     are unset while the rail is a column beside this screen and fall back to
+     `0px`; below 700px the rail is a band above it and
+     `../../ui/shell/shell.css` publishes its head height and its slot's cap.
+     That is one declaration instead of a media query with a hand-counted number
+     in it — which is what this was first written as, and it left 273px of page
+     scroll on a 556px viewport. */
+  height: calc(100dvh - var(--of-rail-head-h, 0px) - var(--of-rail-slot-max, 0px));
   /* A grid child's default `min-height: auto` would let a tall column grow the
      row past the viewport, which is the page scroll this layout forbids. */
   min-height: 0;
@@ -339,7 +353,8 @@
 .of-builder-wait {
   display: grid;
   place-items: center;
-  height: calc(100dvh - var(--of-header-h));
+  /* The same height as the screen it stands in for. */
+  height: calc(100dvh - var(--of-rail-head-h, 0px) - var(--of-rail-slot-max, 0px));
   padding: 24px;
 }
 
@@ -357,31 +372,30 @@
 
 /* ── Narrow viewports ────────────────────────────────────────────────────────
    The contract's screens are desktop-first and this one is the most desktop of
-   them: a 272px palette, a drawing and a 302px bill do not fit beside each other
+   them: the 265px rail, a drawing and a 302px bill do not fit beside each other
    below about 900px. Rather than invent a phone builder the contract does not
-   specify, the two side columns narrow to their minimum and then the bill drops
-   below the stage — one column of drawing over parts list, which is still a
-   builder, and still no page scroll because the whole thing stays a grid at the
-   viewport's height.
+   specify, the bill narrows to its minimum and then drops below the stage — one
+   column of drawing over parts list, which is still a builder, and still no page
+   scroll because the whole thing stays a grid at the viewport's height.
+
+   The palette used to be the third thing competing for that width, and it used
+   to be pinned down the left of both rows here so it stayed beside the drawing.
+   It is in the rail now, which stacks above the whole screen at 700px — see
+   `../../ui/shell/shell.css` — so what is left below is about the bill.
    ──────────────────────────────────────────────────────────────────────────── */
 
 @media (max-width: 1080px) {
   .of-builder {
-    grid-template-columns: 236px minmax(0, 1fr) 268px;
+    grid-template-columns: minmax(0, 1fr) 268px;
   }
 }
 
 @media (max-width: 900px) {
   .of-builder {
-    grid-template-columns: 236px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     /* The stage keeps two thirds of the height; the bill takes the rest and
        scrolls inside itself as it always did. */
     grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
-  }
-
-  .of-palette {
-    /* Down the left of both rows, so the palette is still beside the drawing. */
-    grid-row: 1 / span 2;
   }
 
   .of-builder-bill {
@@ -389,3 +403,4 @@
     border-top: 1px solid var(--line);
   }
 }
+

@@ -30,7 +30,7 @@ import { describe, expect, it } from 'vitest'
 
 /* Deep, not through the barrel: `@/screens/assemblies` also exports the React
    screen, and this file needs only the generated data. */
-import { RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
+import { RECIPE_TEMPLATES } from '@/assembly/templates'
 
 import type { SlotConvention, SlotName, SlotRule, SlotSide } from './rules'
 import {
