@@ -149,11 +149,15 @@ function baseFor(topper: CatalogRecord, index: AssemblyIndex) {
 /* ------------------------------------------------------ construction-only tests */
 
 describe('size code table', () => {
-  it('publishes the four ambiguous codes as data, so a fifth cannot arrive quietly', () => {
-    // The corpus block below asserts this table against the live catalog in both
-    // directions. Here it is only the shape of the claim: a code, and the
-    // primitives it is measured to span.
-    expect(Object.keys(AMBIGUOUS_SIZE_CODES).sort()).toEqual(['I', 'O', 'S', 'X'])
+  it('publishes the five ambiguous codes as data, so a sixth cannot arrive quietly', () => {
+    /* The corpus block below asserts this table against the live catalog in both
+       directions. Here it is only the shape of the claim: a code, and the
+       primitives it is measured to span.
+
+       `A` is row **D9**'s and it arrived exactly the way this test is written to
+       make impossible to miss — the corpus assertion failed and named it. */
+    expect(Object.keys(AMBIGUOUS_SIZE_CODES).sort()).toEqual(['A', 'I', 'O', 'S', 'X'])
+    expect(AMBIGUOUS_SIZE_CODES.A).toEqual(['wall:1.5', 'wall:2'])
     expect(AMBIGUOUS_SIZE_CODES.O).toEqual(['column', 'tri:2', 'tri:4'])
     for (const [code, primitives] of Object.entries(AMBIGUOUS_SIZE_CODES)) {
       expect(primitives.length, code).toBeGreaterThan(1)
@@ -1217,13 +1221,26 @@ describeCorpus(corpusSuite, () => {
     expect(buildAssemblyIndex).toHaveLength(1)
   })
 
-  it('confirms the size code is a functional determinant of width, with no exceptions', () => {
+  it('measures the size code against width, and finds 245 exceptions on code `A`', () => {
     // §7's table, and row A3 moved it *here* from `sizeCode.ts`. The module used
     // to publish `SIZE_CODE_WIDTH_UNITS` and `sizeCodeWidth`, and both had zero
     // consumers repo-wide — `src/search/textIndex.ts` names the constant only in
     // a docblock, explaining why its own size-token vocabulary omits `QxG`. So
     // the exports went and the assertion stayed: a drifted tag still fails the
     // build, and there is no longer a hard-coded table for it to drift against.
+    /* **Row D9 broke the "no exceptions" half of this, and A3's deletion is why
+       it cost nothing.** §7's table said the code determines the width, and over
+       2,822 tiles it did. 157 corner-wall meshes read out of R2 say that on 245
+       records tagged `size|openlock|A` the run is **1.500**: a corner wall's
+       `size|width|2` names the cell it fills, not the piece, so the commonest
+       code in the corpus is not a width determinant after all.
+
+       This is exactly the drift the assertion was left here to catch, and it
+       caught it. Had `SIZE_CODE_WIDTH_UNITS` still existed, every reader of
+       `sizeCodeWidth('A')` would now be half a unit wrong in silence; the join
+       moved to the footprint, so nothing but this assertion had to change. The
+       245 are asserted **by identity** below rather than counted, so a 246th
+       cannot arrive unnoticed. */
     const widths: Readonly<Record<string, number>> = { A: 2, BA: 1.5, IA: 1, D: 3, Q: 4 }
     let checked = 0
     const mismatches: string[] = []
@@ -1237,7 +1254,21 @@ describeCorpus(corpusSuite, () => {
       if (measured !== expected) mismatches.push(`${record.id}: ${record.sizeCode ?? ''} is ${String(measured)}`)
     }
     expect(checked).toBe(2822)
-    expect(mismatches).toEqual([])
+    /* All 245 are code `A`, all measure 1.5 against a coded 2, and all carry a
+       corner tag — the three facts that make them the class D9 measured rather
+       than a drifted tag. */
+    expect(mismatches).toHaveLength(245)
+    for (const line of mismatches) expect(line).toMatch(/: A is 1\.5$/)
+    const corners = records.filter(
+      (record) =>
+        record.sizeCode === 'A' &&
+        record.foot.shape === 'wall' &&
+        record.foot.length === 1.5,
+    )
+    expect(corners).toHaveLength(245)
+    // And every other coded record still agrees with the table, which is the
+    // half that did not move.
+    expect(mismatches.filter((line) => !line.includes(': A is'))).toEqual([])
 
     // Row W4's finding, and the reason no width table should come back from the
     // tag: `QxG` is tagged `size|width|4` and the mesh measures 3.000. Its
@@ -1251,11 +1282,15 @@ describeCorpus(corpusSuite, () => {
 
   /* -------------------------------------------------- the code is not a key */
 
-  it('measures the four size codes that span more than one primitive', () => {
-    // Row D4's premise, against the live corpus and in both directions: every
-    // code `AMBIGUOUS_SIZE_CODES` names really does span more than one
-    // primitive, and no code outside it does. The second half is the one that
-    // matters — it is what fails if a corpus rebuild mints a fifth.
+  it('measures the five size codes that span more than one primitive', () => {
+    /* Row D4's premise, against the live corpus and in both directions: every
+       code `AMBIGUOUS_SIZE_CODES` names really does span more than one
+       primitive, and no code outside it does. The second half is the one that
+       matters — it is what fails if a corpus rebuild mints another one.
+
+       **It did.** Row D9's corner-wall correction minted the fifth, and it is
+       `A` — the commonest code in the corpus, spanning `wall:1.5` and `wall:2`.
+       This assertion is what said so. */
     const spans = new Map<string, Set<string>>()
     const counts = new Map<string, Map<string, number>>()
     for (const record of records) {
@@ -1309,23 +1344,54 @@ describeCorpus(corpusSuite, () => {
     const heterogeneous = [...baseCodes.entries()].filter(([, group]) => sharedPrimitive(group) === undefined)
     expect(heterogeneous.map(([code]) => code)).toEqual([])
 
-    // **Two: the one code whose toppers span two primitives has no base at all.**
-    // `O` is on 3 `tri:2` and 2 `tri:4` toppers, and zero bases, so the join it
-    // would have mismatched never ran.
+    /* **Two: the codes whose toppers span two primitives — and row D9 ended the
+       coincidence this reason rested on.**
+
+       It used to be one code, `O`, on 3 `tri:2` and 2 `tri:4` toppers and **zero
+       bases**, so the join it would have mismatched never ran. This paragraph
+       said the arrangement was *"an accident of what has been published, one
+       tile away from ending"*.
+
+       It has ended, and not by a new tile. `A` now spans two topper primitives —
+       **245 `wall:1.5` corner walls against 440 `wall:2` straight ones**, from
+       D9's mesh measurement — and unlike `O` it has **86 bases**, all of them
+       `wall:2`. So a code-first join would today hand every one of those 245
+       corner walls a base half a unit longer than the wall standing on it: 245
+       wrong bills, on the commonest code in the corpus.
+
+       **That is a live defect in the retired key, not in the shipped one.** Row
+       D4 moved the join to the footprint before this measurement existed, and
+       the assertions below record that the shipped key gets all 245 right. The
+       argument for the re-key was *"one tile away from ending"*; the correct
+       reading now is that it had already ended and nothing had measured it. */
     expect(index.basesBySizeCode.has('O')).toBe(false)
-    for (const code of Object.keys(AMBIGUOUS_SIZE_CODES)) {
+    const spanningToppers = Object.keys(AMBIGUOUS_SIZE_CODES).filter((code) => {
       const spans = new Set(
         toppers.filter((record) => record.sizeCode === code).map((record) => footprintKey(record.foot)),
       )
-      if (spans.size <= 1) continue
-      expect(code).toBe('O')
-      expect(index.basesBySizeCode.get(code)).toBeUndefined()
-    }
+      return spans.size > 1
+    })
+    expect(spanningToppers.sort()).toEqual(['A', 'O'])
+    // `O` still has no base to mismatch against. `A` has 86, and they agree with
+    // each other — which is what makes the mismatch a *width* error rather than
+    // a refusal: `sharedPrimitive` would happily return `wall:2` for them.
+    expect(index.basesBySizeCode.get('O')).toBeUndefined()
+    const aBases = bases.filter((record) => record.sizeCode === 'A')
+    expect(aBases).toHaveLength(86)
+    expect(sharedPrimitive(aBases)).toBe('wall:2')
+    expect(
+      Object.fromEntries(
+        [...new Set(toppers.filter((record) => record.sizeCode === 'A').map((record) => footprintKey(record.foot)))]
+          .sort()
+          .map((key) => [
+            key ?? '(none)',
+            toppers.filter((record) => record.sizeCode === 'A' && footprintKey(record.foot) === key).length,
+          ]),
+      ),
+    ).toEqual({ 'wall:1.5': 245, 'wall:2': 440 })
 
-    // Which leaves the coincidence in full: for the three ambiguous codes bases
-    // *do* carry, no topper carrying one is a shape those bases are not. That is
-    // an accident of what has been published, one tile away from ending, and the
-    // reason the fix is a key change rather than a patch.
+    // And for the three ambiguous codes whose bases and toppers still agree, the
+    // old coincidence holds — which is why it was never a wrong bill *there*.
     const spanned = new Map<string, { basePrimitive: string | undefined; toppers: number; primitives: string[] }>()
     for (const [code, group] of baseCodes) {
       if (!Object.hasOwn(AMBIGUOUS_SIZE_CODES, code)) continue
@@ -1334,10 +1400,14 @@ describeCorpus(corpusSuite, () => {
       spanned.set(code, { basePrimitive: sharedPrimitive(group), toppers: carried.length, primitives })
     }
     expect(Object.fromEntries(spanned)).toEqual({
+      A: { basePrimitive: 'wall:2', toppers: 685, primitives: ['wall:1.5', 'wall:2'] },
       I: { basePrimitive: 'rect:1x1', toppers: 50, primitives: ['rect:1x1'] },
       S: { basePrimitive: 'rect:1x2', toppers: 96, primitives: ['rect:1x2'] },
       X: { basePrimitive: 'arc:4-4.5@90', toppers: 0, primitives: [] },
     })
+    // `A` is the one that no longer satisfies it, and it is excluded by name
+    // rather than by loosening the check.
+    spanned.delete('A')
     for (const { basePrimitive, primitives } of spanned.values()) {
       for (const primitive of primitives) expect(primitive).toBe(basePrimitive)
     }
@@ -1674,11 +1744,20 @@ describeCorpus(corpusSuite, () => {
     expect(index.basesByFootprint.has('tri:4')).toBe(false)
   })
 
-  it('hands out the same base as the code key did, wherever the code key found one', () => {
-    // The re-key is **additive on this corpus**: for all 3,943 toppers the code
-    // key matched, the primitive key hands out the identical base, and 43 more
-    // gain one. The `code` weight is what makes that true — congruence pools
-    // across families, so without the tie-break 434 toppers would drift.
+  it('hands out the same base as the code key did, but for D9’s 245 corner walls', () => {
+    /* The re-key was **additive on this corpus**: for all 3,943 toppers the code
+       key matched, the primitive key handed out the identical base, and 43 more
+       gained one. The `code` weight is what makes that true — congruence pools
+       across families, so without the tie-break 434 toppers would drift.
+
+       **Row D9 made it non-additive on 245, and that is the correction landing
+       rather than the re-key failing.** Those toppers are corner walls whose run
+       is 1.5 and whose code says 2, so the *old* code key was matching them
+       against 2-unit bases. Now the primitive key matches them against 1.5-unit
+       ones — a different base, and the right one. `different: 245` here is the
+       measure of how wrong the code key was on them, not of any regression: the
+       assertion below that every match is congruent to its topper still holds
+       over all four preferences. */
     const d1UnderOldKey = (tile: CatalogRecord, lock: LockSystem | undefined): CatalogRecord | undefined => {
       const candidates = legacyCandidatesOf(tile)
       if (candidates === undefined || candidates.length === 0) return undefined
@@ -1716,8 +1795,8 @@ describeCorpus(corpusSuite, () => {
       }
       expect({ lock: lock ?? 'none', same, different, gained, lost }).toEqual({
         lock: lock ?? 'none',
-        same: 3943,
-        different: 0,
+        same: 3698,
+        different: 245,
         gained: 43,
         lost: 0,
       })
@@ -1739,10 +1818,15 @@ describeCorpus(corpusSuite, () => {
       smallest = Math.min(smallest, match.candidates)
       largest = Math.max(largest, match.candidates)
     }
-    // The cost of the fix, stated: 383,252 candidate pairs against 334,189, a
-    // 14.7% wider scan for 43 more matched toppers and every match congruent.
+    /* The cost of the fix, stated: **390,847** candidate pairs against 334,189,
+       a 17.0% wider scan for 43 more matched toppers and every match congruent.
+       383,252 before row D9 split 245 corner walls off the `wall:2` congruence
+       class into `wall:1.5`, which is a *larger* pool rather than a smaller one:
+       `wall:1.5` already had 769 members and the class those toppers now join is
+       the bigger of the two. The code side is untouched at 334,189 — a code join
+       never looked at the run. */
     expect(codePairs).toBe(334_189)
-    expect(primitivePairs).toBe(383_252)
+    expect(primitivePairs).toBe(390_847)
     // 43 of the 44 congruence classes the bases cover are reached by a topper,
     // plus the one size code that still finds a base.
     expect(keysUsed.size).toBe(43)

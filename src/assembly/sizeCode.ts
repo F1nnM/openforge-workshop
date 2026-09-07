@@ -57,11 +57,20 @@
  * What keeps the *module*: {@link sharedPrimitive} and
  * {@link AMBIGUOUS_SIZE_CODES} are read by `baseMatch.ts#candidatesFor`, which
  * outlived rule 1 as the default-fill ranking. The corpus assertion that the
- * code determines a width **with zero exceptions over 2,822 tiles** is kept in
- * `assembly.test.ts` and now runs against the emitted records directly rather
- * than against a table this file publishes. A drifted tag still fails the build;
- * what no longer exists is a hard-coded five-entry table for it to drift
+ * code determines a width used to say **zero exceptions over 2,822 tiles**; it
+ * is kept in `assembly.test.ts` and runs against the emitted records directly
+ * rather than against a table this file publishes. A drifted tag still fails the
+ * build; what no longer exists is a hard-coded five-entry table for it to drift
  * against.
+ *
+ * **Row D9 turned that zero into 245, and A3's deletion is why it cost
+ * nothing.** A corner wall tagged `size|openlock|A` measures 1.500 and not the
+ * 2 the code implies, so the code is *not* a functional determinant of width
+ * after all — on the commonest code in the corpus, over 8.7% of the tiles that
+ * carry it. Had `SIZE_CODE_WIDTH_UNITS` survived, every consumer of
+ * `sizeCodeWidth('A')` would now be wrong by half a unit and nothing would have
+ * said so. It did not survive, the join moved to the footprint, and the only
+ * thing that had to change was the assertion and the entry above.
  *
  * That gate is not decoration. All 26 codes on the base side pass it today — the
  * `I`, `S` and `X` bases are homogeneous, and no base carries `O` at all — which
@@ -86,6 +95,16 @@ import { footprintKey } from './footprint'
  * left a comment saying "never both" and a comment cannot fail.
  */
 export const AMBIGUOUS_SIZE_CODES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  /**
+   * Row **D9**, and the one that makes this constant's own argument sharpest.
+   * `A` is the corpus's commonest code — 1,095 records — and it was the model of
+   * a determinant: every one of them a 2-unit run. 157 meshes read out of R2 say
+   * that on **245** of them the run is **1.500**, because a corner wall's
+   * `size|width|2` names the cell it fills and not the piece. So the code that
+   * looked least ambiguous spans two widths of the same primitive, and a
+   * code-first join would put a 2-unit base under a 1.5-unit corner wall.
+   */
+  A: Object.freeze(['wall:1.5', 'wall:2']),
   I: Object.freeze(['column', 'rect:1x1']),
   O: Object.freeze(['column', 'tri:2', 'tri:4']),
   S: Object.freeze(['rect:1x2', 'wall:2']),

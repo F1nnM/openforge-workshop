@@ -80,8 +80,30 @@ import type { CatalogAssets, CatalogFile } from '../src/catalog'
  * read the last one. The record *shape* is `SCHEMA_VERSION`'s subject and the
  * record *content* is this one's, and this row is the cleanest example of the
  * split the two numbers exist to express.
+ *
+ * ## Row D9 is the second bump, and it is the case this docblock names first
+ *
+ * *"Bump it when a field's meaning changes without the schema changing: a
+ * different footprint tie-break…"* — and this is a different footprint
+ * derivation. `resolveFootprint` gives a corner wall tagged `size|width|2` a
+ * run of **1.5** rather than 2, on **245 records**, because row D9 fetched 157
+ * corner-wall meshes from R2 and measured them: the tag names the cell and the
+ * piece is the cell face less the 0.5 column. `pipeline/footprint.ts#cornerWallRun`
+ * is the rule and `docs/templates-plan.md` §9 is the measurement.
+ *
+ * The biconditional decides it with no judgement call, exactly as B1's line
+ * says it should: the emitted `{tags, records}` digest moves — 245 records write
+ * a different `foot.length` and a different size token — so the version moves
+ * with it. The stamp gate caught this row having forgotten, which is the failure
+ * mode the rule was written for, and it named the fix.
+ *
+ * `SCHEMA_VERSION` stays 4 for the third time. No field was added, no field's
+ * type changed, and `foot.length` means what it always meant — *the end-to-end
+ * run of the wall*. What changed is that on 245 records it is now **true**. A
+ * consumer needs no new code to read this index; it needs its caches
+ * invalidated, which is precisely what this number is for.
  */
-export const PIPELINE_VERSION = 2
+export const PIPELINE_VERSION = 3
 
 /**
  * Payload budget, brotli, for the emitted `catalog.json`.
@@ -217,6 +239,31 @@ export const PIPELINE_VERSION = 2
  * references. `form|straight` is on 5,707, so it takes 0 and `role|wall` takes
  * 1. Both are one digit, which is the property the price rested on, so the
  * argument survives its own premise being wrong.
+ *
+ * **Row D9 took it to 366,677 B — 71.62%** (5,905,632 B raw), by correcting 245
+ * corner walls from a tagged 2-unit run to their measured 1.5. The same three
+ * figures, and the split between them is the same one P3 and B1 each recorded:
+ *
+ *   1. **The shipped delta is +504 B**, artefact to artefact, pipeline 2's
+ *      366,173 B against pipeline 3's 366,677 B, both normalised here.
+ *   2. **Isolating the footprint change alone gives +493 B** — this corpus at
+ *      this epoch with the version stamp held at 2, which measures 366,666 B.
+ *      Its counterpart is not an estimate: building from a tree with only
+ *      `pipeline/footprint.ts` reverted reproduces row B2's pinned index digest
+ *      `cf21ab85ac304a20…` **byte for byte** at 366,173 B, so the isolation is
+ *      exact in both directions. `pipeline/templates.test.ts` carries both
+ *      digests.
+ *   3. The two disagree by **11 B, which is `version.pipeline` going 2 to 3** —
+ *      one character, in a different place, and the third time this docblock has
+ *      had to record that number for a different row.
+ *
+ * The raw side is the honest one to reason about and the compressed side is not:
+ * 245 records writing `"length":1.5` for `"length":2` and `1.5x` for `2x` is
+ * **+980 raw bytes** and +504 compressed, while the counterfactuals two other
+ * tests measure against this same artefact moved by −179 B and +223 B on the
+ * *same* change. See `pipeline/templates.test.ts`, where the 128-row `layouts`
+ * key went +808 → **−71** → +396 B across this row's two halves without one byte
+ * of the table itself changing.
  */
 export const SIZE_BUDGET_BYTES = 500 * 1024
 

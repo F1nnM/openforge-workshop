@@ -37,6 +37,22 @@
  * *lose* a footprint, because W1 measured them and the footprint they had was
  * wrong. A wrong primitive placed confidently is worse than a refusal.
  *
+ * ## What row D9 changed, and it moves no tile between cases
+ *
+ * One **parameter** correction, on 245 tiles: a corner wall tagged
+ * `size|width|2` runs **1.5**, because that tag names the cell and the piece is
+ * the cell face less the 0.5 corner column. Read from 157 meshes fetched whole
+ * from R2 — the class had **0 measured records** when rows A10, B2 and D8 each
+ * declined to guess it. See {@link cornerWallRun} for the table and
+ * {@link isCornerAssembly} for the 36 records the correction must *not* touch.
+ *
+ * It is deliberately not in the movement table above: `footprintKind` is
+ * untouched, every one of the 245 stays a `wall`, and so the RECT/WALL/ARC
+ * tallies `docs/verify-catalog-facts.py` mirrors are unchanged. This module's
+ * contract — *the script mirrors the classification, the numbers inside a bucket
+ * have one home here* — is what makes a 245-tile correction possible without
+ * touching the script.
+ *
  * ### A radius is an outline only when nothing reassigns it
  *
  * The load-bearing change of both rows. `arc` asserts *the outline is an annular
@@ -223,6 +239,25 @@ const COMPONENT_PREFIX = 'component|'
 
 /** `part|lintel` — an insert whose `size|radius` is the arch it fits, not its outline. */
 const LINTEL_TAG = 'part|lintel'
+
+/** The `shape|corner` family root. 671 records carry it or one of its qualifiers. */
+const CORNER_TAG = 'shape|corner'
+
+/**
+ * `shape|corner|wall` — the marker on a corner printed as **one L**, both legs
+ * together, rather than as a single leg. See {@link isCornerAssembly}.
+ */
+const CORNER_ASSEMBLY_TAG = 'shape|corner|wall'
+
+/** The mirror class, 133 tiles each. Its presence overrides {@link CORNER_ASSEMBLY_TAG}. */
+const CORNER_CHIRALITY_TAGS = ['shape|corner|left', 'shape|corner|right'] as const
+
+/**
+ * The one cell size a corner *run* is tagged with, and so the only tagged run
+ * {@link cornerWallRun} will correct. All 245 of them; see that docstring for
+ * why 3 and 4 are refused rather than extrapolated.
+ */
+const CORNER_CELL_RUN_UNITS = 2
 
 /**
  * Whether the tile's outline is curved — a **segment-exact** test against W2's
@@ -521,6 +556,105 @@ function wallRunLength(tags: readonly string[]): number | undefined {
 }
 
 /**
+ * Whether any `shape|corner` tag is on the tile — the family root or a qualifier.
+ *
+ * Segment-exact on the root so `shape|cornerstone`, were it ever minted, would
+ * not match; the qualifiers are matched by prefix because the corpus writes
+ * fourteen of them (`|left`, `|right`, `|both`, `|wall`, `|low`, `|convex`,
+ * `|concave`, `|internal`, `|floor`, `|corbels`, the `full-low-minimal` ladder,
+ * and the bare letters `a`–`i`).
+ */
+function isCornerPiece(tags: readonly string[]): boolean {
+  return tags.some((tag) => tag === CORNER_TAG || tag.startsWith(`${CORNER_TAG}|`))
+}
+
+/**
+ * Whether the tile is an **L-shaped whole-cell** corner rather than a corner
+ * *run* — the class row D9 measured and which must keep its tagged dimension.
+ *
+ * `shape|corner|wall` **without chirality**, and both halves of that are
+ * measured rather than reasoned. All 36 such records are `rough_stone` two-wall
+ * corner assemblies — one print carrying both legs of the corner — and every one
+ * of the 36 measures its tagged size in *both* plan axes, not a 0.5-deep run:
+ *
+ * | code / tagged | records | measured run | measured across |
+ * | --- | ---: | --- | --- |
+ * | `IA` / 1 | 3 | 1.020–1.055 | 1.003–1.027 |
+ * | `A`  / 2 | 27 | 2.012–2.028 | 2.001–2.013 |
+ * | `D`  / 3 | 3 | 3.011–3.026 | 3.010–3.014 |
+ * | `Q`  / 4 | 3 | 4.012–4.028 | 4.007–4.012 |
+ *
+ * All 36 read in full from R2 — no sampling. So `shape|corner|wall` names a
+ * piece that *is* its cell, and {@link cornerWallRun} must not shorten it.
+ *
+ * **Chirality wins where the two markers collide**, on exactly one record:
+ * `towne+broken_stucco-a#corner+left+wall+low.2x…` carries `shape|corner|wall`
+ * *and* `shape|corner|left`, and measures **1.500 × 0.502** — a single leg, not
+ * an L. One record is a thin basis for a precedence rule, which is why it is the
+ * *measured* one that decides and not the tag that reads more specific.
+ *
+ * Their `{shape:'wall', length: n}` footprint is still wrong — an L is not a
+ * 0.5-deep run — but that is a **different** defect from this row's and
+ * `Footprint` has no case for an L. Recording it here rather than approximating
+ * it as a `rect` (which would claim a filled square) or `none` (which would
+ * unplace 36 tiles): `footprintKind` is mirrored by
+ * `docs/verify-catalog-facts.py` and moving these to another bucket is a
+ * classification change, not a parameter one.
+ */
+function isCornerAssembly(tags: readonly string[]): boolean {
+  if (!tags.includes(CORNER_ASSEMBLY_TAG)) return false
+  return !CORNER_CHIRALITY_TAGS.some((tag) => tags.includes(tag))
+}
+
+/**
+ * The run of a corner wall, whose tagged width names the **cell** and not the
+ * piece — or `undefined` when the tag is already the run.
+ *
+ * ## The question three rows refused to guess, settled by reading the meshes
+ *
+ * Rows A10, B2 and D8 all met this and all declined to answer it, correctly:
+ * `docs/templates-plan.md` §9 says *"do not silently write 1.5"* because nothing
+ * in the corpus recorded the mitre. Row **D9 measured it** — 157 corner-wall
+ * meshes read whole from R2, axis-aligned bounds over every facet — and the
+ * corpus's silence turns out to have been hiding one number:
+ *
+ * | class | records | tagged | **measured run** | thickness |
+ * | --- | ---: | ---: | --- | --- |
+ * | chirality + code `A` | 224 | 2 | **1.500–1.513** (93 designs) | 0.500–0.658 |
+ * | corner, no chirality, code `A` | 21 | 2 | **1.500–1.518** (all 21) | 0.499–0.508 |
+ * | corner, no chirality, code `BA` | 6 | 1.5 | **1.500** (all 6) | 0.500 |
+ * | *control* — straight `IA`/`BA`/`A`/`D`/`Q` | — | 1/1.5/2/3/4 | **1.000/1.500/2.000/3.000/4.000** | 0.500 |
+ *
+ * So on the 245 tagged `2` the run is **1.5**, which is exactly a 2-unit cell
+ * face less the 0.5 corner column, and it is *identical* to a modular
+ * `size|width|1.5` wall. The two corner recipes describe the same geometry and
+ * differ only in how many prints it takes. §9's caution stands as written — the
+ * number had to be measured — and its second clause is now false: the mitre is
+ * in a measurement.
+ *
+ * ## Why the correction is gated on the tagged run being 2
+ *
+ * Because the **6 `BA` corner walls refute the general rule.** "A corner wall
+ * loses the column's 0.5" would put them at 1.0 and they measure 1.500 exactly,
+ * to three decimals, on all six. Their tag already names the run; the `A` tag
+ * names the cell. One tag class, two readings — the same shape of ambiguity D8
+ * found between the 224 and the 21 `grate+widened.2x2` records, and the same
+ * resolution: separate the classes on a tag and measure both sides.
+ *
+ * `CORNER_CELL_RUN_UNITS` is 2 because 2 is the only cell size any corner *run*
+ * in the corpus is tagged with. A 3- or 4-unit corner run would be
+ * `3 - 0.5 = 2.5` if the same geometry held, and there is not one to measure —
+ * every `D` and `Q` corner in the archive is an {@link isCornerAssembly} L — so
+ * the correction refuses to extrapolate off the one cell size it has evidence
+ * for.
+ */
+function cornerWallRun(tags: readonly string[], tagged: number): number | undefined {
+  if (tagged !== CORNER_CELL_RUN_UNITS) return undefined
+  if (!isCornerPiece(tags) || isCornerAssembly(tags)) return undefined
+  return tagged - WALL_THICKNESS_UNITS
+}
+
+/**
  * Whether the tile is a column whose footprint may be placed.
  *
  * `'column'` for the four measured letters, `'none'` for `col+T` — which W2 marks
@@ -626,9 +760,13 @@ export function resolveFootprint(tags: readonly string[]): Footprint {
       return { shape: 'rect', w, d }
     }
     case 'wall': {
-      const length = wallRunLength(tags) ?? numericTagValue(tags, 'size|width')
-      if (length === undefined || length <= 0) return { shape: 'none' }
-      return { shape: 'wall', length }
+      // The tessellation's run, else the tag's — then row D9's corner
+      // correction, which is the one place the *table* also names the cell
+      // rather than the piece: code `A` was measured on a straight
+      // `plain#base.A.openlock+topless.stl`, and a corner `A` is 1.5.
+      const tagged = wallRunLength(tags) ?? numericTagValue(tags, 'size|width')
+      if (tagged === undefined || tagged <= 0) return { shape: 'none' }
+      return { shape: 'wall', length: cornerWallRun(tags, tagged) ?? tagged }
     }
     default:
       return { shape: 'none' }

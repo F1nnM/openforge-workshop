@@ -499,7 +499,21 @@ describeCorpus('the click path over the live archive', () => {
          to close, and `fail` on the 2 external-corner `single_piece` recipes.
          The point of re-measuring it *here* is that a one-click placement is the
          surface where a user meets it, and `describePlacementFill` is where it
-         is said. */
+         is said.
+
+         **Row D9 emptied it: 40 of 40 raise no doubt.** The 2 that failed were
+         the `single_piece` corners, whose two walls a `size|width|2` tag made 2
+         units long against a 0.5 column on a 2-unit face. 157 corner-wall meshes
+         read out of R2 measure the run at **1.500**, so `1.5 + 0.5 = 2` closes
+         both faces and there is nothing left to disclose. The 4 internal corners
+         are still `undecidable` — no wall part, no anchored face — and still
+         raise no *doubt*, which is the distinction the note below draws and D9
+         does not touch.
+
+         The test is kept as a positive rather than deleted: it is what would
+         fail if a future row reintroduced a doubt on the one-click path, and the
+         sentence check below still has to have something to run on when one
+         does. */
       const fill = cold()
       const recipes = PLACEABLE_TEMPLATES.filter((template) => template.parts.length > 1)
       const doubted = recipes
@@ -519,22 +533,31 @@ describeCorpus('the click path over the live archive', () => {
             .join(', ')}\n`,
       )
 
-      /* **This is not C2's 34 of 40, and the two do not disagree.** C2 counted
-         `PlacedTemplate.verdict`, where the 4 internal corners are
-         `undecidable` — they have no `wall` slot, so there is no edge to close
-         and `placeTemplateSlots` raises no doubt about them. Counted by *doubts*
-         — which is what a surface can say a sentence about — the failures are
-         the 2 external-corner `single_piece` recipes and their 4 `over-run`
-         walls. A row that reported `undecidable` as a doubt would be inventing a
-         sentence about a rule that declined to answer. */
-      expect(codes.get('over-run')).toBe(4)
-      expect(doubted).toHaveLength(2)
+      /* **This was C2's 2 recipes and 4 `over-run` walls, and it is now zero of
+         each.** The distinction C2 drew still holds and is still the reason the
+         number is not 36: counted by `PlacedTemplate.verdict` the 4 internal
+         corners are `undecidable`, but counted by *doubts* — which is what a
+         surface can say a sentence about — they raise none, because they have no
+         `wall` slot and so no edge to close. A row that reported `undecidable`
+         as a doubt would be inventing a sentence about a rule that declined to
+         answer. */
+      expect(codes.get('over-run')).toBeUndefined()
+      expect(doubted).toEqual([])
 
-      // Every doubt reaches the sentence the surface announces. A placement that
-      // cannot close must not read as a clean one.
-      for (const one of doubted) {
-        expect(describePlacementFill(one.placed)).toMatch(/needs a choice|anchored|placeable|straight run/)
+      /* And the sentence path is still exercised, on a doubt constructed rather
+         than found — otherwise emptying the archive's doubts would have quietly
+         retired the assertion that a placement which cannot close does not read
+         as a clean one. */
+      const first = recipes[0]
+      if (first === undefined) throw new Error('no placeable recipe')
+      const placed = cold()(idOf(first), [])
+      const withDoubt = {
+        ...placed,
+        doubts: [{ part: 'wall', code: 'over-run' as const, want: 2, got: 2.5 }],
       }
+      expect(describePlacementFill(withDoubt)).toMatch(
+        /needs a choice|anchored|placeable|straight run/,
+      )
     },
     SLOW_MS,
   )

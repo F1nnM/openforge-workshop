@@ -612,12 +612,21 @@ describe('the band, and why row A7 could not delete it — re-measured under row
  */
 describe('the wired slot layout', () => {
   const layout = templateSlotLayout(fixtureTemplateParts)
-  /** The five records of a filled 2 x 2 corner, as the rule receives them. */
+  /**
+   * The five records of a filled 2 x 2 corner, as the rule receives them.
+   *
+   * The two wall slots hold `cornerWall` — a **1.5**-unit run — and not the
+   * straight `wall2`. Row **D9** measured 157 corner-wall meshes out of R2 and
+   * every one tagged `size|width|2` runs 1.500, so 1.5 is the footprint the
+   * archive actually hands these slots. With `wall2` in them this fixture was a
+   * 2-unit run on a face a 0.5 column had already taken half a unit of, which is
+   * an over-run no record produces.
+   */
   const CORNER = new Map([
     [FIXTURE_SLOTS.base, record(FIXTURE_IDS.floor2)],
     [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
-    [FIXTURE_SLOTS.rightWall, record(FIXTURE_IDS.wall2)],
-    [FIXTURE_SLOTS.leftWall, record(FIXTURE_IDS.wall2)],
+    [FIXTURE_SLOTS.rightWall, record(FIXTURE_IDS.cornerWall)],
+    [FIXTURE_SLOTS.leftWall, record(FIXTURE_IDS.cornerWall)],
     [FIXTURE_SLOTS.column, record(FIXTURE_IDS.column)],
   ])
   const answerAt = (slot: SlotName, fills = CORNER) => layout(FIXTURE_TEMPLATE, slot, fills)
@@ -628,24 +637,25 @@ describe('the wired slot layout', () => {
   }
   const at = (slot: SlotName, fills = CORNER) => positionOf(answerAt(slot, fills), slot)
 
-  it('lays a 2 x 2 corner’s five slots out, over-running walls included', () => {
+  it('lays a 2 x 2 corner’s five slots out, each wall abutting the column', () => {
     /*
-      **The table this row is judged on, and row D8 changed one number in it.**
-      The 2-unit walls are the corpus's own 8 `single_piece` mitres:
-      `placeTemplateSlots` answers `over-run want 2 got 2.5` for both, because
-      two 2-unit runs and a 0.5 column do not tile two 2-unit edges end to end.
-      That doubt stands and the plan still forbids inventing the number that
-      would close it — but it is a *warning* now, not a refusal, so both walls
-      are laid out at the faces they are anchored to.
+      **The table this row is judged on. Row D8 changed one number in it and row
+      D9 changed three more.**
 
-      Every part lands at the cell's minimum corner because every anchor here is
-      flush to `-x`/`-z`, and the *extents* are what separate them: the right
-      wall runs 2 x 0.5 along the north face, the left wall is turned a quarter
-      so its 0.5 x 2 runs down the west face, and the 0.5 x 0.5 column sits in
-      the square where the two meet. **`rotation: 270` on the left wall is the
-      whole of the reported defect**: before this row both walls came back
-      `rotation: 0` at the same corner, so they drew through each other along one
-      face and left the other face bare.
+      D8's number is `rotation: 270` on the left wall, and it is the whole of the
+      reported defect: before it, both walls came back `rotation: 0` at the same
+      corner, so they drew through each other along one face and left the other
+      bare.
+
+      D9's are the two walls' `dx`/`dz`. They used to be `0, 0` — every part at
+      the cell's minimum corner, every anchor flush to `-x`/`-z`, with only the
+      *extents* separating them — and the two walls were 2-unit runs that
+      `placeTemplateSlots` answered `over-run want 2 got 2.5` for. The meshes say
+      the run is **1.5**, so each wall now sits at the far end of the 1.5 its
+      column leaves: the right wall's 1.5 x 0.5 starts half a unit along the
+      north face, the left wall's 0.5 x 1.5 starts half a unit down the west
+      face, and the 0.5 x 0.5 column has the square where the two meet to itself.
+      No overlap, no gap, no doubt.
     */
     expect(at(FIXTURE_SLOTS.base)).toEqual({ dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell: FIXTURE_CELL })
     expect(at(FIXTURE_SLOTS.floor)).toEqual({
@@ -663,7 +673,7 @@ describe('the wired slot layout', () => {
       cell: FIXTURE_CELL,
     })
     expect(at(FIXTURE_SLOTS.rightWall)).toEqual({
-      dx: 0,
+      dx: 0.5,
       dz: 0,
       rotation: 0,
       elevationMm: BASE_LIFT_MM,
@@ -671,7 +681,7 @@ describe('the wired slot layout', () => {
     })
     expect(at(FIXTURE_SLOTS.leftWall)).toEqual({
       dx: 0,
-      dz: 0,
+      dz: 0.5,
       rotation: 270,
       elevationMm: BASE_LIFT_MM,
       cell: FIXTURE_CELL,
@@ -809,8 +819,8 @@ describe('the wired slot layout', () => {
             [
               [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
               [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
-              [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2],
-              [FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2],
+              [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.cornerWall],
+              [FIXTURE_SLOTS.leftWall, FIXTURE_IDS.cornerWall],
               [FIXTURE_SLOTS.column, FIXTURE_IDS.column],
             ],
             0,

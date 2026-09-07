@@ -135,8 +135,17 @@ describe('the refs a predicate resolves to', () => {
     expect(sizeRefs({ kind: 'none' })).toEqual({ require: [], deny: [] })
   })
 
-  it('denies the two tags that make a `size|width` mean something else', () => {
-    expect(RUN_DENY_TAGS).toEqual(['shape|angled|right', 'shape|option|curved_interface'])
+  it('denies the three tags that make a `size|width` mean something else', () => {
+    /* `shape|corner` is row **D9**'s: 245 corner walls are tagged
+       `size|width|2` and measure 1.500, so a `run: 2` ref that did not deny it
+       would offer a 1.5 wall for a 2-unit face. See `size.ts#RUN_DENY_TAGS` for
+       what the third entry costs (595 records unreachable by a run ref) and why
+       that is affordable (no shipped path was reaching them through one). */
+    expect(RUN_DENY_TAGS).toEqual([
+      'shape|angled|right',
+      'shape|option|curved_interface',
+      'shape|corner',
+    ])
   })
 
   it('asks the vocabulary rather than holding one', () => {
@@ -354,26 +363,38 @@ describeCorpus(corpusTitle, () => {
     /* One row per outcome, and there is **no row where the two disagree** — no
        `exact/<a doubt>` and no `not exact/placed`. */
     expect(Object.fromEntries([...outcome].sort())).toEqual({
-      'exact/placed': 1034,
+      'exact/placed': 1050,
       'no run/no-footprint': 32,
       'no run/no-run': 104,
-      'not exact/over-run': 41,
+      'not exact/over-run': 25,
     })
     expect([...outcome.values()].reduce((a, b) => a + b, 0)).toBe(1211)
-    /* What a *compatible* predicate would buy, and it is a loss. Of the 41
-       inexact slots, **25 are short of the face and 16 over-run it** — and the
-       25 short ones are exactly the 25 `wall-on-tile` combinations B2 reports as
-       `fails`, while the 16 long ones are the 8 external-corner failures counted
-       once per wall. A "fits inside the face" reading would admit all 25 and
-       every one of them arrives as a doubt nobody chose. */
-    expect({ short, long }).toEqual({ short: 25, long: 16 })
-    expect(short + long).toBe(41)
+    /* What a *compatible* predicate would buy, and it is still a loss. Row **D9**
+       moved 16 slots from `not exact` to `exact`: the 8 external-corner failures
+       counted once per wall, whose runs a `size|width|2` tag made 2 units long
+       against a face the column leaves 1.5 of. Measured, the run **is** 1.5, so
+       the exact predicate and B2's closure agree on them the way they always
+       agreed on everything else.
+
+       All 25 that remain are **short** of the face and none over-runs it, and
+       they are exactly the 25 `wall-on-tile` combinations B2 reports as `fails`
+       — a 0.5 column filling a wall slot. A "fits inside the face" reading would
+       admit all 25 and every one of them arrives as a doubt nobody chose. */
+    expect({ short, long }).toEqual({ short: 25, long: 0 })
+    expect(short + long).toBe(25)
   }, SLOW_MS)
 
-  it('has `cornerSpanOf` agree with B2’s fill-read `cornerSpan` on every corner slot', () => {
+  it('has `cornerSpanOf` agree with B2’s fill-read reservation on every corner slot', () => {
     /* `cornerSpanOf` reads the *rules* because a generator has no fills yet;
-       `offsets.ts#cornerSpan` reads the fills. They must agree or a generated
-       run predicate would ask for a face length the layout does not close on. */
+       `offsets.ts#cornerReservation` reads the fills. They must agree or a
+       generated run predicate would ask for a face length the layout does not
+       close on.
+
+       Row **D9** made the fill-read side *signed* and per-face — a corner sits at
+       one end of one face and the other end of its neighbour — so what is
+       compared here is the magnitude, which is the quantity a run predicate
+       needs. The sum below is over the corner slots rather than over the faces,
+       which is exactly `cornerSpanOf`'s own shape. */
     let checked = 0
     for (const combination of combinations) {
       let fromFills = 0
@@ -420,7 +441,16 @@ describeCorpus(corpusTitle, () => {
     expect(poolTotal).toBe(5456)
     expect([...runs.values()].reduce((a, b) => a + b, 0)).toBe(5071)
     expect([...runs.keys()].map(Number).sort((a, b) => a - b)).toEqual([0.5, 1, 1.5, 2, 3, 4])
-    expect(runs.get('2')).toBe(1663)
+    /* 1,663 at run 2 before row **D9**, and the 277 that left are corner-wall
+       candidate references — the same records, counted once per slot that admits
+       them. They are at 1.5 now because that is what the meshes measure, and the
+       domain is still the same six lattice values, so nothing about the
+       predicate's enumerability changed. Both halves asserted, because a drop at
+       2 with no matching rise at 1.5 would mean records had left the pools
+       rather than moved within them. */
+    expect(runs.get('2')).toBe(1386)
+    expect(runs.get('1.5')).toBe(1371)
+    expect((runs.get('2') ?? 0) + (runs.get('1.5') ?? 0)).toBe(1663 + 1094)
   }, SLOW_MS)
 
   it('splits B2’s verdicts 980 / 25 / 138 for `wall-on-tile`, which is not a run comparison', () => {

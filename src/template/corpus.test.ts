@@ -61,7 +61,7 @@ import {
   measureSolver,
 } from './measure'
 import type { PlacedTemplate, SlotDoubtCode } from './offsets'
-import { placeTemplateSlots, slotOffset } from './offsets'
+import { cornerReservation, placeTemplateSlots, slotOffset } from './offsets'
 import type { SlotName, TemplateLayout } from './rules'
 import { SLOT_CONVENTIONS, conventionFor, ruleFor } from './rules'
 
@@ -293,7 +293,14 @@ describeCorpus(corpusTitle, () => {
     () => {
       /* The load-bearing result of the row, and the reason a `SlotLayout`
          carrying `(dx, dz, dy, yaw)` is not implementable: a stored offset is
-         right for one fill of a slot and wrong for the next. */
+         right for one fill of a slot and wrong for the next.
+
+         **The corner wall slots hold 3 each, not 4** — row D9. They used to
+         offer `{wall,length:2}` and `{wall,length:1.5}` as two footprints, from
+         a `size|width|2` tag and a `size|width|1.5` tag; measured, both classes
+         of mesh run 1.500 and they are one footprint. The single-piece and
+         modular corners are the same geometry differing only in print count,
+         so the slot's *domain* shrank while its record count did not. */
       const perSlot = new Map<SlotName, Set<string>>()
       for (const { part, records } of parts) {
         const feet = perSlot.get(part) ?? new Set<string>()
@@ -305,8 +312,8 @@ describeCorpus(corpusTitle, () => {
         floor: 8,
         wall: 14,
         column: 1,
-        'right wall': 4,
-        'left wall': 4,
+        'right wall': 3,
+        'left wall': 3,
       })
       const oneFootprint = parts.filter(
         ({ records }) => new Set(records.map((record) => JSON.stringify(record.foot))).size === 1,
@@ -374,14 +381,25 @@ describeCorpus(corpusTitle, () => {
   /* ------------------------------------------------------------ the closure */
 
   it(
-    'closes on 1,006 of 1,215 combinations, fails on 33 and cannot decide 176',
+    'closes on 1,014 of 1,215 combinations, fails on 25 and cannot decide 176',
     () => {
+      /* **Row D9 moved this split, and the movement is exactly the 8 mitres.**
+         D8 left it at 1,006 / 33 / 176 on purpose, because settling it meant
+         measuring a mitre nobody had measured. Measured — 157 corner-wall
+         meshes from R2, run 1.500 on all 245 records tagged `size|width|2` —
+         two 1.5 walls and a 0.5 column tile two 2-unit faces exactly, so the 8
+         `single_piece` corner combinations move from `fails` to `closes` and
+         nothing else moves at all. `undecidable` is byte-identical at 176: the
+         `diag`, `tri` and `no-footprint` refusals are untouched by a wall run.
+
+         82.8% to **83.5%**, and the remaining 25 failures are one population
+         rather than two — see the itemisation below. */
       expect(combinations).toHaveLength(1215)
       const verdicts = tally(combinations.map((one) => one.placed.verdict))
       process.stdout.write(`\n[template] closure ${JSON.stringify(verdicts)}\n`)
-      expect(verdicts).toEqual({ closes: 1006, fails: 33, undecidable: 176 })
-      expect(1006 / 1215).toBeCloseTo(0.828, 3)
-      expect(33 / 1215).toBeCloseTo(0.027, 3)
+      expect(verdicts).toEqual({ closes: 1014, fails: 25, undecidable: 176 })
+      expect(1014 / 1215).toBeCloseTo(0.835, 3)
+      expect(25 / 1215).toBeCloseTo(0.021, 3)
       expect(176 / 1215).toBeCloseTo(0.145, 3)
     },
     SLOW_MS,
@@ -395,48 +413,70 @@ describeCorpus(corpusTitle, () => {
       counts[one.placed.verdict] = (counts[one.placed.verdict] ?? 0) + 1
       per.set(id, counts)
     }
+    /* `wall-on-tile` is untouched — its 40 edges have no `corner` sibling, so
+       `cornerReservation` is 0 on every one of them and not a coordinate moved.
+       `external-corner` is where the whole movement lives: **34 of 34 close**,
+       where D8 measured 8 `fails` and 26 `closes`. */
     expect(per.get('wall-on-tile')).toEqual({ closes: 980, fails: 25, undecidable: 138 })
-    expect(per.get('external-corner')).toEqual({ closes: 26, fails: 8, undecidable: 0 })
+    expect(per.get('external-corner')).toEqual({ closes: 34, fails: 0, undecidable: 0 })
     /* All 38 internal-corner combinations, and every one of them undecidable:
        with no wall part there is no anchored face and so no closure to check.
        Counting them as fits would inflate 82.8% by three points on nothing. */
     expect(per.get('internal-corner')).toEqual({ closes: 0, fails: 0, undecidable: 38 })
   })
 
-  it('itemises the 33 failures as 25 columns in a wall slot and the 8 single-piece mitres', () => {
+  it('itemises the 25 failures as one population: a column filling a wall slot', () => {
+    /* **What row D9 emptied.** This used to read *25 columns in a wall slot and
+       the 8 single-piece mitres*, and the 8 were the whole of §9's *"do not
+       silently write 1.5"*. They are gone from this list because the 1.5 was
+       measured rather than written: two 1.5 walls and a 0.5 column tile two
+       2-unit faces, so all 34 external-corner combinations close.
+
+       What is left is one population and no corner among it — asserted below in
+       both directions, because "the mitres closed" and "the mitres stopped being
+       counted" would look the same from the count alone. */
     const failures = combinations.filter((one) => one.placed.verdict === 'fails')
-    expect(failures).toHaveLength(33)
+    expect(failures).toHaveLength(25)
 
     const columnsAsWalls = failures.filter((one) => one.feet.get('wall')?.shape === 'column')
     expect(columnsAsWalls).toHaveLength(25)
     for (const one of columnsAsWalls) {
       // A 0.5 column filling a wall slot on a 2 x 2 floor. The corpus admits it;
-      // there is no 2-unit edge run to match.
+      // there is no 2-unit edge run to match, and no corner sibling reserves any
+      // of the face either, so `want` is the whole 2.
       expect(one.placed.doubts).toEqual([{ part: 'wall', code: 'over-run', want: 2, got: 0.5 }])
+      expect(one.layout).toBe(SLOT_CONVENTIONS[0])
     }
+    // No external corner fails at all any more, and no `single_piece` recipe
+    // does either — the two spellings of the same fact.
+    expect(failures.filter((one) => one.layout === SLOT_CONVENTIONS[1])).toEqual([])
+    expect(failures.filter((one) => one.template.tags.includes('build|s2w|single_piece'))).toEqual([])
+  })
 
-    const mitres = failures.filter((one) => one.layout === SLOT_CONVENTIONS[1])
-    expect(mitres).toHaveLength(8)
-    for (const one of mitres) {
-      /* **The 8 the plan's §9 singles out.** Every one is a `single_piece`
-         corner: two `size|width|2` walls plus a 0.5 column on a 2 x 2 cell,
-         where `2 + 0.5 !== 2`. The meshes must be mitred back physically and
-         **nothing in the corpus records the mitre** — 0 of the **245** records
-         carrying `shape|corner|left` and/or `shape|corner|right` (266 tag
-         references over 245 records; 21 files carry both) have a measured mesh,
-         asserted below. So the doubt names the edge and the sum and stops: *do
-         not silently write 1.5*.
+  it('closes the 8 single-piece mitres on the measured 1.5, with all five parts placed', () => {
+    /* **The row's headline, asserted as a positive rather than an absence.**
 
-         **Row D8: all five slots place regardless.** The doubt says the runs do
-         not tile the face; it does not say the wall has nowhere to be. Refusing
-         it a coordinate made `catalog.ts` draw it at the cell corner unrotated,
-         piling both walls and the column on one square — the defect the project
-         owner reported. `offsets.test.ts` measures that the five placed parts
-         still union to exactly the 2 x 2 cell on all four quarters, so nothing
-         overhangs and A10's rigid body survives. */
-      expect(one.template.tags).toContain('build|s2w|single_piece')
-      expect(one.placed.doubts.map((doubt) => doubt.code)).toEqual(['over-run', 'over-run'])
-      expect(one.placed.doubts.every((doubt) => doubt.want === 2 && doubt.got === 2.5)).toBe(true)
+       Every `single_piece` external corner: two walls that a `size|width|2` tag
+       used to make 2 units long, and that 157 R2 meshes measure at **1.500** —
+       `footprint.ts#cornerWallRun`. 1.5 + 0.5 = 2 on both faces, so there is no
+       doubt left to raise, and the offsets abut the column instead of running a
+       quarter unit through it (D8 measured that overlap; `offsets.test.ts`
+       measures the abutment).
+
+       §9's caution is kept in the plan and its reason is kept here: the number
+       is asserted to be the *measured* one and not an arithmetic convenience —
+       `2 - WALL_THICKNESS_UNITS` is written nowhere in this file. */
+    const singlePiece = combinations.filter(
+      (one) =>
+        one.layout === SLOT_CONVENTIONS[1] && one.template.tags.includes('build|s2w|single_piece'),
+    )
+    expect(singlePiece).toHaveLength(8)
+    for (const one of singlePiece) {
+      expect(one.placed.verdict).toBe('closes')
+      expect(one.placed.doubts).toEqual([])
+      expect(one.feet.get('right wall')).toEqual({ shape: 'wall', length: 1.5 })
+      expect(one.feet.get('left wall')).toEqual({ shape: 'wall', length: 1.5 })
+      expect(one.feet.get('column')).toEqual({ shape: 'column' })
       expect(one.placed.slots.map((slot) => slot.part)).toEqual([
         'base',
         'floor',
@@ -444,8 +484,20 @@ describeCorpus(corpusTitle, () => {
         'left wall',
         'column',
       ])
-      expect(JSON.stringify(one.placed)).not.toContain('1.5')
+      // Abutted, not centred: a quarter unit off the face centre, towards the
+      // end the column does not take.
+      const byPart = new Map(one.placed.slots.map((slot) => [slot.part, slot]))
+      expect(byPart.get('right wall')?.offset).toEqual([0.25, -0.75])
+      expect(byPart.get('left wall')?.offset).toEqual([-0.75, 0.25])
     }
+    /* And the modular half resolves to the same geometry, which is the sharpest
+       form of the finding: the two recipes differ only in how many prints the
+       corner takes. */
+    const modular = combinations.filter(
+      (one) => one.layout === SLOT_CONVENTIONS[1] && !one.template.tags.includes('build|s2w|single_piece'),
+    )
+    expect(modular).toHaveLength(26)
+    for (const one of modular) expect(one.placed.verdict).toBe('closes')
   })
 
   it('itemises the 176 undecidables, and the 102 diagonals are four measured runs', () => {
@@ -497,7 +549,16 @@ describeCorpus(corpusTitle, () => {
     expect(disagrees).toBe(0)
   })
 
-  it('produces four distinct edge insets, three of them off the 0.5 snap lattice', () => {
+  it('produces five distinct edge coordinates, four of them off the 0.5 snap lattice', () => {
+    /* **Row D9 added the fifth, and it is the abutment.** The flush inset along
+       the anchored axis is unchanged — `-1.25`, `-0.75`, `-0.25`, `0` — and the
+       new `0.25` is the *other* axis: half of the 0.5 a corner column reserves,
+       on the 68 edge slots of the 34 external-corner combinations. Every edge of
+       every `wall-on-tile` combination still reads 0 there, which is why 980
+       closing combinations did not move.
+
+       Collected as "whichever coordinate is not zero" the way this test always
+       has, so both axes land in one set — see the pair below for the split. */
     const insets = new Set<number>()
     for (const one of combinations) {
       for (const slot of one.placed.slots) {
@@ -506,13 +567,30 @@ describeCorpus(corpusTitle, () => {
       }
     }
     const sorted = [...insets].sort((a, b) => a - b)
-    /* The four the archive really produces. `0` is the degenerate case — a 1 x 1
+    /* The five the archive really produces. `0` is the degenerate case — a 1 x 1
        cell filled by a 1 x 1 wall piece, where the piece *is* the cell — and the
-       other three are odd multiples of 0.25. */
-    expect(sorted).toEqual([-1.25, -0.75, -0.25, 0])
-    // Multiples of 0.25 without exception, and three of the four off the 0.5 step.
+       other four are odd multiples of 0.25. */
+    expect(sorted).toEqual([-1.25, -0.75, -0.25, 0, 0.25])
+    // Multiples of 0.25 without exception, and four of the five off the 0.5 step.
     for (const inset of sorted) expect(Number.isInteger(inset * 4)).toBe(true)
-    expect(sorted.filter((inset) => !Number.isInteger(inset * 2))).toHaveLength(3)
+    expect(sorted.filter((inset) => !Number.isInteger(inset * 2))).toHaveLength(4)
+
+    /* And the abutment is confined to the corner recipes, measured rather than
+       argued: an edge slot picks up a non-zero shift along its face exactly when
+       its layout has a `corner` sibling on that face. */
+    let shifted = 0
+    let unshifted = 0
+    for (const one of combinations) {
+      for (const slot of one.placed.slots) {
+        if (slot.anchor !== 'edge') continue
+        const along = cornerReservation(one.layout, one.feet, slot.side) / 2
+        if (along === 0) unshifted += 1
+        else shifted += 1
+      }
+    }
+    // 68 = the two walls of each of the 34 external-corner combinations.
+    expect(shifted).toBe(68)
+    expect(unshifted).toBe(1007)
   })
 
   it('gives every closing combination an offset on the quarter-unit lattice', () => {
@@ -524,10 +602,11 @@ describeCorpus(corpusTitle, () => {
         for (const value of slot.offset) expect(Number.isInteger(value * 4)).toBe(true)
       }
     }
-    /* 1,006 closing combinations: 980 wall recipes at 3 slots and 26 corners at
-       5. Every coordinate of every one is on the quarter-unit lattice, and the
-       template origin is the only thing that ever gets snapped. */
-    expect(offsets).toBe(980 * 3 + 26 * 5)
+    /* 1,014 closing combinations: 980 wall recipes at 3 slots and **34** corners
+       at 5 — row D9 moved 8 of them out of `fails`. Every coordinate of every one
+       is on the quarter-unit lattice, and the template origin is the only thing
+       that ever gets snapped. */
+    expect(offsets).toBe(980 * 3 + 34 * 5)
   })
 
   it('recomputes the same offset from the rule and from the footprints, for all of them', () => {
@@ -542,7 +621,13 @@ describeCorpus(corpusTitle, () => {
         const foot = one.feet.get(slot.part)
         const shape = foot === undefined ? undefined : footprintShape(foot)
         if (rule === undefined || shape === undefined) continue
-        expect(slotOffset(rule, cell, shape.extent)).toEqual(slot.offset)
+        /* The fourth argument is row D9's, and passing it here is the point:
+           `placeTemplateSlots` computes the face's own reservation from the
+           layout and the fills, and `slotOffset` must reproduce the same
+           coordinate from the same three inputs plus that one number. Omitting
+           it would silently compare a corner edge against its pre-D9 centre. */
+        const reserved = cornerReservation(one.layout, one.feet, rule.side)
+        expect(slotOffset(rule, cell, shape.extent, reserved)).toEqual(slot.offset)
       }
     }
   })
@@ -716,7 +801,7 @@ describeCorpus(corpusTitle, () => {
   /* -------------------------------------------------------- the byte price */
 
   it(
-    'would cost the index +222 B to ship the rule as 128 rows, so it ships in the bundle',
+    'would cost the index +102 B to ship the rule as 128 rows, so it ships in the bundle',
     () => {
       /* The counterfactual, measured with `emit.ts`'s own brotli-11 instrument
          over the **shipped artefact at the payload epoch** — the construction
@@ -758,9 +843,14 @@ describeCorpus(corpusTitle, () => {
         `\n[template] index ${String(baseline)} B · with a 128-row layouts key ${String(withTable)} B ` +
           `(+${String(withTable - baseline)})\n`,
       )
-      expect(baseline).toBe(366_768)
+      /* 366,768 B before row **D9**. The corrected corner footprint writes
+         `"length":1.5` where 245 records said `"length":2` and turns their size
+         token from `2x` to `1.5x`, which is +980 B raw and **+40 B brotli** —
+         a fact about one artefact at one epoch, never a rate, exactly as B1
+         recorded. */
+      expect(baseline).toBe(366_682)
       expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
-      expect(withTable - baseline).toBe(222)
+      expect(withTable - baseline).toBe(102)
       expect(baseline / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
     },
     SLOW_MS,
@@ -1008,7 +1098,7 @@ describeCorpus(
 
     /* ------------------------------------------------------- the fills, placed */
 
-    it('produces a template that closes geometrically on 34 of the 40, and B2 owns the other 6', () => {
+    it('produces a template that closes geometrically on 36 of the 40, and B2 owns the other 4', () => {
       const { index, context: ctx } = ready()
       const verdicts: Record<string, number> = {}
       const doubts: Record<string, number> = {}
@@ -1030,25 +1120,25 @@ describeCorpus(
       }
 
       /* The end-to-end question this row cannot answer on its own: does the
-         one-click default actually *fit*? On 34 of 40 it does. The 6 that do not
-         are B2's known population and not this solver's choice:
+         one-click default actually *fit*? On **36 of 40** it does, and the 4 that
+         do not are the four internal corners, which have no wall part at all and
+         so no closure to check.
 
-           - **4 `undecidable`** — the four internal corners, which have no wall
-             part at all, so there is no closure to check;
-           - **2 `fails`** — the two external-corner `single_piece` recipes,
-             whose two `size|width|2` walls plus a 0.5 column cannot share two
-             2-unit edges. The mitre is in no tag and in no measured mesh, and
-             B2's §9 rule is *"do not silently write 1.5"*, so they surface as
-             `over-run` doubts, two walls each.
+         **Row D9 closed the other 2.** They were the external-corner
+         `single_piece` recipes, whose two walls a `size|width|2` tag made 2 units
+         long against a 0.5 column on a 2-unit face. C2's note said *"no choice of
+         fill closes those two — the arithmetic is over the tagged widths, which
+         every candidate carries"*, and that was right: **no choice of fill could,
+         because the tag was wrong.** 157 corner-wall meshes measure the run at
+         1.500, so the arithmetic is now over a measured run and closes for every
+         candidate rather than for none.
 
-         No choice of fill closes those two — the arithmetic is over the tagged
-         widths, which every candidate carries — so this is not a policy failure
-         and a different ordering would not fix it. What it does mean is that a
-         one-click placement can arrive with a doubt on it, which is C1's and
-         C3's to disclose and is exactly what `SlotDoubt` is for. */
-      expect(verdicts).toEqual({ closes: 34, fails: 2, undecidable: 4 })
-      expect(doubts).toEqual({ 'over-run': 4 })
-      expect(failing.every((id) => id.includes('corner') && id.endsWith('-single-piece'))).toBe(true)
+         So a one-click placement no longer arrives with a doubt on it anywhere in
+         the archive — `doubts` is empty. C1's and C3's disclosure paths are still
+         needed for an *incomplete* fill, which is a different code. */
+      expect(verdicts).toEqual({ closes: 36, undecidable: 4 })
+      expect(doubts).toEqual({})
+      expect(failing).toEqual([])
     })
 
     /* ------------------------------------------------- row B4's 47 families */
@@ -1077,7 +1167,7 @@ describeCorpus(
       expect(RECIPE_TEMPLATES.flatMap((template) => template.parts)).toHaveLength(128)
     })
 
-    it('fills all 47 generated families, at every one of their 304 size options', () => {
+    it('fills all 47 generated families, at every one of their 303 size options', () => {
       const { index, context: ctx } = ready()
       let options = 0
       const unfilled: string[] = []
@@ -1104,7 +1194,13 @@ describeCorpus(
          row that cannot be filled at any size. They are dropped from the
          generator instead, and their records are reached through `shape-base`.
          (350 over 51 with 8 empty domains before that row.) */
-      expect(options).toBe(304)
+      /* 304 before row **D9**, and the one it lost is `wall-corner-s2w`'s
+         *"2 wide"*: no corner wall is 2 units long, so that position had no
+         geometry behind it. Its records fold into the family's existing
+         *"1.5 wide"*. The `2 wide by 2 deep` position stays — those are the 21
+         `grate+widened.2x2` cells, measured at 2.000 x 2.000 and genuinely
+         whole-cell. */
+      expect(options).toBe(303)
       expect(unfilled).toEqual([])
       expect(
         Object.values(GENERATED_FAMILY_SIZES).filter((sizes) => sizes.length === 1),

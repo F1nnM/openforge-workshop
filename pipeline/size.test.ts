@@ -191,16 +191,34 @@ describeCorpus(title, () => {
     expect(exact).toHaveLength(3449)
   })
 
-  it('has 84 wall corrections in three equal thirds, of which 28 are the 1.000 u one', () => {
+  it('has 329 wall corrections in two populations, 245 of them row D9’s corner run', () => {
     const corrections = file.records.filter((record) => {
       const foot = record.foot
       const tagged = numericTagValue(tags(record), 'size|width')
       return foot.shape === 'wall' && tagged !== undefined && tagged !== foot.length
     })
-    /* The brief says 56. It is 84, and all 84 carry the same tag. */
-    expect(corrections).toHaveLength(84)
-    for (const record of corrections)
-      expect(tags(record)).toContain('shape|option|curved_interface')
+    /* The brief said 56. It was 84 — all `curved_interface` — and row **D9**
+       added 245 more: corner walls whose `size|width|2` names the cell and whose
+       measured run is 1.5. Two populations, separated by a tag, and every
+       correction is in one of them. */
+    expect(corrections).toHaveLength(329)
+    const population = (record: CatalogRecord): string =>
+      tags(record).includes('shape|option|curved_interface') ? 'curved_interface' : 'corner'
+    expect(Object.fromEntries(tally(corrections.map(population)))).toEqual({
+      curved_interface: 84,
+      corner: 245,
+    })
+    for (const record of corrections.filter((one) => population(one) === 'corner')) {
+      const own = tags(record)
+      expect(own.some((tag) => tag === 'shape|corner' || tag.startsWith('shape|corner|'))).toBe(true)
+      /* And every one of the 245 is code `A` at a tagged 2 — the class D9
+         measured, and the reason the correction is gated on the tagged run
+         being 2 rather than applied to every corner wall. The 6 `BA` corner
+         walls measure 1.500 against a tagged 1.5 and are not corrections. */
+      expect(tagValue(own, 'size|openlock')).toBe('A')
+      expect(numericTagValue(own, 'size|width')).toBe(2)
+      expect(record.foot.shape === 'wall' ? record.foot.length : NaN).toBe(1.5)
+    }
 
     const byCode = tally(
       corrections.map((record) => {
@@ -212,19 +230,27 @@ describeCorpus(title, () => {
       }),
     )
     expect([...byCode.entries()].sort()).toEqual([
+      ['A 2->1.5', 245],
       ['AxG 2->1.991', 28],
       ['BAxG 1.5->1.547', 28],
       ['QxG 4->3', 28],
     ])
 
-    /* Only the `QxG` third is a *correction* once the run is put back on the
-       lattice: the other 56 snap to exactly the value their tag already gives. */
+    /* Which corrections **survive the snap to the lattice**, and it is the
+       question that separates a measurement from a rounding. Of the 84
+       curved-interface walls only the 28 `QxG` do — the other 56 snap back to
+       exactly the value their tag already gives, so their correction is a
+       sub-lattice one. All **245** of row D9's do, because 1.5 is a lattice value
+       and half a unit is not noise: the corner run really is a different size
+       from the tag, the way `QxG` really is 3 and not 4. */
     const movedOnTheLattice = corrections.filter((record) => {
       const size = sizeOf(record)
       return size !== undefined && size.w !== numericTagValue(tags(record), 'size|width')
     })
-    expect(movedOnTheLattice).toHaveLength(28)
-    for (const record of movedOnTheLattice) expect(sizeOf(record)?.w).toBe(3)
+    expect(movedOnTheLattice).toHaveLength(273)
+    expect(
+      Object.fromEntries(tally(movedOnTheLattice.map((record) => String(sizeOf(record)?.w)))),
+    ).toEqual({ '1.5': 245, '3': 28 })
   })
 
   /* ------------------------------------------------ the lattice, bounded twice */
@@ -273,10 +299,13 @@ describeCorpus(title, () => {
   it('offers 48 distinct grid cells and 10 distinct runs, half units included', () => {
     const cells = tally(resolved.map((record) => `${String(sizeOf(record)?.w)}x${String(sizeOf(record)?.d)}`))
     expect(cells.size).toBe(48)
+    /* Row **D9** moved 245 records from `2x0.5` to `1.5x0.5` — the corner walls
+       — which is enough to make `2x2` the commonest cell in the archive. The
+       count of distinct cells is unchanged at 48: 1.5 x 0.5 already existed. */
     expect([...cells.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)).toEqual([
-      ['2x0.5', 1223],
       ['2x2', 1064],
-      ['1.5x0.5', 552],
+      ['2x0.5', 978],
+      ['1.5x0.5', 797],
       ['4x0.5', 512],
       ['1x1', 500],
       ['4x4', 453],
@@ -415,15 +444,24 @@ describeCorpus(title, () => {
        is the direction that matters: a wrongly admitted candidate with real
        geometry is a wall drawn through another wall, and that is what
        {@link RUN_DENY_TAGS} buys.
-    
-       331 records *are* admitted that the resolution refuses, and every one of
+
+       **Row D9 broke this and then restored it, which is the whole reason the
+       assertion is here.** Correcting 245 corner walls from a tagged 2 to a
+       measured 1.5 made them exactly the thing this test forbids — real
+       geometry, admitted by a `run: 2` ref, 1.5 units long. `shape|corner`
+       joined the deny list in response. The 245 do not become *placeable*
+       false positives again under any spelling of the corner tag, which is what
+       the 0 below now covers.
+
+       319 records *are* admitted that the resolution refuses, and every one of
        them is `foot: {shape:'none'}` — a tagged `size|width` on a piece with no
        placeable outline, mostly `size|segment` design fragments and the
-       octagon-segment `U` codes. They are not reachable as a wrong *placement*:
-       `offsets.ts#placeTemplateSlots` refuses a fill with no extent as
-       `no-footprint` one step later, which is 4 of B2's 1,211 walked edge slots.
-       So they cost a candidate card, not a drawing, and the split is asserted
-       rather than the total. */
+       octagon-segment `U` codes. (331 before the corner deny took 12 shapeless
+       corner records out of reach as well.) They are not reachable as a wrong
+       *placement*: `offsets.ts#placeTemplateSlots` refuses a fill with no extent
+       as `no-footprint` one step later, which is 32 of B2's 1,211 walked edge
+       slots. So they cost a candidate card, not a drawing, and the split is
+       asserted rather than the total. */
     const denied = new Set(RUN_DENY_TAGS)
     const admits = (record: CatalogRecord, run: number): boolean => {
       const own = tags(record)
@@ -446,15 +484,38 @@ describeCorpus(title, () => {
       }
     }
     expect(placeable).toBe(0)
-    expect(shapeless).toBe(331)
-    /* And what it costs, exactly: the 56 curved-interface walls whose tag was
-       right and the 28 whose tag was wrong by a unit. The 133 columns are not in
-       this figure because their run is 0.5, and there is no `size|width|0.5` tag
-       for a run-0.5 slot to be spelled with in the first place — no cell face is
-       half a unit long, so no family generates one. */
+    expect(shapeless).toBe(319)
+    /* And what it costs, exactly. 84 before row D9 — the 56 curved-interface
+       walls whose tag was right and the 28 whose tag was wrong by a unit — and
+       **595 more** from the corner deny, of which only 245 are records the deny
+       was written for. `RUN_UNREACHABLE`'s docstring itemises all five groups.
+       The trade is deliberate and priced there: a false negative costs a
+       candidate card, a false positive costs a drawing, and no shipped path was
+       reaching the 595 through a run ref in the first place.
+
+       The 133 columns are not in this figure because their run is 0.5, and there
+       is no `size|width|0.5` tag for a run-0.5 slot to be spelled with in the
+       first place — no cell face is half a unit long, so no family generates
+       one. */
     expect(falseNegatives).toBe(RUN_UNREACHABLE)
-    expect(RUN_UNREACHABLE).toBe(84)
-    expect(falseNegatives / 6661).toBeCloseTo(0.0126, 4)
+    expect(RUN_UNREACHABLE).toBe(679)
+    expect(falseNegatives / 6661).toBeCloseTo(0.102, 3)
+    /* The split, so the 595 cannot quietly grow: every one of them carries a
+       corner tag and none of them is one of the 84. */
+    const cornerish = (record: CatalogRecord): boolean =>
+      tags(record).some((tag) => tag === 'shape|corner' || tag.startsWith('shape|corner|'))
+    let corner = 0
+    let curved = 0
+    for (const run of [1, 1.5, 2, 3, 4, 5, 6, 7, 8]) {
+      const predicate: SizePredicate = { kind: 'run', run }
+      for (const record of file.records) {
+        if (!sizeAdmits(predicate, sizeOf(record))) continue
+        if (admits(record, run)) continue
+        if (tags(record).includes('shape|option|curved_interface')) curved += 1
+        else if (cornerish(record)) corner += 1
+      }
+    }
+    expect({ corner, curved }).toEqual({ corner: 595, curved: 84 })
   })
 
   it('has the cell refs exact on every `rect` record', () => {
@@ -507,8 +568,15 @@ describeCorpus(title, () => {
        `does not reproduce` block — but its 50 singletons reproduce under one of the three,
        and every spelling is at least 4.2x the 52. That ratio is the claim §2.4
        actually rests on, and it holds. */
-    expect([...byFootprint.values()].filter((count) => count === 1)).toHaveLength(50)
-    expect([...byToken.values()].filter((count) => count === 1)).toHaveLength(46)
+    /* 50 before row **D9**, and the 51st is a family whose corner walls left the
+       `{wall,length:2}` footprint they shared with something else. The plan's own
+       figure was 50 and it reproduced under exactly this spelling; it is
+       restated at the measured 51 rather than quietly kept, because the ratio
+       below is the claim §2.4 rests on and it is unaffected. */
+    expect([...byFootprint.values()].filter((count) => count === 1)).toHaveLength(51)
+    // 46 before D9, and the same family moves here for the same reason: a
+    // `2x` token that no longer names any corner wall.
+    expect([...byToken.values()].filter((count) => count === 1)).toHaveLength(47)
     expect(byCell.size / withForm.size).toBeGreaterThan(4.1)
   })
 
@@ -552,11 +620,17 @@ describeCorpus(title, () => {
     })
     expect(empty.reduce((total, [, entry]) => total + entry.records, 0)).toBe(231)
 
-    /* And the shape of the other 47: 295 cells between all 52, a median of 4 per
-       family and a maximum of 31 — so a size control is a short list, not a
-       48-item dropdown. */
+    /* And the shape of the other 47: **294** cells between all 52, a median of 4
+       per family and a maximum of 31 — so a size control is a short list, not a
+       48-item dropdown.
+
+       295 before row **D9**. The one that went is `wall|corner|s2w`'s `2x0.5`:
+       no corner wall is 2 units long, so that cell had no geometry behind it and
+       its records fold into the `1.5x0.5` the family already had. A domain
+       shrinking by a cell while losing no records is what a corrected dimension
+       looks like. */
     const sizes = [...domains.values()].map((entry) => entry.cells.size).sort((a, b) => a - b)
-    expect(sizes.reduce((a, b) => a + b, 0)).toBe(295)
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(294)
     expect(sizes[Math.floor(sizes.length / 2)]).toBe(4)
     expect(Math.max(...sizes)).toBe(31)
   })
@@ -624,17 +698,19 @@ describeCorpus(title, () => {
         expect(file.records.filter((record) => isFloor(record) && bare(record))).toHaveLength(0)
     })
 
-    it('has 84 `foot` corrections wearing three deltas, not 56 wearing one', () => {
+    it('has 329 `foot` corrections wearing four deltas, not 56 wearing one', () => {
       /* The brief: *"56 corrections (all `curved_interface`, wrong by exactly
          1.000 u)"*. Measured: 84 corrections, all `curved_interface`, and the
-         1.000 u delta belongs to 28 of them. Asserted in full above; restated
-         here so the disagreement is findable. */
+         1.000 u delta belongs to 28 of them. Row **D9** then added 245 at a
+         **0.500** delta — the corner runs — so neither the count nor the "all
+         `curved_interface`" holds. Asserted in full above; restated here so the
+         disagreement is findable. */
       const corrections = file.records.filter((record) => {
         const foot = record.foot
         const tagged = numericTagValue(tags(record), 'size|width')
         return foot.shape === 'wall' && tagged !== undefined && tagged !== foot.length
       })
-      expect(corrections).toHaveLength(84)
+      expect(corrections).toHaveLength(329)
       const byDelta = tally(
         corrections.map((record) => {
           const foot = record.foot
@@ -642,7 +718,12 @@ describeCorpus(title, () => {
           return ((numericTagValue(tags(record), 'size|width') ?? 0) - length).toFixed(3)
         }),
       )
-      expect(Object.fromEntries(byDelta)).toEqual({ '0.009': 28, '-0.047': 28, '1.000': 28 })
+      expect(Object.fromEntries(byDelta)).toEqual({
+        '0.500': 245,
+        '0.009': 28,
+        '-0.047': 28,
+        '1.000': 28,
+      })
     })
 
     it('needs 217 to 277 families with size in the key, and reproduces 285 under no spelling', () => {

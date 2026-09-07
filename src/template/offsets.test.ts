@@ -43,6 +43,7 @@ import { WALL_THICKNESS_UNITS } from '@/catalog'
 
 import type { SlotPlacement } from './offsets'
 import {
+  cornerReservation,
   edgeRun,
   placeTemplateSlots,
   quarterTurn,
@@ -70,39 +71,41 @@ const WALL_2X2 = feetOf([
   ['wall', wall(2)],
 ])
 
-/** A 2 x 2 external corner: two 2-unit walls and a column on a 2 x 2 cell. */
-const CORNER_2X2 = feetOf([
-  ['base', rect(2, 2)],
-  ['floor', rect(2, 2)],
-  ['right wall', wall(2)],
-  ['left wall', wall(2)],
-  ['column', column],
-])
-
 /**
- * The 8 failures, verbatim from the corpus.
+ * A 2 x 2 external corner, at the footprint the meshes have: two **1.5**-unit
+ * walls and a 0.5 column on a 2 x 2 cell.
  *
- * The closure walk resolves the four `single_piece` corner recipes and gets
- * `right wall` and `left wall` both at `{shape:'wall',length:2}` on a
- * `rect 2 x 2` floor, on 8 of 34 walked combinations. Two 2-unit runs plus a
- * 0.5 column cannot occupy two 2-unit edges, and **the mitre that would make
- * them fit is in no tag and in no measured mesh** — 0 of the 266
- * `shape|corner|left`/`right` records have a measured bounding box.
+ * It used to read `wall(2)`, from a `size|width|2` tag. Row **D9** fetched 157
+ * corner-wall meshes from R2 and measured the run at **1.500** on all 245
+ * records that carry that tag — the tag names the cell, and
+ * `footprint.ts#cornerWallRun` now says so. 1.5 + 0.5 = 2 on both faces, so
+ * this is a closing recipe rather than the 8 failures it used to model, and
+ * both corner recipes resolve to it.
  */
-const CORNER_MITRE = feetOf([
-  ['base', rect(2, 2)],
-  ['floor', rect(2, 2)],
-  ['right wall', wall(2)],
-  ['left wall', wall(2)],
-  ['column', column],
-])
-
-/** The same recipe with 1.5-unit walls, which is what the `modular` half resolves to. */
-const CORNER_CLOSING = feetOf([
+const CORNER_2X2 = feetOf([
   ['base', rect(2, 2)],
   ['floor', rect(2, 2)],
   ['right wall', wall(1.5)],
   ['left wall', wall(1.5)],
+  ['column', column],
+])
+
+/**
+ * The same recipe with the **wrong** 2-unit run the corpus used to derive, kept
+ * as the one place this file still exercises an over-run on a corner.
+ *
+ * Not reachable from the archive any more — 0 records resolve to it — and it is
+ * here for two measurements the change has to keep honest: that a run longer
+ * than the span its corner leaves still earns an `over-run` doubt rather than
+ * being quietly re-fitted, and that such a run really does leave the cell,
+ * which is the cost D8 named for this convention and the reason the number had
+ * to be measured before it could be taken.
+ */
+const CORNER_OVER_RUN = feetOf([
+  ['base', rect(2, 2)],
+  ['floor', rect(2, 2)],
+  ['right wall', wall(2)],
+  ['left wall', wall(2)],
   ['column', column],
 ])
 
@@ -203,6 +206,91 @@ describe('slotOffset', () => {
         -(w - 0.5) / 2,
         -(d - 0.5) / 2,
       ])
+    }
+  })
+
+  it('shifts an edge by half of what its corner reserves, and by nothing when nothing does', () => {
+    /* The `reserved` term, isolated. Zero reserved is the 40 `wall-on-tile`
+       edges and it must be *exactly* the old behaviour, because those 980
+       closing combinations did not move and the suite asserts they did not. */
+    const rule = ruleOf(EXTERNAL_CORNER, 'right wall')
+    const part = { w: 1.5, d: WALL_THICKNESS_UNITS }
+    expect(slotOffset(rule, { w: 2, d: 2 }, part)).toEqual([0, -0.75])
+    expect(slotOffset(rule, { w: 2, d: 2 }, part, 0.5)).toEqual([0.25, -0.75])
+    expect(slotOffset(rule, { w: 2, d: 2 }, part, -0.5)).toEqual([-0.25, -0.75])
+    // And an unfilled corner reserves nothing, so the wall does not move off
+    // centre for a column that is not there.
+    expect(slotOffset(rule, { w: 2, d: 2 }, part, 0)).toEqual([0, -0.75])
+  })
+})
+
+describe('cornerReservation', () => {
+  const feet = feetOf([
+    ['base', rect(2, 2)],
+    ['floor', rect(2, 2)],
+    ['right wall', wall(1.5)],
+    ['left wall', wall(1.5)],
+    ['column', column],
+  ])
+
+  it('signs the two faces its corner touches, and refuses the two it does not', () => {
+    /* `corner`, `side: 0` is the `(-x, -z)` square, so it belongs to face 0 —
+       where it sits at that face's own `-x` end — and to face 3, where the same
+       square lands at `+x`. Faces 1 and 2 it does not touch at all, and a span
+       subtracted from those would be a column reserving room on the far side of
+       the tile. */
+    expect(cornerReservation(EXTERNAL_CORNER, feet, 0)).toBe(WALL_THICKNESS_UNITS)
+    expect(cornerReservation(EXTERNAL_CORNER, feet, 3)).toBe(-WALL_THICKNESS_UNITS)
+    expect(cornerReservation(EXTERNAL_CORNER, feet, 1)).toBe(0)
+    expect(cornerReservation(EXTERNAL_CORNER, feet, 2)).toBe(0)
+  })
+
+  it('derives the +x half from quarterTurn rather than trusting the docstring', () => {
+    /* The sign is the whole of what could be got backwards, and getting it
+       backwards draws the wall *through* the column at one of the two sides —
+       which is what a first attempt at this row did. So it is derived: put the
+       corner's own flush offset through `quarterTurn` for both faces it touches
+       and read which end of each face the square lands on.
+
+       For a 2 x 2 cell the column's flush offset in `F(0)` is `(-0.75, -0.75)`.
+       Face 0 reads it directly: `x = -0.75`, the `-x` end, so an edge there
+       shifts `+`. Face 3 is the same square seen from a frame one quarter turn
+       away, and `quarterTurn` is what says where that is. */
+    const cell = { w: 2, d: 2 }
+    const columnExtent = { w: WALL_THICKNESS_UNITS, d: WALL_THICKNESS_UNITS }
+    const flush = slotOffset(ruleOf(EXTERNAL_CORNER, 'column'), cell, columnExtent)
+
+    for (const side of [0, 3] as const) {
+      // Undo the face frame's quarter turn to read the square in that frame.
+      const back = quarterTurn(flush, ((4 - side) % 4) as 0 | 1 | 2 | 3)
+      const atMinusX = (back[0] ?? 0) < 0
+      const expected = atMinusX ? WALL_THICKNESS_UNITS : -WALL_THICKNESS_UNITS
+      expect(cornerReservation(EXTERNAL_CORNER, feet, side), `side ${String(side)}`).toBe(expected)
+    }
+  })
+
+  it('reads the fill’s extent, so a corner of another size reserves its own span', () => {
+    /* 0.5 on all 8 real corner slots, because a column is the only footprint any
+       of them admits — but read off the fill, so the arithmetic does not have to
+       be revisited if a corner slot ever admits something else. */
+    const wide = feetOf([...feet, ['column', rect(1, 1)]])
+    expect(cornerReservation(EXTERNAL_CORNER, wide, 0)).toBe(1)
+    expect(cornerReservation(EXTERNAL_CORNER, wide, 3)).toBe(-1)
+    // An unfilled corner keeps D8's 0.5 fallback: it is what the closure check
+    // for an `unfilled` combination is measured against.
+    const bare = feetOf([
+      ['base', rect(2, 2)],
+      ['floor', rect(2, 2)],
+      ['right wall', wall(1.5)],
+    ])
+    expect(cornerReservation(EXTERNAL_CORNER, bare, 0)).toBe(WALL_THICKNESS_UNITS)
+  })
+
+  it('is 0 on every face of a layout with no corner slot at all', () => {
+    // The 40 `wall-on-tile` edges, which is why none of their 980 closing
+    // combinations moved.
+    for (const side of [0, 1, 2, 3] as const) {
+      expect(cornerReservation(WALL_ON_TILE, WALL_2X2, side)).toBe(0)
     }
   })
 })
@@ -441,33 +529,41 @@ describe('placeTemplateSlots', () => {
     expect(placed.slots.map((slot) => slot.restsOn)).toEqual([null, 'base', 'base'])
   })
 
-  it('places a closing external corner, and subtracts the column from both edges', () => {
-    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_CLOSING)
+  it('places a closing external corner, with each wall abutting the column', () => {
+    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_2X2)
     expect(placed.verdict).toBe('closes')
-    // 1.5 + 0.5 = 2 on both faces, which is why the modular half closes where
-    // the single-piece half does not.
+    // 1.5 + 0.5 = 2 on both faces — the measured run against the measured
+    // column, and now the run **both** corner recipes resolve to.
     expect(placed.slots).toHaveLength(5)
     const byPart = new Map(placed.slots.map((slot) => [slot.part, slot]))
-    expect(byPart.get('right wall')?.offset).toEqual([0, -0.75])
+    /* The quarter unit that used to be the disagreement. `dx` is
+       `reserved / 2`, so the wall is centred on the 1.5 the column leaves rather
+       than on the 2-unit face: at side 0 the corner is at the `-x` end so the
+       wall shifts `+0.25`, and at side 3 the same square lands at `+x` so it
+       shifts `-0.25` in that face's own frame — which comes back as `+0.25` on
+       `z` after the quarter turn. `the offsets, placed by the canvas` below
+       turns both into boxes and measures that they meet the column exactly. */
+    expect(byPart.get('right wall')?.offset).toEqual([0.25, -0.75])
     expect(byPart.get('right wall')?.yaw).toBe(0)
-    expect(byPart.get('left wall')?.offset).toEqual([-0.75, 0])
+    expect(byPart.get('left wall')?.offset).toEqual([-0.75, 0.25])
     expect(byPart.get('left wall')?.yaw).toBe(270)
     expect(byPart.get('column')?.offset).toEqual([-0.75, -0.75])
   })
 
-  it('warns about the 8 single-piece mitres, places them anyway, and writes no 1.5', () => {
-    /* §9 of the plan, verbatim: *"the mitre is in no tag and no measurement. Do
-       not silently write 1.5."* So the verdict is `fails` and the doubt reports
-       the edge and the sum — never the difference and never a corrected run.
+  it('still warns when a run is longer than the span its corner leaves', () => {
+    /* **What used to be the 8 single-piece mitres, and is now reachable from no
+       record at all.** §9 of the plan said *"the mitre is in no tag and no
+       measurement. Do not silently write 1.5."* Row D9 measured it — 157
+       corner-wall meshes, run 1.500 on all 245 records tagged `size|width|2` —
+       so the 8 close and this fixture is the hypothetical that remains.
 
-       **Row D8 changed what happens next.** The two walls used to get no
-       coordinate, and `catalog.ts` then drew them at `dx = dz = 0` unrotated —
-       one pile on one square, which the project owner reported. The doubt is a
-       warning about the *sum*, not a claim that the part has nowhere to go: each
-       wall's position is the face it is anchored to, and the yaws below are what
-       separate two 2-unit runs onto two adjacent faces. Still no 1.5 anywhere in
-       the answer. */
-    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_MITRE)
+       It is kept because the *reason* §9 was written still stands. A run that
+       does not fit the span its corner leaves must earn a doubt naming the face
+       and the sum and stop there; the branch must not re-fit it, and it must not
+       be handed a number nobody measured. The doubt is still a warning about the
+       *sum* rather than a claim that the part has nowhere to go — row D8's
+       finding — so all five slots still place. */
+    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_OVER_RUN)
     expect(placed.verdict).toBe('fails')
     expect(placed.doubts).toEqual([
       { part: 'right wall', code: 'over-run', want: 2, got: 2.5 },
@@ -481,14 +577,18 @@ describe('placeTemplateSlots', () => {
       'column',
     ])
     const byPart = new Map(placed.slots.map((slot) => [slot.part, slot]))
-    // The same offsets and yaws the *closing* modular corner gets for its own
-    // 1.5 runs, because the anchor does not depend on whether the sum closes:
-    // flush to `-z` at side 0, flush to `-x` at side 3.
-    expect(byPart.get('right wall')?.offset).toEqual([0, -0.75])
+    // The same offsets and yaws a closing corner gets, because the anchor does
+    // not depend on whether the sum closes: abutted to the column at side 0,
+    // and to the same square at side 3.
+    expect(byPart.get('right wall')?.offset).toEqual([0.25, -0.75])
     expect(byPart.get('right wall')?.yaw).toBe(0)
-    expect(byPart.get('left wall')?.offset).toEqual([-0.75, 0])
+    expect(byPart.get('left wall')?.offset).toEqual([-0.75, 0.25])
     expect(byPart.get('left wall')?.yaw).toBe(270)
-    expect(JSON.stringify(placed)).not.toContain('1.5')
+    /* And the doubt still reports the face and the sum rather than the run that
+       would close it. `2.5 - 2` is 0.5, not 1.5, so the old `not.toContain`
+       guard cannot distinguish "wrote 1.5" from "wrote nothing"; what matters is
+       that the two reported numbers are the *cell edge* and *what the fills come
+       to*, which is asserted above by value. */
     expect(slotDoubtSentence(placed.doubts[0] as never)).toBe(
       'The right wall part needs a choice: this edge is 2 units and the pieces on it come to 2.5.',
     )
@@ -687,18 +787,32 @@ describe('the offsets, placed by the canvas', () => {
        than from a fixture. Nothing overhangs the cell at 0°, so 7.56 could not
        have been the unrotated footprint of a 2 x 2 anything.
 
-       **Row D8 strengthened this from three parts to five, which is the load
-       bearing half.** A10 could only measure the base, the floor and the column,
-       because the two 2-unit walls earned `over-run` and were refused a
-       coordinate. They are placed now, and the union is *still* exactly the
-       cell: two 2-unit walls flush to two adjacent 2-unit faces overlap in the
-       0.5 x 0.5 corner square and overhang nothing. So the answer to *"does the
-       fix break A10's invariant"* is measured here and it is no — the pieces
-       genuinely fit inside the cell, which is the brief's own condition on
-       drawing them. */
+       **Row D8 strengthened this from three parts to five, and row D9 removed
+       the overlap that made five parts fit.** A10 could measure only the base,
+       the floor and the column, because the two walls earned `over-run` and were
+       refused a coordinate. D8 placed them and the union was still the cell, but
+       only because two 2-unit walls flush to two adjacent faces *overlapped* in
+       the 0.5 corner square. On the measured 1.5 run they abut it instead: the
+       three parts tile an L with no overlap and no gap, the doubts are gone, and
+       the union is still exactly 4.00. So the answer to *"does the corrected
+       footprint break A10's invariant"* is measured here and it is no — it holds
+       more cleanly than before.
+
+       The 2-unit run **is** outside the cell under this convention, which is the
+       cost D8 named for it, and `still warns when a run is longer than the span
+       its corner leaves` is where that is measured. It is unreachable from the
+       archive: 0 records resolve to a 2-unit corner run. */
     const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_2X2)
-    expect(placed.doubts.map((doubt) => doubt.code)).toEqual(['over-run', 'over-run'])
+    expect(placed.doubts).toEqual([])
     expect(placed.slots).toHaveLength(5)
+
+    /* The L, part by part, at rotation 0 — the picture the whole row is about.
+       The column takes `[0, 0.5]` of both faces and each wall takes the 1.5 the
+       column leaves on its own. Adjacent, not overlapping. */
+    const boxes = boxesAt(EXTERNAL_CORNER, CORNER_2X2, 0)
+    expect(boxes[2]).toEqual({ x: 0.5, z: 0, w: 1.5, d: 0.5 })
+    expect(boxes[3]).toEqual({ x: 0, z: 0.5, w: 0.5, d: 1.5 })
+    expect(boxes[4]).toEqual({ x: 0, z: 0, w: 0.5, d: 0.5 })
 
     for (const rotation of QUARTERS) {
       const union = unionAt(EXTERNAL_CORNER, CORNER_2X2, rotation)
@@ -808,45 +922,66 @@ describe('the offsets, placed by the canvas', () => {
     expect(unionAt(WALL_ON_TILE, feet, 90)).toEqual({ x: -0.5, z: 0, w: 1.5, d: 1 })
   })
 
-  it('centres an edge across the whole face, which a closing corner then overlaps', () => {
-    /* **A disagreement inside this module, measured and not repaired here.**
+  it('abuts an edge against its corner sibling, so a closing corner has no overlap', () => {
+    /* **The disagreement D8 measured and left open, now closed by measurement.**
 
        The closure check subtracts a `corner`-anchored sibling's span from the
-       face — `cornerSpan`, 0.5 on all 8 real corner slots — but `slotOffset`'s
-       `edge` line has `dx: 0`, so the wall is centred across the *whole* face
-       rather than across what the column leaves. The two therefore disagree
-       whenever a corner recipe closes: two 1.5-unit walls and a 0.5 column on a
-       2 x 2 cell is `closes` with no doubts, and the wall then runs through the
-       column for 0.25 units and leaves a 0.25 gap at the far end.
+       face, but `slotOffset`'s `edge` line used to have `dx: 0` — the wall
+       centred across the *whole* face rather than across what the column leaves.
+       The two disagreed whenever a corner recipe closed: two 1.5 walls and a 0.5
+       column on a 2 x 2 cell was `closes` with no doubts, and the wall then ran
+       through the column for 0.25 units and left a 0.25 gap at the far end. D8
+       recorded the picture and declined to pick, because picking meant deciding
+       whether a corner wall's tagged 2 units include the mitre.
 
-       It is unreachable on the corpus, which is why it is pinned rather than
-       fixed: all 34 walked combinations of the four external-corner recipes are
-       `fails` (8) or `undecidable` (26), so no real fill set closes an edge
-       alongside a column. Repairing it would move an offset on every one of the
-       1,006 closing combinations and is row **B2**'s authored convention to
-       settle, not this row's rotation fix. */
-    const closing = feetOf([
-      ['base', rect(2, 2)],
-      ['floor', rect(2, 2)],
-      ['right wall', wall(1.5)],
-      ['left wall', wall(1.5)],
-      ['column', column],
-    ])
-    const placed = placeTemplateSlots(EXTERNAL_CORNER, closing)
+       Row **D9** measured the mitre — 157 corner-wall meshes from R2, run 1.500
+       on all 245 records tagged `size|width|2` — and the 1.5 is what makes the
+       abutting convention the right one: 1.5 against 0.5 on a 2-unit face has
+       exactly one arrangement that neither overlaps nor gaps, and it is this.
+
+       It is also no longer unreachable on the corpus. All 34 walked combinations
+       of the four external-corner recipes now `close`, where D8 measured 8
+       `fails` and 26 `undecidable`, so this offset is what the archive really
+       produces. */
+    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_2X2)
     expect(placed.verdict).toBe('closes')
     expect(placed.doubts).toEqual([])
 
-    const boxes = boxesAt(EXTERNAL_CORNER, closing, 0)
-    const wallBox = boxes[2]
+    const boxes = boxesAt(EXTERNAL_CORNER, CORNER_2X2, 0)
+    const rightWall = boxes[2]
+    const leftWall = boxes[3]
     const columnBox = boxes[4]
-    // The north wall spans x [0.25, 1.75] and the column x [0, 0.5]: they share
-    // a quarter unit, and the wall stops a quarter unit short of the east face.
-    expect(wallBox).toEqual({ x: 0.25, z: 0, w: 1.5, d: 0.5 })
+    /* The column takes x [0, 0.5] of the north face and the north wall takes the
+       1.5 it leaves, [0.5, 2.0] — they meet at 0.5 and share nothing. The same
+       on the west face in `z`. The boxes come from the canvas's own
+       `slotGeometry`, so this is what the drawing does and not an arithmetic
+       restatement of the offsets. */
+    expect(rightWall).toEqual({ x: 0.5, z: 0, w: 1.5, d: 0.5 })
+    expect(leftWall).toEqual({ x: 0, z: 0.5, w: 0.5, d: 1.5 })
     expect(columnBox).toEqual({ x: 0, z: 0, w: 0.5, d: 0.5 })
-    // The union is still the cell and still rigid, which is what this row owns.
+    // The union is still the cell and still rigid, at every quarter.
     for (const rotation of QUARTERS) {
-      expect(unionAt(EXTERNAL_CORNER, closing, rotation)).toEqual({ x: 0, z: 0, w: 2, d: 2 })
+      expect(unionAt(EXTERNAL_CORNER, CORNER_2X2, rotation)).toEqual({ x: 0, z: 0, w: 2, d: 2 })
     }
+  })
+
+  it('leaves the cell when a run is longer than the span its corner leaves', () => {
+    /* The cost of the abutting convention, measured rather than asserted away —
+       D8 named it as the reason not to take the edit without a measurement.
+
+       A 2-unit run on a 2-unit face whose corner has already taken 0.5 has
+       nowhere to go: abutted, it runs from 0.25 to 2.25 and a quarter unit of it
+       is outside the cell, so the union is 2.25² and A10's 4.00 does not hold.
+       That is exactly why the footprint had to be measured before this
+       convention could be adopted — and it is unreachable from the archive,
+       where every corner run is 1.5. */
+    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_OVER_RUN)
+    expect(placed.doubts.map((doubt) => doubt.code)).toEqual(['over-run', 'over-run'])
+    const union = unionAt(EXTERNAL_CORNER, CORNER_OVER_RUN, 0)
+    expect(union).toEqual({ x: 0, z: 0, w: 2.25, d: 2.25 })
+    expect(union.w * union.d).toBeCloseTo(5.0625, 6)
+    const boxes = boxesAt(EXTERNAL_CORNER, CORNER_OVER_RUN, 0)
+    expect(boxes[2]).toEqual({ x: 0.25, z: 0, w: 2, d: 0.5 })
   })
 
   it('keeps every part on the quarter-unit lattice through a full circle', () => {

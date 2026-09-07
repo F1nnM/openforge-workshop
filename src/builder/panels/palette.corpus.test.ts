@@ -398,13 +398,17 @@ describeCorpus('the query the owner ran', () => {
 /* ------------------------------------------------- 5. the size control's domain */
 
 describeCorpus('the size control is a control, and 7 families have none', () => {
-  it('holds 304 positions over the 47, median 4 and maximum 32', () => {
+  it('holds 303 positions over the 47, median 4 and maximum 32', () => {
     const families = TEMPLATE_FAMILIES.filter((family) => family.kind === 'family')
-    // `TemplateFamily.sizes` is *what there is to choose*, so the 7 one-position
-    // tables arrive as empty; the emitted table is what holds 304.
+    /* `TemplateFamily.sizes` is *what there is to choose*, so the 7 one-position
+       tables arrive as empty; the emitted table is what holds 303.
+
+       304 before row **D9**. The position that went is `wall-corner-s2w`'s
+       *"2 wide"*: 157 corner-wall meshes measure 1.500, so no corner wall is 2
+       units long and that chip named a size the family does not have. */
     const offered = families.map((family) => family.sizes.length)
     const emitted = offered.map((length) => (length === 0 ? 1 : length))
-    expect(emitted.reduce((total, length) => total + length, 0)).toBe(304)
+    expect(emitted.reduce((total, length) => total + length, 0)).toBe(303)
 
     const sorted = [...emitted].sort((a, b) => a - b)
     expect(sorted[Math.floor(sorted.length / 2)]).toBe(4)
@@ -526,7 +530,7 @@ describeCorpus('every item but the inserts resolves to a family', () => {
     ).toHaveLength(285)
   })
 
-  it('hits an exact size position for 3,206 of the 3,728, and any-size for 522', () => {
+  it('hits an exact size position for 3,104 of the 3,728, and any-size for 624', () => {
     let exact = 0
     let any = 0
     for (const item of items) {
@@ -536,12 +540,28 @@ describeCorpus('every item but the inserts resolves to a family', () => {
       if (positionOf(family, tags).length > 0) exact += 1
       else any += 1
     }
-    // 86.0%. So "Use in builder" usually arms *"Floor: Straight, 2 wide by 2
-    // deep"* rather than the family at any size, which is as close as a template
-    // model can come to "place this tile".
-    expect(exact).toBe(3206)
-    expect(any).toBe(522)
+    /* 83.3%. So "Use in builder" usually arms *"Floor: Straight, 2 wide by 2
+       deep"* rather than the family at any size, which is as close as a template
+       model can come to "place this tile".
+
+       **86.0% before row D9, and this is the one place its correction costs the
+       user something.** The position a size chip carries is a *tag* ref, and the
+       102 designs that moved are corner walls whose only `size|width` tag says 2
+       while their measured run is 1.5. Their family's *"1.5 wide"* chip requires
+       `size|width|1.5`, which they do not carry, and its *"2 wide"* chip is gone
+       because no corner wall is 2 units long — so they arm the family at **any
+       size** instead of at a size.
+
+       Nothing is unreachable: *any size* fills and places, and the geometry the
+       builder draws is the corrected 1.5. What is lost is the chip, and the fix
+       is the derived `size|run|<r>` tag `src/template/size.ts` prices at +300 B
+       and declines — the same gap the 28 `QxG` walls have been in since W4.
+       Recorded here rather than papered over, because a figure that fell needs a
+       reason a reader can check. */
+    expect(exact).toBe(3104)
+    expect(any).toBe(624)
     expect(exact + any).toBe(3728)
+    expect(exact / 3728).toBeCloseTo(0.833, 3)
   })
 
   it('is the same answer for every variant of every item, which is why a record may be asked', () => {

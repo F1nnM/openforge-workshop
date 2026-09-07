@@ -280,9 +280,14 @@ interface SlotRule {
 ```
 
 Offsets are arithmetic at fill time against the fill's *own* footprint: `edge` gives
-`(0, -(D - t) / 2)`, `corner` gives `(-(W - 0.5) / 2, -(D - 0.5) / 2)`. Measured, that rule closes
-on **1,006 of 1,215 resolved combinations (82.8%)**, fails on **33 (2.7%)** and is undecidable on
-**176 (14.5%)**.
+`(r / 2, -(D - t) / 2)` where `r` is the signed span a `corner` sibling takes out of that face,
+`corner` gives `(-(W - 0.5) / 2, -(D - 0.5) / 2)`. Measured, that rule closes on **1,014 of 1,215
+resolved combinations (83.5%)**, fails on **25 (2.1%)** and is undecidable on **176 (14.5%)**.
+
+The `r / 2` is row **D9**'s and it is 0 on all 40 `wall-on-tile` edges, so it moves nothing there.
+On the 68 corner edges it abuts the wall against its column instead of centring it across the whole
+face — which is the choice row D8 identified as unresolvable *"until somebody can measure a
+mitre"*, and §9 is where that measurement is. The split was **1,006 / 33 / 176** before it.
 
 **80 of 128 parts derive with no authoring** — every `base` and every `floor` part, anchored to the
 cell at yaw 0, and their elevations are already implemented and measured (the base's own mesh height;
@@ -295,9 +300,10 @@ internal-corner fixture defect, which §9.1 records.
 **Where the table lives, and what it costs.** It ships in the bundle beside `templates.ts`, so the
 index gains **0 B** — asserted by rebuilding the corpus and comparing bytes, not quoted. The
 counterfactual is the one figure this plan got wrong three ways at once: a `layouts` key carrying the
-128-row expansion is **+222 B** against the shipped artefact at the payload epoch, **+808 B** against
+128-row expansion is **+281 B** against the shipped artefact at the payload epoch, **-71 B** against
 a fresh build with an empty ordinal manifest, and the **+374 B** written here reproduces only against
-the *pre-B1* `catalog.json`. Brotli is not additive over 5.9 MB, so "this field costs N bytes" is a
+the *pre-B1* `catalog.json`. (It was +222 and +808 before row D9's corner correction moved both
+artefacts; the second one changed **sign**.) Brotli is not additive over 5.9 MB, so "this field costs N bytes" is a
 fact about one artefact at one epoch and never a rate. Every byte figure in this document should be
 read with the construction beside it.
 
@@ -654,15 +660,53 @@ green, which is why they are written down rather than discovered.
   `src/search/textIndex.ts`. §7's untouched list carries the measurements.
 - It does not add a y-axis to the *store*. Elevation stays derived (§2.2), because 18.4% of measured
   toppers are pre-lifted and 77.5% are not — a stored elevation would encode that inconsistency.
-- It does not solve the 33 combinations (2.7%) where the anchor rule fails or the 176 (14.5%) where
-  it is undecidable. The 8 corner failures are all `single_piece` — two `size|width|2` walls plus a
-  0.5 column on a 2x2 cell, where the mitre is in no tag and no measurement. **Do not silently write
-  1.5.** They surface as *needs a choice*. B2 backed the refusal with a further measurement:
-  `shape|corner|left` is on 133 tiles and **0 measured**, `shape|corner|right` 133 and **0**,
-  `shape|column|corner` 20 and **0** — nothing in the corpus can settle that angle. The 176 break
-  down as **102** `diag`/`tri` combinations with no axis-aligned run (given here as 106), **38**
-  internal-corner combinations with no anchored face, and the remainder `{shape:'none'}` fills with
-  no footprint at all. Counting them as fits would inflate 82.8% by three points on nothing.
+- It does not solve the **25 combinations (2.1%)** where the anchor rule fails or the 176 (14.5%)
+  where it is undecidable. The 25 are one population — a 0.5 column filling a wall slot on a 2-unit
+  face — and they surface as *needs a choice*. The 176 break down as **102** `diag`/`tri`
+  combinations with no axis-aligned run (given here as 106), **38** internal-corner combinations
+  with no anchored face, and the remainder `{shape:'none'}` fills with no footprint at all. Counting
+  them as fits would inflate 83.5% by three points on nothing.
+
+  **The 8 corner failures are gone, and row D9 is why.** This line used to read *"the 8 corner
+  failures are all `single_piece` — two `size|width|2` walls plus a 0.5 column on a 2x2 cell, where
+  the mitre is in no tag and no measurement. **Do not silently write 1.5.**"* The caution was right
+  and it stands: **1.5 must be measured, never assumed.** Its second clause is now false. The mitre
+  *is* in a measurement — row D9 fetched the meshes from Cloudflare R2 and read their bounding boxes
+  over every facet:
+
+  | class | records | tagged | **measured run** | thickness |
+  | --- | ---: | ---: | --- | --- |
+  | chirality + `size\|openlock\|A` | 224 | 2 | **1.500–1.513** (93 designs sampled) | 0.500–0.658 |
+  | corner, no chirality, code `A` | 21 | 2 | **1.500–1.518** (all 21) | 0.499–0.508 |
+  | corner, no chirality, code `BA` | 6 | 1.5 | **1.500** (all 6) | 0.500 |
+  | `shape\|corner\|wall` L-pieces | 36 | 1 / 2 / 3 / 4 | **their tagged size in both axes** (all 36) | — |
+  | *control* — straight `IA`/`BA`/`A`/`D`/`Q` walls | — | 1 / 1.5 / 2 / 3 / 4 | **1.000 / 1.500 / 2.000 / 3.000 / 4.000** | 0.500 |
+  | the `col+L` column | — | — | **0.499 × 0.500** | — |
+
+  157 meshes read whole, ~2.3 GB over free egress, zero exceptions. So on a corner wall
+  `size|width|2` names **the cell**, and the run is the cell face less the 0.5 column: exactly 1.5,
+  and identical to a modular `size|width|1.5` wall. `1.5 + 0.5 = 2` closes both faces, the two
+  corner recipes turn out to describe *the same geometry* and differ only in how many prints the
+  corner takes, and the closure split moved **1,006 / 33 / 176 → 1,014 / 25 / 176**.
+
+  B2's supporting measurement — `shape|corner|left` on 133 tiles and **0 measured**,
+  `shape|corner|right` 133 and **0**, `shape|column|corner` 20 and **0** — was accurate about the
+  *sidecar*: `tools/measure/measurements.json` covers 1,163 blobs and none of the 245 is among
+  them. That is why three rows (A10, B2, D8) were right to refuse the number. What it could not
+  say is that the meshes were unreachable; they were one `fetch` away.
+
+  Two things the measurement did **not** license, both recorded rather than assumed:
+  - The 6 `BA` corner walls measure 1.500 against a **tagged 1.5**, so "a corner wall loses the
+    column's 0.5" is false as a general rule and `footprint.ts#cornerWallRun` is gated on the
+    tagged run being 2.
+  - The 36 `shape|corner|wall` L-pieces measure their tagged size in *both* plan axes — they are
+    whole-cell corner assemblies, one print carrying both legs — so they keep their dimension. Their
+    `{shape:'wall', length:n}` footprint is still wrong (an L is not a 0.5-deep run) and that is a
+    **separate, still-open defect**: `Footprint` has no case for an L, and moving them to `rect`
+    would claim a filled square while `none` would unplace 36 tiles.
+  - The 21 `grate+widened.2x2` records, which D8 flagged as the other reading of `size|width|2`,
+    measure **2.000 × 2.000** and are genuinely whole-cell. They keep their `rect` footprint, and
+    the depth tag is what separates them from the runs.
 - It does not restate the download thresholds. `bill.ts`'s `DOWNLOAD_LARGE_BYTES` (512 MB) and
   `DOWNLOAD_HUGE_BYTES` (2 GB) are calibrated on "fifty placements at the 10.36 MB corpus median",
   and a template instance is multi-part, so the calibrating sentence in that docblock is now false:
@@ -936,9 +980,9 @@ question each answers.
 
 ## 11. Still open, and owned by nobody
 
-Three of these are row A1's findings about the `pinned` bit; the fourth is row A8's. None of the
-four is a bug in anything that has landed — they are decisions this plan never took, and none of
-them is named in §7 against a row.
+Four of these are row A1's and A8's findings; the last two are row D9's. None of the six is a bug in
+anything that has landed — they are decisions this plan never took, and none of them is named in §7
+against a row.
 
 1. **There is no unpin.** Once a slot is pinned it is permanently deaf to the lock. §3.3 never offers
    "reset this slot", so A1 did not invent the action — but a user who pins one wall can never hand
@@ -954,3 +998,19 @@ them is named in §7 against a row.
 4. **One measured loss is unowned.** A8 deleted four bill surfaces rather than repointing them,
    because each reported a fact nothing computes now. One of the four was the `unknown-joinery`
    mark — the only surface for the **93 items (2.4%)** with no connector tag anywhere.
+5. **The 36 `shape|corner|wall` L-pieces have no footprint primitive.** Row D9 measured all 36 —
+   one print carrying both legs of a corner, measuring its tagged size in *both* plan axes (`IA` 1 ×
+   1, `A` 2 × 2, `D` 3 × 3, `Q` 4 × 4, all within 0.055 u) — and left their `{shape:'wall',
+   length:n}` footprint alone, because an L is not a 0.5-deep run and `Footprint` has no case that
+   is. `rect` would claim a filled square and collide against the whole cell; `none` would unplace
+   36 tiles. Either is a **classification** change, so it also moves the RECT/WALL/ARC tallies
+   `docs/verify-catalog-facts.py` mirrors and `pipeline/catalog.test.ts` asserts — which is why D9,
+   whose correction was a parameter and touched no tally, did not take it.
+6. **102 designs lost their exact size chip, and the fix is a priced tag.** The cost of D9's
+   correction, measured in `src/builder/panels/palette.corpus.test.ts`: a size position is a *tag*
+   ref, and a corner wall's only `size|width` tag says 2 while its measured run is 1.5. So those
+   designs arm their family at *any size* rather than at a size — 3,206 → **3,104 of 3,728** exact
+   hits, 86.0% → 83.3%. Nothing is unreachable and the geometry drawn is the corrected 1.5; what is
+   lost is the chip. The fix is the derived `size|run|<r>` tag `src/template/size.ts` prices at
+   **+300 B** and declines for a tag-table reason, and D9 raised its stake from 84 records to 679
+   (`RUN_UNREACHABLE`). It is B4/B5's table, and it is in neither of their §7 rows.

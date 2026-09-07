@@ -304,10 +304,16 @@ describeCorpus(title, () => {
   })
 
   it('cuts visible duplication by 19x', () => {
-    // 6,749 files share a display name with another file today, and the worst
-    // single query returns 24 identical-looking cards. After the collapse: 131
-    // names over 323 aggregates, worst case 6.
-    expect(index.stats.duplicateNames).toEqual({ names: 131, aggregates: 323, worst: 6 })
+    /* 6,749 files share a display name with another file today, and the worst
+       single query returns 24 identical-looking cards. After the collapse: 130
+       names over 321 aggregates, worst case 6.
+
+       131 / 323 before row **D9**. A display name carries the size token, and
+       correcting 245 corner walls from a 2-unit run to their measured 1.5 turns
+       `2x` into `1.5x` on them — which *separates* one name that two aggregates
+       used to share. So the duplication figure improved for the same reason the
+       footprint did: two things that looked alike were different sizes. */
+    expect(index.stats.duplicateNames).toEqual({ names: 130, aggregates: 321, worst: 6 })
     const perFile = new Map<string, number>()
     for (const record of result.file.records) perFile.set(record.name, (perFile.get(record.name) ?? 0) + 1)
     expect(Math.max(...perFile.values())).toBe(24)

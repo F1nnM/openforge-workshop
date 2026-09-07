@@ -53,6 +53,8 @@ const TAGS = [
   'build|thick wall',
   'shape|column',
   'shape|angled|right',
+  'shape|corner',
+  'shape|corner|right',
 ]
 
 const tag = (name: string): number => {
@@ -298,6 +300,40 @@ export const FIXTURE_CATALOG = {
       foot: { shape: 'diag', run: 2.828 },
       rotStep: 45,
     },
+    {
+      id: 'tiles/cut_stone/wall/corner+right.2x.openlock.stl',
+      ord: 11,
+      blob: blob(12),
+      file: 'corner+right.2x.openlock.stl',
+      bytes: 2_097_152,
+      sprite: true,
+      thumb: false,
+      family: 'tiles/cut_stone/wall',
+      design: 'd-wall-corner',
+      name: 'Cut stone corner wall 1.5',
+      kinds: ['wall'],
+      conn: ['openlock'],
+      layer: 'topper',
+      texture: 'cut_stone',
+      tags: [
+        tag('shape|wall'),
+        tag('shape|corner'),
+        tag('shape|corner|right'),
+        tag('texture|cut_stone'),
+        tag('connection|openlock'),
+      ],
+      /* **A corner wall runs 1.5, not the 2 its `size|width` tag names** — row
+         D9, from 157 meshes read whole out of R2. The tag names the *cell* and
+         the piece is the cell face less the 0.5 corner column, so 1.5 + 0.5
+         tiles a 2-unit face exactly. `pipeline/footprint.ts#cornerWallRun`
+         derives it and `docs/templates-plan.md` §9 carries the table.
+
+         Distinct from {@link FIXTURE_IDS.wall2}, which is a *straight* 2-unit
+         wall and measures 2.000 — the control in the same table. The two used to
+         be one fixture, and a corner slot filled with the straight wall is what
+         made this file's corner assertions describe an over-run. */
+      foot: { shape: 'wall', length: 1.5 },
+    },
   ],
 }
 
@@ -328,6 +364,8 @@ export const FIXTURE_IDS = {
   diag: 'tiles/cut_stone/angled/diagPA.openlock.stl',
   shapeless: 'tiles/cave/hex/hex.stl',
   thickWall: 'tiles/cut_stone/thick_wall/2x0.5.openlock.stl',
+  /** A 1.5-unit corner wall — the run row D9 measured. See its record. */
+  cornerWall: 'tiles/cut_stone/wall/corner+right.2x.openlock.stl',
 } as const
 
 /* --------------------------------------------------------------- templates */
