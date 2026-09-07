@@ -48,6 +48,7 @@ export type {
   DownloadFailureKind,
   DownloadState,
   GeneratedDownload,
+  PartInfo,
 } from './useArchiveDownload'
 
 export {
