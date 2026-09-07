@@ -33,7 +33,27 @@
       // subscription is absent is a TLS handshake error *after* a green deploy,
       // so the dash buys certainty rather than saving a subscription we know we
       // need.
-      "routes": [{ "pattern": "staging-openforge-workshop.mfinn.de", "custom_domain": true }]
+      "routes": [{ "pattern": "staging-openforge-workshop.mfinn.de", "custom_domain": true }],
+      // `pr-preview.yml` uploads a version against this env for every PR and
+      // needs the preview URL that comes with it, but this Worker's
+      // `workers.dev` route is off (traffic goes through the custom domain
+      // above), and Cloudflare now defaults Preview URLs to match that route —
+      // a deliberate change, made after a 2025-09 incident class where a
+      // preview stayed public behind a disabled `workers.dev` route without
+      // anyone realising. So without this line every version upload succeeds
+      // and prints no URL at all, which is exactly what happened the first
+      // time `pr-preview.yml` ran (PR #145).
+      //
+      // Declared here rather than left as the one-off dashboard/API toggle
+      // that unblocked that PR, because Cloudflare's own docs warn the setting
+      // reverts to this file's answer on the next deploy if the file doesn't
+      // have one — an undeclared toggle is one `wrangler deploy` away from
+      // silently breaking every PR's preview again. `enabled` (the
+      // `workers.dev` route itself) stays unset, which resolves to `false` the
+      // same way it already did — this line changes only whether a *preview*
+      // of a version is public, not whether the Worker gets a permanent
+      // `workers.dev` address alongside its custom domain.
+      "preview_urls": true
     },
     "production": {
       "name": "openforge-workshop",
