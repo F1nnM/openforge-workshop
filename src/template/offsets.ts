@@ -17,20 +17,44 @@
  *
  * ```
  * cell   →  (0, 0)
- * edge   →  (0, −(cellF.d − part.d) / 2)                       flush to −z, centred across it
- * corner →  (−(cellF.w − part.w) / 2, −(cellF.d − part.d) / 2) flush to −x and −z
+ * edge   →  (reserved / 2, −(cellF.d − part.d) / 2)             flush to −z, centred on what the corner leaves
+ * corner →  (−(cellF.w − part.w) / 2, −(cellF.d − part.d) / 2)  flush to −x and −z
  * ```
  *
- * and the result is turned back by `side` quarter-turns. Every one of those is
- * an **inset** while the part is no larger than the face it lies on, so nothing
+ * and the result is turned back by `side` quarter-turns. The `z` term is always
+ * an **inset** while the part is no deeper than the face it lies on, so nothing
  * overhangs the cell and a template's union *is* its cell — which is how row A10
- * settled a 2 x 2 corner's footprint at 4.00 units². All four insets the corpus
- * produces are `<= 0`; `offsets.test.ts` measures both that and what a part
- * deeper than its own cell does instead. At `side: 0` the
- * `corner` line is `(−(W − 0.5) / 2, −(D − 0.5) / 2)` for every real fill,
+ * settled a 2 x 2 corner's footprint at 4.00 units²; `offsets.test.ts` measures
+ * both that and what a part deeper than its own cell does instead. At `side: 0`
+ * the `corner` line is `(−(W − 0.5) / 2, −(D − 0.5) / 2)` for every real fill,
  * because `{shape:'column'}` is the only footprint any of the 8 `corner` slots
  * admits and a column is exactly {@link WALL_THICKNESS_UNITS} square —
  * `offsets.test.ts` asserts that equivalence rather than hard-coding the 0.5.
+ *
+ * ### `reserved` — the edge abuts its corner sibling, and row D9 measured why
+ *
+ * `reserved` is the signed span a `corner`-anchored sibling takes out of *this*
+ * face, from {@link cornerReservation}: `+span` when the corner sits at the face
+ * frame's `−x` end, `−span` when it sits at `+x`, and **0 when no corner touches
+ * this face at all**, which is every one of the 40 `wall-on-tile` edges. So the
+ * wall is centred on the span the corner leaves rather than on the whole face,
+ * and `reserved / 2` is that recentring.
+ *
+ * This is the second of the two edits row **D8** named as mutually exclusive and
+ * declined to pick between, and it is now the measured one: a corner wall tagged
+ * `size|width|2` **runs 1.5** (`footprint.ts#cornerWallRun`, 157 meshes), so
+ * `1.5 + 0.5 = 2` and the wall meets the column exactly. Centring across the
+ * whole face put that 1.5 run at `x ∈ [0.25, 1.75]` — a quarter unit over the
+ * column at one end and a quarter-unit gap at the other, which D8 measured and
+ * reported. Abutting puts it at `x ∈ [0.5, 2.0]` against a column at
+ * `[0, 0.5]`, and the two corner recipes draw the identical L.
+ *
+ * Written as `reserved / 2` rather than `+(cellF.w − part.w) / 2` on purpose:
+ * the two agree exactly whenever the face closes, and only the former is 0 when
+ * the corner reserves nothing — an unfilled corner slot must not shove the wall
+ * to one end of a face nothing is standing on. It also makes this line and
+ * {@link cornerReservation}'s subtraction in the closure check **one**
+ * convention instead of two, which is what D8 asked for.
  *
  * ## Two arithmetic hazards, both measured
  *
@@ -195,11 +219,16 @@ function quarterTurnExtent(extent: Extent, side: SlotSide): Extent {
  * this directory, so naming the leaf breaks the cycle at its only edge and costs
  * nothing: `footprintExtent` is defined there, not merely re-exported.
  */
-export function slotOffset(rule: SlotRule, cell: Extent, part: Extent): PlanPoint {
+export function slotOffset(
+  rule: SlotRule,
+  cell: Extent,
+  part: Extent,
+  reserved: number = 0,
+): PlanPoint {
   if (rule.anchor === 'cell') return [0, 0]
   const inFrame = quarterTurnExtent(cell, rule.side)
   const dz = -(inFrame.d - part.d) / 2
-  const dx = rule.anchor === 'corner' ? -(inFrame.w - part.w) / 2 : 0
+  const dx = rule.anchor === 'corner' ? -(inFrame.w - part.w) / 2 : reserved / 2
   return quarterTurn([dx, dz], rule.side)
 }
 
@@ -406,7 +435,6 @@ export function placeTemplateSlots(
   const doubts: SlotDoubt[] = []
 
   const cell = cellExtentOf(layout, feet, doubts)
-  const taken = cell === undefined ? 0 : cornerSpan(layout, feet)
 
   for (const rule of layout.slots) {
     const foot = feet.get(rule.part)
@@ -429,13 +457,21 @@ export function placeTemplateSlots(
 
        `over-run` is a **warning**, and the slot is placed anyway. That the sum
        misses says the fills' *runs* do not tile the face under
-       {@link cornerSpan}'s disjointness assumption; it does not say the part has
-       nowhere to go. Its position is the face it is anchored to — and on the 8
-       single-piece corner mitres every part still lands inside its own cell: two
-       2-unit walls flush to two adjacent 2-unit faces of a 2 x 2 overlap in the
-       0.5 x 0.5 corner square and overhang nothing, so the union is still the
-       cell and A10's rigid body is intact. `offsets.test.ts` measures that
-       union.
+       {@link cornerReservation}'s disjointness assumption; it does not say the
+       part has nowhere to go. Its position is the face it is anchored to, and
+       every part still lands inside its own cell whenever it is no longer than
+       the span the corner leaves it — so the union is still the cell and A10's
+       rigid body is intact. `offsets.test.ts` measures that union.
+
+       **Row D9 emptied this case of the 8 single-piece corner mitres.** They
+       were the 8 that reported `want: 2, got: 2.5`, on the strength of a
+       `{shape:'wall', length:2}` footprint the meshes do not have: the run is
+       1.5, so `1.5 + 0.5 = 2` and they close. What remains here is the 25
+       combinations that fill a `wall` slot with a 0.5 column on a 2-unit face,
+       where there is no run to match and the corpus really does admit the
+       mismatch. The branch is still written to invent nothing — a doubt names
+       the face and the sum and stops — because the *reason* it was written
+       stands: a number that closes a face must be measured, never assumed.
 
        Refusing the coordinate collapsed both walls *and* the column to
        `dx = dz = 0` unrotated, which drew the two walls through each other along
@@ -445,6 +481,7 @@ export function placeTemplateSlots(
        overhang or nothing at all. A warning the user can act on plus the
        anchored position beats a pile, and it also beats inventing the half unit
        that would close the sum, which this branch still does not do. */
+    const reserved = cornerReservation(layout, feet, rule.side)
     if (rule.anchor === 'edge') {
       const run = edgeRun(foot)
       if (run === null) {
@@ -452,6 +489,7 @@ export function placeTemplateSlots(
         continue
       }
       const span = rule.side % 2 === 0 ? cell.w : cell.d
+      const taken = Math.abs(reserved)
       if (Math.abs(run + taken - span) > CLOSURE_EPS) {
         doubts.push({ part: rule.part, code: 'over-run', want: span, got: run + taken })
       }
@@ -460,7 +498,7 @@ export function placeTemplateSlots(
       part: rule.part,
       anchor: rule.anchor,
       side: rule.side,
-      offset: slotOffset(rule, cell, part),
+      offset: slotOffset(rule, cell, part, reserved),
       yaw: slotYaw(rule),
       restsOn: rule.restsOn,
     })
@@ -528,61 +566,87 @@ function cellExtentOf(
 }
 
 /**
- * How much of an anchored face a `corner`-anchored sibling takes.
+ * Which end of face `face` a `corner`-anchored slot at side `corner` occupies,
+ * as a sign in that face's own frame — `+1` at `−x`, `−1` at `+x`, `0` when the
+ * corner does not touch the face.
  *
- * {@link WALL_THICKNESS_UNITS} on all 8 real corner slots, because
- * `{shape:'column'}` is the only footprint any of them admits — but read off the
- * fill rather than written as 0.5, so a future corner fill of another size is
- * subtracted correctly instead of silently ignored. A column is square, so which
- * axis is read does not matter and no side needs threading through.
+ * A `corner` rule is flush to `−x` **and** `−z` in `F(corner)`, so the square it
+ * takes belongs to two faces and no others: face `corner`, where it is at the
+ * `−x` end, and face `corner − 1`, where the same square lands at `+x`. That is
+ * `rules.ts`'s own statement — *"`side: 0` and `side: 3` are adjacent, and the
+ * corner they share is exactly the one `corner`, `side: 0` names"* — read as
+ * arithmetic instead of as prose, and `offsets.test.ts` derives the `+x` half
+ * from `quarterTurn` rather than trusting this comment.
  *
- * ## An open decision row D8 found and deliberately did not take
- *
- * **This subtraction and {@link slotOffset}'s `edge` line are two different
- * conventions, and at most one of them is right.** The subtraction reserves the
- * corner's span at one end of the face, as though the wall and the column lay
- * end to end. `slotOffset` centres the wall across the **whole** face and
- * reserves nothing. Measured on a 2 x 2 external corner at rotation 0, drawn
- * through the canvas's own `slotGeometry`:
- *
- * | recipe | wall run | verdict | right wall drawn | column drawn |
- * | --- | ---: | --- | --- | --- |
- * | single piece | 2 | `fails` | `x ∈ [0, 2]`, `z ∈ [0, 0.5]` | `x ∈ [0, 0.5]` |
- * | modular | 1.5 | `closes` | `x ∈ [0.25, 1.75]`, `z ∈ [0, 0.5]` | `x ∈ [0, 0.5]` |
- *
- * So the recipe this file calls a **failure** draws a flawless L — the two walls
- * meet in the corner square and nothing overhangs — and the recipe it calls a
- * **fit** draws each wall a quarter unit over the column at one end with a
- * quarter-unit gap at the other. The verdicts are the wrong way round with
- * respect to the picture.
- *
- * Exactly one of two edits reconciles them, and **the corpus cannot say which**:
- *
- *   1. *Drop the subtraction.* Then a full-face run closes and 1.5 on a 2-unit
- *      face is the under-run — which inverts the whole 1,006 / 33 / 176 split
- *      this file documents, and makes the 8 single-piece mitres correct rather
- *      than doubtful.
- *   2. *Make the `edge` anchor abut.* Centre the wall on the span the corner
- *      leaves rather than on the face. The modular corner then butts against its
- *      column, and the single-piece walls move a quarter unit **outside** the
- *      cell, so A10's 4.00 stops holding for them.
- *
- * Choosing is choosing whether a single-piece corner wall's 2 units *include*
- * the mitre that overlaps the column or *exclude* it, and that is precisely the
- * question the corpus refuses: see the D8 note on {@link SlotDoubt} — 0 of the
- * 245 chirality records measured, and the class carries both readings at once.
- * Row D8's mandate was that nothing may draw stacked, which is settled without
- * touching this; picking between 1 and 2 would be inventing the fact that
- * settles it, and it changes which recipe the surface warns about. It is a
- * decision for whoever can measure a mitre.
+ * The `0` case is not decoration. Nothing in the corpus reaches it — the only
+ * `corner` slots are the 8 columns of the external and internal corners, and no
+ * template pairs a corner with an edge it does not touch — but without it a
+ * fourth convention that put a column opposite its wall would have that column's
+ * span silently subtracted from a face it is nowhere near.
  */
-function cornerSpan(layout: TemplateLayout, feet: ReadonlyMap<SlotName, Footprint>): number {
+function cornerSign(corner: SlotSide, face: SlotSide): -1 | 0 | 1 {
+  if (corner === face) return 1
+  if ((corner + 3) % 4 === face) return -1
+  return 0
+}
+
+/**
+ * The signed span the `corner`-anchored siblings take out of one face:
+ * **positive at the face's `−x` end, negative at `+x`, 0 when none touches it.**
+ *
+ * The magnitude is {@link WALL_THICKNESS_UNITS} on all 8 real corner slots,
+ * because `{shape:'column'}` is the only footprint any of them admits — but read
+ * off the fill rather than written as 0.5, so a future corner fill of another
+ * size is reserved correctly instead of silently ignored. A column is square, so
+ * which axis is read does not matter.
+ *
+ * ## The decision row D8 found, and which measurement settled
+ *
+ * D8 recorded that this subtraction and {@link slotOffset}'s `edge` line were
+ * **two conventions of which at most one could be right**: this reserved the
+ * corner's span at one end of the face, while `slotOffset` centred the wall
+ * across the whole face and reserved nothing. Measured on a 2 x 2 external
+ * corner at rotation 0, drawn through the canvas's own `slotGeometry`, the
+ * verdicts came out backwards with respect to the picture — the `fails` recipe
+ * drew a flawless L and the `closes` recipe drew each wall a quarter unit over
+ * the column with a quarter-unit gap at the far end.
+ *
+ * D8 named the two available edits and declined to pick, because picking meant
+ * deciding whether a corner wall's tagged 2 units include the mitre, *"a
+ * decision for whoever can measure a mitre"*. Row **D9 measured the mitre**: 157
+ * corner-wall meshes read whole from R2, and the run is **1.500** on all 245
+ * records tagged `size|width|2` (`footprint.ts#cornerWallRun`). That picks D8's
+ * option 2 and rules out option 1:
+ *
+ * | | run | face | 1.5 + 0.5 | drawn (cell-min coords) |
+ * | --- | ---: | ---: | ---: | --- |
+ * | column (`corner`, side 0) | 0.5 | — | — | `x ∈ [0, 0.5]`, `z ∈ [0, 0.5]` |
+ * | right wall (`edge`, side 0) | 1.5 | 2 | **2 — closes** | `x ∈ [0.5, 2.0]`, `z ∈ [0, 0.5]` |
+ * | left wall (`edge`, side 3) | 1.5 | 2 | **2 — closes** | `x ∈ [0, 0.5]`, `z ∈ [0.5, 2.0]` |
+ *
+ * Three parts, no overlap, no gap, everything inside `[0, 2]²`, and **both**
+ * corner recipes now draw that — the single-piece and the modular are the same
+ * geometry differing only in print count. Dropping the subtraction (option 1)
+ * would instead have needed a 2-unit run, which is the number the meshes refute.
+ *
+ * The 0.5 fallback for an unfilled or extentless corner is kept from D8's
+ * version: it is what a `no-cell`/`unfilled` combination's closure check is
+ * measured against, and changing it would move the split for a reason that has
+ * nothing to do with a mitre.
+ */
+export function cornerReservation(
+  layout: TemplateLayout,
+  feet: ReadonlyMap<SlotName, Footprint>,
+  face: SlotSide,
+): number {
   let total = 0
   for (const rule of layout.slots) {
     if (rule.anchor !== 'corner') continue
+    const sign = cornerSign(rule.side, face)
+    if (sign === 0) continue
     const foot = feet.get(rule.part)
     const extent = foot === undefined ? undefined : footprintExtent(foot)
-    total += extent?.w ?? WALL_THICKNESS_UNITS
+    total += sign * (extent?.w ?? WALL_THICKNESS_UNITS)
   }
   return total
 }

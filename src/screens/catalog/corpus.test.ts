@@ -323,12 +323,18 @@ describeCorpus('a card can be told from its neighbour', () => {
     for (const item of items) expect(previewOf(item)).toBeDefined()
   })
 
-  it('narrows 131 shared names to 21 identical cards, facet by facet', () => {
+  it('narrows 130 shared names to 21 identical cards, facet by facet', () => {
     const keyed = (of: (item: TileAggregate) => readonly string[]) =>
       collisions(items.map((item) => of(item).join('|')))
 
-    // The starting point A1 measured: the title alone is not identity.
-    expect(keyed((item) => [parts(item).name])).toEqual({ groups: 131, items: 323, worst: 6 })
+    /* The starting point A1 measured: the title alone is not identity.
+
+       131 / 323 before row **D9**. A display name carries the size token, and
+       correcting 245 corner walls from a tagged 2-unit run to their measured 1.5
+       renames them from `2x` to `1.5x` — which *separates* one colliding pair.
+       So the number this row exists to shrink shrank for the same reason the
+       footprint did: two cards that looked identical were different sizes. */
+    expect(keyed((item) => [parts(item).name])).toEqual({ groups: 130, items: 321, worst: 6 })
 
     // Texture and the size chip separate **nothing**, and that is the finding
     // that makes the rest of this row necessary rather than nice: two aggregates
@@ -339,7 +345,7 @@ describeCorpus('a card can be told from its neighbour', () => {
         const part = parts(item)
         return [part.name, part.texture, part.size]
       }),
-    ).toEqual({ groups: 131, items: 323, worst: 6 })
+    ).toEqual({ groups: 130, items: 321, worst: 6 })
 
     // The availability chips are the first thing that separates anything — they
     // are derived from the connection axis, which is exactly what an aggregate

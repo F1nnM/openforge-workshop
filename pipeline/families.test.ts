@@ -204,7 +204,7 @@ describeCorpus(title, () => {
       }
     })
 
-    it('agrees with `sizeAdmits` at 257 positions to within 12 and 128', () => {
+    it('agrees with `sizeAdmits` at 256 positions to within 12 and 373', () => {
       /* The other half of the guard, against B3's own ground truth rather than
          against the refs that produced the position. A position's *label*
          carries the predicate it means — a `cell` position reads "w wide by d
@@ -218,13 +218,22 @@ describeCorpus(title, () => {
          | direction | incidences | records |
          | --- | ---: | ---: |
          | the refs admit what the predicate does not | 12 | 12 |
-         | the predicate admits what the refs do not | 128 | 128 |
+         | the predicate admits what the refs do not | 373 | 373 |
 
          Both were larger before row D1's base deny — 160 incidences over 136
          records — and for a reason worth keeping: a base could be missed twice,
          once in the base family and once under the role of the piece it sits
          under. Now it is missed only in the base family, so the incidences and
-         the records are the same 128.
+         the records are the same number.
+
+         **Row D9 took the second direction from 128 to 373**, and the 245 are
+         its corner walls. Their cell is now `1.5 x 0.5` and their only
+         `size|width` tag says 2, so the predicate at *"1.5 wide"* admits them
+         and the ref that spells that position cannot find them — the same
+         *"geometry the tags do not state"* the 102 arcs and 26 walls were
+         already in, and the case for the derived run tag `src/template/size.ts`
+         prices and declines. The first direction is unchanged at 12, which is
+         the direction that would mean a wrong candidate.
       */
       let positions = 0
       let admittedBeyond = 0
@@ -248,20 +257,19 @@ describeCorpus(title, () => {
           }
         }
       }
-      expect(positions).toBe(257)
-      expect(families.reduce((total, family) => total + family.sizes.length, 0)).toBe(304)
+      expect(positions).toBe(256)
+      expect(families.reduce((total, family) => total + family.sizes.length, 0)).toBe(303)
       expect(admittedBeyond).toBe(12)
-      expect(missed).toBe(128)
-      expect(missedRecords.size).toBe(128)
-      expect(missedRecords.size / 8702).toBeCloseTo(0.0147, 4)
+      expect(missed).toBe(373)
+      expect(missedRecords.size).toBe(373)
+      expect(missedRecords.size / 8702).toBeCloseTo(0.0429, 4)
     })
 
-    it('misses 128 records whose cell is geometry the tags do not state', () => {
-      /* The 136, by why. Every one of them resolves a cell the control *names*
-         and carries no tag saying so, so it is reachable at `ANY_SIZE` and
-         nowhere else — which is a third reason every family has that position,
-         beside B3's five empty domains and the 1,112 records with no cell at
-         all. */
+    it('misses 373 records whose cell is geometry the tags do not state', () => {
+      /* By why. Every one of them resolves a cell the control *names* and
+         carries no tag saying so, so it is reachable at `ANY_SIZE` and nowhere
+         else — which is a third reason every family has that position, beside
+         B3's five empty domains and the 1,112 records with no cell at all. */
       const reasons = new Map<string, number>()
       for (const family of families) {
         const population = populationOf(family)
@@ -276,13 +284,14 @@ describeCorpus(title, () => {
           }
         }
       }
-      /* 102 of the 128 are 90 degree annular sectors, whose cell is `rOut x rOut`
-         and whose only `size|` tags are a radius and an angle. The other 26 are
-         `wall` footprints: 14 stair strips at a 0.5 depth the corpus never tags,
+      /* 102 are 90 degree annular sectors, whose cell is `rOut x rOut` and whose
+         only `size|` tags are a radius and an angle. The other **271** are
+         `wall` footprints: **245 corner walls** whose measured 1.5 run no tag
+         states (row D9), 14 stair strips at a 0.5 depth the corpus never tags,
          and the 12 `QxG` bases whose tagged width is a unit wider than their
          measured run. By family, since the base deny moved 32 of the arcs out of
          a role family and into the base family alone: */
-      expect(Object.fromEntries(reasons)).toEqual({ arc: 102, wall: 26 })
+      expect(Object.fromEntries(reasons)).toEqual({ arc: 102, wall: 271 })
       const byFamily = new Map<string, number>()
       for (const family of families) {
         const population = populationOf(family)
@@ -302,6 +311,10 @@ describeCorpus(title, () => {
         'stair|straight|-': 14,
         'floor|curve|-': 10,
         'floor|curve|s2w': 3,
+        /* Row **D9**. The whole corner-wall class lands in one family, at the
+           one position whose label states the run their meshes have and their
+           tags do not. */
+        'wall|corner|s2w': 245,
       })
     })
   })
@@ -774,7 +787,7 @@ describeCorpus(title, () => {
   /* ------------------------------------------------------------------- the size */
 
   describe('the size control', () => {
-    it('finds B3’s 295 cells over the 52 keys, and spells 228 of its own 242', () => {
+    it('finds B3’s 294 cells over the 52 keys, and spells 227 of its own 241', () => {
       const cells = new Map<string, Set<string>>()
       for (const record of file.records) {
         const size = sizeOf(record)
@@ -783,7 +796,11 @@ describeCorpus(title, () => {
         set.add(`${String(size.w)}x${String(size.d)}`)
         cells.set(keyOf(record), set)
       }
-      expect([...cells.values()].reduce((total, set) => total + set.size, 0)).toBe(295)
+      /* 295 before row **D9**, and the cell that went is `wall|corner|s2w`'s
+         `2x0.5`: no corner wall is 2 units long. Its records fold into the
+         `1.5x0.5` the key already held, so a cell left the domain and no record
+         did. */
+      expect([...cells.values()].reduce((total, set) => total + set.size, 0)).toBe(294)
 
       /* Of the 295, how many the generator's own domain holds — and after row
          D1 the two are counted over different populations, which is why the
@@ -791,20 +808,22 @@ describeCorpus(title, () => {
 
          B3's 295 is cells over the 52 keys with every record in them. A keyed
          family's records are its key's less the bases, so its domain is smaller:
-         **242 cells over the 46 keyed families**, 228 spelled and 14 refused,
-         plus the base family's own **31** — 29 spelled and 2 refused — for 273.
-         The 22 between 295 and 273 are the two insert keys' 11 and 11 more that
-         only a base occupied in its key. */
+         **241 cells over the 46 keyed families**, 227 spelled and 14 refused,
+         plus the base family's own **31** — 29 spelled and 2 refused — for 272.
+         The 22 between 294 and 272 are the two insert keys' 11 and 11 more that
+         only a base occupied in its key. (295 / 242 / 228 / 273 before row D9
+         took `wall|corner|s2w`'s `2x0.5` out of the domain — see the cell count
+         above.) */
       const named = families.filter((family) => family.key !== BARE_BASE_KEY)
       const spelled = named.reduce((total, family) => total + family.sizes.length - 1, 0)
       const refused = named.reduce((total, family) => total + family.inexpressibleCells.length, 0)
-      expect(spelled).toBe(228)
+      expect(spelled).toBe(227)
       expect(refused).toBe(14)
-      expect(spelled + refused).toBe(242)
+      expect(spelled + refused).toBe(241)
       const base = byId.get(familySlug(BARE_BASE_KEY))
       if (base === undefined) throw new Error('no bare-base family')
       expect(base.sizes.length - 1 + base.inexpressibleCells.length).toBe(31)
-      expect(242 + 31).toBe(273)
+      expect(241 + 31).toBe(272)
       /* The 11 that are the insert keys', measured rather than assumed, so the
          other 11 are named as what they are: cells no non-base record of their
          own key resolves to. */
@@ -814,7 +833,8 @@ describeCorpus(title, () => {
         return count
       }
       expect(cellsOfKeys((key) => key.startsWith('insert|'))).toBe(11)
-      expect(cellsOfKeys((key) => !key.startsWith('insert|'))).toBe(284)
+      // 284 before row D9 removed `wall|corner|s2w`'s `2x0.5`.
+      expect(cellsOfKeys((key) => !key.startsWith('insert|'))).toBe(283)
 
       /* And nothing was deduped away: every family's positions carry distinct
          tag lists, and its positions plus its refusals account for every cell
@@ -933,7 +953,7 @@ describeCorpus(title, () => {
       for (const family of single) expect(candidatesOf(family, ANY_SIZE).length).toBe(family.records)
     })
 
-    it('spells 48 run positions and 209 cell positions, and every label is true', () => {
+    it('spells 47 run positions and 209 cell positions, and every label is true', () => {
       /* A `run` position is *coarser than a cell* — `size|width|2` says nothing
          about depth, and `require`/`deny` are exact tag equality so the grammar
          has no prefix deny to narrow it with. That was this row's draft worry
@@ -962,9 +982,12 @@ describeCorpus(title, () => {
           }
         }
       }
-      expect(run).toBe(48)
+      /* 48 run positions before row **D9**. `wall-corner-s2w`'s *"2 wide"* was
+         one of them and no corner wall is 2 units long, so it is gone and the
+         cell positions are untouched. */
+      expect(run).toBe(47)
       expect(cell).toBe(209)
-      expect(run + cell).toBe(257)
+      expect(run + cell).toBe(256)
 
       /* The widest position in the table, which is the one worth naming: 32 of
          the 365 are the wall-thickness floor strips B1 files under `role|floor`,
@@ -985,7 +1008,7 @@ describeCorpus(title, () => {
       ).toHaveLength(38)
     })
 
-    it('drops `sizeRefs`’s deny, and the trade is 12 labels against 241 records', () => {
+    it('drops `sizeRefs`’s deny, and the trade is 12 labels against 912 records', () => {
       /* The departure from B3, measured in both directions. Its `deny` is right
          for the `edge` slot it was written for — where an over-running wall
          *"would draw two walls through each other"* — and wrong here, because a
@@ -1010,36 +1033,70 @@ describeCorpus(title, () => {
          family entirely — including the 121 diagonals, which are 121 of the
          only family they have. */
       const denied = file.records.filter((record) => tags(record).some((tag) => RUN_DENY_TAGS.includes(tag)))
-      expect(denied).toHaveLength(241)
+      /* 241 before row **D9** added `shape|corner` to the deny list, and 912
+         after — the third entry is on 671 records where the first two are on 130
+         and 111. That widening is what makes this test's argument stronger
+         rather than weaker: keeping the deny would now take **912** records out
+         of their own family at every position including `ANY_SIZE`, against a
+         cost of 12 mislabels for dropping it. */
+      expect(denied).toHaveLength(912)
       expect(file.records.filter((record) => tags(record).includes('shape|angled|right'))).toHaveLength(130)
       expect(
         file.records.filter((record) => tags(record).includes('shape|option|curved_interface')),
       ).toHaveLength(111)
+      expect(file.records.filter((record) => tags(record).includes('shape|corner'))).toHaveLength(671)
       const perKey = new Map<string, number>()
       for (const record of denied) perKey.set(keyOf(record), (perKey.get(keyOf(record)) ?? 0) + 1)
+      /* The 671 `shape|corner` records row D9 added spread over eleven more
+         keys, and `wall|corner|s2w` alone holds 380 of them — which is the
+         concrete form of *"keeping the deny would take a record out of its own
+         family"*: that family is corners, and the deny is on being a corner. */
       expect(Object.fromEntries(perKey)).toEqual({
         'wall|curve|separate wall': 84,
         'wall|diagonal|separate wall': 121,
         'floor|curve|-': 27,
         'floor|diagonal|-': 8,
         'column|diagonal|separate wall': 1,
+        'wall|corner|s2w': 380,
+        'wall|corner|thick wall': 90,
+        'wall|hex|thick wall': 56,
+        'wall|corner|s-system': 40,
+        'wall|corner|wall on tile': 36,
+        'roof|corner|-': 30,
+        'floor|corner|wall on tile': 12,
+        'wall|corner|separate wall': 12,
+        'stair|corner|-': 6,
+        'floor|internal_corner|wall on tile': 5,
+        'floor|corner|s2w': 4,
       })
-      /* 36 of the 241 are bases, so after row D1 their *own family* is the base
-         family and the total is unchanged either way. */
+      /* 159 of the 912 are bases (36 of them before row D9), so after row D1
+         their *own family* is the base family and the total is unchanged either
+         way. */
       const perFamily = new Map<string, number>()
       for (const record of denied) {
         const key = isBase(record) ? BARE_BASE_KEY : keyOf(record)
         perFamily.set(key, (perFamily.get(key) ?? 0) + 1)
       }
       expect(Object.fromEntries(perFamily)).toEqual({
-        'shape|base': 36,
+        'shape|base': 159,
         'wall|curve|separate wall': 48,
         'wall|diagonal|separate wall': 121,
         'floor|curve|-': 27,
         'floor|diagonal|-': 8,
         'column|diagonal|separate wall': 1,
+        'wall|corner|s2w': 341,
+        'wall|corner|thick wall': 66,
+        'wall|corner|s-system': 40,
+        'wall|corner|wall on tile': 36,
+        'roof|corner|-': 30,
+        'floor|corner|wall on tile': 12,
+        'wall|hex|thick wall': 8,
+        'stair|corner|-': 6,
+        'floor|internal_corner|wall on tile': 5,
+        'floor|corner|s2w': 4,
       })
-      expect(denied.filter(isBase)).toHaveLength(36)
+      // 36 before row D9; 123 of the 671 corner records are bases.
+      expect(denied.filter(isBase)).toHaveLength(159)
 
       /* What dropping it costs: 12 records at one position of one family, and
          they are the 12 the `admittedBeyond` count above found. */
@@ -1054,11 +1111,16 @@ describeCorpus(title, () => {
       expect(wrong).toHaveLength(12)
       expect(wrong.every((tile) => tile.includes('.QxG.'))).toBe(true)
 
-      /* And B3's `RUN_UNREACHABLE` from this side: 84 curved-interface walls,
-         of which 56 land on the position their tag names — which is also the
-         position their cell resolves to — so for those the drop is a
-         correction rather than a cost. */
-      expect(RUN_UNREACHABLE).toBe(84)
+      /* And B3's `RUN_UNREACHABLE` from this side: 84 curved-interface walls, of
+         which 56 land on the position their tag names — which is also the
+         position their cell resolves to — so for those the drop is a correction
+         rather than a cost. Row **D9** took it to 679 by adding the 595
+         `shape|corner` records, and from *this* side the reading is the same in
+         a stronger form: 245 of those 595 are corner walls whose cell resolves
+         to `1.5x0.5`, so dropping the deny puts them at their family's *"1.5
+         wide"* position, which is the position their **geometry** names even
+         though their tag does not. */
+      expect(RUN_UNREACHABLE).toBe(679)
     })
   })
 
@@ -1201,11 +1263,11 @@ describeCorpus(title, () => {
            ref this module emits is a tag the corpus already carries and nothing
            on `build.ts`'s path imports it.
 
-           `templates.test.ts` pins the same 366,173 B for the same construction
+           `templates.test.ts` pins the same 366,677 B for the same construction
            (a fresh build with an empty ordinal manifest at the payload epoch),
            and `npm run stamp` checks the derivation digest in both directions. */
         const size = measureCatalog(serialiseCatalog(file))
-        expect(size.brotli).toBe(366_173)
+        expect(size.brotli).toBe(366_677)
         expect(size.withinBudget).toBe(true)
         expect(file.tags).toHaveLength(930)
         expect(file.tags.filter((tag) => tag.startsWith('size|run|'))).toHaveLength(0)
@@ -1223,7 +1285,7 @@ describeCorpus(title, () => {
 
         /* The counterfactual, priced against the same artefact at the same epoch
            — the construction rows B1, B2 and B3 all quote. A `families` key
-           carrying the 47 slots and their 304 size positions costs the index
+           carrying the 47 slots and their 303 size positions costs the index
            real bytes, and it would buy nothing: the palette needs the table
            before the 5.6 MB index lands, which is `pipeline/templates.ts`'s
            argument for the 40 verbatim. */
@@ -1244,12 +1306,14 @@ describeCorpus(title, () => {
           `\n[families] index ${String(size.brotli)} B unchanged · the same table inside it ` +
             `${String(inIndex.brotli)} B (+${String(inIndex.brotli - size.brotli)})\n`,
         )
-        expect(inIndex.brotli - size.brotli).toBe(2277)
+        /* 2,277 B before row D9 moved the artefact this is measured against;
+           brotli is not additive over 5.9 MB and this file already says so. */
+        expect(inIndex.brotli - size.brotli).toBe(1796)
       },
       SLOW_MS,
     )
 
-    it('costs 44,495 raw bytes of the generated module, and prices the cut', () => {
+    it('costs 44,450 raw bytes of the generated module, and prices the cut', () => {
       /* The whole price of shipping all 47 rather than the plan's first 20 — and
          `FAMILY_TABLE_BYTES` is asserted against the emitter rather than
          quoted, so a family set that grows moves the constant or fails. */

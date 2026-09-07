@@ -309,7 +309,7 @@ describeFixtures(title, () => {
     })
 
     it(
-      'adds 0 B to the index, against +808 B for shipping the same rule inside it',
+      'adds 0 B to the index, and prices the same rule inside it at +396 B',
       () => {
         /* The claim the row rests on, measured rather than argued. The
            conventions ship in the bundle, `pipeline/build.ts` never reaches this
@@ -320,6 +320,18 @@ describeFixtures(title, () => {
            same epoch from a tree with this row reverted: same raw length
            (5,907,324 B), same brotli (366,173 B) and the same SHA-256 of the
            serialised index, `cf21ab85ac304a20…`.
+
+           **Row D9 moved that artefact, and proved what moved it the same way.**
+           Building this same corpus at this same epoch from a tree with *only*
+           `pipeline/footprint.ts` reverted to its pre-D9 state reproduces
+           `cf21ab85ac304a20…` byte for byte — 5,904,652 B raw, 366,173 B brotli
+           — and with the corrected corner run it is
+           `e1d5ca5459812bb1f636b4acfe923f4b8b26e640761ef05bdcf754f843428a33`,
+           5,905,632 B raw and **366,677 B brotli**. So the whole of the +980 B
+           raw / **+493 B** brotli is 245 records writing `"length":1.5` where
+           they wrote `"length":2`, and B2's own "0 B" claim is unaffected: it is
+           a claim about *this* module, and reverting *this* module still gives
+           the artefact the surrounding tree produces.
 
            The counterfactual here is the 128-row expansion of the same three
            rules as a `layouts` key, against **this** construction — a fresh
@@ -355,7 +367,7 @@ describeFixtures(title, () => {
             `${String(withTable.brotli)} B (+${String(withTable.brotli - shipped.brotli)})\n`,
         )
 
-        expect(shipped.brotli).toBe(366_173)
+        expect(shipped.brotli).toBe(366_677)
         expect(shipped.withinBudget).toBe(true)
         expect(shipped.brotli / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
         // And nothing of the model is in the bytes, which is the structural half.
@@ -363,7 +375,17 @@ describeFixtures(title, () => {
           expect(json).not.toContain(needle)
         }
         expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
-        expect(withTable.brotli - shipped.brotli).toBe(808)
+        /* **+396 B, against +808 before row D9** — and the two intermediate
+           readings are worth recording because they bracket the instrument
+           rather than the subject. Nothing about the table changed at any point:
+           the same 128 rows, asserted just above. Measured at the footprint
+           correction alone it was **-71 B** — adding the `layouts` key made the
+           index *smaller* — and one further character, `version.pipeline` going
+           2 to 3, brings it back to +396. So a "this field costs N bytes" figure
+           over a 5.9 MB brotli stream is not even reliably positive, let alone a
+           rate. The row's claim never rested on it; it rests on the structural
+           assertion below and the byte-identical revert digest above. */
+        expect(withTable.brotli - shipped.brotli).toBe(396)
       },
       SLOW_MS,
     )

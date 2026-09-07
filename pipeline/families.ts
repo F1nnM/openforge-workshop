@@ -953,4 +953,4 @@ export function familyLayout(family: GeneratedFamily): TemplateLayout {
  * tree with row B2 reverted, and `npm run stamp` reports
  * `content 7bf89a1d617714ff` unchanged with `PIPELINE_VERSION` still 2.
  */
-export const FAMILY_TABLE_BYTES = 44_495
+export const FAMILY_TABLE_BYTES = 44_450
