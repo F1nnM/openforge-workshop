@@ -73,6 +73,26 @@
  * dominant family by instance count wins, which is the choice that colours the
  * most creases correctly.
  *
+ * ## Row D7: this file holds the hover cue, because the cue crosses the canvas
+ *
+ * The silhouette pass belongs to `Stage` — it is one composer per `<Canvas>` and
+ * that canvas is shared with the catalog's tile previews — and the piece under
+ * the pointer is known only to `RoomSurface`, *inside* the canvas. So the two
+ * meet here, in the component that mounts both: the surface publishes an
+ * {@link OutlineRequest} through `onOutline`, this holds it, and `Stage` draws
+ * it. The same shape `onStatus` has had since R2, and for the same reason.
+ *
+ * One `useState` and no subscription, deliberately. A hover crossing is already
+ * strictly cheaper than what the readout costs: `onStatus` fires on every
+ * pointer *move* (the status carries the cursor), so this file re-renders per
+ * move today, and a request published once per piece entered adds a fraction of
+ * that. The alternative — a mutable handle the surface writes and the pass
+ * subscribes to — buys nothing and hides the wiring.
+ *
+ * `Stage` gets the request on every render, empty when nothing is hovered, and
+ * `StageProps.outline` says why that must not become `undefined` between
+ * hovers: presence is what builds the pass.
+ *
  * ## A placed tile with no mesh is drawn, always
  *
  * R1 measured **0.60 s to a first warm mesh and 1.37 s cold**, and its cache has
@@ -96,6 +116,8 @@ import { meshQueue, useMeshQueue } from '@/mesh'
 import type { PlacementId, SlotName } from '@/store'
 import { useLockSystem, useRoomDesign } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
+import type { OutlineRequest } from '@/three/outline'
+import { NO_OUTLINE } from '@/three/outline'
 import { AO_RADIUS, Stage } from '@/three/Stage'
 import { Eyebrow } from '@/ui/primitives'
 
@@ -370,6 +392,8 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
 
   const { message, announce } = useAnnouncer()
   const [status, setStatus] = useState<SurfaceStatus | null>(null)
+  /** The piece under the pointer, as the outline pass wants it. Row D7. */
+  const [outline, setOutline] = useState<OutlineRequest>(NO_OUTLINE)
   const publish = useCallback(
     (next: SurfaceStatus) => {
       setStatus(next)
@@ -420,6 +444,7 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
             label={label}
             aoRadius={AO_RADIUS_MM * fit.scale}
             enablePan
+            outline={outline}
             {...(occlusion === null ? {} : { occlusion })}
           >
             <RoomSurface
@@ -431,6 +456,7 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
               armed={armed}
               fill={filler}
               {...(onEditSlots === undefined ? {} : { onEditSlots })}
+              onOutline={setOutline}
               onStatus={publish}
               announce={announce}
               keyHelpId={KEY_HELP_ID}

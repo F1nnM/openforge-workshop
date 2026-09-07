@@ -117,13 +117,40 @@
  * The browser's own menu is suppressed on the canvas and only there — see
  * `onContextMenu` below for why that is two reasons rather than one taste.
  *
- * ## Row D3: the piece under the pointer glows, and it is a drawing change only
+ * ## Row D7: the glow is the tile's silhouette, and D3's was the plan view
  *
  * The owner asked that *"when hovering over a template in the editor, its
  * outline glow slightly"*, and the section above is why that is load-bearing
  * rather than decorative: a right click opens the slot editor on **whichever
  * piece the pointer resolves to**, so a user has to be able to see which piece
  * that is before pressing. Erase and move have had the same problem for longer.
+ *
+ * Row D3 drew it and drew the wrong thing, and the owner's diagnosis was exact:
+ * *"a 1px wide border floating on top of the element, not a glowing outline of
+ * the rendered tile"*. It built the cue from `polygons` — the **tagged
+ * footprint** — as a flat `lineSegments` loop lifted to the part's top height,
+ * so on a wall it was a horizontal rectangle in the air above the mesh. That is
+ * not a thin version of the right drawing; it is the plan view, drawn in 3D, at
+ * a height. It also could be *occluded* by anything standing between the camera
+ * and that plane, so the cue was as likely to be hidden as to be misread.
+ *
+ * D7 replaces it with the **silhouette of the geometry that is on screen**,
+ * traced by an outline pass in `src/three/Stage.tsx`. {@link silhouettes} is
+ * what this component contributes and carries the derivation; `outline.ts`
+ * carries why an instanced room needs a proxy mesh, and `Stage.tsx` carries the
+ * reconciliation with a design direction that says there is no stroke in 3D.
+ * Three things about it are stated here because they are facts about the
+ * *surface* and not about the pass:
+ *
+ *   1. **The cue is a screen-space edge, so nothing can hide it.** The mask's
+ *      boundary is where the piece stops covering pixels, which is exactly where
+ *      the user needs the line, whether the piece abuts a neighbour or stands
+ *      alone. A drawn loop had to be positioned in the world and could lose.
+ *   2. **A plate is outlined as a plate**, not as a mesh it does not have — the
+ *      flat loop is *correct* when the flat plate is what was rendered, which is
+ *      every piece today while blocker B2 is open.
+ *   3. **The pointer path did not change.** It did not change in D3 either, and
+ *      the A/B below still holds: `under` was already computed on every move.
  *
  * **Nothing was added to the pointer path to draw it.** `under` — `pieceAt` over
  * the cursor this component has tracked for the ghost since the mockup — was
@@ -140,30 +167,30 @@
  * scene's own object: the outline is memoised on the piece, so 200 moves across
  * one piece rebuild its geometry **zero** times.
  *
- * Three decisions in it, each of which could have gone the other way:
+ * Three decisions came out of D3 and all three survive the change of drawing:
  *
- *   1. **The glow rings the instance and not the resolved part.** The drawing
- *      below carries the arithmetic that settles it — on a single-part template
- *      the two are the *same loop*, so a second cue would read as the glow being
- *      brighter on some pieces than others rather than as a finer target.
+ *   1. **The cue names the instance and not the resolved part.** D3 settled it
+ *      with an argument about `polygons` being the flat map of its parts';
+ *      the pass settles it by construction — see the note beside the drawing.
  *   2. **It goes out while a button is held**, because a held button here means
  *      the camera: left orbits and right pans. {@link dragging} carries the
  *      mechanism, and why it is read off `PointerEvent.buttons` rather than
  *      tracked from the presses.
  *   3. **It follows the cursor and not the pointer**, so `[`, `]` and the arrow
  *      keys ring the piece they announce and a keyboard user gets the same cue
- *      from the keyboard. That is also how this row found that neither keyboard
+ *      from the keyboard. That is also how D3 found that neither keyboard
  *      cursor writer asked for a frame at all — {@link moveCursor} has the
  *      measurement — which is a defect in the *caret* that predates the glow.
  *
- * The erase ring is the same drawing at full strength rather than a second one,
- * and two special cases went with it: the ring used to be skipped for any piece
- * with a plate on it and the plate's own contour recoloured instead, so a
+ * The erase cue is the same drawing at full strength rather than a second one,
+ * and two special cases went with it in D3: the ring used to be skipped for any
+ * piece with a plate on it and the plate's own contour recoloured instead, so a
  * template with one mesh loaded and two still waiting highlighted **only the two
  * that were waiting**. It also used to be one loop at the *tallest* part's
  * height, which drew a corner template's floor outline at its **wall's** top —
  * 12.7 mm above the floor on this directory's fixture and 63.5 mm on a shipped
- * wall, the height `surface.ts` measures its parallax against.
+ * wall, the height `surface.ts` measures its parallax against. Both are moot
+ * now: there is one mask over whatever the piece is drawn as.
  *
  * ## Row A4b: everything drawn is a **part**, and the preview is a whole piece
  *
@@ -188,8 +215,8 @@
  */
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { BufferGeometry, Matrix4, Mesh } from 'three'
-import { Raycaster } from 'three'
+import type { BufferGeometry, Mesh } from 'three'
+import { Matrix4, Raycaster } from 'three'
 
 import type {
   MoveDrag,
@@ -222,6 +249,7 @@ import {
   rotateGeneratedPlacement,
   rotatePlacement,
 } from '@/store'
+import type { OutlineRequest, OutlineSubject } from '@/three/outline'
 
 import type { SurfaceEdit, SurfaceStatus, TemplateGhost } from './edits'
 import type { PlacementFiller } from './fills'
@@ -356,6 +384,29 @@ export interface RoomSurfaceProps {
    * secondary press resolves through the same `pieceAt` erase does.
    */
   readonly onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
+  /**
+   * The hover cue, published as a request for `Stage`'s silhouette pass — row **D7**.
+   *
+   * **Required**, for the reason {@link RoomSurfaceProps.fill} gives about a
+   * filler: an optional cue would mean a caller that forgot to wire it still
+   * compiles, still picks, still erases — and never shows the user which piece
+   * any of that is happening to. That is precisely the class of silent failure
+   * row D3 shipped and this row is fixing.
+   *
+   * It is a *callback out* rather than a handle in, and that is the same shape
+   * {@link RoomSurfaceProps.onStatus} already has: this component owns the
+   * ephemeral state of a gesture and publishes what it means, and `BuilderRoom`
+   * holds it and passes it to the canvas that can draw it. The surface cannot own
+   * the pass — the pass is one per `<Canvas>` and shared with the catalog's tile
+   * previews (row G3) — and it must not reach into a composer to get at one.
+   *
+   * Called from an effect on a memoised value, so a pointer crossing one piece
+   * publishes **once** and two hundred moves across it publish nothing further.
+   * There is no clearing cleanup: `BuilderRoom` mounts this component and the
+   * `Stage` that draws for it under one condition, so they unmount together and
+   * a final empty request would be a state update into a tree that is going away.
+   */
+  readonly onOutline: (request: OutlineRequest) => void
   readonly onStatus: (status: SurfaceStatus) => void
   readonly announce: (text: string) => void
   /** Id of the paragraph holding the key map, for the canvas's `aria-describedby`. */
@@ -372,6 +423,7 @@ export function RoomSurface({
   armed,
   fill,
   onEditSlots,
+  onOutline,
   onStatus,
   announce,
   keyHelpId,
@@ -478,12 +530,22 @@ export function RoomSurface({
    * exactly the single-primitive assumption A1 broke. Each plate takes its own
    * part's tint, elevation and outline, so a wall waiting for a mesh appears at
    * wall height over the floor that has one.
+   *
+   * **Row D7 builds the geometry here rather than inside `FootprintPlate`**, and
+   * it is an ownership change rather than a tidy-up: the hover cue outlines the
+   * silhouette of *the object that is drawn*, so the plate and its silhouette
+   * have to be the same `BufferGeometry` and not two builds of the same
+   * arithmetic. One geometry per plate, one owner, one disposal below. The
+   * rebuild frequency is unchanged in the case that matters — nothing in this
+   * memo's dependencies moves with the pointer.
    */
   const plated = useMemo<readonly PlatedPart[]>(() => {
     const plates: PlatedPart[] = [
       ...scene.generated.map((piece) => ({
         key: piece.id,
+        pieceId: piece.id,
         polygons: piece.polygons,
+        geometry: plateGeometry(piece.polygons, PLATE_HEIGHT_MM),
         tint: piece.style.tint,
         edge: piece.style.edge,
         heightMm: PLATE_HEIGHT_MM,
@@ -492,53 +554,120 @@ export function RoomSurface({
     for (const piece of scene.pieces) {
       for (const part of piece.parts) {
         if (geometries.has(part.record.blob)) continue
+        const heightMm = part.layout.elevationMm + PLATE_HEIGHT_MM
         plates.push({
           key: `${piece.id}:${part.slot}`,
+          pieceId: piece.id,
           polygons: part.polygons,
+          geometry: plateGeometry(part.polygons, heightMm),
           tint: part.style.tint,
           edge: part.style.edge,
-          heightMm: part.layout.elevationMm + PLATE_HEIGHT_MM,
+          heightMm,
         })
       }
     }
     return plates
   }, [scene, geometries])
 
+  // The plates' geometries are this component's, so they are released here —
+  // `FootprintPlate` no longer has one of its own to dispose. React runs this
+  // cleanup against the *previous* list before the next effect, so a scene change
+  // disposes exactly the geometries that scene built.
+  useEffect(
+    () => () => {
+      for (const plate of plated) plate.geometry.dispose()
+    },
+    [plated],
+  )
+
   /**
-   * The piece under the pointer, as one outline per part at that part's own top.
+   * The piece under the pointer, as the **silhouette of what is drawn for it** —
+   * row D7, and the whole of the row.
    *
-   * Row D3's drawing, and the arity is row A4b's again: a template is N parts at
-   * N elevations, so *"its outline"* is N loops and not one — and a loop per part
-   * is what keeps each one at the height the thing it rings actually reaches. The
-   * single union ring this replaced was drawn at the **tallest** part's top for
-   * the whole piece, so a corner template's floor outline was drawn at its
-   * wall's top: 12.7 mm up on this directory's fixture, 63.5 mm on a shipped
-   * wall. Nothing is added to the set of loops by the change:
-   * `piece.polygons` **is** `parts.flatMap((part) => part.polygons)` —
-   * `scene.ts`'s own identity, the one `edits.ts#planSlotEdit` also leans on — so
-   * these are the same loops the union drew, each at its own elevation instead of
-   * all of them at one.
+   * Row D3 built this list out of `polygons` — the tagged *footprint*, as a flat
+   * loop lifted to the part's top height — and the owner read the result
+   * correctly: *"a 1px wide border floating on top of the element, not a glowing
+   * outline of the rendered tile"*. On a 63.5 mm wall that loop is a horizontal
+   * rectangle hanging in the air over the mesh. It is not a thin version of the
+   * right drawing; it is a drawing of the plan view, in 3D, at a height.
    *
-   * A generated base is one loop by construction: it names no recipe and so has
-   * no slots, exactly as its plate has none.
+   * So nothing here is a polygon. Each subject is a geometry **that is already on
+   * screen** and the matrix it is already drawn with:
    *
-   * **Memoised on the piece and not on the pointer**, which is the whole of this
-   * row's cost control. `pieceAt` returns the scene's own object, so `under`
-   * keeps its identity for as long as the pointer stays on one piece, and
-   * `PlateOutline`'s own geometry memo therefore survives every move across it:
-   * 200 moves over a two-part piece build **two** outlines, not 400.
+   *   - **a part with a mesh** contributes `group.lod.geometry` and
+   *     `group.matrices[i]`, read straight out of the {@link Room3D} the
+   *     instanced draw was built from. Not recomputed through `tileMatrix`: a
+   *     second derivation of the same placement is a second opinion about where
+   *     the tile is, and the cue's one job is to agree with the picture.
+   *   - **a part with no mesh** contributes its footprint **plate's** geometry —
+   *     the same object {@link FootprintPlate} draws. A plate is flat by design
+   *     (0.6 mm where a wall is 63.5), so its silhouette *is* a flat loop, and
+   *     that is the honest cue rather than the wrong one: the flat outline is
+   *     right exactly when the thing on screen is flat. Blocker **B2** makes this
+   *     the common case today — nothing is uploaded to `/lod/`, so a room is all
+   *     plates — and row D3's own predecessor got this wrong in the other
+   *     direction by *skipping* the cue for any piece carrying a plate.
+   *
+   * The pass unions the subjects into one mask and traces its boundary, so N
+   * parts produce **one** loop around the piece as drawn and no interior lines
+   * between a template's floor and its wall. That settles D3's first decision —
+   * the glow rings the instance, not the part — as a property of the drawing
+   * instead of as an argument about arithmetic.
+   *
+   * **Memoised on the piece and not on the pointer**, which is this row's cost
+   * control exactly as it was D3's: `pieceAt` returns the scene's own object, so
+   * `under` keeps its identity while the pointer stays on one piece, and 200
+   * moves across a two-part piece build **one** subject list.
    */
-  const glow = useMemo<readonly GlowPart[]>(() => {
+  const silhouettes = useMemo<readonly OutlineSubject[]>(() => {
     if (under === undefined) return []
-    if (under.kind === 'generated') {
-      return [{ key: under.id, polygons: under.polygons, heightMm: PLATE_HEIGHT_MM * 2 }]
+    const subjects: OutlineSubject[] = []
+    // The surface draws in millimetres inside a scaled group; the pass draws in
+    // the scene's own frame. `outline.ts` carries why the scale is composed here.
+    const world = new Matrix4().makeScale(fit.scale, fit.scale, fit.scale)
+    for (const group of room.groups) {
+      for (const [index, id] of group.placements.entries()) {
+        const matrix = group.matrices[index]
+        if (id !== under.id || matrix === undefined) continue
+        subjects.push({
+          key: `${under.id}:${group.blob}:${String(index)}`,
+          geometry: group.lod.geometry,
+          matrix: new Matrix4().multiplyMatrices(world, matrix),
+        })
+      }
     }
-    return under.parts.map((part) => ({
-      key: `${under.id}:${part.slot}`,
-      polygons: part.polygons,
-      heightMm: partTopMm(part) + PLATE_HEIGHT_MM,
-    }))
-  }, [under, partTopMm])
+    for (const plate of plated) {
+      // The plate's positions are absolute millimetres, so the fit is its whole
+      // transform — the same one its `<mesh>` gets from the group it sits in.
+      if (plate.pieceId === under.id) subjects.push({ key: plate.key, geometry: plate.geometry, matrix: world })
+    }
+    return subjects
+  }, [under, room, plated, fit.scale])
+
+  /**
+   * The cue, published for `Stage`'s pass — one drawing at two strengths.
+   *
+   * Erase keeps {@link ACCENT} and hover keeps {@link HOVER_GLOW}, which is D3's
+   * decision and still right: a click in erase mode *deletes* the thing being
+   * named, so the loud cue is the honest one there and the quiet one everywhere
+   * else. The **colour** is the axis and the drawing is not, so there is one
+   * shape to get right and one place it is got right.
+   *
+   * Empty while a button is held, for {@link dragging}'s reason: a held button
+   * here means the camera, and a cue that hops from piece to piece while the
+   * view swings under a stationary hand is worse than no cue.
+   */
+  const outline = useMemo<OutlineRequest>(
+    () => ({
+      subjects: dragging ? [] : silhouettes,
+      colour: tools.tool === 'erase' ? ACCENT : HOVER_GLOW,
+    }),
+    [dragging, silhouettes, tools.tool],
+  )
+
+  useEffect(() => {
+    onOutline(outline)
+  }, [onOutline, outline])
 
   /* ------------------------------------------------------------- the mutations */
 
@@ -1234,6 +1363,7 @@ export function RoomSurface({
         <FootprintPlate
           key={plate.key}
           parts={plate.polygons}
+          geometry={plate.geometry}
           tint={plate.tint}
           edge={plate.edge}
           heightMm={plate.heightMm}
@@ -1241,37 +1371,25 @@ export function RoomSurface({
       ))}
 
       {/*
-        The piece under the pointer, ringed part by part — the owner's hover glow
-        and the erase gesture's own highlight, which are **one drawing at two
-        strengths** rather than two drawings. Row C8 is why the quiet one has to
-        exist at all: a right click opens the slot editor on whichever piece the
-        pointer resolves to, so a user has to be able to see which piece that is
-        before pressing. Erase keeps {@link ACCENT}, because a click there
-        *deletes* the thing being named and the loud cue is the honest one.
+        The hover cue is **not drawn here**, and that is row D7's whole shape. It
+        is a silhouette of the geometry above rather than a loop beside it, so it
+        cannot be a line in this tree: it is a post pass over the frame this tree
+        renders, and what this component contributes is {@link silhouettes} —
+        published through `onOutline`, drawn by `Stage`'s outline pass, in
+        `Stage.tsx` and `src/three/outline.ts`.
 
-        Every loop belongs to the **instance** and none of them is a part's alone
-        — even though a right click does resolve one level further, to the slot
-        whose part was hit. That level is deliberately not drawn, for a reason
-        that is arithmetic rather than taste: `piece.polygons` is the flat map of
-        its parts' polygons, so on a single-part template — the common case — a
-        second "resolved part" outline would be the *same loop drawn twice*, which
-        does not read as a finer cue, it reads as the whole glow being brighter on
-        some pieces than others. The slot is named in words instead, by
-        `planSlotEdit`, on the one gesture that uses it. The panel's own rows are
-        still the pointer-free way in, and they still list every piece.
+        Row C8 is why the cue has to exist at all: a right click opens the slot
+        editor on whichever piece the pointer resolves to, so a user has to be
+        able to see which piece that is before pressing. Erase and move have had
+        the same problem for longer.
 
-        Suppressed while a button is held: see {@link dragging}.
+        The cue names the **instance** and not the slot, even though a right click
+        does resolve one level further. That level stays undrawn for the reason
+        D3 gave and the pass now enforces: the mask is the union of the piece's
+        parts, so a second "resolved part" silhouette inside it would trace a
+        boundary that is not there. The slot is named in words instead, by
+        `planSlotEdit`, on the one gesture that uses it.
       */}
-      {dragging
-        ? null
-        : glow.map((part) => (
-            <PlateOutline
-              key={part.key}
-              parts={part.polygons}
-              colour={tools.tool === 'erase' ? ACCENT : HOVER_GLOW}
-              heightMm={part.heightMm}
-            />
-          ))}
 
       {/*
         The armed marker: one cell at the snapped anchor, with no mesh behind it
@@ -1306,21 +1424,25 @@ export function RoomSurface({
   )
 }
 
-/** One plate to draw: an outline, two colours and a height. */
+/** One plate to draw: a geometry, an outline, two colours and a height. */
 interface PlatedPart {
   /** Stable across renders: the placement, then the slot. */
   readonly key: string
+  /**
+   * The piece this plate belongs to.
+   *
+   * Row D7: the hover cue asks *"which of these plates is the piece under the
+   * pointer"*, and a placement id answers it for both populations — a generated
+   * base is one plate keyed by its own id, a catalog part one plate per waiting
+   * slot. Deriving it back out of {@link key} would be string surgery on a
+   * composite, which is what a second field costs less than.
+   */
+  readonly pieceId: PlacementId
   readonly polygons: readonly PlanPart[]
+  /** Built and disposed by the surface; drawn by the plate and outlined by the cue. */
+  readonly geometry: BufferGeometry
   readonly tint: string
   readonly edge: string
-  readonly heightMm: number
-}
-
-/** One loop of the hover glow: a part's outline, at that part's own top. */
-interface GlowPart {
-  /** Stable across renders: the placement, then the slot. */
-  readonly key: string
-  readonly polygons: readonly PlanPart[]
   readonly heightMm: number
 }
 
@@ -1370,9 +1492,7 @@ function Lattice() {
  *
  * Flat, 0.6 mm of it, in the part's own material tint with a bright contour —
  * `markers.ts` sets out why that cannot be read as the tile and why it must not
- * be omitted. The geometry is built from the outline's convex parts and disposed
- * explicitly on unmount rather than left to the reconciler, which disposes what
- * it constructed and not what it was handed.
+ * be omitted.
  *
  * Takes `parts` and two colours rather than a piece, which since row **A4b** is
  * the only shape that works: a plate is drawn **per slot**, so it needs that
@@ -1380,21 +1500,26 @@ function Lattice() {
  * slot. `heightMm` is the slot's declared elevation plus the plate's thickness,
  * so a wall waiting for a mesh appears at wall height over the floor that has
  * one.
+ *
+ * **The geometry is handed in since row D7** and is not this component's to
+ * dispose. It used to be built and released here, which was right while a plate
+ * was the only thing drawn from it; the hover cue outlines the plate's own
+ * silhouette, so the plate and the cue have to hold the same object, and the
+ * owner is the one place that can see both — see the {@link plated} memo.
  */
 function FootprintPlate({
   parts,
+  geometry,
   tint,
   edge,
   heightMm,
 }: {
   parts: readonly PlanPart[]
+  geometry: BufferGeometry
   tint: string
   edge: string
   heightMm: number
 }) {
-  const geometry = useMemo(() => plateGeometry(parts, heightMm), [parts, heightMm])
-  useEffect(() => () => { geometry.dispose() }, [geometry])
-
   return (
     <>
       <mesh geometry={geometry} dispose={null}>
@@ -1405,7 +1530,14 @@ function FootprintPlate({
   )
 }
 
-/** The ring around a plate, or around the piece the erase gesture would take. */
+/**
+ * The ring around a plate, and the ghost's fallback when it has no mesh.
+ *
+ * Not the hover cue any more — row D7 moved that to a silhouette pass, and the
+ * two things it drew were never the same drawing: this one traces the tagged
+ * footprint on purpose, because a plate *is* the tagged footprint given 0.6 mm of
+ * thickness, while a cue tracing a footprint over a 63.5 mm wall was the defect.
+ */
 function PlateOutline({
   parts,
   colour,
