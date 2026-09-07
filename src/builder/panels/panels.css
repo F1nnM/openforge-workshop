@@ -73,10 +73,13 @@
   color: var(--mut);
 }
 
+/* The list's own region since row D2 — the two sections inside it carry the
+   headings and the counts, so this is the RECENT strip, the two sections and the
+   insert sentence in one column. */
 .of-pal-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -160,12 +163,34 @@
   overflow: hidden;
 }
 
-.of-pal-size {
+/* The row's right-hand column: the slot count, then the one fact that differs by
+   kind — a candidate count on a single tile, the build system on an assembly.
+   `PalettePanel.tsx#rowFact` carries why those two. One line and `nowrap`,
+   because the name beside it is the part allowed to wrap. */
+.of-pal-detail {
   flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
   font-family: var(--face-mono);
   font-size: 10.5px;
   color: var(--mut);
   white-space: nowrap;
+}
+
+/* Row D2 puts this on all 91 rows and it is the row's answer to the report that
+   caused the row: a placement that brings five slots and one that brings one
+   were indistinguishable. Held at the row's own ink so it reads before the
+   fact beside it, which is a quantity rather than a kind. */
+.of-pal-slots {
+  color: var(--ink);
+  opacity: 0.75;
+}
+
+.of-pal-fact::before {
+  content: '·';
+  margin-right: 5px;
+  opacity: 0.5;
 }
 
 .of-pal-note {
@@ -175,11 +200,26 @@
   color: var(--mut);
 }
 
-/* ── The palette's groups, facets and size control (row C1) ──────────────────
-   Nine role groups over 91 rows, two facet axes, and one size control that
-   appears inside the armed row. Every measurement behind the shape is in
-   `palette.ts` and `families.ts`.
+/* ── The palette's sections, groups, facets and size control ─────────────────
+   Two sections over 91 rows — 40 assemblies, then 51 single tiles in eight role
+   groups — two facet axes, and one size control that appears inside the armed
+   row. Every measurement behind the shape is in `palette.ts` and `families.ts`.
    ──────────────────────────────────────────────────────────────────────────── */
+
+/* A section is the palette's coarsest division and the one row D2 added: the
+   kind of thing a row is, said once instead of on 91 rows. Spaced further apart
+   than the role groups inside one of them, because that is the whole claim —
+   these two lists are more different from each other than WALL is from FLOOR. */
+.of-pal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.of-pal-section + .of-pal-section {
+  margin-top: 10px;
+}
 
 .of-pal-group {
   display: flex;
@@ -188,10 +228,11 @@
   min-width: 0;
 }
 
-/* Same hairline rule as the block heading, one step quieter: nine of these are
-   on screen at once and the block's own `<h2>` has to stay the louder one. */
+/* Same hairline rule as the section heading, one step quieter: eight of these
+   are on screen at once and the section's own `<h2>` has to stay the louder one. */
 .of-pal-subheading {
   margin-top: 4px;
+  opacity: 0.82;
 }
 
 .of-pal-facets {
