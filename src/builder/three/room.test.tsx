@@ -59,7 +59,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { planCatalogFromFile } from '@/builder/canvas'
 import * as loadLod from './loadLod'
-import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from '@/builder/canvas/fixture'
+import { FIXTURE_IDS, FIXTURE_TEMPLATE, OTHER_FIXTURE_TEMPLATE, fixtureCatalogFile } from '@/builder/canvas/fixture'
+
+import type { PlacementFiller } from './fills'
 
 /**
  * What the two stubs record.
@@ -79,6 +81,14 @@ const surfaceCalls: {
   scale: number
   armed: string | null
   loaded: number
+  /* Row C5. The filler itself, not a summary of it: the point of capturing it is
+     to *call* it, which is the only way this level can prove that a click would
+     place a filled instance — `useThree` makes the real surface unmountable, so
+     the pointer path itself is unreachable from jsdom (`edits.ts` states that
+     limitation) and this is the closest a test gets to the click. */
+  fill: PlacementFiller
+  /** Row C8: whether the room carried the screen's slot-editor handler through. */
+  edits: boolean
 }[] = []
 
 vi.mock('@/three/Stage', async () => {
@@ -113,6 +123,8 @@ vi.mock('./RoomSurface', () => ({
     fit,
     tools,
     geometries,
+    fill,
+    onEditSlots,
   }: {
     room: {
       groups: { count: number; matrices: unknown[]; resolution: { family: { id: string } } }[]
@@ -121,6 +133,8 @@ vi.mock('./RoomSurface', () => ({
     fit: { scale: number }
     tools: { selectedDesign: string | null }
     geometries: ReadonlyMap<string, unknown>
+    fill: PlacementFiller
+    onEditSlots?: unknown
   }) => {
     surfaceCalls.push({
       groups: room.groups.length,
@@ -130,6 +144,8 @@ vi.mock('./RoomSurface', () => ({
       scale: fit.scale,
       armed: tools.selectedDesign,
       loaded: geometries.size,
+      fill,
+      edits: onEditSlots !== undefined,
     })
     return <div data-testid="surface" />
   },
@@ -139,11 +155,16 @@ const { AO_RADIUS_MM, BuilderRoom, MEDIAN_TILE_MM } = await import('./BuilderRoo
 const { AO_RADIUS } = await import('@/three/Stage')
 const { VIEW_RADIUS } = await import('@/three/geometry')
 const { surfaceFit } = await import('./surface')
-const { planTools, recordOf, sceneOf } = await import('./fixture')
+const { fixtureAuthorities, planTools, sceneOf } = await import('./fixture')
 const { readFileSync } = await import('node:fs')
 const { join } = await import('node:path')
 
 const CATALOG = planCatalogFromFile(fixtureCatalogFile())
+/* Row C5's required prop: the three authorities the click's fill solve walks,
+   real ones over the same eleven records this file's catalog is built from. Built
+   once for the file — eleven records, but `buildAssemblyIndex` is not free and
+   nothing here mutates it. */
+const AUTHORITIES = fixtureAuthorities()
 const ASSETS = {
   lod: 'https://objects.openforge.tools/lod',
   // The conversion queue is keyed on this base and is never asked for anything
@@ -155,7 +176,7 @@ const ASSETS = {
 function scene(ids: readonly string[]) {
   return sceneOf(
     CATALOG,
-    ids.map((id, i) => ({ tileId: id, x: i * 2, z: 0 })),
+    ids.map((id, i) => ({ tile: id, x: i * 2, z: 0 })),
   )
 }
 
@@ -196,6 +217,7 @@ describe('the room with an empty store — today’s real state', () => {
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.wall2])}
         tools={planTools()}
         assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={notFound}
       />,
     )
@@ -208,11 +230,13 @@ describe('the room with an empty store — today’s real state', () => {
     // because the ground plane *is* where the next tile goes.
     expect(screen.getByTestId('stage')).toBeInTheDocument()
     expect(screen.getByTestId('surface')).toBeInTheDocument()
-    // Both numbers, so an outlined tile is legible rather than mysterious.
-    expect(screen.getByText(/2 of 2 placed tiles have no mesh/i)).toBeInTheDocument()
-    // And the disclosure says the tile is real, which is the thing a marker must
+    // Both numbers, and in **parts**: a plate is drawn per part since row A4b,
+    // so a count of placements would say "2" about a room that might be showing
+    // six outlines.
+    expect(screen.getByText(/2 of 2 placed parts have no mesh/i)).toBeInTheDocument()
+    // And the disclosure says the part is real, which is the thing a marker must
     // never leave in doubt.
-    expect(screen.getByText(/tile is really there/i)).toBeInTheDocument()
+    expect(screen.getByText(/part is really there/i)).toBeInTheDocument()
   })
 
   it('reports the budget and the draw count even when nothing drew', async () => {
@@ -222,11 +246,12 @@ describe('the room with an empty store — today’s real state', () => {
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={notFound}
       />,
     )
     await waitFor(() => {
-      expect(screen.getByText('0 in 0 instanced meshes, 1 outlined')).toBeInTheDocument()
+      expect(screen.getByText('0 parts in 0 instanced meshes, 1 outlined')).toBeInTheDocument()
     })
     expect(screen.getByText('1 of 150 meshes')).toBeInTheDocument()
   })
@@ -240,6 +265,7 @@ describe('the room with an empty store — today’s real state', () => {
         scene={scene([])}
         tools={planTools()}
         assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={fetchImpl as unknown as typeof fetch}
       />,
     )
@@ -254,28 +280,59 @@ describe('the room with an empty store — today’s real state', () => {
   })
 })
 
-describe('the armed tile', () => {
-  it('is requested before it is placed, so the first ghost has geometry', async () => {
-    // The armed tile is not in the scene — that is what "armed" means — so a
-    // store driven by the scene alone would leave the user placing their first
-    // tile blind.
+describe('the armed family', () => {
+  it('fetches nothing for it, because a family names no mesh yet', async () => {
+    // **The inverse of what row R2 asserted here, and a real loss of capability
+    // rather than a tidier test.** R2 added the armed tile's own blob to the
+    // load set so the first ghost had geometry before the first placement. Since
+    // row A1 the armed thing is a `TemplateId`, and `edits.ts#templateGhost`
+    // draws a cell marker with no mesh in it. Row **C5** wires C2's solver to the
+    // click, so the files *are* knowable before the press — and this assertion
+    // stands anyway, on purpose: the marker draws no mesh, so prefetching a
+    // family's blobs would warm the cache for a placement that may never happen.
+    // `BuilderRoom`'s `blobs` docblock carries that decision.
     const fetchImpl = spyFetch()
     render(
       <BuilderRoom
         catalog={CATALOG}
         scene={scene([])}
-        tools={planTools({ selectedDesign: fixtureDesignOf(FIXTURE_IDS.floor1) })}
+        tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
         assets={ASSETS}
+        fill={AUTHORITIES}
+        fetchImpl={fetchImpl as unknown as typeof fetch}
+      />,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('stage')).toBeInTheDocument()
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('loads exactly the parts the scene draws, and nothing beside them', async () => {
+    // Contract **C-d** at the component boundary: the fetched set is
+    // `roomBlobs(scene)`, so it holds one address per drawn part and no extras.
+    // A second derivation here is what would report "not in the store" about a
+    // blob nobody asked for.
+    const fetchImpl = spyFetch()
+    const drawn = scene([FIXTURE_IDS.floor1, FIXTURE_IDS.wall2])
+    render(
+      <BuilderRoom
+        catalog={CATALOG}
+        scene={drawn}
+        tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={fetchImpl as unknown as typeof fetch}
       />,
     )
     await waitFor(() => {
       expect(fetchImpl).toHaveBeenCalled()
     })
-    const record = recordOf(CATALOG, FIXTURE_IDS.floor1)
-    expect(record).toBeDefined()
+    const wanted = new Set(drawn.pieces.flatMap((piece) => piece.parts.map((part) => part.record.blob)))
+    expect(wanted.size).toBe(2)
     const asked = fetchImpl.mock.calls.map(([url]) => url)
-    expect(asked.some((url) => url.includes(record?.blob ?? 'none'))).toBe(true)
+    expect(asked).toHaveLength(wanted.size)
+    for (const blob of wanted) expect(asked.some((url) => url.includes(blob))).toBe(true)
   })
 })
 
@@ -290,6 +347,7 @@ describe('when an object is there and broken', () => {
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={broken as unknown as typeof fetch}
       />,
     )
@@ -319,6 +377,7 @@ describe('when the browser cannot decode meshopt', () => {
           scene={scene([FIXTURE_IDS.floor1])}
           tools={planTools()}
           assets={ASSETS}
+        fill={AUTHORITIES}
             fetchImpl={fetchImpl as unknown as typeof fetch}
         />,
       )
@@ -344,6 +403,7 @@ describe('the room with a store object', () => {
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor1, FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={glbResponder()}
       />,
     )
@@ -352,8 +412,11 @@ describe('the room with a store object', () => {
       expect(surfaceCalls.at(-1)?.groups).toBe(1)
     })
 
-    // Three placements of one tile: one instanced mesh, three instances.
-    expect(screen.getByText('3 in 1 instanced mesh')).toBeInTheDocument()
+    // Three placements of one file: one instanced mesh, three parts.
+    expect(screen.getByText('3 parts in 1 instanced mesh')).toBeInTheDocument()
+    // And the arity the other lines are in terms of, so "3 parts in 1 mesh" is
+    // readable — three placements of one part each, none of them empty.
+    expect(screen.getByText('3 placed')).toBeInTheDocument()
     // 118 triangles per instance from the fixture, times three.
     expect(screen.getByText('354')).toBeInTheDocument()
     expect(screen.getByText('1 of 1 loaded')).toBeInTheDocument()
@@ -362,7 +425,7 @@ describe('the room with a store object', () => {
     expect(screen.getByText(/1 of 150 meshes · .* of 36\.2 MB/)).toBeInTheDocument()
 
     const call = stageCalls.at(-1)
-    expect(call?.label).toContain('3 placed tiles')
+    expect(call?.label).toContain('3 placed templates')
     // `enablePan`, at last passed by the component `Stage`'s prop docblock names:
     // a two-metre plan cannot be walked across by orbit and zoom alone.
     expect(call?.enablePan).toBe(true)
@@ -399,6 +462,7 @@ describe('the room with a store object', () => {
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={glbResponder()}
       />,
     )
@@ -415,6 +479,7 @@ describe('the room with a store object', () => {
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2, FIXTURE_IDS.wall2, FIXTURE_IDS.angled])}
         tools={planTools()}
         assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={glbResponder()}
       />,
     )
@@ -425,7 +490,139 @@ describe('the room with a store object', () => {
   })
 })
 
+describe('what a click would place — row C5', () => {
+  it('hands the surface a filler that solves the armed family’s parts', async () => {
+    /* **The row's own wiring, as far as jsdom can follow it.** `BuilderRoom`
+       builds the filler from the three authorities the screen passes and the lock
+       in the store; the surface calls it on the click. So calling the captured
+       filler is calling what the click calls — and it must come back with real
+       fills, because `fills: {}` is exactly the state row C5 exists to end. */
+    render(
+      <BuilderRoom
+        catalog={CATALOG}
+        scene={scene([FIXTURE_IDS.floor1])}
+        tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        assets={ASSETS}
+        fill={AUTHORITIES}
+        fetchImpl={notFound}
+      />,
+    )
+    await waitFor(() => {
+      expect(surfaceCalls.length).toBeGreaterThan(0)
+    })
+    const fill = surfaceCalls.at(-1)?.fill
+    expect(fill).toBeTypeOf('function')
+    const placed = fill?.(FIXTURE_TEMPLATE, [])
+
+    // Both slots of the fixture template, from the eleven-record catalog this
+    // file's own scene is built over — one archive, one answer.
+    expect(placed?.known).toBe(true)
+    expect(placed?.filled).toBe(2)
+    expect(Object.keys(placed?.fills ?? {}).sort()).toEqual(['floor', 'right wall'])
+    expect(Object.values(placed?.fills ?? {}).every((one) => one?.pinned === false)).toBe(true)
+  })
+
+  it('places a family this build has no recipe for, rather than refusing', async () => {
+    // Contract C-g from the other end: `OTHER_FIXTURE_TEMPLATE` is not in the
+    // fixture lookup, which is the state C1 measured for all 51 generated
+    // families against the 40-recipe table. It places; the bill refuses it.
+    render(
+      <BuilderRoom
+        catalog={CATALOG}
+        scene={scene([FIXTURE_IDS.floor1])}
+        tools={planTools({ selectedTemplate: OTHER_FIXTURE_TEMPLATE })}
+        assets={ASSETS}
+        fill={AUTHORITIES}
+        fetchImpl={notFound}
+      />,
+    )
+    await waitFor(() => {
+      expect(surfaceCalls.length).toBeGreaterThan(0)
+    })
+    const placed = surfaceCalls.at(-1)?.fill(OTHER_FIXTURE_TEMPLATE, [])
+
+    expect(placed).toMatchObject({ known: false, fills: {}, slots: 0 })
+  })
+
+  it('keeps one filler across re-renders, so the memo inside it survives', async () => {
+    /* The whole cost argument rests on this: a filler rebuilt on every render
+       would re-solve every placement, where one memoised filler makes a room of
+       twenty identical rows a single solve. Measured over the archive at 91 cold
+       solves in ~42 ms and 91 repeats in ~0.1 ms — `fills.test.ts`. */
+    const view = render(
+      <BuilderRoom
+        catalog={CATALOG}
+        scene={scene([FIXTURE_IDS.floor1])}
+        tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        assets={ASSETS}
+        fill={AUTHORITIES}
+        fetchImpl={notFound}
+      />,
+    )
+    await waitFor(() => {
+      expect(surfaceCalls.length).toBeGreaterThan(0)
+    })
+    const first = surfaceCalls.at(-1)?.fill
+
+    view.rerender(
+      <BuilderRoom
+        catalog={CATALOG}
+        scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2])}
+        tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        assets={ASSETS}
+        fill={AUTHORITIES}
+        fetchImpl={notFound}
+      />,
+    )
+    await waitFor(() => {
+      expect(surfaceCalls.length).toBeGreaterThan(1)
+    })
+
+    expect(surfaceCalls.at(-1)?.fill).toBe(first)
+  })
+})
+
 describe('the keyboard path exists in the document', () => {
+  it('carries row C8’s handler through to the surface when the screen passes one', async () => {
+    // `Builder3DPanel` is asserted at its own boundary in `panel.test.tsx`; this
+    // is the second hop, and the room does nothing to the handler but pass it —
+    // the dialog it opens is outside this directory entirely.
+    surfaceCalls.length = 0
+    render(
+      <BuilderRoom
+        assets={ASSETS}
+        catalog={CATALOG}
+        fetchImpl={notFound}
+        fill={AUTHORITIES}
+        onEditSlots={() => undefined}
+        scene={scene([FIXTURE_IDS.floor1])}
+        tools={planTools()}
+      />,
+    )
+    await waitFor(() => {
+      expect(surfaceCalls.length).toBeGreaterThan(0)
+    })
+    expect(surfaceCalls.at(-1)?.edits).toBe(true)
+  })
+
+  it('passes none when the screen passes none, so the prop stays optional', async () => {
+    surfaceCalls.length = 0
+    render(
+      <BuilderRoom
+        assets={ASSETS}
+        catalog={CATALOG}
+        fetchImpl={notFound}
+        fill={AUTHORITIES}
+        scene={scene([FIXTURE_IDS.floor1])}
+        tools={planTools()}
+      />,
+    )
+    await waitFor(() => {
+      expect(surfaceCalls.length).toBeGreaterThan(0)
+    })
+    expect(surfaceCalls.at(-1)?.edits).toBe(false)
+  })
+
   it('publishes a key map for the canvas to point at', async () => {
     // The canvas's `aria-describedby` names this paragraph, and `RoomSurface`
     // sets the attribute on the `<canvas>` element itself. The element cannot be
@@ -437,6 +634,7 @@ describe('the keyboard path exists in the document', () => {
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         assets={ASSETS}
+        fill={AUTHORITIES}
         fetchImpl={notFound}
       />,
     )
@@ -450,6 +648,18 @@ describe('the keyboard path exists in the document', () => {
     expect(keys?.textContent).toMatch(/Drag to orbit/)
     expect(keys?.textContent).toMatch(/Arrow keys move the plan cursor/)
     expect(keys?.textContent).toMatch(/Escape puts it back/)
+    /*
+      Row **C8**. The right click is on the drawing now, so the key map has to
+      say so — and it has to say the *other* route in the same breath, because a
+      right click has no keyboard equivalent every platform agrees on and this
+      paragraph is what the canvas's `aria-describedby` points at. The second
+      sentence is the panel's list, named as the pointer-free way in.
+    */
+    expect(keys?.textContent).toMatch(/Right-click a piece to choose what goes in its slots/)
+    expect(keys?.textContent).toMatch(/Pieces on the plan list/)
+    // And the right button is a pan, which is the interaction the 5 px
+    // threshold protects — the sentence used to name only the middle one.
+    expect(keys?.textContent).toMatch(/drag with the right or middle button/)
     // And a live region for the announcements, polite and atomic.
     const live = document.querySelector('[aria-live="polite"]')
     expect(live).not.toBeNull()

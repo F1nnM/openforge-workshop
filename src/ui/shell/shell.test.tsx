@@ -9,8 +9,8 @@
  *
  * The store is real too, driven through its exported actions. It persists to
  * `localStorage`, so every test clears it. The alternative — mocking
- * `useLibraryCount` — would prove the header renders a number and nothing about
- * where the number comes from.
+ * `usePlacementCount` — would prove the header renders a number and nothing
+ * about where the number comes from.
  *
  * The archive stats come through `CatalogStatsProvider`, which is the reason that
  * provider exists: without it the header fetches `catalog.json`, and a component
@@ -20,18 +20,22 @@ import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { DesignId } from '@/catalog'
 import { createWorkshopRouter } from '@/routes'
-import { addToLibrary, clearPersistedWorkshopState, placeTile, resetWorkshop } from '@/store'
+import { aTemplateInstance } from '@/store/fixture'
+import { clearPersistedWorkshopState, placeTemplate, resetWorkshop } from '@/store'
 
 import type { CatalogStats } from './catalogStats'
 import { CatalogStatsProvider } from './catalogStats'
 
 const STATS: CatalogStats = { tileCount: 8702, archiveHost: 'objects.openforge.tools' }
 
-/** Two items. The library counts items, not files, since row V1. */
-const DESIGN_A = DesignId.parse('d4c2a57740b65')
-const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
+/**
+ * Two placements. Since row A1 a placement is a **template instance** — a recipe,
+ * an angle and a fill per slot — so the two differ by cell rather than by
+ * identity, which is all this file's subject (a count in the header) needs them
+ * to differ by. The store's own parse is exercised in `src/store/**`.
+ */
+const place = (x: number) => placeTemplate(aTemplateInstance({ x, z: 0 }))
 
 async function renderApp(path = '/', stats: CatalogStats | null = STATS) {
   // The router resets scroll after a navigation. jsdom 30 defines `scrollTo` as a
@@ -59,7 +63,6 @@ const sectionNav = () => screen.getByRole('navigation', { name: 'Sections' })
 // the whitespace between them is the name-computation algorithm's business, not
 // this test's. What matters is that the unit is in the name and the bare digit is
 // not the whole of it.
-const LIBRARY = (n: number) => new RegExp(`^Library\\s*,\\s*${String(n)} tiles? saved$`)
 const BUILDER = (n: number) => new RegExp(`^Builder\\s*,\\s*${String(n)} tiles? placed$`)
 
 beforeEach(() => {
@@ -80,16 +83,15 @@ describe('AppFrame', () => {
       'href',
       '/',
     )
-    // Catalog, Library, Builder, Assemblies — in that order. Asserted by name
-    // rather than by count, so adding or removing a tab is a deliberate edit
-    // here instead of a bare number to bump. Row X9 added Assemblies, because
-    // row C3's screen had no entrance at all until its route was mounted; row L1
-    // removed Settings, because it deleted the route that tab existed to reach.
-    // `toEqual` on the whole list is what makes the removal assertable in both
-    // directions: a re-added tab fails here as loudly as a missing one.
+    // Catalog, Builder, Assemblies — in that order. Asserted by name rather than
+    // by count, so adding or removing a tab is a deliberate edit here instead of
+    // a bare number to bump. Row X9 added Assemblies, because row C3's screen had
+    // no entrance at all until its route was mounted; row L1 removed Settings and
+    // row A0 removed Library, each because it deleted the route the tab existed
+    // to reach. `toEqual` on the whole list is what makes a removal assertable in
+    // both directions: a re-added tab fails here as loudly as a missing one.
     expect(within(sectionNav()).getAllByRole('link').map((link) => link.textContent)).toEqual([
       expect.stringContaining('Catalog'),
-      expect.stringContaining('Library'),
       expect.stringContaining('Builder'),
       expect.stringContaining('Assemblies'),
     ])
@@ -101,10 +103,13 @@ describe('AppFrame', () => {
   })
 
   it('gives the document one main landmark, with the screen inside it', async () => {
-    await renderApp('/library')
+    // `/assemblies` rather than `/library`, which row A0 deleted. Any screen
+    // with a heading of its own does; what is asserted is that the frame owns
+    // the document's one `<main>` and the screen renders inside it.
+    await renderApp('/assemblies')
 
     const main = screen.getByRole('main')
-    expect(within(main).getByRole('heading', { name: 'Library' })).toBeInTheDocument()
+    expect(within(main).getByRole('heading', { name: 'Guided assemblies' })).toBeInTheDocument()
     expect(within(main).queryByRole('main')).toBeNull()
   })
 
@@ -119,8 +124,8 @@ describe('AppFrame', () => {
 describe('nav', () => {
   it.each([
     ['/catalog', 'Catalog'],
-    ['/library', 'Library'],
     ['/builder', 'Builder'],
+    ['/assemblies', 'Assemblies'],
   ])('marks %s as the current page, and only that one', async (path, label) => {
     await renderApp(path)
 
@@ -143,28 +148,26 @@ describe('nav', () => {
     }
   })
 
-  it('names the counts rather than showing bare numbers', async () => {
-    addToLibrary(DESIGN_A)
-    addToLibrary(DESIGN_B)
-    placeTile({ design: DESIGN_A, x: 0, z: 0, rotation: 0 })
+  it('names the count rather than showing a bare number', async () => {
+    place(0)
+    place(2)
 
     await renderApp('/catalog')
 
     // The digits are aria-hidden; the accessible name carries the unit.
-    expect(screen.getByRole('link', { name: LIBRARY(2) })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: BUILDER(1) })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: BUILDER(2) })).toBeInTheDocument()
   })
 
   it('tracks the store as it changes', async () => {
     await renderApp('/catalog')
 
-    expect(screen.getByRole('link', { name: LIBRARY(0) })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: BUILDER(0) })).toBeInTheDocument()
 
     act(() => {
-      addToLibrary(DESIGN_A)
+      place(0)
     })
 
-    expect(screen.getByRole('link', { name: LIBRARY(1) })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: BUILDER(1) })).toBeInTheDocument()
     // And the chip itself, which is the visual half of the same count.
     expect(screen.getByText('1')).toBeInTheDocument()
   })
@@ -198,8 +201,8 @@ describe('keyboard', () => {
       screen.getByRole('link', { name: 'Skip to content' }),
       screen.getByRole('link', { name: 'OpenForge Catalog & Workshop — home' }),
       screen.getByRole('link', { name: 'Catalog' }),
-      screen.getByRole('link', { name: LIBRARY(0) }),
       screen.getByRole('link', { name: BUILDER(0) }),
+      screen.getByRole('link', { name: 'Assemblies' }),
     ])
   })
 

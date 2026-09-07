@@ -16,10 +16,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { GRID_UNIT_MM, WALL_THICKNESS_UNITS } from '@/catalog'
+import type { SlotName } from '@/store'
 
-import { fixtureCatalogFile } from './fixture'
+import type { SlotRecords } from './catalog'
+import { FIXTURE_CELL, FIXTURE_IDS, FIXTURE_SLOTS, FIXTURE_TEMPLATE, fixtureCatalogFile, fixtureSlotLayout } from './fixture'
 import {
   DIAGONAL_ANGLE_DEG,
+  ORIGIN_LAYOUT,
   SNAP_STEP,
   anchorFor,
   anchorForShape,
@@ -42,9 +45,14 @@ import {
   quadContains,
   rotatedExtent,
   rotationStepFor,
+  slotAnchor,
+  slotGeometry,
   snapTo,
+  turnOffset,
+  unionBox,
   unitsToMm,
 } from './geometry'
+import type { PlanBox, PlanShape, SlotLayout } from './geometry'
 
 const catalog = fixtureCatalogFile()
 const record = (id: string) => {
@@ -382,3 +390,251 @@ describe('readouts', () => {
   })
 })
 
+describe('slot layout — row A4a', () => {
+  const wall = footprintShape({ shape: 'wall', length: 2 })
+  if (wall === undefined) throw new Error('the wall footprint must draw')
+
+  it('leaves an offset alone at rotation 0, exactly', () => {
+    expect(turnOffset(1.5, 0.25, 0)).toEqual([1.5, 0.25])
+    expect(slotAnchor(wall, { dx: 1.5, dz: 0.25, rotation: 0, elevationMm: 0 }, [2, 3], 0)).toEqual([
+      3.5, 3.25,
+    ])
+  })
+
+  it('turns an offset exactly on every quarter, with no trigonometric residue', () => {
+    // The whole reason the quarter turns are a swap rather than a cosine:
+    // `Math.cos(Math.PI / 2)` is 6.1e-17, so trig would put a 0.25-unit offset
+    // 1.5e-17 off the lattice — and equality is what two abutting parts need.
+    expect(turnOffset(1, 0.25, 90)).toEqual([-0.25, 1])
+    expect(turnOffset(1, 0.25, 180)).toEqual([-1, -0.25])
+    expect(turnOffset(1, 0.25, 270)).toEqual([0.25, -1])
+    expect(turnOffset(1, 0.25, 360)).toEqual([1, 0.25])
+  })
+
+  it('keeps a quarter-unit offset on the quarter-unit lattice through a full circle', () => {
+    // §2.2: slot offsets land on multiples of 0.25 and deliberately never snap.
+    // Whatever the instance's quarter turn, they must stay there exactly.
+    for (const rotation of [0, 90, 180, 270]) {
+      for (const [dx, dz] of [
+        [0.25, 0.75],
+        [1.5, 0.25],
+        [2.75, 1.25],
+      ]) {
+        const [x, z] = turnOffset(dx as number, dz as number, rotation)
+        expect(Number.isInteger(x * 4)).toBe(true)
+        expect(Number.isInteger(z * 4)).toBe(true)
+      }
+    }
+  })
+
+  it('folds a negative zero, which the negating branches really do produce', () => {
+    // `-0` survives in memory but not through `JSON.stringify`, so an offset
+    // holding one would stop a scene comparing equal to itself after a round
+    // trip. Both negating quarters can reach it from a zero component.
+    expect(Object.is(turnOffset(0, 1, 90)[0], -0)).toBe(false)
+    expect(Object.is(turnOffset(0, 0, 180)[0], -0)).toBe(false)
+    expect(Object.is(turnOffset(0, 0, 180)[1], -0)).toBe(false)
+    expect(Object.is(turnOffset(1, 0, 270)[1], -0)).toBe(false)
+  })
+
+  it('falls back to trigonometry off the quarter turns', () => {
+    // The 893 tiles whose angle is not a multiple of 90 are placeable, so an
+    // instance really can sit at 45°.
+    const [x, z] = turnOffset(2, 0, 45)
+    expect(x).toBeCloseTo(Math.SQRT2, 10)
+    expect(z).toBeCloseTo(Math.SQRT2, 10)
+  })
+
+  it('adds the slot yaw to the instance rotation and the footprint angle', () => {
+    // Three angles, one line: `slotGeometry` is the only place they meet.
+    const layout: SlotLayout = { dx: 0, dz: 0, rotation: 90, elevationMm: 12.7 }
+    expect(slotGeometry(wall, layout, [0, 0], 0).angle).toBe(90)
+    expect(slotGeometry(wall, layout, [0, 0], 45).angle).toBe(135)
+    // And it folds past a full circle rather than reporting 450.
+    expect(slotGeometry(wall, layout, [0, 0], 300).angle).toBe(30)
+  })
+
+  it('anchors a part where its box lands, so the box is the turned extent there', () => {
+    const layout: SlotLayout = { dx: 1.5, dz: 0, rotation: 90, elevationMm: 0 }
+    // Unturned instance: the wall sits at its own offset, turned a quarter by
+    // its slot, so a 2 x 0.5 run becomes 0.5 x 2 at x 1.5.
+    expect(slotGeometry(wall, layout, [0, 0], 0).box).toEqual({ x: 1.5, z: 0, w: 0.5, d: 2 })
+    // Instance turned a quarter, and no cell declared, so the part is its own:
+    // its 0.5 x 2 box turns about the origin to `[-2, 0] x [1.5, 2]` and the
+    // re-anchoring brings it back to x 0, extents 2 x 0.5.
+    expect(slotGeometry(wall, layout, [0, 0], 90).box).toEqual({ x: 0, z: 1.5, w: 2, d: 0.5 })
+  })
+
+  it('puts every part at the instance origin under the default layout', () => {
+    // `ORIGIN_LAYOUT` is the rule in force until row B2's lands: right for the
+    // `floor` and `base` slots, and stacking for the rest.
+    expect(ORIGIN_LAYOUT).toEqual({ dx: 0, dz: 0, rotation: 0, elevationMm: 0 })
+    expect(Object.isFrozen(ORIGIN_LAYOUT)).toBe(true)
+    expect(slotGeometry(wall, ORIGIN_LAYOUT, [2, 3], 0).box).toEqual({ x: 2, z: 3, w: 2, d: 0.5 })
+  })
+
+  it('unions a template s boxes into the one box the instance occupies', () => {
+    expect(
+      unionBox([
+        { x: 0, z: 0, w: 2, d: 2 },
+        { x: 1.5, z: 0, w: 0.5, d: 2 },
+        { x: 0, z: -0.5, w: 2, d: 0.5 },
+      ]),
+    ).toEqual({ x: 0, z: -0.5, w: 2, d: 2.5 })
+  })
+
+  it('has no box for no parts, rather than a degenerate one', () => {
+    // An instance with nothing drawable is a thing `scene.ts` reports rather
+    // than draws, so the empty case must not be a zero-sized box at the origin.
+    expect(unionBox([])).toBeUndefined()
+  })
+})
+
+/* --------------------------------------------------- the rigid body — row A10 */
+
+/**
+ * A template is placed and rotated as one unit (§1), so its footprint is a rigid
+ * body: a quarter turn may swap the instance's width for its depth and must not
+ * change its area, and `x`/`z` stay the minimum corner of what it occupies.
+ *
+ * Row **A4b** measured the composition A4a assumed and found neither: on the
+ * five-part fixture corner the union went 4.00 → 7.00 → **12.25** → 7.00 units²,
+ * so a half-turned 2 x 2 corner covered three times its own ground. These are
+ * the tests for the rule that replaced it — {@link slotAnchor}, step by step —
+ * and the numbers are the *cell's*, because B2's `edge` anchor is flush to a
+ * face and centred across it and its `corner` anchor is the square where two
+ * faces meet: nothing overhangs, so a 2 x 2 corner's union is 2 x 2.
+ */
+describe('a template is a rigid body under rotation', () => {
+  const QUARTERS = [0, 90, 180, 270] as const
+
+  /** The five slots of the fixture corner, resolved to shapes and layouts. */
+  const CORNER = [
+    [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+    [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+    [FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2],
+    [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2],
+    [FIXTURE_SLOTS.column, FIXTURE_IDS.column],
+  ] as const
+
+  /**
+   * The five slots as a {@link SlotRecords} map — the whole instance, which is
+   * what the rule takes since row **C6** widened the seam. `fixtureSlotLayout`
+   * reads the cell off the `floor` entry of it for all five slots, so a caller
+   * that handed over one record at a time could no longer get an answer.
+   */
+  const CORNER_FILLS: SlotRecords = new Map(CORNER.map(([slot, id]) => [slot, record(id)]))
+
+  function shapeOf(id: string): PlanShape {
+    const shape = footprintShape(record(id).foot)
+    if (shape === undefined) throw new Error(`no shape for ${id}`)
+    return shape
+  }
+
+  /** The union of the five parts' boxes, at one instance rotation. */
+  function cornerBox(rotation: number, over: Partial<SlotLayout> = {}): PlanBox {
+    const boxes = CORNER.map(([slot, id]) => {
+      const layout = { ...fixtureSlotLayout(FIXTURE_TEMPLATE, slot, CORNER_FILLS), ...over }
+      return slotGeometry(shapeOf(id), layout, [0, 0], rotation).box
+    })
+    const union = unionBox(boxes)
+    if (union === undefined) throw new Error('the corner must have a box')
+    return union
+  }
+
+  it('keeps a 2 x 2 corner exactly 2 x 2 at its origin, on every quarter turn', () => {
+    // Exact equality, not an area comparison: the box is the cell, at the
+    // instance origin, whichever way the instance is turned. That is the two
+    // properties at once — the area is preserved *and* `x`/`z` is still the
+    // minimum corner of what the instance occupies.
+    for (const rotation of QUARTERS) {
+      expect(cornerBox(rotation), `rotation ${String(rotation)}`).toEqual({
+        x: 0,
+        z: 0,
+        w: FIXTURE_CELL.w,
+        d: FIXTURE_CELL.d,
+      })
+    }
+  })
+
+  it('turns the parts within the cell rather than leaving them where they were', () => {
+    // The union being invariant would also be satisfied by ignoring the rotation
+    // altogether, so this pins where the two walls and the column actually go.
+    // The north wall becomes the east wall, the east wall becomes the south, and
+    // the south-east column becomes the south-west one.
+    const boxOf = (slot: SlotName, id: string, rotation: number) =>
+      slotGeometry(shapeOf(id), fixtureSlotLayout(FIXTURE_TEMPLATE, slot, CORNER_FILLS), [0, 0], rotation).box
+
+    expect(boxOf(FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2, 0)).toEqual({ x: 0, z: 0, w: 2, d: 0.5 })
+    expect(boxOf(FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2, 90)).toEqual({ x: 1.5, z: 0, w: 0.5, d: 2 })
+    expect(boxOf(FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2, 0)).toEqual({ x: 1.5, z: 0, w: 0.5, d: 2 })
+    expect(boxOf(FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2, 90)).toEqual({ x: 0, z: 1.5, w: 2, d: 0.5 })
+    expect(boxOf(FIXTURE_SLOTS.column, FIXTURE_IDS.column, 0)).toEqual({ x: 1.5, z: 1.5, w: 0.5, d: 0.5 })
+    expect(boxOf(FIXTURE_SLOTS.column, FIXTURE_IDS.column, 90)).toEqual({ x: 0, z: 1.5, w: 0.5, d: 0.5 })
+    expect(boxOf(FIXTURE_SLOTS.column, FIXTURE_IDS.column, 180)).toEqual({ x: 0, z: 0, w: 0.5, d: 0.5 })
+    expect(boxOf(FIXTURE_SLOTS.column, FIXTURE_IDS.column, 270)).toEqual({ x: 1.5, z: 0, w: 0.5, d: 0.5 })
+  })
+
+  it('stays on the 0.5 lattice exactly, with no trigonometric residue', () => {
+    // The re-anchoring is a subtraction, so it is the step that could reintroduce
+    // the 6.1e-17 the quarter-turn branches exist to avoid. Every coordinate of
+    // every part must still be an exact multiple of 0.25.
+    for (const rotation of QUARTERS) {
+      for (const [slot, id] of CORNER) {
+        const layout = fixtureSlotLayout(FIXTURE_TEMPLATE, slot, CORNER_FILLS)
+        const { box } = slotGeometry(shapeOf(id), layout, [0, 0], rotation)
+        for (const value of [box.x, box.z, box.w, box.d]) {
+          expect(Number.isInteger(value * 4), `${slot} at ${String(rotation)}: ${String(value)}`).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('is not rigid without a declared cell, which is why the field exists', () => {
+    // Row A4b's measurement, reproduced: strip the cell and the offsets orbit
+    // as bare points again, so the half-turn covers 12.25 units² — three times
+    // the 4.00 the unturned corner covers. A `dx`/`dz` of zero is unaffected,
+    // which is why nothing written before A4b could see it.
+    const areas = QUARTERS.map((rotation) => {
+      const box = cornerBox(rotation, { cell: undefined })
+      return box.w * box.d
+    })
+    expect(areas).toEqual([4, 7, 12.25, 7])
+  })
+
+  it('is rigid without a cell when every part is at the origin, which is the fallback', () => {
+    // `ORIGIN_LAYOUT` was production's only layout until row C6 wired B2's rule,
+    // and it is still the answer for a template with no convention — B4's 51
+    // one-slot families. It needs no cell: N boxes sharing one corner union to
+    // (max w) x (max d), and a quarter turn preserves that product.
+    const areas = QUARTERS.map((rotation) => {
+      const boxes = CORNER.map(([, id]) => slotGeometry(shapeOf(id), ORIGIN_LAYOUT, [0, 0], rotation).box)
+      const union = unionBox(boxes)
+      if (union === undefined) throw new Error('the corner must have a box')
+      return union.w * union.d
+    })
+    expect(areas).toEqual([4, 4, 4, 4])
+  })
+
+  it('turns a part rigidly off the quarters too, where only the bounding box grows', () => {
+    // The centre branch is the same rule, and the polygons prove it: the four
+    // corners of the right wall at 45° are the corners of its unturned box,
+    // rotated about the instance origin. The *box* is 41% larger, which is a
+    // property of an axis-aligned box around a turned rectangle and not of this
+    // composition.
+    const layout = fixtureSlotLayout(FIXTURE_TEMPLATE, FIXTURE_SLOTS.column, CORNER_FILLS)
+    const flat = slotGeometry(shapeOf(FIXTURE_IDS.column), layout, [0, 0], 0)
+    const turned = slotGeometry(shapeOf(FIXTURE_IDS.column), layout, [0, 0], 45)
+    const centre = boxCentre(flat.box)
+    // The cell's own centre is (1, 1); the column's centre orbits about the
+    // instance origin and is re-anchored by the cell's own turned corner.
+    const cellCorner = [-Math.SQRT2, 0] as const
+    const radians = Math.PI / 4
+    const expected = {
+      x: centre.x * Math.cos(radians) - centre.z * Math.sin(radians) - cellCorner[0],
+      z: centre.x * Math.sin(radians) + centre.z * Math.cos(radians) - cellCorner[1],
+    }
+    expect(boxCentre(turned.box).x).toBeCloseTo(expected.x, 12)
+    expect(boxCentre(turned.box).z).toBeCloseTo(expected.z, 12)
+  })
+})

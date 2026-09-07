@@ -57,6 +57,21 @@
     "src/assembly/footprint.ts",
     "src/assembly/assemblyIndex.ts",
     "src/share/manifest.ts",
+    // Row B2's, and the same shape as the three above: `pipeline/templates.ts`
+    // gates every fixture's part-name set against the three slot conventions, so
+    // a twenty-first fixture file fails `npm run import:catalog` naming the
+    // template rather than reaching the browser with no slot geometry. The
+    // alternative is a second copy of the three part-name sets in `pipeline/`.
+    //
+    // Named as a single file for the reason `src/three/stl/parse.ts` is:
+    // `src/template/offsets.ts` needs `@/builder/canvas`, which needs DOM lib.
+    // `rules.ts` is deliberately import-free, so this entry pulls in nothing.
+    "src/template/rules.ts",
+    // Row B3's, and the same entry for the same reason: `pipeline/size.ts`
+    // resolves the grid cell a slot predicates on, and the predicate's spelling
+    // has one home. `size.ts` imports only `./rules`, so the pair still pulls in
+    // nothing.
+    "src/template/size.ts",
     // Named as a single file, not as the directory: `src/three/stl/` also holds
     // the Worker client, which needs DOM lib this project does not have. The
     // measurement and LOD tools both parse STL, and a second copy of the parser

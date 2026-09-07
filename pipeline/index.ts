@@ -10,12 +10,49 @@
  * JSON loader deliberately skips and emits the 40 recipe templates as a
  * generated module; they are not records, carry no `file_metadata` and are not
  * in `catalog.json` — `./templates` carries the measurement behind that.
+ *
+ * Row B1 added `./role`, which is the first derivation here whose output is a
+ * **tag** rather than a field: the `role|<x>` and `form|<x>` axes a template
+ * slot predicates on, interned alongside everything the scan produced. It is
+ * exported because `pipeline/families.ts` will generate the family table from
+ * the same two enums, and a second copy of a closed enum is how the two halves
+ * of a key silently stop agreeing.
+ *
+ * Row B3 added `./size`, which is the third axis of that key's *complement*: the
+ * grid cell a slot predicates on, resolved per record and **emitted nowhere**.
+ * Keyed on `(role, form, build)` the corpus needs 52 families; with size in the
+ * key it needs 217 to 277, which is the whole reason size is a slot parameter.
+ * `src/template/size.ts` carries the predicate and the encoding decision.
+ *
+ * Row B4 added `./families`, which is what those three were for: 51 one-slot
+ * families generated from the key, with the size domain as a control on the
+ * placed instance. They ride into the browser through the *same* generated
+ * module as the 40 — `./templates` merges the two sources and emits one file —
+ * so the index still gains 0 B and the tag table is still 930 strings.
+ *
+ * Row E3 added `./authored`, the third source `./templates` merges: the two
+ * assemblies this repo authors, each declared as the **difference from a named
+ * shipped fixture slot** and checked against it at import time, so a fixture
+ * refresh that moves one of those slots fails the build naming the ref rather
+ * than leaving a stale copy. The fixtures themselves are never rewritten and
+ * still round-trip byte for byte.
  */
 export { MIN_DETECTION_RECALL, assertAggregation, measureAggregation } from './aggregate'
 export type { AggregateViolation, AggregationReport, DetectionScore } from './aggregate'
 export { buildCatalog } from './build'
 export type { BuildOptions, BuildResult, BuildStats } from './build'
 export { buildDesignIndex, designId, designKey } from './design'
+export {
+  ANY_SIZE,
+  BARE_BASE_KEY,
+  BUILD_TAGS,
+  FAMILY_TABLE_BYTES,
+  SKIPPED_ROLES,
+  deriveFamilies,
+  familyLayout,
+  familySlug,
+} from './families'
+export type { FamilySizePosition, GeneratedFamily } from './families'
 export {
   assertWithinBudget,
   compressCatalog,
@@ -75,8 +112,20 @@ export {
   writeManifest,
 } from './ordinals'
 export type { OrdinalAssignment } from './ordinals'
-export { buildTagTable, hasTagPrefix, namespaceRoots, numericTagValue, tagValue } from './tags'
+export { FORMS, ROLES, fileTokens, inferForm, inferRole, roleTags } from './role'
+export type { Confidence, Form, Inferred, Role, RoleInput, Signal } from './role'
+export { cellExtentUnits, resolveGridSize, sizeRefusalOf } from './size'
+export type { SizeRefusal } from './size'
 export {
+  buildTagTable,
+  hasTagPrefix,
+  hasTagSegment,
+  namespaceRoots,
+  numericTagValue,
+  tagValue,
+} from './tags'
+export {
+  AUTHORED_MARKER,
   TEMPLATES_MODULE_PATH,
   loadTemplateFixtures,
   printFixture,
@@ -86,6 +135,8 @@ export {
   templateSlug,
 } from './templates'
 export type { TemplateFixture } from './templates'
+export { AUTHORED_RECIPES, AUTHORED_SOURCE_PREFIX, deriveAuthored, isAuthoredSource } from './authored'
+export type { AuthoredRecipe, SlotDerivation } from './authored'
 export {
   THUMB_INVENTORY_PATH,
   THUMB_INVENTORY_VERSION,

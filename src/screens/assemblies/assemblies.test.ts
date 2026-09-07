@@ -396,25 +396,44 @@ describe('resolvePart', () => {
 })
 
 describe('the shipped templates', () => {
-  it('are 40, over 20 fixture files, with 128 parts', () => {
-    expect(RECIPE_TEMPLATES).toHaveLength(40)
-    expect(new Set(RECIPE_TEMPLATES.map((template) => template.source)).size).toBe(20)
-    expect(RECIPE_TEMPLATES.reduce((total, template) => total + template.parts.length, 0)).toBe(128)
+  /**
+   * The 40 read from the fixtures, without row **E3**'s two authored in this
+   * repo. Split on `source`, whose `authored:` prefix is
+   * `pipeline/authored.ts#AUTHORED_SOURCE_PREFIX`.
+   */
+  const FIXTURES = RECIPE_TEMPLATES.filter((template) => !template.source.startsWith('authored:'))
+
+  it('are 40 from the fixtures, over 20 files with 128 parts, plus row E3’s 2', () => {
+    expect(FIXTURES).toHaveLength(40)
+    expect(new Set(FIXTURES.map((template) => template.source)).size).toBe(20)
+    expect(FIXTURES.reduce((total, template) => total + template.parts.length, 0)).toBe(128)
+
+    /* And the whole shipped array, which is what the palette and this screen
+       list: 42 over 21 distinct `source` values — the 20 fixtures plus one
+       `authored:` value both of E3's rows carry, because both derive from
+       `blueprints.s2w.wall.yaml`. */
+    expect(RECIPE_TEMPLATES).toHaveLength(42)
+    expect(new Set(RECIPE_TEMPLATES.map((template) => template.source)).size).toBe(21)
+    expect(RECIPE_TEMPLATES.reduce((total, template) => total + template.parts.length, 0)).toBe(135)
   })
 
   it('carry unique names and unique slugs', () => {
-    expect(new Set(RECIPE_TEMPLATES.map((template) => template.name)).size).toBe(40)
-    expect(new Set(RECIPE_TEMPLATES.map((template) => template.id)).size).toBe(40)
+    expect(new Set(RECIPE_TEMPLATES.map((template) => template.name)).size).toBe(42)
+    expect(new Set(RECIPE_TEMPLATES.map((template) => template.id)).size).toBe(42)
   })
 
-  it('split 20 and 20 between the two build kinds, which is what the screen groups on', () => {
+  it('split 20 and 22 between the two build kinds, which is what the screen groups on', () => {
     const single = RECIPE_TEMPLATES.filter((template) =>
       template.tags.includes('build|s2w|single_piece'),
     )
     const modular = RECIPE_TEMPLATES.filter((template) => template.tags.includes('build|s2w|modular'))
 
     expect(single).toHaveLength(20)
-    expect(modular).toHaveLength(20)
+    /* 22 since row **E3**: both authored rows carry `build|s2w|modular`, one by
+       inheriting the fixture's tag list outright and one by naming it. The sum
+       is what matters — a row in neither group is a row this screen does not
+       show at all. */
+    expect(modular).toHaveLength(22)
     expect(single.length + modular.length).toBe(RECIPE_TEMPLATES.length)
   })
 
@@ -424,7 +443,13 @@ describe('the shipped templates', () => {
       .flatMap((part) => part.tags.constrain ?? [])
       .filter((entry) => 'tag' in entry && entry.siblings !== undefined)
 
-    expect(siblings).toHaveLength(30)
+    /* 34: the fixtures' 30 plus row **E3**'s 4 — the corridor's two walls each
+       constrain `connection|side` on the other, and its base collects
+       `connection` from both, where the shipped modular base collects from one
+       `wall`. The `fulfills` census is unmoved at 20, because an authored slot
+       deliberately does not carry it: `fulfills` is scoped to a part's own
+       *nested* slots and this module measured it a no-op against `SlotFills`. */
+    expect(siblings).toHaveLength(34)
     expect(parts.flatMap((part) => part.fulfills)).toEqual(Array.from({ length: 20 }, () => 'base'))
   })
 

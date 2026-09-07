@@ -8,18 +8,13 @@
  * Row A4 added `./tileAddress`: what the `?tile=` param addresses now that the
  * catalog lists items rather than files, and the only place a number for a URL is
  * taken off an aggregate.
+ *
+ * Row A0 removed `libraryRoute`. `routeTree.tsx` carries why the route is gone
+ * and where its one non-library surface went.
  */
 export { createWorkshopRouter } from './router'
 export type { WorkshopRouter, WorkshopRouterOptions } from './router'
-export {
-  assembliesRoute,
-  builderRoute,
-  catalogRoute,
-  landingRoute,
-  libraryRoute,
-  rootRoute,
-  routeTree,
-} from './routeTree'
+export { assembliesRoute, builderRoute, catalogRoute, landingRoute, rootRoute, routeTree } from './routeTree'
 export type { TileSubject, TileTarget } from './tileAddress'
 export { resolveTileTarget, tileOrdinal } from './tileAddress'
 export { closeTileDrawer, openTileDrawer, showTileInDrawer } from './tileDrawer'

@@ -61,6 +61,43 @@
  * between renders. That is a different situation, not a better answer to this
  * one.
  *
+ * ## Row D7: one stroke is back, and it is a *selection* device, not a contour
+ *
+ * The section above states a visual direction — in 3D there is no stroke, so the
+ * AO pass is the contour — and an outline pass is a change to that direction
+ * rather than an implementation detail. So the reconciliation is written down
+ * rather than assumed. The two do not answer the same question:
+ *
+ * - **N8AO is a permanent, family-neutral separation.** Every tile has to come
+ *   off the parchment ground and off its neighbours, all sixteen families at
+ *   once, in every frame. Hence one pass with one colour uniform, and the note
+ *   above is why one colour is all a screen-space pass can have.
+ * - **A hover cue is a transient, single-subject identity** — *which one of these
+ *   will the click act on*. One object, in a named colour, gone the moment the
+ *   pointer leaves.
+ *
+ * The rule underneath both is `architecture-plan.md` §9's, and it is worth
+ * quoting because it is the *binding* text where the paragraph above is this
+ * file's gloss on it: **"silhouette is carried by a contour, not the fill"**.
+ * A contour is exactly what the outline pass draws. What §9 forbids is a cue
+ * that leans on the fill — which is what an `instanceColor` highlight would have
+ * been, and `outline.ts` carries that argument with D3's numbers.
+ *
+ * An occlusion pass is structurally unable to be the second thing: its colour is
+ * per frame, so it cannot say *"this one"*. And the choice was in fact taken
+ * before this row — row D3 shipped the cue as `lineSegments` at full accent for
+ * erase, so a stroke was already on the drawing. What D7 changes is not whether
+ * there is a stroke but **what shape it traces**: D3 traced the tagged footprint
+ * lifted to the part's top height, which on a wall is a horizontal rectangle
+ * hovering over the mesh. This traces the silhouette of the geometry that is
+ * actually on screen.
+ *
+ * It is **opt-in per canvas** ({@link StageProps.outline}) and the tile viewer
+ * does not opt in, so the stack behind the drawer's "View in 3D" and behind every
+ * card in `SharedStage.tsx` is unchanged — the same three passes over the same
+ * render targets. The stated direction still holds everywhere it was stated
+ * about.
+ *
  * ## One subject here, many in `SharedStage.tsx`
  *
  * This component renders its own `<Canvas>`, so N of it is N live WebGL
@@ -83,9 +120,10 @@
 import { OrbitControls } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { N8AOPostPass } from 'n8ao'
-import { EffectComposer, EffectPass, RenderPass, SMAAEffect } from 'postprocessing'
+import { BlendFunction, EffectComposer, EffectPass, OutlineEffect, RenderPass, SMAAEffect } from 'postprocessing'
 import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef } from 'react'
+import type { Camera, Object3D, Scene } from 'three'
 import { Color, HalfFloatType, Vector2 } from 'three'
 
 import {
@@ -99,6 +137,8 @@ import {
   ORBIT_ROTATE_SPEED,
   VIEW_RADIUS,
 } from './frame'
+import type { OutlineRequest } from './outline'
+import { OUTLINE_EDGE_STRENGTH, OUTLINE_LAYER, OUTLINE_RESOLUTION_SCALE, outlineProxies } from './outline'
 
 /**
  * Occlusion radius, in world units, against `VIEW_RADIUS = 1`.
@@ -175,6 +215,28 @@ export interface StageProps {
    * default keeps the detail viewer exactly as it was.
    */
   enablePan?: boolean
+  /**
+   * The silhouette cue — row **D7**, and the one prop that changes the pass stack.
+   *
+   * **Presence opts this canvas into the outline pass; absence leaves the stack
+   * exactly as it was.** That is a distinction between `undefined` and
+   * {@link NO_OUTLINE} rather than a redundancy, and it is load-bearing in both
+   * directions:
+   *
+   * - The tile viewer and every card in `SharedStage.tsx` pass nothing, so no
+   *   `OutlineEffect` is constructed, no mask or edge render target is allocated
+   *   and no fourth pass runs. Their frames are byte-identical to before D7.
+   * - The builder passes a request on **every** render, empty when nothing is
+   *   hovered. If it passed `undefined` instead, the composer's identity would
+   *   change on every hover and a two-pass AO chain would be torn down and
+   *   rebuilt — four render targets and three programs — twice per pointer
+   *   crossing. An empty request disables the pass instead, which costs nothing
+   *   and keeps the composer.
+   *
+   * A canvas that opts in and then stops (or the reverse) rebuilds the composer,
+   * deliberately: it is a change to the pass stack and not to a uniform.
+   */
+  outline?: OutlineRequest
   className?: string
   /** Accessible label for the canvas element. */
   label: string
@@ -185,6 +247,7 @@ export function Stage({
   occlusion,
   aoRadius = AO_RADIUS,
   enablePan = false,
+  outline,
   className,
   label,
 }: StageProps) {
@@ -211,7 +274,11 @@ export function Stage({
         minDistance={ORBIT_MIN_DISTANCE}
         maxDistance={ORBIT_MAX_DISTANCE}
       />
-      <PostStack aoRadius={aoRadius} {...(occlusion === undefined ? {} : { occlusion })} />
+      <PostStack
+        aoRadius={aoRadius}
+        {...(occlusion === undefined ? {} : { occlusion })}
+        {...(outline === undefined ? {} : { outline })}
+      />
     </Canvas>
   )
 }
@@ -244,7 +311,7 @@ export function StageLights() {
 }
 
 /**
- * What {@link useStageComposer} hands back: the composer, and the two knobs.
+ * What {@link useStageComposer} hands back: the composer, and the three knobs.
  */
 export interface StageComposer {
   readonly composer: EffectComposer
@@ -262,6 +329,34 @@ export interface StageComposer {
    * with the same colour allocates nothing at all.
    */
   readonly configure: (occlusion: string | undefined, aoRadius: number) => void
+  /**
+   * Outline exactly these objects, in this colour — or `null` when this stack
+   * was built without an outline pass.
+   *
+   * `null` rather than a no-op function, so a caller that asks a stack it did
+   * not opt in to for a silhouette fails to compile rather than silently drawing
+   * nothing. An empty list disables the pass; see {@link StageProps.outline}.
+   *
+   * The objects must be in the scene and must be the caller's to keep alive: the
+   * pass reads them on the frames between this call and the next one. It also
+   * writes to their `layers` — `postprocessing`'s `Selection` is a render layer
+   * — which is why the objects handed over are proxies built for the purpose
+   * (`outline.ts`) rather than the room's own instanced meshes.
+   */
+  readonly outline: ((objects: readonly Object3D[], colour: string) => void) | null
+}
+
+/** What {@link useStageComposer} takes. One flag, and it changes the pass list. */
+export interface StageComposerOptions {
+  /**
+   * Build the outline pass. Default `false`.
+   *
+   * A boolean and not the request itself, because it is keyed into the memo that
+   * builds the composer: a value that changed per hover would rebuild the whole
+   * chain. `Stage` derives it from the *presence* of
+   * {@link StageProps.outline} for exactly that reason.
+   */
+  readonly outline?: boolean
 }
 
 /**
@@ -276,21 +371,36 @@ export interface StageComposer {
  * hook: {@link Stage} renders the scene once per invalidation, and
  * `SharedStage.tsx` renders it once per subject per frame. Both get the same
  * passes, the same quality mode and the same target format.
+ *
+ * ## With {@link StageComposerOptions.outline}, a fourth pass — row D7
+ *
+ * `RenderPass → N8AO → **outline** → SMAA`, and both halves of that position
+ * are chosen. It is **after N8AO** because the outline is a cue and not a
+ * surface: an occlusion pass multiplying into it would darken it wherever the
+ * silhouette runs through a crease, which is precisely the boundary the cue is
+ * drawn on. It is **before SMAA** so the edge is antialiased with everything
+ * else rather than left as the one aliased thing in the frame.
+ *
+ * A separate `EffectPass` rather than a second effect merged into the SMAA pass,
+ * and that is not a taste: `SMAAEffect` declares `EffectAttribute.CONVOLUTION`,
+ * and `postprocessing` refuses to merge a convolution effect with any other. So
+ * the outline costs one more fullscreen quad, and only while something is
+ * outlined — the pass is disabled by {@link StageComposer.outline} when the
+ * selection is empty, which is a `continue` in the composer's loop.
  */
-export function useStageComposer(): StageComposer {
+export function useStageComposer({ outline = false }: StageComposerOptions = {}): StageComposer {
   const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
   const camera = useThree((state) => state.camera)
   const size = useThree((state) => state.size)
   const invalidate = useThree((state) => state.invalidate)
 
-  const ao = useRef<N8AOPostPass | null>(null)
   const colours = useRef(new Map<string, Color>())
 
   // Deliberately not keyed on `size`: the composer is resized below, and
   // rebuilding a two-pass AO chain on every drag of a drawer edge would
   // reallocate four render targets and recompile three programs.
-  const composer = useMemo(() => {
+  const stack = useMemo<StageStack>(() => {
     // HalfFloat targets: the AO pass multiplies into the beauty buffer, and an
     // 8-bit intermediate bands visibly in the shallow gradients that are most of
     // a stone tile's surface.
@@ -298,54 +408,170 @@ export function useStageComposer(): StageComposer {
     created.addPass(new RenderPass(scene, camera))
 
     const initial = gl.getSize(new Vector2())
-    const pass = new N8AOPostPass(scene, camera, initial.width, initial.height)
-    pass.setQualityMode('Medium')
-    pass.configuration.screenSpaceRadius = false
-    pass.configuration.halfRes = false
-    pass.configuration.distanceFalloff = 0.65
-    pass.configuration.intensity = 2.6
-    created.addPass(pass)
-    ao.current = pass
+    const ao = new N8AOPostPass(scene, camera, initial.width, initial.height)
+    ao.setQualityMode('Medium')
+    ao.configuration.screenSpaceRadius = false
+    ao.configuration.halfRes = false
+    ao.configuration.distanceFalloff = 0.65
+    ao.configuration.intensity = 2.6
+    created.addPass(ao)
+
+    const silhouette = outline ? addOutlinePass(created, scene, camera) : null
 
     created.addPass(new EffectPass(camera, new SMAAEffect()))
-    return created
-  }, [gl, scene, camera])
+    return { composer: created, ao, silhouette }
+  }, [gl, scene, camera, outline])
 
   useEffect(() => {
-    composer.setSize(size.width, size.height)
+    stack.composer.setSize(size.width, size.height)
     invalidate()
-  }, [composer, invalidate, size.width, size.height])
+  }, [stack, invalidate, size.width, size.height])
 
   // The composer owns render targets and compiled programs for every pass; r3f
   // knows nothing about it, so it is disposed explicitly. See index.ts's note on
   // what disposal does and does not cover.
   useEffect(
     () => () => {
-      composer.dispose()
-      ao.current = null
+      stack.composer.dispose()
       colours.current.clear()
     },
-    [composer],
+    [stack],
   )
 
-  return useMemo(
-    () => ({
-      composer,
+  return useMemo(() => {
+    /** One `Color` per hex, for the life of the canvas. Both uniforms share it. */
+    const linear = (style: string): Color => {
+      let colour = colours.current.get(style)
+      if (colour === undefined) {
+        colour = new Color().setStyle(style, 'srgb')
+        colours.current.set(style, colour)
+      }
+      return colour
+    }
+    const silhouette = stack.silhouette
+
+    return {
+      composer: stack.composer,
       configure: (occlusion: string | undefined, aoRadius: number) => {
-        const pass = ao.current
-        if (pass === null) return
-        const style = occlusion ?? '#000000'
-        let colour = colours.current.get(style)
-        if (colour === undefined) {
-          colour = new Color().setStyle(style, 'srgb')
-          colours.current.set(style, colour)
-        }
-        pass.configuration.aoRadius = aoRadius
-        pass.configuration.color = colour
+        stack.ao.configuration.aoRadius = aoRadius
+        stack.ao.configuration.color = linear(occlusion ?? '#000000')
       },
-    }),
-    [composer],
-  )
+      outline:
+        silhouette === null
+          ? null
+          : (objects: readonly Object3D[], colour: string) => {
+              silhouette.effect.selection.set(objects)
+              // Both edges the same colour, and that is a *correctness* choice
+              // rather than a simplification — see `addOutlinePass`.
+              const value = linear(colour)
+              silhouette.effect.visibleEdgeColor = value
+              silhouette.effect.hiddenEdgeColor = value
+              // Nothing selected is not a cue drawn in nothing: it is a pass that
+              // does not run. The composer skips a disabled pass entirely, so a
+              // canvas with nothing hovered pays no fullscreen quad and no
+              // occluder depth render.
+              silhouette.pass.enabled = objects.length > 0
+            },
+    }
+  }, [stack])
+}
+
+/**
+ * The composer and the two passes whose knobs are turned later.
+ *
+ * **One memo value rather than a composer plus two refs, and it is a bug fix
+ * rather than tidying.** `StrictMode` double-invokes a `useMemo` factory in
+ * development, so a factory that *both* returns the composer and writes its
+ * passes into refs runs twice and leaves the refs pointing at the **second**
+ * composer while React keeps the **first** — the one that renders. Every knob
+ * then turns on a pass that is not in the rendered chain, silently.
+ *
+ * Row D7 hit it head-on (the outline pass was enabled on the discarded composer,
+ * so the hover cue rendered nothing at all, with no error anywhere) and then
+ * measured that it had **already been true of the AO pass** since the pass stack
+ * was written. In the builder, in a dev browser: `configure` had written the
+ * dominant family's edge `#3e3d39` and the calibrated radius 0.0214, while the
+ * N8AO pass actually rendering still held n8ao's defaults — **`#000000` and
+ * radius 5**. So the section above about the occlusion colour being the family's
+ * own measured `edge` was not true of any development frame, and every visual
+ * judgement made in `npm run dev` was made against untuned AO. Production has no
+ * double-invoke, so the shipped build was correct; nothing was wrong with the
+ * *values*, only with which object received them.
+ *
+ * Returning the passes makes the mismatch unrepresentable: whichever composer
+ * React keeps, its passes come with it.
+ *
+ * What this does **not** fix is that the discarded composer is never disposed —
+ * one composer with four render targets and three programs is leaked per canvas
+ * mount, in development only. The real fix for that is to create the composer in
+ * an effect rather than a memo, which makes `composer` nullable for a frame and
+ * changes this hook's contract for `SharedStage.tsx` as well; it is a bigger
+ * change than this row should make to a shared file, and it is written down here
+ * rather than left to be rediscovered.
+ */
+interface StageStack {
+  readonly composer: EffectComposer
+  readonly ao: N8AOPostPass
+  /** `null` unless {@link StageComposerOptions.outline} asked for the pass. */
+  readonly silhouette: OutlinePass | null
+}
+
+/** The outline pass and the effect inside it — see {@link addOutlinePass}. */
+interface OutlinePass {
+  readonly pass: EffectPass
+  readonly effect: OutlineEffect
+}
+
+/**
+ * Add the silhouette pass, tuned for a light ground and a duplicated subject.
+ *
+ * Four settings, and each one is a decision this row had to take:
+ *
+ * - **`BlendFunction.ALPHA`, not the default `SCREEN`.** Screen blending
+ *   brightens, and on the parchment ground it turns any mid-tone outline into
+ *   near-white — it is the right default for a dark scene and the wrong one
+ *   here. `ALPHA` composites the colour the design chose, which is what makes
+ *   D3's contrast table still describe the cue: 2.39:1 for the hover glow
+ *   against `--bg` and 4.19:1 for the accent the erase gesture uses.
+ *
+ *   Its one cost, recorded so nobody chases it: `ALPHA` is
+ *   `mix(dst, src, src.a)` over the **whole** `vec4`, so it mixes alpha as well
+ *   as colour. Against this canvas's transparent buffer that squares the edge's
+ *   alpha (`a² ` where `dst.a` is 0) and against an opaque tile it dips the
+ *   frame's alpha to `1 - a + a²` in the shoulder of the band, letting a few
+ *   percent of the parchment well through an edge pixel. Both are why
+ *   {@link OUTLINE_EDGE_STRENGTH} puts the *peak* at exactly 1.0: at the peak
+ *   neither happens, and the falloff either side is an antialiased edge either
+ *   way.
+ * - **`xRay: true`, with the hidden edge the same colour as the visible one.**
+ *   Two reasons, both load-bearing. The pick is plan containment
+ *   (`pieceAt`) and not a mesh raycast, so the piece the click will act on can
+ *   legitimately be *behind* another piece; with hidden edges off, that piece
+ *   would get no cue at all, which is D3's defect in a new costume. And the
+ *   visible/hidden test compares the proxy's depth against a room that still
+ *   contains the tile the proxy duplicates — equal depths to within float noise
+ *   — so the classification of a silhouette's own pixels is noise. One colour
+ *   makes that noise invisible instead of a speckled two-tone edge.
+ * - **`blur: false`.** {@link OUTLINE_RESOLUTION_SCALE} already softens the edge
+ *   to about two pixels; a Kawase blur on top is two more half-resolution passes
+ *   to spread a cue that is meant to be *"slightly"* there.
+ */
+function addOutlinePass(composer: EffectComposer, scene: Scene, camera: Camera): OutlinePass {
+  const effect = new OutlineEffect(scene, camera, {
+    blendFunction: BlendFunction.ALPHA,
+    edgeStrength: OUTLINE_EDGE_STRENGTH,
+    resolutionScale: OUTLINE_RESOLUTION_SCALE,
+    xRay: true,
+    blur: false,
+  })
+  // See `OUTLINE_LAYER`: the default is a module-global counter, so this is what
+  // keeps the mask on the same layer on the thirty-first mount as on the first.
+  effect.selection.layer = OUTLINE_LAYER
+  const pass = new EffectPass(camera, effect)
+  // Nothing is hovered at mount. The pass is enabled by the first request.
+  pass.enabled = false
+  composer.addPass(pass)
+  return { pass, effect }
 }
 
 /**
@@ -356,9 +582,20 @@ export function useStageComposer(): StageComposer {
  * `gl.render` itself, which would draw the un-occluded beauty pass over the
  * composed frame every frame — a bug that looks like "the AO does nothing".
  */
-function PostStack({ aoRadius, occlusion }: { aoRadius: number; occlusion?: string }) {
+function PostStack({
+  aoRadius,
+  occlusion,
+  outline,
+}: {
+  aoRadius: number
+  occlusion?: string
+  outline?: OutlineRequest
+}) {
   const invalidate = useThree((state) => state.invalidate)
-  const stage = useStageComposer()
+  // Presence, not identity: see `StageProps.outline`. `outline !== undefined` is
+  // constant for the life of a canvas in both callers, so the composer is built
+  // once whatever the pointer does.
+  const stage = useStageComposer({ outline: outline !== undefined })
 
   useEffect(() => {
     stage.configure(occlusion, aoRadius)
@@ -368,6 +605,50 @@ function PostStack({ aoRadius, occlusion }: { aoRadius: number; occlusion?: stri
   useFrame((_, delta) => {
     stage.composer.render(delta)
   }, 1)
+
+  if (outline === undefined || stage.outline === null) return null
+  return <OutlineSubjects request={outline} select={stage.outline} />
+}
+
+/**
+ * The proxy meshes the silhouette pass selects, mounted and unmounted with the
+ * request.
+ *
+ * Imperative rather than JSX, and the reason is that r3f's tree buys nothing
+ * here: these objects take no pointer events, cast no shadow, draw no pixel and
+ * live exactly as long as one hover. What the pass needs is the `Object3D`s
+ * themselves, which through JSX would mean collecting N refs and re-rendering
+ * for each — for a mesh whose whole purpose is to be listed in a `Selection`.
+ *
+ * `outline.ts` owns what a proxy *is*; this owns when it exists. The geometries
+ * belong to the caller (`useLodStore`'s objects, or the surface's own plate
+ * geometry), so nothing here disposes one — and the shared mask material is a
+ * module constant, so there is nothing else to release either. Removal from the
+ * scene is the whole cleanup.
+ */
+function OutlineSubjects({
+  request,
+  select,
+}: {
+  request: OutlineRequest
+  select: (objects: readonly Object3D[], colour: string) => void
+}) {
+  const scene = useThree((state) => state.scene)
+  const invalidate = useThree((state) => state.invalidate)
+
+  useEffect(() => {
+    const proxies = outlineProxies(request.subjects)
+    for (const proxy of proxies) scene.add(proxy)
+    select(proxies, request.colour)
+    // `frameloop="demand"`: a cue nobody asked a frame for does not appear, and
+    // one nobody asked a frame to remove does not go away.
+    invalidate()
+    return () => {
+      select([], request.colour)
+      for (const proxy of proxies) scene.remove(proxy)
+      invalidate()
+    }
+  }, [request, select, scene, invalidate])
 
   return null
 }

@@ -154,14 +154,22 @@ describe('there is one class name for a button', () => {
     expect(offenders).toEqual([])
   })
 
-  it('spells every button through Button or buttonProps at the seven call sites', () => {
-    // The two screens that had grown their own copy of the block. Counted, so a
-    // regression is a number a reviewer can see: two on the landing hero, and
-    // five across the library screen and its backup block.
+  it('spells every button through Button or buttonProps at the four call sites', () => {
+    // The two files that had grown their own copy of the block. Counted, so a
+    // regression is a number a reviewer can see: two on the landing hero, and two
+    // in the backup block.
+    //
+    // **It was seven across three files until row A0.** The library screen's own
+    // three — two `Link`s and a real `<button>` — went with the screen; its
+    // backup block is the file below, relocated to `@/builder/panels` because it
+    // is the app's only export/import of the workshop and §13 makes that
+    // load-bearing. The property this test holds in place is unchanged, and so is
+    // the reason it counts rather than greps: `.of-lib-action` was a 45-line
+    // duplicate of `.of-action`, and the way that comes back is one call site at
+    // a time.
     const read = (path: string) => withoutComments(readFileSync(resolve(REPO_ROOT, path), 'utf8'))
     const landing = read('src/screens/landing/Landing.tsx')
-    const screenFile = read('src/screens/library/LibraryScreen.tsx')
-    const transfer = read('src/screens/library/LibraryTransfer.tsx')
+    const backup = read('src/builder/panels/BackupPanel.tsx')
 
     const uses = (source: string) =>
       (source.match(/buttonProps\(\{/g) ?? []).length + (source.match(/<Button[\s/>]/g) ?? []).length
@@ -171,9 +179,7 @@ describe('there is one class name for a button', () => {
     expect(uses(landing)).toBe(2)
     expect(landing.match(/size: 'lg'/g) ?? []).toHaveLength(2)
 
-    // Two `Link`s and one real `<button>`.
-    expect(uses(screenFile)).toBe(3)
     // One real `<button>` and one `<label>` wrapping a clipped file input.
-    expect(uses(transfer)).toBe(2)
+    expect(uses(backup)).toBe(2)
   })
 })

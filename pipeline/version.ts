@@ -62,8 +62,48 @@ import type { CatalogAssets, CatalogFile } from '../src/catalog'
  * anything the pipeline derives. Changing a base URL therefore has to be
  * re-locked deliberately, and is attributed as configuration rather than
  * silently demanding a version bump.
+ *
+ * ## Row B1 is the first row that had to bump it, and it is the easy direction
+ *
+ * Three rows in a row declined the bump and argued it in prose; this one takes
+ * it in one line, because the biconditional above answers it without a
+ * judgement call. `pipeline/role.ts` adds a **derivation**, not a check: the
+ * emitted `tags` table goes 915 → 930 strings and every record's `tags` array
+ * gains two ids, so the locked digest moves. Under rule one, a digest that
+ * moves with the versions standing still is *a derivation that changed and
+ * nothing announced it* — so the version moves with it.
+ *
+ * `SCHEMA_VERSION` stays 4, and that is the interesting half. Role and form are
+ * emitted as **ordinary interned tags**, so no field was added, no field's type
+ * changed, and `CatalogRecord` is byte-for-byte the same shape it was — a
+ * consumer that has never heard of `role|wall` reads this index exactly as it
+ * read the last one. The record *shape* is `SCHEMA_VERSION`'s subject and the
+ * record *content* is this one's, and this row is the cleanest example of the
+ * split the two numbers exist to express.
+ *
+ * ## Row D9 is the second bump, and it is the case this docblock names first
+ *
+ * *"Bump it when a field's meaning changes without the schema changing: a
+ * different footprint tie-break…"* — and this is a different footprint
+ * derivation. `resolveFootprint` gives a corner wall tagged `size|width|2` a
+ * run of **1.5** rather than 2, on **245 records**, because row D9 fetched 157
+ * corner-wall meshes from R2 and measured them: the tag names the cell and the
+ * piece is the cell face less the 0.5 column. `pipeline/footprint.ts#cornerWallRun`
+ * is the rule and `docs/templates-plan.md` §9 is the measurement.
+ *
+ * The biconditional decides it with no judgement call, exactly as B1's line
+ * says it should: the emitted `{tags, records}` digest moves — 245 records write
+ * a different `foot.length` and a different size token — so the version moves
+ * with it. The stamp gate caught this row having forgotten, which is the failure
+ * mode the rule was written for, and it named the fix.
+ *
+ * `SCHEMA_VERSION` stays 4 for the third time. No field was added, no field's
+ * type changed, and `foot.length` means what it always meant — *the end-to-end
+ * run of the wall*. What changed is that on 245 records it is now **true**. A
+ * consumer needs no new code to read this index; it needs its caches
+ * invalidated, which is precisely what this number is for.
  */
-export const PIPELINE_VERSION = 1
+export const PIPELINE_VERSION = 3
 
 /**
  * Payload budget, brotli, for the emitted `catalog.json`.
@@ -158,6 +198,72 @@ export const PIPELINE_VERSION = 1
  * a reason to encode the flag as an exception list, which is the alternative
  * that was measured (+23 B uniform, but O(33 B) per exception raw and a set
  * lookup at every consumer).
+ *
+ * **Row B1 took it to 366,173 B — 71.52%** (5,907,324 B raw), by emitting the
+ * derived `role|<x>` and `form|<x>` axes as interned tags. Two figures, and P3's
+ * distinction between them is now the third time it has mattered:
+ *
+ *   1. **The shipped delta is +544 B**, artefact to artefact, pipeline 1's
+ *      365,629 B against pipeline 2's 366,173 B, both normalised here.
+ *   2. **Isolating the axes alone gives +468 B** — the same built file with the
+ *      15 derived tag strings stripped, the table rebuilt and the version stamp
+ *      left at 2. `pipeline/role.test.ts` asserts this one, because it is
+ *      self-contained and does not need a stale version number pinned in a test.
+ *   3. The two disagree by **76 B, which is the cost of `version.pipeline` going
+ *      from `1` to `2`** — one character, in a different place. That is the same
+ *      non-additivity P3 measured at this granularity, and it is why the ±110 B
+ *      those early rows quoted was never a rate.
+ *
+ * **The row was priced at +865 B and that figure does not reproduce.** Two
+ * reasons, and the second is the interesting one:
+ *
+ *   - The research measured the encoding by appending the 15 derived strings to
+ *      the *tail* of the existing 915-entry table, so no existing id moved and
+ *      each new reference cost three digits. `buildTagTable` orders by
+ *      descending frequency instead, so the two commonest derived values take
+ *      ids 0 and 1 and every existing id shifts up. Re-measured against the
+ *      pipeline-1 baseline, tail-append costs **+776 B** and frequency-ordered
+ *      **+1,111 B** — so on that baseline the ordering was the *expensive*
+ *      choice, and it is still the right one, because `buildTagTable`'s docblock
+ *      makes the table a pure function of the corpus and 335 B does not buy an
+ *      exception to that.
+ *   - Change one character of the version stamp and the frequency-ordered
+ *      artefact drops from 366,740 B to 366,173 B while the plain one *rises*
+ *      from 365,629 B to 365,705 B. The delta the same code produces is +1,111 B
+ *      at pipeline 1 and +468 B at pipeline 2. There is no single number here to
+ *      have got right; there is an artefact size, measured, and this docblock is
+ *      where it is written down.
+ *
+ * One prediction the row also had to correct: **`role|wall` does not take tag id
+ * 0.** It was expected to, as the corpus's most frequent tag at 5,381
+ * references. `form|straight` is on 5,707, so it takes 0 and `role|wall` takes
+ * 1. Both are one digit, which is the property the price rested on, so the
+ * argument survives its own premise being wrong.
+ *
+ * **Row D9 took it to 366,677 B — 71.62%** (5,905,632 B raw), by correcting 245
+ * corner walls from a tagged 2-unit run to their measured 1.5. The same three
+ * figures, and the split between them is the same one P3 and B1 each recorded:
+ *
+ *   1. **The shipped delta is +504 B**, artefact to artefact, pipeline 2's
+ *      366,173 B against pipeline 3's 366,677 B, both normalised here.
+ *   2. **Isolating the footprint change alone gives +493 B** — this corpus at
+ *      this epoch with the version stamp held at 2, which measures 366,666 B.
+ *      Its counterpart is not an estimate: building from a tree with only
+ *      `pipeline/footprint.ts` reverted reproduces row B2's pinned index digest
+ *      `cf21ab85ac304a20…` **byte for byte** at 366,173 B, so the isolation is
+ *      exact in both directions. `pipeline/templates.test.ts` carries both
+ *      digests.
+ *   3. The two disagree by **11 B, which is `version.pipeline` going 2 to 3** —
+ *      one character, in a different place, and the third time this docblock has
+ *      had to record that number for a different row.
+ *
+ * The raw side is the honest one to reason about and the compressed side is not:
+ * 245 records writing `"length":1.5` for `"length":2` and `1.5x` for `2x` is
+ * **+980 raw bytes** and +504 compressed, while the counterfactuals two other
+ * tests measure against this same artefact moved by −179 B and +223 B on the
+ * *same* change. See `pipeline/templates.test.ts`, where the 128-row `layouts`
+ * key went +808 → **−71** → +396 B across this row's two halves without one byte
+ * of the table itself changing.
  */
 export const SIZE_BUDGET_BYTES = 500 * 1024
 

@@ -20,11 +20,11 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { DesignId, GRID_UNIT_MM, TileId } from '@/catalog'
+import { GRID_UNIT_MM, TileId } from '@/catalog'
 import { footprintShape, planGeometry } from '@/builder/canvas/geometry'
-import { findConflicts, planBand } from '@/builder/canvas/overlap'
+import { findConflicts, levelAt, planBand } from '@/builder/canvas/overlap'
 import type { PlacementId } from '@/store'
-import { Placement as PlacementSchema } from '@/store'
+import { TemplateInstance as TemplateInstanceSchema } from '@/store'
 
 import { BASIS_MM, GRID_BASIS } from '../panel/footprint'
 import { canonicalise, recipeId, recipeKey } from '../panel/recipe'
@@ -68,8 +68,9 @@ function archiveBase(overrides: Partial<ArchiveBase> = {}): ArchiveBase {
     name: 'Plain Square Base 2x2',
     id: 'tiles/bases/plain/openlock,magnetic+flex/plain#base+square.2x2.openlock,magnetic+flex.stl',
     // The item this archived file is one connection variant of. S4's resolver
-    // carries it (row V4) because a `Placement` names a design, and this is the
-    // one field `placeRecipe` needs that a recipe cannot supply.
+    // carries it for row V4's `Placement`, which named a design — row A9 stopped
+    // reading it, because A1's fills name files. Kept here only because
+    // `ArchiveBase` still declares it; the field has no reader left in `src`.
     design: 'd-plain-square-2x2' as ArchiveBase['design'],
     swept: {
       file: 'plain#base+square.2x2.openlock,magnetic+flex.stl',
@@ -188,9 +189,18 @@ describe('what a generated placement persists', () => {
     })
     expect(Object.is(parsed.x, 0)).toBe(true)
     expect(Object.is(parsed.z, 0)).toBe(true)
-    // The same value the store's `Placement` produces, so a scene of both
-    // compares equal to itself after an export and re-import.
-    const catalogue = PlacementSchema.parse({ design: 'd-a-b', x: -0, z: -0, rotation: 0 })
+    // The same value the store's own placement record produces, so a scene of
+    // both compares equal to itself after an export and re-import. The template
+    // id here names no family — this is `schema.ts#coordinate`'s `+ 0` under
+    // test, and nothing else.
+    const catalogue = TemplateInstanceSchema.parse({
+      id: 'p1',
+      template: 'a-family',
+      x: -0,
+      z: -0,
+      rotation: 0,
+      fills: {},
+    })
     expect(Object.is(catalogue.x, parsed.x)).toBe(true)
   })
 
@@ -300,6 +310,17 @@ describe('reaching the plan view’s collision', () => {
     const catalogue = {
       id: idOf(2),
       band: 'area' as const,
+      // A catalog part is the level it stands at — there is no height for one
+      // anywhere the app reads. `levelAt(0)` is the **ground-level** part of an
+      // instance, which since row C6's real layout rule means its `base`: that
+      // rule rests the base on the plan and lifts the `floor`, `wall` and
+      // `column` one base thickness (`BASE_LIFT_MM`, 6 mm) above it. A base is
+      // what a generated base competes with for a square anyway, and it is the
+      // part that carries the instance's whole cell, so this is the pair worth
+      // asserting rather than the easy one. The generated base's own interval
+      // starts at the ground and is 6 mm tall, so the two share vertical space
+      // and the sweep reaches the geometry.
+      level: levelAt(0),
       box: overlapping.box,
       parts: overlapping.parts,
       axisAligned: overlapping.axisAligned,
@@ -329,20 +350,66 @@ describe('reaching the plan view’s collision', () => {
 /* -------------------------------------------------------- the archived fork */
 
 describe('an archived resolution', () => {
-  it('becomes an ordinary Placement, addressed by the archive’s own TileId', () => {
+  it('hands over the archive’s own file as a pinned SlotFill, and the cell', () => {
     const base = archiveBase()
     const placed = placeRecipe(recipeOf(SQUARE, { x: 2, y: 2 }), { kind: 'archived', base }, { x: 3, z: 4 })
     expect(placed.kind).toBe('archived')
     if (placed.kind !== 'archived') return
-    // No new placement model at all: the store, the canvas, `resolvePlacement`,
-    // the bill and the pack all already handle this.
-    expect(placed.placement).toEqual({ design: base.design, x: 3, z: 4, rotation: 0 })
-    // The identity is a design and provably not a file: `TileId` refuses it, so
-    // the archived arm cannot smuggle a `tiles/…` path into the slot the store
-    // now reads as an item. The other direction — a `gen:` id here — is refused
-    // by `migrations.ts#salvageDesign` on the way back out of `localStorage`.
-    expect(TileId.safeParse(placed.placement.design).success).toBe(false)
-    expect(DesignId.safeParse(placed.placement.design).success).toBe(true)
+    // Row A1's decision D1: a fill names a **file**. So the arm hands over the
+    // exact published STL rather than the design it is a variant of — the
+    // `design` hop row V4 put here has no reader left.
+    expect(placed.fill).toEqual({ tile: base.id, pinned: true })
+    expect(TileId.safeParse(placed.fill.tile).success).toBe(true)
+    expect(placed.at).toEqual({ x: 3, z: 4, rotation: 0 })
+  })
+
+  it('pins the fill, because the recipe named the lock the resolver matched on', () => {
+    // Contract C-k: a `pinned` fill survives a lock re-solve and an `auto` one
+    // does not. `LOCK` is a recipe parameter and part of `recipeKey`, and
+    // `resolutionOf` keys on `recipeKey`, so the archived file carries the lock
+    // the user dialled rather than one the sweep picked — which is what makes
+    // `true` honest here. `false` would let a later lock change swap the file
+    // out from under a parameter set that named it exactly.
+    for (const lock of ['openlock', 'dragonlock']) {
+      const placed = placeRecipe(
+        recipeOf(SQUARE, { x: 2, y: 2, LOCK: lock }),
+        { kind: 'archived', base: archiveBase() },
+        { x: 0, z: 0 },
+      )
+      if (placed.kind !== 'archived') throw new Error('expected an archived placement')
+      expect(placed.fill.pinned).toBe(true)
+    }
+  })
+
+  it('names no template and no slot, because neither is this module’s to name', () => {
+    // The load-bearing claim of row A9. A base is a *slot* of a family under
+    // templates (§1.7), there is no family for one base alone, and B4's
+    // `(role, form, build)` key cannot produce one — B1's `ROLES` has no `base`
+    // and all 686 archive-answerable bases carry a role of what they sit under.
+    // So the arm decides the file and stops; the caller, which holds the family
+    // table, decides the family. An invented id here would be a placement that
+    // draws nothing and prices nothing.
+    const placed = placeRecipe(
+      recipeOf(SQUARE, { x: 2, y: 2 }),
+      { kind: 'archived', base: archiveBase() },
+      { x: 0, z: 0 },
+    )
+    if (placed.kind !== 'archived') throw new Error('expected an archived placement')
+    expect(Object.keys(placed).sort()).toEqual(['at', 'base', 'fill', 'kind', 'note', 'recipeId'])
+  })
+
+  it('refuses a record id that is not a catalog path, rather than casting it', () => {
+    // `ArchiveBase.id` is typed `string`, so this parse is the only thing in the
+    // chain that checks it — and a fill carrying a non-`tiles/…` id would be a
+    // slot the catalog can never resolve, surfacing at render time as an empty
+    // slot rather than here as a parse failure.
+    expect(() =>
+      placeRecipe(
+        recipeOf(SQUARE, { x: 2, y: 2 }),
+        { kind: 'archived', base: archiveBase({ id: 'plain#base+square.2x2.stl' }) },
+        { x: 0, z: 0 },
+      ),
+    ).toThrow(/catalog path/)
   })
 
   it('never calls the archived file a render of these parameters', () => {
@@ -356,9 +423,21 @@ describe('an archived resolution', () => {
     expect(placed.note).not.toContain('Generated')
   })
 
-  it('folds an out-of-range rotation the way the store does', () => {
-    const placed = placeRecipe(recipeOf(SQUARE, { x: 2, y: 2 }), ABSENT, { x: 0, z: 0, rotation: 450 })
-    expect(placed.placement.rotation).toBe(90)
+  it('folds an out-of-range rotation the way the store does, in both arms', () => {
+    // One fold, before the fork, so the two arms cannot disagree about the angle
+    // — which they could when each parsed its own record through a different
+    // schema.
+    const generated = placeRecipe(recipeOf(SQUARE, { x: 2, y: 2 }), ABSENT, { x: 0, z: 0, rotation: 450 })
+    if (generated.kind !== 'generated') throw new Error('expected a generated placement')
+    expect(generated.placement.rotation).toBe(90)
+
+    const archived = placeRecipe(
+      recipeOf(SQUARE, { x: 2, y: 2 }),
+      { kind: 'archived', base: archiveBase() },
+      { x: 0, z: 0, rotation: 450 },
+    )
+    if (archived.kind !== 'archived') throw new Error('expected an archived placement')
+    expect(archived.at.rotation).toBe(90)
   })
 
   it('reports both files when the archive answers twice', () => {

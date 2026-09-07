@@ -3,11 +3,35 @@
  * The three panels, rendered.
  *
  * Nothing is mocked that has a real implementation available. The **real store**
- * (so a placement goes through `placeTile`'s Zod parse), the **real facet engine**
- * over a nine-record fixture through the **real `CatalogFile.parse`**, the **real
- * assembly resolver** (so a base is auto-inserted by the rule rather than by a
- * stub) and the **real archive planner** (so an entry name is the one the zip
- * would carry).
+ * (so a placement goes through `placeTemplate`'s Zod parse), the **real facet
+ * engine** over a nine-record fixture through the **real `CatalogFile.parse`**,
+ * the **real assembly resolver** over the two recipes in `fixture.ts`, and the
+ * **real archive planner** (so an entry name is the one the zip would carry).
+ *
+ * ## What row A8 deleted from this file, and why it is a deletion
+ *
+ * Two whole blocks — **`the missing-base gap`** (6 tests) and **`variant
+ * resolution in the bill`** (8) — plus three cases in the bill block. Every one
+ * of them asserted a sentence the panel can no longer be handed, and the facts
+ * behind them are not moved but gone:
+ *
+ *   - the three base-gap notes, the `base · added` mark, the print-variant
+ *     disclosure and `base-already-on-plan` were rule 1's. **Nothing inserts a
+ *     base**: a recipe declares one as an ordinary slot, so there is no
+ *     auto-insert to disclose and `NoteCode` lost all eight codes.
+ *   - the `Resolved for openlock` summary, the per-row `openlock · one part`
+ *     marks and the `published as 2 files` copy were rule 0's. **A fill names an
+ *     exact file**, so nothing chooses at resolution time and `VariantResolution`
+ *     no longer exists to read a verdict off.
+ *
+ * They are not rewritten here, because what replaces them is row **C4**'s
+ * question — what a bill should say about a *fill* — and answering it in this row
+ * would be inventing the panel C4 owns. `assembly/assembly.test.ts` already holds
+ * the resolver-side facts (`fill-off-slot`, `slot-unfilled`, `complete`), and
+ * `billView.ts`'s own docblock records the deletion with the measurements.
+ *
+ * What arrived in their place is one test per new surface: the empty-slot note,
+ * the download's refusal of an incomplete scene, and the reduced palette.
  *
  * Two seams are injected, and both are ones `@/download` publishes for exactly
  * this: {@link SaveEnvironment} and {@link BlobSource}. That is what lets every
@@ -24,12 +48,12 @@
  */
 import { TextEncoder as NodeTextEncoder } from 'node:util'
 
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useMemo } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AssemblyIndex, BillOfTiles } from '@/assembly'
-import { buildAssemblyIndex, buildBillOfTiles, selectVariantForLock } from '@/assembly'
+import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { usePlanTools } from '@/builder/canvas'
 import type { SurfaceStatus } from '@/builder/three'
 import type { CatalogFile, DesignId } from '@/catalog'
@@ -39,14 +63,15 @@ import { BlobFetchError, PreviewMeshRefusedError } from '@/download'
 import { createSearchEngine, defaultFacetSearch } from '@/search'
 import { resolveMaterial } from '@/materials'
 import type { CatalogIndex } from '@/screens/catalog'
-import type { LockSystem, Placement } from '@/store'
+import type { PlacementId } from '@/store'
 import {
-  clearPendingDesign,
+  TemplateId,
+  armTemplateInBuilder,
+  clearFill,
+  clearPendingArm,
   clearPersistedWorkshopState,
-  placeTile,
+  placeTemplate,
   resetWorkshop,
-  sendDesignToBuilder,
-  setLockSystem,
   usePlacements,
   useSelectionStore,
   useWorkshopStore,
@@ -59,9 +84,16 @@ import {
   FIXTURE_IDS,
   FIXTURE_NAMES,
   MIXED_INTEGRAL,
+  ONE_SLOT_TEMPLATE_ID,
+  TWO_SLOTS,
+  aStrictInstance,
+  anInstance,
+  fixtureContext,
   fixtureCatalogFile,
   mixedCatalogFile,
 } from './fixture'
+import { TEMPLATE_FAMILIES } from './families'
+import { forgetRecentFamilies } from './palette'
 import { PalettePanel } from './PalettePanel'
 import { PlanToolbar } from './PlanToolbar'
 import { useArchiveDownload } from './useArchiveDownload'
@@ -73,12 +105,11 @@ import { DownloadAction } from './DownloadAction'
 /**
  * The design behind a fixture key.
  *
- * The library and the selection channel are design-keyed since row V1, a palette
- * row is an item since row V3, and a **placement** is one since row V4 — so
- * everything that used to be `id(…)` in this file is now `design(…)`. `id`
- * survives for the assertions that are genuinely about a file: which entry a
- * download pack writes, which record a bill line names, which blob a thumb
- * loads.
+ * The selection channel is design-keyed since row V1, a palette row is an item
+ * since row V3, and a **placement** is one since row V4 — so everything that used
+ * to be `id(…)` in this file is now `design(…)`. `id` survives for the assertions
+ * that are genuinely about a file: which entry a download pack writes, which
+ * record a bill line names, which blob a thumb loads.
  */
 const design = (key: keyof typeof FIXTURE_DESIGNS): DesignId => FIXTURE_DESIGNS[key] as DesignId
 
@@ -89,6 +120,9 @@ let assembly: AssemblyIndex
 beforeEach(() => {
   resetWorkshop()
   clearPersistedWorkshopState()
+  // The RECENT ring is module-level session state (`palette.ts` argues why it is
+  // not in the store), so a family armed by one test is still in it for the next.
+  forgetRecentFamilies()
   file = fixtureCatalogFile()
   const engine = createSearchEngine(file)
   index = {
@@ -106,14 +140,39 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function place(key: keyof typeof FIXTURE_DESIGNS, x = 0, z = 0): void {
+/**
+ * Place one file, as a one-slot instance.
+ *
+ * The unit changed and the helper's shape did not: a test still names a fixture
+ * key and a cell, and what reaches the store is `fixture.ts`'s one-slot recipe
+ * with that file in its only slot. That keeps every assertion below about one
+ * file per placement, which is what they were written for — {@link placeBoth} is
+ * the two-slot case, added for the one thing a one-slot recipe cannot express.
+ */
+function place(key: keyof typeof FIXTURE_IDS, x = 0, z = 0): void {
   act(() => {
-    placeTile({ design: design(key), x, z, rotation: 0 })
+    placeTemplate(anInstance([FIXTURE_IDS[key]], { x, z }))
   })
 }
 
-function library(): string[] {
-  return Object.keys(useWorkshopStore.getState().library)
+/** One instance of the two-slot recipe, so a bill has more parts than placements. */
+function placeBoth(a: keyof typeof FIXTURE_IDS, b: keyof typeof FIXTURE_IDS, x = 0, z = 0): void {
+  act(() => {
+    placeTemplate(anInstance([FIXTURE_IDS[a], FIXTURE_IDS[b]], { x, z }))
+  })
+}
+
+/**
+ * One instance of the two-slot recipe with its second slot left open.
+ *
+ * Contract **C-g**: §3.2 places a template with a part still empty, so this is
+ * an ordinary state of an instance and not a corrupt one — and it is the state
+ * `slot-unfilled` and the download's refusal are both about.
+ */
+function placeHalf(a: keyof typeof FIXTURE_IDS, x = 0, z = 0): void {
+  act(() => {
+    placeTemplate(anInstance([FIXTURE_IDS[a], null], { x, z }))
+  })
 }
 
 function placementCount(): number {
@@ -122,7 +181,20 @@ function placementCount(): number {
 
 /* -------------------------------------------------------------- the palette */
 
-/** The palette, plus a readout of the tool state it writes. */
+/**
+ * The palette, plus a readout of the tool state it writes.
+ *
+ * **The armed readout is `PlanTools` again.** Row A8 had reduced this panel to
+ * its own private selection, because the list was the archive and the surface
+ * places a family; row C1 replaced the list with the 87 templates, so
+ * `tools.selectedTemplate` is the armed value and the panel keeps no copy of it.
+ * {@link armedRow} reads the DOM for the same fact, which is where a *user* sees
+ * it, and the two agree on every assertion below.
+ *
+ * `forgetRecentFamilies()` runs in this file's `beforeEach`: the RECENT ring is
+ * module-level session state (`palette.ts` argues why it is not in the store), so
+ * a family armed by one test would still be in it for the next.
+ */
 function PaletteHarness({ query = '' }: { query?: string }) {
   const tools = usePlanTools({ tool: 'erase' })
   return (
@@ -133,177 +205,532 @@ function PaletteHarness({ query = '' }: { query?: string }) {
         search={{ ...defaultFacetSearch(), q: query }}
         onQueryChange={() => undefined}
       />
-      <p data-testid="armed">{tools.selectedDesign ?? 'none'}</p>
+      <p data-testid="selected-template">{tools.selectedTemplate ?? 'none'}</p>
+      {/* Row C5: the armed **size**, as `PlanTools` now carries it. The chip on
+          screen is the same fact rendered by the panel; this is the fact the 3D
+          surface reads to solve the fills, and the two must not diverge. */}
+      <p data-testid="armed-size">{tools.armedSize.join(' ') || 'any'}</p>
       <p data-testid="tool">{tools.tool}</p>
     </div>
   )
 }
 
+/** A palette row, as against a facet chip or a size chip — both are also buttons. */
+const isRow = (button: HTMLElement): boolean => button.className.includes('of-pal-pick')
+
+/** Every template row's accessible name, which is the family's **full** name. */
+function paletteRows(): string[] {
+  return screen
+    .queryAllByRole('button')
+    .filter(isRow)
+    .map((button) => button.getAttribute('aria-label') ?? '')
+}
+
+/** The full name on the pressed palette row, or `'none'`. */
+function armedRow(): string {
+  const pressed = screen.queryAllByRole('button', { pressed: true }).filter(isRow)
+  const first = pressed[0]
+  return first === undefined ? 'none' : (first.getAttribute('aria-label') ?? '')
+}
+
+/**
+ * One row, by the family's full name.
+ *
+ * The **last** match, because a family that is also in the RECENT ring has two
+ * rows and RECENT is rendered first — so this is always the row in the family's
+ * own group, which is the one a test means when it names a group's heading in
+ * the same breath.
+ */
+function row(name: string): HTMLElement {
+  const found = screen
+    .queryAllByRole('button')
+    .filter(isRow)
+    .filter((candidate) => (candidate.getAttribute('aria-label') ?? '').startsWith(`${name},`))
+  const last = found[found.length - 1]
+  if (last === undefined) throw new Error(`no palette row named "${name}"`)
+  return last
+}
+
+/** The pressed size chip's label, or `'none'`. */
+function armedSize(): string {
+  const group = screen.queryByRole('group', { name: /^Size for / })
+  if (group === null) return 'none'
+  const pressed = within(group).getAllByRole('button', { pressed: true })[0]
+  return pressed === undefined ? 'none' : (pressed.getAttribute('aria-label') ?? '')
+}
+
 describe('the palette', () => {
-  it('greys the tiles the plan cannot hold, and offers no control for them', () => {
-    for (const key of ['floor1', 'arc', 'slab'] as const) {
-      act(() => {
-        useWorkshopStore.setState((state) => ({ library: { ...state.library, [design(key)]: true } }))
-      })
-    }
+  it('lists the 89 templates this build ships, and nothing from the archive', () => {
+    // The list was the **library** until row A0 and the **archive search** until
+    // this row: 3,822 items, none of them placeable, which is why row A8 had to
+    // make the panel arm nothing at all. What is here now is B4's 47 generated
+    // families plus the 40 shipped recipes and row **E3**'s 2 authored in this
+    // repo. (51 families until row D1 dropped the four whose whole population
+    // was bases.)
     render(<PaletteHarness />)
 
-    // The floor and the curve are buttons; the footprint-less column is not a
-    // control at all — see `PalettePanel.tsx` on why not a disabled button.
-    // Row W6 made the sector placeable, so `none` is the only case left greyed.
-    const rows = screen.getAllByRole('listitem')
-    expect(rows).toHaveLength(3)
+    expect(paletteRows()).toHaveLength(89)
+    // Row D2: the total is two section headings rather than one, because the
+    // two counts are the fact the owner needed and 89 was not.
+    expect(screen.getByRole('heading', { name: /^Assemblies 42/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^Single tiles 47/ })).toBeInTheDocument()
+    // Not the archive, and not the library before it.
+    expect(screen.queryByRole('heading', { name: /Archive/ })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /Library/ })).toBeNull()
+    // The fixture's nine items are 3,822's stand-in and not one of them is a row.
+    expect(screen.queryByText(FIXTURE_NAMES.floor1)).toBeNull()
+  })
 
-    const placeable = rows.filter((row) => row.hasAttribute('data-placeable'))
-    expect(placeable).toHaveLength(2)
-    expect(within(placeable[0] as HTMLElement).getByRole('button', { pressed: false })).toHaveTextContent(
-      FIXTURE_NAMES.floor1,
+  it('groups the single tiles by role, in corpus order, under the assemblies', () => {
+    // §3.1's grouping, now one level down. Ordered by records rather than by
+    // family count — wall 5,381, floor 2,162, riser 319, column 223, stair 206,
+    // roof 100, decor 26 — then the bare-base family, which A9 proved no
+    // `(role, form, build)` key can name. **The ninth group is gone**: the 40
+    // authored recipes carry no role at all and were listed under a heading
+    // naming their build system, which is how the owner came to place a one-slot
+    // corner and conclude the templates were broken.
+    render(<PaletteHarness />)
+
+    const headings = screen
+      .getAllByRole('heading', { level: 3 })
+      .map((heading) => heading.textContent ?? '')
+    expect(headings.map((heading) => heading.replace(/\d+$/, '').trim())).toEqual([
+      'Wall',
+      'Floor',
+      'Riser',
+      'Column',
+      'Stair',
+      'Roof',
+      'Decor',
+      'Base',
+    ])
+    // 17 wall families, and the group heading carries the count.
+    expect(headings[0]).toContain('17')
+    expect(headings).not.toContain('S2W: Wall on Tile')
+    // There is no `insert` group: `role|insert` is a perfect bijection with
+    // `layer === 'insert'` and 262 of those 285 records are already reachable as
+    // a fill for a host tile's accessory slot, so the panel says where they live.
+    expect(headings).not.toContain('Insert')
+    expect(screen.getByText(/inserts are not templates/i)).toBeInTheDocument()
+  })
+
+  it('puts the 40 assemblies above all 47 single tiles', () => {
+    /* **The defect, as a DOM order.** The owner placed a corner, got a one-slot
+       row, and reported that they could not modify the walls or pick a floor —
+       *"Thats the whole point of the templates I wanted."* The assembly they were
+       describing was in the build all along, as row 50 of 87. The kind of thing a
+       row is is now the first division the list makes. */
+    render(<PaletteHarness />)
+
+    const rows = paletteRows()
+    /* 42 assemblies first, and **40 of them** carry the shipped prefix. Row
+       **E3**'s two do not, deliberately: D4 measured that the `S2W:` opening all
+       40 names is the *floor's* build system, and E3's widened wall lifts exactly
+       that requirement off its floor slot. So the palette shows
+       `Wall on Tile: Wall (Any, Modular, Any Floor)` beside a stripped
+       `Wall (Any, Modular)` — two rows that differ by a whole clause, which is
+       the owner's original complaint (two rows that looked the same and behaved
+       differently) not being recreated. */
+    expect(rows.slice(0, 42).filter((name) => name.startsWith('S2W: Wall on Tile: '))).toHaveLength(40)
+    expect(rows.slice(0, 42).filter((name) => name.startsWith('Wall on Tile: '))).toHaveLength(2)
+    expect(rows.slice(42).some((name) => name.includes('Wall on Tile: '))).toBe(false)
+    // Two section headings, assemblies first, each carrying its own count.
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent ?? ''),
+    ).toEqual(['Assemblies 42', 'Single tiles 47'])
+  })
+
+  it('states a slot count on every row, and it is the template\u2019s own part count', () => {
+    /* Row D2's third fix and the one the report was literally about: *"It shows
+       everywhere as having one slot only."* The number is
+       `template.parts.length` and never a count of the slots that still need a
+       choice — `screens/assemblies/assembly.ts` measured that the 20 parts
+       declaring `fulfills` cover a *nested* blueprint's slots and have no sibling
+       impact, so a 5-part corner really is five choices. */
+    render(<PaletteHarness />)
+
+    for (const family of TEMPLATE_FAMILIES) {
+      expect(family.slots).toBe(family.template.parts.length)
+      expect(row(family.name).getAttribute('aria-label')).toContain(
+        `, ${String(family.slots)} slot${family.slots === 1 ? '' : 's'},`,
+      )
+    }
+    /* The two populations, as the two things the palette now distinguishes — and
+       row **E3**'s corridor is the build's only **4**, `(base, floor, left wall,
+       right wall)`, which is a corner's part set minus the column. */
+    expect(new Set(TEMPLATE_FAMILIES.filter((f) => f.kind === 'recipe').map((f) => f.slots))).toEqual(
+      new Set([3, 4, 5]),
     )
-
-    for (const row of rows.filter((candidate) => !candidate.hasAttribute('data-placeable'))) {
-      expect(within(row).queryAllByRole('button')).toHaveLength(0)
-    }
-    expect(screen.getByText('no plan shape')).toBeInTheDocument()
-    // The canvas's own refusal sentence, so the two cannot disagree about why.
-    expect(screen.getByText(/no derivable footprint/)).toBeInTheDocument()
+    expect(new Set(TEMPLATE_FAMILIES.filter((f) => f.kind === 'family').map((f) => f.slots))).toEqual(
+      new Set([1]),
+    )
   })
 
-  it('sinks the unplaceable tiles to the end of the list rather than interleaving them', () => {
-    act(() => {
-      useWorkshopStore.setState({
-        library: { [design('slab')]: true, [design('floor2')]: true, [design('floor1')]: true },
-      })
-    })
-    render(<PaletteHarness />)
+  it('ranks the assembly the owner wanted first for their own query', () => {
+    /* `corner` is what they were looking for, and **fourteen** one-slot rows have
+       the word in their name — the brief for this row said eleven, and it was
+       sixteen before row D1 dropped two of them as base-only. The section puts
+       the 8 assemblies above all 14; `palette.ts#rankFamilies` then orders inside
+       the section by where the token landed and, for a tie, by how many `': '`
+       qualifiers the query did not ask for — so the unqualified
+       `Corner (Any, …)` sorts above `Corner: Low (…)`. */
+    render(<PaletteHarness query="corner" />)
 
-    const rows = screen.getAllByRole('listitem')
-    expect(rows.map((row) => row.hasAttribute('data-placeable'))).toEqual([true, true, false])
-    expect(rows[0]).toHaveTextContent(FIXTURE_NAMES.floor1)
-    expect(rows[1]).toHaveTextContent(FIXTURE_NAMES.floor2)
+    const rows = paletteRows()
+    expect(rows).toHaveLength(22)
+    expect(rows[0]).toContain('S2W: Wall on Tile: Corner (Any, Single Piece)')
+    expect(rows.slice(0, 8).every((name) => name.startsWith('S2W: Wall on Tile: '))).toBe(true)
+    // The internal corners are still corners and still shown, below the four
+    // whose label *starts* with the word.
+    expect(rows.slice(0, 4).some((name) => name.includes('Internal'))).toBe(false)
+    // An extra token pays for the qualifier and the order inverts, which is what
+    // makes the tiebreak a ranking rather than a preference for short names.
+    cleanup()
+    render(<PaletteHarness query="corner low" />)
+    expect(paletteRows()[0]).toContain('S2W: Wall on Tile: Corner: Low (Single Piece)')
   })
 
-  it('arms the canvas when a row is selected, and forces place mode', () => {
-    act(() => {
-      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
-    })
+  it('takes the shared prefix off an assembly label and keeps the build system on the row', () => {
+    /* The 40 rows lost the heading that said `S2W: Wall on Tile`, so the build
+       system moved onto the row — from the template's own `build|` tag, which is
+       a per-row fact and stays right when a second build system's assemblies
+       land. */
     render(<PaletteHarness />)
 
-    expect(screen.getByTestId('armed')).toHaveTextContent('none')
+    const assembly = row('S2W: Wall on Tile: Corner (Any, Single Piece)')
+    expect(within(assembly).getByText('Corner (Any, Single Piece)')).toBeInTheDocument()
+    expect(assembly.textContent).toContain('5 slots')
+    expect(assembly.textContent).toContain('S2W')
+    expect(assembly.getAttribute('aria-label')).toBe(
+      'S2W: Wall on Tile: Corner (Any, Single Piece), 5 slots, S2W build system',
+    )
+  })
+
+  it('takes the role off a row name, because the heading already said it', () => {
+    render(<PaletteHarness />)
+
+    // `Wall: Straight (Separate Wall)` under a heading that says WALL spends a
+    // third of a 272px column repeating itself.
+    expect(within(row('Wall: Straight (Separate Wall)')).getByText('Straight (Separate Wall)')).toBeInTheDocument()
+    expect(screen.queryByText('Wall: Straight (Separate Wall)')).toBeNull()
+    // And the 40 recipes lose the prefix all 40 share.
+    expect(
+      within(row('S2W: Wall on Tile: Corner: Low (Single Piece)')).getByText('Corner: Low (Single Piece)'),
+    ).toBeInTheDocument()
+  })
+
+  it('arms a family, writes it to the tool state and forces place mode', () => {
+    // **Row A8's reduction, undone.** The panel wrote nothing to `PlanTools`
+    // because a `DesignId` in `selectedTemplate` would report every placement
+    // `unknown-template`; a family id is what the surface places.
+    render(<PaletteHarness />)
+
+    expect(armedRow()).toBe('none')
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
     expect(screen.getByTestId('tool')).toHaveTextContent('erase')
 
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) }))
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
 
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor1)
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('wall-straight-separate-wall')
+    expect(armedRow()).toContain('Wall: Straight (Separate Wall)')
     // §3: "Sets the active tile and forces place mode."
     expect(screen.getByTestId('tool')).toHaveTextContent('place')
-    expect(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })).toHaveAttribute(
-      'aria-pressed',
-      'true',
+  })
+
+  it('disarms when the armed row is pressed again', () => {
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+
+    expect(armedRow()).toBe('none')
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
+  })
+
+  it('narrows on a query over names and axes, conjunctively', () => {
+    // Two words of one family's name is the interesting query, so the tokens are
+    // ANDed: an OR over `corner s2w` returns every corner and every S2W.
+    render(<PaletteHarness query="corner s2w" />)
+
+    const rows = paletteRows()
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every((text) => text.toLowerCase().includes('corner'))).toBe(true)
+    // `s2w` matches `build|s2w` on the rows whose visible name does not say it.
+    expect(screen.getByRole('status')).toHaveTextContent(`${String(rows.length)} of 89 templates`)
+  })
+
+  it('narrows the single tiles by form and leaves the assemblies alone', () => {
+    /* **`form` is an axis only 47 of the 89 carry.** C1 applied it to everything,
+       so a form chip hid all 40 assemblies — and `Corner`, the most natural
+       narrowing for the query the owner actually ran, emptied the section holding
+       the answer. An assembly carries no `form|` tag: its form is up to five
+       values in its parts' own `require` blocks. So the chip is labelled for what
+       it reaches and reaches only that. */
+    render(<PaletteHarness />)
+
+    const form = screen.getByRole('group', { name: 'Tile form' })
+    fireEvent.click(within(form).getByRole('button', { name: 'Octagon' }))
+
+    // Two octagon families: `wall|octagon|separate wall` and `floor|octagon`.
+    expect(screen.getByRole('heading', { name: /^Single tiles 2/ })).toBeInTheDocument()
+    // And all 40 assemblies are still there, which is the point.
+    expect(screen.getByRole('heading', { name: /^Assemblies 42/ })).toBeInTheDocument()
+    expect(paletteRows()).toHaveLength(44)
+
+    // Re-pressing clears it, which is what `aria-pressed` promises.
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Tile form' })).getByRole('button', { name: 'Octagon' }),
+    )
+    expect(paletteRows()).toHaveLength(89)
+  })
+
+  it('narrows both sections by build, because every template carries one', () => {
+    // `build` is the axis both kinds have on themselves: all 42 assemblies are
+    // `build|s2w` — row E3's two inherit the tag from the fixture they derive
+    // from, because they really are S2W wall-on-tile assemblies and only their
+    // floor slot's admissions differ — and 7 of the 47 single tiles are.
+    render(<PaletteHarness />)
+
+    const build = screen.getByRole('group', { name: 'Build' })
+    fireEvent.click(within(build).getByRole('button', { name: 'S2W' }))
+
+    expect(screen.getByRole('heading', { name: /^Assemblies 42/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^Single tiles 7/ })).toBeInTheDocument()
+    expect(paletteRows()).toHaveLength(49)
+
+    // A build no assembly carries drops the section rather than heading nothing.
+    fireEvent.click(within(screen.getByRole('group', { name: 'Build' })).getByRole('button', { name: 'S2W' }))
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Build' })).getByRole('button', { name: 'Thick Wall' }),
+    )
+    expect(screen.queryByRole('heading', { name: /^Assemblies/ })).toBeNull()
+    expect(screen.getByRole('heading', { name: /^Single tiles 4/ })).toBeInTheDocument()
+  })
+
+  it('counts what the resolver admits, and a size position narrows it', () => {
+    // **The number is `@/composition`'s own answer**, resolved through the same
+    // `resolveSlotTags` a fill will be, so the row cannot disagree with what the
+    // solver sees. Over the fixture, `floor|straight|-` admits five items — and
+    // its `1 wide by 1 deep` position admits the two 1x1s.
+    render(<PaletteHarness />)
+
+    expect(row('Floor: Straight').getAttribute('aria-label')).toBe(
+      'Floor: Straight, 1 slot, 5 tiles',
+    )
+
+    fireEvent.click(row('Floor: Straight'))
+    expect(armedSize()).toBe('any size, 5 tiles')
+
+    const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
+    fireEvent.click(within(sizes).getByRole('button', { name: /^1 wide by 1 deep/ }))
+
+    expect(armedSize()).toBe('1 wide by 1 deep, 2 tiles')
+    // The row's own number follows the chosen position, because that is the set
+    // a fill will come from.
+    expect(row('Floor: Straight').getAttribute('aria-label')).toBe(
+      'Floor: Straight, 1 slot, 2 tiles',
     )
   })
 
-  it('disarms when the armed row is selected again', () => {
-    act(() => {
-      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
-    })
+  it('offers the size control on the armed family only', () => {
+    // 304 positions over 47 families: on all of them at once the column would be
+    // a wall of chips, and the control's subject is the family being armed.
     render(<PaletteHarness />)
-    const row = () => screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })
+    expect(screen.queryByRole('group', { name: /^Size for/ })).toBeNull()
 
-    fireEvent.click(row())
-    fireEvent.click(row())
-    expect(screen.getByTestId('armed')).toHaveTextContent('none')
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+    const sizes = screen.getByRole('group', { name: 'Size for Wall: Straight (Separate Wall)' })
+    // Eight positions, `any size` first and pressed.
+    expect(within(sizes).getAllByRole('button')).toHaveLength(8)
+    expect(armedSize()).toContain('any size')
+    // Exactly one control on screen: arming another family moves it.
+    fireEvent.click(row('Wall: Curve (Separate Wall)'))
+    expect(screen.getAllByRole('group', { name: /^Size for/ })).toHaveLength(1)
+    expect(screen.getByRole('group', { name: 'Size for Wall: Curve (Separate Wall)' })).toBeInTheDocument()
   })
 
-  it('searches the whole catalog and offers "+ add" only for tiles not saved', () => {
-    act(() => {
-      useWorkshopStore.setState({ library: { [design('floor1')]: true } })
-    })
-    render(<PaletteHarness query="dungeon stone floor" />)
-
-    // Three fixture records match, one of which is already saved — so two "+ add"
-    // buttons in the results and none in the library block.
-    // The `+` glyph is aria-hidden, so the accessible name starts at "add" and
-    // carries the tile — forty rows must not present forty identical buttons.
-    const adds = screen.getAllByRole('button', { name: /^add / })
-    expect(adds.length).toBeGreaterThan(0)
-
-    const twinAdd = screen.getByRole('button', { name: new RegExp(`add ${FIXTURE_NAMES.twin} to the library`) })
-    fireEvent.click(twinAdd)
-    expect(library()).toContain(FIXTURE_DESIGNS.twin)
-  })
-
-  it('offers a starter set when the library is empty, and the set is one texture of floors and walls', () => {
+  it('gives no size control to a family the archive tags no size for', () => {
+    // **7 families, not the 5 this row was briefed with**: B3's five empty
+    // domains plus two whose domain is real and inexpressible — `stair|curve`
+    // and `column|corner|s2w`. (It was 8 until row D1 dropped
+    // `floor|curve|separate wall` as base-only.) Either way the emitted table
+    // holds one position, and a control with one position cannot be operated, so
+    // the row gets a sentence instead.
     render(<PaletteHarness />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Add a starter set/ }))
+    fireEvent.click(row('Decor: Straight'))
 
-    // The fixture's only textured, placeable, non-base items are the two
-    // dungeon_stone floors and the twin; the cave wall is a topper and placeable
-    // too. What matters is that a base is never offered and every key is a design
-    // this catalog holds — the starter set returns designs since row V3, so a key
-    // that did not resolve would be a library entry with no row and no way to
-    // remove it from here.
-    const saved = library()
-    expect(saved.length).toBeGreaterThan(0)
-    for (const key of saved) {
-      const item = index.engine.aggregates.byDesign.get(key as DesignId)
-      expect(item, key).toBeDefined()
-      expect(item?.variantClass).not.toBe('base-only')
-      expect(item?.foot.shape === 'rect' || item?.foot.shape === 'wall').toBe(true)
-    }
+    expect(screen.queryByRole('group', { name: /^Size for/ })).toBeNull()
+    expect(screen.getByText(/archive tags no size for this family/)).toBeInTheDocument()
+    // And the family is armed all the same: `any size` is what it places at.
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('decor-straight')
   })
 
-  /**
-   * The defect row V3 closes, at the surface that showed it.
-   *
-   * `PalettePanel` called `paletteRows(Object.keys(library) as TileId[], …)`. The
-   * assertion made it compile after row V1 re-keyed the library to designs, and
-   * every lookup then missed — the library block rendered **empty** for every
-   * saved item, with no error anywhere. So this asserts the count rather than the
-   * content: an empty list is what the bug looked like.
-   */
-  it('lists every saved item, which the file-keyed cast rendered as an empty block', () => {
-    act(() => {
-      useWorkshopStore.setState({
-        library: {
-          [design('floor1')]: true,
-          [design('floor2')]: true,
-          [design('wallNoBase')]: true,
-        },
-      })
-    })
+  it('shows slots and a build system on an assembly, and offers it no size', () => {
+    // An assembly has 3 or 5 slots, so one candidate count cannot answer "how
+    // many tiles fill this"; and its parts `require` their own `size|width|2`, so
+    // a size is part of which assembly this is rather than a parameter of the
+    // placement — a size control here would be a chip that changed nothing,
+    // because no `constrain` block would collect its tags.
     render(<PaletteHarness />)
 
-    expect(screen.getAllByRole('listitem')).toHaveLength(3)
-    expect(screen.getByRole('heading', { name: /Library 3/ })).toBeInTheDocument()
+    const recipe = row('S2W: Wall on Tile: Corner: Low (Single Piece)')
+    expect(recipe.getAttribute('aria-label')).toContain('5 slots')
+    expect(recipe.textContent).toContain('5 slots')
+    expect(recipe.textContent).toContain('S2W')
+    expect(TEMPLATE_FAMILIES.filter((f) => f.kind === 'recipe' && f.sizes.length > 0)).toEqual([])
+
+    fireEvent.click(recipe)
+    expect(screen.queryByRole('group', { name: /^Size for/ })).toBeNull()
+    expect(screen.getByTestId('selected-template')).toHaveTextContent(
+      's2w-wall-on-tile-corner-low-single-piece',
+    )
+  })
+
+  it('remembers what was armed, newest first, as a strip and not a third section', () => {
+    // RECENT **mitigates** the recognition cost and does not fix it — the
+    // research was explicit and `palette.ts` keeps the claim honest where the
+    // ring is implemented. Session state, so a reload starts it empty.
+    render(<PaletteHarness />)
+    expect(screen.queryByRole('group', { name: 'Recent' })).toBeNull()
+
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+    fireEvent.click(row('Wall: Curve (Separate Wall)'))
+
+    const recent = () => screen.getByRole('group', { name: 'Recent' })
+    expect(
+      within(recent())
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual([
+      'Wall: Curve (Separate Wall), any size',
+      'Wall: Straight (Separate Wall), any size',
+    ])
+    // **A strip, because a group would duplicate rows.** All 89 rows are always
+    // listed, so a RECENT group would put a second pressed row — and a second
+    // live size control — on screen for the same family.
+    expect(paletteRows()).toHaveLength(89)
+    expect(screen.getAllByRole('button', { pressed: true }).filter(isRow)).toHaveLength(1)
+
+    // The ring is a set with an order: arming one twice does not spend two slots.
+    fireEvent.click(row('Wall: Curve (Separate Wall)'))
+    fireEvent.click(row('Wall: Curve (Separate Wall)'))
+    expect(within(recent()).getAllByRole('button')).toHaveLength(2)
+  })
+
+  it('remembers the size too, so re-placing a 2x2 floor is one press', () => {
+    // The ring holds *arms*, not families: a user who has just put down four 2x2
+    // floors wants the fifth at 2x2, and a chip that armed the family at `any
+    // size` would drop the only part of the choice they made twice.
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Floor: Straight'))
+    const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
+    fireEvent.click(within(sizes).getByRole('button', { name: /^2 wide by 2 deep/ }))
+    // Disarm, so the chip has something to restore.
+    fireEvent.click(row('Floor: Straight'))
+    expect(armedRow()).toBe('none')
+
+    const chip = within(screen.getByRole('group', { name: 'Recent' })).getByRole('button', {
+      name: 'Floor: Straight, 2 wide by 2 deep',
+    })
+    fireEvent.click(chip)
+
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
+    expect(armedSize()).toBe('2 wide by 2 deep, 1 tiles')
+    // Two sizes of one family are two arms, which is the point of holding the
+    // size at all.
+    fireEvent.click(within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', { name: /^any size/ }))
+    expect(
+      within(screen.getByRole('group', { name: 'Recent' })).getAllByRole('button'),
+    ).toHaveLength(2)
+  })
+
+  it('hands the armed size to `PlanTools`, which is what the click solves with', () => {
+    /* **Row C5's handoff.** The size position was `PalettePanel`'s own state
+       while nothing read it, and C1 wrote down the consequence: *2 wide by 2
+       deep* narrowed a count on screen and the placement got the solver's
+       default, because `three/edits.ts` placed with `fills: {}`. The position now
+       lives beside the family in `PlanTools`, which is the only object the
+       palette and the 3D surface share. */
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Floor: Straight'))
+    expect(screen.getByTestId('armed-size')).toHaveTextContent('any')
+
+    const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
+    fireEvent.click(within(sizes).getByRole('button', { name: /^2 wide by 2 deep/ }))
+
+    // The exact `size|` spelling `FillContext.size` takes, so the palette and
+    // B4's `GENERATED_FAMILY_SIZES` cannot drift into two vocabularies.
+    expect(screen.getByTestId('armed-size')).toHaveTextContent('size|width|2 size|depth|2')
+    expect(armedSize()).toBe('2 wide by 2 deep, 1 tiles')
+  })
+
+  it('drops the armed size when a different family is armed', () => {
+    /* A position is a list of `size|` tags and B4's domains differ per family —
+       7 of the 47 have none at all. Carrying 2x2 across would hand the solver a
+       size the new family's candidates may not carry, which C2 classifies
+       `no-candidate` (*nothing in the archive is this size*) for a size the user
+       chose for a different row. */
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('Floor: Straight'))
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', {
+        name: /^2 wide by 2 deep/,
+      }),
+    )
+    fireEvent.click(row('Wall: Straight (Separate Wall)'))
+
+    expect(screen.getByTestId('armed-size')).toHaveTextContent('any')
+  })
+
+  it('says nothing about a starter set, and nothing about placing being unwired', () => {
+    // §2.4's "Add a starter set" put six *tiles* in the library; row A0 deleted
+    // both and a starter set, if it comes back, is a starter room. Row A8's
+    // "placing is not wired to this list" note goes with the list it was about —
+    // asserted as an absence so nobody reinstates a disclaimer that is no longer
+    // true.
+    render(<PaletteHarness />)
+
+    expect(screen.queryByRole('button', { name: /Add a starter set/ })).toBeNull()
+    expect(screen.queryByText(/Placing is not wired to this list yet/)).toBeNull()
+    expect(screen.queryByText(/arms nothing/)).toBeNull()
+  })
+
+  it('says nothing matched, and where the archive went', () => {
+    render(<PaletteHarness query="dungeon stone" />)
+
+    expect(paletteRows()).toHaveLength(0)
+    // A texture is not a family axis: 89 rows x 36 reachable texture roots is
+    // 3,204, which is the recall cost §3.1 inverted. So the panel points at the
+    // surface that does index textures.
+    expect(screen.getByText(/search the catalog screen/i)).toBeInTheDocument()
   })
 })
 
 /* ----------------------------------------------- the "use in builder" handoff */
 
 /**
- * Row G5's reader side.
+ * Row G5's reader side, carrying row C1's arm.
  *
  * The channel is cleared around every test in this block rather than in the
  * file's shared `beforeEach`: it is not part of `WorkshopState`, so
  * `resetWorkshop()` does not touch it, and a value left in the box would arm a
  * palette in an unrelated test.
+ *
+ * **What arrives is a family and a size**, not a design — `store/selection.ts`
+ * carries the decision and the drawer's side of it is `detail.test.tsx`.
  */
 describe('the pre-selection handoff', () => {
   beforeEach(() => {
-    clearPendingDesign()
+    clearPendingArm()
   })
 
   afterEach(() => {
-    clearPendingDesign()
+    clearPendingArm()
   })
-
-  /** File the item, which is what `TileDrawer` does before it posts. */
-  function saveItem(key: keyof typeof FIXTURE_DESIGNS): void {
-    act(() => {
-      useWorkshopStore.setState((state) => ({ library: { ...state.library, [design(key)]: true } }))
-    })
-  }
 
   /**
    * Mount the palette inside an `act` of our own.
@@ -321,133 +748,159 @@ describe('the pre-selection handoff', () => {
     return view
   }
 
-  it('arms the item the catalog drawer sent, and forces place mode', () => {
-    // Exactly what `TileDrawer`'s action does, in its order: file it, then post
-    // it, then navigate — the navigation being this render.
-    saveItem('floor1')
+  it('arms the family the drawer sent, at the size it sent, and forces place mode', () => {
+    // Exactly what `TileDrawer`'s action does, in its order: post the arm, then
+    // navigate — the navigation being this render. It used to post an item and
+    // seed the palette's search with its name, because the list was the archive;
+    // a tile's name narrows a list of family names to nothing, so the arm is the
+    // whole handoff now.
     act(() => {
-      sendDesignToBuilder(design('floor1'))
+      armTemplateInBuilder({
+        template: 'floor-straight' as TemplateId,
+        size: ['size|width|1', 'size|depth|1'],
+      })
     })
 
     mountPalette()
 
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor1)
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
+    expect(armedRow()).toContain('Floor: Straight')
+    expect(armedSize()).toBe('1 wide by 1 deep, 2 tiles')
     // The harness opens in `erase`; arming forces `place`, as a click does.
     expect(screen.getByTestId('tool')).toHaveTextContent('place')
-    expect(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
   })
 
-  it('claims the handoff once, so a re-mount does not re-arm a tile the user disarmed', () => {
-    saveItem('floor1')
+  it('claims the handoff once, so a re-mount does not re-arm a family the user disarmed', () => {
     act(() => {
-      sendDesignToBuilder(design('floor1'))
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: [] })
     })
 
     const first = mountPalette()
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor1)
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
     expect(useSelectionStore.getState().pending).toBeNull()
 
     first.unmount()
     mountPalette()
-    expect(screen.getByTestId('armed')).toHaveTextContent('none')
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
     expect(screen.getByTestId('tool')).toHaveTextContent('erase')
   })
 
   it('takes the second press when two arrive with no claim between them', () => {
-    saveItem('floor1')
-    saveItem('floor2')
     act(() => {
-      sendDesignToBuilder(design('floor1'))
-      sendDesignToBuilder(design('floor2'))
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: [] })
+      armTemplateInBuilder({ template: 'wall-straight' as TemplateId, size: [] })
     })
 
     mountPalette()
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor2)
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('wall-straight')
   })
 
-  it('arms nothing for an item the plan cannot hold, and the library note says why', () => {
-    // The `none` footprint: 370 of 3,822 items, 726 of 8,702 files. Arming it
-    // would give the user
-    // an armed tile every click of which the canvas correctly refuses, which is
-    // the failure the greyed rows exist to avoid.
-    saveItem('slab')
+  it('arms nothing for a family this build does not ship, and still claims the box', () => {
+    // The one reachable failure, and it is narrower than row A0's guard: that one
+    // also refused the 370 items with no footprint, which is a property of a
+    // *fill* and not of a family. A share link or a tab left open across a
+    // re-import is what reaches this.
     act(() => {
-      sendDesignToBuilder(design('slab'))
+      armTemplateInBuilder({ template: 'wall-retired-and-gone' as TemplateId, size: [] })
     })
 
     mountPalette()
 
-    expect(screen.getByTestId('armed')).toHaveTextContent('none')
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
     expect(screen.getByTestId('tool')).toHaveTextContent('erase')
-    // The explanation is already on screen, because the drawer filed the tile on
-    // its way here — so the refusal costs no new copy.
-    expect(screen.getByText(/cannot be laid out on the plan/)).toBeInTheDocument()
     // Claimed all the same: a handoff this palette will not act on must not sit
     // in the box waiting to arm the next mount.
     expect(useSelectionStore.getState().pending).toBeNull()
   })
 
-  it('arms nothing for a design this catalog build does not hold', () => {
+  it('falls back to any size when the position no longer exists', () => {
+    // A catalog re-import between the press and the claim can retire the cell a
+    // position named. `any size` is a real position — the slot's `constrain`
+    // collects nothing and the family admits every size — so this degrades
+    // rather than failing.
     act(() => {
-      sendDesignToBuilder('d-retired-and-gone' as DesignId)
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: ['size|width|99'] })
     })
 
     mountPalette()
-    expect(screen.getByTestId('armed')).toHaveTextContent('none')
-    expect(useSelectionStore.getState().pending).toBeNull()
+
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
+    expect(armedSize()).toBe('any size, 5 tiles')
   })
 
-  it('carries the item, and the bill still resolves the print', () => {
-    // The channel is a selection, never a resolution. `floor2` is a
-    // `connection|openforge` topper and its design has one variant here, so the
-    // arming resolves to that file — and the bill it produces is still two
-    // parts, because the auto-inserted base is the resolver's decision and not
-    // the palette's. `the two-sided item` below is where the arming has a real
-    // choice to make.
-    saveItem('floor2')
+  it('clears a facet so the armed row is on screen', () => {
+    // A filter the user set ten minutes ago on another screen must not hide the
+    // row a press on a third screen just armed.
+    const view = mountPalette()
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Tile form' })).getByRole('button', { name: 'Octagon' }),
+    )
+    expect(paletteRows()).toHaveLength(44)
+    view.unmount()
+
     act(() => {
-      sendDesignToBuilder(design('floor2'))
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: [] })
+    })
+    mountPalette()
+
+    expect(paletteRows()).toHaveLength(89)
+    expect(armedRow()).toContain('Floor: Straight')
+  })
+
+  it('arms a family, and the bill prints exactly what the slots name', () => {
+    // The channel is a selection, never a resolution — and since row A3 nothing
+    // downstream resolves either. What the arm names is a family; what the bill
+    // prints is whatever file a *fill* names, which is row C2's choice to make.
+    act(() => {
+      armTemplateInBuilder({ template: 'floor-straight' as TemplateId, size: [] })
     })
 
     mountPalette()
-    expect(screen.getByTestId('armed')).toHaveTextContent(FIXTURE_DESIGNS.floor2)
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
 
-    const bill = buildBillOfTiles([{ design: design('floor2'), x: 0, z: 0, rotation: 0 }], assembly, {
+    const bill = buildBillOfTiles([anInstance([FIXTURE_IDS.floor2])], assembly, {
+      ...fixtureContext(file),
       lock: 'openlock',
     })
     expect(bill.placements).toBe(1)
-    expect(bill.parts).toBe(2)
-    expect([...bill.lines.map((line) => line.tile.id)].sort()).toEqual(
-      [FIXTURE_IDS.base2, FIXTURE_IDS.floor2].sort(),
-    )
+    expect(bill.parts).toBe(1)
+    expect(bill.lines.map((line) => line.tile.id)).toEqual([FIXTURE_IDS.floor2])
   })
 })
 
 /* -------------------------------------------------------- the two-sided item */
 
 /**
- * The bug the owner reported, on the one item shape that can express it.
+ * The bug the owner reported, and what is left of it once the palette stops
+ * showing pictures.
  *
  * `MIXED_INTEGRAL` joins `floor2`'s design, so `d-floor-2` becomes the corpus's
  * `both` class: a `topper` that needs a base, and an `integral` that does not.
  * **931 live items (24.4%) are this shape and on all 931 the two rules disagree**
  * — `TileAggregate.preview` names the topper and `selectVariant` names the
- * integral. The palette asks both questions and this block pins each answer to
- * the right one:
+ * integral.
  *
- *   - the **thumb** renders the topper, because that mesh is the tile;
- *   - the **armed id** is the integral, because that is what this build prints.
+ * Rows V3 and V5 pinned that in *this file*, because the palette rendered one
+ * and armed the other. **Row C1 deleted both halves of that pairing**: a palette
+ * row is a family, a family has no picture, and picking a representative tile to
+ * show would put the owner's defect back in a new place (`palette.ts` argues it).
+ * So two of this block's four tests are gone rather than rewritten:
  *
- * Reversed, the row shows a tile welded to a base — which is what the owner
- * described seeing — or arms a topper and lets the bill charge for a base the
- * user could have skipped. Both are asserted, so neither can be reintroduced by
- * "simplifying" the two calls into one.
+ *   - *"renders the topper in the row, not the file the resolver would print"* —
+ *     the rendered half of the finding. **It has no home in this file any more**,
+ *     and the one surface that still renders `item.preview` is the catalog card;
+ *     this row's report names that as the place it should be re-asserted, because
+ *     nothing else in the suite renders a preview and compares it to the print.
+ *     The headless half survives in `palette.corpus.test.ts`, which measures the
+ *     disagreement on all 931 items under all three locks.
+ *   - *"keeps the row pressed when the lock preference changes under it"* —
+ *     there is no file in a palette row for a preference to move. The property is
+ *     now structural: `aria-pressed` compares two `TemplateId`s, and nothing in
+ *     the store can change either one.
  *
- * The index is swapped in this block's own `beforeEach`, which runs after the
- * file's: the outer one restores the nine-record fixture for every other block.
+ * What is kept is the premise (the item really is two-sided) and the bill's half
+ * of the identity, because that is the assertion a future row would otherwise
+ * have to reconstruct.
  */
 describe('the two-sided item', () => {
   let mixedAssembly: AssemblyIndex
@@ -462,12 +915,9 @@ describe('the two-sided item', () => {
       materialOf: (record) => resolveMaterial(resolveTags(mixedFile, record), record.file).material,
     }
     mixedAssembly = buildAssemblyIndex(mixedFile)
-    act(() => {
-      useWorkshopStore.setState({ library: { [design('floor2')]: true } })
-    })
   })
 
-  /** The item really is two-sided, so the two assertions below are not vacuous. */
+  /** The item really is two-sided, so the assertion below is not vacuous. */
   it('is one item over two variants, previewing the topper', () => {
     const item = index.engine.aggregates.byDesign.get(design('floor2'))
     expect(item?.variantClass).toBe('both')
@@ -479,95 +929,38 @@ describe('the two-sided item', () => {
     expect(selectVariant(item!, { bottom: 'openlock' }).variant.id).toBe(MIXED_INTEGRAL.id)
   })
 
-  it('renders the topper in the row, not the file the resolver would print', () => {
-    render(<PaletteHarness />)
-
-    const row = screen.getAllByRole('listitem')[0] as HTMLElement
-    const image = within(row).getByRole('presentation', { hidden: true })
-    // The sprite URL is content-addressed, so the blob in it names the file the
-    // thumb is showing. `2…` is the topper's md5, `9…` the integral's.
-    expect(image).toHaveAttribute('src', expect.stringContaining('2'.repeat(32)))
-    expect(image.getAttribute('src')).not.toContain('9'.repeat(32))
-  })
-
   /**
-   * What arming the *other* file would actually cost, measured rather than assumed.
+   * The palette arms a family, and the bill prints whatever a slot names.
    *
-   * The obvious claim — "arming the topper puts a base in the bill" — **is
-   * false, and this test asserts that it is.** A6's rule 0 re-resolves every
-   * placement at bill time, so placing the topper and placing the integral
-   * produce the same one part; the bill was never the broken surface.
-   *
-   * What arming the topper costs is the **substitution mark**: `resolved !==
-   * placed` on every one of the 931 two-sided items, so the bill would tell the
-   * user it printed a file they did not place, every time, for nothing. Arming
-   * `selectVariant`'s answer is what makes the palette and the bill agree — which
-   * is the honest version of the reason, and the reason the arming rule is
-   * `selectVariant`'s rather than `preview`'s.
+   * **The two-sidedness has stopped reaching the bill at all, and that is the
+   * finding this test carries.** V3's defect was that the palette armed a *file*
+   * and rule 0 then printed a different one, on every one of the 931 two-sided
+   * items. Both halves are gone: the palette arms a family (row C1) and a fill
+   * names an exact file (row A3), so the file in the bill is the file in the slot
+   * and no rule can move it. Choosing *which* file of an item fills a slot is row
+   * **C2**'s, and `selectVariantForLock` is still exported for it.
    */
-  it('arms the item, and the bill prints the integral of it', () => {
+  it('arms a family, and the bill prints exactly the file the slot names', () => {
     render(<PaletteHarness />)
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor2) }))
+    fireEvent.click(row('Floor: Straight'))
+    expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
+    // Both files of the two-sided item are in that family's candidate set, and
+    // the family names neither of them: it is the *slot* that will.
+    expect(row('Floor: Straight').getAttribute('aria-label')).toBe(
+      'Floor: Straight, 1 slot, 5 tiles',
+    )
 
-    // **The armed value is the item.** Under V3 this read `MIXED_INTEGRAL.id`,
-    // because the palette had to resolve a file for the canvas to place; V4
-    // deleted that hop and the assertion collapses to the design the row is
-    // keyed by.
-    const armed = screen.getByTestId('armed').textContent ?? ''
-    expect(armed).toBe(FIXTURE_DESIGNS.floor2)
-
-    const bill = buildBillOfTiles([{ design: armed as DesignId, x: 0, z: 0, rotation: 0 }], mixedAssembly, {
-      lock: 'openlock',
-    })
-    // One part, and it is the integral — the file the row's thumbnail is *not*
-    // showing, which is the whole of the disagreement V3 measured on 1,598 of
-    // 3,822 items. Nobody had to choose it and nobody can freeze it: the bill
-    // resolves it here, under the preference in force here.
-    expect(bill.parts).toBe(1)
-    expect(bill.lines.map((line) => line.tile.id)).toEqual([MIXED_INTEGRAL.id])
-    expect(bill.resolved[0]?.resolution?.resolved).toBe(MIXED_INTEGRAL.id)
-    // Two files in the item, so the bill has something to disclose — the
-    // successor to the `substituted` flag this test used to read.
-    expect(bill.resolved[0]?.resolution?.variants).toBe(2)
-
-    // There is no second scene to compare against any more. Arming the preview
-    // instead of the integral was a state the store could hold under V3 and
-    // cannot hold now: both are the same design, and `Placement` has nowhere to
-    // put the difference. `@ts-expect-error` is the demonstration — the day a
-    // file id becomes assignable there again, this line stops failing and the
-    // build breaks.
-    // @ts-expect-error a placement holds a DesignId; MIXED_INTEGRAL.id is a TileId
-    const unrepresentable: Placement = { design: MIXED_INTEGRAL.id, x: 0, z: 0, rotation: 0 }
-    expect(unrepresentable.design).toBe(MIXED_INTEGRAL.id)
-  })
-
-  /**
-   * The pressed row survives a change of lock preference.
-   *
-   * **This test is the same and its subject is gone.** Under V3 the palette armed
-   * a *file*, so the pressed state had to be decided by asking which design that
-   * file belonged to (`armedItem`); comparing `armFile(item, lock)` to the armed
-   * id would have un-pressed the row the moment the preference changed — the
-   * three locks disagree about the file for **37.1%** of items, so a common state
-   * and not a corner — leaving the canvas armed with nothing highlighted. After
-   * V4 the armed value *is* the row's key and there is nothing a preference can
-   * move. Kept as a regression on the behaviour, not on the mechanism.
-   */
-  it('keeps the row pressed when the lock preference changes under it', () => {
-    render(<PaletteHarness />)
-    const row = () => screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.floor2) })
-
-    fireEvent.click(row())
-    expect(row()).toHaveAttribute('aria-pressed', 'true')
-    const armed = screen.getByTestId('armed').textContent
-
-    act(() => {
-      setLockSystem('dragonlock')
-    })
-
-    expect(row()).toHaveAttribute('aria-pressed', 'true')
-    // Nothing re-armed either: the canvas still holds the item it was given.
-    expect(screen.getByTestId('armed')).toHaveTextContent(armed ?? '')
+    for (const tile of [MIXED_INTEGRAL.id, FIXTURE_IDS.floor2]) {
+      const bill = buildBillOfTiles([anInstance([tile])], mixedAssembly, {
+        ...fixtureContext(index.file),
+        lock: 'openlock',
+      })
+      // One part, and it is the file named — for *either* file of the item. Under
+      // rule 0 the second of these would have printed the first.
+      expect(bill.parts).toBe(1)
+      expect(bill.lines.map((line) => line.tile.id)).toEqual([tile])
+      expect(bill.complete).toBe(true)
+    }
   })
 })
 
@@ -577,12 +970,12 @@ function ToolbarHarness({ moving }: { moving?: string }) {
   const tools = usePlanTools()
   const placements = usePlacements()
   const placed = Object.keys(placements).length
-  // The armed item as the record this build would print — `BuilderScreen` asks
-  // `planCatalog.record` for the same thing; this harness holds no `PlanCatalog`,
-  // so it runs the one function that hop is made of.
-  const armedItem = tools.selectedDesign === null ? null : index.engine.aggregates.byDesign.get(tools.selectedDesign)
-  const armed =
-    armedItem == null ? undefined : index.engine.record(selectVariantForLock(armedItem, 'openlock').variant.id)
+  // The armed **step**, since row A8 — the toolbar takes a number rather than a
+  // record, because what is armed is a family of up to five files and has no
+  // single `rotStep`. `ARMED_TURN_STEP_DEG` is what `BuilderScreen` passes and
+  // what `three/edits.ts#planTurn` turns by; 90 is spelled here so the harness
+  // does not import the surface for one constant.
+  const armedStep = tools.selectedTemplate === null ? undefined : 90
   // The 3D surface reports its readout through `onStatus`; the toolbar only
   // reads it. `moving` is the one field this harness needs to stand in for, so
   // the rest is the empty readout the toolbar already handles. `SurfaceStatus`
@@ -604,13 +997,13 @@ function ToolbarHarness({ moving }: { moving?: string }) {
         }
   return (
     <div>
-      <button type="button" onClick={() => tools.setSelectedDesign(design('floor1'))}>
+      <button type="button" onClick={() => tools.setSelectedTemplate(ONE_SLOT_TEMPLATE_ID)}>
         arm
       </button>
       <PlanToolbar
         tools={tools}
         status={status}
-        armed={armed}
+        armedStep={armedStep}
         placed={placed}
         onClear={() => {
           useWorkshopStore.setState({ placements: {} })
@@ -690,7 +1083,10 @@ describe('the toolbar', () => {
  */
 function BillHarness({ download }: { download?: ArchiveDownload }) {
   const placements = usePlacements()
-  const bill = useMemo(() => buildBillOfTiles(Object.values(placements), assembly, { lock: 'openlock' }), [placements])
+  const bill = useMemo(
+    () => buildBillOfTiles(Object.values(placements), assembly, { ...fixtureContext(file), lock: 'openlock' }),
+    [placements],
+  )
   return (
     <BillPanel
       bill={bill}
@@ -712,20 +1108,22 @@ function inertDownload(bill: BillOfTiles): ArchiveDownload {
     cancel: () => undefined,
     dismiss: () => undefined,
     saveUrlList: () => undefined,
+    splitPlans: undefined,
+    saveSplitPart: () => undefined,
   }
 }
 
 describe('the bill of tiles', () => {
   it('reflects the store as it fills', () => {
     render(<BillHarness />)
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('0 tiles placed')
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('0 pieces placed')
     expect(screen.getByText(/Nothing placed yet/)).toBeInTheDocument()
 
     place('floor1', 0, 0)
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('1 tile placed')
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('1 piece placed')
 
     place('floor1', 2, 0)
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('2 tiles placed')
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('2 pieces placed')
   })
 
   it('dedupes by md5, not by tile id', () => {
@@ -735,7 +1133,7 @@ describe('the bill of tiles', () => {
     place('twin', 2, 0)
     render(<BillHarness />)
 
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('2 tiles placed')
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('2 pieces placed')
     // One line, quantity two, and one file's bytes — not two.
     const rows = screen.getAllByRole('listitem')
     expect(rows).toHaveLength(1)
@@ -745,21 +1143,230 @@ describe('the bill of tiles', () => {
     expect(screen.getByText('1.0 MB', { selector: '.of-bill-bytes' })).toBeInTheDocument()
   })
 
-  it('marks the base it inserted for a topper the user did not place', () => {
-    place('floor2')
+  /**
+   * The parts subline, and the mark that used to sit beside it.
+   *
+   * **`base · added` is gone and nothing replaced it**, which is the whole of what
+   * row A3 changed about this panel's rows. It read `BillLine.baseQuantity` and
+   * said *"added under a topper you placed, not placed by you"*; a recipe declares
+   * its base as an ordinary slot, so every copy in the bill is one the scene asked
+   * for and there is no unaccountable row left to mark. What survives is the
+   * inequality the subline is really about: one placement, more than one part.
+   */
+  it('says how many parts a recipe prints, and marks nothing as added', () => {
+    placeBoth('floor2', 'base2')
     render(<BillHarness />)
 
-    expect(screen.getByText(/2 parts to print/)).toBeInTheDocument()
+    expect(screen.getByText(/1 piece placed/)).toBeInTheDocument()
+    // **Row C4: the subline is unconditional and names both figures.** The
+    // heading counts instances and this counts what they cost, so a reader never
+    // has to infer one from the other — and it was rendered only when
+    // `parts > placements`, which hid the part count for every one-part scene and
+    // for every scene whose instances have holes in them.
+    expect(screen.getByText(/2 parts to print, over 2 files/)).toBeInTheDocument()
 
     const rows = screen.getAllByRole('listitem')
     expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.textContent).join(' ')).toContain(FIXTURE_NAMES.base2)
+    expect(document.body).not.toHaveTextContent(/base · added/)
+    expect(document.body).not.toHaveTextContent(/not placed by you/)
+    // **Both rows expand to the same instance**, which is the other half of the
+    // change: an instance is attached to the line of every part it resolved to,
+    // so a five-slot corner is removable from any of its five rows rather than
+    // from one.
+    for (const row of rows) {
+      expect(within(row).getByRole('button', { expanded: false })).toBeInTheDocument()
+    }
+  })
 
-    const auto = rows.filter((row) => row.hasAttribute('data-auto'))
-    expect(auto).toHaveLength(1)
-    expect(auto[0]).toHaveTextContent(FIXTURE_NAMES.base2)
-    expect(auto[0]).toHaveTextContent(/Added under a topper you placed, not placed by you/)
-    // And it is not expandable, because there is no placement of it to remove.
-    expect(within(auto[0] as HTMLElement).queryByRole('button')).toBeNull()
+  /**
+   * The empty slot, on the panel.
+   *
+   * `slot-unfilled` is the note row A3 added and the loudest thing this panel can
+   * now say: every slot of every shipped recipe is required — `PartSlot.optional`
+   * is absent from all 128 parts of the 40 — so an empty one is a hole in the
+   * print, and it is the one condition that refuses a download.
+   */
+  it('warns in full about a slot the scene has not filled', () => {
+    placeHalf('floor2')
+    render(<BillHarness />)
+
+    const note = screen.getByText(/1 slot is still empty/).closest('.of-bill-note')
+    expect(note).not.toBeNull()
+    expect(note).toHaveAttribute('data-tone', 'warn')
+    expect(note).toHaveTextContent(/none of the 128 parts is marked optional/)
+    expect(note).toHaveTextContent(/the download is refused until each one is filled/)
+    // Not behind the `<details>` the info notes live in, and the piece is still
+    // on the plan — §3.2's "places anyway".
+    expect(note?.closest('details')).toBeNull()
+    expect(screen.getByText(/1 piece placed/)).toBeInTheDocument()
+
+    // **Row C4: and the roll-up now has a list behind it.** The note says *how
+    // many* slots are empty; before this block that was the whole of it, and a
+    // user was sent to look at a drawing that is one tab stop. This names the
+    // recipe, the slot and the cell.
+    const fault = screen.getByText(/panels-two-slot · wall · x 0, z 0/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/1 slot needs attention/)).toBeInTheDocument()
+    expect(screen.getByText(/The download is refused until each one holds a file/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing is in this slot/)).toBeInTheDocument()
+
+    // One bill row for the filled slot, one fault entry for the empty one.
+    expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+    expect(document.querySelectorAll('.of-bill-fault')).toHaveLength(1)
+  })
+
+  /**
+   * **Row A11: the same hole, reached by emptying a slot that was filled.**
+   *
+   * Before `clearFill` this state was unreachable from inside the app —
+   * `fillSlot` and `pinFill` both write a tile, so a complete instance stayed
+   * complete and `relock.ts` could only *report* a stale fill it could not
+   * remove. The assertion is the one brief point 1 asks for: clearing must make
+   * the download refuse, so the pack cannot ship a piece one part short.
+   *
+   * `bill.complete` is asserted directly as well as through the panel, because
+   * that boolean is what `useArchiveDownload` refuses on — the copy is what the
+   * user reads and the flag is what stops the bytes.
+   */
+  it('refuses the download once a slot is cleared, and names the slot', () => {
+    let id = '' as PlacementId
+    act(() => {
+      id = placeTemplate(anInstance([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2], { x: 1, z: 2 }))
+    })
+    render(<BillHarness />)
+
+    const billNow = (): BillOfTiles =>
+      buildBillOfTiles(Object.values(useWorkshopStore.getState().placements), assembly, {
+        ...fixtureContext(file),
+        lock: 'openlock',
+      })
+
+    // Both slots filled: nothing to fault and nothing refused.
+    expect(billNow().complete).toBe(true)
+    expect(document.querySelectorAll('.of-bill-fault')).toHaveLength(0)
+
+    act(() => {
+      expect(clearFill(id, TWO_SLOTS[1]!)).toBe('cleared')
+    })
+
+    // C-g: the piece is still on the plan, and the *pack* is what refuses.
+    expect(billNow().complete).toBe(false)
+    expect(screen.getByText(/1 piece placed/)).toBeInTheDocument()
+    expect(screen.getByText(/1 slot is still empty/)).toBeInTheDocument()
+    const fault = screen.getByText(/panels-two-slot · wall · x 1, z 2/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/Nothing is in this slot/)).toBeInTheDocument()
+  })
+
+  /**
+   * **The state row A3 created and row A8 could not surface: a fill that is
+   * wrong.**
+   *
+   * Rule 0 chose the file from a design, so there was nothing to disagree with —
+   * a placement resolved or it did not. A fill names an exact file, so
+   * `@/composition` can say the slot does not admit it, and `fill-off-slot` is
+   * the note. The note is a roll-up: it says how many slots hold a file they
+   * should not, and nothing about which. This block is the which.
+   *
+   * `STRICT_TEMPLATE` is the fixture that makes it reachable — the two A8
+   * recipes both declare `tags: {}`, and an empty require set admits every
+   * record, so no bill either of them produces can carry this note at all.
+   */
+  it('names the slot holding a file it does not admit, and does not refuse the download over it', () => {
+    act(() => {
+      // A wall in a slot that requires `shape|floor`. The record is real, the
+      // catalog holds it, and the slot does not admit it — which is exactly the
+      // population `fill-off-slot` describes: a pinned fill from outside the
+      // candidate set.
+      placeTemplate(aStrictInstance(FIXTURE_IDS.wallNoBase, { x: 3, z: 1 }))
+    })
+    render(<BillHarness />)
+
+    expect(screen.getByText(/1 filled slot holds a file it does not admit/)).toBeInTheDocument()
+    const fault = screen.getByText(/panels-floor-only · floor · x 3, z 1/)
+    // **Not blocking**, and that split is §7's: an unprintable pack is refused, a
+    // wrong build is disclosed. The piece prints; it will not fit.
+    expect(fault.closest('.of-bill-fault')).not.toHaveAttribute('data-blocking')
+    expect(screen.getByText(/These will print and will not fit/)).toBeInTheDocument()
+    expect(screen.getByText(/You pinned it; pick another file for the slot/)).toBeInTheDocument()
+
+    // The file is still billed — one part lost is not the instance, and this one
+    // is not even lost.
+    expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /Remove the piece with the faulty floor at x 3, z 1/ }))
+    expect(placementCount()).toBe(0)
+  })
+
+  it('tells a retired fill apart from an empty slot, and blocks the download over both', () => {
+    // The three states an explicitly-filled instance can be wrong in are
+    // `empty`, `retired` and `off-slot`, and the first two look identical to
+    // `BillOfTiles.complete` — the pack is one file short either way. They are
+    // not identical to a user: one slot was never filled, the other names a file
+    // that has left the archive, and `ResolvedSlotFill.admissible` is
+    // `undefined` for both because there is nothing to check.
+    act(() => {
+      placeTemplate(anInstance([FIXTURE_IDS.floor1, 'tiles/gone/away.stl'], { x: 2, z: 2 }))
+    })
+    render(<BillHarness />)
+
+    const fault = screen.getByText(/panels-two-slot · wall · x 2, z 2/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/has left the archive, so there is nothing to print for it/)).toBeInTheDocument()
+    // Not an orphan: the other slot resolved, so the instance is a row with a
+    // hole in it rather than a piece with nothing to print.
+    expect(screen.queryByText(/nothing this build can print/)).toBeNull()
+    expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+  })
+
+  it('gives an instance with nothing to print one block and one Remove, not two', () => {
+    // Both surfaces can describe an instance that resolved to no parts — the
+    // orphan block by cause, the fault block slot by slot — and two Remove
+    // buttons for one piece in a 302px column is worse than either. The orphan
+    // block wins because the whole piece has to go.
+    act(() => {
+      placeTemplate(anInstance([null, null], { x: 5, z: 5 }))
+    })
+    render(<BillHarness />)
+
+    expect(screen.getByText(/1 placed piece has nothing this build can print/)).toBeInTheDocument()
+    expect(screen.queryByText(/slots need attention/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: /^Remove/ })).toHaveLength(1)
+  })
+
+  it('says nothing at all when every fill belongs in its slot', () => {
+    // The negative, over the same strict recipe: a floor in a floor slot. Without
+    // it the assertion above would pass on a block that always renders.
+    act(() => {
+      placeTemplate(aStrictInstance(FIXTURE_IDS.floor1, { x: 3, z: 1 }))
+    })
+    render(<BillHarness />)
+
+    expect(screen.queryByText(/needs attention/)).toBeNull()
+    expect(document.querySelectorAll('.of-bill-fault')).toHaveLength(0)
+    expect(document.querySelectorAll('.of-bill-note[data-tone="warn"]')).toHaveLength(0)
+  })
+
+  /**
+   * **`BillLine.slots`' first consumer, and the reason A3 added the field.**
+   *
+   * Two slots of one instance resolving to the same md5 is a legitimate quantity
+   * of 2 — contract C-c, the md5 dedupe doing its job — and before this the row
+   * read `×2` with one placement under it and no way to account for the second
+   * copy. `tileIds` cannot carry it: it is one id per *catalog path*, so it
+   * cannot tell two askers of one path from one.
+   */
+  it('names both slots when one instance asks for one file twice', () => {
+    placeBoth('floor1', 'twin', 1, 1)
+    render(<BillHarness />)
+
+    // One line, quantity two, one instance.
+    const row = screen.getByRole('button', { expanded: false })
+    expect(row).toHaveTextContent('×2')
+    fireEvent.click(row)
+
+    expect(screen.getByText(/x 1, z 1 · floor \+ wall/)).toBeInTheDocument()
   })
 
   it('makes every placement reachable and removable from the panel', () => {
@@ -780,22 +1387,26 @@ describe('the bill of tiles', () => {
     expect(screen.queryByText('x 1, z 2')).toBeNull()
   })
 
-  it('lists a placement whose tile the catalog no longer holds, and offers to remove it', () => {
+  it('lists an instance nothing in this build can print, and offers to remove it', () => {
     act(() => {
-      // A design this catalog does not hold. Since row V4 that is what strands
-      // a placement — the whole item gone from the corpus, or a tag edit having
-      // moved its files to another design.
-      placeTile({ design: 'd-retired-gone' as DesignId, x: 4, z: 4, rotation: 0 })
+      // A recipe this build does not ship. Since row A1 that is one of the two
+      // ways an instance resolves to no parts at all — the other being a fill
+      // whose file has left the archive — and both land in this block, because
+      // the consequence is the same: no line, and no way to reach the piece from
+      // the inventory without one.
+      placeTemplate({
+        ...anInstance([FIXTURE_IDS.floor1], { x: 4, z: 4 }),
+        template: TemplateId.parse('gone-forever'),
+      })
     })
     render(<BillHarness />)
 
-    // One paragraph, not two: `unknown-tile`'s rolled-up note is deliberately
-    // dropped from the warning list because this block is its rendering and can
-    // act on it. See `BillPanel.tsx`.
-    expect(screen.getByText(/1 placed tile is not in this catalog build/)).toBeInTheDocument()
-    expect(screen.getByText('d-retired-gone')).toBeInTheDocument()
+    expect(screen.getByText(/1 placed piece has nothing this build can print/)).toBeInTheDocument()
+    // The template id, which is the only identity an orphan is guaranteed to
+    // have.
+    expect(screen.getByText('gone-forever')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Remove the retired tile/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Remove the unprintable piece/ }))
     expect(placementCount()).toBe(0)
   })
 
@@ -804,7 +1415,14 @@ describe('the bill of tiles', () => {
     render(<BillHarness />)
 
     expect(screen.getByText(/Over 512 MB to download/)).toBeInTheDocument()
-    expect(screen.getByText(/Expect a long transfer/)).toBeInTheDocument()
+    // **Row C4 changed this sentence's subject.** It said "expect a long
+    // transfer" and quoted the whole-corpus median; 512 MB is
+    // `download/save.ts#BLOB_FALLBACK_LIMIT_BYTES` to the byte, so for every
+    // browser without a streaming save it is a *refusal* rather than a slow
+    // download — which is the only part of it a user can act on.
+    expect(screen.getByText(/refuse it outright rather than slowing down/)).toBeInTheDocument()
+    expect(screen.getByText(/about fifty distinct files/)).toBeInTheDocument()
+    expect(screen.queryByText(/Expect a long transfer/)).toBeNull()
     expect(screen.getByText('600.0 MB', { selector: '.of-bill-bytes' })).toHaveAttribute(
       'data-verdict',
       'large',
@@ -818,38 +1436,55 @@ describe('the bill of tiles', () => {
 
     expect(screen.getByText(/Over 2 GB to download/)).toBeInTheDocument()
     expect(screen.getByText(/past what one browser download reliably finishes/)).toBeInTheDocument()
-    expect(screen.getByText('2100.0 MB', { selector: '.of-bill-bytes' })).toHaveAttribute(
+    expect(screen.getByText('2.1 GB', { selector: '.of-bill-bytes' })).toHaveAttribute(
       'data-verdict',
       'huge',
     )
   })
 
-  it('shows a missing-base warning in full rather than behind a disclosure', () => {
+  /**
+   * **The missing-base warning is gone from this panel, and this is the negative
+   * that records it.**
+   *
+   * `wallNoBase` is an openforge topper whose size code (`ZZ`) no base in the
+   * fixture — or in the live corpus — answers to, and placing it used to produce
+   * `no-matching-base`: *"a gap in the library rather than anything you did …
+   * nothing to lock to and will not stay upright."* Rule 1 emitted it, row A3
+   * deleted rule 1, and `assembly/baseMatch.ts#baseGap` still classifies the
+   * archive's 86 / 31 / 260 split for whoever asks — but **no bill can ask**, so
+   * the copy left `noteCopy` rather than being rendered for a note that can never
+   * arrive.
+   *
+   * Warning a user before they fill a `base` slot with nothing is row **C2**'s
+   * (the solver has the candidate set) and row **C3**'s (the editor has the
+   * slot). Asserted as an absence here so that neither row re-adds it to the bill
+   * by accident.
+   */
+  it('says nothing about a missing base, because nothing adds one any more', () => {
     place('wallNoBase')
     render(<BillHarness />)
 
-    const note = screen.getByText(/1 piece has no base in the archive/).closest('.of-bill-note')
-    expect(note).not.toBeNull()
-    expect(note).toHaveAttribute('data-tone', 'warn')
-    // The consequence, spelled out — this is the note that decides whether
-    // somebody prints a wall that cannot stand up.
-    expect(note).toHaveTextContent(/nothing to lock to and will not stay upright/)
-    // Row D4's re-key took this bucket from 129 tiles over nine size codes to 86
-    // over six, and row A6 corrected the copy. Asserted rather than left to a
-    // reader, because a stale corpus figure in user-facing prose is exactly the
-    // thing nobody notices.
-    expect(note).toHaveTextContent(/six size codes are affected, over 86 tiles corpus-wide/)
-    // And it is not inside the `<details>` the info notes live in.
-    expect(note?.closest('details')).toBeNull()
+    expect(screen.queryByText(/no base in the archive/)).toBeNull()
+    expect(screen.queryByText(/will not stay upright/)).toBeNull()
+    expect(document.querySelectorAll('.of-bill-note[data-tone="warn"]')).toHaveLength(0)
+    // One row, one part: the topper, exactly as the scene named it.
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByText(FIXTURE_NAMES.wallNoBase, { selector: '.of-bill-name' })).toBeInTheDocument()
   })
 
   it('keeps the info notes quiet but present', () => {
-    place('floor2')
+    // `slab` is the `none` footprint — 726 corpus files — so the scene carries
+    // exactly one `info` note and no `warn` one. It read `base was added for
+    // you` until row A3 deleted `base-auto-inserted` with the rule that emitted
+    // it, and `no-footprint` is the archetype that survives: true of the data,
+    // nothing to act on.
+    place('slab')
     render(<BillHarness />)
 
     const details = screen.getByText(/notes? about this scene/).closest('details')
     expect(details).not.toBeNull()
-    expect(details).toHaveTextContent(/base was added for you/)
+    expect(details).toHaveTextContent(/cannot be drawn on the plan/)
+    expect(details).toHaveTextContent(/726 corpus tiles are in this state/)
   })
 
   it('sorts rows by copies descending', () => {
@@ -865,275 +1500,29 @@ describe('the bill of tiles', () => {
   })
 })
 
-/* ------------------------------------------------- the three missing-base gaps */
+/* --------------------------------- deleted: the three missing-base gaps (A3) */
 
-/**
- * The three ways a topper can end up with nothing under it, rendered.
- *
- * 377 of the 4,363 live openforge toppers reach one of them, and the whole of
- * row D5 is that they are **three different problems with three different
- * remedies** — the archive is missing a base (86 tiles), no base can carry the
- * shape (31), or the tile publishes no key to search bases by (260). One generic
- * "no base found" would tell the first group they had made a mistake and send the
- * second group looking for an object that cannot exist.
- *
- * Those are the *archive's* counts. What a user meets under openlock is
- * 29 / 29 / 247, because row A6's rule 0 resolves 72 of the 377 to a sibling
- * variant that needs no base at all — see `variant resolution in the bill`
- * below, which is where that half is asserted.
- *
- * The shared fixture only covers the first case, so this block extends it rather
- * than editing it: `src/builder/canvas` and `src/screens/builder` parse the same
- * nine records, and adding tiles to it would change what their palettes list.
- * New tags are **appended**, because the existing records index into that array
- * by position.
- */
-const GAP_TAGS = [...FIXTURE_CATALOG.tags, 'connection|openlock|topless'] as const
+/*
+  Six tests stood here, over a four-record extension of the shared fixture
+  (`gapCatalog`): a half-unit strip with no congruent base, a shapeless corner
+  with no key to match on, and a topper whose only base is the topless print.
+  They asserted the three remedies `no-matching-base` / `no-congruent-base` /
+  `base-unmatchable` spelled out, plus `base-option-chosen`'s print-variant
+  disclosure and the negative when the plain base won.
 
-/** Each gap record's design. One file per design, as in the shared fixture. */
-const GAP_DESIGNS = {
-  strip: 'd-strip',
-  shapeless: 'd-shapeless',
-  toplessTopper: 'd-topless-topper',
-  toplessBase: 'd-topless-base',
-} as const
+  **All five codes left `NoteCode` with rule 1, so no bill can emit one and no
+  render can reach the copy.** The classification survives — `baseGap` measures
+  86 / 31 / 260 over 4,363 toppers, identically under every lock preference, and
+  `src/generator/placement/corpus.test.ts` asserts that split against the live
+  archive. What has no caller is the *bill's* rendering of it.
 
-const GAP_IDS = {
-  strip: 'tiles/cut-stone/misc/risers/risers/cut-stone#riser+high.2x0.5.openforge.stl',
-  shapeless: 'tiles/cavern/volcanic/thick_wall/corner/cavern%volcanic#corner.corner,120°.openforge.stl',
-  toplessTopper: 'tiles/towne/floors/floor/openforge/towne#floor.2x2.T.openforge.stl',
-  toplessBase: 'tiles/bases/plain/base/openlock/plain#base.T.openlock+topless.stl',
-} as const
+  Not rewritten against a slot, because the question "what do we tell a user
+  whose base slot has no candidate" is answered where the candidate set is: row
+  **C2**'s solver, and row **C3**'s editor. The bill-block test above — "says
+  nothing about a missing base" — is the negative that keeps this from being
+  re-added here by accident.
+*/
 
-const GAP_NAMES = {
-  strip: 'Cut Stone High Riser 2x0.5',
-  shapeless: 'Cavern Volcanic Hex Corner 120°',
-  toplessTopper: 'Towne Floor 2x2 T',
-  toplessBase: 'Plain Base T Topless',
-} as const
-
-function gapCatalog(): CatalogFile {
-  const tag = (name: string): number => GAP_TAGS.indexOf(name as (typeof GAP_TAGS)[number])
-  const next = FIXTURE_CATALOG.records.length
-  return CatalogFileSchema.parse({
-    ...FIXTURE_CATALOG,
-    tags: [...GAP_TAGS],
-    records: [
-      ...FIXTURE_CATALOG.records,
-      {
-        // A half-unit strip. `footprintKey` gives `rect:0.5x2`; no base in this
-        // catalog — or in the live one — is half a unit wide. `no-congruent-base`.
-        id: GAP_IDS.strip,
-        ord: next,
-        blob: '9'.repeat(32),
-        file: 'cut-stone#riser+high.2x0.5.openforge.stl',
-        bytes: 2_000_000,
-        sprite: true,
-        thumb: false,
-        family: 'tiles/cut-stone/misc/risers/risers',
-        design: 'd-strip',
-        name: GAP_NAMES.strip,
-        kinds: ['riser'],
-        conn: ['openforge'],
-        layer: 'topper',
-        texture: 'cut-stone',
-        tags: [tag('connection|openforge')],
-        foot: { shape: 'rect', w: 2, d: 0.5 },
-      },
-      {
-        // No size code and no derivable footprint: nothing to search bases by.
-        // `base-unmatchable`.
-        id: GAP_IDS.shapeless,
-        ord: next + 1,
-        blob: 'a'.repeat(32),
-        file: 'cavern%volcanic#corner.corner,120°.openforge.stl',
-        bytes: 8_000_000,
-        sprite: true,
-        thumb: false,
-        family: 'tiles/cavern/volcanic/thick_wall/corner',
-        design: 'd-shapeless',
-        name: GAP_NAMES.shapeless,
-        kinds: [],
-        conn: ['openforge'],
-        build: 'wall on tile',
-        layer: 'topper',
-        texture: 'cavern',
-        tags: [tag('connection|openforge'), tag('build|wall on tile')],
-        foot: { shape: 'none' },
-      },
-      {
-        // A topper whose only base is the topless print — the case D1 left a note
-        // code for and could not add. `base-auto-inserted` *and*
-        // `base-option-chosen`.
-        id: GAP_IDS.toplessTopper,
-        ord: next + 2,
-        blob: 'b'.repeat(32),
-        file: 'towne#floor.2x2.T.openforge.stl',
-        bytes: 4_000_000,
-        sprite: true,
-        thumb: false,
-        family: 'tiles/towne/floors/floor/openforge',
-        design: 'd-topless-topper',
-        name: GAP_NAMES.toplessTopper,
-        kinds: ['floor'],
-        conn: ['openforge'],
-        layer: 'topper',
-        texture: 'towne',
-        tags: [tag('connection|openforge')],
-        // 3x3 rather than 2x2: row D4 keys base matching on the resolved
-        // primitive rather than the size code, and the shared fixture already
-        // holds a *plain* 2x2 base. Under a congruence join that plain base
-        // legitimately outscores the topless one, so this case stopped being
-        // "the only base is the topless print" and `base-option-chosen`
-        // correctly did not fire. The fixture was relying on the size code being
-        // the key. 3x3 is a primitive no other fixture base shares.
-        foot: { shape: 'rect', w: 3, d: 3 },
-        sizeCode: 'T',
-      },
-      {
-        id: GAP_IDS.toplessBase,
-        ord: next + 3,
-        blob: 'c'.repeat(32),
-        file: 'plain#base.T.openlock+topless.stl',
-        bytes: 300_000,
-        sprite: true,
-        thumb: false,
-        family: 'tiles/bases/plain/base/openlock',
-        design: 'd-topless-base',
-        name: GAP_NAMES.toplessBase,
-        kinds: ['base', 'floor'],
-        conn: ['openlock'],
-        layer: 'base',
-        texture: 'plain',
-        tags: [tag('shape|base'), tag('connection|openlock|topless')],
-        // Matches the topper above, and nothing else in either fixture set.
-        foot: { shape: 'rect', w: 3, d: 3 },
-        sizeCode: 'T',
-      },
-    ],
-  })
-}
-
-/** Both id maps, so a scene can mix a shared-fixture tile with a gap one. */
-/** The keys as designs, which is what a placement names since row V4. */
-const ALL_DESIGNS = { ...FIXTURE_DESIGNS, ...GAP_DESIGNS }
-
-/** The panel over `gapCatalog`, with the placements passed in rather than stored. */
-function GapHarness({ tiles }: { tiles: readonly (keyof typeof ALL_DESIGNS)[] }) {
-  const gapFile = useMemo(gapCatalog, [])
-  const gapAssembly = useMemo(() => buildAssemblyIndex(gapFile), [gapFile])
-  const placements = useMemo<Record<string, Placement>>(
-    () =>
-      Object.fromEntries(
-        tiles.map((key, i) => [
-          `p${String(i)}`,
-          { design: ALL_DESIGNS[key] as DesignId, x: i * 2, z: 0, rotation: 0 },
-        ]),
-      ),
-    [tiles],
-  )
-  const bill = useMemo(
-    () => buildBillOfTiles(Object.values(placements), gapAssembly, { lock: 'openlock' }),
-    [placements, gapAssembly],
-  )
-  return (
-    <BillPanel
-      bill={bill}
-      placements={placements}
-      assets={gapFile.assets}
-      sheet={gapFile.sprite}
-      materialOf={(record) => resolveMaterial(resolveTags(gapFile, record), record.file).material}
-      download={inertDownload(bill)}
-    />
-  )
-}
-
-describe('the missing-base gap', () => {
-  /** The warning paragraphs, in the order the panel renders them. */
-  function warnings(): string[] {
-    return [...document.querySelectorAll('.of-bill-note[data-tone="warn"]')].map(
-      (element) => element.textContent ?? '',
-    )
-  }
-
-  it('tells a user with no base in the archive that the library is what is missing', () => {
-    render(<GapHarness tiles={['wallNoBase']} />)
-
-    const note = screen.getByText(/1 piece has no base in the archive/).closest('.of-bill-note')
-    expect(note).toHaveAttribute('data-tone', 'warn')
-    // Not the user's mistake — the sentence that has to be there.
-    expect(note).toHaveTextContent(/a gap in the library rather than anything you did/)
-    // The consequence, and something to do about it.
-    expect(note).toHaveTextContent(/nothing to lock to and will not stay upright/)
-    expect(note).toHaveTextContent(/pair each one with a base you already own/)
-    expect(note?.closest('details')).toBeNull()
-  })
-
-  it('tells a user with an unsupportable shape that it is geometry, not a gap', () => {
-    render(<GapHarness tiles={['strip']} />)
-
-    const note = screen.getByText(/1 piece has a shape no base is built to carry/).closest('.of-bill-note')
-    expect(note).toHaveAttribute('data-tone', 'warn')
-    // The distinction from the case above, in as many words: nobody should go
-    // looking for a base that cannot exist.
-    expect(note).toHaveTextContent(/this is geometry, not an omission/)
-    expect(note).toHaveTextContent(/the narrowest base in the archive is a full unit wide/)
-    expect(note).toHaveTextContent(/print them standalone/)
-    expect(note?.closest('details')).toBeNull()
-  })
-
-  it('tells a user with nothing to match on that the tile, not the archive, is silent', () => {
-    render(<GapHarness tiles={['shapeless']} />)
-
-    const note = screen.getByText(/1 piece gives nothing to match a base on/).closest('.of-bill-note')
-    expect(note).toHaveAttribute('data-tone', 'warn')
-    expect(note).toHaveTextContent(/no key to search bases by/)
-    // Which is the opposite advice to the geometry case: the base may well exist.
-    expect(note).toHaveTextContent(/A base for these probably does exist/)
-    expect(note?.closest('details')).toBeNull()
-  })
-
-  it('renders the three causes as three separate warnings, never as one', () => {
-    render(<GapHarness tiles={['wallNoBase', 'strip', 'shapeless']} />)
-
-    const shown = warnings()
-    expect(shown).toHaveLength(3)
-    // Three distinct headlines and three distinct bodies — the defect this row
-    // fixes is one sentence standing in for all three.
-    expect(new Set(shown).size).toBe(3)
-    expect(shown.join(' ')).toMatch(/no base in the archive/)
-    expect(shown.join(' ')).toMatch(/a shape no base is built to carry/)
-    expect(shown.join(' ')).toMatch(/gives nothing to match a base on/)
-  })
-
-  it('names the print option when the base handed out is not the plain one', () => {
-    render(<GapHarness tiles={['toplessTopper']} />)
-
-    // The base *was* inserted, so this is not a gap — it is the disclosure D1
-    // left the code for: what you print is a different product.
-    const note = screen.getByText(/1 matched base is a print variant, not the plain base/).closest('.of-bill-note')
-    expect(note).toHaveAttribute('data-tone', 'warn')
-    expect(note).toHaveTextContent(/topless — has no top surface at all/)
-    // Both causes, distinguished: `option` ranks directly below `lock` and above
-    // everything else, so either the archive has nothing plainer or the lock beat
-    // it — and only the second one has a lever. Saying only the second would be a
-    // false promise on this very fixture, where the topless print is the only `T`
-    // base there is.
-    expect(note).toHaveTextContent(/the archive holds no plainer print of this base/)
-    expect(note).toHaveTextContent(/changing the lock preference gets the full base back; in the first, nothing will/)
-
-    // Two lines in the bill, one of them the base nobody placed.
-    expect(screen.getByText(/2 parts to print/)).toBeInTheDocument()
-    expect(screen.getByText(GAP_NAMES.toplessBase)).toBeInTheDocument()
-  })
-
-  it('keeps the option disclosure out of the way when the plain base wins', () => {
-    render(<GapHarness tiles={['floor2']} />)
-
-    expect(screen.queryByText(/print variant/)).toBeNull()
-    expect(warnings()).toHaveLength(0)
-  })
-})
 
 /* ------------------------------------------------------------- the download */
 
@@ -1175,7 +1564,10 @@ function DownloadHarness({
   source?: BlobSource
 }) {
   const placements = usePlacements()
-  const bill = useMemo(() => buildBillOfTiles(Object.values(placements), assembly, { lock: 'openlock' }), [placements])
+  const bill = useMemo(
+    () => buildBillOfTiles(Object.values(placements), assembly, { ...fixtureContext(file), lock: 'openlock' }),
+    [placements],
+  )
   const download = useArchiveDownload({
     bill,
     assets: file.assets,
@@ -1272,6 +1664,50 @@ describe('the download action', () => {
     expect(alert).toHaveTextContent(/an archive holding only a licence is not a result/i)
   })
 
+  /**
+   * **The hole between the lines, refused — row A8's one behaviour requirement.**
+   *
+   * `src/download/**` cannot see this state: a plan is built from `BillLine`s and
+   * an unfilled slot is the *absence* of one, so a pack of an incomplete scene
+   * would be a plausible zip that opens cleanly and is one file short of a
+   * printable model. `BillOfTiles.complete` and `.unfilled` are the two facts,
+   * and `useArchiveDownload` is the only caller that holds them.
+   *
+   * Every slot of every shipped recipe is required — `PartSlot.optional` is
+   * absent from all 128 parts of the 40 — so there is no scene for which this
+   * refusal has an exemption to make.
+   */
+  it('refuses a scene with an unfilled slot, before it fetches a byte', async () => {
+    placeHalf('floor1')
+    let opened = 0
+    render(
+      <DownloadHarness
+        environment={blobEnvironment()}
+        source={fakeSource(() => {
+          opened += 1
+          return 'ok'
+        }, sizesOf(file))}
+      />,
+    )
+
+    // The bill is not empty — the filled slot is a line, and the button offers
+    // it — which is exactly why the refusal has to be on the press.
+    expect(screen.getByRole('button', { name: /Download tile pack/ })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
+
+    const alert = await failureText()
+    expect(alert).toHaveAttribute('data-kind', 'incomplete')
+    expect(alert).toHaveTextContent(/One slot on the plan is still empty/)
+    // The recipe and the slot, named — a bare count would send the user to look
+    // at a drawing that is one tab stop.
+    expect(alert).toHaveTextContent(/panels-two-slot: wall/)
+    expect(alert).toHaveTextContent(/a streamed zip records its sizes at the end/)
+    expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+    // Nothing was fetched and nothing was saved.
+    expect(opened).toBe(0)
+    expect(saved).toHaveLength(0)
+  })
+
   it('streams and saves a real archive', async () => {
     place('floor1')
     render(
@@ -1329,6 +1765,91 @@ describe('the download action', () => {
     expect(urls).toHaveLength(2)
     expect(urls.some((type) => type.startsWith('text/plain'))).toBe(true)
     expect(urls.some((type) => type.startsWith('text/csv'))).toBe(true)
+  })
+
+  /**
+   * **Splitting is not offered when it cannot help.**
+   *
+   * One 600 MB file against a 1 MB ceiling: every candidate part is already over
+   * the limit before a byte of licensing is reserved, so `splitArchivePlans`
+   * raises `ArchivePartTooLargeError` and the failure carries no parts. The URL
+   * list stays the only offer, which is what the test above asserts it still is.
+   */
+  it('does not offer to split when one file alone is over the limit', async () => {
+    place('big')
+    render(
+      <DownloadHarness
+        environment={blobEnvironment(1_000_000)}
+        source={fakeSource(() => 'ok', sizesOf(file))}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
+    const alert = await failureText()
+
+    expect(alert).toHaveAttribute('data-kind', 'too-large')
+    expect(within(alert).queryByRole('button', { name: /Save as .* smaller files/ })).toBeNull()
+    expect(alert).toHaveTextContent(/Take the URL list instead and feed it to a download manager/)
+  })
+
+  /**
+   * **The split offer, taken one part at a time.**
+   *
+   * Six distinct files — 8 MB, 3 MB, 1.2 MB, 1 MB, 0.9 MB and 0.5 MB, 14.6 MB
+   * of models between them — against a 12 MB ceiling. The room does not fit, so
+   * the refusal fires exactly as above; but the largest single file (8 MB) sits
+   * inside a part's 10 MB budget (12 MB less `SPLIT_OVERHEAD_BYTES`), so
+   * first-fit-decreasing packs the six into **two** parts and the failure now
+   * carries them.
+   *
+   * Each part is saved on its own press. Nothing is auto-triggered: two
+   * back-to-back saves with no user gesture between them is the shape browsers
+   * popup-block.
+   */
+  it('offers a too-large room as several smaller parts, saved one press at a time', async () => {
+    place('floor2', 0, 0)
+    place('wallNoBase', 2, 0)
+    place('arc', 4, 0)
+    place('floor1', 6, 0)
+    place('slab', 8, 0)
+    place('base2', 10, 0)
+    render(
+      <DownloadHarness
+        environment={blobEnvironment(12_000_000)}
+        source={fakeSource(() => 'ok', sizesOf(file))}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
+    const alert = await failureText()
+    expect(alert).toHaveAttribute('data-kind', 'too-large')
+    expect(alert).toHaveTextContent(/Save it as 2 smaller archives instead/)
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Save as 2 smaller files' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Saved part 1 of 2/)).toBeInTheDocument()
+    })
+    expect(saved).toHaveLength(1)
+    expect(saved[0]?.filename).toMatch(/^openforge-room-\d{4}-\d{2}-\d{2}-part-1-of-2\.zip$/)
+    expect(saved[0]?.blob.size).toBeLessThanOrEqual(12_000_000)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save part 2 of 2' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Saved all 2 parts/)).toBeInTheDocument()
+    })
+    expect(saved).toHaveLength(2)
+    expect(saved[1]?.filename).toMatch(/-part-2-of-2\.zip$/)
+    // Every model byte in the bill landed in one part or the other, once —
+    // and only once: the upper bound is tight enough that a file duplicated
+    // across both parts (adding at least base2's 500,000 bytes) would fail
+    // it, while the gap above the measured total (14,608,166: the 14,600,000
+    // of model bytes plus two parts' worth of LICENSE.txt/ATTRIBUTION.csv
+    // overhead) stays loose enough not to flake on that overhead's exact size.
+    const totalSavedBytes = saved.reduce((sum, entry) => sum + entry.blob.size, 0)
+    expect(totalSavedBytes).toBeGreaterThan(14_600_000)
+    expect(totalSavedBytes).toBeLessThan(14_800_000)
   })
 
   it('says so when the browser offers no way to save a file at all', async () => {
@@ -1407,10 +1928,11 @@ describe('the download action', () => {
       records: [{ ...FIXTURE_CATALOG.records[0], file: '...' }],
     })
     const brokenIndex = buildAssemblyIndex(broken)
-    const placements: Record<string, Placement> = {
-      p1: { design: design('floor1'), x: 0, z: 0, rotation: 0 },
-    }
-    const bill = buildBillOfTiles(Object.values(placements), brokenIndex, { lock: 'openlock' })
+    const instance = anInstance([FIXTURE_IDS.floor1])
+    const bill = buildBillOfTiles([instance], brokenIndex, {
+      ...fixtureContext(broken),
+      lock: 'openlock',
+    })
 
     function Harness() {
       const download = useArchiveDownload({ bill, assets: file.assets, environment: blobEnvironment() })
@@ -1459,333 +1981,32 @@ describe('the download action', () => {
   })
 })
 
-/* --------------------------------------------------------------- the library */
+/* ------------------------ deleted: row A6's variant resolution in the bill (A3) */
 
-/* ------------------------------------------- row A6: variant resolution in the bill */
+/*
+  Eight tests stood here, over a four-record extension of the shared fixture
+  (`a6Catalog`): one design published twice, a dragonlock-only tile, and a tile
+  with no connection tag at all. They asserted rule 0 end to end — one part under
+  openlock and two under magnetic for the same placement, `wrong-system`,
+  `unknown-joinery`, the `Resolved for openlock` scene summary, the per-row
+  "published as 2 files" mark, and the join that kept a resolved placement
+  removable rather than reporting it as retired.
 
-/**
- * One design published twice — the merge the whole aggregation epic is for.
- *
- * **The shared fixture cannot express this and deliberately does not try.** Every
- * one of its nine records has its own `design`, because row A2 had to give `twin`
- * one: two records in a group must agree on `name`, `kinds`, `texture`, `build`,
- * `foot`, `sizeCode` and `rotStep` — A1 measures zero live aggregates that hold
- * two of any of them, and `pipeline/aggregate.ts` fails the build on it — and
- * `twin` carries a different display name from `floor1` on purpose. So a
- * two-variant item is a *new* fixture, built to that invariant rather than
- * against it, and this block extends the shared catalog the way `gapCatalog`
- * does.
- *
- * Three items, and each is one verdict rule 0 has to reach:
- *
- *   - **`mergedTopper` + `mergedIntegral`** — `d-merged`, one item, two files.
- *     Under openlock the integral file wins and the assembly is one part; under
- *     dragonlock and magnetic there is no integral variant in that system, so the
- *     topper wins and a base is added. This is the item the row exists for.
- *   - **`dragonOnly`** — `d-dragon`, a single self-sufficient file carrying
- *     dragonlock. Under openlock the honest verdict is `wrong-system`: it will
- *     print and stand and it will not clip to its neighbours.
- *   - **`untagged`** — `d-untagged`, a single file with **no connection tag at
- *     all**. 93 live aggregates (2.4%) are in this state, 33 of which name a lock
- *     in the filename only. The verdict is `unknown-joinery`, and because
- *     `notes.ts` has no code for it the row mark is the only place it can surface.
- *
- * `mergedIntegral` shares `mergedTopper`'s name, kinds, texture, build, foot and
- * size code, and differs only in `file`, `family`, `blob`, `bytes`, `conn` and
- * `layer` — which is exactly the axis A1 measures as the only one that varies.
- */
-const A6_TAGS = [...FIXTURE_CATALOG.tags, 'connection|dragonlock'] as const
+  **Every one of them read a `VariantResolution`, and a fill names an exact
+  file.** Nothing chooses at resolution time, so there is no verdict, no variant
+  count and no option tie to report; `billView.ts` lost `resolutionSummary` and
+  `rowResolutionCopy` with the type. The `unknown-joinery` mark went with them and
+  was the only surface for the 93 items (2.4%) that name no connector anywhere —
+  recorded here because it is a real loss rather than a tidy-up, and row **C4**
+  owns where it comes back.
 
-const A6_IDS = {
-  mergedTopper: 'tiles/towne/floors/floor/openforge/towne#floor.2x2.merged.openforge.stl',
-  mergedIntegral: 'tiles/towne/floors/floor/openlock/towne#floor.2x2.merged.openlock.stl',
-  dragonOnly: 'tiles/towne/walls/wall/dragonlock/towne#wall.2x.dragonlock.stl',
-  untagged: 'tiles/towne/props/pillar/towne#pillar.1x1.stl',
-} as const
+  Two of the eight facts are asserted elsewhere rather than dropped. That the bill
+  prints exactly the file a slot names, for *either* file of a two-sided item, is
+  the last test of "the two-sided item" above. That an instance stays reachable
+  and removable from every line it contributed to is "says how many parts a recipe
+  prints" in the bill block.
 
-const A6_NAMES = {
-  merged: 'Towne Merged Floor 2x2',
-  dragonOnly: 'Towne Dragonlock Wall 2x',
-  untagged: 'Towne Pillar 1x1',
-} as const
-
-function a6Catalog(): CatalogFile {
-  const tag = (name: string): number => A6_TAGS.indexOf(name as (typeof A6_TAGS)[number])
-  const next = FIXTURE_CATALOG.records.length
-  // Everything the two `d-merged` variants must agree on, spelled once so the
-  // fixture cannot drift out of A1's hoisting invariant.
-  const merged = {
-    design: 'd-merged',
-    name: A6_NAMES.merged,
-    kinds: ['floor'],
-    build: 'separate wall',
-    texture: 'towne',
-    foot: { shape: 'rect', w: 2, d: 2 },
-    sizeCode: 'A',
-    sprite: true,
-    thumb: false,
-  }
-  return CatalogFileSchema.parse({
-    ...FIXTURE_CATALOG,
-    tags: [...A6_TAGS],
-    records: [
-      ...FIXTURE_CATALOG.records,
-      {
-        ...merged,
-        id: A6_IDS.mergedTopper,
-        ord: next,
-        blob: 'd'.repeat(32),
-        file: 'towne#floor.2x2.merged.openforge.stl',
-        bytes: 4_000_000,
-        family: 'tiles/towne/floors/floor/openforge',
-        conn: ['openforge'],
-        layer: 'topper',
-        tags: [tag('shape|floor'), tag('connection|openforge')],
-      },
-      {
-        // The same design, printed with the OpenLOCK footer in the mesh. Bigger
-        // than the topper, which is the ordinary case and the reason `bytes` is
-        // never the tie-break that decides a variant.
-        ...merged,
-        id: A6_IDS.mergedIntegral,
-        ord: next + 1,
-        blob: 'e'.repeat(32),
-        file: 'towne#floor.2x2.merged.openlock.stl',
-        bytes: 4_600_000,
-        family: 'tiles/towne/floors/floor/openlock',
-        conn: ['openlock'],
-        layer: 'integral',
-        tags: [tag('shape|floor'), tag('connection|openlock')],
-      },
-      {
-        id: A6_IDS.dragonOnly,
-        ord: next + 2,
-        blob: 'f'.repeat(32),
-        file: 'towne#wall.2x.dragonlock.stl',
-        bytes: 2_000_000,
-        sprite: true,
-        thumb: false,
-        family: 'tiles/towne/walls/wall/dragonlock',
-        design: 'd-dragon',
-        name: A6_NAMES.dragonOnly,
-        kinds: ['wall'],
-        conn: ['dragonlock'],
-        layer: 'integral',
-        build: 'separate wall',
-        texture: 'towne',
-        tags: [tag('shape|wall'), tag('connection|dragonlock')],
-        foot: { shape: 'wall', length: 2 },
-      },
-      {
-        id: A6_IDS.untagged,
-        ord: next + 3,
-        blob: '1'.repeat(31) + 'a',
-        file: 'towne#pillar.1x1.stl',
-        bytes: 700_000,
-        sprite: true,
-        thumb: false,
-        family: 'tiles/towne/props/pillar',
-        design: 'd-untagged',
-        name: A6_NAMES.untagged,
-        kinds: ['column'],
-        // No connection tag anywhere, which is what `joineryUntagged` is.
-        conn: [],
-        layer: 'integral',
-        texture: 'towne',
-        tags: [tag('shape|floor')],
-        foot: { shape: 'rect', w: 1, d: 1 },
-      },
-    ],
-  })
-}
-
-/**
- * The A6 fixture's designs.
- *
- * `mergedTopper` and `mergedIntegral` share `d-merged` — that is the point of the
- * fixture — so this map has three entries where {@link A6_IDS} has four, and the
- * two merged keys are gone rather than aliased: after row V4 a placement cannot
- * name one file of an item rather than the other, so a key that claimed to would
- * be a lie about what the store can hold.
- */
-const A6_ALL_DESIGNS = { ...FIXTURE_DESIGNS, merged: 'd-merged', dragonOnly: 'd-dragon', untagged: 'd-untagged' } as const
-
-/** The bill over `a6Catalog`, under a stated lock preference. */
-function A6Harness({
-  tiles,
-  lock,
-}: {
-  tiles: readonly (keyof typeof A6_ALL_DESIGNS)[]
-  lock: LockSystem
-}) {
-  const a6File = useMemo(a6Catalog, [])
-  const a6Assembly = useMemo(() => buildAssemblyIndex(a6File), [a6File])
-  const placements = useMemo<Record<string, Placement>>(
-    () =>
-      Object.fromEntries(
-        tiles.map((key, i) => [
-          `p${String(i)}`,
-          { design: A6_ALL_DESIGNS[key] as DesignId, x: i * 2, z: 0, rotation: 0 },
-        ]),
-      ),
-    [tiles],
-  )
-  const bill = useMemo(
-    () => buildBillOfTiles(Object.values(placements), a6Assembly, { lock }),
-    [placements, a6Assembly, lock],
-  )
-  return (
-    <BillPanel
-      bill={bill}
-      placements={placements}
-      assets={a6File.assets}
-      sheet={a6File.sprite}
-      materialOf={(record) => resolveMaterial(resolveTags(a6File, record), record.file).material}
-      download={inertDownload(bill)}
-    />
-  )
-}
-
-describe('variant resolution in the bill', () => {
-  /** Every row's leading text, in the order the panel renders them. */
-  function rowNames(): string[] {
-    return [...document.querySelectorAll('.of-bill-name')].map((element) => element.textContent ?? '')
-  }
-
-  function rowMarks(): string[] {
-    return [...document.querySelectorAll('.of-bill-auto')].map((element) => element.textContent ?? '')
-  }
-
-  it('prints one part under openlock and two under magnetic, for the same placement', () => {
-    // The owner's request, end to end: *"in the builder one can just choose a
-    // lock system for the current build, and we choose the correct file from the
-    // aggregated item, or add a base if there is no tile of that system."*
-    render(<A6Harness tiles={['merged']} lock="openlock" />)
-    expect(rowNames()).toHaveLength(1)
-    expect(screen.getByText(/1 tile placed/)).toBeInTheDocument()
-    // The openlock file, chosen from the item's two — and disclosed as a choice
-    // rather than as a substitution, because after row V4 the user placed the
-    // item and never named a file for the app to override. The old copy read
-    // "Printed instead of towne#floor.2x2.merged.openforge.stl"; there is no
-    // "instead of" left to name.
-    expect(document.body).toHaveTextContent(/openlock · one part/)
-    expect(document.body).toHaveTextContent(/published as 2 files, one per connection system/)
-    expect(document.body).toHaveTextContent(/this is the one that fits openlock/)
-    expect(document.body).not.toHaveTextContent(/Printed instead of/)
-    expect(document.body).toHaveTextContent(/carries its own joinery, so nothing goes under it/)
-    // One part, so no "parts to print" subline and no added base.
-    expect(document.body).not.toHaveTextContent(/base · added/)
-  })
-
-  it('falls back to base auto-insertion when no variant carries the lock', () => {
-    render(<A6Harness tiles={['merged']} lock="magnetic" />)
-    // Two rows: the topper the user placed, and the base the resolver added.
-    // `BASE_2X2` is openlock and `magnetic` has no base in this fixture, so the
-    // match is a lock mismatch — which is the honest outcome and is disclosed.
-    expect(rowNames()).toHaveLength(2)
-    expect(document.body).toHaveTextContent(/2 parts to print/)
-    expect(document.body).toHaveTextContent(/base · added/)
-    expect(screen.getByText(/matched base does not offer your lock system/)).toBeInTheDocument()
-  })
-
-  it('says so when no version of a tile carries the chosen lock', () => {
-    render(<A6Harness tiles={['dragonOnly']} lock="openlock" />)
-    expect(document.body).toHaveTextContent(/not openlock/)
-    expect(document.body).toHaveTextContent(/No version of this tile carries openlock/)
-    // And §7's rule holds: informed, never refused. The row is in the bill.
-    expect(rowNames()).toHaveLength(1)
-    expect(screen.getByText(/has no version in your lock system/)).toBeInTheDocument()
-  })
-
-  it('reports untagged joinery as unknown rather than as incompatible', () => {
-    render(<A6Harness tiles={['untagged']} lock="openlock" />)
-    expect(document.body).toHaveTextContent(/joinery untagged/)
-    expect(document.body).toHaveTextContent(/missing data rather than an incompatibility/)
-    // The one verdict `notes.ts` has no code for, so the row mark is the only
-    // surface it has. If a note is ever added for it, this is where the two
-    // would start saying the same thing twice.
-    expect(document.body).not.toHaveTextContent(/no version in your lock system/)
-  })
-
-  it('summarises what the preference did to the whole scene, once', () => {
-    render(<A6Harness tiles={['merged', 'floor2', 'floor1']} lock="openlock" />)
-    const summary = screen.getByText(/Resolved for openlock/).closest('.of-bill-note')
-    expect(summary).toHaveAttribute('data-tone', 'resolved')
-    // `merged` becomes one part, `floor2` keeps its base, `floor1` needed
-    // nothing to begin with.
-    expect(summary).toHaveTextContent(/2 print as one part/)
-    expect(summary).toHaveTextContent(/1 needs a base under it/)
-    // "1 of 3 placements is published as several files", where this read "1 of 3
-    // placements print a different file of the same tile" — and the agreement is
-    // fixed on the way past: the subject is the count, not the total.
-    expect(summary).toHaveTextContent(/1 of 3 placements is published as several files/)
-    // Quieter than a warning, and below them: the block is disclosure, and a
-    // missing base must stay the loudest thing in the column.
-    expect(summary?.closest('details')).toBeNull()
-  })
-
-  it('says nothing at all when the preference changed nothing', () => {
-    // A scene of one self-sufficient tile that was placed as itself. A permanent
-    // row of reassurance is how a warning surface stops being read.
-    render(<A6Harness tiles={['floor1']} lock="openlock" />)
-    expect(screen.queryByText(/Resolved for/)).toBeNull()
-    expect(rowMarks()).toEqual([])
-  })
-
-  it('keeps a resolved placement removable rather than reporting it as retired', () => {
-    // The join A6 had to rewrite. `line.tileIds` names the *resolved* file and
-    // the store's placement named the *placed* one, so the pre-A6 join found
-    // nothing for a substituted placement and would have put it in the orphan
-    // block: "not in this catalog build", offered for removal, about a tile that
-    // is in the bill and printing correctly. **Row V4 made that mistake
-    // unwritable** — a placement holds a `DesignId` and a line holds `TileId`s,
-    // so the two brands cannot be compared at all — and this is the regression
-    // that says the join still works.
-    render(<A6Harness tiles={['merged']} lock="openlock" />)
-    expect(screen.queryByText(/not in this catalog build/)).toBeNull()
-
-    const row = screen.getByRole('button', { expanded: false })
-    fireEvent.click(row)
-    // Reachable and removable from the keyboard, which is the whole reason the
-    // join exists — see `BillPanel.tsx` on the canvas being one tab stop.
-    expect(screen.getByRole('button', { name: /Remove/ })).toBeInTheDocument()
-    expect(screen.getByText('x 0, z 0')).toBeInTheDocument()
-  })
-
-  it('names how wide the choice was, and no longer names a file nobody chose', () => {
-    // **The one piece of copy row V4 deleted.** A1 measures zero aggregates
-    // holding two display names, so the *name* is identical across an item's
-    // variants and naming it would say nothing — which is why the mark used to
-    // name the *file*, `towne#floor.2x2.merged.openforge.stl`, as the thing the
-    // user was not getting.
-    //
-    // There is no such thing now. The user placed the item; no file was ever
-    // asked for, so none was overridden, and printing that filename would be
-    // naming a file nobody chose in a 302px column. What has to be disclosed is
-    // that a choice was made and how wide it was — 2,117 of 3,822 items are
-    // single-file, so the sentence appears only where there was something to
-    // choose.
-    render(<A6Harness tiles={['merged']} lock="openlock" />)
-    expect(rowNames()[0]).toContain(A6_NAMES.merged)
-    const marks = rowMarks()
-    expect(marks).toHaveLength(1)
-    expect(marks[0]).toContain('published as 2 files')
-    expect(marks[0]).toContain('fits openlock')
-    expect(marks[0]).not.toContain('towne#floor.2x2.merged.openforge.stl')
-    expect(marks[0]).not.toContain('instead of')
-  })
-})
-
-describe('the library block', () => {
-  it('drops ids the catalog no longer holds rather than rendering a nameless row', () => {
-    act(() => {
-      useWorkshopStore.setState({
-        library: { [design('floor1')]: true, ['d-retired-and-gone' as DesignId]: true },
-      })
-    })
-    render(<PaletteHarness />)
-
-    expect(screen.getAllByRole('listitem')).toHaveLength(1)
-    expect(screen.queryByText(/retired/)).toBeNull()
-  })
-})
+  Choosing which file of an item fills a slot is row **C2**'s, and
+  `selectVariantForLock` is exported for it: a candidate grid is an *item* grid
+  and the file is picked from the item afterwards.
+*/

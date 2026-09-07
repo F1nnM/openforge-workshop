@@ -129,15 +129,19 @@ export const SCHEMA_VERSION = 4
  * links all address a tile by `id`.
  *
  * **Row X5 tightened this from `min(1)` to a catalog path.** `min(1)` took any
- * non-empty string, and that is not a cosmetic looseness:
- * `src/store/migrations.ts` runs `TileId.safeParse` over every key of a
- * `localStorage` library and over every placement's identity, so the brand is
- * the only thing standing between a corrupted store and a library full of ids
- * that resolve to nothing and cannot be removed from the UI. `"undefined"`,
- * `"null"` and a whole JSON blob all used to survive that filter. Rows V1 and
- * V4 moved both of those fields to {@link DesignId} and this pattern is now what
- * *recognises* the old shape there rather than what admits it — `salvageLibrary`
- * and `salvagePlacement` both reject a `tiles/…` string by name.
+ * non-empty string, and that is not a cosmetic looseness: `"undefined"`,
+ * `"null"` and a whole JSON blob all used to survive that filter, and
+ * `src/store/migrations.ts` runs `TileId.safeParse` over data that came out of
+ * `localStorage`. So the brand is what stands between a corrupted store and ids
+ * that resolve to nothing and cannot be removed from the UI.
+ *
+ * **What it guards there has moved twice.** Rows V1 and V4 pointed the library's
+ * key and a placement's identity at {@link DesignId}, making this pattern the
+ * thing that *recognised* the old shape rather than the thing that admitted it;
+ * row A1 then deleted the library outright and made a placement a template
+ * instance. So the reader this protects is now `SlotFill.tile` — every file a
+ * placed template's slot is filled with, parsed straight out of a persisted blob
+ * — and the recognition job passed to `TemplateId`'s own pattern.
  *
  * Measured over all 8,702 live records: **8,702 start `tiles/`**, none contains
  * an empty path segment, and the paths run 3 to 8 segments deep and 39 to 183
@@ -216,9 +220,12 @@ export type DesignId = z.infer<typeof DesignId>
 /**
  * An index into `CatalogFile.tags`.
  *
- * The live corpus holds **84,023 tag references over 915 distinct tag strings**
- * (9.7 tags per tile), so the intern table replaces ~92 repetitions of each
- * string with one. Branding keeps a tag id from being passed where a manifest
+ * The live corpus holds **101,427 tag references over 930 distinct tag strings**
+ * (11.7 tags per tile), so the intern table replaces ~109 repetitions of each
+ * string with one. 17,404 of those references and 15 of those strings are row
+ * B1's derived `role|<x>` and `form|<x>` axes — two per record, emitted as
+ * ordinary tags so a template slot can predicate on them with no new grammar;
+ * the scanned corpus itself is 84,023 references over 915 strings. Branding keeps a tag id from being passed where a manifest
  * ordinal is expected — both are small non-negative integers over the same
  * records, and confusing them would be silent.
  */

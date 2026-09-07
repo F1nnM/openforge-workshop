@@ -42,7 +42,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import type { AssemblyIndex } from '@/assembly'
-import type { CatalogFile, DesignId } from '@/catalog'
+import type { CatalogFile } from '@/catalog'
 import { resolveTags } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
 /**
@@ -63,7 +63,7 @@ import {
   clearPersistedWorkshopState,
   holdGeneratedMesh,
   placeGeneratedBase,
-  placeTile,
+  placeTemplate,
   resetWorkshop,
   useGeneratedHoldings,
   useGeneratedMeshes,
@@ -72,7 +72,7 @@ import {
 } from '@/store'
 
 import { BillPanel } from './BillPanel'
-import { FIXTURE_DESIGNS, fixtureCatalogFile } from './fixture'
+import { FIXTURE_IDS, anInstance, fixtureContext, fixtureCatalogFile } from './fixture'
 import { useArchiveDownload } from './useArchiveDownload'
 
 /* ------------------------------------------------------------------ scaffold */
@@ -187,7 +187,7 @@ function Harness({
   const holdings = useGeneratedHoldings()
 
   const bill = useMemo(
-    () => buildBillOfTiles(Object.values(placements), assembly, { lock: 'openlock' }),
+    () => buildBillOfTiles(Object.values(placements), assembly, { ...fixtureContext(file), lock: 'openlock' }),
     [placements],
   )
   const generatedBill = useMemo(
@@ -392,13 +392,67 @@ describe('the pack’s refusals, through the real hook', () => {
     expect(alert).toHaveTextContent(/not to the digest the pack named them by/)
     expect(saved).toHaveLength(0)
   })
+
+  /**
+   * **(5) The same refusal, raised on a split part rather than on the room.**
+   *
+   * `generatedBlobSource.open` re-verifies every hold *at the moment the entry
+   * is opened*, not only when the plan was built, because a hold is a live
+   * reference to a `Uint8Array` the panel still owns. A split download is the
+   * case that gap was written for: the parts are computed when the room is
+   * refused, and each one is saved on a separate press some time later.
+   *
+   * So `saveSplitPart` has to hand its loaded pack module to `classify` exactly
+   * as `start` does. Both branches for row S5's mesh errors are gated on
+   * `pack !== undefined`, so passing `undefined` there made them unreachable
+   * and degraded a refused mesh to the generic "the download failed" — offered
+   * with a **Try again** button, for bytes that will be refused identically
+   * next time. That is what the last two assertions here are about.
+   */
+  it('(5) refuses a mesh that went bad between the plan and a split part’s press', async () => {
+    // 11.5 MB of catalog files against an 11 MB ceiling: too large for this
+    // browser to buffer, and first-fit-decreasing packs it into two parts with
+    // the generated mesh in the first — 8 MB + 0.5 MB + 284 bytes, inside the
+    // 9 MB per-part budget, while the 3 MB wall opens part two.
+    placeTemplate(anInstance([FIXTURE_IDS.floor2], { x: 0, z: 0 }))
+    placeTemplate(anInstance([FIXTURE_IDS.wallNoBase], { x: 4, z: 0 }))
+    placeTemplate(anInstance([FIXTURE_IDS.base2], { x: 8, z: 0 }))
+    const base = aGeneratedBase({ x: 20, z: 0 })
+    placeGeneratedBase(base)
+    const bytes = aBinaryStl(4)
+    holdGeneratedMesh(base.base, { md5: md5Of(bytes), bytes })
+
+    render(<Harness environment={blobEnvironment(11_000_000)} source={fakeSource(sizesOf(file))} />)
+    fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
+    const offer = await failure()
+    expect(offer).toHaveAttribute('data-kind', 'too-large')
+
+    // The hold is the array the panel owns, so this is the real shape of the
+    // race rather than a contrivance: valid when `buildGeneratedPack` measured
+    // it and named it by its digest, one byte different by the time the user
+    // presses save. The layout and the triangle count still check out; only the
+    // digest does not.
+    bytes[100] = (bytes[100] ?? 0) ^ 0xff
+
+    fireEvent.click(within(offer).getByRole('button', { name: 'Save as 2 smaller files' }))
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveAttribute('data-kind', 'mesh-refused')
+    })
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/not to the digest the pack named them by/)
+    // Never retryable, and S5's class says so in its own name: retrying ships
+    // the same bytes.
+    expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(saved).toHaveLength(0)
+  })
 })
 
 /* ---------------------------------------------------------- the happy paths */
 
 describe('downloading a room with generated bases in it', () => {
   it('streams a mixed room whose length matches the plan to the byte', async () => {
-    placeTile({ design: FIXTURE_DESIGNS.floor1 as DesignId, x: 0, z: 0, rotation: 0 })
+    placeTemplate(anInstance([FIXTURE_IDS.floor1]))
     placeBase({ x: 6, triangles: 12 })
 
     render(<Harness environment={blobEnvironment()} source={fakeSource(sizesOf(file))} />)
@@ -443,7 +497,7 @@ describe('downloading a room with generated bases in it', () => {
     // §11's degradation path has nothing to offer a mesh that was never
     // published: there is no URL, because the bytes were made in this browser.
     // Row S5's `urlListShortfall` is that sentence and this is the call site.
-    placeTile({ design: FIXTURE_DESIGNS.big as DesignId, x: 0, z: 0, rotation: 0 })
+    placeTemplate(anInstance([FIXTURE_IDS.big]))
     placeBase({ x: 20 })
 
     render(<Harness environment={blobEnvironment(1_000_000)} source={fakeSource(sizesOf(file))} />)
@@ -457,7 +511,7 @@ describe('downloading a room with generated bases in it', () => {
   })
 
   it('says nothing about a shortfall when there is none', async () => {
-    placeTile({ design: FIXTURE_DESIGNS.big as DesignId, x: 0, z: 0, rotation: 0 })
+    placeTemplate(anInstance([FIXTURE_IDS.big]))
     render(<Harness environment={blobEnvironment(1_000_000)} source={fakeSource(sizesOf(file))} />)
     fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
     const alert = await failure()

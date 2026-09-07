@@ -33,8 +33,13 @@
  * real path through `CatalogFile.parse`, which is where a fixture that drifted
  * from the schema gets caught.
  */
-import type { CatalogFile, DesignId } from '@/catalog'
+import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
+import type { PlacementId, SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
+
+import type { SlotRecords } from './catalog'
+import type { Extent, SlotLayout } from './geometry'
+import { footprintExtent } from './geometry'
 
 const TAGS = [
   'shape|floor',
@@ -48,6 +53,8 @@ const TAGS = [
   'build|thick wall',
   'shape|column',
   'shape|angled|right',
+  'shape|corner',
+  'shape|corner|right',
 ]
 
 const tag = (name: string): number => {
@@ -293,6 +300,40 @@ export const FIXTURE_CATALOG = {
       foot: { shape: 'diag', run: 2.828 },
       rotStep: 45,
     },
+    {
+      id: 'tiles/cut_stone/wall/corner+right.2x.openlock.stl',
+      ord: 11,
+      blob: blob(12),
+      file: 'corner+right.2x.openlock.stl',
+      bytes: 2_097_152,
+      sprite: true,
+      thumb: false,
+      family: 'tiles/cut_stone/wall',
+      design: 'd-wall-corner',
+      name: 'Cut stone corner wall 1.5',
+      kinds: ['wall'],
+      conn: ['openlock'],
+      layer: 'topper',
+      texture: 'cut_stone',
+      tags: [
+        tag('shape|wall'),
+        tag('shape|corner'),
+        tag('shape|corner|right'),
+        tag('texture|cut_stone'),
+        tag('connection|openlock'),
+      ],
+      /* **A corner wall runs 1.5, not the 2 its `size|width` tag names** — row
+         D9, from 157 meshes read whole out of R2. The tag names the *cell* and
+         the piece is the cell face less the 0.5 corner column, so 1.5 + 0.5
+         tiles a 2-unit face exactly. `pipeline/footprint.ts#cornerWallRun`
+         derives it and `docs/templates-plan.md` §9 carries the table.
+
+         Distinct from {@link FIXTURE_IDS.wall2}, which is a *straight* 2-unit
+         wall and measures 2.000 — the control in the same table. The two used to
+         be one fixture, and a corner slot filled with the straight wall is what
+         made this file's corner assertions describe an over-run. */
+      foot: { shape: 'wall', length: 1.5 },
+    },
   ],
 }
 
@@ -302,53 +343,15 @@ export function fixtureCatalogFile(): CatalogFile {
 }
 
 /**
- * The design a fixture *file* belongs to.
+ * Ids by role, so a test reads as its intent rather than as a path.
  *
- * The bridge row V4 needs in the tests: a scene helper is handed a file id,
- * because that is what a canvas test is about — which outline, which band, which
- * tint — and a placement holds an item. Every record here is its own design, so
- * the conversion is total and injective, and a test that places
- * `FIXTURE_IDS.floor1` still draws exactly `FIXTURE_IDS.floor1`.
- *
- * Throws on an id the fixture does not hold, which is what a test placing a
- * retired tile wants: those tests pass a design id directly (see
- * `plan.test.ts`'s unknown-tile case) rather than asking this to invent one.
+ * **Files**, and since row A1 that is all a test needs: a `SlotFill` names an
+ * exact file (decision **D1**) and `PlanCatalog.record` takes a {@link TileId},
+ * so a test that wants a particular outline in a particular slot says so
+ * directly. Row V4's `FIXTURE_DESIGNS` and `fixtureDesignOf` were the bridge from
+ * a file id to the *item* a placement held, and both are deleted with the field
+ * they bridged to — there is no aggregate hop left for them to make.
  */
-export function fixtureDesignOf(tileId: string): DesignId {
-  const record = FIXTURE_CATALOG.records.find((candidate) => candidate.id === tileId)
-  if (record === undefined) throw new Error(`no fixture record for ${tileId}`)
-  return record.design as DesignId
-}
-
-/**
- * **Designs** by role — what a test places, since row V4.
- *
- * Every record in this fixture is its own design (eleven records, eleven
- * designs), so this map is one-to-one with {@link FIXTURE_IDS} and a test that
- * places `FIXTURE_DESIGNS.floor1` gets the record at `FIXTURE_IDS.floor1`. That
- * is a property of *this* fixture and not of the corpus, where a design averages
- * 2.28 files; a test that needs an item with two variants builds its own
- * catalog, and `assembly.test.ts` is full of them.
- *
- * {@link FIXTURE_IDS} stays because plenty of questions are still about a file:
- * which blob an instanced mesh keys on, which entry a download pack writes,
- * which record `materialOf` tints.
- */
-export const FIXTURE_DESIGNS = {
-  floor1: 'd-floor-1',
-  floor2: 'd-floor-2',
-  wall2: 'd-wall-2',
-  angled: 'd-angled',
-  arc: 'd-arc',
-  arcFallback: 'd-arc-convex',
-  column: 'd-column',
-  tri: 'd-tri',
-  diag: 'd-diag',
-  shapeless: 'd-none',
-  thickWall: 'd-thick-wall',
-} as const
-
-/** Ids by role, so a test reads as its intent rather than as a path. */
 export const FIXTURE_IDS = {
   floor1: 'tiles/dungeon_stone/floor/1x1.openlock.stl',
   floor2: 'tiles/dungeon_stone/floor/2x2.openlock.stl',
@@ -361,4 +364,238 @@ export const FIXTURE_IDS = {
   diag: 'tiles/cut_stone/angled/diagPA.openlock.stl',
   shapeless: 'tiles/cave/hex/hex.stl',
   thickWall: 'tiles/cut_stone/thick_wall/2x0.5.openlock.stl',
+  /** A 1.5-unit corner wall — the run row D9 measured. See its record. */
+  cornerWall: 'tiles/cut_stone/wall/corner+right.2x.openlock.stl',
 } as const
+
+/* --------------------------------------------------------------- templates */
+
+/**
+ * A template family for the canvas's tests, and its five slot names.
+ *
+ * Named after the shipped family §2.1 uses as its worked example —
+ * `s2w-wall-on-tile-corner-low-single-piece`, *"the requested floor plus two
+ * walls plus a column in the corner, verbatim"* — but spelled out here rather
+ * than imported, for the reason `src/store/schema.ts#TemplateId` gives at length:
+ * the 40-entry table lives beside a screen, and `catalog.ts` sets out why the
+ * canvas must not reach one.
+ *
+ * **Two of the five slot names contain a space.** That is not decoration: it is
+ * the property `src/store/schema.ts#SlotName` refuses a slug pattern over —
+ * `'right wall'` and `'left wall'` are carried by 8 of the corpus's 128 parts —
+ * so a fixture without one would let a slot-name assumption through.
+ */
+export const FIXTURE_TEMPLATE = 'fixture-corner' as TemplateId
+
+/**
+ * A second family, for the tests about telling two apart — and, since row C6,
+ * the fixture's `wall-on-tile`: `base`, `floor`, `wall`. See
+ * {@link fixtureTemplateParts}.
+ */
+export const OTHER_FIXTURE_TEMPLATE = 'fixture-corridor' as TemplateId
+
+/** The five slots, in the shipped family's own declared order, plus `wall`. */
+export const FIXTURE_SLOTS = {
+  column: 'column' as SlotName,
+  rightWall: 'right wall' as SlotName,
+  leftWall: 'left wall' as SlotName,
+  floor: 'floor' as SlotName,
+  base: 'base' as SlotName,
+  /**
+   * The 32-recipe convention's third part — {@link OTHER_FIXTURE_TEMPLATE}'s.
+   *
+   * Not one of {@link FIXTURE_TEMPLATE}'s five: `wall-on-tile` and
+   * `external-corner` are different part-name **sets** and that is exactly what
+   * `rules.ts` keys a convention on, so a fixture that wanted both conventions
+   * needed a second family and a sixth name.
+   */
+  wall: 'wall' as SlotName,
+}
+
+/**
+ * The part names of the two fixture families, as {@link templateSlotLayout}
+ * wants them.
+ *
+ * The one thing the real rule needs that the canvas cannot see: a convention is
+ * keyed on the part-name **set**, the 91-entry family table lives beside a
+ * screen, and `catalog.ts` sets out why this directory must not reach one. So a
+ * canvas test that wants the *production* rule over these eleven records builds
+ * it as `templateSlotLayout(fixtureTemplateParts)`.
+ *
+ * The two sets are chosen to be `rules.ts`'s two wall-bearing conventions
+ * verbatim — {@link FIXTURE_TEMPLATE} is `external-corner`'s five names and
+ * {@link OTHER_FIXTURE_TEMPLATE} is `wall-on-tile`'s three — because a set that
+ * matched neither would answer {@link ORIGIN_LAYOUT} for every slot and a test
+ * over it could not tell the wiring from its absence. Any other id answers
+ * `undefined`, which is the *"this build has no such recipe"* case and is a
+ * state a real room reaches: C1 measured all 51 generated families reporting
+ * `unknown-template` against a 40-recipe table.
+ */
+export function fixtureTemplateParts(template: TemplateId): readonly string[] | undefined {
+  if (template === FIXTURE_TEMPLATE) {
+    return [
+      FIXTURE_SLOTS.base,
+      FIXTURE_SLOTS.column,
+      FIXTURE_SLOTS.floor,
+      FIXTURE_SLOTS.leftWall,
+      FIXTURE_SLOTS.rightWall,
+    ]
+  }
+  if (template === OTHER_FIXTURE_TEMPLATE) {
+    return [FIXTURE_SLOTS.base, FIXTURE_SLOTS.floor, FIXTURE_SLOTS.wall]
+  }
+  return undefined
+}
+
+/**
+ * The cell {@link fixtureSlotLayout}'s slots are laid out inside.
+ *
+ * The 2 x 2 floor, which is also the fixture's `floor2` footprint — the union
+ * every part of the corner nests inside, and the box the instance turns within.
+ *
+ * **It used to be a constant for four of the five slots and read off the fill for
+ * the fifth, and row C6 closed that split.** The reason for it was a signature:
+ * `catalog.ts#SlotLayoutRule` was `(template, slot, record) => SlotLayout` and
+ * handed over only the record of the slot being laid out, so a rule could resolve
+ * the cell exactly when the slot it was asked about *was* the cell slot, and for
+ * the other four could do no better than the cell its own recipe describes. The
+ * rule now takes the instance's whole {@link SlotRecords} map, so this fixture
+ * reads the `floor` fill's own extent for **all five** — which is B2's rule and
+ * is what keeps a lone 2 x 1 floor anchored at the placement's own `x`/`z`
+ * instead of inside a 2 x 2 cell it does not fill.
+ *
+ * It survives as the fallback for an instance with no `floor` fill at all, where
+ * there is no cell to read and the offsets below are the ones this 2 x 2 implies.
+ */
+export const FIXTURE_CELL = Object.freeze({ w: 2, d: 2 })
+
+/**
+ * A slot layout with **real offsets**, so a test can prove the composition.
+ *
+ * `originSlotLayout` — the rule in force until row B2's lands — puts every part
+ * at the instance origin, which is right for `floor` and `base` and stacks the
+ * rest. A canvas test written only against that could not tell a correct
+ * `slotGeometry` from one that ignored `dx`/`dz` and `layout.rotation` entirely,
+ * so this rule lays out a 2 × 2 corner: the floor and the base on the cell, the
+ * left wall along its north edge, the right wall turned a quarter along its east
+ * edge, and the column in the corner where the two meet.
+ *
+ * **The numbers are a fixture, not a measurement**, and they are chosen to
+ * exercise four facts rather than to describe a real recipe: the offsets are
+ * multiples of 0.25 and include values off the 0.5 snap lattice (§2.2),
+ * `right wall` carries a yaw of its own so a part's angle is not its instance's,
+ * the elevations are distinct so a renderer reading one part's height for
+ * another is visible, and every part **declares the same 2 x 2 cell** so the
+ * assembly is a rigid body under rotation ({@link SlotLayout.cell}). Row **B2**
+ * owns the real rule.
+ *
+ * The five offsets are the ones B2's own `external-corner` convention produces
+ * for this cell — `edge` is *"flush to the face and centred across it"* and
+ * `corner` is the square where two faces meet, so nothing overhangs and the
+ * union is the cell itself, 2 x 2 at the instance origin, at every rotation.
+ *
+ * **It is still authored, and that is deliberate now rather than forced.**
+ * `catalog.ts#templateSlotLayout` is the real composition and the app runs it;
+ * this stays a fixture so that a canvas test measures the *canvas* — one rule
+ * whose numbers are written down, against `slotGeometry` — rather than measuring
+ * B2's arithmetic a second time, which `src/template/offsets.test.ts` already
+ * does over all three conventions.
+ */
+export function fixtureSlotLayout(
+  _template: TemplateId,
+  slot: SlotName,
+  fills: SlotRecords = new Map(),
+): SlotLayout {
+  // The cell slot's own fill *is* the cell, for every slot and not just for the
+  // cell slot itself — which is what the widened seam bought. See
+  // {@link FIXTURE_CELL}.
+  const cell = cellOf(fills.get(FIXTURE_SLOTS.floor))
+  switch (slot) {
+    case FIXTURE_SLOTS.base:
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell }
+    case FIXTURE_SLOTS.floor:
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 6.35, cell }
+    case FIXTURE_SLOTS.leftWall:
+      return { dx: 0, dz: 0, rotation: 0, elevationMm: 12.7, cell }
+    case FIXTURE_SLOTS.rightWall:
+      return { dx: 1.5, dz: 0, rotation: 90, elevationMm: 12.7, cell }
+    case FIXTURE_SLOTS.column:
+      return { dx: 1.5, dz: 1.5, rotation: 0, elevationMm: 12.7, cell }
+    default:
+      // A slot this fixture has no rule for sits a quarter unit off the origin —
+      // deliberately *off* the 0.5 lattice, since §2.2 says a slot offset never
+      // snaps. Total rather than throwing, because `PlanCatalog.parts` walks
+      // whatever the instance's fill map holds and a test is entitled to invent
+      // a slot. No cell either, because a slot no recipe declares belongs to no
+      // cell.
+      return { dx: 0.25, dz: 0.25, rotation: 0, elevationMm: 25.4 }
+  }
+}
+
+/**
+ * The cell of the slot that *is* the cell: the `floor` fill's own extent.
+ *
+ * {@link FIXTURE_CELL} when the instance has no `floor` fill to read — a caller
+ * that asks for a layout without one, and an instance that has not filled it —
+ * and `undefined` for a fill with no placeable footprint, where the part is not
+ * drawn at all and the whole layout is moot.
+ */
+function cellOf(record: CatalogRecord | undefined): Extent | undefined {
+  return record === undefined ? FIXTURE_CELL : footprintExtent(record.foot)
+}
+
+/**
+ * A fill map from `[slot, tileId]` pairs. Every fill `auto`, which is the
+ * solver's.
+ *
+ * Takes **plain strings** and brands them here, which is the whole job of a
+ * fixture: `SlotName` and `TileId` are opaque brands over strings, so a test
+ * that had to mint them itself would be a line of casts per row. One cast here
+ * beats one per call site, and it keeps the `as` out of the tests where it would
+ * read as significant.
+ */
+export function fixtureFills(rows: readonly (readonly [string, string])[]): TemplateInstance['fills'] {
+  const fills: Record<string, SlotFill> = {}
+  for (const [slot, tile] of rows) fills[slot as SlotName] = { tile: tile as TileId, pinned: false }
+  return fills
+}
+
+/**
+ * What {@link fixtureInstance} lets a test override, families as plain strings.
+ *
+ * Every field is `?: T | undefined` rather than `?: T`, because this project sets
+ * `exactOptionalPropertyTypes`: under it a plain `?: T` refuses an explicit
+ * `undefined`, and a test that builds these rows from a tuple with an optional
+ * tail hands over exactly that. Spelling both out is what lets a caller write
+ * `{ template }` instead of `...(template === undefined ? {} : { template })`.
+ */
+export interface FixtureInstanceOptions {
+  readonly x?: number | undefined
+  readonly z?: number | undefined
+  readonly rotation?: number | undefined
+  /** Defaults to {@link FIXTURE_TEMPLATE}. Branded here, for `fixtureFills`' reason. */
+  readonly template?: string | undefined
+}
+
+/**
+ * One template instance, ready to put in a `placements` map.
+ *
+ * `id` is written into the object as well as being the map key, which is
+ * `src/store/schema.ts`'s own rule and the reason it takes the key: *"the key
+ * wins"*, and a fixture that let the two disagree would let a test pass against a
+ * shape nothing in the app can produce.
+ */
+export function fixtureInstance(
+  id: string,
+  fills: TemplateInstance['fills'],
+  over: FixtureInstanceOptions = {},
+): TemplateInstance {
+  return {
+    id: id as PlacementId,
+    template: (over.template ?? FIXTURE_TEMPLATE) as TemplateId,
+    x: over.x ?? 0,
+    z: over.z ?? 0,
+    rotation: over.rotation ?? 0,
+    fills,
+  }
+}

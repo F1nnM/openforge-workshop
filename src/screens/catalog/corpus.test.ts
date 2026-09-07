@@ -24,6 +24,11 @@
  *   5. **The tag row fits its fixed single line.** The same shape as (2), against
  *      `format.ts#TAG_CHIP_BUDGET`: the widest row the corpus produces is
  *      measured, so a relabel that would clip a chip fails the build.
+ *   6. **`groupKindOf` is well posed at item level.** Row **A0** relocated the
+ *      rule here with `format.ts`, and these two assertions came with it from the
+ *      deleted library screen's `grouping.test.ts`: the corpus shares that make a
+ *      single `groupBy(kind)` wrong, and the agreement between an item's kinds
+ *      and every one of its files'.
  *
  * The corpus is the emitted `public/catalog/catalog.json` (`npm run
  * import:catalog`), matching the convention in `../detail/corpus.test.ts`. When
@@ -43,6 +48,7 @@ import {
   bytesRangeLabel,
   cardTagChips,
   fileTokenLabel,
+  groupKindOf,
   humaniseSegment,
   sizeLabel,
   tagChipRowWidth,
@@ -317,12 +323,18 @@ describeCorpus('a card can be told from its neighbour', () => {
     for (const item of items) expect(previewOf(item)).toBeDefined()
   })
 
-  it('narrows 131 shared names to 21 identical cards, facet by facet', () => {
+  it('narrows 130 shared names to 21 identical cards, facet by facet', () => {
     const keyed = (of: (item: TileAggregate) => readonly string[]) =>
       collisions(items.map((item) => of(item).join('|')))
 
-    // The starting point A1 measured: the title alone is not identity.
-    expect(keyed((item) => [parts(item).name])).toEqual({ groups: 131, items: 323, worst: 6 })
+    /* The starting point A1 measured: the title alone is not identity.
+
+       131 / 323 before row **D9**. A display name carries the size token, and
+       correcting 245 corner walls from a tagged 2-unit run to their measured 1.5
+       renames them from `2x` to `1.5x` — which *separates* one colliding pair.
+       So the number this row exists to shrink shrank for the same reason the
+       footprint did: two cards that looked identical were different sizes. */
+    expect(keyed((item) => [parts(item).name])).toEqual({ groups: 130, items: 321, worst: 6 })
 
     // Texture and the size chip separate **nothing**, and that is the finding
     // that makes the rest of this row necessary rather than nice: two aggregates
@@ -333,7 +345,7 @@ describeCorpus('a card can be told from its neighbour', () => {
         const part = parts(item)
         return [part.name, part.texture, part.size]
       }),
-    ).toEqual({ groups: 131, items: 323, worst: 6 })
+    ).toEqual({ groups: 130, items: 321, worst: 6 })
 
     // The availability chips are the first thing that separates anything — they
     // are derived from the connection axis, which is exactly what an aggregate
@@ -391,7 +403,10 @@ describeCorpus('a card can be told from its neighbour', () => {
     expect(lengths[Math.floor(lengths.length / 2)]).toBe(1)
     expect(lengths[lengths.length - 1]).toBe(4)
     // 79 labels over 3,822 cards, which is what makes the row readable rather
-    // than a dump of the 915-value tag vocabulary.
+    // than a dump of the 930-value tag vocabulary. Still 79 after row B1, and
+    // deliberately: `role|` and `form|` are in `CARD_CONTROLLED_ROOTS`, because
+    // a derived predicate is not vocabulary a card should advertise. Left
+    // eligible they would have taken the empty-row count below from 1,044 to 78.
     expect(new Set(rows.flat()).size).toBe(79)
   })
 
@@ -494,5 +509,35 @@ describeCorpus('the two per-item figures the card states', () => {
       (item) => new Set(item.variants.map((variant) => fileTokenLabel(variant.file))).size > 1,
     )
     expect(varying).toHaveLength(22)
+  })
+})
+
+/* --------------------------------------------------------- kind precedence */
+
+describeCorpus('the kind-precedence rule over every item', () => {
+  it('re-derives the multi-kind and no-kind shares the rule exists for', () => {
+    const multi = records.filter((record) => record.kinds.length > 1).length
+    const none = records.filter((record) => record.kinds.length === 0).length
+
+    expect(multi).toBe(1693)
+    expect(none).toBe(1032)
+    // 19.5% in two or more, 11.9% in none — the two facts that make a single
+    // `groupBy(kind)` wrong and `groupKindOf` a rule rather than a field read.
+    expect(multi / records.length).toBeCloseTo(0.195, 3)
+    expect(none / records.length).toBeCloseTo(0.119, 3)
+  })
+
+  it('groups an item by the same kind as every one of its files', () => {
+    // The rule reads `kinds` off the aggregate, which is only sound because A1
+    // measured that no aggregate holds two distinct values of it. Asserted here
+    // rather than assumed, because a caller would otherwise file 1,705
+    // multi-variant items by one arbitrary member's kinds.
+    for (const item of items) {
+      const byItem = groupKindOf(item.kinds)
+      for (const variant of item.variants) {
+        const record = records[variant.ord as unknown as number]
+        expect(groupKindOf(record?.kinds ?? [])).toBe(byItem)
+      }
+    }
   })
 })

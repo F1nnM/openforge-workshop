@@ -12,8 +12,7 @@
 
    ## Why this file imports the catalog's
 
-   The same reason `../../screens/library/library.css` does, and it is no longer
-   the thumbnail: row P3 moved `.of-thumb`, `.of-thumb-frame` and the image rules
+   It is no longer the thumbnail: row P3 moved `.of-thumb`, `.of-thumb-frame` and the image rules
    to `../../ui/thumb/thumb.css`, which `TileThumb.tsx` imports itself, so both
    panels get them with the component. What is left is `.of-search-input`, which
    is the same field as the catalog's with a narrower cap — and restating that
@@ -42,8 +41,8 @@
      which means it escapes every `overflow: hidden` between here and the root and
      contributes its offset to `documentElement.scrollHeight`. With a hundred
      palette rows that was measured at 2,809px of page scroll on a 900px viewport,
-     on a screen specified to have none. `library.css` has the same note on its
-     file-input label, for the same reason. */
+     on a screen specified to have none. `.of-backup` carries the same rule for
+     the same reason — see the note on it below. */
   position: relative;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -74,10 +73,13 @@
   color: var(--mut);
 }
 
+/* The list's own region since row D2 — the two sections inside it carry the
+   headings and the counts, so this is the RECENT strip, the two sections and the
+   insert sentence in one column. */
 .of-pal-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -108,10 +110,14 @@
   list-style: none;
 }
 
+/* A column since row C1: the armed row grows a size control under its own
+   button, and that control belongs to the row rather than to a block of its own
+   — see `PalettePanel.tsx#PaletteList`. */
 .of-pal-row {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -132,15 +138,7 @@
     border-color 120ms ease;
 }
 
-/* A `<div>`, not a button: the tile has no footprint that can be drawn, so
-   there is nothing to arm. See `PalettePanel.tsx` on why it is not a disabled
-   button. */
-.of-pal-row:not([data-placeable]) .of-pal-pick {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.of-pal-row[data-placeable] .of-pal-pick:hover {
+.of-pal-pick:hover {
   background: var(--bg3);
 }
 
@@ -150,46 +148,49 @@
   border-color: var(--acc);
 }
 
-.of-pal-thumb {
-  flex: none;
-  /* 52×40 — the contract's palette thumbnail. Both dimensions are set, so the
-     4:3 `aspect-ratio` the catalog card relies on does not apply and the square
-     frame inside sits 6px in from each side of the well. */
-  width: 52px;
-  height: 40px;
-}
-
 .of-pal-name {
   flex: 1;
   min-width: 0;
   font-size: 12.5px;
   line-height: 1.25;
   color: var(--ink);
-  /* Two lines, then ellipsis. The corpus's display names run to five words and a
-     size token, and a 272px column cannot hold one on a line. */
+  /* Two lines, then ellipsis. A family name is short once the group heading has
+     taken its role off the front — `Straight (Separate Wall)` — but the 40
+     recipe names still run to four words after their shared prefix goes. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
 
-.of-pal-size {
+/* The row's right-hand column: the slot count, then the one fact that differs by
+   kind — a candidate count on a single tile, the build system on an assembly.
+   `PalettePanel.tsx#rowFact` carries why those two. One line and `nowrap`,
+   because the name beside it is the part allowed to wrap. */
+.of-pal-detail {
   flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
   font-family: var(--face-mono);
   font-size: 10.5px;
   color: var(--mut);
   white-space: nowrap;
 }
 
-.of-pal-add {
-  flex: none;
-  /* Tighter than the `sm` default: this button sits in a 272px row beside a
-     thumbnail and a two-line name. */
-  --of-button-px: 8px;
-  --of-button-py: 4px;
-  --of-button-fs: 11.5px;
+/* Row D2 puts this on all 87 rows and it is the row's answer to the report that
+   caused the row: a placement that brings five slots and one that brings one
+   were indistinguishable. Held at the row's own ink so it reads before the
+   fact beside it, which is a quantity rather than a kind. */
+.of-pal-slots {
+  color: var(--ink);
+  opacity: 0.75;
+}
 
-  gap: 3px;
+.of-pal-fact::before {
+  content: '·';
+  margin-right: 5px;
+  opacity: 0.5;
 }
 
 .of-pal-note {
@@ -199,12 +200,117 @@
   color: var(--mut);
 }
 
-.of-pal-empty {
+/* ── The palette's sections, groups, facets and size control ─────────────────
+   Two sections over 87 rows — 40 assemblies, then 47 single tiles in eight role
+   groups — two facet axes, and one size control that appears inside the armed
+   row. Every measurement behind the shape is in `palette.ts` and `families.ts`.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* A section is the palette's coarsest division and the one row D2 added: the
+   kind of thing a row is, said once instead of on 87 rows. Spaced further apart
+   than the role groups inside one of them, because that is the whole claim —
+   these two lists are more different from each other than WALL is from FLOOR. */
+.of-pal-section {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 4px 0 8px;
+  gap: 7px;
+  min-width: 0;
+}
+
+.of-pal-section + .of-pal-section {
+  margin-top: 10px;
+}
+
+.of-pal-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* Same hairline rule as the section heading, one step quieter: eight of these
+   are on screen at once and the section's own `<h2>` has to stay the louder one. */
+.of-pal-subheading {
+  margin-top: 4px;
+  opacity: 0.82;
+}
+
+.of-pal-facets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.of-pal-facet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.of-pal-chip,
+.of-pal-sizebtn {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 4px 6px;
+  color: var(--mut);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.of-pal-chip:hover,
+.of-pal-sizebtn:hover {
+  background: var(--bg3);
+}
+
+.of-pal-chip[aria-pressed='true'],
+.of-pal-sizebtn[aria-pressed='true'] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--acc) 14%, transparent);
+  border-color: var(--acc);
+}
+
+/* Wrapped, not scrolled: the longest domain is 32 positions and a horizontal
+   scroller in a 272px column hides most of them behind a gesture. */
+.of-pal-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 6px 4px;
+}
+
+.of-pal-sizebtn {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+/* The candidate count on a size chip. Quieter than the label, because the label
+   is what is being chosen and the count is what it costs. */
+.of-pal-sizecount {
+  font-size: 9.5px;
+  color: var(--mut);
+  opacity: 0.8;
+}
+
+.of-pal-sizebtn[aria-pressed='true'] .of-pal-sizecount {
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+/* The sentence the 7 families with no expressible size domain get instead of a
+   control, indented to the control's own inset so it reads as the row's. */
+.of-pal-nosize {
+  padding: 0 6px 4px;
+  font-size: 11px;
 }
 
 /* ── The floating toolbar ────────────────────────────────────────────────────
@@ -332,8 +438,8 @@
 }
 
 /* ── Notes ───────────────────────────────────────────────────────────────────
-   The library screen's warning device, because it is the same warning: an accent
-   bar down the left and the accent at a tenth behind it. No alarm colour — the
+   An accent bar down the left and the accent at a tenth behind it — the same
+   warning device `.of-backup-report` uses, because it is the same warning. No alarm colour — the
    Parchment palette has none, and inventing one would put a hex outside the
    contract's table.
    ──────────────────────────────────────────────────────────────────────────── */
@@ -355,16 +461,6 @@
 .of-bill-note[data-tone='huge'] {
   border-left-width: 3px;
   background: color-mix(in srgb, var(--acc) 14%, transparent);
-}
-
-/* The resolution summary is disclosure, not a warning: it says what the lock
-   preference did, and every scene with a topper in it has one. So it keeps the
-   note's shape and drops to the muted rule and a transparent ground — the
-   warnings above it have to stay the loudest thing in the column. */
-.of-bill-note[data-tone='resolved'] {
-  background: none;
-  border-left-color: var(--line);
-  color: var(--mut);
 }
 
 .of-bill-note-head {
@@ -485,30 +581,54 @@ div.of-bill-open {
   text-align: center;
 }
 
-/* A base the resolver added, not a tile the user placed. */
-.of-bill-auto {
+/* Row A3 deleted three rules from here — `.of-bill-auto`, its `warn` tone and
+   the hatched `[data-auto]` left edge. All three marked a decision the app made
+   on the user's behalf: a base rule 1 inserted, and the variant rule 0 chose.
+   Nothing is inserted and nothing is chosen, so there is no such row to mark and
+   the selectors matched nothing. Row C4 owns whatever a row says about a fill. */
+
+/* ── Faulty slots (row C4) ───────────────────────────────────────────────────
+   Inside a `.of-bill-note`, so the accent bar and the tone are the note's. Each
+   entry is two lines rather than one — the subject with its Remove action, then
+   the reason — because the reason is a sentence and the subject is a recipe slug
+   plus a slot name plus a cell, and in a 302px column those do not share a line.
+   The ones that refuse the download carry a second rule down the left, which is
+   the same device the `huge` verdict uses: heavier bar, same hue, no new colour.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-bill-faults {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.of-bill-fault {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 7px;
+  border-left: 1px solid color-mix(in srgb, var(--acc) 35%, transparent);
+}
+
+.of-bill-fault[data-blocking] {
+  border-left-width: 2px;
+  border-left-color: var(--acc);
+}
+
+.of-bill-fault-head {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  margin: 0 0 3px 60px;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.of-bill-fault-why {
   font-size: 11.5px;
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--mut);
-}
-
-/* A row-level resolution mark that is a compromise rather than an explanation —
-   a base in the wrong system, a tile with no version in this one. Full ink
-   instead of muted, which is the only lever available: the Parchment palette has
-   no alarm colour, and `panels.css` may not invent one. */
-.of-bill-auto[data-tone='warn'] {
-  color: var(--ink);
-}
-
-.of-bill-row[data-auto] .of-bill-open {
-  /* Hatched left edge, echoing the drawing's own "this was added for you" mark
-     without borrowing the canvas's pattern id. */
-  border-left: 2px dashed var(--line);
-  padding-left: 6px;
 }
 
 /* ── Placements under a row ──────────────────────────────────────────────── */
@@ -685,6 +805,8 @@ div.of-bill-open {
 
 @media (prefers-reduced-motion: reduce) {
   .of-pal-pick,
+  .of-pal-chip,
+  .of-pal-sizebtn,
   .of-bill-open {
     transition: none;
   }
@@ -802,4 +924,106 @@ div.of-bill-open {
 
 .of-gbill-param dd {
   color: var(--ink);
+}
+
+/* ── Backup ──────────────────────────────────────────────────────────────────
+   Row A0, relocated from the deleted library screen. Not in the contract's
+   §2.4 — architecture-plan.md §13 is why it exists at all (see
+   `BackupPanel.tsx`), and the bill column is why it is here.
+
+   It is the last child of `.of-builder-bill`, a fixed-height grid whose `1fr`
+   row is the bill, so it is sized to cost the parts list as little as possible:
+   `sm` controls, one 12.5px sentence, and a report that only exists after a
+   press. The top border separates it from the accessory slots above without
+   adding a second bordered box inside a bordered column.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-backup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+  /* The same containing-block rule as `.of-palette`: the clipped file input
+     inside the Import label is `position: absolute`, and without a positioned
+     ancestor its containing block is the *initial* one — so it escapes every
+     `overflow: hidden` up to the root and adds its offset to the document's
+     scroll height, on a screen specified to have none. */
+  position: relative;
+  /* A badly damaged import file produces six dropped entries plus a tail line,
+     and this column has no page scroll to absorb them. */
+  max-height: 45vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.of-backup-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.of-backup-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--mut);
+}
+
+.of-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* At this width the two controls share a row until they cannot, and then each
+   takes one — a 96px button beside a wrapped label reads as a mistake. */
+.of-backup-actions > * {
+  flex: 1 1 auto;
+}
+
+.of-backup-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  align-self: stretch;
+  border-radius: 4px;
+  border-left: 2px solid var(--acc2);
+  background: color-mix(in srgb, var(--acc2) 10%, transparent);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* A failed import changed nothing, and a partial one kept less than the file
+   held; both are the accent, which is this palette's "look here". Success keeps
+   verdigris, the contract's confirmation colour. */
+.of-backup-report[data-tone='error'],
+.of-backup-report[data-tone='warn'] {
+  border-left-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 8%, transparent);
+}
+
+.of-backup-report-line {
+  margin: 0;
+}
+
+/* The discarded entries are `src/store/migrations.ts`'s own strings — paths and
+   values, so mono, and small because a badly damaged file produces six of them. */
+.of-backup-dropped {
+  margin: 0;
+  padding-left: 18px;
+  font-family: var(--face-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mut);
+  overflow-wrap: anywhere;
+}
+
+.of-backup-dropped [data-tone='more'] {
+  list-style: none;
+  margin-left: -18px;
+  font-style: italic;
 }

@@ -1,6 +1,15 @@
 /**
  * The 40 recipe templates: the other half of the fixtures directory, read at
- * last.
+ * last — and, since row **B4**, the merge point where they meet the generated
+ * families.
+ *
+ * The 40 and the 51 have nothing in common upstream: one set is parsed out of
+ * YAML and validated part-by-part against `PartSlot`, the other is a `GROUP BY`
+ * over the emitted `(role, form, build)` tags in `pipeline/families.ts`. They
+ * meet in {@link printTemplateModule}, which emits **one** file with three
+ * exports, because they arrive in the browser through the same lazily-mounted
+ * chunk and neither is in the index. That function's docblock carries the merge
+ * decisions; everything below it is still about the 40 alone.
  *
  * ## What the 40 are, and why nothing had read them
  *
@@ -72,8 +81,8 @@
  *
  * | | raw | brotli | of budget |
  * | --- | ---: | ---: | ---: |
- * | `catalog.json` as merged | 5,858,260 B | 365,603 B | 71.4% |
- * | with a `templates` key | 5,897,727 B | 366,863 B | 71.7% |
+ * | `catalog.json` as merged | 5,907,360 B | 366,768 B | 71.6% |
+ * | with a `templates` key | 5,946,827 B | 368,028 B | 71.9% |
  * | **the 40 would add** | **+39,467 B** | **+1,260 B** | **+0.25 pt** |
  * | the same 40 alone | 39,454 B | 1,452 B | — |
  *
@@ -96,6 +105,16 @@
  * `templates.test.ts` fails when the committed module is not byte-for-byte what
  * this file emits. The path is {@link TEMPLATES_MODULE_PATH} and it is a constant
  * of this module, not of the screen.
+ *
+ * ## One thing here is not a reader
+ *
+ * {@link checkTemplateTags} is row **B6**'s answer to an upstream tag defect:
+ * two of the four internal-corner templates carry `shape|corner`. The fixtures
+ * are pinned and read-only, so this repo records the defect rather than
+ * repairing it — and records it as a *census computed from each fixture's own
+ * parts*, so that upstream fixing the data fails the import as loudly as
+ * upstream breaking a third template would. The reasoning, and why a
+ * normalisation was declined, is beside {@link TemplateTagDefect}.
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -104,7 +123,10 @@ import { z } from 'zod'
 
 import { PartSlot } from '../src/catalog'
 import type { ConstrainRef, TagRef } from '../src/catalog'
+import type { SlotConvention } from '../src/template/rules'
+import { conventionFor } from '../src/template/rules'
 
+import type { GeneratedFamily } from './families'
 import { fixturesDir } from './fixtures'
 
 /**
@@ -414,7 +436,231 @@ export function loadTemplateFixtures(dir: string = templateFixturesDir()): reado
     .filter((name) => name.endsWith('.yaml'))
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   if (files.length === 0) throw new Error(`no *.yaml fixtures in ${dir}`)
-  return files.flatMap((name) => readTemplateFile(name, readFileSync(join(dir, name), 'utf8')))
+  const entries = files.flatMap((name) => readTemplateFile(name, readFileSync(join(dir, name), 'utf8')))
+  /* The complete pinned set is the only place the tag-defect census means
+     anything, and this is the only function that has it. See below. */
+  checkTemplateTags(entries)
+  return entries
+}
+
+/* ------------------------------------------------ the internal-corner defect */
+
+/**
+ * The upstream tag defect this repo records rather than repairs.
+ *
+ * **Two of the four internal-corner templates carry `shape|corner`** where
+ * their siblings carry `shape|internal_corner`, and one of the two loses its
+ * `|low` qualifier with it. Measured over all 40, each of which carries exactly
+ * one `shape|` tag:
+ *
+ * | `shape|` tag | templates |
+ * | --- | ---: |
+ * | `shape\|wall` | 32 |
+ * | `shape\|corner` | **4** |
+ * | `shape\|corner\|low` | 2 |
+ * | `shape\|internal_corner` | 1 |
+ * | `shape\|internal_corner\|low` | 1 |
+ *
+ * Four templates are tagged `shape|corner` where only two are corners. The
+ * sharpest form of it: `S2W: Wall on Tile: Internal Corner: Low (Modular)`
+ * carries a tag list **identical, string for string, to
+ * `S2W: Wall on Tile: Corner (Any, Modular)`** — five tags, same order — while
+ * having three parts against the other's five. On tags alone those two
+ * templates are the same template.
+ *
+ * `shape|corner` is not a coarser reading of `shape|internal_corner`; the two
+ * are **siblings** under `shape|`, so this is a wrong answer rather than a
+ * partial one. The fixtures do also drop a *qualifier* twice — both
+ * `blueprints.s2w.wall.wall+low.yaml` entries carry plain `shape|wall` while
+ * requiring `shape|wall|low` on their wall part — and that is a defensible
+ * family root, which is why the check below is about the form and not about the
+ * qualifier.
+ *
+ * ## Why this is a guard and not a normalisation
+ *
+ * The tempting fix is to rewrite the tag on the way in. Declined, for three
+ * measured reasons and one structural one:
+ *
+ *   1. **It would falsify this module's central claim.** Everything here rests
+ *      on one property: `printFixture` re-emits the fixtures byte for byte and
+ *      {@link printTemplateModule}'s output is asserted byte-identical to the
+ *      committed module, so `src/screens/assemblies/templates.ts` is *provably*
+ *      the fixtures' content. Rewrite a tag and the shipped module carries a
+ *      string that appears in no fixture, with the normaliser as the only
+ *      witness that the difference is exactly the correction.
+ *   2. **Nothing reads a template's `shape|` tag, and the one path that could
+ *      is empty on exactly these four templates.** `AssembliesScreen` groups on
+ *      `build|s2w|single_piece` / `build|s2w|modular`; `measure.ts` and
+ *      `assemblies.test.ts` read tag *roots* only; every layout decision keys on
+ *      the part-name set, which is right on 40 of 40. The one path that reaches
+ *      candidate resolution is `assembly.ts`'s
+ *      `resolveSlotTags(part.tags, template.tags, ...)`, where a template's own
+ *      tags are the `parentTags` a `constrain` entry inherits — and **all four
+ *      internal-corner templates carry 0 `constrain` entries**, the only 4 of
+ *      the 40 that do; the other 36 carry between 3 and 8. So the wrong tag is
+ *      inherited by nothing, and the correction has no beneficiary today.
+ *   3. **It would erase two rows' evidence.** `src/template/rules.test.ts` and
+ *      `pipeline/templates.test.ts` both measure this defect off the fixtures to
+ *      justify keying on the part-name set. A normalisation turns both green by
+ *      vacuity, and both live in directories row B6 does not own.
+ *   4. The fixtures are pinned and read-only (`.github/fixtures.env`), so the
+ *      real repair belongs upstream and this repo's job is to notice.
+ *
+ * ## Why the predicate is the contradiction and not the spelling
+ *
+ * A hard-coded list of two `(source, name)` pairs cannot tell whether upstream
+ * fixed the data — it would keep passing over corrected fixtures for ever. A
+ * bare `count !== 2` cannot say which template moved. So the census below is
+ * computed from a signal **inside each fixture**: a template whose own parts
+ * require an `internal_corner` form while its own `shape|` tag names a
+ * different one. Measured over the 40, the parts say `internal_corner` on
+ * **4 of 4** internal corners and on **0 of the other 36** — every one of the
+ * four requires `shape|floor|internal_corner` on its `floor` part, and the two
+ * modular ones additionally require `shape|base|internal_corner`.
+ *
+ * That predicate fires in both directions. Upstream fixing either template
+ * drops the census below two and {@link checkTemplateTags} fails the import
+ * saying so; a third mis-tagged template raises it and fails naming that one.
+ */
+export interface TemplateTagDefect {
+  /** The fixture file. */
+  readonly source: string
+  /** The template's name, which is unique across all 40. */
+  readonly name: string
+  /** The `shape|` tag it carries — exactly one on all 40. */
+  readonly carries: readonly string[]
+  /** The part whose `require` contradicts it. */
+  readonly part: string
+  /** That part's contradicting `require` tag. */
+  readonly requires: string
+}
+
+/** The form segment of a `shape|`-rooted tag, or `undefined` for a bare root. */
+function shapeForm(tag: string, at: 1 | 2): string | undefined {
+  const parts = tag.split('|')
+  return parts[0] === 'shape' ? parts[at] : undefined
+}
+
+/**
+ * The tag-defect census over a set of templates.
+ *
+ * A template is a defect when one of its parts requires a `shape|<x>|<form>`
+ * tag whose `<form>` its own `shape|` tag does not name. Only
+ * `internal_corner` is treated as such a form, and deliberately: it is the one
+ * the fixtures contradict themselves about, and the one whose mis-spelling
+ * names a sibling rather than a coarser parent.
+ */
+export function templateTagDefects(entries: readonly TemplateFixture[]): readonly TemplateTagDefect[] {
+  const out: TemplateTagDefect[] = []
+  for (const entry of entries) {
+    const carries = entry.tags.filter((tag) => tag.startsWith('shape|'))
+    const claimed = new Set(carries.map((tag) => shapeForm(tag, 1)))
+    for (const part of entry.parts) {
+      const ref = (part.tags.require ?? []).find((each) => shapeForm(each.tag, 2) === 'internal_corner')
+      if (ref === undefined || claimed.has('internal_corner')) continue
+      out.push({ source: entry.source, name: entry.name, carries, part: part.name, requires: ref.tag })
+      break
+    }
+  }
+  return out
+}
+
+/**
+ * The two defects this repo has recorded, at `OPENFORGE_CATALOG_SHA`.
+ *
+ * Both are the `(Modular)` entry of their file, both carry `shape|corner`, and
+ * neither has a `wall` part at all — so a tag-keyed layout would hand an
+ * internal corner an external corner's two-wall convention and then look for
+ * `right wall` and `left wall` fills that cannot exist.
+ */
+export const RECORDED_TAG_DEFECTS: readonly string[] = [
+  'blueprints.s2w.internal_corner.low.yaml: S2W: Wall on Tile: Internal Corner: Low (Modular)',
+  'blueprints.s2w.internal_corner.yaml: S2W: Wall on Tile: Internal Corner (Modular)',
+]
+
+/** `source: name`, the form {@link RECORDED_TAG_DEFECTS} is written in. */
+export function tagDefectKey(defect: TemplateTagDefect): string {
+  return `${defect.source}: ${defect.name}`
+}
+
+const DEFECT_ADVICE =
+  'The fixtures are pinned and read-only, so this repo records the defect instead of repairing it: ' +
+  'see the census in pipeline/templates.ts, RECORDED_TAG_DEFECTS beside it, ' +
+  "and src/template/rules.test.ts's tag-key measurement."
+
+/**
+ * The guard: the census must be exactly {@link RECORDED_TAG_DEFECTS}, or the
+ * import fails saying which way it moved.
+ *
+ * Called from {@link loadTemplateFixtures}, because that is the only function
+ * that holds the complete pinned set and because it is what
+ * `npm run import:catalog` calls before it regenerates the module. A fixture
+ * refresh therefore lands on this rather than quietly rewriting
+ * `src/screens/assemblies/templates.ts` with a different census behind it.
+ *
+ * The empty case gets its own message, because it is the good news and reads as
+ * a failure otherwise: nothing to work around means the workaround and this
+ * guard should go.
+ */
+export function checkTemplateTags(entries: readonly TemplateFixture[]): void {
+  const found = templateTagDefects(entries).map(tagDefectKey).sort()
+  const expected = [...RECORDED_TAG_DEFECTS].sort()
+  if (found.length === expected.length && found.every((key, at) => key === expected[at])) return
+
+  if (found.length === 0) {
+    throw new Error(
+      'the upstream internal-corner tag defect is gone: no template contradicts its own parts, ' +
+        `where ${String(expected.length)} did at the pinned fixtures. This is upstream fixing the data. ` +
+        'Delete RECORDED_TAG_DEFECTS, this guard and its test, and the tag-key measurements in ' +
+        'pipeline/templates.test.ts and src/template/rules.test.ts that exist only because of it.',
+    )
+  }
+
+  const gone = expected.filter((key) => !found.includes(key))
+  const added = found.filter((key) => !expected.includes(key))
+  const subject = found.length === 1 ? 'template contradicts' : 'templates contradict'
+  throw new Error(
+    `the internal-corner tag defect census moved: ${String(found.length)} ${subject} their own ` +
+      `parts, against the ${String(expected.length)} recorded.` +
+      (added.length > 0 ? ` No longer recorded: ${added.join(' | ')}.` : '') +
+      (gone.length > 0 ? ` Recorded but no longer found: ${gone.join(' | ')}.` : '') +
+      ` ${DEFECT_ADVICE}`,
+  )
+}
+
+/* -------------------------------------------------------------- slot geometry */
+
+/**
+ * The layout convention for one template, or a throw naming the template.
+ *
+ * Row **B2**'s build-time gate, and the one thing the pipeline does with slot
+ * geometry. Nothing is *emitted*: the three conventions ship in the bundle in
+ * `src/template/rules.ts`, and the index gains **0 B** — a 128-row expansion of
+ * the same rule as a `layouts` key was measured at **+222 B** brotli against the
+ * shipped artefact at the payload epoch and declined, exactly as the 40
+ * templates themselves were. `templates.test.ts` asserts the 0 B rather than
+ * quoting it, by rebuilding the corpus and comparing the emitted bytes;
+ * `src/template/corpus.test.ts` prices the counterfactual against the shipped
+ * artefact.
+ *
+ * What the gate is for: `conventionFor` is keyed on the **part-name set**, which
+ * classifies 40 of 40, and a set it does not know is a template this project
+ * cannot lay out. Reading it here makes that a failure of
+ * `npm run import:catalog`, naming the file and the template, rather than a
+ * template that reaches the browser with no geometry and reads as an archive
+ * gap. `src/template/rules.ts` is deliberately import-free so this crossing
+ * costs `tsconfig.node.json` one named file and no transitive dependency.
+ */
+export function templateConvention(entry: TemplateFixture): SlotConvention {
+  const convention = conventionFor(entry.parts.map((part) => part.name))
+  if (convention === undefined) {
+    throw new Error(
+      `${entry.source}: ${entry.name} has the part set ` +
+        `[${entry.parts.map((part) => part.name).join(', ')}], which no slot convention covers — ` +
+        'author one in src/template/rules.ts',
+    )
+  }
+  return convention
 }
 
 /* ------------------------------------------------------------- the round-trip */
@@ -471,6 +717,21 @@ function printFixturePart(part: PartSlot): string[] {
 /* ------------------------------------------------------------ the shipped data */
 
 /**
+ * The line that separates the fixture entries from row **E3**'s authored ones
+ * inside `RECIPE_TEMPLATES`.
+ *
+ * A marker and not a comment for a reader's convenience: it is what
+ * `templates.test.ts` cuts the array on to assert that **the 40 are emitted byte
+ * for byte with and without the authored table** — row B4's guard for the 47
+ * generated families, applied to the second merge into the same module. Without
+ * a cut point the guard could only compare whole regions, and an emitter change
+ * that interleaved the two would pass it while destroying the claim that
+ * everything above the mark is provably the fixtures' content.
+ */
+export const AUTHORED_MARKER =
+  '  /* ---- authored in this repo, derived from the fixtures above: pipeline/authored.ts ---- */'
+
+/**
  * A template's id: a slug of its name.
  *
  * Derived from the name rather than from the file, because the two entries in a
@@ -521,12 +782,47 @@ function printModulePart(part: PartSlot): string[] {
 }
 
 /**
- * The whole of {@link TEMPLATES_MODULE_PATH}, emitted from the fixtures.
+ * The whole of {@link TEMPLATES_MODULE_PATH}, emitted from the fixtures **and**
+ * from row B4's generated families.
  *
  * `templates.test.ts` asserts the committed file is byte-identical to what this
- * returns, so the module is *provably* the fixtures' content and not a
+ * returns, so the module is *provably* its two sources' content and not a
  * transcription of it. `npm run import:catalog` rewrites it, which is the only
  * thing that should: the header says so and the test enforces it.
+ *
+ * ## Three sources, three exports, one file
+ *
+ * The 40 come from YAML and are validated part-by-part against `PartSlot`; the
+ * families come from the *corpus*, keyed on the `(role, form, build)` tags
+ * `pipeline/build.ts` already interned; row **E3**'s two come from
+ * `pipeline/authored.ts`, which derives them from named slots of the YAML. They
+ * meet only here, and they meet as the same emitted type: `RecipeTemplate` covers
+ * all three without a field to spare, because a family's `tags` are the
+ * `parentTags` its size positions are joined against and its `source` is the
+ * corpus key it was derived from.
+ *
+ * The **families** stay a separate array, and that is not tidiness: a family has
+ * one slot, no layout convention and its own size control, and `families.ts`
+ * gives it a role heading in the single-tile section of the palette. The
+ * **authored two** are `RECIPE_TEMPLATES` entries, and that is not tidiness
+ * either — it is measured. `src/builder/panels/families.ts` keys the palette's
+ * assemblies *section* on which of the two arrays a template came from, and
+ * nothing else; an authored assembly emitted anywhere but `RECIPE_TEMPLATES`
+ * reaches the browser as a one-slot single-tile row under a role heading, which
+ * is the exact defect the owner reported and row D2 repaired. So they are
+ * appended, after {@link AUTHORED_MARKER}, and `templates.test.ts` asserts
+ * everything above the marker is byte-identical with and without them.
+ *
+ * `families` is a required parameter where `authored` is defaulted, and the
+ * asymmetry is deliberate: a default of `[]` for the families would let a caller
+ * silently emit an empty family table and the whole of B4 is in that table, while
+ * `authored: []` is exactly what the byte-identity guard needs to be able to ask
+ * for.
+ *
+ * The `id` namespace is shared, though, and checked as one: {@link templateSlug}
+ * and `families.ts#familySlug` are the same construction and a collision between
+ * a fixture slug and a family key throws here rather than becoming a duplicate
+ * React key.
  *
  * The emitted `fulfills` is flattened from the grammar's `[{ part: 'base' }]` to
  * `['base']`, which is a derivation and is named as one. `PartSlot.fulfills`
@@ -534,14 +830,25 @@ function printModulePart(part: PartSlot): string[] {
  * the projection the consumer reads, the same way `CatalogRecord.blob` is a
  * projection of `file_metadata.md5`.
  */
-export function printTemplateModule(entries: readonly TemplateFixture[]): string {
+export function printTemplateModule(
+  entries: readonly TemplateFixture[],
+  families: readonly GeneratedFamily[],
+  authored: readonly TemplateFixture[] = [],
+): string {
   const seen = new Set<string>()
   const body: string[] = []
 
-  for (const entry of entries) {
+  const emit = (entry: TemplateFixture): void => {
     const id = templateSlug(entry.name)
     if (seen.has(id)) throw new Error(`two templates slug to ${id}`)
     seen.add(id)
+    /* Row B2's gate, run here because this is what `npm run import:catalog`
+       calls. It emits nothing — the conventions ship in the bundle and the index
+       gains 0 B — so the bytes below are unchanged by it, and a fixture with an
+       unknown part set fails the import rather than the browser. Row E3's two
+       authored entries go through the same gate, which is why the corridor's
+       convention has to be in `SLOT_CONVENTIONS` before its template exists. */
+    templateConvention(entry)
     body.push(
       '  {',
       `    id: ${quote(id)},`,
@@ -555,30 +862,96 @@ export function printTemplateModule(entries: readonly TemplateFixture[]): string
     )
   }
 
+  for (const entry of entries) emit(entry)
+  if (authored.length > 0) {
+    body.push(AUTHORED_MARKER)
+    for (const entry of authored) emit(entry)
+  }
+
+  const familyBody: string[] = []
+  for (const family of families) {
+    if (seen.has(family.id)) throw new Error(`two templates slug to ${family.id}`)
+    seen.add(family.id)
+    familyBody.push(
+      '  {',
+      `    id: ${quote(family.id)},`,
+      `    name: ${quote(family.name)},`,
+      /* The corpus key — a generated family's whole provenance, and the answer a
+         fixture template gives with a file name. */
+      `    source: ${quote(family.key)},`,
+      `    tags: [${family.tags.map(quote).join(', ')}],`,
+      '    parts: [',
+      ...printModulePart(family.slot),
+      '    ],',
+      '  },',
+    )
+  }
+
+  const sizeBody = families.map(
+    (family) =>
+      `  ${quote(family.id)}: [${family.sizes
+        .map((size) => `{ label: ${quote(size.label)}, tags: [${size.tags.map(quote).join(', ')}] }`)
+        .join(', ')}],`,
+  )
+
+  const allRecipes = [...entries, ...authored]
   return `${[
     '/**',
-    ' * The 40 recipe templates, as data.',
+    ` * The ${String(allRecipes.length)} recipe templates and the ${String(families.length)} generated families, as data.`,
     ' *',
     ' * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`',
-    ' * fixtures beside the JSON and emits this file; `npm run import:catalog` writes',
-    ' * it and `pipeline/templates.test.ts` asserts the committed bytes are exactly',
-    " * `printTemplateModule(loadTemplateFixtures())`, so an edit here fails the suite",
-    ' * rather than drifting quietly.',
+    ' * fixtures beside the JSON, `pipeline/authored.ts` derives this repo’s own two',
+    ' * from named slots of those fixtures, `pipeline/families.ts` derives the families',
+    ' * from the built corpus, and this file is what the three emit;',
+    ' * `npm run import:catalog` writes it and `pipeline/templates.test.ts` asserts the',
+    ' * committed bytes are exactly what the emitter returns, so an edit here fails the',
+    ' * suite rather than drifting quietly.',
     ' *',
-    ' * The 40 are not in `catalog.json`: none of them carries `file_metadata`, so none',
-    ' * is an STL and none is a `CatalogRecord`. Putting them in the index anyway was',
-    ' * measured at +1,260 B brotli and declined — `pipeline/templates.ts` carries the',
-    ' * table and the reason, which is that the recipe list is the one part of this',
-    ' * screen that renders before the index lands.',
+    ` * \`RECIPE_TEMPLATES\` is the ${String(entries.length)} read from the fixtures — all of them`,
+    ' * `S2W: Wall on Tile`, reaching 35.4% of the corpus — followed, below the marker,',
+    ` * by the ${String(authored.length)} row **E3** authored here: a wall recipe whose floor slot is widened`,
+    ' * off the shipped `(Any, Modular)` one, taking the section to 51.0% of the records',
+    ' * and 49.5% of the designs, and a corridor, whose two walls sit on opposite faces.',
+    ' * Everything above the marker is byte-identical with and without them.',
+    ' * `GENERATED_FAMILIES` is one',
+    ' * family per `(role, form, build)` key the emitted tags already carry, each with',
+    ' * one required slot denying `shape|base`, plus the bare-base family no such key',
+    ' * can name and which requires it.',
+    ' * `GENERATED_FAMILY_SIZES` is each family’s size control keyed by family id: a',
+    ' * placed instance adds a position’s tags to its `parentTags`, where the slot’s own',
+    ' * `constrain` block collects them, so size costs no new resolution code at all.',
+    ' * `pipeline/families.ts` carries every measurement behind all three.',
+    ' *',
+    ' * None of it is in `catalog.json`. No template carries `file_metadata`, so none is',
+    ' * an STL and none is a `CatalogRecord`; putting the 40 in the index anyway was',
+    ' * measured at +1,260 B brotli and declined. Every ref the families emit is a tag',
+    ' * the corpus already carries, so the index gains 0 B and the tag table stays at 930',
+    ' * strings. The reason both live in the bundle is that the recipe list is the one',
+    ' * part of this screen that renders before the index lands.',
     ' *',
     ` * ${String(entries.length)} templates over ${String(new Set(entries.map((entry) => entry.source)).size)} fixture files, ${String(
       entries.reduce((total, entry) => total + entry.parts.length, 0),
-    )} parts.`,
+    )} parts; ${String(authored.length)} authored over ${String(
+      authored.reduce((total, entry) => total + entry.parts.length, 0),
+    )} more.`,
+    ` * ${String(families.length)} generated families over ${String(
+      families.reduce((total, family) => total + family.records, 0),
+    )} records, ${String(families.reduce((total, family) => total + family.sizes.length, 0))} size positions.`,
     ' */',
     "import type { RecipeTemplate } from './assembly'",
     '',
     'export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [',
     ...body,
     ']',
+    '',
+    'export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [',
+    ...familyBody,
+    ']',
+    '',
+    'export const GENERATED_FAMILY_SIZES: Readonly<',
+    '  Record<string, readonly { readonly label: string; readonly tags: readonly string[] }[]>',
+    '> = {',
+    ...sizeBody,
+    '}',
   ].join('\n')}\n`
 }

@@ -40,12 +40,11 @@ import { openTileDrawer } from '@/routes'
 import { TINT_FILTER_SHEET_ID } from '@/ui/thumb'
 import { parseCompactSearch, stringifyCompactSearch, validateCatalogSearch, validateFacetSearch } from '@/search'
 import {
-  claimPendingDesign,
-  clearPendingDesign,
+  claimPendingArm,
+  clearPendingArm,
   clearPersistedWorkshopState,
   resetWorkshop,
   setLockSystem,
-  useLibraryCount,
   useWorkshopStore,
 } from '@/store'
 
@@ -92,7 +91,26 @@ const TAGS = [
   'connection|side|dragonlock',
   'connection|openlock|topless',
   'shape|arch',
+  /* Rows C1 and C3. The drawer's two actions both derive a template family from
+     `(role, form, build)` — or from `shape|base` — through
+     `familyKey.ts#armForTags`, so a fixture record with neither axis names no
+     family at all. That state is real (an unclassified record) and the drawer
+     says something different about it than about an insert, so both are
+     exercised: the records below carry the axes, the ones that do not are the
+     unclassified case, and `shapeless` is the insert. Row C3's *"+ Place on the
+     plan"* is gated on the same answer, so these four tags are what let it
+     resolve `floor-straight` and place into its one slot. */
+  'role|floor',
+  'form|straight',
+  'role|wall',
+  'role|insert',
 ]
+
+/** Indices into {@link TAGS}, for the four row C1 added. */
+const ROLE_FLOOR = 11
+const FORM_STRAIGHT = 12
+const ROLE_WALL = 13
+const ROLE_INSERT = 14
 
 /**
  * One record. `design` is required rather than defaulted, because after A1 the
@@ -141,7 +159,7 @@ const CATALOG = CatalogFile.parse({
       family: 'tiles/cave/floors/floor',
       name: 'Cave Floor 1x1',
       build: 'separate wall',
-      tags: [0, 3, 4],
+      tags: [0, 3, 4, ROLE_FLOOR, FORM_STRAIGHT],
     }),
     tile({
       id: 'tiles/cave/floors/floor/cave%floor.2x2.stl',
@@ -170,7 +188,7 @@ const CATALOG = CatalogFile.parse({
       name: 'Cave Wall 2x Low',
       kinds: ['wall'],
       // `shape|wall|low` — the height lookup's single-qualifier branch.
-      tags: [1, 3],
+      tags: [1, 3, ROLE_WALL, FORM_STRAIGHT],
       foot: { shape: 'wall', length: 2 },
       // A one-file item that still declares an accessory slot, so the slot
       // section's singular wording is exercised rather than assumed.
@@ -203,7 +221,8 @@ const CATALOG = CatalogFile.parse({
       family: 'tiles/cave/misc/curved',
       name: 'Cave Curved Insert',
       foot: { shape: 'none' },
-      tags: [2, 3],
+      // `role|insert`: one of the 94 designs no family names, on purpose.
+      tags: [2, 3, ROLE_INSERT, FORM_STRAIGHT],
     }),
     tile({
       id: 'tiles/aztlan/separate_walls/column/aztlan%column.stl',
@@ -235,7 +254,7 @@ const CATALOG = CatalogFile.parse({
       bytes: 2_100_000,
       // `openforge` underneath plus `side|dragonlock`: needs a base, and joins
       // its neighbours in dragonlock.
-      tags: [3, 7, 8, 10],
+      tags: [3, 7, 8, 10, ROLE_WALL, FORM_STRAIGHT],
       foot: { shape: 'wall', length: 2 },
       // A `base` slot, which is the base match and must NOT be listed as an
       // accessory, and a `torch` slot, which must be — and which only this file
@@ -257,7 +276,7 @@ const CATALOG = CatalogFile.parse({
       kinds: ['wall'],
       layer: 'integral',
       bytes: 2_400_000,
-      tags: [3, 6, 10],
+      tags: [3, 6, 10, ROLE_WALL, FORM_STRAIGHT],
       foot: { shape: 'wall', length: 2 },
     }),
     tile({
@@ -272,7 +291,7 @@ const CATALOG = CatalogFile.parse({
       // The smallest of the three, which is exactly why a byte tie-break must
       // not be allowed to read as a recommendation: `topless` has no top surface.
       bytes: 900_000,
-      tags: [3, 9, 10],
+      tags: [3, 9, 10, ROLE_WALL, FORM_STRAIGHT],
       foot: { shape: 'wall', length: 2 },
     }),
   ],
@@ -283,13 +302,16 @@ const CATALOG = CatalogFile.parse({
 /**
  * The catalog stand-in: a focusable control to prove focus restoration, plus the
  * drawer under test.
+ *
+ * It rendered `useLibraryCount()` beside them until row A0, so a test could see
+ * the drawer's toggle write through to the store. The toggle and the library are
+ * both gone; the drawer's one remaining action is observed through the router and
+ * the selection channel instead.
  */
 function CatalogStub() {
-  const count = useLibraryCount()
   return (
     <div>
       <button type="button">a card</button>
-      <output>library {count}</output>
       <TileDrawer catalog={CATALOG} />
     </div>
   )
@@ -359,13 +381,13 @@ beforeEach(() => {
   clearPersistedWorkshopState()
   // Row G5's channel is not part of `WorkshopState`, so `resetWorkshop` does not
   // reach it and a handoff left in the box would leak between tests.
-  clearPendingDesign()
+  clearPendingArm()
 })
 
 afterEach(() => {
   resetWorkshop()
   clearPersistedWorkshopState()
-  clearPendingDesign()
+  clearPendingArm()
 })
 
 /* ----------------------------------------------------------------- the URL */
@@ -759,23 +781,60 @@ describe('the storage address', () => {
 /* ------------------------------------------------------------------ actions */
 
 describe('the actions', () => {
-  it('toggles the tile in and out of the library', async () => {
+  it('offers §2.5’s two actions, the library toggle having become a placement', async () => {
+    // Row A0 deleted the first action with the library it wrote to; **row C3**
+    // puts one back with a different verb, because templates are the only
+    // placement unit and *"I am going to print this"* now means *"this piece is
+    // on my plan"*. The old library toggle is still asserted absent, so nothing
+    // can quietly bring a second destination back.
     await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
 
-    const toggle = within(drawer()).getByRole('button', { name: '+ Add to library' })
-    expect(toggle).toHaveAttribute('aria-pressed', 'false')
-
-    act(() => {
-      fireEvent.click(toggle)
-    })
-    expect(within(drawer()).getByRole('button', { name: '✓ In library' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
-    expect(screen.getByText('library 1')).toBeInTheDocument()
+    const actions = within(drawer())
+      .getAllByRole('button')
+      .filter((button) => button.className.includes('of-detail-action'))
+    expect(actions.map((button) => button.textContent)).toEqual([
+      '+ Place on the plan',
+      'Use in builder →',
+    ])
+    expect(within(drawer()).queryByRole('button', { name: /Add to library/ })).toBeNull()
   })
 
-  it('sends the item to the builder, adding it to the library on the way', async () => {
+  it('places the shown file into the family that admits it, keeping the file', async () => {
+    // Row C3's half of the two actions, and the difference from arming: this
+    // keeps the **file**. `armForTags` names the family — `role|floor` +
+    // `form|straight` is `floor-straight` — and `placeFileAsFamily` pins the
+    // variant on screen into that family's one slot, so the piece on the plan is
+    // the piece in the preview well. `placeOnPlan` picks the cell with the
+    // plan's own collision predicate.
+    const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+
+    fireEvent.click(within(drawer()).getByRole('button', { name: /Place on the plan/ }))
+    // `waitFor`, because the press fetches `./placeOnPlan` and, through it, the
+    // plan projection and the family table — the boundary that keeps all three
+    // out of the catalog's own chunk, and the reason this is not synchronous.
+    await waitFor(() => {
+      expect(within(drawer()).getByRole('status')).toHaveTextContent(/Placed as/)
+    })
+
+    const placements = Object.values(useWorkshopStore.getState().placements)
+    expect(placements).toHaveLength(1)
+    expect(placements[0]).toMatchObject({
+      template: 'floor-straight',
+      rotation: 0,
+      // `pinned: true`: the user pressed a button naming this tile, so the lock
+      // re-solve must honour it (§2.1, contract C-k).
+      fills: { floor: { tile: 'tiles/cave/floors/floor/cave%floor.1x1.stl', pinned: true } },
+    })
+    // It does not navigate, which is what keeps it a second action rather than a
+    // quieter copy of "Use in builder →": the library toggle accumulated without
+    // leaving the catalog and so does this. Nothing reaches the channel either —
+    // placing is not arming.
+    expect(router.state.location.pathname).toBe('/catalog')
+    expect(claimPendingArm()).toBeNull()
+    expect(within(drawer()).getByRole('status')).toHaveTextContent(/Placed as Floor: Straight at x /)
+  })
+
+  it('sends the family that admits the tile, and no query with it', async () => {
     const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
 
     await act(async () => {
@@ -784,24 +843,71 @@ describe('the actions', () => {
     })
 
     expect(router.state.location.pathname).toBe('/builder')
-    expect((router.state.location.search as unknown as { q: string }).q).toBe('Cave Floor 1x1')
     expect(screen.getByText('Builder screen')).toBeInTheDocument()
-    // Row G5. Before the channel existed this action could file a tile, navigate
-    // and seed a query, and then had nowhere to say "and arm this one" — which is
-    // PR #23's defect. It now posts the **item**, and the builder's palette
-    // claims it. Row V1 changed the currency from a file to a design, for the
-    // reason G5 itself gave: the file on screen is one of several prints of the
-    // thing the user chose, so sending it froze a lock preference into a handoff.
-    expect(claimPendingDesign()).toBe('d-floor-1x1')
-    expect(Object.keys(useWorkshopStore.getState().library)).toEqual(['d-floor-1x1'])
+    // **The seeded query is gone, and its absence is the assertion.** The action
+    // used to navigate with `?q=` the tile's name, because row A0's palette
+    // listed the archive and the search was what put a row for the item in front
+    // of the claim. Row C1's palette lists 91 template families, so a tile's name
+    // narrows it to nothing — the arm is the whole handoff now.
+    expect((router.state.location.search as { q?: string }).q).toBeUndefined()
+    // Row G5's channel, carrying row C1's arm: the family derived from this
+    // record's own `(role, form)` — `role|floor form|straight` is the key
+    // `floor|straight|-`, whose id `familyKey.ts` *constructs* rather than looks
+    // up — plus the tile's own size tags. The **palette** turns those into a
+    // position of that family's control, because the domain is in the table the
+    // drawer deliberately does not import.
+    expect(claimPendingArm()).toEqual({ template: 'floor-straight', size: ['size|width|1'] })
   })
 
-  it('sends the item, and still shows the variant the preference picked', async () => {
+  it('says which family it will arm, because a family is not the tile', async () => {
+    // The lossiness, disclosed at the writer. `armForTags` maps a tile to the
+    // family that admits it, and the fill solver may put a different print — or a
+    // different tile of the family — in the slot; a press that said only "use in
+    // builder" would be claiming more than it does.
+    //
+    // The *family* and not the size: the size travels as the tile's own tags and
+    // becomes a position on arrival, so naming one here would mean a third copy
+    // of the generator's labels for no gain.
+    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    expect(within(drawer()).getByText(/Arms/)).toHaveTextContent(
+      'Arms the Floor: Straight family, at this tile’s size.',
+    )
+  })
+
+  it('offers no arm for an insert, and says where it goes instead', async () => {
+    // 94 designs, all `role|insert`, and 262 of their 285 records are already
+    // reachable as a fill for a host tile's accessory slot — which is the grid
+    // this same drawer renders. So the action is replaced rather than disabled,
+    // and nothing reaches the channel.
+    await renderAt(`/catalog?tile=${String(ORD.shapeless)}`)
+
+    expect(within(drawer()).queryByRole('button', { name: /Use in builder/ })).toBeNull()
+    expect(within(drawer()).getByText(/Inserts are not placed on their own/)).toBeInTheDocument()
+    expect(claimPendingArm()).toBeNull()
+    // Row C3. Both actions are gated on the same answer, so the sentence stands
+    // alone rather than beside a "place it" that would place it wrongly.
+    expect(within(drawer()).queryByRole('button', { name: /Place on the plan/ })).toBeNull()
+  })
+
+  it('offers no arm for a tile this build files under no family', async () => {
+    // Unreachable over the emitted index — all 8,702 records carry exactly one
+    // role and one form — and reachable after an import that fails to classify
+    // one. It must not read as the insert case: that tile has somewhere to go and
+    // this one does not.
+    await renderAt(`/catalog?tile=${String(ORD.arc)}`)
+
+    expect(within(drawer()).queryByRole('button', { name: /Use in builder/ })).toBeNull()
+    expect(within(drawer()).getByText(/files no template family for this tile/)).toBeInTheDocument()
+    // Row C3, as above: one refusal for both verbs.
+    expect(within(drawer()).queryByRole('button', { name: /Place on the plan/ })).toBeNull()
+  })
+
+  it('sends the family, and still shows the variant the preference picked', async () => {
     // `?tile=30` is canonical, and with no lock chosen A1's rank shows the plain
     // openlock integral rather than the address holder — the case the tests above
     // assert, and it is unchanged: the drawer's *display* is still per-variant.
-    // What travels is the item, so the two questions have come apart, which is
-    // the whole of row V1's change to this channel.
+    // What travels is a family, so the two questions have come apart — which was
+    // row V1's change to this channel and survives row C1's.
     await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
     expect(
       within(drawer())
@@ -814,21 +920,24 @@ describe('the actions', () => {
       await Promise.resolve()
     })
 
-    expect(claimPendingDesign()).toBe('d-arch')
-    // And the same item is filed, so the palette has a row to arm.
-    expect(Object.keys(useWorkshopStore.getState().library)).toEqual(['d-arch'])
+    expect(claimPendingArm()?.template).toBe('wall-straight')
   })
 
   it.each([
     ['a dragonlock preference and the topless variant', 'dragonlock', ORD.archTopless] as const,
     ['no preference and the topper variant', 'openlock', ORD.archTopper] as const,
-  ])('sends the same item under %s', async (_label, lock, ord) => {
+  ])('sends the same arm under %s', async (_label, lock, ord) => {
     // `?tile=32` asked for a specific print and the drawer still shows it. Under
     // the old file-carrying channel this case existed because the handoff had to
     // carry *that* file, or following a link and pressing the action would arm a
-    // different one — a lock preference leaking into a handoff. A design cannot
-    // leak, so the claim is the same item from either variant under either lock,
+    // different one — a lock preference leaking into a handoff. A family cannot
+    // leak, so the claim is the same arm from either variant under either lock,
     // and the assertion is an *invariance* rather than an identity.
+    //
+    // It is also the fixture's copy of a corpus measurement: over all 3,822
+    // items, the number whose variants disagree about either the family or the
+    // size position is **0** — which is what makes reading the shown record's
+    // tags rather than the item's a safe question to ask.
     act(() => {
       setLockSystem(lock)
     })
@@ -839,7 +948,7 @@ describe('the actions', () => {
       await Promise.resolve()
     })
 
-    expect(claimPendingDesign()).toBe('d-arch')
+    expect(claimPendingArm()).toEqual({ template: 'wall-straight', size: [] })
   })
 })
 

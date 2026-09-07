@@ -29,10 +29,10 @@ import type { Footprint } from '@/catalog'
 
 import type { PlanBox, PlanPoint } from './geometry'
 import { footprintShape, planGeometry, snapTo } from './geometry'
-import type { OverlapSubject, PlanBand } from './overlap'
+import type { OverlapSubject } from './overlap'
 import { subjectsConflict } from './overlap'
 import type { PlanScene } from './scene'
-import { scenePaintOrder } from './scene'
+import { sceneSubjects } from './scene'
 
 /**
  * How far out the search goes, in grid units.
@@ -54,27 +54,43 @@ export const VACANCY_STEP = 1
  * `rotation` is 0: a generated base is a rect and there is nothing to align it
  * with yet. Turning it is one press of `R` once it is on the plan.
  *
+ * `heightMm` is the recipe's own — `BaseFootprint.heightMm`, arithmetic over
+ * `HEIGHT` or a riser's `z`. It is what keeps this function's promise now that
+ * `subjectsConflict` reads a vertical interval: a 50.8 mm riser and a 6 mm base
+ * are free in different cells, and a search that assumed one height would return
+ * a cell the scene then hatched. It replaced a `band` parameter that no caller
+ * ever passed — every shape the panel offers lands in the `area` band, measured
+ * off the archive in `generator/placement/scene.ts#GENERATED_SHAPES`, so there
+ * was never a second value for it to carry.
+ *
  * Total. A footprint that cannot be drawn on the plan — which no generated base has,
  * every shape the panel offers being a rect — falls straight through to the
  * fallback rather than throwing, because a placement action that threw would take
  * the builder down over a shape the *bill* would have listed happily.
  */
-export function freeCellFor(scene: PlanScene, foot: Footprint, band: PlanBand = 'area'): PlanPoint {
+export function freeCellFor(scene: PlanScene, foot: Footprint, heightMm = 0): PlanPoint {
   const shape = footprintShape(foot)
   if (shape === undefined) return clearOf(scene.bounds)
 
-  const occupied = scenePaintOrder(scene)
+  // Every drawn **part** of every piece, not every piece: since row A1 a
+  // placement is a template instance with a fill per slot, and a piece has no
+  // single band, box or outline for `subjectsConflict` to read. `sceneSubjects`
+  // is the same flattening `buildPlanScene`'s own conflict sweep uses, which is
+  // what keeps this function's promise — a cell it returns is a cell the scene
+  // will not mark in conflict.
+  const occupied = sceneSubjects(scene)
   const start = centreOfPlan(scene.bounds, foot)
 
   const fits = (at: PlanPoint): boolean => {
     const geometry = planGeometry(shape, 0, at[0], at[1])
     const subject: OverlapSubject = {
-      band,
+      band: 'area',
+      level: { elevationMm: 0, heightMm },
       box: geometry.box,
       parts: geometry.parts,
       axisAligned: geometry.axisAligned,
     }
-    return !occupied.some((piece) => subjectsConflict(piece, subject))
+    return !occupied.some((candidate) => subjectsConflict(candidate, subject))
   }
 
   // Ring by ring, so the answer is the *nearest* free cell rather than the first

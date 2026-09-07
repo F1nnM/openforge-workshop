@@ -29,20 +29,48 @@
  * the *discriminant* (`rect` vs `tri`) and not the dimensions.
  *
  * **The join is now on {@link footprintKey}** — the resolved primitive — and the
- * code keeps three narrower jobs:
+ * code keeps two narrower jobs:
  *
- *   1. **A width, for the search layer's size tokens.** {@link sizeCodeWidth},
- *      unchanged, and the corpus assertion above still guards it.
- *   2. **A tie-break inside a congruent candidate set** —
- *      `MATCH_WEIGHTS.code` in `resolve.ts`. Once every candidate is congruent,
- *      geometric fit is settled by the key and the code is the strongest
- *      remaining *identity* signal: the base belongs to the same published size
- *      family. It cannot outvote the lock or the print option.
- *   3. **The last-resort key for a topper with no primitive at all** — 14
+ *   1. **A tie-break inside a congruent candidate set** —
+ *      `MATCH_WEIGHTS.code` in `baseMatch.ts`. Once every candidate is
+ *      congruent, geometric fit is settled by the key and the code is the
+ *      strongest remaining *identity* signal: the base belongs to the same
+ *      published size family. It cannot outvote the lock or the print option.
+ *   2. **The last-resort key for a topper with no primitive at all** — 14
  *      toppers, every one of them coded `U`, whose footprint W4 declined to
  *      guess. That path is the one place the old defect could still bite, so it
  *      is gated on {@link sharedPrimitive}: a code may only find a base when the
  *      bases carrying it agree about what shape they are.
+ *
+ * ## Row A3 deleted the third job, which was the width
+ *
+ * `SIZE_CODE_WIDTH_UNITS` and `sizeCodeWidth` are gone, and the plan was right
+ * that nothing consumed them — but wrong that the file could go with them. The
+ * only references were the barrel's re-export, this module, and
+ * `assembly.test.ts`'s table check. `src/search/textIndex.ts` names the constant
+ * in a **docblock**, explaining why its own size-token vocabulary omits `QxG`,
+ * and reimplements nothing — so the search layer's size tokens were never this
+ * function's caller. The `QxG` argument survives below because it is the reason
+ * no width table should be reintroduced from the tag, not because anything reads
+ * one.
+ *
+ * What keeps the *module*: {@link sharedPrimitive} and
+ * {@link AMBIGUOUS_SIZE_CODES} are read by `baseMatch.ts#candidatesFor`, which
+ * outlived rule 1 as the default-fill ranking. The corpus assertion that the
+ * code determines a width used to say **zero exceptions over 2,822 tiles**; it
+ * is kept in `assembly.test.ts` and runs against the emitted records directly
+ * rather than against a table this file publishes. A drifted tag still fails the
+ * build; what no longer exists is a hard-coded five-entry table for it to drift
+ * against.
+ *
+ * **Row D9 turned that zero into 245, and A3's deletion is why it cost
+ * nothing.** A corner wall tagged `size|openlock|A` measures 1.500 and not the
+ * 2 the code implies, so the code is *not* a functional determinant of width
+ * after all — on the commonest code in the corpus, over 8.7% of the tiles that
+ * carry it. Had `SIZE_CODE_WIDTH_UNITS` survived, every consumer of
+ * `sizeCodeWidth('A')` would now be wrong by half a unit and nothing would have
+ * said so. It did not survive, the join moved to the footprint, and the only
+ * thing that had to change was the assertion and the entry above.
  *
  * That gate is not decoration. All 26 codes on the base side pass it today — the
  * `I`, `S` and `X` bases are homogeneous, and no base carries `O` at all — which
@@ -57,34 +85,6 @@ import type { CatalogRecord } from '@/catalog'
 import { footprintKey } from './footprint'
 
 /**
- * The five codes §7 fixes, in grid units.
- *
- * Deliberately **not** exhaustive over the 36 codes in the corpus. The other 31
- * (`S`, `SB`, `SA`, `I`, `IL`, `X`, `AxG`, `A+S`, …) have no published width and
- * are not guessed at here; the width is a search token, and an unknown code
- * costs the base match nothing now that the match does not read the code as a
- * key at all.
- *
- * `QxG` stays off the table on purpose, and row W4 measured why: it is tagged
- * `size|width|4` and the mesh is **3.000**. Its footprint is `wall:3`, so the
- * base match already treats it as three units wide by congruence. Adding it here
- * would be a search-token change (row A2's surface), and the entry would be
- * **3**, never the 4 the tag claims.
- */
-export const SIZE_CODE_WIDTH_UNITS: Readonly<Record<string, number>> = Object.freeze({
-  A: 2,
-  BA: 1.5,
-  IA: 1,
-  D: 3,
-  Q: 4,
-})
-
-/** The width a size code determines, or `undefined` for the 31 codes with no published width. */
-export function sizeCodeWidth(code: string): number | undefined {
-  return SIZE_CODE_WIDTH_UNITS[code]
-}
-
-/**
  * The codes measured to span more than one footprint primitive, and what they
  * span — the whole reason the join key moved off the code.
  *
@@ -95,6 +95,16 @@ export function sizeCodeWidth(code: string): number | undefined {
  * left a comment saying "never both" and a comment cannot fail.
  */
 export const AMBIGUOUS_SIZE_CODES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  /**
+   * Row **D9**, and the one that makes this constant's own argument sharpest.
+   * `A` is the corpus's commonest code — 1,095 records — and it was the model of
+   * a determinant: every one of them a 2-unit run. 157 meshes read out of R2 say
+   * that on **245** of them the run is **1.500**, because a corner wall's
+   * `size|width|2` names the cell it fills and not the piece. So the code that
+   * looked least ambiguous spans two widths of the same primitive, and a
+   * code-first join would put a 2-unit base under a 1.5-unit corner wall.
+   */
+  A: Object.freeze(['wall:1.5', 'wall:2']),
   I: Object.freeze(['column', 'rect:1x1']),
   O: Object.freeze(['column', 'tri:2', 'tri:4']),
   S: Object.freeze(['rect:1x2', 'wall:2']),

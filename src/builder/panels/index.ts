@@ -10,6 +10,11 @@
  * The plan-view canvas is **not** here: it is `@/builder/canvas` (row 17), which
  * this directory imports and never modifies.
  *
+ * Row **A0** adds a fourth: `BackupPanel`, the JSON export/import that was the
+ * deleted library screen's and is the app's only backup path. It is a panel for
+ * the reason its own docblock gives — what the envelope carries is the room, and
+ * this column is already everything about the room that is not the 3D surface.
+ *
  * Row S5's generated bases reach two of these. `BillPanel` takes an optional
  * `generated` prop and renders `GeneratedBillSection` inside its scroll area;
  * `useArchiveDownload` takes an optional `generated` option and composes the
@@ -27,13 +32,15 @@ export type { PlanToolbarProps } from './PlanToolbar'
 export { BillPanel } from './BillPanel'
 export type { BillPanelProps } from './BillPanel'
 
+export { BackupPanel } from './BackupPanel'
+
 export { GeneratedBillSection } from './GeneratedBillSection'
 export type { GeneratedBillSectionProps } from './GeneratedBillSection'
 
 export { DownloadAction } from './DownloadAction'
 export type { DownloadActionProps } from './DownloadAction'
 
-export { useArchiveDownload } from './useArchiveDownload'
+export { IncompleteSceneError, useArchiveDownload } from './useArchiveDownload'
 export type {
   ArchiveDownload,
   ArchiveDownloadOptions,
@@ -41,19 +48,61 @@ export type {
   DownloadFailureKind,
   DownloadState,
   GeneratedDownload,
+  PartInfo,
 } from './useArchiveDownload'
 
-export { MAX_SEARCH_ROWS, paletteRows, searchRows, starterSet } from './palette'
-export type { PaletteLookup, PaletteRow, PaletteSource } from './palette'
-
-export { billInventory, noteCopy, resolutionSummary, rowResolutionCopy, thresholdLabel, verdictCopy } from './billView'
+export {
+  ALL_FACETS,
+  MAX_RECENT,
+  SECTION_LABEL,
+  candidateCount,
+  createCounter,
+  filterFamilies,
+  forgetRecentFamilies,
+  groupFamilies,
+  matchesQuery,
+  paletteSections,
+  queryTokens,
+  rankFamilies,
+  reachableFacets,
+  recentArms,
+  rememberArm,
+  rowScore,
+} from './palette'
 export type {
-  BillInventory,
-  BillPlacement,
-  BillRow,
-  NoteCopy,
-  ResolutionSummary,
-  RowResolution,
-  RowResolutionCopy,
-  VerdictCopy,
-} from './billView'
+  CandidateCounter,
+  PaletteFacets,
+  PaletteGroup,
+  PaletteSection,
+  RecentArm,
+  SectionKey,
+} from './palette'
+
+/* Row C1's family model, with row D2's two kinds. `PLACEABLE_TEMPLATES` is the
+   list a recipe table must be built from now that the palette arms all 87 — see
+   its own docblock, and C1's report, for what happens to a placement whose id is
+   not in it; it still holds all 87, because splitting the *palette* into two
+   sections splits nothing the resolver looks up. `GROUP_ORDER` is the eight
+   single-tile groups: an assembly has no role and therefore no group. */
+export {
+  ANY_SIZE_LABEL,
+  GROUP_LABEL,
+  GROUP_ORDER,
+  INSERT_DESIGNS,
+  NO_BUILD,
+  PLACEABLE_TEMPLATES,
+  TEMPLATE_FAMILIES,
+  axisLabel,
+  familyById,
+  positionOf,
+  sizeLabelOf,
+} from './families'
+export type { FamilyKind, GroupKey, SizePosition, TemplateFamily } from './families'
+
+/* The drawer's question, without the template table — `familyKey.ts` carries the
+   A/B build that says why those are two modules. */
+export { AXIS_LABEL, BASE_FAMILY, armForTags, armNameForTags, armRefusalFor, familyName, familySlug, sizeTagsOf } from './familyKey'
+export type { ArmRefusal, FamilyArm } from './familyKey'
+
+export { billInventory, noteCopy, thresholdLabel, verdictCopy } from './billView'
+export type { BillInventory, BillPlacement, BillRow, NoteCopy, VerdictCopy } from './billView'

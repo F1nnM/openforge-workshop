@@ -2,7 +2,7 @@
  * The mount point, and the only part of this row that is in the entry bundle.
  *
  * ```tsx
- * <Builder3DPanel catalog={planCatalog} scene={scene} tools={tools} assets={index.file.assets} />
+ * <Builder3DPanel catalog={planCatalog} scene={scene} tools={tools} assets={index.file.assets} fill={fill} />
  * ```
  *
  * One line inside `BuilderScreen`'s `.of-builder-stage`, filling it. It needs
@@ -76,8 +76,10 @@ import { Suspense, lazy } from 'react'
 
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
 import type { CatalogAssets } from '@/catalog'
+import type { PlacementId, SlotName } from '@/store'
 
 import type { SurfaceStatus } from './edits'
+import type { FillAuthorities } from './fills'
 
 import './builder3d.css'
 
@@ -102,13 +104,50 @@ export interface Builder3DPanelProps {
    * change only: every call site already passes the whole `catalogFile.assets`.
    */
   readonly assets: Pick<CatalogAssets, 'lod' | 'models'>
+  /**
+   * The assembly index, the template lookup and the composition index — row
+   * **C5**'s fill solve, which turns the armed family into the files that fill
+   * its slots at the moment of the click.
+   *
+   * A **type-only** import, so the lazy boundary is unmoved: nothing about this
+   * prop puts a solver, an index or a renderer on this side of the line, and
+   * `boundary.test.ts` still walks the same graph. The values are the screen's
+   * own memos.
+   */
+  readonly fill: FillAuthorities
+  /**
+   * Row **C8**: open the slot editor on one placed instance, with the slot the
+   * pointer was over pre-selected.
+   *
+   * The owner's right click, arriving from the piece on the plan rather than
+   * from its row in the bill column. Two primitives and not an object, which is
+   * what keeps this prop free at the lazy boundary: `PlacementId` and `SlotName`
+   * are branded strings out of `@/store`, so nothing about the signature reaches
+   * the dialog, the assembly index or the renderer, and `boundary.test.ts` walks
+   * the same graph it did before.
+   *
+   * Optional, because it is a destination rather than an input: with no handler
+   * the surface never records a secondary press at all, so a right-drag pans and
+   * a right-click does nothing — which is the behaviour every caller had before
+   * this row.
+   */
+  readonly onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
   /** The surface's readout, for the toolbar and the corner plates. */
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
 }
 
-export function Builder3DPanel({ catalog, scene, tools, assets, onStatus, fetchImpl }: Builder3DPanelProps) {
+export function Builder3DPanel({
+  catalog,
+  scene,
+  tools,
+  assets,
+  fill,
+  onEditSlots,
+  onStatus,
+  fetchImpl,
+}: Builder3DPanelProps) {
   return (
     <div className="of-b3d-launch">
       <Suspense fallback={<div className="of-b3d-well of-shimmer" data-status="chunk" />}>
@@ -117,6 +156,8 @@ export function Builder3DPanel({ catalog, scene, tools, assets, onStatus, fetchI
           scene={scene}
           tools={tools}
           assets={assets}
+          fill={fill}
+          {...(onEditSlots === undefined ? {} : { onEditSlots })}
           {...(onStatus === undefined ? {} : { onStatus })}
           {...(fetchImpl === undefined ? {} : { fetchImpl })}
         />

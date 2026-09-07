@@ -1,43 +1,77 @@
 /**
- * The plan's accessory slots — what the placed pieces hold, and what is missing.
+ * The plan's pieces and their slots — the surface the right-click editor opens
+ * from, and the accessory inventory the bill cannot hold.
  *
  * §2.4 gives the right-hand column to the bill of tiles, and the bill is an
- * inventory of *placements*. A composition slot is not a placement: a torch in a
- * wall's `torch` slot is reached through the wall, never dropped on the grid, so
- * `buildBillOfTiles` neither counts it nor can. This panel is that missing half,
- * and it sits under the bill because it is the same question one step further in
- * — *and what goes in the holes*.
+ * inventory of *placements*. This panel is the two halves of that column's
+ * remainder: **what each placed recipe has in its slots**, which is row C3's
+ * subject, and **what the files in those slots themselves hold**, which is the
+ * question one step further in.
  *
- * ## What it can honestly do with a pick
+ * ## The right click is on the drawing **and** here, and both are load-bearing
  *
- * It saves the chosen file's **item** to the library, and says so in the panel.
- * That is the whole of the available channel: `WorkshopState` holds a library and
- * placements, the bill is built from placements, and row **G5** owns the
- * selection channel. So a slot fill cannot yet appear as a bill line, and this
- * panel does not pretend otherwise — it states the count of required slots the
- * plan has open, and the library is where the picks land. `addToLibrary` is an
- * existing store action; nothing here writes a new field.
+ * §3.3 asks for *"a popover on the placed instance"*, and the placed instance is
+ * drawn by `builder/three/RoomSurface.tsx`. Row C3 could not put the gesture
+ * there and said exactly why: `onDown` began `if (event.button !== 0) return`,
+ * so a secondary press was never seen at all, and the 5 px discriminator that
+ * separates a click from a camera drag — `surface.ts#isClickGesture`,
+ * `DRAG_THRESHOLD_PX` — is inside a module that imports three.js and is exported
+ * from `@/builder/three` **type-only**, by a boundary test that keeps the
+ * renderer out of the entry chunk. Re-declaring five pixels here would have been
+ * a second copy of the number the owner's reference was felt with.
  *
- * **The pick is a file and the library holds designs (row V1), so one hop is
- * needed** — in this direction only. The plan side no longer needs one: row V4
- * made a placement name a design, so `planSlots` resolves *outwards* to the file
- * whose slots are open, and {@link designIndex} is still what carries a chosen
- * fill *inwards* to the item it is one print of. `SlotFills` resolves a concrete `TileId` — dead-end greying is the
- * whole point of reusing it, and that is a per-file question — and
- * {@link designIndex} carries it to the item that file is one print of. The map is
- * built once per catalog rather than per pick: `TileDrawer` answers the same
- * question with `catalog.records.find(…)`, which is a linear scan over 8,702
- * records and is fine for one lookup on a drawer open, but this callback fires
- * per pick on a panel that re-renders on every store write.
+ * Row **C8** built the seam on the far side instead — a `RoomSurface` prop that
+ * fires from `pointerup`, so the discriminator is reused where it lives and this
+ * panel never sees a pixel. What that changes here is the *state*, and only the
+ * state: which piece's editor is open is now `BuilderScreen`'s, because two
+ * surfaces open it and neither can hold the other's. Everything else about this
+ * panel is unchanged.
  *
- * ## Why the whole picker is reused rather than reimplemented
+ * **The panel route stays, and deleting it would have been a regression twice
+ * over.** A right click has no keyboard equivalent every platform agrees on, so
+ * the drawing's gesture is pointer-only by construction — the canvas is a
+ * `role="application"` with its own key map and no `contextmenu` key binding.
+ * Every piece on the plan is a real `<button>` here, `onContextMenu` opens its
+ * editor and so do `Enter` and `Space`, which is §3.3's second requirement.
  *
- * Dead-end greying is the row's point and it is the part that would rot if there
- * were two of it. `SlotFills` comes across from `@/screens/detail/slots` whole —
- * the same resolution, the same `aria-disabled` cards, the same reasons — the
- * way `PalettePanel` and `BillPanel` take `TileThumb` from the catalog screen
- * rather than restating the sprite arithmetic. The panel supplies the plan-side
- * framing and nothing else.
+ * The second reason is not about the keyboard at all and is worth writing down,
+ * because it is invisible from the drawing: **a right click can only reach what
+ * is drawn.** `PlanScene.unfilled` is *"one per instance with no filled slots at
+ * all"*, and neither `RoomSurface`'s plates nor its instanced meshes walk it —
+ * both walk `scene.pieces` and `scene.generated` — so an instance holding
+ * nothing occupies no pixels and there is nothing on the plan to right-click.
+ * {@link planPieces} walks the **placements map**, so those pieces are rows in
+ * this list, and this list is the only way to fill them. Row C5's solve makes
+ * that the uncommon case rather than the normal one, not an impossible one.
+ *
+ * ## A pick writes a `SlotFill`, and only a template slot can hold one
+ *
+ * This is where row A0's stub is finally wired, and it is wired for the
+ * template's **declared** slots only. The accessory picker below stays a preview,
+ * because the destination contract **C-e** assumed does not exist for it:
+ *
+ *   - `TemplateInstance.fills` is `Record<SlotName, SlotFill>` and a `SlotFill`
+ *     is `{ tile, pinned }` — **one level**. An accessory slot is a slot of a
+ *     *file*, one level below the template's own, and there is no key for it.
+ *   - Writing it under its bare name anyway would put it in `fills` beside the
+ *     template's slots, where the two readers disagree: `resolve.ts#readFills`
+ *     walks `template.parts`, so the **bill would not count it**, and
+ *     `canvas/catalog.ts#parts` walks every key of `fills`, so the **drawing
+ *     would draw it**. The builder's own invariant is that *"the room and the
+ *     parts list cannot disagree"*; a fill nothing prints is exactly that
+ *     disagreement.
+ *
+ * So the copy states what an accessory pick is — a preview of what the slot will
+ * take — rather than accepting a press that persists something no bill can see.
+ * Closing it needs `resolve.ts` and `bill.ts` (row A3's) to walk non-declared
+ * fills, or a nested fill in A1's schema; both are named in the report.
+ *
+ * ## A holder is a filled slot, not a placement
+ *
+ * Row **A8**, following `planSlots.ts`: a template instance holds up to five
+ * files and each declares its own composition slots, so one placed corner can
+ * appear in the accessory list two or three times — once per file that opens
+ * something.
  *
  * ## The corpus decides the layout, again
  *
@@ -48,61 +82,205 @@
  */
 import { useMemo } from 'react'
 
+import type { AssemblyIndex } from '@/assembly'
 import { describeCell } from '@/builder/canvas'
-import type { CatalogFile, DesignId, TileId } from '@/catalog'
+import type { CatalogFile } from '@/catalog'
+import type { RecipeTemplate } from '@/screens/assemblies'
 import { SlotFills } from '@/screens/detail/slots'
-import type { LockSystem, Placement } from '@/store'
-import { addToLibrary } from '@/store'
-import { Eyebrow } from '@/ui/primitives'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
+import { Chip, Eyebrow } from '@/ui/primitives'
 
-import { planSlots } from './planSlots'
+import type { PlanPiece } from './planSlots'
+import { planPieces, planSlots } from './planSlots'
+import { SlotEditor } from './SlotEditor'
 
 import './slots.css'
 
 export interface SlotsPanelProps {
   readonly catalog: CatalogFile
-  /** `WorkshopState.placements`, passed straight through from the screen. */
-  readonly placements: Readonly<Record<string, Placement>>
   /**
-   * The build's lock preference, passed through for the same reason
-   * `placements` is: this panel is a projection of the store and the screen
-   * already holds both.
+   * `@/assembly`'s index over the same catalog.
    *
-   * Row V4 needs it because a placement names an item and a slot is a property
-   * of a *file* — `config` is one of the fields that differ between an item's
-   * variants — so which slots are open is a question the preference helps
-   * answer. See `planSlots.ts#PlanSlotHolder.parent`.
+   * A parameter and never built here: `buildAssemblyIndex` is a pure function of
+   * the file and the builder screen has already memoised one for the bill, so a
+   * second copy would scan 8,702 records to answer the same questions.
    */
-  readonly lock?: LockSystem
+  readonly assembly: AssemblyIndex
+  /**
+   * The family table this build ships — `resolveInstance`'s `TemplateLookup`.
+   *
+   * The panel cannot hold it: `src/builder/**` must not reach into a screen, and
+   * the 40 recipes plus B4's generated families live in
+   * `screens/assemblies/templates.ts` because that list renders before the index
+   * lands. So the screen that holds the table passes it, exactly as it passes it
+   * to `buildBillOfTiles`.
+   */
+  readonly templates: (id: TemplateId) => RecipeTemplate | undefined
+  /** `WorkshopState.placements`, passed straight through from the screen. */
+  readonly placements: Readonly<Record<string, TemplateInstance>>
+  /**
+   * Which piece's editor is open, and on which slot — `null` for none.
+   *
+   * **Lifted out of this component by row C8**, and the lift is what the row
+   * needed rather than a tidy-up: the same editor now opens from a right click
+   * on the drawing, and two components cannot each own the one dialog's open
+   * state. `BuilderScreen` holds it because it is the only thing that renders
+   * both surfaces.
+   */
+  readonly editing: SlotEditTarget | null
+  /** Open an editor, or close the open one with `null`. */
+  readonly onEdit: (target: SlotEditTarget | null) => void
 }
 
 /**
- * Every file's design, in one pass over the index.
+ * One open slot editor: whose slots, and which row it opens on.
  *
- * A plain function rather than a hook so the memo below owns the lifetime, and a
- * `Map` rather than a `find` per call for the reason the module docblock gives.
+ * The panel's own type and deliberately not `@/builder/three`'s
+ * `SlotEditGesture`, which is the same two fields plus a sentence to announce.
+ * `builder/panels/boundary.test.ts` is the line between them and a `import type`
+ * across it would be free in bytes and wrong in meaning — the panel would then
+ * read as depending on the 3D surface's vocabulary, when in fact the drawing is
+ * one of *two* callers and the panel row is the other. `BuilderScreen` converts
+ * the surface's two primitives into this on the way past.
  */
-function designIndex(catalog: CatalogFile): ReadonlyMap<TileId, DesignId> {
-  const out = new Map<TileId, DesignId>()
-  for (const record of catalog.records) out.set(record.id, record.design)
-  return out
+export interface SlotEditTarget {
+  readonly placement: PlacementId
+  /**
+   * The slot to open on, or `undefined` to let the editor choose.
+   *
+   * `undefined` is what the panel row passes, because a row names a piece and
+   * not a point — and the editor's own rule is the better answer there: it opens
+   * on the first slot still needing a choice. A right click on the drawing has a
+   * point, so it names the slot whose part was under it.
+   */
+  readonly slot?: SlotName | undefined
 }
 
-export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
-  const designOf = useMemo(() => designIndex(catalog), [catalog])
-  // One resolution per placed file that declares a slot, and the panel re-renders
-  // on every store change — 0.09 ms each is cheap and 50 of them on every
-  // library toggle is not, so it is memoised on the placements it read.
-  const inventory = useMemo(() => planSlots(catalog, placements, lock), [catalog, placements, lock])
+export function SlotsPanel({ catalog, assembly, templates, placements, editing, onEdit }: SlotsPanelProps) {
+  const pieces = useMemo(
+    () => planPieces(catalog, placements, templates),
+    [catalog, placements, templates],
+  )
+  // One resolution per filled file that declares a slot, and the panel re-renders
+  // on every store change — 0.09 ms each is cheap and 50 of them on every store
+  // write is not, so it is memoised on the placements it read.
+  //
+  // No `lock` in the dependency list since row A8, because `planSlots` takes
+  // none: a fill names an exact file, so which slots are open does not move when
+  // the preference does.
+  const inventory = useMemo(() => planSlots(catalog, placements), [catalog, placements])
+
+  const open = pieces.find((piece) => piece.placement === editing?.placement)
+
+  const unknown = pieces.filter((piece) => piece.template === undefined)
+  const gaps = pieces.reduce((total, piece) => total + piece.needsChoice.length, 0)
 
   return (
     /*
       `aria-label` rather than `aria-labelledby` on an `<h3>`: `Eyebrow` takes no
       `id`, and widening a shared primitive for one landmark's benefit is not
-      this row's to do. The heading is still a real `h3`, so the drawer-side and
+      this row's to do. The headings are still real `h3`s, so the drawer-side and
       panel-side sections carry the same level.
     */
-    <section aria-label="Accessory slots" className="of-planslots">
+    <section aria-label="Pieces and slots" className="of-planslots">
+      <Eyebrow as="h3" className="of-planslots-head">
+        Pieces on the plan
+      </Eyebrow>
+
+      {pieces.length === 0 ? (
+        <p className="of-planslots-note">
+          Nothing is placed yet. Every piece on the plan is a recipe with named slots, and each
+          one&rsquo;s slots can be changed by right-clicking it on the plan or by pressing its row
+          here.
+        </p>
+      ) : (
+        <>
+          <p className="of-planslots-note">
+            {`${String(pieces.length)} ${pieces.length === 1 ? 'piece' : 'pieces'} placed. `}
+            Right-click a piece on the plan to choose what goes in the slot you clicked, or press a
+            row below for all of its slots.
+            {gaps === 0 ? '' : ` ${String(gaps)} ${gaps === 1 ? 'slot needs' : 'slots need'} a choice.`}
+          </p>
+
+          <ul className="of-planslots-pieces">
+            {pieces.map((piece) => (
+              <li key={piece.placement}>
+                <button
+                  aria-label={pieceLabel(piece)}
+                  className="of-planslots-piecebtn"
+                  data-gap={piece.needsChoice.length === 0 ? undefined : ''}
+                  disabled={piece.template === undefined}
+                  onClick={() => {
+                    onEdit({ placement: piece.placement })
+                  }}
+                  onContextMenu={(event) => {
+                    // The gesture §3.3 asks for, on the row. `preventDefault` so
+                    // the browser's own menu does not cover the editor it opens;
+                    // the event is not stopped from propagating, because nothing
+                    // above this panel listens for one.
+                    //
+                    // No slot named, and that is the row's honest answer rather
+                    // than a missing feature: a row is a piece and a piece has
+                    // every slot in it. The editor's own rule — open on the
+                    // first slot still needing a choice — is a better guess than
+                    // any this list could make. The drawing's right click is the
+                    // gesture that *has* a point, and row C8 gives it the slot.
+                    event.preventDefault()
+                    onEdit({ placement: piece.placement })
+                  }}
+                  type="button"
+                >
+                  <span className="of-planslots-piecename">{piece.name}</span>
+                  <span className="of-planslots-at">
+                    {describeCell(piece.instance.x, piece.instance.z)}
+                  </span>
+                  <span className="of-planslots-pieceslots">
+                    {piece.template === undefined
+                      ? 'recipe not in this build'
+                      : `${String(piece.filled)} of ${String(piece.slots)} slots filled`}
+                  </span>
+                  {piece.pinned === 0 ? null : <Chip>{`${String(piece.pinned)} chosen`}</Chip>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {unknown.length === 0 ? null : (
+        <p className="of-planslots-gap">
+          {`${String(unknown.length)} ${
+            unknown.length === 1 ? 'piece names a recipe' : 'pieces name recipes'
+          } this build no longer ships, so ${
+            unknown.length === 1 ? 'its' : 'their'
+          } slots cannot be listed.`}
+        </p>
+      )}
+
+      {open === undefined || open.template === undefined ? null : (
+        <SlotEditor
+          catalog={catalog}
+          index={assembly}
+          instance={open.instance}
+          /*
+            The slot in the key as well as the placement, since row C8. The
+            editor holds its own *shown row* in state, so a second right click on
+            a different part of the **same** piece would otherwise change
+            `initialSlot` and change nothing on screen — the state initialised on
+            the first open would still be the one deciding. Remounting is the
+            right answer rather than a `useEffect` that pushes the prop into
+            state: the user pointed somewhere new, which is a new question, and
+            the design filter and the refusal notice should start clean too.
+          */
+          key={`${open.placement}:${editing?.slot ?? ''}`}
+          onClose={() => {
+            onEdit(null)
+          }}
+          {...(editing?.slot === undefined ? {} : { initialSlot: editing.slot })}
+          template={open.template}
+        />
+      )}
+
       <Eyebrow as="h3" className="of-planslots-head">
         Accessory slots
       </Eyebrow>
@@ -120,8 +298,9 @@ export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
             {`${String(inventory.holders.length)} ${
               inventory.holders.length === 1 ? 'piece' : 'pieces'
             }, ${String(inventory.required)} of them required. `}
-            Picking one adds its item to your library. The bill above counts placed tiles, so a
-            slot fill is not a line in it.
+            An accessory is a slot of a <em>file</em>, one level below the recipe&rsquo;s own slots,
+            and a fill can only name a slot of the recipe — so the picker below shows what each one
+            will take rather than keeping a choice the bill could not count.
           </p>
 
           {inventory.unfillable === 0 ? null : (
@@ -137,26 +316,13 @@ export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
                 <p className="of-planslots-piece">
                   {holder.name}
                   <span className="of-planslots-at">
-                    {describeCell(holder.placement.x, holder.placement.z)}
+                    {/* The slot as well as the cell, since row A8: two holders of
+                        one instance sit at the same coordinate, so the cell alone
+                        no longer tells them apart. */}
+                    {holder.slot} · {describeCell(holder.instance.x, holder.instance.z)}
                   </span>
                 </p>
-                <SlotFills
-                  catalog={catalog}
-                  onPick={(_slot, tile) => {
-                    // Cleared picks are left in the library: removing an item the
-                    // user may have added deliberately, because they changed one
-                    // slot, would be the panel undoing a decision it did not make.
-                    if (tile === undefined) return
-                    const design = designOf.get(tile)
-                    // A pick the index does not hold cannot happen — `SlotFills`
-                    // resolves against this same catalog — and silently saving
-                    // nothing is the right answer if it ever does, because the
-                    // alternative is putting a key in the library that resolves
-                    // to no record and cannot be removed through any button.
-                    if (design !== undefined) addToLibrary(design)
-                  }}
-                  parent={holder.parent}
-                />
+                <SlotFills catalog={catalog} parent={holder.parent} />
               </li>
             ))}
           </ul>
@@ -167,9 +333,29 @@ export function SlotsPanel({ catalog, placements, lock }: SlotsPanelProps) {
         <p className="of-planslots-gap">
           {`${String(inventory.orphans.length)} ${
             inventory.orphans.length === 1 ? 'placement names' : 'placements name'
-          } an item this index no longer holds, so what it can hold is unknown.`}
+          } a file this index no longer holds, so what it can hold is unknown.`}
         </p>
       )}
     </section>
   )
+}
+
+/**
+ * A piece's accessible name: what it is, where it is, and what it still needs.
+ *
+ * One attribute rather than a `VisuallyHidden` span, following A5 and C2 — a
+ * screen-reader user moving between the rows of this list hears the name alone,
+ * and the thing they need from it is which piece has a hole in it.
+ */
+function pieceLabel(piece: PlanPiece): string {
+  const where = describeCell(piece.instance.x, piece.instance.z)
+  if (piece.template === undefined) {
+    return `${piece.name} at ${where} — this build ships no such recipe`
+  }
+  const parts = [
+    `${piece.name} at ${where}`,
+    `${String(piece.filled)} of ${String(piece.slots)} slots filled`,
+  ]
+  if (piece.needsChoice.length > 0) parts.push(`needs a choice: ${piece.needsChoice.join(', ')}`)
+  return `${parts.join(' — ')}. Customise its slots.`
 }

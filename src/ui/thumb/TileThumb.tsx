@@ -65,10 +65,10 @@
  *
  * P1 put the filter on `.of-thumb-frame` rather than on the `<img>`, for two
  * reasons. The first still holds for both sources: the well's gradient
- * (`.of-thumb`), the plate and the library's shimmer skeleton — a bare
- * `<div class="of-thumb of-shimmer">` in `screens/library/LibraryScreen.tsx` —
- * are token colours that must not inherit a filter, and the frame exists only
- * inside the image branch and carries no colour of its own.
+ * (`.of-thumb`), the plate and any shimmer skeleton drawn over it — a bare
+ * `<div class="of-thumb of-shimmer">`, which the library screen used before row
+ * A0 deleted it — are token colours that must not inherit a filter, and the frame
+ * exists only inside the image branch and carries no colour of its own.
  *
  * The second was that filtering the frame is **ten times cheaper**, because a
  * CSS filter rasterises the element's own clipped box and `.of-thumb-sheet`'s

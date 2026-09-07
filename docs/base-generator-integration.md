@@ -140,20 +140,28 @@ tracks confirmed it four ways:
 
 ### 2.2 Headers the app sends
 
-A `_headers` file in the Cloudflare Pages assets directory:
+A `_headers` file in `public/`, served identically by Workers Static Assets and by
+Cloudflare Pages — copied here verbatim from `public/_headers`, the file that actually
+ships:
 
 ```
 /*
   Cross-Origin-Opener-Policy: unsafe-none
   Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob: https://objects.openforge.tools; connect-src 'self' https://objects.openforge.tools; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
 
-/engine/*.wasm
-  Content-Type: application/wasm
+/assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-/engine/*.js
-  Cache-Control: public, max-age=31536000, immutable
+/assets/*.wasm
+  Content-Type: application/wasm
 ```
+
+Not `/engine/*`, which this section originally named: `vite.config.ts` imports the wasm
+binary as `?url` with no custom `assetsDir`, so Vite emits it — and the engine's JS glue —
+under Vite's own default `assets/` output directory, content-hashed
+(`assets/openscad-{hash}.wasm`), not under a path this app chose. `/assets/*` covers every
+hashed build output, which is the standard immutable-caching move for a Vite production
+build and not narrower than intended.
 
 Three things here are load-bearing and easy to get wrong:
 

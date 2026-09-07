@@ -4,12 +4,14 @@
  *
  * ## Why `@/mesh` must stay light
  *
- * The conversion is triggered from **add-to-library**, which happens on the
- * catalog card, in the tile drawer, on the assemblies screen and in the palette
- * — four eager screens. If `@/mesh` reached three.js, every visitor to `/catalog`
- * would download the 411 kB renderer chunk to look at thumbnails. If it reached
- * `meshoptimizer`, they would download 55 kB of wasm-bearing simplifier to add a
- * tile to a list.
+ * The conversion is triggered from `src/App.tsx`, which is mounted for **every**
+ * screen including the landing one. If `@/mesh` reached three.js, every visitor
+ * to `/catalog` would download the 411 kB renderer chunk to look at thumbnails.
+ * If it reached `meshoptimizer`, they would download 55 kB of wasm-bearing
+ * simplifier to open a page with no 3D on it. The lazy boundary is what makes
+ * that survivable, and it is the second block below that proves the boundary is
+ * really there — but the barrel is imported eagerly by the 3D chunk and by
+ * `builder/three/loadLod.ts`, so its own weight still matters.
  *
  * Neither is caught by the type checker and neither would break anything. Rows
  * S4, S5 and X9 each measured one innocent import doing real damage — X9 at
@@ -104,7 +106,7 @@ describe('the eager surface of @/mesh', () => {
   it('finds a real graph, so a broken walker cannot pass vacuously', () => {
     expect(files).toContain('mesh/index.ts')
     expect(files).toContain('mesh/queue.ts')
-    expect(files).toContain('mesh/library.ts')
+    expect(files).toContain('mesh/tiers.ts')
     expect(files).toContain('mesh/weld.ts')
     expect(files).toContain('download/source.ts')
     expect(files.length).toBeGreaterThan(8)
@@ -155,15 +157,13 @@ describe('the eager surface of @/builder/three, after this row', () => {
 })
 
 /**
- * Row **R3** wired the conversion, and the wiring is the one thing that could
- * have moved this whole directory into the entry chunk.
+ * The wiring is the one thing that could have moved this whole directory into
+ * the entry chunk.
  *
- * R1 assumed the call would land in four eager screens, and it would have been
- * survivable — this directory is light by design and that is what the block
- * above proves. R3 put it in `src/App.tsx` instead, which is mounted for every
- * screen including the landing one, so a **static** import there would put
- * `@/mesh`, `@/assembly` and the aggregate builder in front of the first paint
- * of a screen where nothing has been saved and there is nothing to warm.
+ * It lives in `src/App.tsx`, which is mounted for every screen including the
+ * landing one, so a **static** import there would put `@/mesh`, `@/assembly` and
+ * the aggregate builder in front of the first paint of a screen where the room
+ * is empty and there is nothing to warm.
  *
  * The mechanism is a dynamic `import()`, which the walker cannot see — that is
  * what a lazy boundary *is*, the same reason `Builder3DPanel`'s `lazy` call is
@@ -193,8 +193,9 @@ describe('the warming call site', () => {
 
   it('keeps the warmer and its context off the barrel, so nothing pulls them by accident', () => {
     // They are reached by deep path only — `App.tsx` for the subscription and
-    // `BuilderRoom.tsx` for the assembly index — because the barrel is imported
-    // by the lazy 3D chunk and a re-export here would be an easy accident.
+    // `BuilderRoom.tsx` for the catalog derivations — because the barrel is
+    // imported by the lazy 3D chunk and a re-export here would be an easy
+    // accident. `warm.ts` reaches `@/store`, which the barrel must not.
     const barrel = staticClosure(join(HERE, 'index.ts')).files.map(relative)
     expect(barrel).not.toContain('mesh/warm.ts')
     expect(barrel).not.toContain('mesh/context.ts')

@@ -139,9 +139,18 @@ describeCorpus(title, () => {
     // measured at the build clock would not be a delta.
     const atEpoch = { ...file, version: { ...file.version, built: PAYLOAD_TIMESTAMP } }
     const baseline = brotli(JSON.stringify(atEpoch))
-    // 365,603 since row P3, which added `CatalogRecord.thumb`: 365,403 + 200 B
-    // for an 8,702-record boolean that is `false` on every one of them.
-    expect(baseline).toBe(365_603)
+    // **366,768 since row B1**, which emits the derived `role|<x>` and
+    // `form|<x>` axes as 15 interned tags over 17,404 new references: 365,603 +
+    // **1,165 B**. This is the shipped-artefact figure, measured on both sides
+    // with the same instrument, and it is the one every payload docblock in the
+    // repo quotes. Row B1's own test measures the *field* in isolation and gets
+    // 468 B; the two differ because `version.pipeline` also went 1 to 2 and
+    // brotli is not additive over 5.9 MB — the same caveat P3 recorded one line
+    // below, now fired twice.
+    // **366,682 since row D9**, which corrected 245 corner walls from a tagged
+    // 2-unit run to their measured 1.5: +40 B brotli on the shipped artefact.
+    // (366,768 before it, from row B1's two derived axes.)
+    expect(baseline).toBe(366_682)
 
     const map: Record<string, number> = {}
     for (const record of bases) {
@@ -151,13 +160,18 @@ describeCorpus(title, () => {
     }
     expect(Object.keys(map)).toHaveLength(709)
     const withMap = brotli(JSON.stringify({ ...atEpoch, bases: map }))
-    // 3,650 B since row P3, and the drop from 3,776 is worth a line because it
-    // is not this row's data changing. Nothing about the recipe map moved; the
-    // *baseline* it is measured against gained a boolean per record, and brotli
-    // is not additive — so a field added elsewhere shifted this delta by 126 B,
-    // 3.3% of it. A delta over a 5.8 MB artefact is a fact about one artefact,
+    // 3,732 B since row D9, and the fourth value this line has held. It went
+    // 3,776 → 3,650 when P3 added a boolean per record, 3,650 → 3,588 when B1
+    // added two tag references per record, and 3,588 → 3,732 when D9 corrected
+    // 245 corner-wall run lengths and bumped `PIPELINE_VERSION` — and **not one
+    // of the three did anything about the recipe map**: the *baseline* it is
+    // measured against moved each time, and brotli is not additive. Three rows
+    // have now shifted this delta by 126 B, 62 B and 144 B without touching a
+    // byte of its subject, and D9's own two halves pulled it in opposite
+    // directions (the footprint alone gave 3,509; the version character brought
+    // it to 3,732). A delta over a 5.9 MB artefact is a fact about one artefact,
     // which is exactly why this line is asserted and not quoted from a docblock.
-    expect(withMap - baseline).toBe(3_650)
+    expect(withMap - baseline).toBe(3_732)
     // The row expected ~12 KB. It is 3.3x smaller than that and still 0 is
     // cheaper, because every input is already in the records.
     expect(withMap - baseline).toBeLessThan(12_288)

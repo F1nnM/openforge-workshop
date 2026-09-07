@@ -42,15 +42,26 @@ import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type * as BuilderThree from '@/builder/three'
+import type * as GeneratorPanelModule from '@/generator/panel'
+import type { ArchivedPlacement } from '@/generator/placement'
 import { createWorkshopRouter } from '@/routes'
 import type { FacetSearch } from '@/search'
-import { FIXTURE_CATALOG, FIXTURE_DESIGNS, FIXTURE_NAMES } from '@/builder/panels/fixture'
+import { TileId } from '@/catalog'
+import { FIXTURE_CATALOG, FIXTURE_IDS, FIXTURE_NAMES, anInstance } from '@/builder/panels/fixture'
 import { resetCatalogSearchIndex } from '@/screens/catalog'
-import { clearPersistedWorkshopState, resetWorkshop, useWorkshopStore } from '@/store'
+import {
+  SlotName,
+  TemplateId,
+  clearPersistedWorkshopState,
+  placeTemplate,
+  resetWorkshop,
+  setLockSystem,
+  useWorkshopStore,
+} from '@/store'
 import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
 
 /**
@@ -74,9 +85,92 @@ import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
  * stage. One assertion changed for it and the change is recorded at the call
  * site: nothing in this file can any longer see a `role="application"`.
  */
+/**
+ * Row **C8**'s gesture, as a value a test can set — the canvas cannot fire it.
+ *
+ * `vi.hoisted` because `vi.mock`'s factory is hoisted above every `const` in
+ * this file, so a plain module-level object would be in its temporal dead zone
+ * when the stub below is constructed.
+ */
+const gesture = vi.hoisted(() => ({ placement: '', slot: undefined as string | undefined }))
+
 vi.mock('@/builder/three', async () => {
   const actual = await vi.importActual<typeof BuilderThree>('@/builder/three')
-  return { ...actual, Builder3DPanel: () => <div data-testid="builder-3d" /> }
+  return {
+    ...actual,
+    /*
+      Row **C8** gave the panel one more seam and it is stubbed the way the
+      generator drawer's `onPlace` is, one block down: a real `<button>` that
+      fires the callback with what the real surface would have resolved. What
+      that buys is the **screen's** half of the round trip — `onEditSlots` →
+      `setEditing` → `SlotsPanel` → the dialog — which is the one hop no test in
+      `src/builder/three/**` can reach, because the state lifted out of the panel
+      landed here.
+    */
+    Builder3DPanel: ({ onEditSlots }: BuilderThree.Builder3DPanelProps) => (
+      <div data-testid="builder-3d">
+        <button
+          onClick={() => {
+            onEditSlots?.(gesture.placement as never, gesture.slot as never)
+          }}
+          type="button"
+        >
+          right-click the piece
+        </button>
+      </div>
+    ),
+  }
+})
+
+/**
+ * The generator drawer, reduced to its one seam — `onPlace`.
+ *
+ * Row **A8** needs the screen's *handling* of a resolved recipe under test, and
+ * the drawer that produces one is behind a lazy boundary with the pinned
+ * parameter schemas, the base resolver and, one import further on, the OpenSCAD
+ * engine. Mounting it to press a button would put all of that in this test's
+ * graph to exercise one callback.
+ *
+ * So the element is swapped for a button that calls `onPlace` with the value the
+ * real drawer hands over. That value is `placeRecipe`'s own return type, spelled
+ * as a literal here rather than produced by calling it: what is under test is
+ * what `BuilderScreen` does with an {@link ArchivedPlacement}, not how the
+ * generator arrives at one — `src/generator/placement/placement.test.ts` owns
+ * that half, and building a `Resolution` here would couple this test to the
+ * resolver's fixtures for nothing.
+ *
+ * `importActual` keeps the module real, so the barrel's own type surface is
+ * still exercised by the import; only the component is replaced.
+ */
+const ARCHIVED_BASE_FILE = 'plain#base.2x2.openlock.stl'
+const ARCHIVED: ArchivedPlacement = {
+  kind: 'archived',
+  fill: { tile: TileId.parse(FIXTURE_IDS.base2), pinned: true },
+  at: { x: 4, z: 0, rotation: 0 },
+  // `ArchiveBase` is the resolver's own record type and carries a dozen fields
+  // this screen never reads — it takes the file and the fill and nothing else —
+  // so only those are spelled, and the cast is what says the rest is not this
+  // test's subject. `src/generator/panel/resolve.ts` owns the whole shape.
+  base: { id: FIXTURE_IDS.base2, file: ARCHIVED_BASE_FILE } as ArchivedPlacement['base'],
+  recipeId: 'abcd1234',
+  note: `Placed from the generator. ${ARCHIVED_BASE_FILE} is Devon's published mesh.`,
+}
+
+vi.mock('@/generator/panel', async () => {
+  const actual = await vi.importActual<typeof GeneratorPanelModule>('@/generator/panel')
+  return {
+    ...actual,
+    GeneratorPanel: ({ onPlace }: GeneratorPanelModule.GeneratorPanelProps) => (
+      <button
+        type="button"
+        onClick={() => {
+          onPlace?.(ARCHIVED, null)
+        }}
+      >
+        place the archived base
+      </button>
+    ),
+  }
 })
 
 /* ------------------------------------------------------------------ scaffold */
@@ -149,7 +243,7 @@ describe('the builder screen', () => {
     // this level is that the stage's element is mounted; the role itself is
     // asserted where a real renderer produces it, in `three/room.test.tsx`.
     expect(screen.getByTestId('builder-3d')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /tiles placed/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /pieces placed/ })).toBeInTheDocument()
     expect(screen.queryByText(/Placeholder/)).toBeNull()
   })
 
@@ -170,43 +264,269 @@ describe('the builder screen', () => {
     expect(screen.getByRole('button', { name: /^Lock system: / })).toBeInTheDocument()
   })
 
-  it('reads the facets out of the URL, so a shared palette search arrives filtered', async () => {
-    const { router } = await renderBuilder('/builder?q=cave')
+  it('reads the query out of the URL, so a shared palette link arrives filtered', async () => {
+    // **What `q` narrows changed with row C1 and the linkability did not.** The
+    // palette listed the archive's 3,822 items and this asserted that a shared
+    // `?q=cave` found a *tile*; it lists the 91 templates this build can place,
+    // so the same URL narrows the family list — `curve` matches the three curve
+    // families and nothing in the catalog is consulted. `routeTree.tsx` still
+    // validates the whole `FacetSearch` for the route, which is why the link
+    // works at all.
+    const { router } = await renderBuilder('/builder?q=curve')
 
-    expect(currentSearch(router).q).toBe('cave')
-    // The archive block appears with the matching tile in it — the palette
-    // searched the whole catalog rather than only the (empty) library.
-    expect(screen.getByRole('region', { name: /^Archive/ })).toHaveTextContent(FIXTURE_NAMES.wallNoBase)
+    expect(currentSearch(router).q).toBe('curve')
+    const templates = screen.getByRole('region', { name: /^Templates/ })
+    expect(templates).toHaveTextContent('Curve (Separate Wall)')
+    // And a tile's name is no longer a query this list can answer, which is why
+    // the drawer's handoff stopped seeding one.
+    expect(templates).not.toHaveTextContent(FIXTURE_NAMES.wallNoBase)
   })
 
   it('writes the palette query back to the URL', async () => {
     const { router } = await renderBuilder()
 
-    fireEvent.change(screen.getByRole('searchbox', { name: /Search the catalog/ }), {
-      target: { value: 'dungeon' },
+    fireEvent.change(screen.getByRole('searchbox', { name: /Search the template families/ }), {
+      target: { value: 'corner' },
     })
     await waitFor(() => {
-      expect(currentSearch(router).q).toBe('dungeon')
+      expect(currentSearch(router).q).toBe('corner')
     })
   })
 
   it('drives the bill from the store, through the whole screen', async () => {
     await renderBuilder()
 
-    expect(screen.getByRole('heading', { name: '0 tiles placed' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '0 pieces placed' })).toBeInTheDocument()
 
     act(() => {
-      useWorkshopStore.setState({
-        placements: {
-          // `PlacementId` and `DesignId` are branded strings over the same
-          // scene; the store's own parse is exercised in `panels.test.tsx`.
-          p1: { design: FIXTURE_DESIGNS.floor1, x: 0, z: 0, rotation: 0 },
-        } as never,
+      // Through `placeTemplate`, not `setState`: the screen's bill needs a real
+      // {@link TemplateInstance} and the store's parse is the thing that says
+      // this fixture is one. `anInstance` puts one file in a one-slot recipe —
+      // `fixture.ts` carries both, and the screen resolves them against the
+      // shipped table, so the recipe here is deliberately *not* one of the 40.
+      placeTemplate(anInstance([FIXTURE_IDS.floor1]))
+    })
+
+    // One placement, and the bill reports it as an instance whose recipe this
+    // build does not ship — which is the honest outcome for a fixture family and
+    // is what makes the count and the orphan block both live.
+    expect(screen.getByRole('heading', { name: '1 piece placed' })).toBeInTheDocument()
+    expect(screen.getByText(/1 placed piece has nothing this build can print/)).toBeInTheDocument()
+  })
+
+  it('drives the bill through the shipped recipe table, so a real family resolves', async () => {
+    await renderBuilder()
+
+    act(() => {
+      // `s2w-wall-on-tile-corner-low-single-piece` is one of the 40 in
+      // `screens/assemblies/templates.ts`, and its `floor` slot is a real slot —
+      // so this is the one assertion that the screen's `templates` lookup is the
+      // shipped table rather than an empty one. Four of its five slots are open,
+      // which §3.2 places anyway.
+      placeTemplate({
+        template: TemplateId.parse('s2w-wall-on-tile-corner-low-single-piece'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('floor')]: { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: false } },
       })
     })
 
-    expect(screen.getByRole('heading', { name: '1 tile placed' })).toBeInTheDocument()
     expect(screen.getByText(FIXTURE_NAMES.floor1, { selector: '.of-bill-name' })).toBeInTheDocument()
+    // The recipe resolved, so the piece is a row rather than an orphan — and the
+    // open slots are reported instead.
+    expect(screen.queryByText(/nothing this build can print/)).toBeNull()
+    expect(screen.getByText(/4 slots are still empty/)).toBeInTheDocument()
+  })
+
+  /**
+   * The owner's right click, from the drawing all the way to the dialog.
+   *
+   * *"The menu to customize the slots of a template should come up with a right
+   * click."* Row C3 built the editor and could only open it from the piece's row
+   * in this column; row **C8** put the gesture on the piece and lifted the open
+   * state here, because two surfaces open one dialog. This is the hop that lift
+   * created: the surface reports a placement and a slot, this screen turns them
+   * into `SlotsPanel`'s `editing`, and the editor opens **on the slot the
+   * pointer was over** rather than on the recipe's first gap.
+   *
+   * `right wall` is the slot fired, and the assertion is that the editor's card
+   * grid is filling *it* — `floor` is filled and the other four are open, so the
+   * editor's own rule would have opened on `base`, the first slot needing a
+   * choice. The two answers differ, which is what makes this an assertion about
+   * the pre-selection rather than about the dialog existing.
+   */
+  it('opens the slot editor from the drawing, on the slot the pointer was over', async () => {
+    await renderBuilder()
+
+    act(() => {
+      placeTemplate({
+        template: TemplateId.parse('s2w-wall-on-tile-corner-low-single-piece'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('floor')]: { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: false } },
+      })
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    const [placement] = Object.keys(useWorkshopStore.getState().placements)
+    gesture.placement = placement ?? ''
+    gesture.slot = 'right wall'
+
+    act(() => {
+      screen.getByRole('button', { name: 'right-click the piece' }).click()
+    })
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('group', { name: 'Fill the right wall slot' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('group', { name: 'Fill the base slot' })).toBeNull()
+  })
+
+  it('opens on the recipe’s first gap when the gesture names no slot', async () => {
+    // The panel row's own case, through the same lifted state: a row names a
+    // piece and has no point to resolve, so the editor applies its own rule.
+    await renderBuilder()
+
+    act(() => {
+      placeTemplate({
+        template: TemplateId.parse('s2w-wall-on-tile-corner-low-single-piece'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('floor')]: { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: false } },
+      })
+    })
+
+    const [placement] = Object.keys(useWorkshopStore.getState().placements)
+    gesture.placement = placement ?? ''
+    gesture.slot = undefined
+
+    act(() => {
+      screen.getByRole('button', { name: 'right-click the piece' }).click()
+    })
+
+    // `column` and not `base`: it is the first of this recipe's declared parts
+    // that has no fill, which is the editor's own rule, read off the shipped
+    // table rather than guessed.
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('group', { name: 'Fill the column slot' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('group', { name: 'Fill the right wall slot' })).toBeNull()
+  })
+
+  /**
+   * **A8's refusal, closed — and this is the assertion that replaces it.**
+   *
+   * The generator's archived arm resolves a recipe to a file Devon already
+   * publishes — 682 of the archive's 709 resolvable keys — and that shortcut is
+   * what stops the 298 kB worker chunk and the 10.5 MB WASM being fetched at
+   * all. Rows A9 and A8 left it unable to *place* the result, because a base
+   * goes on the grid as a one-slot recipe predicating on `shape|base`, `base` is
+   * not one of B1's eight roles, and no family keyed on `(role, form, build)`
+   * could be it. Row **B4** shipped that family — `shape-base` — so the write
+   * exists and the `.of-build-declined` notice is deleted with its test.
+   *
+   * Three things are pinned here and each was a separate decision:
+   *
+   *   - the instance names **`shape-base`** and not a `role|floor` family, which
+   *     would have worked geometrically and mislabelled a base as a floor;
+   *   - the fill lands in the **`base`** slot, carrying A9's `pinned: true` —
+   *     the recipe named the lock and the resolver matched on it, so the lock
+   *     re-solve must not rewrite it;
+   *   - the **generated** map is still empty, because the archive publishes this
+   *     file and generating it would be the other wrong answer.
+   */
+  it('places the archived base it resolved as row B4’s bare-base recipe', async () => {
+    await renderBuilder()
+
+    act(() => {
+      screen.getByRole('button', { name: 'place the archived base' }).click()
+    })
+
+    const placements = Object.values(useWorkshopStore.getState().placements)
+    expect(placements).toHaveLength(1)
+    expect(placements[0]).toMatchObject({
+      template: 'shape-base',
+      x: 4,
+      z: 0,
+      rotation: 0,
+      fills: { base: { tile: FIXTURE_IDS.base2, pinned: true } },
+    })
+    expect(useWorkshopStore.getState().generated).toEqual({})
+    // The refusal is gone rather than quietened: nothing on the screen says the
+    // press did not work, because it did.
+    expect(document.querySelector('.of-build-declined')).toBeNull()
+  })
+
+  /* ------------------------------------------------------------ the re-solve */
+
+  /**
+   * **The lock re-solve, wired — contract C-k's other half.**
+   *
+   * Row C2 built `reSolveScene` and wired nothing, and C-k names the failure
+   * that leaves: without a store write the toggle stops working and *nothing
+   * fails*. Row A2 proved `planSceneMeshes` is lock-free, so a lock change
+   * reaches the drawing, the bill and mesh conversion only through the
+   * placements the re-solve rewrites — which makes this screen's effect the one
+   * thing standing between a live preference and a dead one.
+   *
+   * `shape-base` is B4's bare-base family and the fixture holds two `shape|base`
+   * records, so its one slot has a candidate set here. That is what makes the
+   * write observable at all: the fixture is nine records and most of the 40
+   * recipes resolve to nothing against it.
+   */
+  it('fills an open slot when the lock preference changes, which is what makes the toggle work', async () => {
+    await renderBuilder()
+
+    act(() => {
+      placeTemplate({
+        template: TemplateId.parse('shape-base'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        // Placed empty, which §3.2 permits (contract C-g): "no candidate leaves
+        // the slot empty, marked needs a choice, and places anyway".
+        fills: {},
+      })
+    })
+    const placed = () => Object.values(useWorkshopStore.getState().placements)[0]
+    expect(placed()?.fills).toEqual({})
+
+    act(() => {
+      setLockSystem('dragonlock')
+    })
+
+    const filled = placed()?.fills[SlotName.parse('base')]
+    expect(filled).toBeDefined()
+    // `pinned: false`, and that is the whole of C-k from this side: the solver
+    // writes through `fillSlot`, so its answer stays re-solvable next time.
+    expect(filled?.pinned).toBe(false)
+  })
+
+  it('leaves a pinned fill alone, however wrong the lock makes it', async () => {
+    // The other half of C-k. The pin names a *floor* in a `shape|base` slot, so
+    // no re-solve could ever produce it — which is what makes its survival
+    // evidence of the guard in `fillSlot` rather than a coincidence of ranking.
+    // Reported, never repaired: `relock.ts#PinLockWarning` is the surface for
+    // saying so, and there is no unpin to offer (§11's first gap).
+    await renderBuilder()
+
+    const pinned = { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: true }
+    act(() => {
+      placeTemplate({
+        template: TemplateId.parse('shape-base'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('base')]: pinned },
+      })
+    })
+    act(() => {
+      setLockSystem('magnetic')
+    })
+
+    const placed = Object.values(useWorkshopStore.getState().placements)[0]
+    expect(placed?.fills[SlotName.parse('base')]).toEqual(pinned)
   })
 
   it('offers a retry rather than a blank screen when the index cannot be loaded', async () => {

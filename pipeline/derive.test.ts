@@ -36,7 +36,8 @@ import {
   sizeToken,
 } from './footprint'
 import { displayName, fallbackName } from './naming'
-import { buildTagTable, namespaceRoots, numericTagValue, tagValue } from './tags'
+import { fileTokens, inferForm, inferRole, roleTags } from './role'
+import { buildTagTable, hasTagPrefix, hasTagSegment, namespaceRoots, numericTagValue, tagValue } from './tags'
 import { buildTimestamp } from './version'
 
 describe('tag accessors', () => {
@@ -55,6 +56,19 @@ describe('tag accessors', () => {
 
   it('lists namespace roots once each, in first-seen order', () => {
     expect(namespaceRoots(['shape|wall', 'shape|wall|low', 'shape|corner'], 'shape')).toEqual(['wall', 'corner'])
+  })
+
+  it('matches a tag path on segment boundaries, which a prefix match does not', () => {
+    // The two agree on every prefix the corpus is actually queried with — which
+    // `catalog.test.ts` asserts over all 8,702 records — and disagree only where
+    // a longer word starts with a shorter one. `role.ts` reads the tag tree at
+    // eleven prefixes, and a rule that is right by luck at eleven places is a
+    // rule waiting for a twelfth.
+    expect(hasTagSegment(['shape|wall'], 'shape|wall')).toBe(true)
+    expect(hasTagSegment(['shape|wall|low'], 'shape|wall')).toBe(true)
+    expect(hasTagSegment(['part|door'], 'part')).toBe(true)
+    expect(hasTagSegment(['shape|wallpaper'], 'shape|wall')).toBe(false)
+    expect(hasTagPrefix(['shape|wallpaper'], 'shape|wall')).toBe(true)
   })
 })
 
@@ -727,6 +741,184 @@ describe('display name', () => {
   it('falls back to a cleaned filename when a tile has nothing nameable', () => {
     expect(displayName([], { shape: 'none' }, 'torch_plate.stl')).toBe('Torch Plate')
     expect(fallbackName('cave%aggregate+2#corner.IL+corner,90.openlock.stl')).not.toMatch(/[#%+,]/)
+  })
+})
+
+/* ------------------------------------------------------------- role and form */
+
+/** A classifier input, defaulted so a case names only what it is about. */
+const input = (
+  tags: readonly string[],
+  over: Partial<Omit<Parameters<typeof inferRole>[0], 'tags'>> = {},
+): Parameters<typeof inferRole>[0] => ({
+  tags,
+  foot: { shape: 'none' },
+  family: 'tiles/plain',
+  file: 'plain#thing.stl',
+  ...over,
+})
+
+const role = (tags: readonly string[], over?: Parameters<typeof input>[1]): string =>
+  inferRole(input(tags, over)).role
+
+describe('role', () => {
+  it('reads the shape roots that name a role outright', () => {
+    expect(role(['shape|floor', 'shape|square'])).toBe('floor')
+    expect(role(['shape|wall', 'shape|square'])).toBe('wall')
+    expect(role(['shape|stairs', 'shape|stairs|high'])).toBe('stair')
+    expect(role(['shape|column', 'shape|column|low'])).toBe('column')
+    expect(role(['shape|riser', 'shape|base'])).toBe('riser')
+  })
+
+  it('reads shape|wall|low as a wall even though all 527 omit the parent', () => {
+    // The single clearest case for a derived role: the child *is* the role tag,
+    // and no record in the corpus spells it with the parent beside it.
+    expect(role(['shape|wall|low', 'shape|square', 'size|width|2'])).toBe('wall')
+  })
+
+  it('resolves every one of the six real overlaps in the forced order', () => {
+    // `stair > column > riser > floor > wall`. Every row is a live tag set, and
+    // the order is the only one that survives all six.
+    expect(role(['shape|floor', 'shape|wall', 'shape|square'])).toBe('floor')
+    expect(role(['shape|base', 'shape|wall'])).toBe('wall')
+    expect(role(['shape|column', 'shape|wall'])).toBe('column')
+    expect(role(['shape|stairs', 'shape|wall'])).toBe('stair')
+    expect(role(['shape|base', 'shape|riser'])).toBe('riser')
+    expect(role(['shape|column', 'shape|floor', 'shape|wall'])).toBe('column')
+  })
+
+  it('gives a base the role of what it carries, not the role "base"', () => {
+    // `role` is orthogonal to `layer`: a base *for* a wall is role wall, layer
+    // base, which is what makes the fixtures' `shape|base|wall` slot expressible
+    // as `layer === 'base' && role === <the topper's role>`.
+    expect(role(['shape|base', 'shape|base|wall'])).toBe('wall')
+    expect(role(['shape|base', 'shape|base|square'])).toBe('floor')
+    expect(role(['shape|base', 'shape|base|stairs'])).toBe('stair')
+    expect(role(['shape|base', 'shape|base|s2w'])).toBe('wall')
+    expect(role(['shape|base', 'shape|base|hex'])).toBe('wall')
+  })
+
+  it('falls to the build system for the 40 bases that name no support, and says it is low', () => {
+    const inferred = inferRole(
+      input(['shape|base', 'size|width|1', 'size|depth|1'], { build: 'thick wall' }),
+    )
+    expect(inferred).toMatchObject({ role: 'wall', signal: 'build-tag', confidence: 'low' })
+  })
+
+  it('finds the 100 roof records, which no shape tag names at all', () => {
+    // `shape|roof` has zero occurrences corpus-wide, so a learner trained on the
+    // tag label cannot reach these — it predicts `insert` for 64 of them.
+    expect(role(['component|roof', 'set|roofs'])).toBe('roof')
+    expect(role(['component|gable'])).toBe('roof')
+    expect(role(['component|eaves'])).toBe('roof')
+    expect(role(['component|dormer'])).toBe('roof')
+  })
+
+  it('reads component| as a feature and never over a shape tag', () => {
+    // 357 of 3,833 records disagree between the two, and every disagreement is
+    // of this shape: a wall *with* a drain, a grate or a slope cut into it.
+    expect(role(['shape|wall', 'component|drain'])).toBe('wall')
+    expect(role(['shape|wall', 'component|slope'])).toBe('wall')
+    expect(role(['shape|floor', 'component|wall'])).toBe('floor')
+    // With no shape tag the same channel is all there is, and then it speaks.
+    expect(role(['component|drain'], { build: 'separate wall' })).toBe('wall')
+    expect(role(['component|manhole'])).toBe('floor')
+    expect(role(['component|full_pillar'])).toBe('column')
+  })
+
+  it('calls a structural wall carrying a statue a wall, not scatter', () => {
+    // One record — `dungeon_stone#wall,secret_door+tamoachan_statue.2x` — carries
+    // `component|wall` and `scatter|statue` and no shape tag, so the order of
+    // these two rungs is decided by exactly one file.
+    expect(role(['component|wall', 'scatter|statue'])).toBe('wall')
+    expect(role(['scatter|statue'])).toBe('decor')
+  })
+
+  it('does not read decoration| as decor while anything else speaks', () => {
+    // 164 records carry a `decoration|`; 152 of them are reliefs carved into a
+    // floor, a wall or an insert, and only 12 are decor.
+    expect(role(['shape|floor', 'decoration|celtic'])).toBe('floor')
+    expect(role(['decoration|celtic'])).toBe('decor')
+  })
+
+  it('calls a part| piece an insert, on the same signal as layer', () => {
+    // A perfect bijection with `layer === 'insert'` and therefore no information
+    // at all — emitted for totality, and no slot may predicate on it.
+    expect(role(['part|door', 'interface|door|arched', 'size|width|sw'])).toBe('insert')
+    expect(classifyLayer(['part|door', 'interface|door|arched'])).toBe('insert')
+  })
+
+  it('reads the path deepest-first, and steps over the joinery that sits below', () => {
+    // `openlock`, `openforge` and their siblings live at depths 4-7, so a
+    // deepest-wins rule reads them before it reads anything about the role.
+    expect(role([], { family: 'tiles/cut-stone/separate_wall/stairs/openlock' })).toBe('stair')
+    expect(role([], { family: 'tiles/cut-stone/separate_wall/primary_floors/openforge,side' })).toBe(
+      'floor',
+    )
+    // And the build system at depth 2 is not a role: `separate_wall` sits on
+    // 3,466 records of every role, so the path vocabulary names no build system.
+    expect(role([], { family: 'tiles/cut-stone/separate_wall' })).toBe('unknown')
+    expect(role([], { family: 'tiles/cut-stone/thick_wall' })).toBe('unknown')
+  })
+
+  it('falls to the filename last, and only then', () => {
+    expect(
+      inferRole(input([], { family: 'tiles/plain/misc', file: 'plain#riser+high.2x1.stl' })),
+    ).toMatchObject({ role: 'riser', signal: 'filename', confidence: 'low' })
+  })
+
+  it('reads the filename shape section, not the joinery suffix', () => {
+    expect(fileTokens('cut-stone#column+low.col+L.side.stl')).toEqual(['column', 'low'])
+    expect(fileTokens('aztlan%bamboo#floor+s2w+wall.2x2.openlock.stl')).toEqual([
+      'floor',
+      's2w',
+      'wall',
+    ])
+    expect(fileTokens('torch.stl')).toEqual(['torch'])
+  })
+})
+
+describe('form', () => {
+  const form = (tags: readonly string[], over?: Parameters<typeof input>[1]): string =>
+    inferForm(input(tags, over))
+
+  it('is straight by default, which is 5,707 of 8,702', () => {
+    expect(form(['shape|wall', 'shape|square'])).toBe('straight')
+  })
+
+  it('puts internal_corner ahead of corner, including the two mis-tagged templates', () => {
+    expect(form(['shape|internal_corner'])).toBe('internal_corner')
+    expect(form(['shape|base|internal_corner'])).toBe('internal_corner')
+    expect(form(['shape|corner|internal'])).toBe('internal_corner')
+  })
+
+  it('puts hex ahead of corner, because the 48 hex bases carry both', () => {
+    expect(form(['shape|base', 'shape|base|hex', 'shape|corner', 'size|angle|120'])).toBe('hex')
+  })
+
+  it('takes diagonal and curve from the measured footprint', () => {
+    // The only two cases where `foot` is independent evidence rather than a
+    // restatement of the tags.
+    expect(form(['shape|wall', 'size|width|2'], { foot: { shape: 'diag', run: 3.536 } })).toBe(
+      'diagonal',
+    )
+    expect(form(['shape|floor'], { foot: { shape: 'arc', rIn: 2, rOut: 2.5, sweep: 90, band: 'radial', bandBasis: 'measured' } })).toBe('curve')
+  })
+
+  it('reads a trailing corner or curve segment, which is how 527 low walls spell it', () => {
+    expect(form(['shape|wall|corner'])).toBe('corner')
+    expect(form(['shape|wall|curved'])).toBe('curve')
+    expect(form(['shape|angled|octagon'])).toBe('octagon')
+  })
+})
+
+describe('the emitted axis tags', () => {
+  it('is role then form, always two, so two runs cannot disagree', () => {
+    expect(roleTags(inferRole(input(['shape|wall', 'shape|corner'])))).toEqual([
+      'role|wall',
+      'form|corner',
+    ])
+    expect(roleTags(inferRole(input(['part|door'])))).toEqual(['role|insert', 'form|straight'])
   })
 })
 

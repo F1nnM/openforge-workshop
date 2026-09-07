@@ -7,58 +7,61 @@
 /**
  * The store, its actions and its persistence.
  *
- * The two tests worth reading first are `rapid sequential writes` — the reason
- * the write path is synchronous and every action uses a functional update — and
- * the `rehydrating` block, which drives the real `persist` middleware rather
- * than calling the migration functions directly, so it proves the wiring and not
- * just the logic.
+ * The four tests worth reading first are `places a template whose fills are
+ * empty` — contract **C-g**, and the reason `placeTemplate` takes no
+ * completeness argument; `refuses to re-solve a slot the user pinned` —
+ * contract **C-k**, and the mechanism keeping the lock toggle alive; `rapid
+ * sequential writes`, the reason the write path is synchronous and every action
+ * uses a functional update; and the `rehydrating` block, which drives the real
+ * `persist` middleware rather than calling the migration functions directly, so
+ * it proves the wiring and not just the logic.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DesignId, TileId } from '@/catalog'
+import type { TileId } from '@/catalog'
 
+import { ANOTHER_TILE, A_TEMPLATE, A_TILE, aFullFillMap, aTemplateInstance } from './fixture'
 import { STORE_VERSION } from './migrations'
-import type { Placement, PlacementId } from './schema'
-import { DEFAULT_LOCK_SYSTEM, WorkshopState } from './schema'
+import type { PlacementId, TemplateId } from './schema'
+import { DEFAULT_LOCK_SYSTEM, SlotName as SlotNameSchema, WorkshopState, filledSlots } from './schema'
+import { armTemplateInBuilder, claimPendingArm } from './selection'
 import { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 import { WORKSHOP_EXPORT_KIND, WorkshopExport, exportWorkshop, importWorkshop } from './transfer'
 import {
   acknowledgeLockSystem,
-  addToLibrary,
-  clearLibrary,
+  clearFill,
   clearPlacements,
+  fillSlot,
   movePlacement,
-  placeTile,
-  removeFromLibrary,
+  pinFill,
+  placeTemplate,
   removePlacement,
   resetWorkshop,
   rotatePlacement,
-  selectIsInLibrary,
-  selectLibraryCount,
   selectLockChosen,
   selectPlacementCount,
+  selectRoomDesign,
   setLockSystem,
-  toggleLibrary,
+  setRoomDesign,
+  unpinFill,
   useWorkshopStore,
 } from './workshopStore'
 
-const TILE_A = TileId.parse('tiles/dungeon_stone/floor/2x2/openlock/dungeon_stone%2x2.openlock.stl')
-const TILE_B = TileId.parse('tiles/cave/thick_wall/wall/corner/openlock/cave%corner.IL.openlock.stl')
+const FLOOR = SlotNameSchema.parse('floor')
+const WALL = SlotNameSchema.parse('right wall')
 
 /**
- * Two designs, spelled the way `pipeline/design.ts` mints one — `d` plus twelve
- * hex characters. Not shortened to `d1`, because the shape is what
- * `migrations.ts` relies on to tell an item from a file, and a fixture that
- * cheated on it would let a regression through.
+ * An arm for the selection channel.
+ *
+ * This row read the channel without taking a position on its currency, because
+ * **row C1 owned what it should carry** and took the decision: an item was
+ * something no reader could act on, so the box holds the palette's arm — a
+ * `TemplateId` and one size position. The one fact this row needs is unchanged:
+ * `resetWorkshop` empties it. `selection.test.ts` holds the rest.
  */
-const DESIGN_A = DesignId.parse('d4c2a57740b65')
-const DESIGN_B = DesignId.parse('d0f1a2b3c4d5e')
+const A_PENDING_ARM = { template: A_TEMPLATE, size: [] as readonly string[] }
 
 const state = () => useWorkshopStore.getState()
-
-function aPlacement(over: Partial<Placement> = {}): Placement {
-  return { design: DESIGN_A, x: 0, z: 0, rotation: 0, ...over }
-}
 
 /** The raw `{ state, version }` envelope `persist` writes, or `null`. */
 function storedPayload(): { state?: unknown; version?: unknown } | null {
@@ -76,6 +79,14 @@ function silenceWarnings(): void {
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 }
 
+/** The empty state, spelled out so a field added to it is a deliberate edit here. */
+const EMPTY = {
+  placements: {},
+  generated: {},
+  lock: DEFAULT_LOCK_SYSTEM,
+  lockChosen: false,
+}
+
 beforeEach(() => {
   localStorage.clear()
   resetWorkshop()
@@ -86,93 +97,67 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/* ------------------------------------------------------------------- library */
+/* ------------------------------------------------------------------ placement */
 
-describe('library', () => {
-  it('adds and removes items', () => {
-    addToLibrary(DESIGN_A)
-    addToLibrary(DESIGN_B)
-    expect(state().library).toEqual({ [DESIGN_A]: true, [DESIGN_B]: true })
-
-    removeFromLibrary(DESIGN_A)
-    expect(state().library).toEqual({ [DESIGN_B]: true })
-  })
-
-  it('is a set: adding twice changes nothing and wakes no subscriber', () => {
-    addToLibrary(DESIGN_A)
-    const before = state().library
-    addToLibrary(DESIGN_A)
-    expect(state().library).toBe(before)
-  })
-
-  it('ignores a removal of a tile that was never there', () => {
-    addToLibrary(DESIGN_A)
-    const before = state().library
-    removeFromLibrary(DESIGN_B)
-    expect(state().library).toBe(before)
-  })
-
-  it('toggles', () => {
-    toggleLibrary(DESIGN_A)
-    expect(selectIsInLibrary(DESIGN_A)(state())).toBe(true)
-    toggleLibrary(DESIGN_A)
-    expect(selectIsInLibrary(DESIGN_A)(state())).toBe(false)
-  })
-
-  it('clears without touching placements or the lock preference', () => {
-    addToLibrary(DESIGN_A)
-    placeTile(aPlacement())
-    setLockSystem('magnetic')
-
-    clearLibrary()
-    expect(selectLibraryCount(state())).toBe(0)
-    expect(selectPlacementCount(state())).toBe(1)
-    expect(state().lock).toBe('magnetic')
-  })
-
-  it('preserves insertion order, which is what the library screen lists by', () => {
-    addToLibrary(DESIGN_B)
-    addToLibrary(DESIGN_A)
-    expect(Object.keys(state().library)).toEqual([DESIGN_B, DESIGN_A])
-  })
-
-  it('reports whether the add inserted — the hook row R1 attaches to', () => {
-    // The one press that means "this item is new to the library", which is the
-    // moment R1 warms its meshes. A second press of the same item must not
-    // report one, or the warm-up runs again for bytes the browser already has.
-    expect(addToLibrary(DESIGN_A)).toBe(true)
-    expect(addToLibrary(DESIGN_A)).toBe(false)
-
-    removeFromLibrary(DESIGN_A)
-    expect(addToLibrary(DESIGN_A)).toBe(true)
-  })
-
-  it('carries one key per item, whatever the file count behind it', () => {
-    // Not a tautology about the map: it is the property the row exists for. The
-    // three lock systems pick two or more distinct *files* for 1,419 of the
-    // 3,822 items (see `corpus.test.ts`), so under the old file key these two
-    // presses — the same item, saved under two preferences — left two entries
-    // and the library screen had to explain them. Nothing here can express the
-    // difference, which is the point.
-    expect(addToLibrary(DESIGN_A)).toBe(true)
-    expect(addToLibrary(DESIGN_A)).toBe(false)
-    expect(selectLibraryCount(state())).toBe(1)
-  })
-})
-
-/* ---------------------------------------------------------------- placements */
-
-describe('placements', () => {
-  it('places a tile under a fresh key each time', () => {
-    const first = placeTile(aPlacement({ x: 1, z: 1 }))
-    const second = placeTile(aPlacement({ x: 2, z: 2 }))
+describe('placing a template', () => {
+  it('puts an instance on the grid under a fresh key each time', () => {
+    const first = placeTemplate(aTemplateInstance({ x: 1, z: 1 }))
+    const second = placeTemplate(aTemplateInstance({ x: 2, z: 2 }))
     expect(first).not.toBe(second)
-    expect(state().placements[first]).toEqual({ design: DESIGN_A, x: 1, z: 1, rotation: 0 })
+    expect(state().placements[first]?.template).toBe(A_TEMPLATE)
+    expect(state().placements[first]?.x).toBe(1)
     expect(selectPlacementCount(state())).toBe(2)
   })
 
+  it('mints the id, so the map key and the id field cannot disagree', () => {
+    // `schema.ts` puts `id` inside the instance because an instance travels
+    // detached from the map, and pays for it with a disagreement that is
+    // expressible in a blob out of storage. Nothing in the *app* can produce
+    // one, and this is why: the caller never supplies an id.
+    const id = placeTemplate(aTemplateInstance())
+    expect(state().placements[id]?.id).toBe(id)
+    for (const [key, instance] of Object.entries(state().placements)) {
+      expect(instance.id).toBe(key)
+    }
+  })
+
+  it('places a template whose fills are empty — contract C-g', () => {
+    // §3.2: a template with no candidate for a part *"places anyway"*, marked
+    // needs a choice. If this row refused an incomplete map, that state would be
+    // unreachable from the store upward: C2's solver could not report a slot it
+    // failed to fill, and C3's editor would have nothing to open on.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    expect(state().placements[id]?.fills).toEqual({})
+    expect(selectPlacementCount(state())).toBe(1)
+  })
+
+  it('places a partly-filled template, which is the ordinary case', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: { [FLOOR]: { tile: A_TILE, pinned: false } } }))
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: A_TILE, pinned: false })
+    // And the four slots nobody filled read as absent rather than as anything
+    // else — the shape §3.2's "needs a choice" is rendered from.
+    expect(state().placements[id]?.fills[WALL]).toBeUndefined()
+  })
+
+  it('places a fully-filled template too', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    expect(Object.keys(state().placements[id]?.fills ?? {})).toHaveLength(5)
+  })
+
+  it('accepts a slot name the schema cannot check against the template', () => {
+    // Deliberate, and stated because it looks like a hole: validating that a key
+    // of `fills` is a slot of `template` needs the family table, which must not
+    // enter the store's file closure (`schema.ts#TemplateId`). It fails closed —
+    // rendering walks the *template's* parts and asks `fills` for each, so an
+    // unknown key is never read.
+    const id = placeTemplate(
+      aTemplateInstance({ fills: { [SlotNameSchema.parse('no such slot')]: { tile: A_TILE, pinned: true } } }),
+    )
+    expect(state().placements[id]?.fills[SlotNameSchema.parse('no such slot')]?.pinned).toBe(true)
+  })
+
   it('folds rotation into [0, 360) on the way in', () => {
-    const id = placeTile(aPlacement({ rotation: 450 }))
+    const id = placeTemplate(aTemplateInstance({ rotation: 450 }))
     expect(state().placements[id]?.rotation).toBe(90)
     rotatePlacement(id, -90)
     expect(state().placements[id]?.rotation).toBe(270)
@@ -184,46 +169,322 @@ describe('placements', () => {
     // `Math.round(-0.2) * 0.5` is `-0`, so a snap function produces this. It
     // survives in memory but not through `JSON.stringify`, which would make an
     // exported scene differ from the one it was exported from.
-    const id = placeTile(aPlacement({ x: -0, z: -0 }))
+    const id = placeTemplate(aTemplateInstance({ x: -0, z: -0 }))
     expect(Object.is(state().placements[id]?.x, 0)).toBe(true)
     expect(Object.is(state().placements[id]?.z, 0)).toBe(true)
   })
 
   it('moves and removes', () => {
-    const id = placeTile(aPlacement())
+    const id = placeTemplate(aTemplateInstance())
     movePlacement(id, -2.5, 4)
-    expect(state().placements[id]).toEqual({ design: DESIGN_A, x: -2.5, z: 4, rotation: 0 })
+    expect(state().placements[id]?.x).toBe(-2.5)
+    expect(state().placements[id]?.z).toBe(4)
+    // A move keeps the fills: which files the piece is made of is not a question
+    // about where it sits.
+    expect(state().placements[id]?.fills).toEqual(aTemplateInstance().fills)
 
     removePlacement(id)
     expect(state().placements).toEqual({})
   })
 
+  it('rotates as one unit, leaving the fills alone', () => {
+    // §1: a template is "placed and rotated as one unit". The slot offsets are
+    // arithmetic against this one angle at fill time (§2.2), so there is nothing
+    // per-slot to rotate and nothing here to keep in step.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    const before = state().placements[id]?.fills
+    rotatePlacement(id, 180)
+    expect(state().placements[id]?.rotation).toBe(180)
+    expect(state().placements[id]?.fills).toBe(before)
+  })
+
   it('ignores edits to a key that is not on the grid', () => {
     const ghost = 'not-a-placement-in-this-scene' as PlacementId
-    placeTile(aPlacement())
+    placeTemplate(aTemplateInstance())
     const before = state().placements
     movePlacement(ghost, 1, 1)
     rotatePlacement(ghost, 90)
     removePlacement(ghost)
+    // A stale drag is a bug in the caller rather than an outcome of the room, so
+    // it is named rather than folded into "nothing changed".
+    expect(fillSlot(ghost, FLOOR, A_TILE)).toBe('unknown-placement')
+    expect(pinFill(ghost, FLOOR, A_TILE)).toBe('unknown-placement')
     expect(state().placements).toBe(before)
   })
 
-  it('rejects an unusable placement at the call that made it', () => {
+  it('rejects an unusable instance at the call that made it', () => {
     // Loud here, where the stack names the culprit — rather than months later
     // during a hydration, where it is indistinguishable from storage corruption.
-    expect(() => placeTile(aPlacement({ x: Number.NaN }))).toThrow()
-    // The empty string is the one value `DesignId`'s `min(1)` refuses, and it
-    // is what an `as DesignId` cast on a missing field produces.
-    expect(() => placeTile({ ...aPlacement(), design: '' as DesignId })).toThrow()
+    expect(() => placeTemplate(aTemplateInstance({ x: Number.NaN }))).toThrow()
+    // A template id is a lowercase hyphen-separated slug, so a catalog path, an
+    // empty string and `"undefined"` are all refused. That pattern is the only
+    // thing standing between a corrupt blob and an instance naming no template.
+    expect(() => placeTemplate(aTemplateInstance({ template: '' as TemplateId }))).toThrow()
+    expect(() => placeTemplate(aTemplateInstance({ template: 'tiles/x.stl' as TemplateId }))).toThrow()
+    expect(() => placeTemplate(aTemplateInstance({ template: 'Not A Slug' as TemplateId }))).toThrow()
+    // And a fill whose file is not a catalog path.
+    expect(() =>
+      placeTemplate(aTemplateInstance({ fills: { [FLOOR]: { tile: 'nonsense' as TileId, pinned: false } } })),
+    ).toThrow()
     expect(state().placements).toEqual({})
   })
 
-  it('clears the scene without touching the library', () => {
-    addToLibrary(DESIGN_A)
-    placeTile(aPlacement())
+  it('clears the scene', () => {
+    placeTemplate(aTemplateInstance())
     clearPlacements()
     expect(state().placements).toEqual({})
-    expect(selectLibraryCount(state())).toBe(1)
+    expect(state().lock).toBe(DEFAULT_LOCK_SYSTEM)
+  })
+})
+
+/* ---------------------------------------------------------------------- fills */
+
+describe('filling slots', () => {
+  it('fills a slot auto, and reports that it wrote', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    expect(fillSlot(id, FLOOR, A_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: A_TILE, pinned: false })
+  })
+
+  it('pins a slot the user picked', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    expect(pinFill(id, FLOOR, A_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: A_TILE, pinned: true })
+  })
+
+  it('refuses to re-solve a slot the user pinned — contract C-k', () => {
+    // §2.1: "a lock change re-solves every `auto` fill and never touches a
+    // `pinned` one". The refusal lives in the store rather than in the solver,
+    // because a solver that simply forgot to skip pinned slots would silently
+    // discard every deliberate choice in the room with nothing failing.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+
+    // `'kept-pinned'` and not `false`: after a lock change the count of these is
+    // the number of deliberate choices the re-solve honoured, which is what §3.3
+    // has to disclose. A boolean would hide it among two other falses — see
+    // `FillOutcome`.
+    expect(fillSlot(id, FLOOR, ANOTHER_TILE)).toBe('kept-pinned')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: A_TILE, pinned: true })
+  })
+
+  it('re-solves an auto slot, which is what makes the lock toggle live', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+    expect(fillSlot(id, FLOOR, ANOTHER_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: ANOTHER_TILE, pinned: false })
+  })
+
+  it('lets the user override their own pick, and their own is the only thing that can', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+    expect(pinFill(id, FLOOR, ANOTHER_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: ANOTHER_TILE, pinned: true })
+  })
+
+  it('is a no-op that wakes no subscriber when the fill is already what it would write', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+    const before = state().placements
+    // `'unchanged'`, distinguishable from `'kept-pinned'`: a re-solve that
+    // produces the same file is not news, while one that honoured a user's pick
+    // is.
+    expect(fillSlot(id, FLOOR, A_TILE)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('promotes an auto fill to pinned even when the file does not change', () => {
+    // The one case the identity check above must not swallow: "yes, that one" on
+    // the file the solver already chose is a decision, and it has to stick or the
+    // next lock change would undo it.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+    expect(pinFill(id, FLOOR, A_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]?.pinned).toBe(true)
+    expect(fillSlot(id, FLOOR, ANOTHER_TILE)).toBe('kept-pinned')
+  })
+
+  it('touches one slot and one instance', () => {
+    const first = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    const second = placeTemplate(aTemplateInstance({ x: 4, fills: aFullFillMap() }))
+    const otherInstance = state().placements[second]
+    const otherSlot = state().placements[first]?.fills[WALL]
+
+    pinFill(first, FLOOR, ANOTHER_TILE)
+
+    expect(state().placements[second]).toBe(otherInstance)
+    expect(state().placements[first]?.fills[WALL]).toBe(otherSlot)
+  })
+
+  it('survives a persist round trip with the pinned bits intact', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+    pinFill(id, WALL, ANOTHER_TILE)
+
+    const payload = storedPayload()
+    resetWorkshop()
+    writeStored(payload)
+    void useWorkshopStore.persist.rehydrate()
+
+    expect(state().placements[id]?.fills[FLOOR]?.pinned).toBe(false)
+    expect(state().placements[id]?.fills[WALL]?.pinned).toBe(true)
+  })
+})
+
+/* ------------------------------------------------ clearing and unpinning */
+
+/**
+ * Row **A11**'s two actions, and the two facts they exist for.
+ *
+ * `clearFill` is the only thing in the app that makes a filled slot empty
+ * again — `fillSlot` and `pinFill` both write a tile — so before it a re-solve
+ * that could no longer fill a slot left the previous answer in place
+ * (`relock.ts`'s fourth gap, `InstanceReSolve.stale`).
+ *
+ * `unpinFill` is the only thing that writes `false` over a `true`, so before it
+ * **the first pin made a slot permanently deaf to the lock toggle**. The test
+ * named `re-exposes an unpinned slot to the lock` is the one to read: it is the
+ * whole of contract C-k's missing half, and it fails by `fillSlot` returning
+ * `'kept-pinned'` for a slot the user has handed back.
+ */
+describe('clearing and unpinning a fill', () => {
+  it('clears a fill and removes the key, rather than setting it to undefined', () => {
+    // The distinction the type system cannot make and three readers can:
+    // `canvas/catalog.ts#parts`, `share/link.ts` and `migrations.ts#salvageFills`
+    // all walk `Object.keys(fills)`, so a key holding `undefined` would draw
+    // nothing, encode a `pinned` bit for no file, and fail the schema on the way
+    // back in.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    expect(clearFill(id, FLOOR)).toBe('cleared')
+
+    const fills = state().placements[id]?.fills ?? {}
+    expect(Object.keys(fills)).not.toContain(FLOOR)
+    // `filledSlots` is `Object.keys`, so it is the one line that decides it.
+    expect([...filledSlots(fills)].sort()).toEqual(['base', 'column', 'left wall', 'right wall'])
+    expect(FLOOR in fills).toBe(false)
+  })
+
+  it('leaves the instance on the grid — contract C-g', () => {
+    // §3.2's "places anyway": an empty slot reads *needs a choice* and the room
+    // still holds the piece, so clearing is not a shorthand for removing.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    clearFill(id, FLOOR)
+    expect(selectPlacementCount(state())).toBe(1)
+    expect(state().placements[id]?.template).toBe(A_TEMPLATE)
+    expect(state().placements[id]?.fills[WALL]).toEqual({ tile: A_TILE, pinned: false })
+  })
+
+  it('clears a fill the user pinned, because clearing is the user own action', () => {
+    // `clearFill` has no pinned guard and no guarded twin: the only caller is
+    // the user, and emptying a slot you chose is the strongest form of "I no
+    // longer want my choice". No solver clears anything — C2's `reSolveScene`
+    // reports `UnfilledReport.stale` instead.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+    expect(clearFill(id, FLOOR)).toBe('cleared')
+    expect(state().placements[id]?.fills[FLOOR]).toBeUndefined()
+  })
+
+  it('is unchanged on a slot that is already empty, and wakes no subscriber', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    const before = state().placements
+    expect(clearFill(id, FLOOR)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('reports an unknown placement rather than writing', () => {
+    const gone = 'not-on-the-grid' as PlacementId
+    expect(clearFill(gone, FLOOR)).toBe('unknown-placement')
+    expect(unpinFill(gone, FLOOR)).toBe('unknown-placement')
+    expect(state().placements[gone]).toBeUndefined()
+  })
+
+  it('re-exposes an unpinned slot to the lock, which is C-k missing half', () => {
+    // The headline. `pinFill` is a one-way door without this: nothing else in
+    // the app writes `false` over a `true`, so the slot would answer
+    // `'kept-pinned'` to every re-solve for the life of the room — and the lock
+    // is a live preference, disagreeing about which file to print for 1,419 of
+    // 3,822 items (37.1%).
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+    expect(fillSlot(id, FLOOR, ANOTHER_TILE)).toBe('kept-pinned')
+
+    expect(unpinFill(id, FLOOR)).toBe('unpinned')
+
+    expect(fillSlot(id, FLOOR, ANOTHER_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: ANOTHER_TILE, pinned: false })
+  })
+
+  it('keeps the file when it unpins, which is the whole difference from clearing', () => {
+    // Two actions rather than one with a mode, and this is the state that
+    // separates them: unpinning leaves a printable file and moves only the
+    // authority over it, where clearing leaves a hole that stops the pack.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+    unpinFill(id, FLOOR)
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: A_TILE, pinned: false })
+  })
+
+  it('is unchanged on a slot the lock already owns, whether filled or empty', () => {
+    // Both spellings of one fact — *the lock decides this slot on its next
+    // pass* — which is why `UnpinOutcome` does not name them apart. `fillSlot`
+    // writes to both alike, so a caller reading them apart would have nothing
+    // different to do.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+
+    let before = state().placements
+    expect(unpinFill(id, FLOOR)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+
+    before = state().placements
+    expect(unpinFill(id, WALL)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('touches one slot and one instance', () => {
+    const first = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    const second = placeTemplate(aTemplateInstance({ x: 4, fills: aFullFillMap() }))
+    pinFill(first, FLOOR, A_TILE)
+    const otherInstance = state().placements[second]
+    const otherSlot = state().placements[first]?.fills[WALL]
+
+    unpinFill(first, FLOOR)
+    expect(state().placements[second]).toBe(otherInstance)
+    expect(state().placements[first]?.fills[WALL]).toBe(otherSlot)
+
+    clearFill(first, FLOOR)
+    expect(state().placements[second]).toBe(otherInstance)
+    expect(state().placements[first]?.fills[WALL]).toBe(otherSlot)
+  })
+
+  it('leaves a cleared slot absent across a persist round trip', () => {
+    // The wire and the storage blob agree with the map: an absent slot is
+    // already the representation of *unfilled* on both, so a cleared slot needs
+    // nothing new from `share/link.ts` and no migration from `migrations.ts`.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    clearFill(id, FLOOR)
+    pinFill(id, WALL, A_TILE)
+
+    const payload = storedPayload()
+    resetWorkshop()
+    writeStored(payload)
+    void useWorkshopStore.persist.rehydrate()
+
+    expect(state().placements[id]?.fills[FLOOR]).toBeUndefined()
+    expect(FLOOR in (state().placements[id]?.fills ?? {})).toBe(false)
+    expect(state().placements[id]?.fills[WALL]).toEqual({ tile: A_TILE, pinned: true })
+  })
+
+  it('lets the next re-solve fill a cleared slot, because an empty slot is not pinned', () => {
+    // §2.1 read literally, and `clearFill`'s docblock states it: the lock owns
+    // every slot the user has not pinned, and a slot the user emptied is not
+    // pinned. So clearing is "I have taken this out and not yet said what goes
+    // in", and the download refuses until then rather than for ever.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    clearFill(id, FLOOR)
+    expect(fillSlot(id, FLOOR, A_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: A_TILE, pinned: false })
   })
 })
 
@@ -266,6 +527,20 @@ describe('lock preference', () => {
     expect(state().lock).toBe(DEFAULT_LOCK_SYSTEM)
   })
 
+  it('does not itself re-solve a fill, and this is the boundary it holds', () => {
+    // The repair is a *re-solve* — C2 walking the slots and calling `fillSlot` —
+    // and it is not this action's, because doing it here would put the fill
+    // solver and therefore the catalog inside the store. So switching the lock
+    // leaves the room exactly as it was and the trigger is all it is.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+    const before = state().placements[id]?.fills[FLOOR]
+
+    setLockSystem('dragonlock')
+
+    expect(state().placements[id]?.fills[FLOOR]).toBe(before)
+  })
+
   it('survives a persist round trip', () => {
     setLockSystem('dragonlock')
     const payload = storedPayload()
@@ -291,36 +566,126 @@ describe('lock preference', () => {
   })
 })
 
+/* --------------------------------------------------------------- room design */
+
+describe('room design', () => {
+  it('ships with none, and that is a decision rather than a gap', () => {
+    /* `defaultWorkshopState` sets out why: the lock has a default because some
+       joinery has to be printed and 99.9% reach makes one answer least-bad,
+       where the top two designs reach 122 and 111 of 179 placeable parts and
+       choosing between them for the user is choosing what their dungeon looks
+       like. */
+    expect(state().design).toBeUndefined()
+    expect(selectRoomDesign(state())).toBeUndefined()
+  })
+
+  it('holds one design for the whole room', () => {
+    setRoomDesign('dungeon_stone')
+    expect(state().design).toBe('dungeon_stone')
+    expect(selectRoomDesign(state())).toBe('dungeon_stone')
+  })
+
+  it('clears back to no design, which is one of the picker’s options', () => {
+    setRoomDesign('dungeon_stone')
+    setRoomDesign(undefined)
+    expect(state().design).toBeUndefined()
+  })
+
+  it('has no chosen flag beside it, and does not need one', () => {
+    // `lockChosen` exists because `lock === 'openlock'` cannot be told from
+    // "never opened the picker". The design's shipped value is *absent*, so the
+    // field answers that question by itself.
+    expect('designChosen' in state()).toBe(false)
+    setRoomDesign('cave')
+    expect(state().lockChosen).toBe(false)
+  })
+
+  it('does not itself re-solve a fill, and this is the boundary it holds', () => {
+    /* The same boundary `setLockSystem` holds, for the same reason: the repair
+       is `reSolveScene` walking the slots and calling `fillSlot`, and doing it
+       here would put the fill solver — and therefore the catalog — inside the
+       store. `BuilderScreen` is the caller. */
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+    const before = state().placements[id]?.fills[FLOOR]
+
+    setRoomDesign('dungeon_stone')
+
+    expect(state().placements[id]?.fills[FLOOR]).toBe(before)
+  })
+
+  it('survives a persist round trip', () => {
+    setRoomDesign('towne')
+    const payload = storedPayload()
+    expect((payload?.state as WorkshopState).design).toBe('towne')
+
+    resetWorkshop()
+    expect(state().design).toBeUndefined()
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+    void useWorkshopStore.persist.rehydrate()
+    expect(state().design).toBe('towne')
+  })
+
+  it('round-trips *no design* as an absent key rather than as a null', () => {
+    /* `JSON.stringify` drops an `undefined` value, so the persisted blob has no
+       `design` key at all — and `salvageDesign` reads an absent key as no
+       preference. The two halves have to agree or a cleared design would come
+       back as a `null` the schema refuses. */
+    setRoomDesign('towne')
+    setRoomDesign(undefined)
+    const payload = storedPayload()
+    expect('design' in (payload?.state as object)).toBe(false)
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+    void useWorkshopStore.persist.rehydrate()
+    expect(state().design).toBeUndefined()
+  })
+
+  it('survives an export and re-import', () => {
+    setRoomDesign('aztlan')
+    const file = exportWorkshop()
+    resetWorkshop()
+    expect(importWorkshop(file)).toEqual({ ok: true, dropped: [] })
+    expect(state().design).toBe('aztlan')
+  })
+
+  it('is cleared by a reset, like every other persisted field', () => {
+    setRoomDesign('aztlan')
+    resetWorkshop()
+    expect(state().design).toBeUndefined()
+  })
+})
+
 /* ----------------------------------------------------------------- selectors */
 
 describe('selector granularity', () => {
-  it('does not disturb library subscribers when a tile is placed', () => {
-    addToLibrary(DESIGN_A)
-    const libraryBefore = state().library
-    const membershipBefore = selectIsInLibrary(DESIGN_A)(state())
+  it('does not disturb one instance’s subscribers when another is placed', () => {
+    const id = placeTemplate(aTemplateInstance())
+    const instanceBefore = state().placements[id]
 
-    placeTile(aPlacement())
-    placeTile(aPlacement({ x: 1 }))
+    placeTemplate(aTemplateInstance({ x: 1 }))
+    placeTemplate(aTemplateInstance({ x: 2 }))
 
-    // Same object identity and the same boolean, so a catalog card subscribed
-    // through `useIsInLibrary` re-renders for neither placement.
-    expect(state().library).toBe(libraryBefore)
-    expect(selectIsInLibrary(DESIGN_A)(state())).toBe(membershipBefore)
-  })
-
-  it('does not disturb scene subscribers when a tile is filed', () => {
-    const id = placeTile(aPlacement())
-    const placementsBefore = state().placements
-    addToLibrary(DESIGN_B)
-    expect(state().placements).toBe(placementsBefore)
-    expect(state().placements[id]).toBe(placementsBefore[id])
+    // Same object identity, so a component subscribed through `usePlacement(id)`
+    // re-renders for neither.
+    expect(state().placements[id]).toBe(instanceBefore)
   })
 
   it('reports counts as numbers, so an unchanged count is not a re-render', () => {
-    addToLibrary(DESIGN_A)
-    expect(selectLibraryCount(state())).toBe(1)
-    addToLibrary(DESIGN_A)
-    expect(selectLibraryCount(state())).toBe(1)
+    const id = placeTemplate(aTemplateInstance())
+    expect(selectPlacementCount(state())).toBe(1)
+    // A slot edit changes the scene and not the count, which is the whole reason
+    // the header subscribes to a number.
+    fillSlot(id, WALL, A_TILE)
+    expect(selectPlacementCount(state())).toBe(1)
+  })
+
+  it('counts instances rather than parts', () => {
+    // One instance is up to five printed pieces. This chip is about what the
+    // user put down; row C4 owns the count of parts, which needs the templates.
+    placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    expect(selectPlacementCount(state())).toBe(1)
   })
 })
 
@@ -328,7 +693,7 @@ describe('selector granularity', () => {
 
 describe('persistence', () => {
   it('writes synchronously, with the version stamped from the first commit', () => {
-    addToLibrary(DESIGN_A)
+    placeTemplate(aTemplateInstance())
     // No await: an async storage adapter would make this line flaky and every
     // rapid placement a lost-update race.
     const payload = storedPayload()
@@ -336,16 +701,19 @@ describe('persistence', () => {
     expect(payload?.state).toEqual(state())
   })
 
-  it('persists placements and the lock preference too', () => {
-    const id = placeTile(aPlacement({ x: 3, z: -1, rotation: 90 }))
+  it('persists instances, their fills and the lock preference', () => {
+    const id = placeTemplate(aTemplateInstance({ x: 3, z: -1, rotation: 90, fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
     setLockSystem('magnetic')
     const payload = storedPayload()
     expect(WorkshopState.safeParse(payload?.state).success).toBe(true)
     expect((payload?.state as WorkshopState).placements[id]).toEqual({
-      design: DESIGN_A,
+      id,
+      template: A_TEMPLATE,
       x: 3,
       z: -1,
       rotation: 90,
+      fills: { [FLOOR]: { tile: A_TILE, pinned: true } },
     })
     expect((payload?.state as WorkshopState).lock).toBe('magnetic')
   })
@@ -353,39 +721,45 @@ describe('persistence', () => {
   it('loses no update across rapid sequential writes', () => {
     const placed: PlacementId[] = []
     for (let index = 0; index < 250; index += 1) {
-      placed.push(placeTile(aPlacement({ x: index * 0.5, z: 0, rotation: (index * 90) % 360 })))
-      addToLibrary(DesignId.parse(`d${index.toString(16).padStart(12, '0')}`))
+      placed.push(placeTemplate(aTemplateInstance({ x: index * 0.5, z: 0, rotation: (index * 90) % 360 })))
+      fillSlot(placed[index] as PlacementId, WALL, ANOTHER_TILE)
     }
 
     expect(new Set(placed).size).toBe(250)
     expect(selectPlacementCount(state())).toBe(250)
-    expect(selectLibraryCount(state())).toBe(250)
 
     // The persisted copy must agree with memory exactly. A dropped write shows
     // up here even when the in-memory count is right.
     const persisted = storedPayload()?.state
     expect(persisted).toEqual(state())
     expect(Object.keys((persisted as WorkshopState).placements)).toHaveLength(250)
+    for (const id of placed) {
+      expect((persisted as WorkshopState).placements[id]?.fills[WALL]?.tile).toBe(ANOTHER_TILE)
+    }
   })
 
   it('resets state and storage together', () => {
-    addToLibrary(DESIGN_A)
-    placeTile(aPlacement())
+    placeTemplate(aTemplateInstance())
     setLockSystem('dragonlock')
 
     resetWorkshop()
-    expect(state()).toEqual({
-      library: {},
-      placements: {},
-      generated: {},
-      lock: DEFAULT_LOCK_SYSTEM,
-      lockChosen: false,
-    })
+    expect(state()).toEqual(EMPTY)
     expect(storedPayload()?.state).toEqual(state())
   })
 
+  it('clears the selection channel on reset — contract C-f', () => {
+    // `selection.ts` used to argue the opposite, and its premise was the
+    // library: "a reset that emptied the library disarms the handoff by making
+    // it unclaimable". Row A0 deleted the library, so the palette now lists the
+    // 91 templates this build ships, which no reset can clear — and a pending
+    // handoff would survive "clear everything" and still be claimable.
+    armTemplateInBuilder(A_PENDING_ARM)
+    resetWorkshop()
+    expect(claimPendingArm()).toBeNull()
+  })
+
   it('clears the persisted copy on request', () => {
-    addToLibrary(DESIGN_A)
+    placeTemplate(aTemplateInstance())
     expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull()
     clearPersistedWorkshopState()
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
@@ -396,8 +770,7 @@ describe('persistence', () => {
 
 describe('rehydrating', () => {
   it('reads back a payload it wrote', async () => {
-    addToLibrary(DESIGN_A)
-    const id = placeTile(aPlacement({ x: 2, z: 2, rotation: 180 }))
+    const id = placeTemplate(aTemplateInstance({ x: 2, z: 2, rotation: 180, fills: aFullFillMap() }))
     setLockSystem('magnetic')
     const written = state()
 
@@ -407,6 +780,7 @@ describe('rehydrating', () => {
 
     expect(state()).toEqual(written)
     expect(state().placements[id]?.rotation).toBe(180)
+    expect(Object.keys(state().placements[id]?.fills ?? {})).toHaveLength(5)
   })
 
   it('validates a correctly stamped but corrupt payload — the crashed-tab case', async () => {
@@ -414,18 +788,22 @@ describe('rehydrating', () => {
     writeStored({
       version: STORE_VERSION,
       state: {
-        // A file id among the keys is the one corruption row V1 introduced the
-        // possibility of: it is what every version 1–3 library was made of, so a
-        // hand edit or a stale preview build can put one here under the current
-        // stamp. It must be refused rather than kept as a key that resolves to
-        // no record.
-        library: { [DESIGN_A]: true, [DESIGN_B]: 'yes', '': true, [TILE_A]: true },
         placements: {
-          good: { design: DESIGN_A, x: 1, z: 1, rotation: 0 },
-          bad: { design: DESIGN_B, x: null, z: 1, rotation: 0 },
-          // A file id in the identity slot: the shape every version 1-4 blob
-          // wrote, and the one `salvageDesign` recognises by name.
-          stale: { design: TILE_A, x: 0, z: 0, rotation: 0 },
+          good: { id: 'good', template: A_TEMPLATE, x: 1, z: 1, rotation: 0, fills: {} },
+          bad: { id: 'bad', template: A_TEMPLATE, x: null, z: 1, rotation: 0, fills: {} },
+          // The identity every version 5 blob wrote, and the one
+          // `salvageTemplate` recognises by field name.
+          stale: { design: 'd4c2a57740b65', x: 0, z: 0, rotation: 0 },
+          // A readable instance with one unreadable fill: it keeps the instance
+          // and loses the slot, which then reads as needs a choice.
+          partial: {
+            id: 'partial',
+            template: A_TEMPLATE,
+            x: 2,
+            z: 2,
+            rotation: 0,
+            fills: { floor: { tile: A_TILE, pinned: true }, 'right wall': { tile: 'nonsense', pinned: false } },
+          },
         },
         lock: 'padlock',
       },
@@ -434,36 +812,37 @@ describe('rehydrating', () => {
 
     // The version matches, so `migrate` never runs; only `merge` stands between
     // this payload and the app.
-    expect(state().library).toEqual({ [DESIGN_A]: true })
-    expect(Object.keys(state().placements)).toEqual(['good'])
+    expect(Object.keys(state().placements).sort()).toEqual(['good', 'partial'])
+    expect(state().placements['partial' as PlacementId]?.fills).toEqual({
+      [FLOOR]: { tile: A_TILE, pinned: true },
+    })
     expect(state().lock).toBe(DEFAULT_LOCK_SYSTEM)
     expect(console.warn).toHaveBeenCalledOnce()
   })
 
   it.each([
     ['version 1 — a library of files, no lockChosen, no generated', 1],
-    ['version 2 — lockChosen but no generated', 2],
-    ['version 3 — the shape before the library held designs', 3],
+    ['version 4 — a library of designs, placements still keyed by file', 4],
+    ['version 5 — the shape before a placement held a template', 5],
     ['a version from the future', STORE_VERSION + 3],
   ])('discards a payload stamped %s and rewrites storage at the current version', async (_label, version) => {
     silenceWarnings()
-    // Written the way version 1–3 wrote it: the library is a map of *files*.
-    // Nothing about it is readable as a version 4 state, and the owner's
-    // decision is that nothing is deployed so nothing has to be — see
-    // `migrations.ts`.
+    // Written the way version 5 wrote it: a `library` beside placements that
+    // name a design. Nothing about it is readable as a version 6 state, and the
+    // owner's decision is that nothing is deployed so nothing has to be — see
+    // `migrations.ts`, including why a 5 → 6 rung would have to *fabricate* a
+    // family and a fill set rather than convert anything.
     writeStored({
-      ...(version === undefined ? {} : { version }),
-      state: { library: { [TILE_A]: true }, placements: {}, lock: 'dragonlock' },
+      version,
+      state: {
+        library: { d4c2a57740b65: true },
+        placements: { p1: { design: 'd4c2a57740b65', x: 0, z: 0, rotation: 0 } },
+        lock: 'dragonlock',
+      },
     })
     await useWorkshopStore.persist.rehydrate()
 
-    expect(state()).toEqual({
-      library: {},
-      placements: {},
-      generated: {},
-      lock: DEFAULT_LOCK_SYSTEM,
-      lockChosen: false,
-    })
+    expect(state()).toEqual(EMPTY)
     // Rewritten at the current version, so the next load is a clean read rather
     // than a second discard.
     expect(storedPayload()?.version).toBe(STORE_VERSION)
@@ -474,33 +853,46 @@ describe('rehydrating', () => {
     silenceWarnings()
     // Measured against `zustand/middleware`, not assumed: `persist` calls
     // `migrate` only when `typeof value.version === 'number'`, so an unstamped
-    // blob — or one stamped `"3"` — bypasses the gate entirely and is read by
-    // `merge`, which is `salvageWorkshopState`. That is why `salvageLibrary`
-    // rejects a file id in the library rather than trusting the gate to have
-    // discarded the shape first: on this path it is the only reader there is.
-    writeStored({ state: { library: { [TILE_A]: true }, placements: {}, lock: 'dragonlock' } })
+    // blob — or one stamped `"5"` — bypasses the gate entirely and is read by
+    // `merge`, which is `salvageWorkshopState`. That is why `salvageTemplate`
+    // recognises the old `design` field by name rather than trusting the gate to
+    // have discarded the shape first: on this path it is the only reader there is.
+    writeStored({
+      state: {
+        placements: { p1: { design: 'd4c2a57740b65', x: 0, z: 0, rotation: 0 } },
+        lock: 'dragonlock',
+      },
+    })
     await useWorkshopStore.persist.rehydrate()
 
-    // The library is empty because every key was a file id, named and dropped.
-    expect(state().library).toEqual({})
+    // The scene is empty because the one placement named an item rather than a
+    // template, named and dropped.
+    expect(state().placements).toEqual({})
     // And the rest of the blob survived, because salvage keeps what it can — so
     // the lock is the one the blob carried, not the default a discard produces.
     expect(state().lock).toBe('dragonlock')
     expect(console.warn).toHaveBeenCalledOnce()
   })
 
-  it('starts fresh and throws the poison away when the payload is not even JSON', async () => {
+  it('says nothing about a leftover library key, because that field no longer exists', async () => {
     silenceWarnings()
-    localStorage.setItem(STORAGE_KEY, '{"state":{"library"')
+    // Not corruption of the current shape — a field the build has dropped. On
+    // the unstamped path it has no reader and no effect, and a message about it
+    // would tell the user about a feature that is gone.
+    writeStored({ state: { library: { d4c2a57740b65: true }, placements: {}, lock: 'magnetic' } })
     await useWorkshopStore.persist.rehydrate()
 
-    expect(state()).toEqual({
-      library: {},
-      placements: {},
-      generated: {},
-      lock: DEFAULT_LOCK_SYSTEM,
-      lockChosen: false,
-    })
+    expect(state().lock).toBe('magnetic')
+    expect(state()).toEqual({ ...EMPTY, lock: 'magnetic' })
+    expect(console.warn).not.toHaveBeenCalled()
+  })
+
+  it('starts fresh and throws the poison away when the payload is not even JSON', async () => {
+    silenceWarnings()
+    localStorage.setItem(STORAGE_KEY, '{"state":{"placements"')
+    await useWorkshopStore.persist.rehydrate()
+
+    expect(state()).toEqual(EMPTY)
     // Removed, so the next load starts clean instead of reproducing this
     // forever — which is the difference between a bad session and a dead app.
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
@@ -512,7 +904,7 @@ describe('rehydrating', () => {
     ['an array state', { state: [], version: STORE_VERSION }],
     ['a missing state', { version: STORE_VERSION }],
     ['a future version', { state: { lock: 'magnetic' }, version: STORE_VERSION + 3 }],
-    ['no envelope at all', { library: { [DESIGN_A]: true } }],
+    ['no envelope at all', { placements: {} }],
   ])('survives %s in storage', async (_label, payload) => {
     silenceWarnings()
     writeStored(payload)
@@ -525,10 +917,8 @@ describe('rehydrating', () => {
 
 describe('export and import', () => {
   it('round-trips to identical state', () => {
-    addToLibrary(DESIGN_A)
-    addToLibrary(DESIGN_B)
-    placeTile(aPlacement({ x: 1.5, z: -2, rotation: 22.5 }))
-    placeTile(aPlacement({ design: DESIGN_B, x: 0, z: 0, rotation: 270 }))
+    placeTemplate(aTemplateInstance({ x: 1.5, z: -2, rotation: 22.5, fills: aFullFillMap() }))
+    placeTemplate(aTemplateInstance({ x: 0, z: 0, rotation: 270, fills: {} }))
     setLockSystem('dragonlock')
     const original = state()
 
@@ -542,7 +932,7 @@ describe('export and import', () => {
   })
 
   it('writes an envelope that identifies itself and carries the version', () => {
-    addToLibrary(DESIGN_A)
+    placeTemplate(aTemplateInstance())
     const parsed = WorkshopExport.parse(JSON.parse(exportWorkshop()))
     expect(parsed.kind).toBe(WORKSHOP_EXPORT_KIND)
     expect(parsed.version).toBe(STORE_VERSION)
@@ -551,7 +941,7 @@ describe('export and import', () => {
   })
 
   it('persists what it imported', () => {
-    addToLibrary(DESIGN_A)
+    placeTemplate(aTemplateInstance())
     const file = exportWorkshop()
     resetWorkshop()
     importWorkshop(file)
@@ -559,15 +949,13 @@ describe('export and import', () => {
   })
 
   it('replaces rather than merging, so the result is exactly the file', () => {
-    addToLibrary(DESIGN_A)
+    const kept = placeTemplate(aTemplateInstance())
     const file = exportWorkshop()
     resetWorkshop()
-    addToLibrary(DESIGN_B)
-    placeTile(aPlacement({ design: DESIGN_B }))
+    placeTemplate(aTemplateInstance({ x: 9 }))
 
     importWorkshop(file)
-    expect(state().library).toEqual({ [DESIGN_A]: true })
-    expect(state().placements).toEqual({})
+    expect(Object.keys(state().placements)).toEqual([kept])
   })
 
   it.each([
@@ -575,10 +963,10 @@ describe('export and import', () => {
     ['an empty string', ''],
     ['a bare array', '[]'],
     ['someone else’s JSON', '{"nodes":[],"edges":[]}'],
-    ['a bare state with no envelope', '{"library":{},"placements":{},"lock":"magnetic"}'],
+    ['a bare state with no envelope', '{"placements":{},"lock":"magnetic"}'],
     ['the wrong kind', '{"kind":"something-else","version":1,"state":{}}'],
   ])('changes nothing when given %s', (_label, file) => {
-    addToLibrary(DESIGN_A)
+    placeTemplate(aTemplateInstance())
     const before = state()
     const result = importWorkshop(file)
     expect(result.ok).toBe(false)
@@ -591,10 +979,9 @@ describe('export and import', () => {
         kind: WORKSHOP_EXPORT_KIND,
         version: STORE_VERSION,
         state: {
-          library: { [DESIGN_A]: true },
           placements: {
-            keep: { design: DESIGN_A, x: 0, z: 0, rotation: 90 },
-            lose: { design: DESIGN_B, x: 'somewhere', z: 0, rotation: 0 },
+            keep: { id: 'keep', template: A_TEMPLATE, x: 0, z: 0, rotation: 90, fills: {} },
+            lose: { id: 'lose', template: A_TEMPLATE, x: 'somewhere', z: 0, rotation: 0, fills: {} },
           },
           lock: 'magnetic',
         },
@@ -607,17 +994,17 @@ describe('export and import', () => {
   })
 
   it.each([
-    ['an older version', 3],
+    ['an older version', 5],
     ['a newer version', STORE_VERSION + 1],
     ['no version at all', undefined],
   ])('refuses a file exported at %s, and says which', (_label, version) => {
-    addToLibrary(DESIGN_A)
+    placeTemplate(aTemplateInstance())
     const before = state()
     const result = importWorkshop(
       JSON.stringify({
         kind: WORKSHOP_EXPORT_KIND,
         ...(version === undefined ? {} : { version }),
-        state: { library: { [TILE_B]: true }, placements: {}, lock: 'magnetic' },
+        state: { placements: {}, lock: 'magnetic' },
       }),
     )
 

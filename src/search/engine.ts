@@ -117,7 +117,7 @@ export interface SearchEngine {
    * The aggregate layer this engine indexes.
    *
    * Exposed rather than rebuilt by each consumer: `buildAggregateIndex` is a
-   * pure function of the file and costs one pass over 8,702 records plus 84,023
+   * pure function of the file and costs one pass over 8,702 records plus 101,427
    * tag references, and rows A3 to A7 all need the same lookups (`byDesign`,
    * `byOrdinal`, `byTile`, `stats`). One instance per session, reached through
    * whoever already holds the engine.

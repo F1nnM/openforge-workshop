@@ -18,6 +18,11 @@
  *      with the generator.
  *   4. **The census.** Every figure `pipeline/templates.ts` and row C3's PR
  *      quote, computed rather than restated.
+ *   5. **Row B2's slot geometry costs the index nothing.** Every fixture's
+ *      part-name set resolves to one of the three authored conventions (40 of
+ *      40), an unknown set fails the *import* rather than the browser, and the
+ *      emitted artefact is byte-identical with and without the row — asserted by
+ *      rebuilding the corpus at the payload epoch, not by prose.
  *
  * Skips **loudly** without the fixtures, naming the path and the override — the
  * precedent `src/composition/corpus.test.ts` and `src/search/corpus.test.ts`
@@ -42,16 +47,31 @@ import { z } from 'zod'
 
 import { TagRef } from '../src/catalog'
 
+import { SLOT_CONVENTIONS, conventionFor } from '../src/template/rules'
+
+import { buildCatalog } from './build'
+import { measureCatalog, serialiseCatalog } from './emit'
+import { deriveAuthored } from './authored'
+import { deriveFamilies } from './families'
+import type { GeneratedFamily } from './families'
 import { FixtureRow, fixtureFingerprint, fixturesDir, loadFixtureRows } from './fixtures'
+import { emptyManifest } from './ordinals'
 import type { TemplateFixture } from './templates'
 import {
+  AUTHORED_MARKER,
+  RECORDED_TAG_DEFECTS,
   TEMPLATES_MODULE_PATH,
+  checkTemplateTags,
   loadTemplateFixtures,
   printFixture,
   printTemplateModule,
   readTemplateFile,
+  tagDefectKey,
+  templateConvention,
   templateSlug,
+  templateTagDefects,
 } from './templates'
+import { PAYLOAD_TIMESTAMP, SIZE_BUDGET_BYTES } from './version'
 
 const FIXTURES = fixturesDir()
 const hasFixtures = existsSync(FIXTURES)
@@ -68,6 +88,31 @@ describeFixtures(title, () => {
   const entries: readonly TemplateFixture[] = hasFixtures ? loadTemplateFixtures(FIXTURES) : []
   const parts = entries.flatMap((entry) => entry.parts)
   const constrain = parts.flatMap((part) => part.tags.constrain ?? [])
+  /* Row E3's third source. A pure function of `entries`, so it needs no corpus
+     and no lazy build; `authored.test.ts` is where its own content is checked. */
+  const authored: readonly TemplateFixture[] = hasFixtures ? deriveAuthored(entries) : []
+
+  /**
+   * Row B4's families, built once and lazily.
+   *
+   * The emitted module has two sources now, so the byte-identity assertion below
+   * needs both — and the second one is a function of the *built corpus* rather
+   * than of the fixtures directory, which is what makes its 0 B structural. Built
+   * on first use so the two-thirds of this file that only reads YAML still runs
+   * without paying for a corpus build.
+   */
+  let cachedFamilies: readonly GeneratedFamily[] | undefined
+  const families = (): readonly GeneratedFamily[] => {
+    cachedFamilies ??= deriveFamilies(
+      buildCatalog({
+        rows: loadFixtureRows(FIXTURES),
+        manifest: emptyManifest(),
+        fixturesRef: 'test',
+        builtAt: PAYLOAD_TIMESTAMP,
+      }).file,
+    )
+    return cachedFamilies
+  }
 
   /* ------------------------------------------------------------ the two halves */
 
@@ -202,13 +247,507 @@ describeFixtures(title, () => {
     expect(lost).toBe(70)
   })
 
+  /* ------------------------------------------------------------ slot geometry */
+
+  /**
+   * Rebuilding the 8,702-tile corpus and brotli-ing 5.9 MB at quality 11, twice.
+   * `role.test.ts` measures the same way for the same reason.
+   */
+  const SLOW_MS = 300_000
+
+  describe('row B2’s slot conventions', () => {
+    it('covers all 40 part-name sets, in the 32 / 4 / 4 split, out of four conventions', () => {
+      const per = new Map<string, number>()
+      for (const entry of entries) {
+        const convention = templateConvention(entry)
+        per.set(convention.id, (per.get(convention.id) ?? 0) + 1)
+      }
+      expect(Object.fromEntries(per)).toEqual({
+        'wall-on-tile': 32,
+        'external-corner': 4,
+        'internal-corner': 4,
+      })
+      /* Four since row **E3**, and the fourth is reached by no fixture at all:
+         the corridor's `(base, floor, left wall, right wall)` has no upstream
+         template, which is why its convention has to exist before
+         `pipeline/authored.ts`'s entry can pass the gate below. */
+      expect(SLOT_CONVENTIONS).toHaveLength(4)
+      expect(SLOT_CONVENTIONS.map((convention) => convention.id)).toContain('corridor')
+      expect([...per.keys()]).not.toContain('corridor')
+    })
+
+    it('fails the import, naming the file and the template, on a set it does not know', () => {
+      /* The whole point of reading the conventions from the pipeline. A
+         twenty-first fixture file with a new part set is a template this project
+         cannot lay out, and the honest place to find that out is
+         `npm run import:catalog` — not the browser, where an unlaid-out template
+         is indistinguishable from an archive gap. */
+      const invented: TemplateFixture = {
+        source: 'blueprints.s2w.invented.yaml',
+        name: 'S2W: Wall on Tile: Ceiling (Any, Modular)',
+        type: 'blueprint',
+        tags: ['object|tile'],
+        parts: [
+          { name: 'ceiling', tags: { require: [{ tag: 'shape|roof' }] } },
+          { name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } },
+          { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
+        ],
+      }
+      expect(() => templateConvention(invented)).toThrow(/blueprints\.s2w\.invented\.yaml/)
+      expect(() => templateConvention(invented)).toThrow(/no slot convention covers/)
+      expect(() => printTemplateModule([...entries, invented], [])).toThrow(/no slot convention covers/)
+    })
+
+    it('keys on the part-name set, which the fixtures’ own shape tags cannot do', () => {
+      /* Two of the four internal-corner entries carry `shape|corner`. Read from
+         the fixtures rather than from the generated module, so the defect is
+         observed at its source. Row **B6** files it upstream. */
+      const misTagged = entries.filter(
+        (entry) =>
+          entry.tags.includes('shape|corner') &&
+          conventionFor(entry.parts.map((part) => part.name))?.id === 'internal-corner',
+      )
+      expect(misTagged).toHaveLength(2)
+      expect(misTagged.map((entry) => entry.source).sort()).toEqual([
+        'blueprints.s2w.internal_corner.low.yaml',
+        'blueprints.s2w.internal_corner.yaml',
+      ])
+      // And every one of them really has no wall part, which is what a
+      // tag-keyed rule would have gone looking for.
+      for (const entry of misTagged) {
+        expect(entry.parts.map((part) => part.name)).not.toContain('wall')
+      }
+    })
+
+    it(
+      'adds 0 B to the index, and prices the same rule inside it at +396 B',
+      () => {
+        /* The claim the row rests on, measured rather than argued. The
+           conventions ship in the bundle, `pipeline/build.ts` never reaches this
+           module, and the emitted artefact is therefore **byte-identical** to
+           what row B1 pinned — which is what "0 B" has to mean to be checkable.
+
+           Confirmed once directly as well, by building the same corpus at the
+           same epoch from a tree with this row reverted: same raw length
+           (5,907,324 B), same brotli (366,173 B) and the same SHA-256 of the
+           serialised index, `cf21ab85ac304a20…`.
+
+           **Row D9 moved that artefact, and proved what moved it the same way.**
+           Building this same corpus at this same epoch from a tree with *only*
+           `pipeline/footprint.ts` reverted to its pre-D9 state reproduces
+           `cf21ab85ac304a20…` byte for byte — 5,904,652 B raw, 366,173 B brotli
+           — and with the corrected corner run it is
+           `e1d5ca5459812bb1f636b4acfe923f4b8b26e640761ef05bdcf754f843428a33`,
+           5,905,632 B raw and **366,677 B brotli**. So the whole of the +980 B
+           raw / **+493 B** brotli is 245 records writing `"length":1.5` where
+           they wrote `"length":2`, and B2's own "0 B" claim is unaffected: it is
+           a claim about *this* module, and reverting *this* module still gives
+           the artefact the surrounding tree produces.
+
+           The counterfactual here is the 128-row expansion of the same three
+           rules as a `layouts` key, against **this** construction — a fresh
+           build with an empty ordinal manifest. `src/template/corpus.test.ts`
+           prices it against the shipped artefact instead and gets +222 B, and
+           the research measured +374 B against the pre-B1 `catalog.json`. All
+           three are the same table. Row B1 records the lesson in this same
+           file: brotli is not additive over 5.9 MB, so a "this field costs N
+           bytes" figure is a fact about one artefact at one epoch, never a
+           rate. */
+        const { file } = buildCatalog({
+          rows: loadFixtureRows(FIXTURES),
+          manifest: emptyManifest(),
+          fixturesRef: 'test',
+          builtAt: PAYLOAD_TIMESTAMP,
+        })
+        const json = serialiseCatalog(file)
+        const shipped = measureCatalog(json)
+
+        const layouts = entries.map((entry) => ({
+          id: templateSlug(entry.name),
+          slots: templateConvention(entry).slots.map((slot) => ({
+            part: slot.part,
+            anchor: slot.anchor,
+            side: slot.side,
+            restsOn: slot.restsOn,
+          })),
+        }))
+        const withTable = measureCatalog(serialiseCatalog({ ...file, layouts } as never))
+
+        process.stdout.write(
+          `\n[template] index ${String(shipped.brotli)} B unchanged · the same rule inside it ` +
+            `${String(withTable.brotli)} B (+${String(withTable.brotli - shipped.brotli)})\n`,
+        )
+
+        expect(shipped.brotli).toBe(366_677)
+        expect(shipped.withinBudget).toBe(true)
+        expect(shipped.brotli / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
+        /* And nothing of the model is in the bytes, which is the structural half.
+           Row **E3** added the last four needles: a fourth convention, two
+           authored templates and a new doubt code, none of which may reach the
+           index either — this is the same claim it makes with `stamp.json`'s
+           `lock.content` and `corpus.digest`, from inside the build. */
+        for (const needle of [
+          'anchor',
+          'restsOn',
+          'layouts',
+          'wall-on-tile',
+          'external-corner',
+          'corridor',
+          'authored',
+          'Any Floor',
+          'no-walk',
+        ]) {
+          expect(json).not.toContain(needle)
+        }
+        expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
+        /* **+396 B, against +808 before row D9** — and the two intermediate
+           readings are worth recording because they bracket the instrument
+           rather than the subject. Nothing about the table changed at any point:
+           the same 128 rows, asserted just above. Measured at the footprint
+           correction alone it was **-71 B** — adding the `layouts` key made the
+           index *smaller* — and one further character, `version.pipeline` going
+           2 to 3, brings it back to +396. So a "this field costs N bytes" figure
+           over a 5.9 MB brotli stream is not even reliably positive, let alone a
+           rate. The row's claim never rested on it; it rests on the structural
+           assertion below and the byte-identical revert digest above. */
+        expect(withTable.brotli - shipped.brotli).toBe(396)
+      },
+      SLOW_MS,
+    )
+
+    it('is not on the index’s path at all, so the 0 B is structural', () => {
+      /* `pipeline/templates.ts` already documents that `build.ts` does not
+         import it; this asserts it, and asserts the same of `emit.ts`, which is
+         what actually writes the bytes. A future row wiring slot geometry into
+         the index fails here rather than moving a byte count silently. */
+      for (const module of ['pipeline/build.ts', 'pipeline/emit.ts']) {
+        const source = readFileSync(module, 'utf8')
+        expect(source, module).not.toContain("from './templates'")
+        expect(source, module).not.toContain('src/template')
+      }
+    })
+  })
+
+  /* ------------------------------------------- row B6’s internal-corner defect */
+
+  describe('the upstream internal-corner tag defect', () => {
+    /** The one `shape|` tag each of the 40 carries. */
+    const shapeTagsOf = (entry: TemplateFixture): readonly string[] =>
+      entry.tags.filter((tag) => tag.startsWith('shape|'))
+
+    it('tags four of the 40 shape|corner where only two are corners', () => {
+      const tally = new Map<string, number>()
+      for (const entry of entries) {
+        const shape = shapeTagsOf(entry)
+        // Exactly one `shape|` tag each, which is what makes the tally a
+        // partition of the 40 rather than a count of tags.
+        expect(shape, entry.name).toHaveLength(1)
+        for (const tag of shape) tally.set(tag, (tally.get(tag) ?? 0) + 1)
+      }
+
+      expect(Object.fromEntries([...tally].sort())).toEqual({
+        'shape|corner': 4,
+        'shape|corner|low': 2,
+        'shape|internal_corner': 1,
+        'shape|internal_corner|low': 1,
+        'shape|wall': 32,
+      })
+    })
+
+    it('makes one internal corner tag-identical to an external one', () => {
+      /* The sharpest reading of the defect, and the reason a tag key cannot be
+         rescued by looking harder at the tags: these two templates carry the
+         same five strings in the same order and are not the same shape. */
+      const find = (name: string): TemplateFixture => {
+        const entry = entries.find((each) => each.name === name)
+        if (entry === undefined) throw new Error(`no template named ${name}`)
+        return entry
+      }
+      const internal = find('S2W: Wall on Tile: Internal Corner: Low (Modular)')
+      const external = find('S2W: Wall on Tile: Corner (Any, Modular)')
+
+      expect(internal.tags).toEqual(external.tags)
+      expect(internal.parts).toHaveLength(3)
+      expect(external.parts).toHaveLength(5)
+      // The low one loses its qualifier too: neither `internal_corner` nor `low`
+      // survives, though its column part still requires `shape|column|low`.
+      expect(internal.tags).toContain('shape|corner')
+      expect(
+        internal.parts.flatMap((part) => (part.tags.require ?? []).map((ref) => ref.tag)),
+      ).toContain('shape|column|low')
+    })
+
+    it('is detected from each fixture’s own parts, on 4 of 4 and 0 of the other 36', () => {
+      /* The signal the census is built on, measured in both directions. It has
+         to be independent of the tag it is checking, or the check is circular. */
+      const partsSayInternal = entries.filter((entry) =>
+        entry.parts.some((part) =>
+          (part.tags.require ?? []).some((ref) => ref.tag.split('|')[2] === 'internal_corner'),
+        ),
+      )
+
+      expect(partsSayInternal).toHaveLength(4)
+      expect(partsSayInternal.map((entry) => templateConvention(entry).id)).toEqual([
+        'internal-corner',
+        'internal-corner',
+        'internal-corner',
+        'internal-corner',
+      ])
+      // Every one of the four says so on its `floor` part; the two modular ones
+      // say it on their `base` part as well.
+      const requires = (entry: TemplateFixture, part: string): readonly string[] =>
+        (entry.parts.find((each) => each.name === part)?.tags.require ?? []).map((ref) => ref.tag)
+      for (const entry of partsSayInternal) {
+        expect(requires(entry, 'floor'), entry.name).toContain('shape|floor|internal_corner')
+      }
+      expect(
+        partsSayInternal.filter((entry) => requires(entry, 'base').includes('shape|base|internal_corner')),
+      ).toHaveLength(2)
+    })
+
+    it('censuses exactly the two recorded templates, both Modular and both wall-less', () => {
+      const defects = templateTagDefects(entries)
+
+      expect(defects.map(tagDefectKey).sort()).toEqual([...RECORDED_TAG_DEFECTS].sort())
+      for (const defect of defects) {
+        expect(defect.carries).toEqual(['shape|corner'])
+        expect(defect.part).toBe('floor')
+        expect(defect.requires).toBe('shape|floor|internal_corner')
+        expect(defect.name).toContain('Modular')
+      }
+      // Neither has a wall part, which is what a tag-keyed layout would have
+      // gone looking for after handing them the external corner's convention.
+      const named = defects.map((defect) => defect.name)
+      for (const entry of entries.filter((each) => named.includes(each.name))) {
+        expect(entry.parts.map((part) => part.name)).not.toContain('wall')
+      }
+    })
+
+    it('passes the pinned fixtures, which is the only reason the import runs', () => {
+      // `loadTemplateFixtures` calls this, so a red census fails
+      // `npm run import:catalog` before it rewrites the generated module.
+      expect(() => {
+        checkTemplateTags(entries)
+      }).not.toThrow()
+    })
+
+    it('fails, and says the defect is gone, when the census empties', () => {
+      /* The direction a hard-coded allow-list of two names could not see.
+         Upstream correcting either fixture is the good outcome and must still
+         stop the import, because the workaround and the guard both become dead
+         weight the moment it happens. */
+      const repaired = entries.map((entry) =>
+        entry.tags.includes('shape|corner') && entry.parts.every((part) => part.name !== 'wall')
+          ? { ...entry, tags: entry.tags.map((tag) => (tag === 'shape|corner' ? 'shape|internal_corner' : tag)) }
+          : entry,
+      )
+
+      expect(templateTagDefects(repaired)).toEqual([])
+      expect(() => {
+        checkTemplateTags(repaired)
+      }).toThrow(/is gone/)
+      expect(() => {
+        checkTemplateTags(repaired)
+      }).toThrow(/upstream fixing the data/)
+    })
+
+    it('fails, naming it, when a third template joins the census', () => {
+      const invented: TemplateFixture = {
+        source: 'blueprints.s2w.invented.yaml',
+        name: 'S2W: Wall on Tile: Internal Corner (Any, Modular)',
+        type: 'blueprint',
+        tags: ['object|tile', 'build|s2w', 'shape|corner'],
+        parts: [
+          { name: 'column', tags: { require: [{ tag: 'size|column_shape|L' }] } },
+          { name: 'floor', tags: { require: [{ tag: 'shape|floor|internal_corner' }] } },
+          { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
+        ],
+      }
+
+      expect(templateTagDefects([...entries, invented])).toHaveLength(3)
+      expect(() => {
+        checkTemplateTags([...entries, invented])
+      }).toThrow(/blueprints\.s2w\.invented\.yaml/)
+      expect(() => {
+        checkTemplateTags([...entries, invented])
+      }).toThrow(/census moved: 3 templates/)
+    })
+
+    it('is inherited by nothing, because those four templates carry no constrain', () => {
+      /* The one path a template's own tags reach candidate resolution by:
+         `assembly.ts` passes them to `resolveSlotTags` as the `parentTags` a
+         `constrain` entry inherits. If the two defective templates had a
+         `constrain` block, the wrong tag would be a live resolution bug rather
+         than a labelling one — and the answer here would have had to be a
+         normalisation. They do not. */
+      const constrainCount = (entry: TemplateFixture): number =>
+        entry.parts.reduce((total, part) => total + (part.tags.constrain ?? []).length, 0)
+      const internal = entries.filter((entry) => templateConvention(entry).id === 'internal-corner')
+
+      expect(internal).toHaveLength(4)
+      expect(internal.map(constrainCount)).toEqual([0, 0, 0, 0])
+      // And they are the only four of the 40 with none.
+      expect(entries.filter((entry) => constrainCount(entry) === 0)).toHaveLength(4)
+      const others = entries.filter((entry) => constrainCount(entry) > 0).map(constrainCount)
+      expect(others).toHaveLength(36)
+      expect(Math.min(...others)).toBe(3)
+      expect(Math.max(...others)).toBe(8)
+    })
+
+    it(
+      'leaves the emitted module carrying the fixtures’ own tags, defect included',
+      () => {
+        /* The decision, asserted rather than described: the guard records the
+           defect and does not repair it, so the generated module is still
+           provably the fixtures' content. A normalisation would show up here.
+
+           **Both arms take the real emitter call, families included, and that
+           is load-bearing since row B4.** The module has two sources now, so
+           the tally below is a claim about the *whole* file rather than about
+           its fixture half: a generated family whose tags spelled
+           `shape|corner` would break it, and none does — the 47 emit only
+           `role|`, `form|`, `build|` and `shape|base`. Passing `[]` here would
+           still compile and would quietly narrow the assertion back to the 40,
+           which is why this test pays for the corpus build. The byte-identity
+           test below is the other half: it proves the committed file *is* this
+           emitter's output, so the two arms are one artefact reached two ways. */
+        const occurrences = (text: string, needle: string): number => text.split(needle).length - 1
+        for (const text of [
+          printTemplateModule(entries, families(), authored),
+          readFileSync(TEMPLATES_MODULE_PATH, 'utf8'),
+        ]) {
+          expect(text).toContain("name: 'S2W: Wall on Tile: Internal Corner: Low (Modular)'")
+          // The fixtures' own tally survives into the module: four `shape|corner`,
+          // one `shape|internal_corner|low`. A normalisation would read 2 and 2.
+          expect(occurrences(text, "'shape|corner'")).toBe(4)
+          expect(occurrences(text, "'shape|internal_corner|low'")).toBe(1)
+          expect(occurrences(text, "'shape|internal_corner'")).toBe(1)
+        }
+      },
+      SLOW_MS,
+    )
+  })
+
   /* ---------------------------------------------------------- the emitted module */
 
-  it('has the committed module byte-identical to the emitter’s output', () => {
-    expect(
-      printTemplateModule(entries),
-      `${TEMPLATES_MODULE_PATH} is out of date or hand-edited. ${REFRESH}`,
-    ).toBe(readFileSync(TEMPLATES_MODULE_PATH, 'utf8'))
+  it(
+    'has the committed module byte-identical to the emitter’s output',
+    () => {
+      expect(
+        printTemplateModule(entries, families(), authored),
+        `${TEMPLATES_MODULE_PATH} is out of date or hand-edited. ${REFRESH}`,
+      ).toBe(readFileSync(TEMPLATES_MODULE_PATH, 'utf8'))
+    },
+    SLOW_MS,
+  )
+
+  it(
+    'emits the 40 byte-for-byte identically with and without the family table',
+    () => {
+      /* The merge point's own property, and the reason rows B6 and B4 can both
+         claim the module. B6 asserts the emitted module is byte-provably the
+         *fixtures'* content; B4 changed the byte-identity assertion above to
+         compare against **two** sources. Neither replaced the other, and this is
+         what says so: the `RECIPE_TEMPLATES` region is identical whether the
+         family table is emitted beside it or not, so the families are appended
+         and change nothing about the 40.
+
+         Without this, a future emitter change that interleaved the two — sorting
+         all 91 into one array, say — would still pass both guards separately
+         while destroying B6's claim, because its tally would then be counting
+         family bytes it never measured. */
+      const region = (text: string): string => {
+        const from = text.indexOf('export const RECIPE_TEMPLATES')
+        const to = text.indexOf('export const GENERATED_FAMILIES')
+        expect(from).toBeGreaterThan(-1)
+        return to < 0 ? text.slice(from) : text.slice(from, to)
+      }
+      const withFamilies = printTemplateModule(entries, families(), authored)
+      expect(region(withFamilies)).toBe(region(printTemplateModule(entries, [], authored)))
+      expect(region(withFamilies)).toBe(region(readFileSync(TEMPLATES_MODULE_PATH, 'utf8')))
+
+      /* And the other half of the same claim, from the family side: the only
+         `shape|` tag the 47 families emit is `shape|base` — required by the base
+         family and denied by the other 46 since row D1 — which is why B6's
+         `shape|corner` tally is a statement about the whole file and not just
+         about its fixture region. */
+      const familyRegion = withFamilies.slice(withFamilies.indexOf('export const GENERATED_FAMILIES'))
+      const shapeTags = new Set([...familyRegion.matchAll(/'(shape\|[^']*)'/g)].map((match) => match[1]))
+      expect([...shapeTags]).toEqual(['shape|base'])
+    },
+    SLOW_MS,
+  )
+
+  it(
+    'emits the 40 byte-for-byte identically with and without row E3’s authored table',
+    () => {
+      /* **The same guard, for the second merge into this module.** Row B4's is
+         above and cuts on the array boundary, which is enough when the new source
+         gets an array of its own. Row E3's two go *inside* `RECIPE_TEMPLATES` —
+         they have to, because `src/builder/panels/families.ts` keys the palette's
+         assemblies section on which array a template came from and row D2 owns
+         that file — so the cut is {@link AUTHORED_MARKER} instead, and the claim
+         is the same one: everything above it is provably the fixtures' content.
+
+         This is what makes the declared derivation different from an override.
+         An override would rewrite a slot *above* the marker, and the only witness
+         that the rewrite was exactly the documented one would be the overrider
+         itself — which is the reason `TemplateTagDefect`'s docblock declines a
+         one-tag normalisation of these same fixtures. Here the fixtures' half is
+         byte-frozen and the difference is in a region that says whose it is. */
+      const withAuthored = printTemplateModule(entries, families(), authored)
+      const without = printTemplateModule(entries, families(), [])
+
+      /* From the array's opening to whichever comes first: the marker, or the
+         array's own closing bracket when there is no marker. Cutting at
+         `GENERATED_FAMILIES` instead would leave the `]` and a blank line on one
+         side only, and the two arms would differ by two bytes that are not the
+         claim. */
+      const above = (text: string): string => {
+        const from = text.indexOf('export const RECIPE_TEMPLATES')
+        expect(from).toBeGreaterThan(-1)
+        const marker = text.indexOf(AUTHORED_MARKER, from)
+        return marker < 0 ? text.slice(from, text.indexOf('\n]\n', from) + 1) : text.slice(from, marker)
+      }
+      expect(withAuthored).toContain(AUTHORED_MARKER)
+      expect(without).not.toContain(AUTHORED_MARKER)
+      expect(above(withAuthored)).toBe(above(without))
+      expect(above(withAuthored)).toBe(above(readFileSync(TEMPLATES_MODULE_PATH, 'utf8')))
+
+      /* And the other half of the claim, from the authored side: the region below
+         the marker names both rows and neither of the 40. */
+      const below = withAuthored.slice(withAuthored.indexOf(AUTHORED_MARKER))
+      for (const entry of authored) expect(below).toContain(`name: '${entry.name}'`)
+      for (const entry of entries) expect(below).not.toContain(`name: '${entry.name}'`)
+      expect(authored).toHaveLength(2)
+    },
+    SLOW_MS,
+  )
+
+  it('runs the convention gate over the authored entries too, not only the fixtures', () => {
+    /* Which is why the corridor's convention has to exist before its template
+       does. Demonstrated by taking the gate away from it: a part set no
+       convention covers fails the *import*, naming the entry, whether it came
+       from a fixture or from `pipeline/authored.ts`. */
+    const invented: TemplateFixture = {
+      source: 'authored:blueprints.s2w.wall.yaml',
+      name: 'Wall on Tile: Ceiling (Any, Modular)',
+      type: 'blueprint',
+      tags: ['object|tile'],
+      parts: [
+        { name: 'ceiling', tags: { require: [{ tag: 'shape|roof' }] } },
+        { name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } },
+        { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
+      ],
+    }
+    expect(() => printTemplateModule(entries, [], [invented])).toThrow(/no slot convention covers/)
+    expect(() => printTemplateModule(entries, [], [invented])).toThrow(/Wall on Tile: Ceiling/)
+  })
+
+  it('refuses an authored name that slugs onto one of the 40', () => {
+    const [first] = entries
+    if (first === undefined) throw new Error('no templates to build the collision from')
+    expect(() => printTemplateModule(entries, [], [{ ...first, name: `${first.name}!` }])).toThrow(/slug to/)
   })
 
   it('slugs the 40 names to 40 distinct ids, and refuses to emit a collision', () => {
@@ -221,7 +760,7 @@ describeFixtures(title, () => {
     // duplicate key the screen would render as a disappearing card.
     const [first] = entries
     if (first === undefined) throw new Error('no templates to build the collision from')
-    expect(() => printTemplateModule([first, { ...first, name: `${first.name}!` }])).toThrow(/slug to/)
+    expect(() => printTemplateModule([first, { ...first, name: `${first.name}!` }], [])).toThrow(/slug to/)
   })
 
   /* ------------------------------------------------------------------ the census */

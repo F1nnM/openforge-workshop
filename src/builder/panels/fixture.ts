@@ -36,9 +36,26 @@
  * Exported as a plain object rather than a parsed `CatalogFile`, so it travels the
  * real path through `CatalogFile.parse` where a fixture that drifted from the
  * schema gets caught.
+ *
+ * ## Two recipes, added by row A8, and a third by row C4
+ *
+ * A placement is a template instance, so a test that wants a bill needs a recipe
+ * and an {@link AssemblyContext} as well as records. {@link ONE_SLOT_TEMPLATE}
+ * and {@link TWO_SLOT_TEMPLATE} are the smallest pair that covers what the panels
+ * assert — one file per instance, and more parts than placements — and
+ * {@link fixtureContext} is the context over whichever catalog a block parsed.
+ *
+ * They are declared here rather than in each suite because three files build a
+ * bill over these records (`panels.test.tsx`, `generated.test.tsx` and
+ * `screens/builder/builder.test.tsx`) and a fourth copy of a one-slot recipe is
+ * how the copies drift. {@link STRICT_TEMPLATE} is row C4's addition: neither of
+ * A8's two can hold an inadmissible fill, because both declare `tags: {}`.
  */
-import type { CatalogFile } from '@/catalog'
+import type { AssemblyContext, AssemblyTemplate } from '@/assembly'
+import type { CatalogFile, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
+import { createCompositionIndex } from '@/composition'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 
 const TAGS = [
   'shape|floor',
@@ -50,6 +67,19 @@ const TAGS = [
   'connection|openforge',
   'build|separate wall',
   'build|wall on tile',
+  /* Row C1's axes. The palette's rows are B4's generated families, keyed on
+     `(role, form, build)`, and its right-hand number is what `@/composition`
+     admits for that key — so a fixture with no `role|` tag makes every one of
+     the palette's rows count zero and the panel's numbers untestable. Two roles, one
+     form and two size pairs is the smallest set that gives three families a
+     non-zero count and one family a size position that narrows. */
+  'role|floor',
+  'role|wall',
+  'form|straight',
+  'size|width|1',
+  'size|depth|1',
+  'size|width|2',
+  'size|depth|2',
 ] as const
 
 const tag = (name: (typeof TAGS)[number]): number => TAGS.indexOf(name)
@@ -136,7 +166,7 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       build: 'separate wall',
       texture: 'dungeon_stone',
-      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock'), tag('role|floor'), tag('form|straight'), tag('size|width|1'), tag('size|depth|1')],
       foot: { shape: 'rect', w: 1, d: 1 },
     },
     {
@@ -155,7 +185,7 @@ export const FIXTURE_CATALOG = {
       layer: 'topper',
       build: 'separate wall',
       texture: 'dungeon_stone',
-      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openforge')],
+      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openforge'), tag('role|floor'), tag('form|straight'), tag('size|width|2'), tag('size|depth|2')],
       foot: { shape: 'rect', w: 2, d: 2 },
       sizeCode: 'A',
     },
@@ -195,7 +225,7 @@ export const FIXTURE_CATALOG = {
       layer: 'topper',
       build: 'wall on tile',
       texture: 'cave',
-      tags: [tag('shape|wall'), tag('texture|cave'), tag('connection|openforge')],
+      tags: [tag('shape|wall'), tag('texture|cave'), tag('connection|openforge'), tag('role|wall'), tag('form|straight')],
       foot: { shape: 'wall', length: 2 },
       sizeCode: 'ZZ',
     },
@@ -263,7 +293,7 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       build: 'separate wall',
       texture: 'dungeon_stone',
-      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock'), tag('role|floor'), tag('form|straight'), tag('size|width|1'), tag('size|depth|1')],
       foot: { shape: 'rect', w: 1, d: 1 },
     },
     {
@@ -282,7 +312,7 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       build: 'separate wall',
       texture: 'mine',
-      tags: [tag('shape|floor'), tag('connection|openlock')],
+      tags: [tag('shape|floor'), tag('connection|openlock'), tag('role|floor'), tag('form|straight')],
       foot: { shape: 'rect', w: 4, d: 4 },
     },
     {
@@ -301,7 +331,7 @@ export const FIXTURE_CATALOG = {
       layer: 'integral',
       build: 'separate wall',
       texture: 'mine',
-      tags: [tag('shape|floor'), tag('connection|openlock')],
+      tags: [tag('shape|floor'), tag('connection|openlock'), tag('role|floor'), tag('form|straight')],
       foot: { shape: 'rect', w: 4, d: 4 },
     },
   ],
@@ -359,7 +389,7 @@ export const MIXED_INTEGRAL = {
   layer: 'integral',
   build: 'separate wall',
   texture: 'dungeon_stone',
-  tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+  tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock'), tag('role|floor'), tag('form|straight'), tag('size|width|2'), tag('size|depth|2')],
   foot: { shape: 'rect', w: 2, d: 2 },
   sizeCode: 'A',
 }
@@ -370,4 +400,155 @@ export function mixedCatalogFile(): CatalogFile {
     ...FIXTURE_CATALOG,
     records: [...FIXTURE_CATALOG.records, MIXED_INTEGRAL],
   })
+}
+
+/* --------------------------------------------------- the recipes (row A8) */
+
+/**
+ * A one-slot recipe: an instance of it is exactly one file.
+ *
+ * `tags: {}` on the part is deliberate and is not a shortcut — a slot with no
+ * `require`, `deny` or `accept` admits **every** record, because `candidatesFor`
+ * starts from the whole document list when the require set is empty. So every
+ * fill in this recipe and in {@link TWO_SLOT_TEMPLATE} is admissible and neither
+ * can produce a `fill-off-slot` note, which keeps the panels' tests about panels
+ * rather than about C1's constraint semantics (`src/composition` covers those
+ * with 69 ported tests of its own). {@link STRICT_TEMPLATE} is the one that can,
+ * and it exists because that made the condition row C4's fault surface is for
+ * unreachable from here.
+ */
+export const ONE_SLOT = 'model' as SlotName
+export const ONE_SLOT_TEMPLATE_ID = 'panels-one-slot' as TemplateId
+export const ONE_SLOT_TEMPLATE: AssemblyTemplate = {
+  id: ONE_SLOT_TEMPLATE_ID,
+  tags: [],
+  parts: [{ name: ONE_SLOT, tags: {} }],
+}
+
+/**
+ * A two-slot recipe, for the one thing a one-slot one cannot express: a bill
+ * whose `parts` exceeds its `placements`.
+ *
+ * That is the ordinary case in the real build — the 40 shipped templates declare
+ * 3 to 5 parts each, 128 over 40 — and it is what the panel's "parts to print"
+ * subline is for. Two rather than five because two is enough to make the
+ * inequality true, and every extra slot is another fill every test has to supply.
+ */
+export const TWO_SLOTS = ['floor', 'wall'].map((name) => name as SlotName)
+export const TWO_SLOT_TEMPLATE_ID = 'panels-two-slot' as TemplateId
+export const TWO_SLOT_TEMPLATE: AssemblyTemplate = {
+  id: TWO_SLOT_TEMPLATE_ID,
+  tags: [],
+  parts: TWO_SLOTS.map((name) => ({ name, tags: {} })),
+}
+
+/**
+ * A one-slot recipe whose slot admits **floors only** — the fixture row C4 needed
+ * and neither A8 template could be.
+ *
+ * `ONE_SLOT_TEMPLATE` and `TWO_SLOT_TEMPLATE` both declare `tags: {}`, and that
+ * is not an oversight: a slot with no `require`, `deny` or `accept` admits every
+ * record, because `candidatesFor` starts from the whole document list when the
+ * require set is empty. So **no bill either of them produces can carry a
+ * `fill-off-slot` note**, and `ResolvedSlotFill.admissible` is `true` for every
+ * fill in every existing panels test. That was the right call for A8 — it keeps
+ * those tests about panels rather than about C1's constraint semantics — but it
+ * makes the one condition row C4's fault surface exists for unreachable.
+ *
+ * One `require` tag is the whole difference. `shape|floor` is carried by
+ * `floor1`, `floor2`, `base2`'s twin-keyed floor and `twin`, and **not** by
+ * `wallNoBase`, `slab` or `arc` — so filling this slot with a wall is an
+ * inadmissible fill made of records the fixture already holds, with no fourth
+ * catalog needed and no change to any existing bill total.
+ */
+export const STRICT_SLOT = 'floor' as SlotName
+export const STRICT_TEMPLATE_ID = 'panels-floor-only' as TemplateId
+export const STRICT_TEMPLATE: AssemblyTemplate = {
+  id: STRICT_TEMPLATE_ID,
+  tags: [],
+  parts: [{ name: STRICT_SLOT, tags: { require: [{ tag: 'shape|floor' }] } }],
+}
+
+/**
+ * One instance of {@link STRICT_TEMPLATE} holding the file given.
+ *
+ * A separate mint rather than a fourth arity of {@link anInstance}, because that
+ * function chooses its recipe from the *number* of entries and a strict one-slot
+ * instance is indistinguishable from a permissive one by count alone.
+ */
+export function aStrictInstance(
+  tile: string,
+  at: { x?: number; z?: number; rotation?: number } = {},
+): TemplateInstance {
+  minted += 1
+  return {
+    id: `fixture-s${String(minted)}` as PlacementId,
+    template: STRICT_TEMPLATE_ID,
+    x: at.x ?? 0,
+    z: at.z ?? 0,
+    rotation: at.rotation ?? 0,
+    fills: { [STRICT_SLOT]: { tile: tile as TileId, pinned: true } },
+  }
+}
+
+/**
+ * The context `resolveInstance` and `buildBillOfTiles` require, over one catalog.
+ *
+ * Both fields are required arguments rather than defaulted options, which is row
+ * A3's point: a resolution with no template has no slots to walk, and one with no
+ * composition index cannot say whether a fill belongs in its slot, so a caller
+ * that has not decided is a compile error rather than a quiet half-answer.
+ *
+ * The composition index is built per call and that is fine here — these are
+ * nine- to thirteen-record catalogs. The app shares one through
+ * `compositionIndexFor`'s `WeakMap`, because over the real corpus it is 10.7 ms
+ * and 409,432 bytes.
+ */
+export function fixtureContext(catalog: CatalogFile): AssemblyContext {
+  const byId = new Map<string, AssemblyTemplate>([
+    [ONE_SLOT_TEMPLATE_ID, ONE_SLOT_TEMPLATE],
+    [TWO_SLOT_TEMPLATE_ID, TWO_SLOT_TEMPLATE],
+    [STRICT_TEMPLATE_ID, STRICT_TEMPLATE],
+  ])
+  return { templates: (id) => byId.get(id), composition: createCompositionIndex(catalog) }
+}
+
+let minted = 0
+
+/**
+ * One instance, filled from the files given: a `TemplateInstance` ready for the
+ * store or for `buildBillOfTiles`.
+ *
+ * The recipe follows the **number of entries** — one is {@link ONE_SLOT_TEMPLATE},
+ * two is {@link TWO_SLOT_TEMPLATE} — so a test names what it wants printed and
+ * never a family.
+ *
+ * **`null` leaves that slot open**, which is contract **C-g** written as a
+ * fixture: §3.2 places a template with a part still empty, so
+ * `anInstance([file, null])` is the state `slot-unfilled`,
+ * `BillOfTiles.complete` and `useArchiveDownload`'s refusal are all about, and it
+ * is the *only* way to produce it — the recipe still declares two slots, so an
+ * instance with one entry would be a complete one-slot instance instead.
+ *
+ * The id is minted per call so two instances are never the same key, and it is
+ * deliberately *not* stable across runs of the module — nothing asserts an id,
+ * and a fixed one would let a test pass while the store overwrote an entry.
+ */
+export function anInstance(
+  tiles: readonly (string | null)[],
+  at: { x?: number; z?: number; rotation?: number } = {},
+): TemplateInstance {
+  const slots = tiles.length > 1 ? TWO_SLOTS : [ONE_SLOT]
+  const filled = tiles.flatMap((tile, index) =>
+    tile === null ? [] : [[slots[index] ?? ONE_SLOT, { tile: tile as TileId, pinned: false }] as const],
+  )
+  minted += 1
+  return {
+    id: `fixture-p${String(minted)}` as PlacementId,
+    template: tiles.length > 1 ? TWO_SLOT_TEMPLATE_ID : ONE_SLOT_TEMPLATE_ID,
+    x: at.x ?? 0,
+    z: at.z ?? 0,
+    rotation: at.rotation ?? 0,
+    fills: Object.fromEntries(filled),
+  }
 }

@@ -60,10 +60,16 @@ const MAX_VARINT_BYTES = 8
  *
  * The same kind of guard as {@link MAX_VARINT_BYTES} and for the same reason: a
  * length prefix is a stranger's number, and a reader that trusted it would
- * allocate from it. 64 KiB is four orders of magnitude above the only string the
- * format carries — a canonical generated-base recipe document, measured at 563
- * bytes for the widest of the five shapes at file defaults — so it cannot bite a
- * real payload, and it bounds a hand-edited one at something a browser shrugs at.
+ * allocate from it. 64 KiB is four orders of magnitude above the longest string
+ * the format carries — a canonical generated-base recipe document, measured at
+ * 563 bytes for the widest of the five shapes at file defaults — so it cannot
+ * bite a real payload, and it bounds a hand-edited one at something a browser
+ * shrugs at.
+ *
+ * Row A5 added two more kinds of string and neither moves the cap: a
+ * `TemplateId` is 51 bytes at the widest of the 40 the build ships and a slot
+ * name is a word or two, so the recipe document is still the only entry within
+ * three orders of magnitude of it.
  *
  * It is deliberately *not* tight to 563: the parameter set is a pinned upstream
  * export and a future `.scad` may declare more parameters, so a cap that tracked

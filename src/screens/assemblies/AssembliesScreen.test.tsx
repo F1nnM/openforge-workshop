@@ -314,13 +314,18 @@ afterEach(() => {
 /* -------------------------------------------------------------------- tests */
 
 describe('the recipe list', () => {
-  it('lists all 40 recipes in two groups of 20', async () => {
+  it('lists all 42 recipes in two groups, 20 single piece and 22 modular', async () => {
     await renderScreen()
 
+    /* 22 modular since row **E3** authored two assemblies in this repo. Both
+       inherit `build|s2w|modular` from the fixture they derive from — they are
+       modular S2W wall-on-tile assemblies and only their floor slot's admissions
+       differ — so the two groups still partition every row, which is what this
+       screen's grouping needs. */
     expect(screen.getByRole('heading', { name: /Single piece — 20/ })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /Modular — 20/ })).toBeTruthy()
-    // Every recipe is a button, plus nothing else: 40 buttons on this view.
-    expect(screen.getAllByRole('button')).toHaveLength(40)
+    expect(screen.getByRole('heading', { name: /Modular — 22/ })).toBeTruthy()
+    // Every recipe is a button, plus nothing else: 42 buttons on this view.
+    expect(screen.getAllByRole('button')).toHaveLength(42)
   })
 
   it('names each recipe’s parts, so a recipe can be chosen before the index lands', async () => {
@@ -364,7 +369,7 @@ describe('opening a recipe', () => {
       fireEvent.click(screen.getByRole('button', { name: '← All recipes' }))
     })
 
-    expect(screen.getByRole('heading', { name: /Modular — 20/ })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /Modular — 22/ })).toBeTruthy()
   })
 })
 
@@ -456,7 +461,7 @@ describe('dead ends', () => {
 })
 
 describe('finishing', () => {
-  it('reports progress, bills the files, and writes their items to the store', async () => {
+  it('reports progress, bills the files, and places them as one instance', async () => {
     await renderScreen()
     await openRecipe()
     pick('wall', 'Torch Wall 2')
@@ -468,19 +473,36 @@ describe('finishing', () => {
     pick('base', 'Wall Base 2')
 
     expect(screen.getByText(/3 of 3 parts answered/)).toBeTruthy()
-    expect(screen.getByText('3 files to print.')).toBeTruthy()
+    expect(screen.getByText(/3 files to print\./)).toBeTruthy()
+    // The bill names files, which is what a composition resolves to.
+    const billed = [...document.querySelectorAll('.of-asm-bill li')].map((li) => li.textContent)
+    expect(billed.sort()).toEqual(['tiles/fix/base-2.stl', 'tiles/fix/floor-2.stl', 'tiles/fix/wall-2.stl'])
+
+    // Row A0 pressed "Add all to library" here and asserted three designs in
+    // `WorkshopState.library`. The library is gone and **row C3** replaces it
+    // with the verb the templates plan intended: a recipe *is* a template, so a
+    // finished walk is one `TemplateInstance` with a file pinned into every
+    // slot. The old action stays asserted absent, so nothing can bring a second
+    // destination back.
+    expect(screen.queryByRole('button', { name: /Add all/ })).toBeNull()
 
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'Add all to library' }))
+      screen.getByRole('button', { name: 'Place on the plan' }).click()
     })
 
-    // Designs, not files: row V1's library holds items. The three parts of this
-    // recipe are three separate items, so the button's two counts agree and the
-    // note above it stays a bare "3 files to print." — the panel only splits the
-    // two figures when a recipe names two prints of one item, which no fixture
-    // template does.
-    expect(Object.keys(useWorkshopStore.getState().library).sort()).toEqual(['base-2', 'floor-2', 'wall-2'])
-    expect(screen.getByRole('button', { name: 'Added to your library' })).toBeTruthy()
+    const placements = Object.values(useWorkshopStore.getState().placements)
+    expect(placements).toHaveLength(1)
+    // One instance, three slots, and every fill `pinned` — the user chose these
+    // card by card, so the lock re-solve must honour them (contract C-k).
+    expect(placements[0]?.template).toBe('s2w-wall-on-tile-wall-torch-modular')
+    expect(placements[0]?.fills).toEqual({
+      wall: { tile: 'tiles/fix/wall-2.stl', pinned: true },
+      floor: { tile: 'tiles/fix/floor-2.stl', pinned: true },
+      base: { tile: 'tiles/fix/base-2.stl', pinned: true },
+    })
+    // Where it landed, said out loud: the press is on `/assemblies` and the
+    // piece appears on a plan the user is not looking at.
+    expect(screen.getByRole('status')).toHaveTextContent(/Placed at x /)
   })
 
   it('clears a pick when its own card is pressed again', async () => {

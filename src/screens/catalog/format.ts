@@ -263,7 +263,7 @@ export interface CardTagChip {
 }
 
 /**
- * The two roots the card already renders as their own dedicated control.
+ * The roots the card does not print as a tag chip.
  *
  * `size|` is the size chip's axis and `connection|` is the availability strip's.
  * Both are deliberate: the size chip states the *resolved footprint* rather than
@@ -276,13 +276,25 @@ export interface CardTagChip {
  * precisely the declaration that the joinery lives on a separately printed base,
  * which the base chip already says.
  *
+ * `role|` and `form|` are here for a different reason, and it is the one that
+ * makes this a *denylist* rather than an oversight. Row B1 emits them as
+ * ordinary interned tags — that is the whole point of the encoding, because it
+ * lets a template slot say `require: [{ tag: 'role|wall' }]` with no new code in
+ * `src/composition/` — but they are a **derived predicate, not corpus
+ * vocabulary**. A scanner never wrote them, they say nothing a reader could not
+ * infer from the title, and there are exactly 15 values across all 8,702
+ * records. Left eligible they land on essentially every card: measured, the
+ * cards with an empty tag row drop from **1,044 to 78** and the cards losing a
+ * chip to the one-line budget rise from **53 to 485** — so the two least
+ * informative chips in the corpus would evict the informative ones on 432 cards.
+ *
  * Every other root — `shape|`, `component|`, `texture|`, `build|`, `interface|`,
  * `part|`, `decoration|`, `scatter|`, `set|` — is eligible, and is then filtered
  * by whether the card has already said it. That is the second rule and it does
  * most of the work: `name` is synthesised from tags, so most of a tile's tags are
  * already in its title.
  */
-const CARD_CONTROLLED_ROOTS: ReadonlySet<string> = new Set(['size', 'connection'])
+const CARD_CONTROLLED_ROOTS: ReadonlySet<string> = new Set(['size', 'connection', 'role', 'form'])
 
 /** `interface|secret_door|magnetic|imperial` → ` interface secret door magnetic imperial `. */
 function spoken(text: string): string {
@@ -565,4 +577,103 @@ const BUILD_LABELS: Readonly<Record<string, string>> = {
 
 export function buildLabel(value: string): string {
   return BUILD_LABELS[value] ?? humaniseSegment(value)
+}
+
+/* --------------------------------------------------------- kind precedence */
+
+/**
+ * Which kind wins when an item is in several buckets. Most specific first.
+ *
+ * Relocated here by row **A0**, from `screens/library/grouping.ts`, when the
+ * library screen was deleted. It is here rather than beside `KIND_OTHER` in
+ * `src/search/facets.ts` for two reasons: {@link kindLabel} is the function that
+ * turns this one's answer into display text, so the rule and its label belong to
+ * one module; and `src/search/**` is a directory the templates plan keeps
+ * untouched, while this module is already the surface `@/builder/panels` and
+ * `@/screens/detail` import their labels from.
+ *
+ * The order decides the corpus combinations that actually occur: a base beats
+ * everything (`shape|base` is in the design key, so a base is always its own
+ * design), stairs and risers beat the wall or floor they belong to, `angled`
+ * beats the wall or floor it is a diagonal of, and a column beats the wall run
+ * it stands in. 1,693 of 8,702 records (19.5%) carry two or more kinds and 1,032
+ * (11.9%) carry none, which is what makes a single `groupBy(kind)` wrong and this
+ * a rule rather than a field read.
+ *
+ * A kind the importer adds later (the vocabulary is `string[]`, not an enum) is
+ * not an error: it ranks after every entry here, so an unrecognised bucket still
+ * produces one group with a humanised label rather than silently folding into
+ * `floor`.
+ */
+export const KIND_PRECEDENCE: readonly string[] = [
+  'base',
+  'stairs',
+  'riser',
+  'angled',
+  'column',
+  'wall',
+  'floor',
+]
+
+function precedenceRank(kind: string): number {
+  const index = KIND_PRECEDENCE.indexOf(kind)
+  return index === -1 ? KIND_PRECEDENCE.length : index
+}
+
+/**
+ * The one group a `kinds` array belongs to.
+ *
+ * Takes the array rather than a record or an aggregate, because both carry the
+ * same field and A1 measured that they always agree — 0 of 3,822 aggregates hold
+ * two distinct values of `kinds`. A signature naming either type would make the
+ * function look like it knew something about that type that it does not.
+ *
+ * Total and deterministic for every possible array: the minimum precedence rank
+ * wins, ties between two equally unranked kinds break lexicographically, and an
+ * empty array is {@link KIND_OTHER}.
+ */
+export function groupKindOf(kinds: readonly string[]): string {
+  let best: string | undefined
+  let bestRank = Number.POSITIVE_INFINITY
+
+  for (const kind of kinds) {
+    const rank = precedenceRank(kind)
+    if (rank < bestRank || (rank === bestRank && best !== undefined && kind < best)) {
+      best = kind
+      bestRank = rank
+    }
+  }
+
+  return best ?? KIND_OTHER
+}
+
+/* ------------------------------------------------------------- byte totals */
+
+/**
+ * A **total** byte figure — `29.1 MB`, `518.3 MB`, `1.6 GB`.
+ *
+ * Read by `@/builder/panels/BillPanel.tsx` for the room's whole download, which
+ * is the one figure in the app that genuinely crosses a gigabyte: the bill warns
+ * at a 2 GB threshold, and before row A0 the number beside that warning read
+ * `2100.0 MB`.
+ *
+ * Relocated here by row **A0** with {@link groupKindOf}, and deliberately not
+ * folded into {@link fileSizeLabel}: that one is always MB above a megabyte
+ * because a single STL never reaches a gigabyte, and a total does. The corpus
+ * median tile is 10.36 MB and p95 is 32.89 MB, so sixty saved walls is
+ * comfortably past a gigabyte and `1640.0 MB` is a number a reader has to
+ * convert before it means anything. The unit is therefore chosen from the value,
+ * which is the same call — and the same reasoning — as
+ * `src/screens/landing/stats.ts#formatBytes`; not shared with that one either,
+ * because it rounds MB to whole numbers, which is right for a 108 GB corpus
+ * figure and wrong for a three-item total reading `29 MB` beside cards that show
+ * a decimal.
+ *
+ * Decimal units (10⁶, 10⁹) throughout, matching every other size in the app and
+ * what the OS reports for the same file.
+ */
+export function totalBytesLabel(bytes: number): string {
+  if (bytes < 1_000_000) return `${String(Math.round(bytes / 1_000))} kB`
+  if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`
 }

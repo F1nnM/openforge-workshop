@@ -11,8 +11,9 @@
  *
  * | error | what the user is told | offer |
  * | --- | --- | --- |
+ * | `IncompleteSceneError` | which slots are empty, and that a pack would be short | — |
  * | `EmptyArchiveError` | nothing is placed | — |
- * | `ArchiveTooLargeToBufferError` | this browser cannot stream a save, and the room is over the buffering limit | the URL list, plus `ATTRIBUTION.csv` |
+ * | `ArchiveTooLargeToBufferError` | this browser cannot stream a save, and the room is over the buffering limit | the room as several smaller archives, and the URL list plus `ATTRIBUTION.csv` |
  * | `NoSaveTargetError` | this browser offers no way to save a file | — |
  * | `BlobFetchError` | which file failed, and from where | retry |
  * | `PreviewMeshRefusedError` | the archive refused a URL that was not an original STL | — |
@@ -29,12 +30,53 @@
  * meets it — place a base, reload, press download — because the recipe persists
  * and the mesh does not.
  *
+ * ## The same rule, for a hole between the lines — row A8
+ *
+ * `IncompleteSceneError` is the first row of the table and it is **this
+ * module's**, not `@/download`'s, and that placement is the requirement rather
+ * than a convenience. A template instance is three to five slots and each is
+ * filled independently, so a scene can be missing a file *between* two bill
+ * lines: `buildBillOfTiles` reports it as `BillOfTiles.complete` plus a list of
+ * `unfilled` slots, and `src/download/**` structurally cannot see it — a plan is
+ * built from lines, and a hole is the absence of one. So the gate has to be here,
+ * at the only point that holds the bill.
+ *
+ * **Every slot of every recipe in the build is required**: `PartSlot.optional` is
+ * absent from all 128 parts of the 40 shipped templates, and absence means
+ * required. So there is no scene for which an empty slot is an acceptable pack,
+ * and the refusal has no exemption to make. §3.2 still places the instance
+ * anyway — the grid accepts an incomplete recipe, the *zip* does not — which is
+ * the same split row S5 made for a generated base with no mesh.
+ *
+ * Thrown before the pack module is loaded and before a byte is fetched, for the
+ * reason the too-large check is raised early: there is nothing to discover later
+ * that could change the answer.
+ *
  * The too-large case is checked **before a byte is fetched**, not only caught
  * from `saveArchive`. `save.ts` refuses at 512 MB when there is no
  * `showSaveFilePicker` — iOS Safari, always — and discovering that after
  * downloading 900 MB over a phone connection would be the worst possible time to
  * find out. The error is the same type either way, so there is one branch in the
  * UI; it is just raised earlier. `saveArchive`'s own check stays as the backstop.
+ *
+ * ## The too-large refusal has an answer now, and it is pressed once per part
+ *
+ * `splitArchivePlans` bin-packs the bill into several archives, each under the
+ * browser's buffering ceiling, so the refusal above carries **{@link
+ * DownloadFailure.splitPlans}** whenever a packing exists — the URL list stops
+ * being the only thing left to offer. When a single file is already over the
+ * limit the split raises `ArchivePartTooLargeError`, splitting cannot help, and
+ * the failure is exactly what it was before: the URL list, unchanged.
+ *
+ * **One press per part, never a sequence.** Firing N `showSaveFilePicker` or
+ * Blob saves back to back with no fresh user gesture between them is precisely
+ * the shape browsers popup-block, so each part is its own button: pressing it
+ * saves that part and, on success, offers the next.
+ *
+ * The parts live on {@link ArchiveDownload.splitPlans} rather than only inside
+ * the failure, because the failure is gone by the time the second part is
+ * needed — saving part 1 moves `state` to `'saved'`. They are cleared by
+ * {@link ArchiveDownload.dismiss} and by a fresh {@link ArchiveDownload.start}.
  *
  * ## A cancellation is not a failure
  *
@@ -53,12 +95,13 @@
  */
 import { useCallback, useMemo, useRef, useState } from 'react'
 
-import type { BillOfTiles } from '@/assembly'
+import type { BillOfTiles, UnfilledSlot } from '@/assembly'
 import type { CatalogAssets } from '@/catalog'
 import type { ArchivePlan, BlobSource, GeneratedArchiveSection, SaveEnvironment, SaveVia } from '@/download'
 import {
   ArchiveLengthMismatchError,
   ArchiveNamingError,
+  ArchivePartTooLargeError,
   ArchiveTooLargeToBufferError,
   BLOB_FALLBACK_LIMIT_BYTES,
   BlobFetchError,
@@ -71,6 +114,7 @@ import {
   openArchiveStream,
   r2BlobSource,
   saveArchive,
+  splitArchivePlans,
   urlListFilename,
   urlListText,
 } from '@/download'
@@ -81,6 +125,50 @@ import type { GeneratedBill } from '@/generator/placement/bill'
 // mean the same thing.
 import type * as GeneratedPackModule from '@/generator/placement/pack'
 import type { GeneratedMeshHoldings } from '@/generator/placement/pack'
+
+/**
+ * Which part of a split download this is.
+ *
+ * Absent from a state entirely when the download is the whole room in one file,
+ * which is every download that is not a split one — so a component can branch
+ * on its presence rather than on a sentinel index.
+ */
+export interface PartInfo {
+  /** 0-based. */
+  readonly index: number
+  readonly of: number
+}
+
+/**
+ * The scene has a declared slot with no file in it, so no pack of it is
+ * printable.
+ *
+ * Declared here rather than in `@/download` because the fact is the bill's and
+ * the bill is this module's argument: `src/download/**` builds a plan from
+ * `BillLine`s and a hole is the absence of one, so nothing there can raise it.
+ * See the module note.
+ *
+ * It carries the holes rather than a count, because the sentence a user can act
+ * on names the recipe and the slot — *"the base slot of a wall-on-tile corner"* —
+ * and a bare "3 slots are empty" sends them to look at a drawing that is one tab
+ * stop.
+ */
+export class IncompleteSceneError extends Error {
+  readonly unfilled: readonly UnfilledSlot[]
+
+  constructor(unfilled: readonly UnfilledSlot[]) {
+    super(
+      `${String(unfilled.length)} declared ${unfilled.length === 1 ? 'slot has' : 'slots have'} no file in ` +
+        'it, so this pack would be short of a printable model.',
+    )
+    // Assigned rather than declared as a parameter property, and the field is
+    // spelled above: `erasableSyntaxOnly` is on, so a parameter property is a
+    // compile error — it is the one piece of TypeScript syntax in a class body
+    // that emits code. `download/save.ts`'s own errors are written the same way.
+    this.name = 'IncompleteSceneError'
+    this.unfilled = unfilled
+  }
+}
 
 /**
  * Row S5's pack module, loaded on the press rather than imported.
@@ -101,6 +189,7 @@ type GeneratedPack = typeof GeneratedPackModule
 /** Which failure this is, for the panel's own branching. Prose is in the object. */
 export type DownloadFailureKind =
   | 'empty'
+  | 'incomplete'
   | 'too-large'
   | 'no-save-target'
   | 'fetch'
@@ -144,15 +233,25 @@ export interface DownloadFailure {
    * says so instead of letting it be a silent omission.
    */
   readonly urlListShortfall?: string
+  /**
+   * Split alternatives to the too-large plan, one archive each under the
+   * browser's buffering ceiling — present exactly when
+   * {@link ArchiveTooLargeToBufferError} fired and `splitArchivePlans` found a
+   * packing. Absent when a single file is already over the limit
+   * (`ArchivePartTooLargeError`): splitting cannot help that case, and the URL
+   * list is the only offer left.
+   */
+  readonly splitPlans?: readonly ArchivePlan[]
 }
 
 export type DownloadState =
   | { readonly status: 'idle' }
   /** A plan exists and the picker may be open; nothing is being fetched yet. */
-  | { readonly status: 'preparing'; readonly plan: ArchivePlan }
+  | { readonly status: 'preparing'; readonly plan: ArchivePlan; readonly part?: PartInfo }
   | {
       readonly status: 'running'
       readonly plan: ArchivePlan
+      readonly part?: PartInfo
       readonly bytesWritten: number
       /** Entries begun, licensing files included. */
       readonly entriesStarted: number
@@ -160,7 +259,13 @@ export type DownloadState =
       /** The entry being written, for a line under the bar. */
       readonly entry: string | undefined
     }
-  | { readonly status: 'saved'; readonly bytes: number; readonly filename: string; readonly via: SaveVia }
+  | {
+      readonly status: 'saved'
+      readonly bytes: number
+      readonly filename: string
+      readonly via: SaveVia
+      readonly part?: PartInfo
+    }
   | { readonly status: 'failed'; readonly failure: DownloadFailure }
 
 export interface ArchiveDownload {
@@ -180,6 +285,14 @@ export interface ArchiveDownload {
    * under its md5, so `ATTRIBUTION.csv` is the only route back to a readable name.
    */
   readonly saveUrlList: () => void
+  /**
+   * Split alternatives from the current or most recent too-large failure.
+   * Cleared by {@link ArchiveDownload.dismiss} and by a fresh
+   * {@link ArchiveDownload.start}. `undefined` outside that flow.
+   */
+  readonly splitPlans: readonly ArchivePlan[] | undefined
+  /** Save one part of {@link ArchiveDownload.splitPlans}. A no-op while a save is in flight. */
+  readonly saveSplitPart: (index: number) => void
 }
 
 /** The generated half of a download: the bill's rows and the bytes behind them. */
@@ -220,6 +333,14 @@ export function useArchiveDownload({
   loadPack,
 }: ArchiveDownloadOptions): ArchiveDownload {
   const [state, setState] = useState<DownloadState>({ status: 'idle' })
+  /**
+   * The parts of a split download, for as long as one is being worked through.
+   *
+   * Alongside {@link DownloadState} rather than inside it: saving part 1 moves
+   * `state` off the `'failed'` variant these first appeared on, and the panel
+   * still has to know there is a part 2. See the module note.
+   */
+  const [splitPlans, setSplitPlans] = useState<readonly ArchivePlan[] | undefined>(undefined)
   const abort = useRef<AbortController | null>(null)
   /** Guards re-entry: a second click while a stream is open would fetch twice. */
   const running = useRef(false)
@@ -233,7 +354,59 @@ export function useArchiveDownload({
 
   const dismiss = useCallback(() => {
     setState({ status: 'idle' })
+    setSplitPlans(undefined)
   }, [])
+
+  /**
+   * Open the stream for one plan and save it — the whole room, or one part.
+   *
+   * Shared by {@link start} and `saveSplitPart` so a part is saved by exactly
+   * the code path the whole room is, `PartInfo` threaded through the three
+   * states it labels. `'cancelled'` rather than a `setState` of its own,
+   * because the two callers land a dismissed picker on `idle` themselves and
+   * this is the one decision they do not share.
+   */
+  const runSave = useCallback(
+    async (
+      plan: ArchivePlan,
+      packSource: BlobSource,
+      controller: AbortController,
+      part?: PartInfo,
+    ): Promise<'saved' | 'cancelled'> => {
+      // `exactOptionalPropertyTypes` is on: spreading `{}` is how `part` is left
+      // absent rather than explicitly `undefined`. Same device as `shortfallOf`.
+      const partField = part === undefined ? {} : { part }
+      setState({ status: 'preparing', plan, ...partField })
+      const host = environment ?? browserSaveEnvironment()
+      const stream = openArchiveStream(plan, {
+        source: packSource,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          setState({
+            status: 'running',
+            plan,
+            ...partField,
+            bytesWritten: progress.bytesWritten,
+            entriesStarted: progress.entriesStarted,
+            entries: progress.entries,
+            entry: progress.entry?.name,
+          })
+        },
+      })
+
+      const result = await saveArchive(plan, stream, host)
+      if (result.outcome === 'cancelled') return 'cancelled'
+      setState({
+        status: 'saved',
+        bytes: result.bytes,
+        filename: result.filename,
+        via: result.via,
+        ...partField,
+      })
+      return 'saved'
+    },
+    [environment],
+  )
 
   const start = useCallback(() => {
     if (running.current) return
@@ -243,9 +416,20 @@ export function useArchiveDownload({
     abort.current = controller
 
     void (async () => {
+      // A new run, so the previous run's parts are no longer on offer. Inside
+      // the IIFE rather than above the re-entry guard: a press ignored because
+      // one is already in flight must not clear what is on screen.
+      setSplitPlans(undefined)
       let plan: ArchivePlan | undefined
       let pack: GeneratedPack | undefined
       try {
+        // **The hole between the lines, refused first.** Before the pack module
+        // is loaded, before a plan exists and before a byte is fetched: nothing
+        // discovered later can change the answer, and the two facts it reads are
+        // already computed. See the module note for why this cannot live in
+        // `@/download`.
+        if (!bill.complete) throw new IncompleteSceneError(bill.unfilled)
+
         // Loaded before the plan, because the plan needs the section. Held in
         // `pack` for `classify` below: the three refusals this module carries
         // are `instanceof` checks against classes that live inside this chunk,
@@ -258,13 +442,32 @@ export function useArchiveDownload({
         const section = await generatedSection(pack, generated)
 
         plan = buildArchivePlan(bill, { assets, ...(section === undefined ? {} : { generated: section }) })
-        setState({ status: 'preparing', plan })
 
         const host = environment ?? browserSaveEnvironment()
+        const limit = host.blobLimitBytes ?? BLOB_FALLBACK_LIMIT_BYTES
         // Refused before the first fetch rather than after the last one. See the
         // module note; `saveArchive` checks this too and stays the backstop.
-        if (host.showSaveFilePicker === undefined && plan.predictedLength > (host.blobLimitBytes ?? BLOB_FALLBACK_LIMIT_BYTES)) {
-          throw new ArchiveTooLargeToBufferError(plan.predictedLength, host.blobLimitBytes ?? BLOB_FALLBACK_LIMIT_BYTES)
+        if (host.showSaveFilePicker === undefined && plan.predictedLength > limit) {
+          let parts: readonly ArchivePlan[] | undefined
+          try {
+            parts = splitArchivePlans(bill, {
+              assets,
+              generatedAt: plan.generatedAt,
+              limitBytes: limit,
+              ...(section === undefined ? {} : { generated: section }),
+            })
+          } catch (splitError) {
+            // A single file already exceeds the limit — splitting cannot help,
+            // so the failure below carries no parts and the URL list is the
+            // only offer, exactly as it was before splitting existed.
+            if (!(splitError instanceof ArchivePartTooLargeError)) throw splitError
+          }
+          setSplitPlans(parts)
+          setState({
+            status: 'failed',
+            failure: classify(new ArchiveTooLargeToBufferError(plan.predictedLength, limit), plan, pack, parts),
+          })
+          return
         }
 
         const openPlan = plan
@@ -274,27 +477,12 @@ export function useArchiveDownload({
         // is the injected source in a test and R2 in production, so a room mixing
         // catalogued tiles and generated bases exercises both halves.
         const blobs = source ?? r2BlobSource(assets)
-        const stream = openArchiveStream(openPlan, {
-          source: generated === undefined ? blobs : pack.generatedBlobSource(generated.holdings, blobs),
-          signal: controller.signal,
-          onProgress: (progress) => {
-            setState({
-              status: 'running',
-              plan: openPlan,
-              bytesWritten: progress.bytesWritten,
-              entriesStarted: progress.entriesStarted,
-              entries: progress.entries,
-              entry: progress.entry?.name,
-            })
-          },
-        })
-
-        const result = await saveArchive(openPlan, stream, host)
-        if (result.outcome === 'cancelled') {
+        const packSource = generated === undefined ? blobs : pack.generatedBlobSource(generated.holdings, blobs)
+        const outcome = await runSave(openPlan, packSource, controller)
+        if (outcome === 'cancelled') {
           setState({ status: 'idle' })
           return
         }
-        setState({ status: 'saved', bytes: result.bytes, filename: result.filename, via: result.via })
       } catch (error) {
         if (controller.signal.aborted) {
           setState({ status: 'idle' })
@@ -306,7 +494,60 @@ export function useArchiveDownload({
         abort.current = null
       }
     })()
-  }, [assets, bill, environment, generated, loadPack, source])
+  }, [assets, bill, environment, generated, loadPack, runSave, source])
+
+  /**
+   * Save one part of a split download.
+   *
+   * Row-by-row rather than a loop: each part needs its own user gesture, or the
+   * second `showSaveFilePicker` is popup-blocked. See the module note.
+   *
+   * The pack module is loaded again here rather than held from `start`, and only
+   * when the part actually carries a generated mesh — an all-catalog part costs
+   * no dynamic import at all. It is then **held for `classify`**, for the same
+   * reason `start` holds it: `generatedBlobSource.open` re-checks every hold at
+   * stream time and can raise `GeneratedMeshRefusedError` *during* the save, and
+   * every branch for row S5's three errors is an `instanceof` against a class
+   * that lives inside `pack.ts`. Passing `undefined` there would degrade a
+   * refused mesh to the generic "the download failed" — and mark it retryable,
+   * which it is not: retrying ships the same bytes.
+   */
+  const saveSplitPart = useCallback(
+    (index: number) => {
+      if (running.current) return
+      const plan = splitPlans?.[index]
+      if (plan === undefined) return
+      running.current = true
+
+      const controller = new AbortController()
+      abort.current = controller
+      const of = splitPlans?.length ?? 0
+
+      void (async () => {
+        let pack: GeneratedPack | undefined
+        try {
+          const blobs = source ?? r2BlobSource(assets)
+          let packSource: BlobSource = blobs
+          if (plan.generated.length > 0 && generated !== undefined) {
+            pack = await (loadPack ?? loadGeneratedPack)()
+            packSource = pack.generatedBlobSource(generated.holdings, blobs)
+          }
+          const outcome = await runSave(plan, packSource, controller, { index, of })
+          if (outcome === 'cancelled') setState({ status: 'idle' })
+        } catch (error) {
+          if (controller.signal.aborted) {
+            setState({ status: 'idle' })
+            return
+          }
+          setState({ status: 'failed', failure: classify(error, plan, pack) })
+        } finally {
+          running.current = false
+          abort.current = null
+        }
+      })()
+    },
+    [assets, generated, loadPack, runSave, source, splitPlans],
+  )
 
   const saveUrlList = useCallback(() => {
     const plan = state.status === 'failed' ? state.failure.plan : undefined
@@ -318,8 +559,8 @@ export function useArchiveDownload({
   }, [state])
 
   return useMemo(
-    () => ({ state, start, cancel, dismiss, saveUrlList }),
-    [state, start, cancel, dismiss, saveUrlList],
+    () => ({ state, start, cancel, dismiss, saveUrlList, splitPlans, saveSplitPart }),
+    [state, start, cancel, dismiss, saveUrlList, splitPlans, saveSplitPart],
   )
 }
 
@@ -362,7 +603,12 @@ async function generatedSection(
   return pack.buildGeneratedPack(generated.bill, generated.holdings)
 }
 
-function classify(error: unknown, plan: ArchivePlan | undefined, pack: GeneratedPack | undefined): DownloadFailure {
+function classify(
+  error: unknown,
+  plan: ArchivePlan | undefined,
+  pack: GeneratedPack | undefined,
+  splitPlans?: readonly ArchivePlan[],
+): DownloadFailure {
   if (pack !== undefined && error instanceof pack.GeneratedMeshMissingError) {
     return {
       kind: 'unrendered',
@@ -400,6 +646,22 @@ function classify(error: unknown, plan: ArchivePlan | undefined, pack: Generated
     }
   }
 
+  if (error instanceof IncompleteSceneError) {
+    return {
+      kind: 'incomplete',
+      headline:
+        error.unfilled.length === 1
+          ? 'One slot on the plan is still empty'
+          : `${String(error.unfilled.length)} slots on the plan are still empty`,
+      detail:
+        `${unfilledSentence(error.unfilled)} Every slot of every recipe in this build is required, so a pack ` +
+        'without them would be short of a printable model — and a streamed zip records its sizes at the end, so ' +
+        'a short one still opens and nobody would find out until the print failed. Nothing was saved. Fill each ' +
+        'slot, or take the piece off the grid.',
+      retryable: false,
+    }
+  }
+
   if (error instanceof EmptyArchiveError) {
     return {
       kind: 'empty',
@@ -415,10 +677,13 @@ function classify(error: unknown, plan: ArchivePlan | undefined, pack: Generated
       headline: `Too large for this browser to save in one file`,
       detail:
         `This room is ${sizeLabel(error.bytes)} and this browser has no streaming save, so it would have to hold ` +
-        `the whole archive in memory — the limit is ${sizeLabel(error.limit)}. Take the URL list instead and ` +
-        'feed it to a download manager, or build the room in sections.',
+        `the whole archive in memory — the limit is ${sizeLabel(error.limit)}. ` +
+        (splitPlans === undefined
+          ? 'Take the URL list instead and feed it to a download manager, or build the room in sections.'
+          : `Save it as ${String(splitPlans.length)} smaller archives instead, or take the URL list.`),
       retryable: false,
       ...(plan === undefined ? {} : { plan }),
+      ...(splitPlans === undefined ? {} : { splitPlans }),
       ...shortfallOf(plan, pack),
     }
   }
@@ -500,6 +765,22 @@ function shortfallOf(
   if (plan === undefined || pack === undefined) return {}
   const sentence = pack.urlListShortfall(plan)
   return sentence === null ? {} : { urlListShortfall: sentence }
+}
+
+/**
+ * The holes, named — at most three of them, then a count.
+ *
+ * Three because the failure block is prose in a 302px column and the list is
+ * unbounded: a fifty-instance room with one empty slot each would otherwise be a
+ * hundred and fifty recipe names. A slot is `undefined` for an instance whose
+ * whole recipe is unknown, which is a different sentence and is spelled as one.
+ */
+function unfilledSentence(unfilled: readonly UnfilledSlot[]): string {
+  const named = unfilled
+    .slice(0, 3)
+    .map((hole) => (hole.slot === undefined ? `${hole.template} (no such recipe in this build)` : `${hole.template}: ${hole.slot}`))
+  const rest = unfilled.length - named.length
+  return `${named.join('; ')}${rest > 0 ? `; and ${String(rest)} more` : ''}.`
 }
 
 /** Bytes as the panel spells them. Decimal, one place — the corpus's own convention. */

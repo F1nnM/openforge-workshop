@@ -63,8 +63,20 @@
  *     that resolves straight off the fixtures.
  *
  * `stucco` remains the one root that exists but never wins first position, so
- * the all-tags and first-position sets still differ by exactly it. The intern
- * table goes 916 → 915 distinct strings over an unchanged 84,023 references.
+ * the all-tags and first-position sets still differ by exactly it. The **scanned
+ * vocabulary** goes 916 → 915 distinct strings over an unchanged 84,023
+ * references — which is what this module's figures are all about, and is not the
+ * size of the emitted table. Row B1 appends two derived tags to every row after
+ * this step, so `catalog.json` ships 930 strings over 101,427 references. The
+ * two numbers are one collapse apart and one derivation apart, and
+ * `normalise.test.ts` measures the first without ever building the second.
+ *
+ * **Nothing in {@link TAG_ALIASES} may ever name a `role|` or `form|` tag**, and
+ * the ordering is what guarantees it rather than a rule: normalisation runs on
+ * the way in and the derived tags are appended afterwards, so `normaliseTag`
+ * never sees one. If that order were reversed, an alias could rewrite a derived
+ * axis into a value the closed enum does not contain and every template slot
+ * predicating on it would silently resolve to nothing.
  *
  * Rewriting happens **in place**, first occurrence wins, so a tile's tag order
  * is preserved and first-position selection cannot be perturbed by anything but

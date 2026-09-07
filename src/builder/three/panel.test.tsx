@@ -63,21 +63,36 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { planCatalogFromFile } from '@/builder/canvas'
 import type { PlanScene, PlanTools } from '@/builder/canvas'
-import { FIXTURE_IDS, fixtureCatalogFile, fixtureDesignOf } from '@/builder/canvas/fixture'
+import { FIXTURE_IDS, OTHER_FIXTURE_TEMPLATE, fixtureCatalogFile } from '@/builder/canvas/fixture'
+import type { PlacementId, SlotName } from '@/store'
 
 import { Builder3DPanel } from './Builder3DPanel'
-import { planTools, sceneOf } from './fixture'
+import { fixtureAuthorities, planTools, sceneOf } from './fixture'
 
 vi.mock('./BuilderRoom', () => ({
-  default: ({ scene, tools }: { scene: PlanScene; tools: PlanTools }) => (
+  default: ({
+    scene,
+    tools,
+    onEditSlots,
+  }: {
+    scene: PlanScene
+    tools: PlanTools
+    onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
+  }) => (
     <div data-testid="room">
       <span>room of {scene.pieces.length}</span>
-      <span data-testid="armed">{tools.selectedDesign ?? 'nothing'}</span>
+      <span data-testid="armed">{tools.selectedTemplate ?? 'nothing'}</span>
+      {/* Row C8's handler, as a fact the boundary either carried or dropped. */}
+      <span data-testid="edits">{onEditSlots === undefined ? 'no' : 'yes'}</span>
     </div>
   ),
 }))
 
 const CATALOG = planCatalogFromFile(fixtureCatalogFile())
+/* Row C5's required prop. The mocked room ignores it — this file's subject is
+   the `lazy` boundary — but the panel's type demands it, which is the point:
+   nothing can mount the surface without saying what fills a placement. */
+const AUTHORITIES = fixtureAuthorities()
 const ASSETS = {
   lod: 'https://objects.openforge.tools/lod',
   models: 'https://objects.openforge.tools/models',
@@ -86,7 +101,7 @@ const ASSETS = {
 function scene(count: number): PlanScene {
   return sceneOf(
     CATALOG,
-    Array.from({ length: count }, (_unused, i) => ({ tileId: FIXTURE_IDS.floor1, x: i * 2, z: 0 })),
+    Array.from({ length: count }, (_unused, i) => ({ tile: FIXTURE_IDS.floor1, x: i * 2, z: 0 })),
   )
 }
 
@@ -95,7 +110,7 @@ describe('with an empty plan', () => {
     // The inverse of the assertion this file used to make. A surface that
     // refused to open until something had been placed could never be the thing
     // the first placement happened on.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(0)} tools={planTools()} assets={ASSETS} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(0)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
     expect(await screen.findByTestId('room')).toHaveTextContent('room of 0')
     expect(screen.queryByRole('button', { name: /build in 3d/i })).toBe(null)
   })
@@ -116,16 +131,17 @@ describe('the boundary', () => {
     // fail on test order. The mechanism is asserted where it is stable, by
     // reading the source: `boundary.test.ts` checks the `lazy(() => import(…))`
     // and checks that `BuilderRoom` is outside the static closure.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
     expect(await screen.findByTestId('room')).toBeInTheDocument()
   })
 })
 
 describe('what reaches the room', () => {
   it('hands over the screen’s scene rather than a placements map', async () => {
-    // The contract with row V4: the room never sees a `Placement`, so a change
-    // to what a placement *is* cannot reach this row.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(4)} tools={planTools()} assets={ASSETS} />)
+    // The room never sees a `TemplateInstance` map: every piece of geometry,
+    // every conflict and every omission arrives already projected, so a change
+    // to what a placement *is* reaches the canvas and stops there.
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(4)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
     expect(await screen.findByTestId('room')).toHaveTextContent('room of 4')
   })
 
@@ -134,20 +150,50 @@ describe('what reaches the room', () => {
       <Builder3DPanel
         catalog={CATALOG}
         scene={scene(1)}
-        tools={planTools({ selectedDesign: fixtureDesignOf(FIXTURE_IDS.wall2) })}
+        tools={planTools({ selectedTemplate: OTHER_FIXTURE_TEMPLATE })}
         assets={ASSETS}
+        fill={AUTHORITIES}
       />,
     )
-    // The design, not the file: since row V4 the tool state arms an item and
-    // `RoomSurface` resolves the variant. Asserted as the same expression that
+    // The **family**, not a file and not a design: since row A1 the tool state
+    // arms a `TemplateId` (§2.5 — templates are the only placement unit) and
+    // turning one into files is row C2's solver, on the click. Asserted as the
+    // same expression that
     // was armed, so this proves the hand-over rather than a literal.
-    expect(await screen.findByTestId('armed')).toHaveTextContent(fixtureDesignOf(FIXTURE_IDS.wall2))
+    expect(await screen.findByTestId('armed')).toHaveTextContent(OTHER_FIXTURE_TEMPLATE)
+  })
+})
+
+describe('row C8’s handler crosses the lazy line', () => {
+  it('carries it, and omits it when the screen passes none', async () => {
+    /*
+      The handler is `BuilderScreen`'s and the dialog it opens is
+      `builder/panels/slots`'s, so this panel is a wire — but a wire that
+      silently dropped an optional prop would leave the owner's right click doing
+      nothing on the drawing with nothing failing. Both directions asserted,
+      because a component that always rendered `yes` would pass the first half.
+    */
+    const { unmount } = render(
+      <Builder3DPanel
+        assets={ASSETS}
+        catalog={CATALOG}
+        fill={AUTHORITIES}
+        onEditSlots={() => undefined}
+        scene={scene(1)}
+        tools={planTools()}
+      />,
+    )
+    expect(await screen.findByTestId('edits')).toHaveTextContent('yes')
+    unmount()
+
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(1)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
+    expect(await screen.findByTestId('edits')).toHaveTextContent('no')
   })
 })
 
 describe('what row R4 took away', () => {
   it('offers no control that leaves the surface, because there is nowhere to go', async () => {
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} assets={ASSETS} fill={AUTHORITIES} />)
     await screen.findByTestId('room')
 
     // The three names the retired plate and its button went by. Queried rather

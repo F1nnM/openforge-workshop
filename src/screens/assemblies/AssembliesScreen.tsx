@@ -44,22 +44,27 @@
  * offsets, and a scrolling grid cell is the last place to discover what that does
  * to a clipped span.
  *
- * ## The choice is component state, and the completed assembly goes to the library
+ * ## The choice is component state, and a finished recipe becomes a placement
  *
  * `@/store`'s docblock is explicit that everything in `WorkshopState` is
  * persisted and that ephemeral UI state belongs in a component, so the choice
- * lives here, keyed by {@link assemblyStepKey}. What a *finished* recipe can
- * honestly do is put its files in the library — the same destination C2's builder
- * panel uses for the same reason, and the one place in this app where "these are
- * the tiles I am going to print" is already modelled.
+ * lives here, keyed by {@link assemblyStepKey}.
+ *
+ * What a *finished* recipe could honestly do was put its files in the library —
+ * the one place in this app where "these are the tiles I am going to print" was
+ * modelled. Row **A0** deleted the library and row **C3** gives the walk the
+ * destination the templates plan intended: a recipe **is** a template, and a
+ * finished walk is a `TemplateInstance` with a file pinned into every slot. So
+ * the panel places it, and contract dependency **C-e** is closed here. See
+ * {@link Finished}.
  *
  * ## It has no route yet, and that is one line in a file this row does not own
  *
  * `src/routes/**` is row A4's. The route this screen needs is
  * `createRoute({ getParentRoute: () => rootRoute, path: '/assemblies', component: AssembliesScreen })`
- * plus its name in `routeTree.addChildren`, and no search params — for
- * `/library`'s reason, that there is nothing on this screen worth linking but the
- * screen itself. The selected recipe is deliberately *not* a search param: A4's
+ * plus its name in `routeTree.addChildren`, and no search params — for the
+ * deleted `/library`'s reason, that there is nothing on this screen worth linking
+ * but the screen itself. The selected recipe is deliberately *not* a search param: A4's
  * argument that a link must not freeze a preference applies exactly, and a
  * half-finished pick set in a URL is a preference of the worst kind.
  *
@@ -69,15 +74,21 @@
  */
 import { useMemo, useState } from 'react'
 
-import type { CatalogFile, DesignId, TileId } from '@/catalog'
+import type { CatalogFile, TileId } from '@/catalog'
 import type { MaterialId } from '@/materials'
 import { useCatalogIndex } from '@/screens/catalog'
+import { placeOnPlan } from '@/screens/detail/placeOnPlan'
 import { SlotFills, compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
-import { addToLibrary } from '@/store'
 import { Button, Chip, Eyebrow } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
-import type { AssemblyChoice, AssemblyOption, AssemblyStep, RecipeTemplate } from './assembly'
+import type {
+  AssemblyChoice,
+  AssemblyOption,
+  AssemblyState,
+  AssemblyStep,
+  RecipeTemplate,
+} from './assembly'
 import {
   STEP_PAGE,
   assemblyState,
@@ -232,7 +243,7 @@ function Recipe({
 }) {
   /* C2's `compositionIndexFor` rather than a second `createCompositionIndex`:
      it is a `WeakMap` on the parsed file, so this screen and the tile drawer
-     share one 339,756-byte inverted index and one 10.7 ms build. */
+     share one 409,432-byte inverted index and one 10.7 ms build. */
   const recipes = useMemo(
     () => (catalog === undefined ? undefined : createRecipeIndex(catalog, compositionIndexFor(catalog))),
     [catalog],
@@ -305,7 +316,9 @@ function Recipe({
             />
           ))}
 
-          {state.complete ? <Finished catalog={catalog} tiles={state.tiles} /> : null}
+          {state.complete ? (
+            <Finished catalog={catalog} state={state} template={template} />
+          ) : null}
         </>
       )}
     </div>
@@ -491,65 +504,89 @@ function cardLabel(option: AssemblyOption, reason: string, narrowing: string): s
 /* ----------------------------------------------------------------- the finish */
 
 /**
- * What a finished recipe offers.
+ * What a finished recipe offers: the files, and the press that places them.
  *
- * The library and nothing else, for C2's reason: `WorkshopState` holds a library
- * and placements, the bill of tiles is built from placements, and row G5 owns the
- * selection channel. A recipe is a set of files to print, which is exactly what
- * the library is for.
+ * It offered *"Add all to library"*, which wrote the recipe's **items** to
+ * `WorkshopState.library`. Row **A0** deleted the library and left the action
+ * *absent* rather than disabled — a disabled button reads as "not yet, for you",
+ * which was not what had happened — and **row C3 replaces it with a different
+ * verb**: under the templates plan a recipe *is* a template, so a finished walk
+ * is a `TemplateInstance` with a file pinned into every slot, and placing it is
+ * the whole of what "these are the tiles I am going to print" now means.
  *
- * **The two counts can differ, and both are shown.** A recipe names *files* —
- * that is what a composition resolves to and what the list below prints — while
- * row V1 made the library a set of *items*. Two parts of one recipe can be two
- * prints of the same design, so "5 files to print" can be four items saved, and
- * a button that said "add all" while quietly saving fewer keys than the list has
- * rows would be lying about what it did. The saved count is therefore stated
- * rather than assumed, and it is the same collapse the whole V row exists for.
+ * Every fill is `pinned: true`, which is the point of walking a recipe by hand:
+ * the user chose these files card by card, so a lock change must honour them
+ * (§2.1). `placeOnPlan` finds a free cell with the plan's own collision
+ * predicate — this screen has no scene of its own — and the button then says
+ * where the piece landed rather than only that something happened.
  *
- * `catalog` may be `undefined` — the screen renders the template list before the
- * 5.6 MB index lands — but not here: a recipe cannot *complete* without the
- * index it was resolved against. The guard is a type obligation rather than a
- * reachable state, and it disables the button instead of saving nothing, because
- * a press that silently did nothing is the one outcome with no honest label.
+ * **One thing this cannot carry, and it is measured.** A part a sibling's file
+ * `fulfills` contributes no fill, because two slots naming one file would print
+ * it twice (contract **C-c**: the bill groups on md5 and counts both). The store
+ * has no way to say "covered by a sibling", so the placed instance reports that
+ * part as `slot-unfilled` in the bill. It is reachable on **exactly one of the
+ * 40 recipes** — `assembly.ts` measures the blueprint-level `fulfills` reading —
+ * and the panel says so rather than leaving the bill to be the first place
+ * anybody hears about it.
  */
-function Finished({ catalog, tiles }: { catalog: CatalogFile | undefined; tiles: readonly TileId[] }) {
-  const [added, setAdded] = useState(false)
+function Finished({
+  catalog,
+  state,
+  template,
+}: {
+  catalog: CatalogFile | undefined
+  state: AssemblyState
+  template: RecipeTemplate
+}) {
+  const [placed, setPlaced] = useState<string | null>(null)
 
-  // One pass over the index per completed recipe, keyed on the two inputs, so
-  // pressing the button twice does not re-derive and neither does a re-render.
-  const designs = useMemo(() => {
-    if (catalog === undefined) return null
-    const wanted = new Set<string>(tiles)
-    const out = new Set<DesignId>()
-    for (const record of catalog.records) if (wanted.has(record.id)) out.add(record.design)
-    return [...out]
-  }, [catalog, tiles])
+  /* One entry per part that holds its own choice. A `coveredBy` part is skipped
+     for the reason the docblock gives, which is also why `state.tiles` skips it. */
+  const fills = useMemo(() => {
+    const out: Record<string, TileId> = {}
+    for (const step of state.steps) {
+      if (step.chosen === undefined || step.coveredBy !== undefined) continue
+      out[step.name] = step.chosen
+    }
+    return out
+  }, [state])
+
+  const covered = state.steps.filter((step) => step.coveredBy !== undefined).map((step) => step.name)
 
   return (
     <div className="of-asm-done">
       <Chip>Complete</Chip>
       <p className="of-asm-note">
-        {`${String(tiles.length)} ${tiles.length === 1 ? 'file' : 'files'} to print`}
-        {designs === null || designs.length === tiles.length
-          ? '.'
-          : `, ${String(designs.length)} ${designs.length === 1 ? 'item' : 'items'} to save.`}
+        {`${String(state.tiles.length)} ${state.tiles.length === 1 ? 'file' : 'files'} to print. `}
+        Placing it puts one piece on the plan with these files pinned into its slots, so the lock
+        preference will leave them alone.
+        {covered.length === 0
+          ? ''
+          : ` The ${covered.join(' and ')} ${covered.length === 1 ? 'part is' : 'parts are'} covered by a sibling piece and carries no file of its own, which the bill will read as an unfilled slot.`}
       </p>
+
+      <Button
+        disabled={catalog === undefined}
+        onClick={() => {
+          if (catalog === undefined) return
+          setPlaced(placeOnPlan(catalog, { template: template.id, fills }).where)
+        }}
+        size="sm"
+      >
+        Place on the plan
+      </Button>
+
+      {placed === null ? null : (
+        <p className="of-asm-note" role="status">
+          {`Placed at ${placed}. Open the builder to see it — or press again for another.`}
+        </p>
+      )}
+
       <ul className="of-asm-bill">
-        {tiles.map((tile) => (
+        {state.tiles.map((tile) => (
           <li key={tile}>{tile}</li>
         ))}
       </ul>
-      <Button
-        disabled={designs === null}
-        onClick={() => {
-          if (designs === null) return
-          for (const design of designs) addToLibrary(design)
-          setAdded(true)
-        }}
-        tone="primary"
-      >
-        {added ? 'Added to your library' : 'Add all to library'}
-      </Button>
     </div>
   )
 }

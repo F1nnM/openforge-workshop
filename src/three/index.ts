@@ -49,7 +49,8 @@
  * | --- | --- | --- |
  * | `BufferGeometry` from the worker payload | `useStlModel` effect cleanup | unmount, or the record changing |
  * | `MeshStandardMaterial` | `releaseMaterial`, by refcount | when the last holder lets go |
- * | `EffectComposer` + `RenderPass`/N8AO/SMAA render targets | `useStageComposer` effect cleanup | `<Canvas>` unmount |
+ * | `EffectComposer` + `RenderPass`/N8AO/SMAA render targets, and the outline pass's mask and edge targets where a canvas opted into one | `useStageComposer` effect cleanup | `<Canvas>` unmount |
+ * | The outline pass's proxy meshes | `Stage`'s own effect, by removal from the scene | the hover ending. Their geometries belong to the caller and their material is a module constant (`outline.ts`) |
  * | A shared-canvas slot's 2D backing store | the DOM, when the card unmounts | card unmount |
  * | Parse worker | `StlParser.terminate()` | unmount, or an abort |
  * | In-flight fetch | `AbortController` | unmount |

@@ -9,25 +9,25 @@
  *
  * ## Why mesh warming is armed here, of all places
  *
- * Row **R1** converts a saved item's STLs to drawable geometry and cached the
- * result by md5; its docblock left the *call* to another row and said what the
- * absence costs — *"nothing breaks and nothing draws"*. Row R3 wires it, and the
- * wiring has to be somewhere that is mounted for every screen and owns no
- * feature, because the moment a mesh is wanted is spread across four of them:
- * an item is saved from the catalog card, the tile drawer, the assemblies screen
- * or the builder's palette, and the mesh has to be ready by the time the builder
- * opens. `src/mesh/warm.ts` sets out why it is a reconciliation of `(library,
- * lock)` rather than a hook on the add action.
+ * `@/mesh` converts the STLs a user is entitled to into drawable geometry and
+ * caches the result by md5; without a call site it has none, and the 3D builder
+ * draws a footprint plate for every tile in every room. The call has to be
+ * somewhere that is mounted for every screen and owns no feature, because the
+ * moments a mesh is wanted are spread across the app: a template is placed, a
+ * saved room is reloaded, the lock preference is re-solved, or a **share link**
+ * lands a room that was never converted on this machine. `src/mesh/warm.ts` sets
+ * out why it is a reconciliation of `(placements, lock)` — with the real diff on
+ * the derived file set — rather than a hook on the place action.
  *
  * **The import is dynamic, and that is a bundle decision with a measurement
- * behind it.** A static `import { startLibraryWarming } from '@/mesh/warm'` here
+ * behind it.** A static `import { startSceneWarming } from '@/mesh/warm'` here
  * would pull `@/mesh`, `@/assembly` and the aggregate builder into the **entry**
- * chunk — the one blocking first paint on the landing screen, where nothing has
- * been saved yet and there is nothing to warm. Behind `import()` they are a
- * chunk fetched after mount, which is the same argument `Builder3DPanel.tsx`
- * makes for the renderer. Warming is deferrable by construction: no frame waits
- * on it, and `warm.ts` does not even resolve the catalog index unless the library
- * is non-empty.
+ * chunk — the one blocking first paint on the landing screen, where the room is
+ * empty and there is nothing to warm. Behind `import()` they are a chunk fetched
+ * after mount, which is the same argument `Builder3DPanel.tsx` makes for the
+ * renderer. Warming is deferrable by construction: no frame waits on it, and
+ * `warm.ts` does not even resolve the catalog index unless the scene names a
+ * file.
  *
  * The effect is deliberately not `[]`-guarded against `StrictMode`'s double
  * mount. It subscribes, unsubscribes and subscribes again, over a queue whose
@@ -47,7 +47,7 @@ export function App() {
     let mounted = true
     void import('./mesh/warm').then((module) => {
       if (!mounted) return
-      stop = module.startLibraryWarming()
+      stop = module.startSceneWarming()
     })
     return () => {
       mounted = false

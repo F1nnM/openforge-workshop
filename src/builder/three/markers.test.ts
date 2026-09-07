@@ -23,7 +23,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { PlanPart, ScenePiece } from '@/builder/canvas'
 import { planCatalogFromFile } from '@/builder/canvas'
-import { FIXTURE_IDS, fixtureCatalogFile } from '@/builder/canvas/fixture'
+import {
+  FIXTURE_IDS,
+  FIXTURE_SLOTS,
+  fixtureCatalogFile,
+  fixtureSlotLayout,
+} from '@/builder/canvas/fixture'
 import { GRID_UNIT_MM } from '@/catalog'
 
 import { sceneOf } from './fixture'
@@ -39,12 +44,23 @@ import {
 
 const CATALOG = planCatalogFromFile(fixtureCatalogFile())
 
+/**
+ * `piece.polygons` is what a plate is built from, and the rename is the point.
+ *
+ * Row **A4a** renamed `PlanPiece.parts` to `polygons` and gave `parts` to the
+ * slots, so a marker built from a piece takes the **union of its parts'
+ * outlines** — which is what a plate over a whole placement should be — and a
+ * reader that meant the slots is a compile error rather than a fan over the wrong
+ * objects. `partPlates` below covers the per-part case the surface actually
+ * draws.
+ */
+
 /** A quad, an arc's sectors and a diagonal — three genuinely different shapes. */
 const PIECES: readonly ScenePiece[] = sceneOf(CATALOG, [
-  { tileId: FIXTURE_IDS.floor2, x: 0, z: 0 },
-  { tileId: FIXTURE_IDS.arc, x: 6, z: 0 },
-  { tileId: FIXTURE_IDS.diag, x: 12, z: 0 },
-  { tileId: FIXTURE_IDS.tri, x: 18, z: 0 },
+  { tile: FIXTURE_IDS.floor2, x: 0, z: 0 },
+  { tile: FIXTURE_IDS.arc, x: 6, z: 0 },
+  { tile: FIXTURE_IDS.diag, x: 12, z: 0 },
+  { tile: FIXTURE_IDS.tri, x: 18, z: 0 },
 ]).pieces
 
 describe('the fan', () => {
@@ -67,15 +83,15 @@ describe('the fan', () => {
   it('matches the buffer to the arithmetic on every real footprint', () => {
     expect(PIECES).toHaveLength(4)
     for (const piece of PIECES) {
-      const positions = platePositions(piece.parts, PLATE_HEIGHT_MM)
-      expect(positions.length).toBe(plateTriangles(piece.parts) * 9)
+      const positions = platePositions(piece.polygons, PLATE_HEIGHT_MM)
+      expect(positions.length).toBe(plateTriangles(piece.polygons) * 9)
       expect(positions.length).toBeGreaterThan(0)
     }
   })
 
   it('is flat at the height it was asked for', () => {
     for (const piece of PIECES) {
-      const positions = platePositions(piece.parts, PLATE_HEIGHT_MM)
+      const positions = platePositions(piece.polygons, PLATE_HEIGHT_MM)
       for (let i = 1; i < positions.length; i += 3) {
         // `toBeCloseTo`, not `toBe`: the buffer is a `Float32Array`, so 0.6
         // stores as 0.6000000238418579. Flatness is the claim, not the bit pattern.
@@ -89,7 +105,7 @@ describe('the fan', () => {
     // normal of (0, -1, 0) — pointing *away* from the camera. Asserted on every
     // triangle of every real footprint, not just the first.
     for (const piece of PIECES) {
-      const positions = platePositions(piece.parts, PLATE_HEIGHT_MM)
+      const positions = platePositions(piece.polygons, PLATE_HEIGHT_MM)
       for (let i = 0; i < positions.length; i += 9) {
         expect(faceNormalY(positions, i)).toBeGreaterThan(0)
       }
@@ -111,7 +127,7 @@ describe('the fan', () => {
   it('never under-states the cell, and overshoots only outward', () => {
     let worst = 0
     for (const piece of PIECES) {
-      const positions = platePositions(piece.parts, PLATE_HEIGHT_MM)
+      const positions = platePositions(piece.polygons, PLATE_HEIGHT_MM)
       let minX = Infinity
       let maxX = -Infinity
       let minZ = Infinity
@@ -150,9 +166,9 @@ describe('the fan', () => {
 describe('the outline', () => {
   it('closes every ring, so a plate is bounded on all sides', () => {
     for (const piece of PIECES) {
-      const expected = piece.parts.reduce((total, part) => total + part.length, 0)
+      const expected = piece.polygons.reduce((total, part) => total + part.length, 0)
       // One segment per edge, two vertices each, three floats each.
-      expect(plateEdgePositions(piece.parts, PLATE_HEIGHT_MM).length).toBe(expected * 6)
+      expect(plateEdgePositions(piece.polygons, PLATE_HEIGHT_MM).length).toBe(expected * 6)
     }
   })
 
@@ -174,14 +190,14 @@ describe('the geometries', () => {
     // exactly as G1's store objects rely on — `lod.ts` records that a LOD object
     // carries `POSITION` and nothing else.
     const piece = PIECES[0] as ScenePiece
-    const plate = plateGeometry(piece.parts)
+    const plate = plateGeometry(piece.polygons)
     expect(plate.getAttribute('position').itemSize).toBe(3)
     expect(plate.getAttribute('normal')).toBeUndefined()
     expect(plate.boundingSphere).not.toBeNull()
     expect(plate.boundingSphere?.radius).toBeGreaterThan(0)
     plate.dispose()
 
-    const ring = plateEdgeGeometry(piece.parts)
+    const ring = plateEdgeGeometry(piece.polygons)
     expect(ring.getAttribute('position').itemSize).toBe(3)
     expect(ring.boundingSphere).not.toBeNull()
     ring.dispose()
@@ -206,6 +222,79 @@ describe('the geometries', () => {
     // Flat: every vertex on `y = 0`, positioned by the caller.
     for (let i = 0; i < positions.count; i += 1) expect(positions.getY(i)).toBe(0)
     caret.dispose()
+  })
+})
+
+/**
+ * A plate **per part**, which is what `RoomSurface` draws — row A4b.
+ *
+ * The union outline the tests above use is right for a ring over a whole
+ * placement, and wrong for the plates: a three-part template with one converted
+ * mesh must show two outlines at two heights, not one outline over the lot. So
+ * this asserts the two things that would go wrong if a plate were built from the
+ * piece — that the parts are separately plated, and that each one is flat at its
+ * **own** slot elevation rather than at a shared one.
+ *
+ * Through `fixtureSlotLayout`, and **not** through the rule the app runs, which
+ * since row C6 is `catalog.ts#templateSlotLayout`. `originSlotLayout` is out for
+ * the obvious reason — it stacks every part at one anchor and could not tell the
+ * two implementations apart — but the shipped rule is out for a sharper one: its
+ * three conventions rest the `floor` **and** the `wall` on the `base`, so it
+ * produces only **two** distinct elevations (0 and `BASE_LIFT_MM`) and a
+ * renderer that read one part's height for another would be invisible on the one
+ * pair it is most likely to confuse. The fixture's rule declares **three** —
+ * base on the plan, floor 6.35 mm up, walls and column 12.7 mm up — and real
+ * offsets with them. `fixture.ts` states the same split from its own end: the
+ * authored rule stays so that a renderer test measures the *renderer* rather than
+ * re-measuring B2's arithmetic, which `template/offsets.test.ts` already does
+ * over all three conventions.
+ */
+describe('a plate per part', () => {
+  const laidOut = planCatalogFromFile(fixtureCatalogFile(), fixtureSlotLayout)
+  const piece = sceneOf(laidOut, [
+    {
+      fills: [
+        [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+        [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+        [FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2],
+      ],
+      x: 0,
+      z: 0,
+    },
+  ]).pieces[0]
+
+  it('plates each slot at its own declared elevation', () => {
+    expect(piece).toBeDefined()
+    const parts = (piece as NonNullable<typeof piece>).parts
+    expect(parts).toHaveLength(3)
+
+    const heights = new Map<string, number>()
+    for (const part of parts) {
+      const positions = platePositions(part.polygons, part.layout.elevationMm + PLATE_HEIGHT_MM)
+      expect(positions.length).toBe(plateTriangles(part.polygons) * 9)
+      expect(positions.length).toBeGreaterThan(0)
+      for (let i = 1; i < positions.length; i += 3) {
+        expect(positions[i]).toBeCloseTo(part.layout.elevationMm + PLATE_HEIGHT_MM, 4)
+      }
+      heights.set(part.slot, part.layout.elevationMm)
+    }
+
+    // The fixture's own rule: base on the plan, floor a quarter inch up, the
+    // right wall half an inch up. Three distinct numbers, so a renderer reading
+    // one part's height for another is visible here rather than in a browser.
+    expect(heights.get(FIXTURE_SLOTS.base)).toBe(0)
+    expect(heights.get(FIXTURE_SLOTS.floor)).toBe(6.35)
+    expect(heights.get(FIXTURE_SLOTS.rightWall)).toBe(12.7)
+  })
+
+  it('covers strictly more ground per part than any one part does', () => {
+    // The union the ring is drawn from is the parts' outlines put together, so
+    // the whole-piece fan is the sum of the per-part fans. Equality rather than
+    // an inequality, because a union that dropped or duplicated a part would
+    // move this number.
+    const parts = (piece as NonNullable<typeof piece>).parts
+    const perPart = parts.reduce((sum, part) => sum + plateTriangles(part.polygons), 0)
+    expect(plateTriangles((piece as NonNullable<typeof piece>).polygons)).toBe(perPart)
   })
 })
 

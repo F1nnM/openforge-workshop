@@ -2,25 +2,28 @@
 /**
  * The palette's claims about the corpus, measured.
  *
- * Row V3 turned a palette row from a file into an item, and three of the things
- * that makes safe are facts about the data rather than about the code. They are
- * measured here so the arguments in `palette.ts` and `PalettePanel.tsx` fail a
- * test rather than going stale:
+ * **Row C1 turned a palette row from a catalog item into a template family**, and
+ * this file grew a second half rather than being replaced, because the two halves
+ * are about different objects:
  *
- *   1. **Refusing at item level is well posed.** `isPlaceable` used to be asked
- *      of a file. Asking it of an item is only honest if every variant of an item
- *      answers it the same way, which is a corpus property and not a type.
- *   2. **`variantClass === 'base-only'` is the same test as `layer === 'base'`.**
- *      The starter set used to skip base *records*; it now skips base *items*,
- *      and the two agree only because a base is always its own design.
- *   3. **The preview and the armed file disagree, and that is the row's point.**
- *      The panel deliberately renders one and arms the other. If the two rules
- *      ever coincided, half of `PalettePanel`'s docblock would be describing a
- *      distinction with no cases, and the wrong one could be deleted without a
- *      test noticing.
- *
- * A fourth block pins the starter set, because turning it over to items changed
- * its input type and must not have changed its answer.
+ *   - **Blocks 1 to 3 are properties of the *archive*** that the builder still
+ *     rests on and that nothing else in the suite measures. They were written
+ *     here because the palette asked them; it no longer does, so each one now
+ *     names the consumer it is held for. Deleting them with the rows they were
+ *     about would have dropped three measured zeros that four other files' own
+ *     arguments cite:
+ *       1. **placeability is a property of the item** —
+ *          `builder/canvas/geometry.ts#placementRefusal` and the plan view's
+ *          visible refusal of the 370 footprint-less items;
+ *       2. **a base is always its own design** —
+ *          `screens/catalog/format.ts#KIND_PRECEDENCE`, whose "a base beats
+ *          everything" ranking is sound only because of it;
+ *       3. **the preview is not the print** — the catalog card renders the
+ *          former and the bill's fills print the latter, and the disagreement is
+ *          measured on all 931 two-sided items under all three locks.
+ *   - **Blocks 4 to 9 are row C1's own**: the 87 rows, their grouping, the size
+ *     control's domain, the map from an item back to a family, and the one
+ *     contract this row cannot satisfy from inside its own files.
  *
  * `catalog.json` is gitignored and rebuilt from the fixtures
  * (`npm run import:catalog`). **CI does have it** — the stamp step regenerates it
@@ -30,29 +33,41 @@
  *
  * ## What this file cannot prove
  *
- * Nothing here renders anything. It is arithmetic over the emitted index, so it
- * says the palette's *premises* hold; whether the panel then reads the right
- * field is `panels.test.tsx`'s job, and whether the row is legible at 272px is a
- * browser's. It also cannot prove any of this *forward*: a future import is free
- * to emit a design whose files disagree about a footprint, and the point of
- * measuring the zero is that such an import fails here instead of quietly
- * greying half a tile.
+ * Nothing here renders anything. It is arithmetic over the emitted index and the
+ * generated template module, so it says the palette's *premises* hold; whether
+ * the panel then reads the right field is `panels.test.tsx`'s job, and whether 87
+ * rows are legible at 272px is a browser's. It also cannot prove any of this
+ * *forward*: a future import is free to emit a design whose files disagree about
+ * a footprint, or a family whose refs match nothing, and the point of measuring
+ * the zeros is that such an import fails here instead of quietly greying half a
+ * tile or offering a row that arms an empty slot.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { selectVariantForLock } from '@/assembly'
+import type { AssemblyTemplate, TemplateLookup } from '@/assembly'
+import { buildAssemblyIndex, buildBillOfTiles, selectVariantForLock } from '@/assembly'
 import { isPlaceable } from '@/builder/canvas'
-import type { CatalogFile, CatalogRecord, DesignId, TileAggregate, TileId } from '@/catalog'
-import { CatalogFile as CatalogFileSchema, buildAggregateIndex } from '@/catalog'
+import type { CatalogFile, CatalogRecord, TileAggregate } from '@/catalog'
+import { CatalogFile as CatalogFileSchema, buildAggregateIndex, resolveTags } from '@/catalog'
+import { createCompositionIndex, resolveSlotTags } from '@/composition'
+import { RECIPE_TEMPLATES } from '@/screens/assemblies'
+import type { PlacementId, TemplateId, TemplateInstance } from '@/store'
 import { LockSystem } from '@/store'
 
-import type { PaletteLookup } from './palette'
-import { libraryDesigns } from '@/store'
+import {
+  GROUP_ORDER,
+  INSERT_DESIGNS,
+  PLACEABLE_TEMPLATES,
+  TEMPLATE_FAMILIES,
+  familyById,
+  positionOf,
+} from './families'
+import { armForTags, armNameForTags, armRefusalFor, familyName, familySlug } from './familyKey'
+import { candidateCount, paletteSections, rankFamilies } from './palette'
 
-import { paletteRows, searchRows, starterSet } from './palette'
 
 const CATALOG_PATH =
   process.env.OPENFORGE_CATALOG ?? join(process.cwd(), 'public', 'catalog', 'catalog.json')
@@ -96,45 +111,6 @@ const filesOf = (item: TileAggregate): CatalogRecord[] =>
 
 /** The three locks, from the store's own enum rather than a fourth copy of the list. */
 const LOCKS: readonly LockSystem[] = LockSystem.options
-
-/* ------------------------------- 0. the wrong key, guarded by the compiler */
-
-/**
- * The failure row V3 fixes, asserted by `tsc` rather than at runtime.
- *
- * The palette's library block rendered **empty** after row V1 re-keyed the
- * library, because `paletteRows(Object.keys(library) as TileId[], …)` kept
- * compiling. A comment saying "that cannot happen now" would be worth nothing, so
- * the three shapes that used to compile are written out here and each carries a
- * `@ts-expect-error` — which **fails the build if the error goes away.** That is
- * what makes the claim capable of failing.
- *
- * Nothing below runs, and it is deliberately not wrapped in an `it`: the
- * assertion is the compiler's, and an `it` with no `expect` in it would be a
- * passing test that proves nothing. `npm run typecheck` and `npm run build` both
- * compile this file.
- *
- * The pairing that makes it work is measured in `palette.ts`' module note:
- * `Record<TileId, true>` **is** assignable to `Record<DesignId, true>` (a
- * branded key collapses to a `string` index signature), while `TileId[]` is
- * **not** assignable to `DesignId[]`. So the array is the safe position, and
- * `libraryDesigns` is what carries the store's key type into it.
- */
-declare const fileKeyedLibrary: Readonly<Record<TileId, true>>
-declare const fileIds: readonly TileId[]
-declare const lookupStub: PaletteLookup
-declare const inLibraryByFile: (id: TileId) => boolean
-
-// @ts-expect-error the pre-V1 library shape — a map keyed by file
-export const rejectsAFileKeyedLibrary = () => paletteRows(libraryDesigns(fileKeyedLibrary), lookupStub)
-// @ts-expect-error a bare array of file ids, which is what the old cast produced
-export const rejectsFileIds = () => paletteRows(fileIds, lookupStub)
-// @ts-expect-error a membership test that asks about a file rather than an item
-export const rejectsAFileKeyedMembershipTest = () => searchRows(items, lookupStub, inLibraryByFile)
-
-/** The shape that is meant to compile, so the three above are not rejecting everything. */
-export const acceptsDesigns = (library: Readonly<Record<DesignId, true>>) =>
-  paletteRows(libraryDesigns(library), lookupStub)
 
 /* ------------------------------------------------ 1. placeability, at item level */
 
@@ -181,9 +157,12 @@ describeCorpus('a base never shares an item with anything else', () => {
         item.variants.some((variant) => variant.layer !== 'base'),
     )
 
-    // `starterSet` skips `variantClass === 'base-only'` where it used to skip
-    // `record.layer === 'base'`. This zero is what makes those the same test —
-    // `shape|base` is part of the design key, so a base is its own design.
+    // `shape|base` is part of the design key, so a base is always its own
+    // design. `starterSet` was the caller this zero was first measured for — it
+    // skipped `variantClass === 'base-only'` where it used to skip
+    // `record.layer === 'base'` — and row A0 deleted it with the library; the
+    // zero is kept because `format.ts#KIND_PRECEDENCE` rests on it too, and
+    // because an import that broke it would grey half a tile silently.
     expect(mixed.map((item) => item.name)).toEqual([])
 
     const baseOnly = items.filter((item) => item.variantClass === 'base-only')
@@ -255,39 +234,519 @@ describeCorpus('the row shows one file and the build prints another', () => {
   })
 })
 
-/* -------------------------------------------------------------- 4. the starter set */
+/* ------------------------------------------- 4. the 89 rows, and their ids */
 
-describeCorpus('the starter set survived becoming a set of items', () => {
-  it('is the same six dungeon_stone tiles, now named once each', () => {
-    const starter = starterSet(items)
-    const chosen = starter.map((designId) => aggregates?.byDesign.get(designId))
-
-    // The record-level version of this function chose these six by name; the
-    // item-level one chooses the same six, which is the whole claim of the
-    // rewrite. Every field the choice turns on — `kinds`, `foot`, `texture`,
-    // `name` — is a hoisted facet, so there was never a per-file question here.
-    expect(chosen.map((item) => item?.name)).toEqual([
-      'Dungeon Stone Block Floor 1x1',
-      'Dungeon Stone Block Floor 2x2',
-      'Dungeon Stone Block Floor 2x1',
-      'Dungeon Stone Wall 1x IA',
-      'Dungeon Stone Wall 2x A',
-      'Dungeon Stone Wall 4x Q',
-    ])
-
-    // One texture, no bases, all placeable, six distinct designs.
-    expect([...new Set(chosen.map((item) => item?.texture))]).toEqual(['dungeon_stone'])
-    expect(chosen.every((item) => item?.variantClass !== 'base-only')).toBe(true)
-    expect(chosen.every((item) => item !== undefined && isPlaceable(item))).toBe(true)
-    expect(new Set(starter).size).toBe(6)
+describeCorpus('the palette lists 89 templates and can arm every one of them', () => {
+  it('is B4’s 47 families plus the 40 shipped recipes and row E3’s 2, with distinct ids', () => {
+    /* 89 since row **E3** authored two assemblies in this repo. They arrive as
+       `RECIPE_TEMPLATES` entries because this module keys the assemblies section
+       on which of the emitted module's two arrays a template came from, and
+       nothing else — `pipeline/authored.ts` records the measurement. So they are
+       `kind: 'recipe'`, groupless, and above the single tiles, with no change to
+       this directory. */
+    expect(TEMPLATE_FAMILIES).toHaveLength(89)
+    expect(TEMPLATE_FAMILIES.filter((family) => family.kind === 'family')).toHaveLength(47)
+    expect(TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe')).toHaveLength(42)
+    expect(new Set(TEMPLATE_FAMILIES.map((family) => family.id)).size).toBe(89)
+    // `PLACEABLE_TEMPLATES` is the same set as the resolver's own type, in the
+    // same order, so a screen can build one lookup from it.
+    expect(PLACEABLE_TEMPLATES).toHaveLength(89)
   })
 
-  it('offers six items that are each themselves two-sided', () => {
-    // Not decoration: all six are the `both` class, so before this row every one
-    // of them opened the builder showing an `integral` — the starter set was the
-    // defect at its most visible, on the first six rows a new user ever sees.
-    const starter = starterSet(items)
-    const classes = starter.map((designId) => aggregates?.byDesign.get(designId)?.variantClass)
-    expect(classes).toEqual(['both', 'both', 'both', 'both', 'both', 'both'])
+  it('parses every id as a TemplateId, which is what row A8’s refusal rested on', () => {
+    // A8 declined to arm anything because the list held `DesignId`s and a
+    // `DesignId` is a brand over `z.string().min(1)`: **all 89 template ids
+    // satisfy it**, so the compiler could not have caught the cast and every
+    // placement would have been reported `unknown-template`. The discrimination
+    // runs the other way and is what makes this list armable — a `TemplateId` is
+    // a lowercase hyphenated slug, and the generator emits 89 of them.
+    expect(TEMPLATE_FAMILIES.filter((family) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(family.id))).toEqual([])
+    // And no design in the corpus collides with one, which is the other half of
+    // "not lexically disjoint but disjoint in fact".
+    const ids = new Set<string>(TEMPLATE_FAMILIES.map((family) => family.id))
+    expect(items.filter((item) => ids.has(item.design)).map((item) => item.name)).toEqual([])
+  })
+
+  it('groups the 47 single tiles by role in the order the corpus puts them', () => {
+    const records51 = new Map<string, number>()
+    for (const record of records) {
+      const role = resolveTags(loaded!, record).find((tag) => tag.startsWith('role|'))?.slice(5)
+      if (role === undefined) continue
+      records51.set(role, (records51.get(role) ?? 0) + 1)
+    }
+    // §3.1's grouping, and `families.ts#GROUP_ORDER`'s own table.
+    expect(Object.fromEntries(records51)).toEqual({
+      wall: 5381,
+      floor: 2162,
+      riser: 319,
+      insert: 285,
+      column: 223,
+      stair: 206,
+      roof: 100,
+      decor: 26,
+    })
+    // The group order follows those records; the *family* counts do not follow
+    // them, which is why the two lists are different and only one is the order.
+    // `wall` and `floor` were 19 and 17 until row D1 dropped the four families
+    // whose whole population was bases — two walls and two floors.
+    const counts = GROUP_ORDER.map(
+      (key) => TEMPLATE_FAMILIES.filter((family) => family.group === key).length,
+    )
+    expect(counts).toEqual([17, 15, 2, 6, 3, 2, 1, 1])
+    // No `insert` group, although 285 records carry the role: `SKIPPED_ROLES`.
+    expect(GROUP_ORDER).not.toContain('insert')
+    // And **no ninth group for the 42 assemblies** — row D2 made the kind of
+    // thing a row is a section rather than a group, so they carry no role and no
+    // group at all. `GROUP_ORDER` covers the single tiles exactly. Row E3's two
+    // are groupless for the same reason and by the same code path.
+    expect(TEMPLATE_FAMILIES.filter((family) => family.group === undefined)).toHaveLength(42)
+    expect(counts.reduce((total, one) => total + one, 0)).toBe(47)
+  })
+})
+
+/* ------------------------------------- 4b. what the owner's own query returns */
+
+/**
+ * Row **D2**, against the shipped corpus rather than the nine-item fixture.
+ *
+ * The defect was a *palette* defect and the numbers behind it are all in the
+ * generated template module, so these are measurements of the real 87 rows: how
+ * many of them the word *corner* reaches, which kinds they are, and where the
+ * assembly the owner described lands once the section and the ranking are
+ * applied. The brief for this row said eleven one-slot rows contain the word; it
+ * was sixteen when D2 measured it and is **fourteen** now that row D1 has
+ * dropped the two corner families whose whole population was bases
+ * (`Wall: Corner (Separate Wall)` and `Wall: Internal Corner (S2W)`). The first
+ * assertion is the measured figure, whatever it is.
+ */
+describeCorpus('the query the owner ran', () => {
+  const ASSEMBLY = 'S2W: Wall on Tile: Corner (Any, Single Piece)'
+
+  it('reaches 14 one-slot rows and 8 assemblies, not the 11 the brief claimed', () => {
+    const corner = TEMPLATE_FAMILIES.filter((family) =>
+      [family.name, family.role, family.form, family.build]
+        .filter((part) => part !== undefined)
+        .join(' ')
+        .toLowerCase()
+        .replace(/_/g, ' ')
+        .includes('corner'),
+    )
+    expect(corner.filter((family) => family.kind === 'family')).toHaveLength(14)
+    expect(corner.filter((family) => family.kind === 'recipe')).toHaveLength(8)
+    // C1's list was in `GROUP_ORDER`, so all 8 assemblies were below all 14.
+    expect(corner.map((family) => family.kind).lastIndexOf('family')).toBeLessThan(
+      corner.map((family) => family.kind).indexOf('recipe'),
+    )
+  })
+
+  it('puts the 5-slot corner assembly first of all 22', () => {
+    const sections = paletteSections(TEMPLATE_FAMILIES, 'corner')
+    expect(sections.map((section) => section.key)).toEqual(['assemblies', 'tiles'])
+    expect(sections.flatMap((section) => section.rows)[0]?.name).toBe(ASSEMBLY)
+    expect(sections.flatMap((section) => section.rows)).toHaveLength(22)
+
+    // Where it was: row 50 of 87 in the declared order, thirty-eight rows below
+    // the `Wall: Corner (Wall on Tile)` the owner actually found at row 12.
+    expect(TEMPLATE_FAMILIES.findIndex((family) => family.name === ASSEMBLY)).toBe(49)
+    expect(
+      TEMPLATE_FAMILIES.findIndex((family) => family.name === 'Wall: Corner (Wall on Tile)'),
+    ).toBe(11)
+
+    // And it is the one the owner described: a floor, two walls and a column.
+    const assembly = TEMPLATE_FAMILIES.find((family) => family.name === ASSEMBLY)
+    expect(assembly?.template.parts.map((part) => part.name)).toEqual([
+      'column',
+      'right wall',
+      'left wall',
+      'floor',
+      'base',
+    ])
+    expect(assembly?.slots).toBe(5)
+  })
+
+  it('is a ranking and not a preference for the shortest label', () => {
+    // The tiebreak that puts `Corner (Any, …)` above `Corner: Low (…)` is length
+    // normalisation: the qualifier the query did not ask for costs the row. Ask
+    // for it and the order inverts.
+    const low = rankFamilies(
+      TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe'),
+      'corner low',
+    )
+    expect(low[0]?.name).toBe('S2W: Wall on Tile: Corner: Low (Single Piece)')
+  })
+
+  it('reorders nothing at all with an empty query', () => {
+    // Ranking is something a query does. With nothing typed the 40 stay in
+    // fixture order and the 47 in the corpus order §3.1 argued for.
+    expect(rankFamilies(TEMPLATE_FAMILIES, '')).toBe(TEMPLATE_FAMILIES)
+    expect(paletteSections(TEMPLATE_FAMILIES, '').flatMap((section) => section.rows)).toEqual([
+      ...TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe'),
+      ...TEMPLATE_FAMILIES.filter((family) => family.kind === 'family'),
+    ])
+  })
+
+  it('states a slot count no other reading of the template could contradict', () => {
+    // The owner's complaint was a row that claimed one thing and behaved as
+    // another, so the number is `parts.length` and never a count of the parts
+    // that still need a choice — the 20 parts declaring `fulfills` cover a
+    // *nested* blueprint's slots, with no sibling impact.
+    for (const family of TEMPLATE_FAMILIES) {
+      expect(family.slots).toBe(family.template.parts.length)
+    }
+    const slots = TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe').map(
+      (family) => family.slots,
+    )
+    /* Three slot counts since row E3: its widened wall is a 3, and its corridor
+       is the build's only **4** — `(base, floor, left wall, right wall)`, a
+       corner's part set minus the column. A row that says 4 is a row the owner
+       can tell from both a 3 and a 5, which is the whole point of the count. */
+    expect([...new Set(slots)].sort()).toEqual([3, 4, 5])
+    expect(slots.filter((count) => count === 5)).toHaveLength(4)
+    expect(slots.filter((count) => count === 4)).toHaveLength(1)
+    expect(slots.filter((count) => count === 3)).toHaveLength(37)
+  })
+})
+
+/* ------------------------------------------------- 5. the size control's domain */
+
+describeCorpus('the size control is a control, and 7 families have none', () => {
+  it('holds 303 positions over the 47, median 4 and maximum 32', () => {
+    const families = TEMPLATE_FAMILIES.filter((family) => family.kind === 'family')
+    /* `TemplateFamily.sizes` is *what there is to choose*, so the 7 one-position
+       tables arrive as empty; the emitted table is what holds 303.
+
+       304 before row **D9**. The position that went is `wall-corner-s2w`'s
+       *"2 wide"*: 157 corner-wall meshes measure 1.500, so no corner wall is 2
+       units long and that chip named a size the family does not have. */
+    const offered = families.map((family) => family.sizes.length)
+    const emitted = offered.map((length) => (length === 0 ? 1 : length))
+    expect(emitted.reduce((total, length) => total + length, 0)).toBe(303)
+
+    const sorted = [...emitted].sort((a, b) => a - b)
+    expect(sorted[Math.floor(sorted.length / 2)]).toBe(4)
+    expect(sorted[sorted.length - 1]).toBe(32)
+  })
+
+  it('names the 7 rather than counting them — 5 empty domains and 2 inexpressible', () => {
+    // **The brief for this row said 5.** B3's five are the families whose records
+    // resolve no grid cell at all; the other two resolve cells that no `size|`
+    // tag can express (B4's 16 refused cells: 12 annular sectors, 3 columns at
+    // 0.5 x 0.5, and one 3x0.5 curve wall). Both arrive as a one-position table
+    // and both must render no control, so the panel sees 7.
+    //
+    // It was 8 until row D1: `floor|curve|separate wall` was the third
+    // inexpressible one and that family is gone, because all 41 of its records
+    // were bases. The same row took `wall|hex|thick wall` from 56 records to 8.
+    const bare = TEMPLATE_FAMILIES.filter(
+      (family) => family.kind === 'family' && family.sizes.length === 0,
+    ).map((family) => family.template.source)
+    expect(bare.sort()).toEqual(
+      [
+        // B3's five empty domains, 183 records.
+        'wall|diagonal|separate wall',
+        'wall|hex|thick wall',
+        'decor|straight|-',
+        'wall|octagon|separate wall',
+        'floor|octagon|-',
+        // Two whose whole domain is inexpressible.
+        'stair|curve|-',
+        'column|corner|s2w',
+      ].sort(),
+    )
+  })
+
+  it('offers no position that matches nothing, and no family that matches nothing', () => {
+    // **The property that makes the row's number safe to show.** A palette that
+    // offered a size admitting nothing would be a control with a trap in it, and
+    // a family admitting nothing would arm a placement whose only slot can never
+    // be filled. Measured through `@/composition`'s own resolution, which is the
+    // one a fill will use.
+    const composition = createCompositionIndex(loaded!, aggregates)
+    const empty: string[] = []
+    for (const family of TEMPLATE_FAMILIES) {
+      if (family.kind !== 'family') continue
+      if (candidateCount(composition, family) === 0) empty.push(`${family.name} (any size)`)
+      for (const position of family.sizes) {
+        if (candidateCount(composition, family, position.tags) === 0) {
+          empty.push(`${family.name} — ${position.label}`)
+        }
+      }
+    }
+    expect(empty).toEqual([])
+  })
+
+  it('counts every record it can place exactly once, over all 47 families', () => {
+    // **8,417 candidate records against 8,702 in the index, and the 285 between
+    // them are the inserts no family is generated for.** So the 47 families
+    // *partition* what the palette can place — which they did not before row
+    // D1: the sum was 10,380, because `shape-base`'s 1,963 were also admitted
+    // by a role family (a base keeps the role of the piece it sits under) and
+    // 1,678 of the 10,380 were that double count less the inserts.
+    //
+    // `GROUP_ORDER` still puts `base` after the seven roles rather than among
+    // them, and the reason is unchanged: the *records* carrying `role|wall`
+    // include 1,117 bases, so a table of records per role and a table of
+    // families per role are two different readings of the corpus.
+    const composition = createCompositionIndex(loaded!, aggregates)
+    const total = TEMPLATE_FAMILIES.filter((family) => family.kind === 'family').reduce(
+      (sum, family) =>
+        sum + composition.candidatesFor(resolveSlotTags(family.template.parts[0]!.tags, family.template.tags, [])).tiles.length,
+      0,
+    )
+    expect(total).toBe(8417)
+    expect(records.length - total).toBe(285)
+    expect(
+      records.filter((record) => resolveTags(loaded!, record).includes('role|insert')),
+    ).toHaveLength(285)
+  })
+})
+
+/* --------------------------------------- 6. the map from an item to a family */
+
+describeCorpus('every item but the inserts resolves to a family', () => {
+  const tagsOfPreview = (item: TileAggregate): readonly string[] => {
+    const record = byId.get(item.preview)
+    return record === undefined ? [] : resolveTags(loaded!, record)
+  }
+
+  /**
+   * The family an item's own tags name, through the **constructed** key.
+   *
+   * `familyKey.ts` builds the id rather than looking it up, so this composition
+   * — construct, then find the row — is the whole of what the drawer does, and
+   * the assertions below are about both halves at once: a constructed id that
+   * named no family would show up here as an unmapped design.
+   */
+  const familyOfItem = (item: TileAggregate) => {
+    const arm = armForTags(tagsOfPreview(item))
+    return arm === undefined ? undefined : familyById(arm.template)
+  }
+
+  it('names a family for 3,728 of 3,822 designs, and refuses 94 inserts by name', () => {
+    // They *must* partition: every record carries exactly one role and one form,
+    // so the families cover the corpus and the only designs left over are the
+    // ones no family is generated for.
+    const mapped = items.filter((item) => familyOfItem(item) !== undefined)
+    expect(mapped).toHaveLength(3728)
+
+    const refused = items.filter((item) => familyOfItem(item) === undefined)
+    expect(refused).toHaveLength(INSERT_DESIGNS)
+    expect(refused).toHaveLength(94)
+    // All 94 are inserts, which is what lets the drawer say *where the tile goes
+    // instead* rather than "this cannot be placed". `unclassified` is the other
+    // answer and it is unreachable over this index — which is the assertion.
+    expect(refused.filter((item) => armRefusalFor(tagsOfPreview(item)) !== 'insert')).toEqual([])
+    // And they hold all 285 insert records.
+    expect(
+      records.filter((record) => resolveTags(loaded!, record).includes('role|insert')),
+    ).toHaveLength(285)
+  })
+
+  it('hits an exact size position for 3,104 of the 3,728, and any-size for 624', () => {
+    let exact = 0
+    let any = 0
+    for (const item of items) {
+      const tags = tagsOfPreview(item)
+      const family = familyOfItem(item)
+      if (family === undefined) continue
+      if (positionOf(family, tags).length > 0) exact += 1
+      else any += 1
+    }
+    /* 83.3%. So "Use in builder" usually arms *"Floor: Straight, 2 wide by 2
+       deep"* rather than the family at any size, which is as close as a template
+       model can come to "place this tile".
+
+       **86.0% before row D9, and this is the one place its correction costs the
+       user something.** The position a size chip carries is a *tag* ref, and the
+       102 designs that moved are corner walls whose only `size|width` tag says 2
+       while their measured run is 1.5. Their family's *"1.5 wide"* chip requires
+       `size|width|1.5`, which they do not carry, and its *"2 wide"* chip is gone
+       because no corner wall is 2 units long — so they arm the family at **any
+       size** instead of at a size.
+
+       Nothing is unreachable: *any size* fills and places, and the geometry the
+       builder draws is the corrected 1.5. What is lost is the chip, and the fix
+       is the derived `size|run|<r>` tag `src/template/size.ts` prices at +300 B
+       and declines — the same gap the 28 `QxG` walls have been in since W4.
+       Recorded here rather than papered over, because a figure that fell needs a
+       reason a reader can check. */
+    expect(exact).toBe(3104)
+    expect(any).toBe(624)
+    expect(exact + any).toBe(3728)
+    expect(exact / 3728).toBeCloseTo(0.833, 3)
+  })
+
+  it('is the same answer for every variant of every item, which is why a record may be asked', () => {
+    // The drawer reads the **shown record's** tags rather than the item's, the
+    // same shape as `foot`'s hoisting argument. This is the zero that makes that
+    // safe: no item in the corpus has variants that disagree about either the
+    // family or the size position.
+    const disagreeing = items.filter((item) => {
+      const arms = new Set(
+        item.variants.map((variant) => {
+          const record = byId.get(variant.id)
+          const arm = record === undefined ? undefined : armForTags(resolveTags(loaded!, record))
+          return arm === undefined ? 'none' : [arm.template, ...arm.size].join(' ')
+        }),
+      )
+      return arms.size > 1
+    })
+    expect(disagreeing.map((item) => item.name)).toEqual([])
+  })
+
+  it('sends a base to the base family and not to the role it keeps', () => {
+    // The order of the two questions is load bearing. A base carries the role of
+    // the piece it sits under — 1,117 wall, 661 floor, 176 riser, 9 stair — so
+    // asking the role first would file every one of them under a family whose
+    // slot denies `shape|base`'s records outright.
+    const bases = items.filter((item) => tagsOfPreview(item).includes('shape|base'))
+    expect(bases.length).toBeGreaterThan(0)
+    expect(
+      bases.filter((item) => familyOfItem(item)?.id !== 'shape-base'),
+    ).toEqual([])
+    // And they are not a fringe: 340 of the 3,822 designs and 1,963 records.
+    expect(bases).toHaveLength(340)
+    expect(records.filter((record) => resolveTags(loaded!, record).includes('shape|base'))).toHaveLength(1963)
+  })
+})
+
+/* ------------------- 6b. the constructed key against the generated one */
+
+/**
+ * **The one duplication this row introduced, held in place.**
+ *
+ * `familyKey.ts` builds a family's id and name from `(role, form, build)` rather
+ * than looking them up, because a value import of the generated table from the
+ * catalog drawer puts that table in the entry chunk — an A/B build measured
+ * +5.95 kB gzip for every visitor to every page, and that module's docblock
+ * carries the three-row table. The price is a second derivation of something the
+ * generator owns, and the only acceptable answer to that is this comparison.
+ */
+describeCorpus('the drawer constructs the key the generator emitted', () => {
+  /** The 46 keyed families. `shape-base` is not one of them by construction. */
+  const keyed = TEMPLATE_FAMILIES.filter(
+    (family) => family.kind === 'family' && family.template.source !== 'shape|base',
+  )
+
+  it('reproduces all 46 ids and all 46 names, with no exceptions', () => {
+    expect(keyed).toHaveLength(46)
+    const wrong = keyed.flatMap((family) => {
+      const [role = '', form = '', build = '-'] = family.template.source.split('|')
+      const system = build === '-' ? undefined : build
+      const problems: string[] = []
+      if (familySlug(role, form, system) !== family.id) {
+        problems.push(`${family.template.source}: id ${familySlug(role, form, system)} != ${family.id}`)
+      }
+      if (familyName(role, form, system) !== family.name) {
+        problems.push(`${family.template.source}: name ${familyName(role, form, system)} != ${family.name}`)
+      }
+      return problems
+    })
+    expect(wrong).toEqual([])
+  })
+
+  it('names every family it constructs, over all 3,822 designs', () => {
+    // B4's generation rule seen from the other end: a family exists for every
+    // `(role, form, build)` key the corpus carries, so a *constructed* key cannot
+    // miss unless the generator stops doing that — at which point this fails
+    // instead of the drawer arming an id nothing ships.
+    const orphaned = items.flatMap((item) => {
+      const record = byId.get(item.preview)
+      const tags = record === undefined ? [] : resolveTags(loaded!, record)
+      const arm = armForTags(tags)
+      if (arm === undefined) return []
+      return TEMPLATE_FAMILIES.some((family) => family.id === arm.template) ? [] : [item.name]
+    })
+    expect(orphaned).toEqual([])
+  })
+
+  it('names the family the drawer is about to arm, for the drawer to print', () => {
+    // The disclosure the press needs: the drawer says which family it will arm,
+    // and the name it prints is the family's own — not a paraphrase of it.
+    for (const family of keyed.slice(0, 8)) {
+      const record = records.find((candidate) =>
+        family.template.parts[0] !== undefined &&
+        resolveTags(loaded!, candidate).includes(`role|${family.role ?? ''}`) &&
+        resolveTags(loaded!, candidate).includes(`form|${family.form ?? ''}`),
+      )
+      if (record === undefined) continue
+      const tags = resolveTags(loaded!, record)
+      const name = armNameForTags(tags)
+      expect(name).toBe(TEMPLATE_FAMILIES.find((row) => row.id === armForTags(tags)?.template)?.name)
+    }
+  })
+})
+
+/* ----------------------------- 7. the one contract this row cannot satisfy alone */
+
+describeCorpus('a placement resolves only against the whole template table', () => {
+  const lookupOver = (templates: readonly { readonly id: string }[]): TemplateLookup => {
+    const table = new Map(templates.map((template) => [template.id, template as AssemblyTemplate]))
+    return (id) => table.get(id)
+  }
+
+  const anInstanceOf = (id: string): TemplateInstance =>
+    ({
+      id: '00000000-0000-4000-8000-000000000000' as PlacementId,
+      template: id as TemplateId,
+      x: 0,
+      z: 0,
+      rotation: 0,
+      fills: {},
+    }) satisfies TemplateInstance
+
+  it('reports a family placement unknown-template against the 40 recipes alone', () => {
+    // **The seam row C1 cannot close from inside its own files, measured.**
+    // `screens/builder/BuilderScreen.tsx` builds its recipe table as
+    // `new Map(RECIPE_TEMPLATES.map(…))` — the 40 — which was right for every id
+    // that existed before this row and is wrong for all 47 families. Against that
+    // table every placement the new palette arms resolves to no parts and one
+    // `warn` note, which `billView.ts` renders as *"1 placed piece names a recipe
+    // this build does not ship"*. That file belongs to row C3;
+    // `PLACEABLE_TEMPLATES` is the one line it needs.
+    const assembly = buildAssemblyIndex(loaded!)
+    const composition = createCompositionIndex(loaded!, aggregates)
+    const family = TEMPLATE_FAMILIES.find((row) => row.kind === 'family')!
+    const instance = anInstanceOf(family.id)
+
+    const stale = buildBillOfTiles([instance], assembly, {
+      templates: lookupOver(RECIPE_TEMPLATES),
+      composition,
+    })
+    expect(stale.notes.map((note) => note.code)).toEqual(['unknown-template'])
+    expect(stale.parts).toBe(0)
+
+    const whole = buildBillOfTiles([instance], assembly, {
+      templates: lookupOver(PLACEABLE_TEMPLATES),
+      composition,
+    })
+    // With the whole table the instance resolves: one slot, unfilled, which is
+    // contract **C-g**'s legitimate state and row C2's to fill.
+    expect(whole.notes.map((note) => note.code)).toEqual(['slot-unfilled'])
+    expect(whole.unfilled.map((slot) => slot.slot)).toEqual([family.template.parts[0]!.name])
+  })
+
+  it('resolves all 87 against the whole table, and none of them against the 40', () => {
+    const assembly = buildAssemblyIndex(loaded!)
+    const composition = createCompositionIndex(loaded!, aggregates)
+    const whole = lookupOver(PLACEABLE_TEMPLATES)
+    const forty = lookupOver(RECIPE_TEMPLATES)
+
+    const unknownAgainstWhole = TEMPLATE_FAMILIES.filter(
+      (family) =>
+        buildBillOfTiles([anInstanceOf(family.id)], assembly, { templates: whole, composition }).notes.some(
+          (note) => note.code === 'unknown-template',
+        ),
+    )
+    expect(unknownAgainstWhole).toEqual([])
+
+    const unknownAgainstForty = TEMPLATE_FAMILIES.filter(
+      (family) =>
+        buildBillOfTiles([anInstanceOf(family.id)], assembly, { templates: forty, composition }).notes.some(
+          (note) => note.code === 'unknown-template',
+        ),
+    )
+    // Exactly the 47 families: the 40 recipes are in both tables.
+    expect(unknownAgainstForty).toHaveLength(47)
   })
 })

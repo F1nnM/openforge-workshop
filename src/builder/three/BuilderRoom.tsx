@@ -73,6 +73,26 @@
  * dominant family by instance count wins, which is the choice that colours the
  * most creases correctly.
  *
+ * ## Row D7: this file holds the hover cue, because the cue crosses the canvas
+ *
+ * The silhouette pass belongs to `Stage` — it is one composer per `<Canvas>` and
+ * that canvas is shared with the catalog's tile previews — and the piece under
+ * the pointer is known only to `RoomSurface`, *inside* the canvas. So the two
+ * meet here, in the component that mounts both: the surface publishes an
+ * {@link OutlineRequest} through `onOutline`, this holds it, and `Stage` draws
+ * it. The same shape `onStatus` has had since R2, and for the same reason.
+ *
+ * One `useState` and no subscription, deliberately. A hover crossing is already
+ * strictly cheaper than what the readout costs: `onStatus` fires on every
+ * pointer *move* (the status carries the cursor), so this file re-renders per
+ * move today, and a request published once per piece entered adds a fraction of
+ * that. The alternative — a mutable handle the surface writes and the pass
+ * subscribes to — buys nothing and hides the wiring.
+ *
+ * `Stage` gets the request on every render, empty when nothing is hovered, and
+ * `StageProps.outline` says why that must not become `undefined` between
+ * hovers: presence is what builds the pass.
+ *
  * ## A placed tile with no mesh is drawn, always
  *
  * R1 measured **0.60 s to a first warm mesh and 1.37 s cold**, and its cache has
@@ -84,28 +104,29 @@
  * is in the hint line and the readout. Nothing in the gesture path consults the
  * mesh store, so a missing mesh cannot change what may be placed where.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
-import type { AssemblyIndex } from '@/assembly'
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
-import { createStyleResolver } from '@/builder/canvas'
 import { useAnnouncer } from '@/builder/canvas/hooks'
 import type { CatalogAssets, CatalogRecord } from '@/catalog'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
 import type { MeshTask } from '@/mesh'
 import { meshQueue, useMeshQueue } from '@/mesh'
-import { meshContext } from '@/mesh/context'
-import { useLockSystem } from '@/store'
+import type { PlacementId, SlotName } from '@/store'
+import { useLockSystem, useRoomDesign } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
+import type { OutlineRequest } from '@/three/outline'
+import { NO_OUTLINE } from '@/three/outline'
 import { AO_RADIUS, Stage } from '@/three/Stage'
 import { Eyebrow } from '@/ui/primitives'
 
-import { designBase, sceneBases } from './bases'
 import type { SurfaceStatus } from './edits'
 import { describeSurface } from './edits'
+import type { FillAuthorities } from './fills'
+import { createPlacementFiller } from './fills'
 import type { Room3D } from './instances'
-import { buildRoom3D } from './instances'
+import { buildRoom3D, roomBlobs } from './instances'
 import { LOD_ROOM_BUDGET_BYTES, lodObjectBudget } from './lod'
 import { meshoptSupported } from './loadLod'
 import { RoomSurface } from './RoomSurface'
@@ -169,97 +190,126 @@ export interface BuilderRoomProps {
    * passes the whole `catalogFile.assets`, so nothing changed but the type.
    */
   readonly assets: Pick<CatalogAssets, 'lod' | 'models'>
+  /**
+   * The three authorities row **C5**'s fill solve needs, and not one more.
+   *
+   * `BuilderScreen` already holds all three, memoised, for the bill and for the
+   * lock re-solve: `buildAssemblyIndex` over 8,702 records, a `TemplateLookup`
+   * over `PLACEABLE_TEMPLATES`' 91 families, and `compositionIndexFor`'s shared
+   * 409,432-byte inverted index. Passing them is what keeps the room, the bill
+   * and the slots panel answering about one archive; deriving them here would
+   * build a second assembly index for an identical answer.
+   *
+   * **Required, so the wiring cannot be forgotten silently.** The lock
+   * preference is deliberately *not* here — it is read from the store below, the
+   * same store `BuilderScreen` reads it from, because it is a preference rather
+   * than an index and a prop would let the two drift.
+   */
+  readonly fill: FillAuthorities
+  /**
+   * Row **C8**: the owner's right click, passed straight through to the surface.
+   *
+   * Nothing is done to it here and nothing can be — the dialog it opens is
+   * `builder/panels/slots/`'s and lives outside this directory, which is
+   * `builder/panels/boundary.test.ts`'s line and not an inconvenience. So the
+   * room is a wire, and the state it would otherwise hold is `BuilderScreen`'s.
+   */
+  readonly onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
 }
 
-export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl }: BuilderRoomProps) {
-  const armed = tools.selectedDesign === null ? undefined : catalog.record(tools.selectedDesign)
+export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, onStatus, fetchImpl }: BuilderRoomProps) {
+  /**
+   * The armed **family**, straight off the shared tool state.
+   *
+   * No resolution left to do *here*, and that is row A1's doing rather than a
+   * simplification: the palette arms a `TemplateId` (§2.5 — *"templates are the
+   * only placement unit"*), and turning one into the files that fill its slots is
+   * row **C2**'s solver, which {@link filler} below calls on the click. There is
+   * no lock hop for the *drawing* — a `SlotFill` names an exact file (decision
+   * **D1**), so `planCatalogFromFile` takes no `lock`.
+   */
+  const armed = tools.selectedTemplate
 
   /**
-   * The lock preference, read from the store rather than taken as a prop.
+   * The click's fill solver, memoised on everything that can change its answer.
    *
-   * One source of truth, and the reason it is not a prop is not convenience: two
-   * copies of one preference is how a control comes to disagree with what it
-   * controls, which is the argument `BuilderScreen.tsx` makes for `<LockToggle>`
-   * taking none either. `catalog` is already memoised on this same value by the
-   * screen, so the record the room draws and the base it stands on are resolved
-   * under one preference by construction.
+   * The lock is read from the store rather than taken as a prop, and read
+   * **unconditionally** rather than through `useLockChosen`: `buildBillOfTiles`
+   * and `reSolveScene` both take `lock` as it stands, so a filler that declined
+   * the default preference would place files the bill prices differently and the
+   * next lock change would rewrite every one of them under the user.
+   *
+   * `family` — the room's design — is read the same way and from the same store,
+   * and **this paragraph used to say the opposite**: *"deliberately absent. It is
+   * a `FillContext` field with no control anywhere in the app yet, and passing a
+   * guess would reorder every candidate list by a preference nobody expressed."*
+   * That was right while it was true. Row **D6** shipped the control and
+   * `WorkshopState.design` is no longer a guess, so leaving it out would place
+   * pieces that ignore the room's design and then have them rewritten under the
+   * user by the next re-solve — which is what the lock argument above says about
+   * declining the lock, one field over.
+   *
+   * `undefined` still means *no preference* and is what the app ships with, so
+   * the absent case is the ordinary one rather than a fallback.
+   *
+   * One `useMemo`, so the memo table inside the filler survives re-renders: a
+   * room built by clicking the same palette row twenty times is **one** solve and
+   * nineteen hits. Both preferences are in its dependency list, which is what
+   * `fills.ts` means by *"a filler is created per `(lock, family, index)` … so
+   * the preference is in the key by construction"*: a design change throws the
+   * table away rather than serving twenty stale answers out of it.
    */
   const lock = useLockSystem()
-
-  /**
-   * Rule 1's index, resolved once per session — row **R3**.
-   *
-   * `@/mesh/context.ts` says why it is read here instead of arriving as a prop:
-   * `Builder3DPanel.tsx` and `BuilderScreen.tsx` belong to row **R4**, which is
-   * deleting the plan view as this row lands, so a new prop would have to be
-   * threaded through two files this row must not touch — and the same derivation
-   * is needed by `warm.ts`, which is a store subscription with no component to
-   * hang a `useMemo` on. So one module-scope memo serves both and **R4 has
-   * nothing to reconcile.**
-   *
-   * `null` until it resolves, which is one render in which the room draws
-   * exactly what it drew before this row: every topper on the plan, no bases. The
-   * seam worth naming for R4: once `BuilderScreen` collapses onto this surface it
-   * already holds an assembly index over the same file and can pass it down,
-   * making this the non-React caller's fallback alone.
-   */
-  const [assembly, setAssembly] = useState<AssemblyIndex | null>(null)
-  useEffect(() => {
-    let alive = true
-    void meshContext().then(
-      (context) => {
-        if (alive) setAssembly(context.assembly)
-      },
-      (cause: unknown) => {
-        // The room is entirely usable without it: every tile still draws, and
-        // what is lost is the base *under* each topper. A throw here would take
-        // the surface down for a network blip on a screen the user is working in.
-        console.warn('[openforge-workshop] the base index could not be built; bases will not be drawn', cause)
-      },
-    )
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  /** The base under each placed piece, and the one the armed item would get. */
-  const bases = useMemo(
-    () => (assembly === null ? undefined : sceneBases(scene, assembly, lock)),
-    [scene, assembly, lock],
-  )
-  const armedBase = useMemo(
+  const design = useRoomDesign()
+  const filler = useMemo(
     () =>
-      assembly === null || tools.selectedDesign === null
-        ? undefined
-        : designBase(tools.selectedDesign, assembly, lock),
-    [assembly, tools.selectedDesign, lock],
+      createPlacementFiller({
+        index: fill.index,
+        context: {
+          templates: fill.templates,
+          composition: fill.composition,
+          lock,
+          /* Spread rather than assigned, because `exactOptionalPropertyTypes`
+             makes `family: undefined` and *no `family`* two different
+             assignments, and `FillContext.family` documents the absent one. */
+          ...(design === undefined ? {} : { family: design }),
+        },
+      }),
+    [fill.index, fill.templates, fill.composition, lock, design],
   )
 
   /**
-   * The objects to load: every placed piece's, **plus the armed tile's**, plus
-   * **every auto-inserted base's** — row R3.
+   * The objects to load: every drawn part's, and nothing else.
    *
-   * The armed tile is not in the scene — that is what "armed" means — so a store
-   * driven by the scene alone would give the ghost no geometry until after the
-   * first placement, and the user would place their first tile blind. One extra
-   * address, requested the moment a palette row is chosen.
+   * **{@link roomBlobs}, the same function `buildRoom3D` groups by**, so the set
+   * fetched and the set drawn are one derivation and cannot disagree — a room
+   * that fetched from a second one would report *"not in the store"* about a blob
+   * it had never asked for, which is a sentence the app also shows legitimately
+   * and so an invisible failure. `instances.ts` states the derivation as contract
+   * **C-d** and relates it to what `@/mesh`'s warming pass converts.
    *
-   * The bases add very few addresses however large the room: the whole corpus
-   * reaches **84** distinct base blobs under openlock, and the median base is
-   * 0.91 MB against the median tile's 10.77 MB. They are requested even for a
-   * `duplicate`, which is not drawn — its *height* is still what lifts the topper
-   * standing on it, and a height is a measurement of a mesh.
+   * **The armed item is no longer in it, and that follows from what "armed"
+   * means now.** Row R2 added the armed tile's own blob here so the first ghost
+   * had geometry before the first placement; since row A1 the armed thing is a
+   * family, its files are the fill solver's to choose, and the marker
+   * `edits.ts#templateGhost` draws needs no mesh at all.
+   *
+   * Row **C5** makes that a *choice* rather than a limit: {@link filler} can
+   * answer for the armed family before the click, memoised, so its blobs could be
+   * unioned in here and prefetched. They are not, deliberately — the marker draws
+   * no mesh, so the fetch would warm a cache for a placement the user may never
+   * make, and the placement's own blobs arrive through `scene` the instant it
+   * lands. The union is one line the day the ghost draws geometry, which is
+   * `RoomSurface`'s note on B2's layout rule.
+   *
+   * Templates make this cheaper rather than dearer: 40 of the 40 shipped families
+   * carry both a `floor` and a `base`, so 80 of their 128 parts draw out of a
+   * handful of files that instance together.
    */
-  const blobs = useMemo(() => {
-    const wanted = new Set(scene.pieces.map((piece) => piece.record.blob))
-    if (armed !== undefined) wanted.add(armed.blob)
-    if (bases !== undefined) for (const base of bases.values()) wanted.add(base.record.blob)
-    if (armedBase !== undefined) wanted.add(armedBase.record.blob)
-    return [...wanted]
-  }, [scene, armed, bases, armedBase])
+  const blobs = useMemo(() => [...roomBlobs(scene)], [scene])
 
   /*
      Every store object is `EXT_meshopt_compression`-encoded, so without the WASM
@@ -330,17 +380,10 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   })
 
-  const styleOf = useMemo(() => createStyleResolver(catalog), [catalog])
   const resolve = useMemo(() => memoisedResolutions(catalog), [catalog])
   const room = useMemo(
-    () =>
-      buildRoom3D(scene, {
-        geometries: store.geometries,
-        resolve,
-        viewRadius: VIEW_RADIUS,
-        ...(bases === undefined ? {} : { bases }),
-      }),
-    [scene, store.geometries, resolve, bases],
+    () => buildRoom3D(scene, { geometries: store.geometries, resolve, viewRadius: VIEW_RADIUS }),
+    [scene, store.geometries, resolve],
   )
 
   // Constant for the life of the view. See the module note.
@@ -349,6 +392,8 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
 
   const { message, announce } = useAnnouncer()
   const [status, setStatus] = useState<SurfaceStatus | null>(null)
+  /** The piece under the pointer, as the outline pass wants it. Row D7. */
+  const [outline, setOutline] = useState<OutlineRequest>(NO_OUTLINE)
   const publish = useCallback(
     (next: SurfaceStatus) => {
       setStatus(next)
@@ -357,11 +402,22 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
     [onStatus],
   )
 
-  const waiting = scene.pieces.filter((piece) => !store.geometries.has(piece.record.blob)).length + scene.generated.length
+  /**
+   * Drawn **parts** with no mesh, plus every generated base — what the plates
+   * count.
+   *
+   * Parts and not placements since row A4b, for `RoomSurface`'s reason: a plate
+   * is drawn per part, so a three-part template with one converted file is two
+   * plates, and a count of placements would say *"1 outlined"* about two
+   * outlines. `RoomSurface` builds the same list to draw from; this is the number
+   * the notice and the readout quote, so the two are computed the same way.
+   */
+  const waiting =
+    scene.pieces.reduce(
+      (sum, piece) => sum + piece.parts.filter((part) => !store.geometries.has(part.record.blob)).length,
+      0,
+    ) + scene.generated.length
   const label = describeSurface(scene, waiting)
-  // Toppers whose base the bill lists and no store holds — the plate state, per
-  // topper rather than per blob, because that is what the user is looking at.
-  const basesWaiting = room.absentBases.reduce((sum, gap) => sum + gap.placements.length, 0)
 
   return (
     <div className="of-b3d" data-status={roomStatus(room, store.settled)}>
@@ -388,6 +444,7 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
             label={label}
             aoRadius={AO_RADIUS_MM * fit.scale}
             enablePan
+            outline={outline}
             {...(occlusion === null ? {} : { occlusion })}
           >
             <RoomSurface
@@ -397,9 +454,9 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
               fit={fit}
               tools={tools}
               armed={armed}
-              {...(bases === undefined ? {} : { bases })}
-              armedBase={armedBase}
-              styleOf={styleOf}
+              fill={filler}
+              {...(onEditSlots === undefined ? {} : { onEditSlots })}
+              onOutline={setOutline}
               onStatus={publish}
               announce={announce}
               keyHelpId={KEY_HELP_ID}
@@ -418,18 +475,19 @@ export function BuilderRoom({ catalog, scene, tools, assets, onStatus, fetchImpl
           converting={meshes.eagerPending + meshes.backgroundPending}
           stalled={stalled}
           waiting={waiting}
-          basesWaiting={basesWaiting}
-          total={scene.pieces.length + scene.generated.length}
+          unfilled={scene.unfilled.length}
+          total={partsDrawn(scene) + scene.generated.length}
         />
         <p className="of-b3d-plate of-b3d-hint">{status?.hint ?? 'Pick a tile from the palette to start.'}</p>
       </div>
 
-      <RoomReadout room={room} store={store} waiting={waiting} basesWaiting={basesWaiting} />
+      <RoomReadout room={room} store={store} scene={scene} waiting={waiting} />
 
       <p className="of-b3d-keys" id={KEY_HELP_ID}>
-        Drag to orbit, drag with the middle button or with Ctrl to pan across the plan, and scroll to zoom. Click the
-        plan to place the armed tile and click a tile to remove it in Erase mode. Arrow keys move the plan cursor by
-        the snap step, Shift for four steps; Enter places the armed tile, Delete removes the one under the cursor and R
+        Drag to orbit, drag with the right or middle button or with Ctrl to pan across the plan, and scroll to zoom.
+        Click the plan to place the armed tile and click a tile to remove it in Erase mode. Right-click a piece to
+        choose what goes in its slots, or use the Pieces on the plan list beside the drawing. Arrow keys move the plan
+        cursor by the snap step, Shift for four steps; Enter places the armed tile, Delete removes the one under the cursor and R
         turns it. Shift and Enter together pick the tile under the cursor up to move it; the arrow keys then carry it,
         Enter drops it and Escape puts it back. Square brackets step through the placed tiles. G switches snap between
         half a unit and one unit, and P, E and M switch between place, erase and move.
@@ -477,20 +535,20 @@ function SurfaceNotice({
   converting,
   stalled,
   waiting,
-  basesWaiting,
+  unfilled,
   total,
 }: {
   room: Room3D
   store: LodStoreState
   /** Meshes `@/mesh`'s queue is still fetching or decimating. */
   converting: number
-  /** Conversions that reached a terminal state other than the cache. Row R3. */
+  /** Conversions that reached a terminal state other than the cache. */
   stalled: readonly MeshTask[]
-  /** Placed pieces drawn as a plate because no mesh has arrived for them. */
+  /** Drawn parts plated because no mesh has arrived for them. Row A4b. */
   waiting: number
-  /** Toppers whose auto-inserted base is drawn as a plate. Row R3. */
-  basesWaiting: number
-  /** Placed pieces altogether, both populations. */
+  /** Instances with no filled slot at all — `PlanScene.unfilled`. Row A4b. */
+  unfilled: number
+  /** Drawable parts altogether, both populations. */
   total: number
 }) {
   if (room.refusal !== null) return null
@@ -570,42 +628,35 @@ function SurfaceNotice({
   if (waiting > 0) {
     return (
       <p className="of-b3d-plate" role="status">
-        {String(waiting)} of {String(total)} placed {total === 1 ? 'tile has' : 'tiles have'} no mesh in the store
+        {String(waiting)} of {String(total)} placed {total === 1 ? 'part has' : 'parts have'} no mesh in the store
         yet, so {waiting === 1 ? 'it is' : 'they are'} drawn as a marked outline. The outline is the tagged footprint
-        and the tile is really there.
+        and the part is really there.
       </p>
     )
   }
 
   /*
-     Row R3, and it is last because it is the least alarming of the five: every
-     tile is drawn and only the part *underneath* is an outline. It is a real and
-     common state — under openlock 1,878 of 3,822 items get a base, and a base is
-     a separate design that a per-aggregate conversion does not cover until
-     `warm.ts` asks for it — so it gets a sentence of its own rather than being
-     folded into the count above, which is about the tiles the user placed.
-  */
-  if (basesWaiting > 0) {
-    return (
-      <p className="of-b3d-plate" role="status">
-        {basesWaiting === 1 ? 'One tile is' : `${String(basesWaiting)} tiles are`} standing on a base whose mesh has
-        not arrived, so the base is an outline. It is in the bill and in the download either way.
-      </p>
-    )
-  }
+     Row A4b's own line, re-worded by row **C5** and kept last for the same
+     reason: it is the least alarming of the five and the only one the user can
+     act on from here.
 
-  /*
-     X10's `base-already-on-plan`, said out loud. Not suppressed and not merged
-     into the base above: the bill lists two bases for this cell and the room
-     draws one, and the ring is the only thing on screen that can say so.
+     **What changed is how often it is true.** A4b wrote it as *"the state every
+     placement lands in until row C2's fill solver runs"*, and it was — the click
+     wrote `fills: {}`. C5 solves the fills on the click, so an instance reaches
+     `PlanScene.unfilled` only when the solver could fill **nothing**: a size
+     nothing in the archive carries (C2's `no-candidate`, which no sibling change
+     can reopen), a family this build ships no recipe for, or a room restored from
+     before its parts were chosen. Still legitimate — contract C-g, §3.2 *"places
+     anyway"* — and still worth a sentence rather than silence, because there is
+     nothing on screen at all for it: no geometry, no plate and no marker
+     (`PlanScene.unfilled` carries no coordinates to draw one at).
   */
-  if (room.duplicateBases.length > 0) {
-    const count = room.duplicateBases.length
+  if (unfilled > 0) {
     return (
       <p className="of-b3d-plate" role="status">
-        {count === 1 ? 'One tile' : `${String(count)} tiles`} already {count === 1 ? 'stands' : 'stand'} on a base you
-        placed, and the bill adds another underneath. The ring marks{' '}
-        {count === 1 ? 'it' : 'them'}; remove the base you placed if you did not mean to print two.
+        {unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts the
+        archive could fill, so {unfilled === 1 ? 'it draws' : 'they draw'} nothing. Open{' '}
+        {unfilled === 1 ? 'its slots' : 'their slots'} to choose parts, or try another size.
       </p>
     )
   }
@@ -617,50 +668,62 @@ function SurfaceNotice({
  * The counts, in the DOM rather than on the canvas.
  *
  * Five of them earn their place: `instances` against `groups` is the whole claim
- * of the instancing row (fifty placements, twenty draws), `triangles` is what
- * the frame actually costs, the mesh line is the one that explains an outlined
- * tile, the budget line puts resident geometry against its ceiling, and the
- * footprint disagreements are listed because this is the only place in the
- * project where the tagged footprint and the real mesh are both in memory at
- * once.
+ * of the instancing row (fifty parts, twenty draws), `triangles` is what the
+ * frame actually costs, the mesh line is the one that explains an outlined part,
+ * the budget line puts resident geometry against its ceiling, and the footprint
+ * disagreements are listed because this is the only place in the project where
+ * the tagged footprint and the real mesh are both in memory at once.
+ *
+ * Row **R3**'s sixth line — `Bases`, drawn against outlined against
+ * already-on-plan — is **deleted with the population it counted**. A base is a
+ * declared slot of a template now, so it is in `Drawn` with every other part;
+ * a line reporting it separately would need `instances.ts` to keep a division
+ * that no longer exists in the data. Row A4b's replacement is `Templates`, which
+ * reports the arity the other lines are now in terms of: how many placements the
+ * parts belong to, and how many of those have nothing chosen yet.
  */
 function RoomReadout({
   room,
   store,
+  scene,
   waiting,
-  basesWaiting,
 }: {
   room: Room3D
   store: LodStoreState
+  scene: PlanScene
   waiting: number
-  basesWaiting: number
 }) {
+  const placements = scene.pieces.length + scene.unfilled.length
   return (
     <dl className="of-b3d-readout">
       <div>
         <dt>Drawn</dt>
         <dd>
-          {String(room.instances)} in {String(room.groups.length)}{' '}
+          {String(room.instances)} {room.instances === 1 ? 'part' : 'parts'} in{' '}
+          {String(room.groups.length)}{' '}
           {room.groups.length === 1 ? 'instanced mesh' : 'instanced meshes'}
           {waiting === 0 ? '' : `, ${String(waiting)} outlined`}
         </dd>
       </div>
       {/*
-        Row R3's own line, and it earns its place for the reason the row exists:
-        the bases are the half of the assembly that was a bill line and never
-        geometry, and this is the only readout in the app where the count drawn,
-        the count outlined and the count already on the plan can be compared.
-        `baseGroups.length` against `baseInstances` is also where instancing pays
-        best — 84 distinct base blobs serve the whole corpus under openlock.
+        The other half of the ratio above, and the line that makes `Drawn`
+        readable: thirty parts in three draws is a different sentence depending on
+        whether it is ten templates or thirty. The unfilled count sits here rather
+        than beside `Drawn` because those instances contribute no part at all —
+        they are placements with nothing in them.
+
+        Since row **C5** that count is an exception rather than the rule: a click
+        carries C2's solve, so a placement lands with its parts and this tail
+        appears only for an instance the archive could fill no slot of. It is kept
+        for exactly that case — a zero here and a non-zero `Drawn` is the reading
+        that says every placement is real geometry.
       */}
-      {room.baseInstances === 0 && basesWaiting === 0 && room.duplicateBases.length === 0 ? null : (
+      {placements === 0 ? null : (
         <div>
-          <dt>Bases</dt>
+          <dt>Templates</dt>
           <dd>
-            {String(room.baseInstances)} in {String(room.baseGroups.length)}{' '}
-            {room.baseGroups.length === 1 ? 'draw' : 'draws'}
-            {basesWaiting === 0 ? '' : `, ${String(basesWaiting)} outlined`}
-            {room.duplicateBases.length === 0 ? '' : `, ${String(room.duplicateBases.length)} already on the plan`}
+            {String(placements)} placed
+            {scene.unfilled.length === 0 ? '' : `, ${String(scene.unfilled.length)} with no parts chosen`}
           </dd>
         </div>
       )}
@@ -706,6 +769,11 @@ function RoomReadout({
 }
 
 /* ------------------------------------------------------------------- helpers */
+
+/** Drawable parts across every catalog piece. The unit `room.instances` is in. */
+function partsDrawn(scene: PlanScene): number {
+  return scene.pieces.reduce((sum, piece) => sum + piece.parts.length, 0)
+}
 
 /**
  * `4.8 MB`. One decimal, decimal megabytes.

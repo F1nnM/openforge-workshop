@@ -4,8 +4,14 @@
  * ```ts
  * // in the drawer, where the resolver already lives
  * const placed = placeRecipe(recipe, resolution, { x, z, rotation })
- * if (placed.kind === 'archived') placeTile(placed.placement)
- * else scene[nextId()] = placed.placement
+ * // The archived arm hands over a `SlotFill` and a cell and names **no
+ * // template** — `placement.ts#ArchivedPlacement` carries the measurement, and
+ * // row B4 owes the one-slot bare-base family the caller needs here. Until it
+ * // lands, `screens/builder/BuilderScreen.tsx` names the resolved file and
+ * // declines to place it rather than filling the base slot of a `role|floor`
+ * // family, which would work geometrically and mislabel a base as a floor.
+ * if (placed.kind === 'archived') placeTemplate({ template: BARE_BASE, ...placed.at, fills: { [BASE_SLOT]: placed.fill } })
+ * else placeGeneratedBase(placed.placement)
  *
  * // in the plan view
  * const candidates = [...planScene.pieces, ...generatedIds.map((id) =>

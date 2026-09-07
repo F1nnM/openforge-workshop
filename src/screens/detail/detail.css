@@ -181,10 +181,42 @@
 
 /* ── Actions ─────────────────────────────────────────────────────────────── */
 
+/* A column since row C1: the one action carries a line under it saying which
+   family and size it will arm, and for an insert the line replaces the button
+   entirely. */
 .of-detail-actions {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   margin-bottom: 22px;
+}
+
+/* What "Use in builder" will arm, or — for the 94 insert designs no family can
+   name — where the tile goes instead. Muted, because it qualifies the press
+   rather than competing with it. */
+.of-detail-armnote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+
+.of-detail-armnote strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Row C3. The outcome of "+ Place on the plan": the family the file was placed
+   as, and the cell it landed on. Mono, because a grid position is a measured
+   fact. No `flex-basis` and no wrap: row C1 made this container a column for its
+   own arm note, and a column gives a sentence its own line for free — which is
+   what the wrapped row this replaced was reaching for. */
+.of-detail-placed {
+  margin: 0;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
 }
 
 .of-detail-action {
@@ -200,17 +232,14 @@
   transition: filter 120ms ease;
 }
 
-.of-detail-action:hover {
+.of-detail-action:hover:not(:disabled) {
   filter: brightness(1.12);
 }
 
-/* In the library: the secondary accent, which is the palette's "confirmed"
-   colour (design-contract.md §1) — the same green the header's saved count
-   uses. */
-.of-detail-action[aria-pressed='true'] {
-  background: color-mix(in srgb, var(--acc2) 15%, transparent);
-  border-color: var(--acc2);
-  color: var(--acc2);
+/* Only while the placement module is being fetched — see `TileDrawer.tsx`. */
+.of-detail-action:disabled {
+  cursor: progress;
+  opacity: 0.6;
 }
 
 .of-detail-action[data-variant='ghost'] {

@@ -11,10 +11,19 @@
  * The button has five: idle, preparing (a plan exists, the file picker may be
  * open), running (bytes and entries, from the stream's own progress), saved, and
  * failed. `useArchiveDownload` classifies each typed error into a headline and a
- * detail; this component renders them and adds the two affordances that depend on
- * which failure it was — a retry where retrying could work, and §11's URL-list
- * degradation path where the archive is simply too large for the browser to
- * buffer.
+ * detail; this component renders them and adds the affordances that depend on
+ * which failure it was — a retry where retrying could work, and for an archive
+ * too large for the browser to buffer, the room as several smaller zips plus
+ * §11's URL-list degradation path behind it.
+ *
+ * ## The split parts are a sequence of presses, and the panel is what sequences it
+ *
+ * A split download is N saves, and each needs its own user gesture or the
+ * second file picker is popup-blocked. So the panel offers one button at a
+ * time: "save as N smaller files" on the failure, then "save part k+1 of N"
+ * beside each part that lands, then "saved all N parts". It reads
+ * `download.splitPlans` rather than the failure, because the failure is gone
+ * once the first part saves — `useArchiveDownload`'s note argues that placement.
  *
  * ## Why the progress bar is a `<progress>`
  *
@@ -59,6 +68,23 @@ export function DownloadAction({ download, files, generated = 0 }: DownloadActio
           <strong className="of-bill-note-head">{state.failure.headline}.</strong>{' '}
           {state.failure.detail}
           <span className="of-bill-fail-actions">
+            {/*
+              The split offer comes before the URL list because it is the better
+              answer: N real zips rather than a text file of md5-named URLs to
+              feed a download manager by hand. It is absent when
+              `splitArchivePlans` found no packing — one file already over the
+              limit — and then the URL list is the only offer, as it always was.
+            */}
+            {state.failure.kind === 'too-large' && state.failure.splitPlans !== undefined ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  download.saveSplitPart(0)
+                }}
+              >
+                Save as {state.failure.splitPlans.length} smaller files
+              </Button>
+            ) : null}
             {state.failure.kind === 'too-large' && state.failure.plan !== undefined ? (
               <Button size="sm" onClick={download.saveUrlList}>
                 Take the URL list{' '}
@@ -97,6 +123,40 @@ export function DownloadAction({ download, files, generated = 0 }: DownloadActio
         </p>
       ) : null}
 
+      {/*
+        The next part, offered rather than fired. A second save with no user
+        gesture between it and the first is what a popup blocker exists to stop,
+        so the sequence is one press per part — see `useArchiveDownload`'s note.
+
+        Read off `download.splitPlans` together with `state.part` because the
+        failure that first carried the parts is gone by now: saving part 1 moved
+        `state` to `'saved'`.
+      */}
+      {download.splitPlans !== undefined && state.status === 'saved' && state.part !== undefined
+        ? (() => {
+            // Bound here because TypeScript cannot see the guard above still
+            // holds inside `onClick`'s closure.
+            const part = state.part
+            return part.index + 1 < part.of ? (
+              <p className="of-bill-progress-text" role="status">
+                Saved part {part.index + 1} of {part.of} —{' '}
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    download.saveSplitPart(part.index + 1)
+                  }}
+                >
+                  Save part {part.index + 2} of {part.of}
+                </Button>
+              </p>
+            ) : (
+              <p className="of-bill-saved" role="status">
+                Saved all {part.of} parts.
+              </p>
+            )
+          })()
+        : null}
+
       {state.status === 'running' ? (
         <p className="of-bill-progress">
           <progress
@@ -107,6 +167,9 @@ export function DownloadAction({ download, files, generated = 0 }: DownloadActio
             {fileSizeLabel(state.bytesWritten)} of {fileSizeLabel(state.plan.predictedLength)}
           </progress>
           <span className="of-bill-progress-text">
+            {state.part === undefined
+              ? null
+              : `Part ${String(state.part.index + 1)} of ${String(state.part.of)} — `}
             {fileSizeLabel(state.bytesWritten)} of {fileSizeLabel(state.plan.predictedLength)} ·
             file {String(Math.min(state.entriesStarted, state.entries))} of{' '}
             {String(state.entries)}
