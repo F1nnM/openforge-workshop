@@ -75,7 +75,8 @@ import { filledSlots } from '@/store'
 import type { Footprint } from '@/catalog'
 import type { SlotName as PartName } from '@/template/rules'
 import { layoutFor } from '@/template/rules'
-import { placeTemplateSlots, slotElevationMm } from '@/template/offsets'
+import type { PlacedTemplate } from '@/template/offsets'
+import { placeTemplateSlots, slotDoubtSentence, slotElevationMm } from '@/template/offsets'
 
 import type { SlotLayout } from './geometry'
 import { ORIGIN_LAYOUT, footprintShape, rotatedExtent } from './geometry'
@@ -116,7 +117,37 @@ export type SlotRecords = ReadonlyMap<SlotName, CatalogRecord>
  * passes the result here, exactly as it already does for the catalog file
  * itself.
  */
-export type SlotLayoutRule = (template: TemplateId, slot: SlotName, fills: SlotRecords) => SlotLayout
+export type SlotLayoutRule = (template: TemplateId, slot: SlotName, fills: SlotRecords) => SlotLayoutAnswer
+
+/**
+ * A rule's answer for one slot: where it sits, or why it sits nowhere.
+ *
+ * **A union rather than `SlotLayout | undefined`, for the reason
+ * {@link StrandedSlotPart} is a union member and not an optional field.** Row
+ * D8: the rule really does have slots it cannot place — a `diag` wall fill has
+ * no straight run to lie along, and 104 of B2's 1,215 walked combinations are
+ * that case — and the answer it used to give was `dx = dz = 0`, which stacked
+ * every such part on the cell's own corner. An optional layout would have let a
+ * caller keep drawing at the origin by accident; a refusal that carries its own
+ * sentence makes the caller say what it does about it, and gives it the words.
+ */
+export type SlotLayoutAnswer = SlotLayout | SlotRefusal
+
+/**
+ * No position exists for this slot, and the sentence that says why.
+ *
+ * `refused` is `template/offsets.ts#slotDoubtSentence` of the doubt that caused
+ * it — the same wording C3's slot editor mounts, so the plan surface and the
+ * editor do not describe one fault two ways.
+ */
+export interface SlotRefusal {
+  readonly refused: string
+}
+
+/** Whether a rule's answer is a position. Narrows {@link SlotLayoutAnswer}. */
+export function isSlotLayout(answer: SlotLayoutAnswer): answer is SlotLayout {
+  return !('refused' in answer)
+}
 
 /**
  * Every part at the instance origin — the answer for a template with no
@@ -221,21 +252,31 @@ export const BASE_LIFT_MM = 6
  * ## What it does with a slot B2 refuses to place
  *
  * `placeTemplateSlots` is partial by design: a slot with no footprint, no
- * straight run along its face, or fills that over-run the face earns a
- * `SlotDoubt` and **no coordinate**. The app really does reach it: over the 40
- * recipes as C2's solver fills them, 38 raise no doubt and the 2 external-corner
- * `single_piece` recipes raise **4 `over-run` doubts** — two 2-unit walls and a
- * 0.5 column cannot share two 2-unit edges, `want 2 got 2.5` — which
- * `src/template/corpus.test.ts` prints on every run.
- * Such a slot is laid out at `dx = dz = 0` — the cell's own corner, where it
- * draws today — **but with the instance's `cell` declared**, so it turns with
- * the rest of the assembly instead of pivoting on itself. Giving it the
- * fabricated offset that would make it fit is what the plan forbids outright
- * (*"the mitre is in no tag and no measurement. Do not silently write 1.5."*),
- * and dropping the `cell` instead would reintroduce exactly the non-rigid case
- * A10 measured at three times its own ground. The doubt is disclosed where a
- * user can act on it — `three/fills.ts` announces it on the click and C3's slot
- * editor mounts `slotDoubtSentence` — not by moving geometry.
+ * straight run along its face, or a cell slot that is not a rectangle earns a
+ * `SlotDoubt` and **no coordinate**. This rule then answers {@link SlotRefusal}
+ * carrying that doubt's own sentence, and `scene.ts` puts the part in
+ * `PlanScene.undrawable` and draws nothing for it.
+ *
+ * **It used to answer `dx = dz = 0` instead, and that was the defect row D8
+ * fixed.** The old answer stacked every refused part on the cell's own corner
+ * *unrotated*, so a template with two refused parts drew them through each
+ * other. It reached a user: the project owner placed
+ * `S2W: Wall on Tile: Corner (Any, Single Piece)`, whose two 2-unit walls both
+ * earned `over-run want 2 got 2.5`, and reported *"the individual things filling
+ * the slots were overlapping and not in the right position"*. A part a user can
+ * see is missing is honest; a pile is a picture of something nobody can build,
+ * which is the *"plausible room nobody chose"* failure the plan names as this
+ * model's new risk.
+ *
+ * The `over-run` half of that is fixed upstream — `placeTemplateSlots` now
+ * *places* an over-running part at its anchored face and keeps the doubt as a
+ * warning, because the runs missing the face by 0.5 does not mean the part has
+ * nowhere to go. So the 4 `over-run` doubts over the 40 recipes are still
+ * reported, still not repaired with a fabricated offset (*"the mitre is in no
+ * tag and no measurement. Do not silently write 1.5."*), and now drawn where
+ * they belong. The doubt reaches the user where it can be acted on —
+ * `three/fills.ts` announces it on the click and C3's slot editor mounts
+ * `slotDoubtSentence` — rather than by moving geometry.
  *
  * ## Cost
  *
@@ -264,7 +305,7 @@ export function templateSlotLayout(
     const record = fills.get(slot)
     const shape = record === undefined ? undefined : footprintShape(record.foot)
     if (cell === undefined || placement === undefined || shape === undefined) {
-      return { dx: 0, dz: 0, rotation: 0, elevationMm, cell }
+      return { refused: refusalFor(placed, slot) }
     }
 
     // The one line row A10 wrote out and did not wire: a centre `o` in the
@@ -306,6 +347,27 @@ function liftOf(record: CatalogRecord | undefined): number {
   return record === undefined ? 0 : BASE_LIFT_MM
 }
 
+/**
+ * Why one slot got no position, in the words the slot editor already uses.
+ *
+ * The doubt naming this slot when there is one; otherwise the cell slot's, which
+ * is the case where the *cell* failed and took every other slot with it — a
+ * `floor` fill that is not a rectangle has no faces for anything to anchor to,
+ * so blaming the wall would be wrong and saying nothing would be worse.
+ *
+ * The fallback sentence is unreachable through {@link templateSlotLayout}: it is
+ * only called when `placeTemplateSlots` produced no placement for the slot, and
+ * every such path pushes a doubt for either the slot or the cell. It is a real
+ * sentence rather than a `throw` because a caller reading it would be looking at
+ * a plan, not a stack trace.
+ */
+function refusalFor(placed: PlacedTemplate, slot: SlotName): string {
+  const own = placed.doubts.find((doubt) => doubt.part === slot)
+  const doubt = own ?? placed.doubts[0]
+  if (doubt === undefined) return `The ${slot} part has no position in this recipe, so it is not drawn.`
+  return slotDoubtSentence(doubt)
+}
+
 /** The fills as `placeTemplateSlots` wants them: one footprint per filled slot. */
 function footprintsOf(fills: SlotRecords): ReadonlyMap<PartName, Footprint> {
   const feet = new Map<PartName, Footprint>()
@@ -343,8 +405,29 @@ export interface StrandedSlotPart extends PlanSlotPartBase {
   readonly kind: 'stranded'
 }
 
+/**
+ * A part this build holds and the recipe has nowhere to put.
+ *
+ * The third member, added by row **D8**, and the reason it exists is that the
+ * second-best answer was measurably terrible: the rule used to hand such a part
+ * `dx = dz = 0` and every one of them drew stacked on the cell's own corner,
+ * unrotated. `scene.ts` puts these in `PlanScene.undrawable` beside the `none`
+ * footprints, which is the list that already means *"this fill is real and the
+ * plan cannot show it"*.
+ *
+ * The `record` is carried because the omission names the file and the tile's own
+ * name; the {@link SlotLayout} is not, because there is none — that is the whole
+ * content of this case.
+ */
+export interface UnplaceableSlotPart extends PlanSlotPartBase {
+  readonly kind: 'unplaceable'
+  readonly record: CatalogRecord
+  /** Why, from {@link SlotRefusal.refused}. Already a whole sentence. */
+  readonly reason: string
+}
+
 /** One filled slot of an instance, de-referenced. */
-export type PlanSlotPart = ResolvedSlotPart | StrandedSlotPart
+export type PlanSlotPart = ResolvedSlotPart | StrandedSlotPart | UnplaceableSlotPart
 
 /** The catalog, as the canvas sees it. */
 export interface PlanCatalog {
@@ -397,7 +480,7 @@ export interface PlanCatalog {
 export function planCatalogFromFile(file: CatalogFile, layout: SlotLayoutRule = originSlotLayout): PlanCatalog {
   const byId = new Map<string, CatalogRecord>(file.records.map((record) => [record.id, record]))
   const tags = new Map<string, readonly string[]>()
-  const layouts = new Map<string, SlotLayout>()
+  const layouts = new Map<string, SlotLayoutAnswer>()
 
   const view: PlanCatalog = {
     record(tile) {
@@ -449,12 +532,19 @@ export function planCatalogFromFile(file: CatalogFile, layout: SlotLayoutRule = 
         // `NUL`-joined onto the signature, which is JSON and so holds no raw
         // control byte of its own — written as the escape and never as the byte.
         const key = `${signature}\u0000${slot}`
-        let resolved = layouts.get(key)
-        if (resolved === undefined) {
-          resolved = layout(instance.template, slot, records)
-          layouts.set(key, resolved)
+        // A refusal is a real cached answer, so the miss test stays `undefined`:
+        // `SlotLayoutAnswer` is never `undefined` and re-deriving a refusal every
+        // frame would defeat the memo for exactly the templates that need it.
+        let answer = layouts.get(key)
+        if (answer === undefined) {
+          answer = layout(instance.template, slot, records)
+          layouts.set(key, answer)
         }
-        parts.push({ kind: 'resolved', slot, fill, record, layout: resolved })
+        if (!isSlotLayout(answer)) {
+          parts.push({ kind: 'unplaceable', slot, fill, record, reason: answer.refused })
+          continue
+        }
+        parts.push({ kind: 'resolved', slot, fill, record, layout: answer })
       }
       return parts
     },

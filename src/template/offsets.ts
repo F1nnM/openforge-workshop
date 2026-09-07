@@ -301,7 +301,15 @@ export function edgeRun(foot: Footprint): number | null {
  */
 export type SlotVerdict = 'closes' | 'fails' | 'undecidable'
 
-/** Why one slot cannot be laid out, or does not fit. */
+/**
+ * Why one slot cannot be laid out, or does not fit.
+ *
+ * The five split two ways, and row **D8** made the split load-bearing:
+ * `over-run` is the only one that still yields a {@link SlotPlacement}. The
+ * other four mean *no position exists*; `over-run` means *the runs do not tile
+ * the face*, which is a different sentence and does not deprive the part of the
+ * face it is anchored to.
+ */
 export type SlotDoubtCode =
   /** No fill for the slot. C2 places incomplete instances by design. */
   | 'unfilled'
@@ -320,9 +328,22 @@ export type SlotDoubtCode =
  * `want` and `got` are present only on `over-run`, and they are the **cell
  * edge** and **what the fills sum to** — never the difference and never a
  * corrected run. The 8 single-piece corner mitres report `want: 2, got: 2.5`,
- * which says two 2-unit walls and a 0.5 column cannot share two 2-unit edges,
- * and stops there. The number that would make them fit is not in the corpus and
- * is not invented here.
+ * which says two 2-unit walls and a 0.5 column do not tile two 2-unit edges
+ * end to end, and stops there. The number that would make them tile is not in
+ * the corpus and is not invented here.
+ *
+ * **What row D8 measured about that sentence, and could not settle.** The 0.5 it
+ * is short by is {@link cornerSpan}'s — the column's own span, subtracted from
+ * the face on the assumption that the column and the wall lie end to end rather
+ * than overlapping. Whether they do is exactly what the corpus does not say. The
+ * 245 `shape|corner|left`/`right` records are **0 measured**, and worse, they do
+ * not agree with each other: 224 carry `size|openlock|A` with a width and no
+ * depth and resolve to `{shape:'wall', length:2}` — a 2 x 0.5 run — while 21
+ * (`…grate+widened.2x2…`) carry `size|width|2` *and* `size|depth|2` and resolve
+ * to `{shape:'rect', w:2, d:2}`, which is the **cell**, not a run. One tag class,
+ * both readings, and every one of the 245 tagged `size|width|2`. So neither
+ * "`size|width|2` names the run" nor "it names the cell" is the corpus's answer,
+ * and the doubt stays a doubt.
  */
 export interface SlotDoubt {
   readonly part: SlotName
@@ -347,9 +368,17 @@ export interface SlotPlacement {
 
 /** A layout resolved against one set of fills. */
 export interface PlacedTemplate {
-  /** In {@link TemplateLayout.slots} order, minus any slot that earned a doubt. */
+  /**
+   * In {@link TemplateLayout.slots} order, minus any slot for which no position
+   * exists.
+   *
+   * **Not "minus any slot that earned a doubt"** — row D8. An `over-run` slot
+   * appears in *both* this list and {@link doubts}, because the two answer
+   * different questions: where the part goes, and whether the runs tile the
+   * face. The other four {@link SlotDoubtCode}s appear only in `doubts`.
+   */
   readonly slots: readonly SlotPlacement[]
-  /** Empty when the template is fully placed. */
+  /** Empty when the template is fully placed **and** every face tiles. */
   readonly doubts: readonly SlotDoubt[]
   readonly verdict: SlotVerdict
   /** The cell extent every offset was measured against, when there was one. */
@@ -365,6 +394,9 @@ export interface PlacedTemplate {
  * contract the plan needs (*"No candidate leaves the slot empty, marked needs a
  * choice, and places anyway"*) and contract **C-g**'s *"`placeTemplate` must
  * accept incomplete fills"*.
+ *
+ * A slot whose face does not tile is a *different* case and gets both a doubt
+ * and its position; see the `over-run` note in the loop below.
  */
 export function placeTemplateSlots(
   layout: TemplateLayout,
@@ -388,12 +420,31 @@ export function placeTemplateSlots(
       continue
     }
     if (cell === undefined) continue
-    /* The closure check comes *before* the placement, so a slot the rule cannot
-       fit earns a doubt and no coordinate. Placing a `diag` fill from its
-       bounding box would anchor it flush along an axis it does not lie on, and
-       placing an over-running wall would draw two walls through each other —
-       both are pictures of something nobody can build, which is the "plausible
-       room nobody chose" failure the plan names as this model's new risk. */
+    /* Two checks that look alike and are not, and row **D8** separated them
+       because conflating them shipped the worst available drawing.
+
+       `no-run` is a **refusal**. A `diag`, `tri` or `arc` fill has no straight
+       run to lie along, so anchoring it flush from its bounding box would set it
+       against an axis it does not lie on. There is no position to give.
+
+       `over-run` is a **warning**, and the slot is placed anyway. That the sum
+       misses says the fills' *runs* do not tile the face under
+       {@link cornerSpan}'s disjointness assumption; it does not say the part has
+       nowhere to go. Its position is the face it is anchored to — and on the 8
+       single-piece corner mitres every part still lands inside its own cell: two
+       2-unit walls flush to two adjacent 2-unit faces of a 2 x 2 overlap in the
+       0.5 x 0.5 corner square and overhang nothing, so the union is still the
+       cell and A10's rigid body is intact. `offsets.test.ts` measures that
+       union.
+
+       Refusing the coordinate collapsed both walls *and* the column to
+       `dx = dz = 0` unrotated, which drew the two walls through each other along
+       one face and left the other face bare. The project owner reported exactly
+       that — *"the individual things filling the slots were overlapping and not
+       in the right position"* — and it is strictly worse than either an honest
+       overhang or nothing at all. A warning the user can act on plus the
+       anchored position beats a pile, and it also beats inventing the half unit
+       that would close the sum, which this branch still does not do. */
     if (rule.anchor === 'edge') {
       const run = edgeRun(foot)
       if (run === null) {
@@ -403,7 +454,6 @@ export function placeTemplateSlots(
       const span = rule.side % 2 === 0 ? cell.w : cell.d
       if (Math.abs(run + taken - span) > CLOSURE_EPS) {
         doubts.push({ part: rule.part, code: 'over-run', want: span, got: run + taken })
-        continue
       }
     }
     slots.push({
@@ -485,6 +535,46 @@ function cellExtentOf(
  * fill rather than written as 0.5, so a future corner fill of another size is
  * subtracted correctly instead of silently ignored. A column is square, so which
  * axis is read does not matter and no side needs threading through.
+ *
+ * ## An open decision row D8 found and deliberately did not take
+ *
+ * **This subtraction and {@link slotOffset}'s `edge` line are two different
+ * conventions, and at most one of them is right.** The subtraction reserves the
+ * corner's span at one end of the face, as though the wall and the column lay
+ * end to end. `slotOffset` centres the wall across the **whole** face and
+ * reserves nothing. Measured on a 2 x 2 external corner at rotation 0, drawn
+ * through the canvas's own `slotGeometry`:
+ *
+ * | recipe | wall run | verdict | right wall drawn | column drawn |
+ * | --- | ---: | --- | --- | --- |
+ * | single piece | 2 | `fails` | `x ∈ [0, 2]`, `z ∈ [0, 0.5]` | `x ∈ [0, 0.5]` |
+ * | modular | 1.5 | `closes` | `x ∈ [0.25, 1.75]`, `z ∈ [0, 0.5]` | `x ∈ [0, 0.5]` |
+ *
+ * So the recipe this file calls a **failure** draws a flawless L — the two walls
+ * meet in the corner square and nothing overhangs — and the recipe it calls a
+ * **fit** draws each wall a quarter unit over the column at one end with a
+ * quarter-unit gap at the other. The verdicts are the wrong way round with
+ * respect to the picture.
+ *
+ * Exactly one of two edits reconciles them, and **the corpus cannot say which**:
+ *
+ *   1. *Drop the subtraction.* Then a full-face run closes and 1.5 on a 2-unit
+ *      face is the under-run — which inverts the whole 1,006 / 33 / 176 split
+ *      this file documents, and makes the 8 single-piece mitres correct rather
+ *      than doubtful.
+ *   2. *Make the `edge` anchor abut.* Centre the wall on the span the corner
+ *      leaves rather than on the face. The modular corner then butts against its
+ *      column, and the single-piece walls move a quarter unit **outside** the
+ *      cell, so A10's 4.00 stops holding for them.
+ *
+ * Choosing is choosing whether a single-piece corner wall's 2 units *include*
+ * the mitre that overlaps the column or *exclude* it, and that is precisely the
+ * question the corpus refuses: see the D8 note on {@link SlotDoubt} — 0 of the
+ * 245 chirality records measured, and the class carries both readings at once.
+ * Row D8's mandate was that nothing may draw stacked, which is settled without
+ * touching this; picking between 1 and 2 would be inventing the fact that
+ * settles it, and it changes which recipe the surface warns about. It is a
+ * decision for whoever can measure a mitre.
  */
 function cornerSpan(layout: TemplateLayout, feet: ReadonlyMap<SlotName, Footprint>): number {
   let total = 0
