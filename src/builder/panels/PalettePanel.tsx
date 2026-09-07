@@ -1,7 +1,34 @@
 /**
- * The builder's left column — design-contract.md §2.4's palette, as row C1
- * rebuilt it: **the 91 templates this build can place**, grouped by role, with
- * form and build as facets and size as a control on the armed family.
+ * The builder's left column — design-contract.md §2.4's palette: **the 91
+ * templates this build can place**, as two sections — 40 assemblies, then 51
+ * single tiles grouped by role — with a slot count on every row, form and build
+ * as facets and size as a control on the armed single tile.
+ *
+ * ## Row D2, and the report that caused it
+ *
+ * Row C1 listed all 91 as one list in nine groups, because all 91 place through
+ * one function. The project owner placed a `Corner (Wall on Tile)` from it and
+ * reported:
+ *
+ * > *"It shows everywhere as having one slot only. In the menu I can select a few
+ * > corner variations, for this one slot, which are already corner combinations
+ * > of walls. I can't individually modify the walls. I also can't select a floor.
+ * > I need to be able to do that though. Thats the whole point of the templates I
+ * > wanted."*
+ *
+ * They had found a one-slot generated family. The assembly they were describing
+ * ships — `S2W: Wall on Tile: Corner (Any, Single Piece)`, with `column`,
+ * `right wall`, `left wall`, `floor` and `base` — as row 75 of 91, under a
+ * heading that named a build system rather than a kind, with sixteen one-slot
+ * rows whose names also say *corner* above it. **Nothing underneath was broken:
+ * the palette had 91 rows of two different kinds and did not distinguish them.**
+ *
+ * What this row changes is three things and no engine: the list is two sections
+ * with the assemblies first (`palette.ts#paletteSections`), a query ranks each
+ * section so `corner` puts `Corner (Any, Single Piece)` first of 24
+ * (`palette.ts#rankFamilies`), and every row states its slot count — 5 or 3 on
+ * an assembly, 1 on a single tile — from `template.parts.length` and nothing
+ * derived from it.
  *
  * ## What it was, twice, and why neither survived
  *
@@ -21,16 +48,22 @@
  * argument for the shape of the list and `families.ts` for the rows themselves;
  * this file is the control.
  *
- * ## 91 rows, nine groups, and the cost that inverts
+ * ## 91 rows, two sections, eight groups, and the cost that inverts
  *
  * The UX research measured the honest cost of a tag-predicated palette: from
  * roughly 20 recognisable library rows to **3,862** entries, which is
- * recognition becoming recall. Role-predicated families make it **91** — walls
+ * recognition becoming recall. Role-predicated families make it **51** — walls
  * (19 families over 5,381 records), floors (17 / 2,162), risers, columns,
- * stairs, roofs, decor, the one bare-base family, and the 40 `S2W: Wall on Tile`
- * recipes in a group of their own. **RECENT mitigates what is left of that cost
- * and does not fix it**; `palette.ts` says so where the ring is implemented,
- * because that is the claim most likely to be quietly inflated later.
+ * stairs, roofs, decor and the one bare-base family — under the second of two
+ * section headings, above which the 40 authored assemblies are a flat list.
+ * **RECENT mitigates what is left of that cost and does not fix it**;
+ * `palette.ts` says so where the ring is implemented, because that is the claim
+ * most likely to be quietly inflated later.
+ *
+ * **The single tiles are second and not lesser.** B4 measured them reaching
+ * 96.7% of records and 100% of designs against the assemblies' 35.4%, and every
+ * curve, riser, stair and roof is reachable only through one of them, so both
+ * sections render in full, in one scroll, with their own counts.
  *
  * There is no `insert` group and the panel says where inserts went instead: 285
  * records, **262 of them already reachable through a tile's own accessory
@@ -51,13 +84,23 @@
  * can express (`families.ts` enumerates both) — because a control with one
  * position cannot be operated.
  *
- * ## What a row can say, and the one thing it no longer shows
+ * ## What a row says: a name, a slot count, and one second fact
  *
- * A row carries the family's name and {@link candidateCount}'s number: how many
- * archive tiles the slot admits at the chosen size, resolved by
- * `@/composition`'s own `resolveSlotTags` so it is the number a fill will be
- * chosen from rather than a second opinion about it. A recipe shows its part
- * count instead, because 2 to 5 slots have no single answer.
+ * Every row carries its name and its **slot count**, which is the fact the
+ * owner's report was about and the reason it is on all 91 rather than on the 40
+ * that surprised them. Beside it sits one more fact, and which one depends on
+ * what the row *has*:
+ *
+ *   - a **single tile** shows {@link candidateCount}'s number — how many archive
+ *     tiles its one slot admits at the chosen size, resolved through
+ *     `@/composition`'s own `resolveSlotTags` so it is the set a fill will be
+ *     chosen from rather than a second opinion about it;
+ *   - an **assembly** shows its **build system**, from the template's own
+ *     `build|` tag. It has no single candidate count — 3 or 5 slots have no one
+ *     answer — and it needs to say `S2W` somewhere, because the group heading
+ *     that used to say it is now the section heading `Assemblies`. On the row
+ *     rather than on the heading, so it stays right when a second build system's
+ *     assemblies arrive.
  *
  * **No thumbnail.** A family has no picture, and picking a representative would
  * reintroduce the defect rows V3 and V5 spent two revisions removing — a palette
@@ -124,12 +167,11 @@ import {
   positionOf,
   sizeLabelOf,
 } from './families'
-import type { CandidateCounter, PaletteFacets } from './palette'
+import type { CandidateCounter, PaletteFacets, PaletteSection } from './palette'
 import {
   ALL_FACETS,
   createCounter,
-  filterFamilies,
-  groupFamilies,
+  paletteSections,
   reachableFacets,
   recentArms,
   rememberArm,
@@ -159,8 +201,6 @@ export interface PalettePanelProps {
 }
 
 export function PalettePanel({ index, tools, search, onQueryChange }: PalettePanelProps) {
-  const listId = useId()
-
   /**
    * The candidate counter, over the index this panel holds.
    *
@@ -247,8 +287,12 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
     arm(family, positionOf(family, claimed.size))
   }, [pending, arm])
 
-  const rows = useMemo(() => filterFamilies(TEMPLATE_FAMILIES, search.q, facets), [search.q, facets])
-  const groups = useMemo(() => groupFamilies(rows), [rows])
+  const sections = useMemo(
+    () => paletteSections(TEMPLATE_FAMILIES, search.q, facets),
+    [search.q, facets],
+  )
+  /** Every row on screen, both sections — the search readout and RECENT's filter. */
+  const rows = useMemo(() => sections.flatMap((section) => section.rows), [sections])
   const reachable = useMemo(
     () => reachableFacets(TEMPLATE_FAMILIES, search.q, facets),
     [search.q, facets],
@@ -270,39 +314,32 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
 
       <FacetBar facets={facets} reachable={reachable} onChange={setFacets} />
 
-      <section className="of-pal-block" aria-labelledby={listId}>
-        <h2 className="of-pal-heading" id={listId}>
-          <Eyebrow>Templates</Eyebrow> <Chip tone="count">{countLabel(rows.length)}</Chip>
-        </h2>
-
-        {/*
-          One line about what a placement is today, because the alternative is a
-          user watching the bill say "needs a choice" with no idea why. It states
-          the present tense only: what a size position narrows is the number on
-          the row, which is on screen beside it.
-        */}
-        <p className="of-pal-note">
-          A placed family arrives with its slot empty and the bill reports it as needing a choice.
-          The number on a row is how many archive tiles could fill it.
-        </p>
-
+      {/* One region around both sections, and it keeps its own name rather than
+          borrowing a heading: the two `<h2>`s below belong to the sections, and
+          `screens/builder/builder.test.tsx` reads *"which templates does `?q=`
+          leave"* off this landmark, which is a question about the whole list and
+          not about either section. It carries no count — the search field's
+          readout already says `24 of 91 templates` for exactly the same set. */}
+      <section className="of-pal-block" aria-label="Templates">
         {rows.length === 0 ? (
           <p className="of-pal-note">
-            No template matches. The 91 rows are families and recipes, not tiles — search the
-            catalog screen for a texture or a tile name, then use its &ldquo;Use in
-            builder&rdquo;.
+            No template matches. The {countLabel(TEMPLATE_FAMILIES.length)} rows are assemblies and
+            single tiles, not tiles from the archive — search the catalog screen for a texture or a
+            tile name, then use its &ldquo;Use in builder&rdquo;.
           </p>
         ) : null}
 
+        {/* Above **both** sections, because the ring mixes both kinds: a strip of
+            the last six things armed is a fact about the session and not about
+            either list. `palette.ts#MAX_RECENT` carries the rest. */}
         {recentRows.length > 0 ? (
           <RecentStrip rows={recentRows} armed={armed} size={size} arm={arm} />
         ) : null}
 
-        {groups.map((group) => (
-          <PaletteList
-            key={group.key}
-            label={group.label}
-            rows={group.rows}
+        {sections.map((section) => (
+          <PaletteSectionBlock
+            key={section.key}
+            section={section}
             armed={armed}
             size={size}
             count={count}
@@ -328,19 +365,36 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
   )
 }
 
-/* --------------------------------------------------------------------- rows */
+/* ----------------------------------------------------------------- sections */
 
 /**
- * One group: a heading, its rows, and the size control under the armed one.
+ * What a section says about itself, under its heading.
  *
- * The size control lives **inside the armed row's `<li>`** rather than in a
- * panel of its own, for the reason the row itself is the control's subject: a
- * separate block would have to name which family it belonged to, and a 272px
- * column has no room to say "Size — Wall: Corner (S2W)" over a set of chips.
+ * One sentence each, and between them they answer the owner's report in the
+ * panel rather than only in a docblock: an assembly is *several tiles you fill
+ * one by one*, a single tile is *one*. C1 had one sentence over the whole list
+ * — *"a placed family arrives with its slot empty"* — which was true of both
+ * kinds and therefore said nothing about the difference between them.
  */
-function PaletteList({
-  label,
-  rows,
+const SECTION_NOTE: Readonly<Record<PaletteSection['key'], string>> = {
+  assemblies:
+    'Several tiles in one placement — a corner brings its own walls, floor and base. Each slot is a choice you make on the placed piece.',
+  tiles:
+    'One tile, one slot. The number is how many archive tiles could fill it at the chosen size.',
+}
+
+/**
+ * One section: its heading and count, its sentence, and its rows.
+ *
+ * The **assemblies have no sub-groups** and the single tiles have eight, which
+ * is the asymmetry the data has: a role is what makes 51 one-slot rows findable
+ * (§3.1's 3,862-to-51 measurement), and the 40 assemblies are already one flat
+ * list short enough to read — their sub-structure would have been the build
+ * system, and today all 40 share one, so it is on the rows instead
+ * ({@link rowFact}).
+ */
+function PaletteSectionBlock({
+  section,
   armed,
   size,
   count,
@@ -348,8 +402,7 @@ function PaletteList({
   disarm,
   onSize,
 }: {
-  readonly label: string
-  readonly rows: readonly TemplateFamily[]
+  readonly section: PaletteSection
   readonly armed: PlanTools['selectedTemplate']
   readonly size: readonly string[]
   readonly count: CandidateCounter
@@ -358,68 +411,162 @@ function PaletteList({
   readonly onSize: (family: TemplateFamily, position: readonly string[]) => void
 }) {
   const headingId = useId()
+  const rowProps = { armed, size, count, arm, disarm, onSize }
+  return (
+    <section className="of-pal-section" aria-labelledby={headingId}>
+      <h2 className="of-pal-heading" id={headingId}>
+        <Eyebrow>{section.label}</Eyebrow>{' '}
+        <Chip tone="count">{countLabel(section.rows.length)}</Chip>
+      </h2>
+      <p className="of-pal-note">{SECTION_NOTE[section.key]}</p>
+      {section.groups.length === 0 ? (
+        <PaletteList rows={section.rows} {...rowProps} />
+      ) : (
+        section.groups.map((group) => (
+          <PaletteGroupBlock key={group.key} label={group.label} rows={group.rows} {...rowProps} />
+        ))
+      )}
+    </section>
+  )
+}
+
+/* --------------------------------------------------------------------- rows */
+
+/** What every row renderer needs from the panel. */
+interface RowProps {
+  readonly armed: PlanTools['selectedTemplate']
+  readonly size: readonly string[]
+  readonly count: CandidateCounter
+  readonly arm: (family: TemplateFamily, position?: readonly string[]) => void
+  readonly disarm: () => void
+  readonly onSize: (family: TemplateFamily, position: readonly string[]) => void
+}
+
+/** One role group of the single-tile section: a sub-heading over a {@link PaletteList}. */
+function PaletteGroupBlock({
+  label,
+  rows,
+  ...rowProps
+}: RowProps & { readonly label: string; readonly rows: readonly TemplateFamily[] }) {
+  const headingId = useId()
   return (
     <section className="of-pal-group" aria-labelledby={headingId}>
       <h3 className="of-pal-heading of-pal-subheading" id={headingId}>
         <Eyebrow>{label}</Eyebrow> <Chip tone="count">{countLabel(rows.length)}</Chip>
       </h3>
-      <ul className="of-pal-list" role="list">
-        {rows.map((family) => {
-          const selected = armed === family.id
-          // The count follows the armed position, because that is the set a fill
-          // will be chosen from. An unarmed row counts what it admits at `any
-          // size`, which is what it will arm at.
-          const detail = rowDetail(family, count(family, selected ? size : []))
-          return (
-            <li key={family.id} className="of-pal-row" data-selected={selected ? '' : undefined}>
-              <button
-                type="button"
-                className="of-pal-pick"
-                aria-pressed={selected}
-                /* The **full** name and the noun, because the visible row drops
-                   both: the heading carries the role and the column has no width
-                   for `tiles`. Two families are called `Straight` — one under
-                   Wall and one under Floor — so without this a screen reader
-                   hears the same row name twice and a test cannot tell them
-                   apart either. */
-                aria-label={`${family.name}, ${detail}`}
-                onClick={() => {
-                  // Re-selecting the armed row disarms it, which is what
-                  // `aria-pressed` promises.
-                  if (selected) disarm()
-                  else arm(family)
-                }}
-              >
-                <span className="of-pal-name">{family.shortName}</span>
-                <span className="of-pal-size" aria-hidden="true">
-                  {family.kind === 'recipe' ? detail : countLabel(count(family, selected ? size : []) ?? 0)}
-                </span>
-              </button>
-              {selected ? (
-                <SizeControl family={family} size={size} count={count} onSize={onSize} />
-              ) : null}
-            </li>
-          )
-        })}
-      </ul>
+      <PaletteList rows={rows} {...rowProps} />
     </section>
   )
 }
 
 /**
- * The row's right-hand fact: candidates for a family, parts for a recipe.
+ * The rows themselves, with the size control under the armed one.
  *
- * A recipe has 2 to 5 slots, so one candidate count cannot answer *"how many
- * tiles fill this"*; the part count is the honest figure and it is short enough
- * to show whole. A family shows the number alone, because the noun is the same
- * on every row of a group and the column is 272px — the noun is in the row's
- * `aria-label`, where a screen reader needs it and where it costs no width.
- * *"tiles"* rather than *"items"* is the whole app's noun for a design, and
+ * The size control lives **inside the armed row's `<li>`** rather than in a
+ * panel of its own, for the reason the row itself is the control's subject: a
+ * separate block would have to name which family it belonged to, and a 272px
+ * column has no room to say "Size — Wall: Corner (S2W)" over a set of chips.
+ *
+ * Heading-free, because its two callers put different headings above it — an
+ * `<h2>` section for the 40 assemblies, an `<h3>` role group for each slice of
+ * the 51 single tiles.
+ */
+function PaletteList({
+  rows,
+  armed,
+  size,
+  count,
+  arm,
+  disarm,
+  onSize,
+}: RowProps & { readonly rows: readonly TemplateFamily[] }) {
+  return (
+    <ul className="of-pal-list" role="list">
+      {rows.map((family) => {
+        const selected = armed === family.id
+        // The count follows the armed position, because that is the set a fill
+        // will be chosen from. An unarmed row counts what it admits at `any
+        // size`, which is what it will arm at.
+        const fact = rowFact(family, count(family, selected ? size : []))
+        const slots = slotLabel(family.slots)
+        return (
+          <li key={family.id} className="of-pal-row" data-selected={selected ? '' : undefined}>
+            <button
+              type="button"
+              className="of-pal-pick"
+              aria-pressed={selected}
+              /* The **full** name and the nouns, because the visible row drops
+                 both: the heading carries the role and the column has no width
+                 for `tiles`. Two families are called `Straight` — one under
+                 Wall and one under Floor — so without this a screen reader
+                 hears the same row name twice and a test cannot tell them
+                 apart either. */
+              aria-label={`${family.name}, ${slots}, ${fact.spoken}`}
+              onClick={() => {
+                // Re-selecting the armed row disarms it, which is what
+                // `aria-pressed` promises.
+                if (selected) disarm()
+                else arm(family)
+              }}
+            >
+              <span className="of-pal-name">{family.shortName}</span>
+              <span className="of-pal-detail" aria-hidden="true">
+                <span className="of-pal-slots">{slots}</span>
+                <span className="of-pal-fact">{fact.visible}</span>
+              </span>
+            </button>
+            {selected ? (
+              <SizeControl family={family} size={size} count={count} onSize={onSize} />
+            ) : null}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/**
+ * The slot count, on **every** row.
+ *
+ * The owner's report is one sentence long and this is the word in it: *"It shows
+ * everywhere as having one slot only."* They were right about the row they had
+ * and wrong about the palette, and neither the row nor the palette said which.
+ * `family.slots` is `template.parts.length` — `families.ts` argues why it must be
+ * that and not a count of the slots that still need a choice.
+ */
+function slotLabel(slots: number): string {
+  return `${countLabel(slots)} ${slots === 1 ? 'slot' : 'slots'}`
+}
+
+/**
+ * The row's second fact — the one that differs by kind.
+ *
+ * A **single tile** shows how many archive tiles its slot admits. An **assembly**
+ * shows its build system, because it has no single candidate count (3 or 5 slots
+ * have no one answer) and because the group heading that used to carry `S2W` is
+ * now the section heading `Assemblies`. Read off `family.build`, the template's
+ * own `build|` tag, so this is a per-row fact that stays correct when a second
+ * build system's assemblies land rather than a heading that would have to be
+ * rewritten.
+ *
+ * `visible` is abbreviated to the width of the column and `spoken` carries the
+ * noun: *"tiles"* rather than *"items"* is the whole app's word for a design, and
  * `screens/catalog`'s field says the same word over the same figures.
  */
-function rowDetail(family: TemplateFamily, candidates: number | undefined): string {
-  if (family.kind === 'recipe') return `${family.slots} parts`
-  return `${countLabel(candidates ?? 0)} tiles`
+function rowFact(
+  family: TemplateFamily,
+  candidates: number | undefined,
+): { readonly visible: string; readonly spoken: string } {
+  if (family.kind !== 'recipe') {
+    const tiles = countLabel(candidates ?? 0)
+    return { visible: tiles, spoken: `${tiles} tiles` }
+  }
+  // Unreachable over the 40 shipped assemblies, which all carry `build|s2w`; an
+  // assembly emitted without one says `assembly` rather than an empty cell.
+  const build = family.build === undefined ? undefined : axisLabel(family.build)
+  return build === undefined
+    ? { visible: 'assembly', spoken: 'assembly' }
+    : { visible: build, spoken: `${build} build system` }
 }
 
 /**
@@ -432,10 +579,21 @@ function rowDetail(family: TemplateFamily, candidates: number | undefined): stri
  * longest domain is 32 positions and a horizontal scroller in a 272px column
  * hides most of them behind a gesture.
  *
- * Renders **nothing** when there is nothing to choose: the 40 recipes name their
- * own sizes in their parts, and 8 families have no expressible domain. Those 8
- * get a sentence instead of a control, because a row that simply omits the
- * control it has on its nineteen neighbours reads as a bug.
+ * Renders **nothing** when there is nothing to choose: 8 families have no
+ * expressible domain, and no assembly has one at all. Those 8 get a sentence
+ * instead of a control, because a row that simply omits the control it has on
+ * its nineteen neighbours reads as a bug.
+ *
+ * **Row D2 checked the assembly case rather than inheriting it, and it holds.**
+ * `GENERATED_FAMILY_SIZES` has no entry for any of the 40, so `family.sizes` is
+ * empty for all of them — but the reason it should be is in the fixtures: an
+ * assembly's parts `require` their sizes outright (the 5-part corner asks for
+ * `size|width|2` on each wall and `size|width|2` + `size|depth|2` on the floor),
+ * so a size is part of *which assembly this is* rather than a parameter of the
+ * placement. A control here would offer a position whose tags join `parentTags`
+ * where no `constrain` collects them — a chip that changed nothing. So no
+ * control, and no sentence either: an assembly has no neighbour with one, so
+ * there is no missing control to explain.
  */
 function SizeControl({
   family,
@@ -505,14 +663,19 @@ function sizeChipLabel(label: string): string {
 type RecentEntry = { readonly family: TemplateFamily; readonly size: readonly string[] }
 
 /**
- * RECENT, as a strip of chips above the list.
+ * RECENT, as a strip of chips above **both** sections.
  *
- * **A strip and not a tenth group**, because all 91 rows are always listed: a
- * group would put a second row on screen for the same family, and since the size
- * control lives inside the armed row it would put a second live copy of that
+ * **A strip and not a third section**, because all 91 rows are always listed: a
+ * section would put a second row on screen for the same family, and since the
+ * size control lives inside the armed row it would put a second live copy of that
  * control there too. `palette.ts#MAX_RECENT` carries the argument and the
  * research's own caveat — this mitigates the recognition cost of 91 rows and
  * does not fix it, which is why it is six chips and not a curated list.
+ *
+ * **Above both sections rather than inside one**, because the ring mixes the two
+ * kinds: the last six things armed can be four assemblies and two single tiles,
+ * and filing that under either heading would make it a claim about one list when
+ * it is a fact about the session.
  *
  * A chip carries the size as well as the family, because re-placing something is
  * usually re-placing it *at the same size*: four 2x2 floors and then a fifth.
@@ -566,6 +729,16 @@ function RecentStrip({
  * offered, so no chip is a dead end. The axis is not shown at all when one value
  * is all there is: with `?q=octagon` narrowing to two rows, a "form" row holding
  * only "Octagon" is a control with nothing to choose.
+ *
+ * **The two axes reach different numbers of sections, and the labels say which.**
+ * `build` is a tag every one of the 91 templates carries at most one of, so its
+ * chips narrow both sections and its label is the bare axis name. `form` is a tag
+ * only the 51 single tiles carry — an assembly's form lives in up to five
+ * separate `require` blocks, one per part — so it narrows that section alone and
+ * is labelled **Tile form** to say so. `palette.ts#filterFamilies` carries the
+ * measurement and what C1's rule did instead: it hid all 40 assemblies, which
+ * meant pressing `Corner` emptied the section holding the assembly the owner was
+ * looking for.
  */
 function FacetBar({
   facets,
@@ -579,7 +752,7 @@ function FacetBar({
   return (
     <div className="of-pal-facets">
       <FacetRow
-        label="Form"
+        label="Tile form"
         values={reachable.forms}
         labelOf={axisLabel}
         chosen={facets.form}
@@ -688,7 +861,7 @@ function PaletteSearch({
         autoComplete="off"
         spellCheck={false}
         maxLength={MAX_QUERY_LENGTH}
-        placeholder="Search 91 templates…"
+        placeholder={`Search ${countLabel(total)} templates…`}
         value={draft}
         onChange={(event) => {
           const text = event.target.value

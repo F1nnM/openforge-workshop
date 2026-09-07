@@ -28,18 +28,34 @@
  *     fixtures, 128 authored parts between them, every one of them a
  *     `S2W: Wall on Tile` composition.
  *
- * Both are `RecipeTemplate`s and both are placeable through `placeTemplate`, so
- * the palette lists them together and the difference shows up in exactly two
- * places: a recipe has **no size control** (its parts name their own
- * `size|width|2`, so size is part of the recipe's identity) and a recipe's
- * right-hand label counts **parts** where a family's counts candidates.
+ * Both are `RecipeTemplate`s and both are placeable through `placeTemplate`, and
+ * **row C1 read that as licence to list them together. It is not, and the cost
+ * of the mistake was measured in a real browser.** The project owner placed a
+ * corner, got a one-slot row, and reported:
  *
- * ## Grouped by role, because that is what inverts the cost
+ * > *"It shows everywhere as having one slot only. … I can't individually modify
+ * > the walls. I also can't select a floor. I need to be able to do that though.
+ * > Thats the whole point of the templates I wanted."*
+ *
+ * Everything underneath was working. `S2W: Wall on Tile: Corner (Any, Single
+ * Piece)` ships, with `[column, right wall, left wall, floor, base]` — the floor,
+ * the two walls and the column, in their own words. It was row 75 of 91, under a
+ * heading that named a build system rather than a kind, and the eleven — measured
+ * **sixteen** — one-slot rows whose names also say *corner* were above it. So the
+ * kind of thing a row is is the **first** distinction the palette makes now
+ * (`palette.ts#paletteSections`), and the slot count is on every row.
+ *
+ * The other two differences C1 named still hold: an assembly has **no size
+ * control** (its parts name their own `size|width|2`, so size is part of its
+ * identity) and no single candidate count, because 3 or 5 slots have no one
+ * answer to *"how many tiles fill this"*.
+ *
+ * ## Grouped by role inside the single tiles, because that is what inverts the cost
  *
  * §3.1's measurement is the whole argument for this shape: predicated on raw
  * tags the palette would have grown from roughly 20 recognisable library rows to
  * **3,862** entries — recognition becoming recall. Role-predicated families make
- * it **91**, in nine groups.
+ * it **51**, in eight groups, under one section heading.
  *
  * {@link GROUP_ORDER} is ordered by the corpus, not alphabetically, and the
  * figures are records carrying each `role|` tag over the emitted index (measured
@@ -55,7 +71,6 @@
  * | roof | 100 | 2 |
  * | decor | 26 | 1 |
  * | base | 1,963 | 1 |
- * | recipe | — | 40 |
  *
  * The family counts do **not** follow the record counts — riser has 319 records
  * in 2 families and column 223 in 6 — so the two orderings are different lists
@@ -126,11 +141,32 @@ export interface SizePosition {
   readonly tags: readonly string[]
 }
 
-/** Which of the two arrays a row came from. See the module note. */
+/**
+ * Which of the two arrays a row came from. See the module note.
+ *
+ * **The code's word and the screen's word are not the same word, and row D2
+ * fixed the screen's.** `recipe` is what `screens/assemblies` calls a
+ * multi-slot composition and it stays the name in the types; on screen those 40
+ * rows are **assemblies** and the 51 one-slot rows are **single tiles**, because
+ * the owner's report of this palette was that it *"shows everywhere as having
+ * one slot only"* — the two kinds were listed as one list of 91 and the words
+ * `family` and `recipe` were nowhere on it. `palette.ts#SECTION_LABEL` is the
+ * one place the display words are spelled.
+ */
 export type FamilyKind = 'family' | 'recipe'
 
-/** The nine groups of {@link GROUP_ORDER}. */
-export type GroupKey = 'wall' | 'floor' | 'riser' | 'column' | 'stair' | 'roof' | 'decor' | 'base' | 'recipe'
+/**
+ * The eight groups the single-tile rows are split into — {@link GROUP_ORDER}.
+ *
+ * **The 40 assemblies are not in here and no longer have a group.** They were a
+ * ninth `recipe` group under a heading that said `S2W: Wall on Tile`, which is
+ * how the owner came to place a one-slot corner and conclude the templates were
+ * broken: the assembly they wanted was 51 rows further down under a heading
+ * naming a build system rather than a kind. Row D2 makes the kind the *section*
+ * (`palette.ts#paletteSections`) and the role the sub-group inside one of them,
+ * so `TemplateFamily.group` is `undefined` for all 40.
+ */
+export type GroupKey = 'wall' | 'floor' | 'riser' | 'column' | 'stair' | 'roof' | 'decor' | 'base'
 
 /** One palette row: a template, with what the panel needs to show and filter it. */
 export interface TemplateFamily {
@@ -139,20 +175,43 @@ export interface TemplateFamily {
   /** The template's own name — `"Wall: Corner (S2W)"`, `"S2W: Wall on Tile: Wall: Torch (Modular)"`. */
   readonly name: string
   /**
-   * {@link name} with the group's own words taken off the front.
+   * {@link name} with the words the row's own heading already says taken off
+   * the front.
    *
    * The group heading already says `WALL`, so 19 rows that each begin *"Wall: "*
    * spend a third of a 272px column repeating it. Falls back to the full name
    * whenever the prefix is not there, so nothing is ever trimmed to nothing.
+   *
+   * For an assembly that prefix is {@link RECIPE_PREFIX} — `S2W: Wall on
+   * Tile: ` — and **row D2 kept the strip while deleting the heading it used to
+   * pay for.** The section is now called *Assemblies*, so nothing on screen
+   * would say `s2w` any more; the build system moved onto the row itself
+   * instead, from the template's own `build|` tag (`PalettePanel.tsx#rowFact`),
+   * which is a per-row fact and stays right when D4 adds an assembly for a
+   * different build system.
    */
   readonly shortName: string
   readonly kind: FamilyKind
-  readonly group: GroupKey
+  /** The single-tile group, or `undefined` for the 40 assemblies. */
+  readonly group: GroupKey | undefined
   /** B1's axes, from the template's own tags. `undefined` where the key has no such value. */
   readonly role: string | undefined
   readonly form: string | undefined
   readonly build: string | undefined
-  /** Slots to fill. 1 for all 51 families; 2 to 5 across the 40 recipes. */
+  /**
+   * Slots to fill — **`template.parts.length` and nothing derived from it**.
+   *
+   * 1 for all 51 families; **3 or 5** across the 40 assemblies — the 4 outer
+   * corners at 5, the other 36 at 3 (measured; C1's docblock said *"2 to 5"*
+   * and no template has 2 or 4). Row D2 puts this number on every row, and
+   * it is the row's whole job to be the number the next surface agrees with:
+   * the owner's report was a row that said one thing and behaved as another, so
+   * a second derivation — parts minus the 20 that declare `fulfills`, say — is
+   * the one thing this field must not be. `screens/assemblies/assembly.ts`
+   * measured that reading and rejected it: part-level `fulfills` filters the
+   * *nested* blueprint's parts and has *"no sibling impact"*, so the sibling
+   * `base` part of a 5-part corner stays a choice and 5 is the honest count.
+   */
   readonly slots: number
   /**
    * The size control's positions, or **empty when there is nothing to choose**.
@@ -167,10 +226,12 @@ export interface TemplateFamily {
 }
 
 /**
- * The group order, and the labels.
+ * The single-tile group order, and the labels.
  *
  * Ordered by corpus records rather than by family count or the alphabet; the
  * table in the module note carries both figures and the reason they differ.
+ * Eight rather than nine since row D2 — the 40 assemblies are a section and not
+ * a group, and {@link GroupKey} says why.
  */
 export const GROUP_ORDER: readonly GroupKey[] = [
   'wall',
@@ -181,7 +242,6 @@ export const GROUP_ORDER: readonly GroupKey[] = [
   'roof',
   'decor',
   'base',
-  'recipe',
 ]
 
 /**
@@ -189,10 +249,7 @@ export const GROUP_ORDER: readonly GroupKey[] = [
  *
  * The seven role labels are B1's own words, capitalised the way
  * `pipeline/families.ts#LABELS` capitalises them, so the heading and the row
- * names cannot disagree. `recipe` is named for what all 40 are rather than
- * "Recipes": every one of them is an `S2W: Wall on Tile` composition, and saying
- * so is what makes the group's 40 rows legible once the shared prefix is off
- * them.
+ * names cannot disagree.
  */
 export const GROUP_LABEL: Readonly<Record<GroupKey, string>> = {
   wall: 'Wall',
@@ -203,7 +260,6 @@ export const GROUP_LABEL: Readonly<Record<GroupKey, string>> = {
   roof: 'Roof',
   decor: 'Decor',
   base: 'Base',
-  recipe: 'S2W: Wall on Tile',
 }
 
 /**
@@ -227,7 +283,18 @@ export { NO_BUILD, axisLabel } from './familyKey'
  */
 export const INSERT_DESIGNS = 94
 
-/** The prefix all 40 shipped recipes share, taken off their row names. */
+/**
+ * The prefix all 40 shipped recipes share, taken off their row names.
+ *
+ * **The only stripper, and row D2 deliberately did not add a second one.** It
+ * paid for itself while the heading above those 40 rows *was*
+ * `S2W: Wall on Tile`; that heading is now `Assemblies`, and the strip is kept
+ * because the words it removes are still not the row's own — every one of the 40
+ * carries them, so they distinguish nothing and cost a third of a 272px column.
+ * What did have to be replaced is the build system the heading used to carry:
+ * `PalettePanel.tsx#rowFact` reads it off the template's own `build|` tag and
+ * puts it on the row beside the slot count.
+ */
 const RECIPE_PREFIX = 'S2W: Wall on Tile: '
 
 /**
@@ -245,13 +312,9 @@ function familyOf(template: RecipeTemplate, kind: FamilyKind): TemplateFamily {
   const role = axisOf(template.tags, 'role')
   const form = axisOf(template.tags, 'form')
   const build = axisOf(template.tags, 'build')
-  const group: GroupKey =
-    kind === 'recipe'
-      ? 'recipe'
-      : role === undefined
-        ? 'base'
-        : (role as GroupKey)
-  const prefix = kind === 'recipe' ? RECIPE_PREFIX : `${GROUP_LABEL[group]}: `
+  const group: GroupKey | undefined =
+    kind === 'recipe' ? undefined : role === undefined ? 'base' : (role as GroupKey)
+  const prefix = group === undefined ? RECIPE_PREFIX : `${GROUP_LABEL[group]}: `
   return {
     // Parsed rather than cast: the pattern is the one thing about a generated id
     // this module can check, all 91 pass it today, and a generator that emitted
@@ -271,17 +334,30 @@ function familyOf(template: RecipeTemplate, kind: FamilyKind): TemplateFamily {
   }
 }
 
+/** A row's place in {@link GROUP_ORDER}; the 40 groupless assemblies come last. */
+const groupRank = (family: TemplateFamily): number =>
+  family.group === undefined ? GROUP_ORDER.length : GROUP_ORDER.indexOf(family.group)
+
 /**
  * All 91, in group order.
  *
  * A module constant because it is a pure function of two generated arrays: the
  * panel would otherwise rebuild it on every mount, and nothing about it can
  * change while the bundle is loaded.
+ *
+ * **This is a declared order and not the display order any more.** Row D2 shows
+ * the 40 assemblies *above* the 51 single tiles, and does it in
+ * `palette.ts#paletteSections` rather than by resorting this array — because
+ * this array is also {@link PLACEABLE_TEMPLATES}, which two screens build a
+ * `Map` from, and moving it would be moving a list for a reason that belongs to
+ * one panel's layout. What the order still is, is the **tiebreak** the ranked
+ * list falls back on: fixture order inside the assemblies and corpus order
+ * inside each single-tile group.
  */
 export const TEMPLATE_FAMILIES: readonly TemplateFamily[] = [
   ...GENERATED_FAMILIES.map((template) => familyOf(template, 'family')),
   ...RECIPE_TEMPLATES.map((template) => familyOf(template, 'recipe')),
-].sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group))
+].sort((a, b) => groupRank(a) - groupRank(b))
 
 /**
  * Every placeable template, as the resolver's own type.
