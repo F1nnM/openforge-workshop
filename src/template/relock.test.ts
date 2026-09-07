@@ -29,6 +29,7 @@ import {
   TemplateId as TemplateIdSchema,
   clearPlacements,
   fillSlot,
+  filledSlots,
   placeTemplate,
   resetWorkshop,
   useWorkshopStore,
@@ -144,6 +145,44 @@ beforeEach(() => {
 afterEach(() => {
   clearPlacements()
 })
+
+/* ---------------------------------------------------- the design fixture (D6) */
+
+/**
+ * Two designs of every part, so a family preference has something to move.
+ *
+ * The module fixture above carries **no** `texture` at all, deliberately —
+ * `fixture.ts` says so — because every test before this one is about the lock.
+ * A design change needs the axis to exist, and it needs the *first* candidate in
+ * record order to be the wrong design, or a family preference and a
+ * first-in-order walk would be indistinguishable. So `cut-stone` leads on every
+ * part and `dungeon_stone` follows.
+ *
+ * Spelled `cut-stone` with a hyphen and `dungeon_stone` with an underscore,
+ * which is not a typo: those are the two roots the live archive actually
+ * carries, and row D6 found `FillContext.family`'s own docblock offering
+ * `cut_stone` as an example of a value that reaches **nothing**.
+ */
+const DESIGN_RECORDS: readonly FillFixtureRecord[] = [
+  { id: 'tiles/wall.cut', design: 'wall-cut', tags: ['shape|wall'], texture: 'cut-stone' },
+  { id: 'tiles/wall.dungeon', design: 'wall-dungeon', tags: ['shape|wall'], texture: 'dungeon_stone' },
+  { id: 'tiles/floor.cut', design: 'floor-cut', tags: ['shape|floor'], texture: 'cut-stone' },
+  { id: 'tiles/floor.dungeon', design: 'floor-dungeon', tags: ['shape|floor'], texture: 'dungeon_stone' },
+  { id: 'tiles/base.plain', design: 'base-plain', layer: 'base', tags: ['shape|base'], texture: 'plain' },
+]
+
+const CUT_WALL = 'tiles/wall.cut' as unknown as TileId
+const DUNGEON_WALL = 'tiles/wall.dungeon' as unknown as TileId
+
+function designHarness(over: Partial<FillContext> = {}): Harness {
+  const file = fillFixture(DESIGN_RECORDS)
+  const composition = createCompositionIndex(file, buildAggregateIndex(file))
+  const template = templateOf(A_TEMPLATE)
+  return {
+    index: buildAssemblyIndex(file),
+    context: { composition, templates: (id) => (id === template.id ? template : undefined), ...over },
+  }
+}
 
 /* ------------------------------------------------------------- the seam itself */
 
@@ -359,6 +398,124 @@ describe('a fill the re-solve can no longer make', () => {
     // and only the one that was already filled has anything stale about it.
     expect(result.unfilled.map((one) => one.stale)).toEqual([undefined, undefined, undefined])
     expect(result.perInstance[0]?.stale).toEqual([])
+  })
+})
+
+/* --------------------------------------------------------- a design change (D6) */
+
+/**
+ * A design change is this driver's second caller, and the contract is the lock's
+ * word for word: **re-solve every `auto` fill, never touch a `pinned` one.**
+ *
+ * That it is the *same* driver is the finding rather than the convenience. Row
+ * D6 was briefed to wire a room-wide design and the plumbing turned out to be
+ * complete on this side of the seam — `FillContext.family` has been the solver's
+ * first preference since C2 and `reSolveScene` passes its whole context
+ * through — so what this block proves is that nothing had to be added here for
+ * a design change to behave correctly, including the half a new caller is most
+ * likely to get wrong.
+ */
+describe('a design change', () => {
+  it('rewrites an auto fill to the room’s design', () => {
+    const id = placeTemplate({ template: A_TEMPLATE, x: 0, z: 0, rotation: 0, fills: {} })
+
+    // No design: the walk falls through to the ascending address, so the
+    // first-declared `cut-stone` wall wins. This is the state the defect was
+    // found in — the corner that came out of four stone types.
+    const none = designHarness({ lock: 'openlock' })
+    reSolveScene(scene(), none.index, none.context)
+    expect(useWorkshopStore.getState().placements[id]?.fills[WALL]?.tile).toBe(CUT_WALL)
+
+    const dungeon = designHarness({ lock: 'openlock', family: 'dungeon_stone' })
+    const result = reSolveScene(scene(), dungeon.index, dungeon.context)
+
+    const fills = useWorkshopStore.getState().placements[id]?.fills
+    expect(fills?.[WALL]).toEqual({ tile: DUNGEON_WALL, pinned: false })
+    expect(fills?.[FLOOR]?.tile).toBe('tiles/floor.dungeon')
+    // Two of the three moved. The base did not, and that is the archive's shape
+    // rather than a failure: `plain` is the only base in the pool, exactly as it
+    // is on 38 of the 40 shipped base slots.
+    expect(result.outcomes.filled).toBe(2)
+    expect(fills?.[BASE]?.tile).toBe('tiles/base.plain')
+  })
+
+  it('never touches a pinned fill, exactly as a lock change does not', () => {
+    /* The owner's requirement is *"Room-Wide Design as the default, manual
+       deviations are always allowed"*, and this is the second half of it. The
+       pinned wall is in the *wrong* design and stays: `pinned: true` means
+       print this exact file, and a driver that silently restyled it would
+       discard a deliberate choice with nothing failing. */
+    const id = placeTemplate({
+      template: A_TEMPLATE,
+      x: 0,
+      z: 0,
+      rotation: 0,
+      fills: { [WALL]: { tile: CUT_WALL, pinned: true } },
+    })
+    const { index, context } = designHarness({ lock: 'openlock', family: 'dungeon_stone' })
+
+    const result = reSolveScene(scene(), index, context)
+    const fills = useWorkshopStore.getState().placements[id]?.fills
+
+    expect(result.outcomes['kept-pinned']).toBe(1)
+    expect(fills?.[WALL]).toEqual({ tile: CUT_WALL, pinned: true })
+    // And the auto fill beside it *did* follow the design, which is what makes
+    // the refusal a policy rather than a no-op.
+    expect(fills?.[FLOOR]?.tile).toBe('tiles/floor.dungeon')
+  })
+
+  it('honours the pin at no solver cost, and reports it as pinned', () => {
+    placeTemplate({
+      template: A_TEMPLATE,
+      x: 0,
+      z: 0,
+      rotation: 0,
+      fills: { [WALL]: { tile: CUT_WALL, pinned: true } },
+    })
+    const { index, context } = designHarness({ lock: 'openlock', family: 'dungeon_stone' })
+
+    const decisions = reSolveScene(scene(), index, context).perInstance[0]?.fill?.decisions
+    const wall = decisions?.find((one) => one.slot === 'wall')
+
+    expect(wall?.reason).toBe('pinned')
+    expect(wall?.queries).toBe(0)
+    // The pin is not in the family, and the decision says so rather than
+    // claiming the design was honoured because the slot has a fill.
+    expect(wall?.familyHonoured).toBe(false)
+  })
+
+  it('fills a slot with nothing in the design rather than leaving it empty', () => {
+    /* C2's fallback contract, at the driver level: a design is a preference and
+       never a filter. `towne` is in this fixture's pool nowhere at all — which
+       is the reachable case, since 8 of the archive's 36 roots reach no
+       placeable part — and every slot still fills. */
+    const id = placeTemplate({ template: A_TEMPLATE, x: 0, z: 0, rotation: 0, fills: {} })
+    const { index, context } = designHarness({ lock: 'openlock', family: 'towne' })
+
+    const result = reSolveScene(scene(), index, context)
+    const fills = useWorkshopStore.getState().placements[id]?.fills
+
+    expect(result.unfilled).toEqual([])
+    expect(filledSlots(fills ?? {})).toEqual(['wall', 'floor', 'base'])
+    expect(result.perInstance[0]?.fill?.complete).toBe(true)
+  })
+
+  it('reports no pin warning, because a design cannot make a file unprintable', () => {
+    /* `PinLockWarning` is about joinery: a pinned file that carries some lock
+       system and not the wanted one. A design has no such failure mode — the
+       piece prints, it just looks like a different room — so this driver has
+       nothing to warn about and deliberately does not invent a second warning
+       shape for it. */
+    placeTemplate({
+      template: A_TEMPLATE,
+      x: 0,
+      z: 0,
+      rotation: 0,
+      fills: { [WALL]: { tile: CUT_WALL, pinned: true } },
+    })
+    const { index, context } = designHarness({ lock: 'openlock', family: 'dungeon_stone' })
+
+    expect(reSolveScene(scene(), index, context).pinWarnings).toEqual([])
   })
 })
 

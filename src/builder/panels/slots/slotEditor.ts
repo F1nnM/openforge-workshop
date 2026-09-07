@@ -497,6 +497,18 @@ export function handSlotToLock(
   instance: TemplateInstance,
   slot: SlotName,
   lock: LockSystem,
+  /*
+    The room's design, or `undefined` for no preference.
+
+    Passed rather than read, for the reason the rest of this module gives: it is
+    a pure function over an instance, and a hook here would make it one only by
+    accident. Without it a slot handed back to the lock re-solves in catalog
+    order while every other path — the placement click, a lock change, a design
+    change — carries the room's design, so the one gesture whose whole point is
+    "let the room decide again" would have been the one gesture that ignored the
+    room.
+  */
+  design: string | undefined,
 ): SceneReSolve | undefined {
   if (unpinFill(instance.id, slot) !== 'unpinned') return undefined
   const now = useWorkshopStore.getState().placements[instance.id]
@@ -510,5 +522,6 @@ export function handSlotToLock(
     templates: (id) => (id === now.template ? template : undefined),
     composition: recipes.composition,
     lock,
+    ...(design === undefined ? {} : { family: design }),
   })
 }

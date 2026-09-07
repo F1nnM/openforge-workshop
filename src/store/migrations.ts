@@ -149,6 +149,21 @@ import {
  * | 4 | `library` is keyed by **design**, not by file (row V1) |
  * | 5 | a `Placement` holds `design`, not `tileId` (row V4) |
  * | 6 | `library` is **deleted**; a placement is a {@link TemplateInstance} — a template id plus a fill per slot (row A1) |
+ * | 7 | adds `design` — the room-wide design family, a `texture` root or absent (row D6) |
+ *
+ * **Row D6's bump is the *additive* kind, and it bumps anyway.** `design` is one
+ * optional field whose absent reading is the shipped default, so a version 6
+ * blob read as a version 7 one would in fact come back correct — which is
+ * exactly the argument for not bumping, and it is refused for the reason the
+ * stamp exists at all: **one version number must name one shape.** Versions 2
+ * and 3 were additions too (`lockChosen`, `generated`) and both moved the stamp;
+ * leaving it here would make `6` name two shapes and would put the next author
+ * in the position the first commit's docblock describes — *"the first breaking
+ * change has to guess at the shape of every blob already in every user's
+ * browser"*. What the bump costs is a developer's own saved room, which is
+ * precisely the licence row A1 relies on and which has not expired:
+ * `package.json` still says `0.1.0` and `migrations.test.ts`' guard fires the
+ * day it does not.
  *
  * **To ship version N+1 while discarding is still allowed:** change the schema in
  * `schema.ts` and bump this. Nothing else. A blob at any other version is
@@ -158,7 +173,7 @@ import {
  * **To ship version N+1 once it is not:** see the expiry note in the module
  * docblock.
  */
-export const STORE_VERSION = 6
+export const STORE_VERSION = 7
 
 /** A state recovered from untrusted input, plus what had to be thrown away. */
 export interface RecoveredState {
@@ -513,6 +528,28 @@ function salvageLockChosen(input: unknown, dropped: string[]): boolean {
   return false
 }
 
+/**
+ * Recover the room-wide design.
+ *
+ * Absent means *no preference*, which is the shipped default, so an absent value
+ * is **not** reported: it is the ordinary state rather than a drop. Present but
+ * not a non-empty string is corruption and is named.
+ *
+ * There is deliberately **no check that the value names a `texture` root this
+ * archive carries.** That needs `catalog.json`, which `schema.ts` keeps out of
+ * the store's closure, and the check would buy nothing: `FillContext.family` is
+ * a preference and never a filter, so an unknown design is honoured on no slot
+ * and every slot still fills. The failure is a room that looks unstyled, not a
+ * room that cannot be built — and `@/ui/design-picker` only ever writes a root
+ * it derived from the emitted index, so the reachable cause is a hand edit.
+ */
+function salvageDesign(input: unknown, dropped: string[]): string | undefined {
+  if (input === undefined) return undefined
+  if (typeof input === 'string' && input !== '') return input
+  dropped.push(`design: ${describeValue(input)} is not a design family, reset to no preference`)
+  return undefined
+}
+
 function salvageLock(input: unknown, dropped: string[]): LockSystem {
   if (input === undefined) return DEFAULT_LOCK_SYSTEM
   const parsed = LockSystemSchema.safeParse(input)
@@ -547,12 +584,19 @@ export function salvageWorkshopState(input: unknown): RecoveredState {
     }
     return { state: defaultWorkshopState(), dropped }
   }
+  const design = salvageDesign(source.design, dropped)
   return {
     state: {
       placements: salvagePlacements(source.placements, dropped),
       generated: salvageGenerated(source.generated, dropped),
       lock: salvageLock(source.lock, dropped),
       lockChosen: salvageLockChosen(source.lockChosen, dropped),
+      /* Spread rather than assigned, because `exactOptionalPropertyTypes` makes
+         `design: undefined` and *no `design` key* two different values — and the
+         second is the one that survives `JSON.stringify` into `localStorage`
+         unchanged, so a round trip through `persist` cannot turn one into the
+         other. */
+      ...(design === undefined ? {} : { design }),
     },
     dropped,
   }

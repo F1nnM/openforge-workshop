@@ -94,7 +94,7 @@ import { resolveMaterial } from '@/materials'
 import type { MeshTask } from '@/mesh'
 import { meshQueue, useMeshQueue } from '@/mesh'
 import type { PlacementId, SlotName } from '@/store'
-import { useLockSystem } from '@/store'
+import { useLockSystem, useRoomDesign } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
 import { AO_RADIUS, Stage } from '@/three/Stage'
 import { Eyebrow } from '@/ui/primitives'
@@ -220,22 +220,43 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
    * the default preference would place files the bill prices differently and the
    * next lock change would rewrite every one of them under the user.
    *
-   * `family` — the room's texture preference — is deliberately absent. It is a
-   * `FillContext` field with no control anywhere in the app yet, and passing a
-   * guess would reorder every candidate list by a preference nobody expressed.
+   * `family` — the room's design — is read the same way and from the same store,
+   * and **this paragraph used to say the opposite**: *"deliberately absent. It is
+   * a `FillContext` field with no control anywhere in the app yet, and passing a
+   * guess would reorder every candidate list by a preference nobody expressed."*
+   * That was right while it was true. Row **D6** shipped the control and
+   * `WorkshopState.design` is no longer a guess, so leaving it out would place
+   * pieces that ignore the room's design and then have them rewritten under the
+   * user by the next re-solve — which is what the lock argument above says about
+   * declining the lock, one field over.
+   *
+   * `undefined` still means *no preference* and is what the app ships with, so
+   * the absent case is the ordinary one rather than a fallback.
    *
    * One `useMemo`, so the memo table inside the filler survives re-renders: a
    * room built by clicking the same palette row twenty times is **one** solve and
-   * nineteen hits.
+   * nineteen hits. Both preferences are in its dependency list, which is what
+   * `fills.ts` means by *"a filler is created per `(lock, family, index)` … so
+   * the preference is in the key by construction"*: a design change throws the
+   * table away rather than serving twenty stale answers out of it.
    */
   const lock = useLockSystem()
+  const design = useRoomDesign()
   const filler = useMemo(
     () =>
       createPlacementFiller({
         index: fill.index,
-        context: { templates: fill.templates, composition: fill.composition, lock },
+        context: {
+          templates: fill.templates,
+          composition: fill.composition,
+          lock,
+          /* Spread rather than assigned, because `exactOptionalPropertyTypes`
+             makes `family: undefined` and *no `family`* two different
+             assignments, and `FillContext.family` documents the absent one. */
+          ...(design === undefined ? {} : { family: design }),
+        },
       }),
-    [fill.index, fill.templates, fill.composition, lock],
+    [fill.index, fill.templates, fill.composition, lock, design],
   )
 
   /**
