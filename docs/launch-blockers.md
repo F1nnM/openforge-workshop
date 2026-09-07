@@ -21,7 +21,7 @@ Everything else is independent.
 
 ## B1 — the zone rules on `objects.openforge.tools`
 
-**Gates: X1 (thumbnail backfill), X3 (the zip Worker), X6 (deploy).**
+**Gates: X1 (thumbnail backfill), X6 (deploy).**
 
 1. **CORS, unconditional.** `Access-Control-Allow-Origin` for the app's origin on every
    response from the bucket hostname, not only on preflights and not only on 2xx. A 404
