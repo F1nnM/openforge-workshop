@@ -28,7 +28,6 @@
  */
 import type { BillLine, BillOfTiles } from '@/assembly'
 import { downloadSize } from '@/assembly'
-import type { BlobId } from '@/catalog'
 
 import { EmptyArchiveError, buildArchivePlan, defaultFilename } from './plan'
 import type { ArchivePlan, ArchivePlanOptions, GeneratedArchiveMesh, GeneratedArchiveSection } from './plan'
@@ -88,7 +87,6 @@ export interface SplitArchiveOptions extends ArchivePlanOptions {
 
 /** One thing this module packs into a part: a bill line or a generated mesh. */
 interface PackItem {
-  readonly blob: BlobId
   readonly bytes: number
   readonly label: string
 }
@@ -107,8 +105,8 @@ export function splitArchivePlans(bill: Pick<BillOfTiles, 'lines' | 'download'>,
   const generatedAt = generatedAtOption ?? new Date()
   const budget = limitBytes - SPLIT_OVERHEAD_BYTES
 
-  const fileItems: PackItem[] = bill.lines.map((line) => ({ blob: line.blob, bytes: line.bytes, label: line.entryName }))
-  const meshItems: PackItem[] = (generated?.meshes ?? []).map((mesh) => ({ blob: mesh.blob, bytes: mesh.bytes, label: mesh.stem }))
+  const fileItems: PackItem[] = bill.lines.map((line) => ({ bytes: line.bytes, label: line.entryName }))
+  const meshItems: PackItem[] = (generated?.meshes ?? []).map((mesh) => ({ bytes: mesh.bytes, label: mesh.stem }))
   const items = [...fileItems, ...meshItems]
 
   if (items.length === 0) throw new EmptyArchiveError()

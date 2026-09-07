@@ -442,7 +442,6 @@ export function useArchiveDownload({
         const section = await generatedSection(pack, generated)
 
         plan = buildArchivePlan(bill, { assets, ...(section === undefined ? {} : { generated: section }) })
-        setState({ status: 'preparing', plan })
 
         const host = environment ?? browserSaveEnvironment()
         const limit = host.blobLimitBytes ?? BLOB_FALLBACK_LIMIT_BYTES

@@ -1827,8 +1827,15 @@ describe('the download action', () => {
     })
     expect(saved).toHaveLength(2)
     expect(saved[1]?.filename).toMatch(/-part-2-of-2\.zip$/)
-    // Every model byte in the bill landed in one part or the other, once.
-    expect(saved.reduce((sum, entry) => sum + entry.blob.size, 0)).toBeGreaterThan(14_600_000)
+    // Every model byte in the bill landed in one part or the other, once —
+    // and only once: the upper bound is tight enough that a file duplicated
+    // across both parts (adding at least base2's 500,000 bytes) would fail
+    // it, while the gap above the measured total (14,608,166: the 14,600,000
+    // of model bytes plus two parts' worth of LICENSE.txt/ATTRIBUTION.csv
+    // overhead) stays loose enough not to flake on that overhead's exact size.
+    const totalSavedBytes = saved.reduce((sum, entry) => sum + entry.blob.size, 0)
+    expect(totalSavedBytes).toBeGreaterThan(14_600_000)
+    expect(totalSavedBytes).toBeLessThan(14_800_000)
   })
 
   it('says so when the browser offers no way to save a file at all', async () => {

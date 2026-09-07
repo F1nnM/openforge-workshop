@@ -47,7 +47,7 @@ them.
 
 | id | Blocker | Gates | Owner |
 | --- | --- | --- | --- |
-| **B1** | Cloudflare zone admin — CORS **unconditional first**, then the cache rule. The other order caches responses without CORS headers, and the app then fails on cached 200s that look fine in `curl`. | X1, X3, X6 | project owner |
+| **B1** | Cloudflare zone admin — CORS **unconditional first**, then the cache rule. The other order caches responses without CORS headers, and the app then fails on cached 200s that look fine in `curl`. | X1, X6 | project owner |
 | **B2** | R2 write credentials for `/thumbs/` and `/lod/` | X1, G1 | project owner |
 | **B3** | Publisher declaration — free, non-monetised community tool | public launch | project owner |
 | **B4** | Legal read on bundling a **GPL-2** OpenSCAD WASM engine *inside this app* rather than conveying it separately. The separate-origin design answered this cleanly; in-app integration is the owner's stated preference and does not. | S2, S3, S4 | project owner |
