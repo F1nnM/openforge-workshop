@@ -333,11 +333,11 @@ export type SlotVerdict = 'closes' | 'fails' | 'undecidable'
 /**
  * Why one slot cannot be laid out, or does not fit.
  *
- * The five split two ways, and row **D8** made the split load-bearing:
- * `over-run` is the only one that still yields a {@link SlotPlacement}. The
- * other four mean *no position exists*; `over-run` means *the runs do not tile
- * the face*, which is a different sentence and does not deprive the part of the
- * face it is anchored to.
+ * The six split two ways, and row **D8** made the split load-bearing:
+ * `over-run` and row E3's `no-walk` still yield a {@link SlotPlacement}. The
+ * other four mean *no position exists*; those two mean *the runs do not tile the
+ * face* and *the faces leave nothing between them*, which are different sentences
+ * and neither deprives a part of the face it is anchored to.
  */
 export type SlotDoubtCode =
   /** No fill for the slot. C2 places incomplete instances by design. */
@@ -350,6 +350,25 @@ export type SlotDoubtCode =
   | 'no-run'
   /** The fills along one face do not sum to it. 33 of 1,215. */
   | 'over-run'
+  /**
+   * Two **opposed** `edge` slots consume the cell's whole extent across
+   * themselves, so nothing is left to walk on. Row **E3**.
+   *
+   * The one doubt that is not about a position. Every other code says *this part
+   * cannot be placed* or *these runs do not tile this face*; this one says the
+   * arithmetic is flawless and the result is a solid block of stone. A 1 x 1
+   * corridor with a 0.5-deep wall on each `z` face has zero overlapping pairs, a
+   * union exactly equal to its cell and an area exact to A10's invariant — and it
+   * is a wall, not a corridor.
+   *
+   * **0 of the 1,215 combinations of the 40 shipped fixtures can reach it**, and
+   * that is structural rather than lucky: no shipped convention has two edge
+   * slots two quarter-turns apart. `wall-on-tile` has one edge; `external-corner`
+   * has two at sides 0 and 3, which are adjacent; `internal-corner` has none. The
+   * corridor is the first layout in which two slots eat the same axis, which is
+   * why the check arrives with it and not before.
+   */
+  | 'no-walk'
 
 /**
  * One slot the rule could not place, or could not fit.
@@ -377,9 +396,16 @@ export type SlotDoubtCode =
 export interface SlotDoubt {
   readonly part: SlotName
   readonly code: SlotDoubtCode
-  /** The cell edge the fills have to sum to, in grid units. `over-run` only. */
+  /**
+   * The cell edge the fills have to sum to, in grid units.
+   *
+   * `over-run` and `no-walk`. On `no-walk` it is the cell's extent along the axis
+   * the two opposed edges eat, and {@link got} is what they eat between them — so
+   * `want - got` is what is left to walk on and the doubt fires when it is zero
+   * or less.
+   */
   readonly want?: number
-  /** What they do sum to, in grid units. `over-run` only. */
+  /** What they do sum to, in grid units. `over-run` and `no-walk` only. */
   readonly got?: number
 }
 
@@ -404,10 +430,14 @@ export interface PlacedTemplate {
    * **Not "minus any slot that earned a doubt"** — row D8. An `over-run` slot
    * appears in *both* this list and {@link doubts}, because the two answer
    * different questions: where the part goes, and whether the runs tile the
-   * face. The other four {@link SlotDoubtCode}s appear only in `doubts`.
+   * face. `no-walk` is the same shape and names the cell slot, which is placed.
+   * The other four {@link SlotDoubtCode}s appear only in `doubts`.
    */
   readonly slots: readonly SlotPlacement[]
-  /** Empty when the template is fully placed **and** every face tiles. */
+  /**
+   * Empty when the template is fully placed, every face tiles **and** every axis
+   * two opposed edges eat has something left between them.
+   */
   readonly doubts: readonly SlotDoubt[]
   readonly verdict: SlotVerdict
   /** The cell extent every offset was measured against, when there was one. */
@@ -433,6 +463,19 @@ export function placeTemplateSlots(
 ): PlacedTemplate {
   const slots: SlotPlacement[] = []
   const doubts: SlotDoubt[] = []
+  /* How deep each `edge` slot with a real run lies across its own face, so the
+     walkability check below reads the same depths the offsets were computed
+     from rather than resolving every footprint a second time.
+
+     **Only slots that survived the `no-run` refusal are in here**, and that is
+     the correction rather than an optimisation. A `diag`, `tri` or `arc` fill
+     does not lie along the face at all — which is exactly why it is refused a
+     coordinate — so its bounding box says nothing about how much of the cell's
+     axis it takes. Measured: including them made a 2-unit-deep corridor filled
+     with a 2.828 `diag` report `no-walk` on top of the `no-run` it already
+     reported, which is one wrong sentence about a fill the rule had already
+     declined to place. */
+  const edgeDepth = new Map<SlotName, number>()
 
   const cell = cellExtentOf(layout, feet, doubts)
 
@@ -493,6 +536,10 @@ export function placeTemplateSlots(
       if (Math.abs(run + taken - span) > CLOSURE_EPS) {
         doubts.push({ part: rule.part, code: 'over-run', want: span, got: run + taken })
       }
+      /* Its depth *across* the face, which is the axis {@link walkability} adds
+         up. An `over-run` still counts — the part is placed and it really is on
+         that face; only a refused run is silent. */
+      edgeDepth.set(rule.part, part.d)
     }
     slots.push({
       part: rule.part,
@@ -504,7 +551,82 @@ export function placeTemplateSlots(
     })
   }
 
+  if (cell !== undefined) doubts.push(...walkability(layout, cell, edgeDepth))
+
   return { slots, doubts, verdict: verdictOf(layout, doubts), cell }
+}
+
+/**
+ * The axis pairs a convention can eat: face 0 against face 2, and 1 against 3.
+ *
+ * Two quarter-turns apart is the whole definition of *opposed*, and it is the
+ * only relation that matters here — adjacent edges take from two different axes
+ * and can never meet each other.
+ */
+const OPPOSED_FACES: readonly (readonly [SlotSide, SlotSide])[] = [
+  [0, 2],
+  [1, 3],
+]
+
+/**
+ * Whether anything is left to walk on, for each axis two opposed `edge` slots eat.
+ *
+ * **Row E3, and the check that decides whether the corridor is honest.**
+ * `placeTemplateSlots` proves that parts do not overlap and that they cover the
+ * cell. It cannot prove that anything is left to walk on, and until the corridor
+ * there was no layout in which two slots ate the same axis — so a 1 x 1 corridor
+ * with a 0.5-deep wall on each `z` face came out `closes`, area exact, doubts
+ * empty, and drew a solid block of stone. 270 rect floors over 187 designs are
+ * that case.
+ *
+ * The rule belongs with the *convention* rather than with the slot, because any
+ * future convention with two opposed edges inherits the same blindness — and
+ * because it is expressible without a number: **the cell's extent along the eaten
+ * axis must exceed the sum of the opposed edges' depths.** Both walls are yawed
+ * by `side * 90`, so each one's consumption of its axis is its own frame's `d`,
+ * exactly as {@link slotOffset}'s `dz` term reads it.
+ *
+ * ## Three things it deliberately does not do
+ *
+ *   - **It does not touch {@link cornerReservation}.** That function is wrong for
+ *     a face flanked by two corners — D10 §3.4 measured the verdict inverting,
+ *     `fails` on the run that tiles and `closes` on the run that overlaps — and
+ *     repairing it is a different decision with its own measurement. It is not
+ *     needed here: a corner reservation is a span *along* a face and this check is
+ *     across one, and the corridor has no `corner`-anchored slot at all.
+ *   - **It needs two filled edges, not one.** A single wall on a 1 x 1 cell
+ *     leaves 0.5 of walkable depth and is a perfectly ordinary wall tile — 980 of
+ *     the 1,143 `wall-on-tile` combinations close on exactly that arrangement. So
+ *     an unfilled or extentless opposed sibling makes the pair silent rather than
+ *     doubtful; the sibling's own `unfilled` doubt is the honest report there.
+ *   - **It does not refuse the placement.** Like `over-run`, the parts have
+ *     positions and the union really is the cell; what is wrong is the result, not
+ *     the arithmetic. So the slots are placed and the doubt is raised, which is
+ *     the shape row D8 settled for the same reason.
+ */
+function walkability(
+  layout: TemplateLayout,
+  cell: Extent,
+  edgeDepth: ReadonlyMap<SlotName, number>,
+): readonly SlotDoubt[] {
+  const doubts: SlotDoubt[] = []
+  for (const faces of OPPOSED_FACES) {
+    const opposed = layout.slots.filter(
+      (rule) => rule.anchor === 'edge' && faces.includes(rule.side) && edgeDepth.has(rule.part),
+    )
+    if (opposed.length < 2) continue
+    const eaten = opposed.reduce((total, rule) => total + (edgeDepth.get(rule.part) ?? 0), 0)
+    /* The cell seen from either face of the pair: face 0 and face 2 both look
+       along the cell's own `d`, faces 1 and 3 along its `w`. One
+       {@link quarterTurnExtent} call says it without a second convention. */
+    const span = quarterTurnExtent(cell, faces[0]).d
+    if (span - eaten > CLOSURE_EPS) continue
+    /* Named on the **cell** slot and not on either wall. Neither wall is wrong —
+       each is flush to its own face and inside the cell — and the part that has
+       nothing left is the floor. `slotDoubtSentence` reads accordingly. */
+    doubts.push({ part: layout.cell, code: 'no-walk', want: span, got: eaten })
+  }
+  return doubts
 }
 
 /**
@@ -529,6 +651,11 @@ export function slotDoubtSentence(doubt: SlotDoubt): string {
       return (
         `The ${doubt.part} part needs a choice: this edge is ${format(doubt.want)} units and the ` +
         `pieces on it come to ${format(doubt.got)}.`
+      )
+    case 'no-walk':
+      return (
+        `The ${doubt.part} part needs a choice: it is ${format(doubt.want)} units across and the ` +
+        `walls on either side take ${format(doubt.got)}, so nothing is left to walk on.`
       )
   }
 }
@@ -660,9 +787,16 @@ export function cornerReservation(
  * undecidable, not one of each. The four internal-corner recipes have no `edge`
  * slot at all, which is why all **38** of their walked combinations land here
  * rather than counting as fits.
+ *
+ * **`no-walk` is a `fails` and not an `undecidable`, which is row E3's one
+ * judgement here.** `undecidable` means *the rule has no answer for this fill* —
+ * no cell, no footprint, no run to compare. A `no-walk` has all three and a
+ * definite, measurable answer: the cell is `want` units across and the walls take
+ * `got` of them. That is the same kind of statement `over-run` makes, so it is
+ * surfaced the same way — as *needs a choice*, with both numbers named.
  */
 function verdictOf(layout: TemplateLayout, doubts: readonly SlotDoubt[]): SlotVerdict {
-  if (doubts.some((doubt) => doubt.code !== 'over-run')) return 'undecidable'
+  if (doubts.some((doubt) => doubt.code !== 'over-run' && doubt.code !== 'no-walk')) return 'undecidable'
   if (doubts.length > 0) return 'fails'
   return layout.slots.some((rule) => rule.anchor === 'edge') ? 'closes' : 'undecidable'
 }

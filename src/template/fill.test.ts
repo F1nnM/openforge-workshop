@@ -195,7 +195,7 @@ describe('the base slot', () => {
     expect(base?.base?.lockAgrees).toBe(true)
   })
 
-  it('is the slot the layout says something rests on, on all three conventions', () => {
+  it('is the slot the layout says something rests on, on all four conventions', () => {
     /* Read off B2's `restsOn` rather than off the name `base`, so the two cannot
        drift. The assertion is the identity of the slot, not the name test. */
     const restedOn = SLOT_CONVENTIONS.map((convention) => [
@@ -207,6 +207,9 @@ describe('the base slot', () => {
       ['wall-on-tile', ['base']],
       ['external-corner', ['base']],
       ['internal-corner', ['base']],
+      /* Row **E3**'s corridor: two walls and a floor, all three resting on the
+         one base, so the ladder has exactly one slot to rank on this shape too. */
+      ['corridor', ['base']],
     ])
   })
 

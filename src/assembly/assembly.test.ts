@@ -2077,7 +2077,15 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
    * templates silently resolving as `any`. That is hazard 2 of the brief, in the
    * one place this row could hit it.
    */
-  const templates: readonly AssemblyTemplate[] = RECIPE_TEMPLATES
+  /* The 40 read from the fixtures, and not row **E3**'s two authored beside them
+     in the same array. Every figure in this block is a measurement of *those 40* —
+     14,241 candidate pairs, 2,990 distinct admitted files, the 366 MB a
+     fifty-instance room downloads — and folding two more templates in would
+     silently redefine what each one is a measurement of. E3's own reach and
+     closure are measured in `src/template/corpus.test.ts`. */
+  const templates: readonly AssemblyTemplate[] = RECIPE_TEMPLATES.filter(
+    (template) => !template.source.startsWith('authored:'),
+  )
   const byId = new Map(templates.map((template) => [template.id, template]))
   const context: AssemblyContext = {
     templates: (id) => byId.get(id),

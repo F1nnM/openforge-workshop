@@ -69,7 +69,15 @@ describeCorpus(corpusTitle, () => {
   const recipes = hasCatalog
     ? createRecipeIndex(CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8'))))
     : undefined
-  const report = recipes === undefined ? undefined : measureTemplates(recipes, RECIPE_TEMPLATES, STEP_PAGE)
+  /* The 40 read from the fixtures. Row **E3** appended two authored assemblies to
+     `RECIPE_TEMPLATES` — `pipeline/authored.ts` says why they have to live there —
+     and every figure in this block is a measurement of upstream's 40: the 11,938
+     sibling observations, the 24-of-40 blind walk, the 39-to-4 paging payoff. All
+     three are quoted in `assembly.ts`'s docblock as facts about the fixtures, so
+     the population stays the fixtures and E3's pair is walked in
+     `src/template/corpus.test.ts`. */
+  const fixtures = RECIPE_TEMPLATES.filter((template) => !template.source.startsWith('authored:'))
+  const report = recipes === undefined ? undefined : measureTemplates(recipes, fixtures, STEP_PAGE)
 
   it(
     'is 40 recipes over 20 files with 128 uniquely-named parts',

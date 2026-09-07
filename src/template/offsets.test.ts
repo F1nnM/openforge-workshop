@@ -53,7 +53,14 @@ import {
   slotYaw,
 } from './offsets'
 import type { SlotName, SlotRule, TemplateLayout } from './rules'
-import { EXTERNAL_CORNER, INTERNAL_CORNER, SLOT_CONVENTIONS, WALL_ON_TILE, ruleFor } from './rules'
+import {
+  CORRIDOR,
+  EXTERNAL_CORNER,
+  INTERNAL_CORNER,
+  SLOT_CONVENTIONS,
+  WALL_ON_TILE,
+  ruleFor,
+} from './rules'
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -107,6 +114,35 @@ const CORNER_OVER_RUN = feetOf([
   ['right wall', wall(2)],
   ['left wall', wall(2)],
   ['column', column],
+])
+
+/**
+ * A 2 x 2 corridor: two 2-unit walls on **opposite** faces of a 2 x 2 cell.
+ *
+ * Row **E3**'s shape, and the geometry `rules.ts#CORRIDOR` draws in prose:
+ * `base` and `floor` at x ∈ [0, 2] z ∈ [0, 2], `right wall` at z ∈ [0, 0.5],
+ * `left wall` at z ∈ [1.5, 2]. Two walls, no column, no mitre.
+ */
+const CORRIDOR_2X2 = feetOf([
+  ['base', rect(2, 2)],
+  ['floor', rect(2, 2)],
+  ['right wall', wall(2)],
+  ['left wall', wall(2)],
+])
+
+/**
+ * The same corridor on a **1 x 1** cell, which is a wall and not a corridor.
+ *
+ * Geometrically flawless: no overlapping pair, union exactly the cell, area
+ * exact. Functionally a solid block of stone — the two 0.5-deep walls meet in the
+ * middle. 270 rect floors over 187 designs are this case, and this fixture is the
+ * one place the `no-walk` doubt is exercised without the archive.
+ */
+const CORRIDOR_1X1 = feetOf([
+  ['base', rect(1, 1)],
+  ['floor', rect(1, 1)],
+  ['right wall', wall(1)],
+  ['left wall', wall(1)],
 ])
 
 const ruleOf = (layout: TemplateLayout, part: SlotName): SlotRule => {
@@ -392,10 +428,12 @@ describe('slotYaw', () => {
         .map(slotYaw)
         .sort((a, b) => a - b),
     ).toEqual(
-      /* 11 slots over the three conventions: 9 on the reference face, the
-         external corner's left wall at 270 and the internal corner's column at
-         180. */
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 180, 270],
+      /* 15 slots over the four conventions: 12 on the reference face, the
+         external corner's left wall at 270, the internal corner's column at 180
+         and — row **E3** — the corridor's left wall at 180, which is the only
+         one of the four that puts a slot two quarter-turns from the reference
+         face without a corner between them. */
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 180, 180, 270],
     )
     for (const side of [0, 1, 2, 3] as const) {
       const rule: SlotRule = { part: 'wall', anchor: 'edge', side, restsOn: null }
@@ -592,6 +630,125 @@ describe('placeTemplateSlots', () => {
     expect(slotDoubtSentence(placed.doubts[0] as never)).toBe(
       'The right wall part needs a choice: this edge is 2 units and the pieces on it come to 2.5.',
     )
+  })
+
+  it('places a closing corridor, with its two walls on opposite faces and nothing reserved', () => {
+    /* Row **E3**. The `dz` inset is the same `-(2 - 0.5) / 2 = -0.75` a
+       `wall-on-tile` edge gets, because both walls are flush to their own face —
+       and it comes back as `+0.75` on the far face after the quarter turn. `dx`
+       is **0** on both, which is the whole difference from a corner: nothing is
+       `corner`-anchored, so `cornerReservation` is 0 on all four faces and
+       neither wall is shifted along its face. */
+    const placed = placeTemplateSlots(CORRIDOR, CORRIDOR_2X2)
+    expect(placed.verdict).toBe('closes')
+    expect(placed.doubts).toEqual([])
+    expect(placed.cell).toEqual({ w: 2, d: 2 })
+    expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'right wall', 'left wall'])
+    const byPart = new Map(placed.slots.map((slot) => [slot.part, slot]))
+    expect(byPart.get('right wall')?.offset).toEqual([0, -0.75])
+    expect(byPart.get('right wall')?.yaw).toBe(0)
+    expect(byPart.get('left wall')?.offset).toEqual([0, 0.75])
+    expect(byPart.get('left wall')?.yaw).toBe(180)
+    expect(placed.slots.map((slot) => slot.restsOn)).toEqual([null, 'base', 'base', 'base'])
+    // Read off the rule rather than restated: 0 on every face of a layout with
+    // no corner slot, which is what makes the two walls simply flush.
+    for (const side of [0, 1, 2, 3] as const) {
+      expect(cornerReservation(CORRIDOR, CORRIDOR_2X2, side), `face ${String(side)}`).toBe(0)
+    }
+  })
+
+  it('calls a 1 x 1 corridor `fails` on `no-walk`, where the arithmetic alone calls it closed', () => {
+    /* **The check that decides whether the corridor is honest.** Every other
+       assertion about this cell passes: the two walls do not overlap, they cover
+       it exactly, the area is 1.00 and A10's rigid body holds. And it is a wall.
+
+       `placeTemplateSlots` proves that parts do not overlap and that they cover
+       the cell; it cannot prove that anything is left to walk on, and until this
+       convention no layout had two slots eating one axis. So the doubt names the
+       **cell** slot — neither wall is wrong — and reports the two numbers:
+       1 unit across, 1 unit taken. */
+    const placed = placeTemplateSlots(CORRIDOR, CORRIDOR_1X1)
+    expect(placed.verdict).toBe('fails')
+    expect(placed.doubts).toEqual([{ part: 'floor', code: 'no-walk', want: 1, got: 1 }])
+    expect(slotDoubtSentence(placed.doubts[0] as never)).toBe(
+      'The floor part needs a choice: it is 1 units across and the walls on either side take 1, ' +
+        'so nothing is left to walk on.',
+    )
+    /* Placed anyway, exactly as an `over-run` is — row D8's split. The parts do
+       have positions and the union really is the cell; what is wrong is the
+       result, not the arithmetic. */
+    expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'right wall', 'left wall'])
+    // And every face closes, which is why no `over-run` is raised beside it.
+    expect(placed.doubts.filter((doubt) => doubt.code === 'over-run')).toEqual([])
+  })
+
+  it('leaves a 2-deep cell alone, so the doubt fires on nothing walkable rather than on two walls', () => {
+    /* The boundary, from the useful side: 2 units of depth minus 1 unit of wall
+       is one 25.4 mm cell — one 25 mm mini base abreast — and that is a corridor.
+       The check is `span - eaten > 0` and not a margin somebody chose. */
+    const placed = placeTemplateSlots(
+      CORRIDOR,
+      feetOf([
+        ['base', rect(1, 2)],
+        ['floor', rect(1, 2)],
+        ['right wall', wall(1)],
+        ['left wall', wall(1)],
+      ]),
+    )
+    expect(placed.verdict).toBe('closes')
+    expect(placed.doubts).toEqual([])
+    /* And the axis it reads is **depth** and not the smaller dimension: this
+       floor's smallest dimension is 1 and it is perfectly walkable, while the
+       same rectangle turned 90° is solid. That is the correction #135 makes to
+       D10 §3.3, as arithmetic. */
+    const turned = placeTemplateSlots(
+      CORRIDOR,
+      feetOf([
+        ['base', rect(2, 1)],
+        ['floor', rect(2, 1)],
+        ['right wall', wall(2)],
+        ['left wall', wall(2)],
+      ]),
+    )
+    expect(turned.verdict).toBe('fails')
+    expect(turned.doubts).toEqual([{ part: 'floor', code: 'no-walk', want: 1, got: 1 }])
+  })
+
+  it('stays silent when only one of the two opposed slots is filled', () => {
+    /* A single wall on a 1 x 1 cell leaves 0.5 of walkable depth and is an
+       ordinary wall tile — 980 of the 1,143 `wall-on-tile` combinations close on
+       exactly that. So an unfilled opposed sibling makes the pair silent rather
+       than doubtful, and the sibling's own `unfilled` doubt is the honest report.
+       Without this the check would fire on every partially-filled corridor and
+       call an incomplete fill a bad shape. */
+    const placed = placeTemplateSlots(
+      CORRIDOR,
+      feetOf([
+        ['base', rect(1, 1)],
+        ['floor', rect(1, 1)],
+        ['right wall', wall(1)],
+      ]),
+    )
+    expect(placed.doubts).toEqual([{ part: 'left wall', code: 'unfilled' }])
+    expect(placed.verdict).toBe('undecidable')
+  })
+
+  it('cannot fire on any of the three conventions the fixtures use', () => {
+    /* Structural rather than lucky, and the reason the check arrives with the
+       corridor and not before: `no-walk` needs two `edge` slots two quarter-turns
+       apart. `wall-on-tile` has one edge, `external-corner` has two at sides 0
+       and 3 — adjacent — and `internal-corner` has none. So **0 of the 1,215
+       walked combinations of the 40 fixtures** can reach it, which
+       `corpus.test.ts` confirms against the archive rather than by construction. */
+    for (const feet of [WALL_2X2, CORNER_2X2, CORNER_OVER_RUN]) {
+      for (const convention of [WALL_ON_TILE, EXTERNAL_CORNER, INTERNAL_CORNER]) {
+        const placed = placeTemplateSlots(convention, feet)
+        expect(
+          placed.doubts.filter((doubt) => doubt.code === 'no-walk'),
+          convention.id,
+        ).toEqual([])
+      }
+    }
   })
 
   it('refuses a fill with no footprint rather than drawing its bounding box', () => {

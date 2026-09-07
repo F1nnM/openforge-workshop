@@ -750,7 +750,9 @@ describe('the wired slot layout', () => {
     // chain one step long rather than N.
     expect(
       SLOT_CONVENTIONS.map((convention) => convention.slots.find((rule) => rule.part === 'base')?.restsOn),
-    ).toEqual([null, null, null])
+      // Four conventions since row E3's corridor, and every one of them rests
+      // its whole stack on the one `base` slot.
+    ).toEqual([null, null, null, null])
   })
 
   it('is a no-op for a family with no convention, and for a family this build lacks', () => {

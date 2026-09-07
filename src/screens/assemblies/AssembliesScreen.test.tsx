@@ -314,13 +314,18 @@ afterEach(() => {
 /* -------------------------------------------------------------------- tests */
 
 describe('the recipe list', () => {
-  it('lists all 40 recipes in two groups of 20', async () => {
+  it('lists all 42 recipes in two groups, 20 single piece and 22 modular', async () => {
     await renderScreen()
 
+    /* 22 modular since row **E3** authored two assemblies in this repo. Both
+       inherit `build|s2w|modular` from the fixture they derive from — they are
+       modular S2W wall-on-tile assemblies and only their floor slot's admissions
+       differ — so the two groups still partition every row, which is what this
+       screen's grouping needs. */
     expect(screen.getByRole('heading', { name: /Single piece — 20/ })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /Modular — 20/ })).toBeTruthy()
-    // Every recipe is a button, plus nothing else: 40 buttons on this view.
-    expect(screen.getAllByRole('button')).toHaveLength(40)
+    expect(screen.getByRole('heading', { name: /Modular — 22/ })).toBeTruthy()
+    // Every recipe is a button, plus nothing else: 42 buttons on this view.
+    expect(screen.getAllByRole('button')).toHaveLength(42)
   })
 
   it('names each recipe’s parts, so a recipe can be chosen before the index lands', async () => {
@@ -364,7 +369,7 @@ describe('opening a recipe', () => {
       fireEvent.click(screen.getByRole('button', { name: '← All recipes' }))
     })
 
-    expect(screen.getByRole('heading', { name: /Modular — 20/ })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /Modular — 22/ })).toBeTruthy()
   })
 })
 

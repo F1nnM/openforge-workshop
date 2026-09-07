@@ -52,7 +52,9 @@
  * `src/builder/three/place.ts` — *"nothing in the data links the STL's second
  * axis to the plan's depth direction … so the tile takes a canonical
  * orientation"*. Edge assignment is a **builder convention**, and
- * {@link SLOT_CONVENTIONS} is where this project writes its three down.
+ * {@link SLOT_CONVENTIONS} is where this project writes its four down — three
+ * read off the 40 shipped fixtures and, since row **E3**, one
+ * ({@link CORRIDOR}) that no fixture asks for.
  *
  * ## 80 of 128 parts need no authoring; the other 48 need three decisions
  *
@@ -81,7 +83,7 @@
  * business; this module only needs the two facts that make the `base` anchor
  * derivable, and both hold under either spelling.
  *
- * ## Why there are three rules and not a 128-row table
+ * ## Why there are four rules and not a 135-row table
  *
  * A 128-row table is the same information with 125 more places to disagree with
  * itself, and it costs bytes nobody needs to spend. Measured with
@@ -218,13 +220,15 @@ export interface TemplateLayout {
 /**
  * One authored convention: a part-name set and the layout it implies.
  *
- * Three of them, and three is the whole authored payload of this row. Each one
- * is a *decision with no measurement behind it* — the module docblock's second
- * section — so each carries the reasoning that constrains it below.
+ * Three of them covered the 40 shipped fixtures and row **E3** added a fourth
+ * for the corridor, which is the first layout in this project with two walls on
+ * **opposite** faces. Each one is a *decision with no measurement behind it* —
+ * the module docblock's second section — so each carries the reasoning that
+ * constrains it below.
  */
 export interface SlotConvention extends TemplateLayout {
   /** Stable, and safe in a test name or a disclosure string. */
-  readonly id: 'wall-on-tile' | 'external-corner' | 'internal-corner'
+  readonly id: 'wall-on-tile' | 'external-corner' | 'internal-corner' | 'corridor'
   /** The part-name set this convention is keyed on, sorted. */
   readonly parts: readonly SlotName[]
 }
@@ -352,7 +356,67 @@ export const INTERNAL_CORNER: SlotConvention = {
 }
 
 /**
- * The three, in the order they cover the corpus: 96 parts, then 20, then 12.
+ * **Authored convention 4 of 4 — the corridor, authored in this repo.**
+ *
+ * `base`, `floor`, `left wall`, `right wall`. Two walls on **opposite** faces, no
+ * column and no mitre — which is the whole reason it is cheap, and the one thing
+ * that makes it not a corner. Row **E3**; `pipeline/authored.ts` carries the
+ * predicate and `docs/assembly-candidates.md` §3 the enumeration it came from.
+ *
+ * **The first three conventions were read off 40 shipped fixtures. This one has
+ * no fixture at all**, so it is authored twice over: the layout here and the slot
+ * predicate beside it. What constrains it:
+ *
+ *   - **Sides 0 and 2, and nothing else.** Two quarter-turns apart is the
+ *     definition of the shape; at a gap of 1 or 3 it is
+ *     {@link EXTERNAL_CORNER} without its column, and `rules.test.ts` asserts the
+ *     opposition rather than restating the numbers. `cornerReservation` correctly
+ *     returns **0 on all four faces** — there is no `corner`-anchored slot to
+ *     reserve anything — so this convention needs none of the repair
+ *     `offsets.ts#cornerReservation` wants for a face flanked by two corners
+ *     (D10 §3.4), and does not wait on it.
+ *   - **`right wall` takes side 0 and `left wall` side 2**, which is
+ *     {@link EXTERNAL_CORNER}'s assignment kept: chirality is the one positional
+ *     thing the corpus carries and it carries a mirror class, not a mapping to a
+ *     face, so keeping the two conventions consistent is the only thing available
+ *     to be consistent with.
+ *   - **Both walls rest on the `base`**, as every wall in every convention does,
+ *     for the two reasons {@link WALL_ON_TILE} gives.
+ *   - **`floor` is the cell**, as on all four. Measured on this shape:
+ *     `cellExtentOf` refuses a non-`rect` fill, and 272 of the 1,496 floors the
+ *     slot admits are non-`rect` — so the refusal is what keeps 163 `{shape:none}`
+ *     floors from being read as a cell they have not got.
+ *   - **Two slots eat the same axis, which is new.** The walls are pinned to the
+ *     two `z` faces, so they consume one unit of the cell's **depth** between
+ *     them. On a 1-deep cell they meet and the piece is solid stone — and
+ *     `placeTemplateSlots` calls it `closes`, correctly, because it proves that
+ *     parts do not overlap and that they cover the cell and has never had to
+ *     prove that anything is left to walk on. 270 rect floors over 187 designs
+ *     are that case. `offsets.ts`'s `no-walk` doubt is the convention-level answer
+ *     and the slot's `deny size|depth|1` is the predicate-level one; both ship,
+ *     and `corpus.test.ts` measures each with the other removed.
+ *
+ * Drawn through the canvas's own arithmetic on a 2 x 2 cell with two 2-unit
+ * walls: `base` and `floor` at x ∈ [0, 2] z ∈ [0, 2], `right wall` at
+ * x ∈ [0, 2] z ∈ [0, 0.5], `left wall` at x ∈ [0, 2] z ∈ [1.5, 2]. Zero
+ * overlapping pairs, nothing outside the cell, union = cell, area **4.00
+ * units²** — row A10's rigid body, and `offsets.test.ts` recomputes it.
+ */
+export const CORRIDOR: SlotConvention = {
+  id: 'corridor',
+  parts: ['base', 'floor', 'left wall', 'right wall'],
+  cell: 'floor',
+  slots: [
+    { part: 'base', anchor: 'cell', side: 0, restsOn: null },
+    { part: 'floor', anchor: 'cell', side: 0, restsOn: 'base' },
+    { part: 'right wall', anchor: 'edge', side: 0, restsOn: 'base' },
+    { part: 'left wall', anchor: 'edge', side: 2, restsOn: 'base' },
+  ],
+}
+
+/**
+ * The four, the first three in the order they cover the 40 shipped fixtures — 96
+ * parts, then 20, then 12 — and the corridor last, which covers none of them.
  *
  * There is deliberately no fallback entry. A part-name set with no convention is
  * a template this project cannot lay out, and the honest answer is
@@ -361,7 +425,12 @@ export const INTERNAL_CORNER: SlotConvention = {
  * plausible that nobody authored, which the plan's "what gets worse" section
  * names as the new class of silent wrongness this model must not add to.
  */
-export const SLOT_CONVENTIONS: readonly SlotConvention[] = [WALL_ON_TILE, EXTERNAL_CORNER, INTERNAL_CORNER]
+export const SLOT_CONVENTIONS: readonly SlotConvention[] = [
+  WALL_ON_TILE,
+  EXTERNAL_CORNER,
+  INTERNAL_CORNER,
+  CORRIDOR,
+]
 
 const BY_PARTS = new Map<string, SlotConvention>(
   SLOT_CONVENTIONS.map((convention) => [partNameKey(convention.parts), convention]),

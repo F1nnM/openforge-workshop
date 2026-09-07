@@ -51,12 +51,14 @@ import { SLOT_CONVENTIONS, conventionFor } from '../src/template/rules'
 
 import { buildCatalog } from './build'
 import { measureCatalog, serialiseCatalog } from './emit'
+import { deriveAuthored } from './authored'
 import { deriveFamilies } from './families'
 import type { GeneratedFamily } from './families'
 import { FixtureRow, fixtureFingerprint, fixturesDir, loadFixtureRows } from './fixtures'
 import { emptyManifest } from './ordinals'
 import type { TemplateFixture } from './templates'
 import {
+  AUTHORED_MARKER,
   RECORDED_TAG_DEFECTS,
   TEMPLATES_MODULE_PATH,
   checkTemplateTags,
@@ -86,6 +88,9 @@ describeFixtures(title, () => {
   const entries: readonly TemplateFixture[] = hasFixtures ? loadTemplateFixtures(FIXTURES) : []
   const parts = entries.flatMap((entry) => entry.parts)
   const constrain = parts.flatMap((part) => part.tags.constrain ?? [])
+  /* Row E3's third source. A pure function of `entries`, so it needs no corpus
+     and no lazy build; `authored.test.ts` is where its own content is checked. */
+  const authored: readonly TemplateFixture[] = hasFixtures ? deriveAuthored(entries) : []
 
   /**
    * Row B4's families, built once and lazily.
@@ -251,7 +256,7 @@ describeFixtures(title, () => {
   const SLOW_MS = 300_000
 
   describe('row B2’s slot conventions', () => {
-    it('covers all 40 part-name sets, in the 32 / 4 / 4 split', () => {
+    it('covers all 40 part-name sets, in the 32 / 4 / 4 split, out of four conventions', () => {
       const per = new Map<string, number>()
       for (const entry of entries) {
         const convention = templateConvention(entry)
@@ -262,7 +267,13 @@ describeFixtures(title, () => {
         'external-corner': 4,
         'internal-corner': 4,
       })
-      expect(SLOT_CONVENTIONS).toHaveLength(3)
+      /* Four since row **E3**, and the fourth is reached by no fixture at all:
+         the corridor's `(base, floor, left wall, right wall)` has no upstream
+         template, which is why its convention has to exist before
+         `pipeline/authored.ts`'s entry can pass the gate below. */
+      expect(SLOT_CONVENTIONS).toHaveLength(4)
+      expect(SLOT_CONVENTIONS.map((convention) => convention.id)).toContain('corridor')
+      expect([...per.keys()]).not.toContain('corridor')
     })
 
     it('fails the import, naming the file and the template, on a set it does not know', () => {
@@ -370,8 +381,22 @@ describeFixtures(title, () => {
         expect(shipped.brotli).toBe(366_677)
         expect(shipped.withinBudget).toBe(true)
         expect(shipped.brotli / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
-        // And nothing of the model is in the bytes, which is the structural half.
-        for (const needle of ['anchor', 'restsOn', 'layouts', 'wall-on-tile', 'external-corner']) {
+        /* And nothing of the model is in the bytes, which is the structural half.
+           Row **E3** added the last four needles: a fourth convention, two
+           authored templates and a new doubt code, none of which may reach the
+           index either — this is the same claim it makes with `stamp.json`'s
+           `lock.content` and `corpus.digest`, from inside the build. */
+        for (const needle of [
+          'anchor',
+          'restsOn',
+          'layouts',
+          'wall-on-tile',
+          'external-corner',
+          'corridor',
+          'authored',
+          'Any Floor',
+          'no-walk',
+        ]) {
           expect(json).not.toContain(needle)
         }
         expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
@@ -588,7 +613,7 @@ describeFixtures(title, () => {
            emitter's output, so the two arms are one artefact reached two ways. */
         const occurrences = (text: string, needle: string): number => text.split(needle).length - 1
         for (const text of [
-          printTemplateModule(entries, families()),
+          printTemplateModule(entries, families(), authored),
           readFileSync(TEMPLATES_MODULE_PATH, 'utf8'),
         ]) {
           expect(text).toContain("name: 'S2W: Wall on Tile: Internal Corner: Low (Modular)'")
@@ -609,7 +634,7 @@ describeFixtures(title, () => {
     'has the committed module byte-identical to the emitter’s output',
     () => {
       expect(
-        printTemplateModule(entries, families()),
+        printTemplateModule(entries, families(), authored),
         `${TEMPLATES_MODULE_PATH} is out of date or hand-edited. ${REFRESH}`,
       ).toBe(readFileSync(TEMPLATES_MODULE_PATH, 'utf8'))
     },
@@ -637,8 +662,8 @@ describeFixtures(title, () => {
         expect(from).toBeGreaterThan(-1)
         return to < 0 ? text.slice(from) : text.slice(from, to)
       }
-      const withFamilies = printTemplateModule(entries, families())
-      expect(region(withFamilies)).toBe(region(printTemplateModule(entries, [])))
+      const withFamilies = printTemplateModule(entries, families(), authored)
+      expect(region(withFamilies)).toBe(region(printTemplateModule(entries, [], authored)))
       expect(region(withFamilies)).toBe(region(readFileSync(TEMPLATES_MODULE_PATH, 'utf8')))
 
       /* And the other half of the same claim, from the family side: the only
@@ -652,6 +677,78 @@ describeFixtures(title, () => {
     },
     SLOW_MS,
   )
+
+  it(
+    'emits the 40 byte-for-byte identically with and without row E3’s authored table',
+    () => {
+      /* **The same guard, for the second merge into this module.** Row B4's is
+         above and cuts on the array boundary, which is enough when the new source
+         gets an array of its own. Row E3's two go *inside* `RECIPE_TEMPLATES` —
+         they have to, because `src/builder/panels/families.ts` keys the palette's
+         assemblies section on which array a template came from and row D2 owns
+         that file — so the cut is {@link AUTHORED_MARKER} instead, and the claim
+         is the same one: everything above it is provably the fixtures' content.
+
+         This is what makes the declared derivation different from an override.
+         An override would rewrite a slot *above* the marker, and the only witness
+         that the rewrite was exactly the documented one would be the overrider
+         itself — which is the reason `TemplateTagDefect`'s docblock declines a
+         one-tag normalisation of these same fixtures. Here the fixtures' half is
+         byte-frozen and the difference is in a region that says whose it is. */
+      const withAuthored = printTemplateModule(entries, families(), authored)
+      const without = printTemplateModule(entries, families(), [])
+
+      /* From the array's opening to whichever comes first: the marker, or the
+         array's own closing bracket when there is no marker. Cutting at
+         `GENERATED_FAMILIES` instead would leave the `]` and a blank line on one
+         side only, and the two arms would differ by two bytes that are not the
+         claim. */
+      const above = (text: string): string => {
+        const from = text.indexOf('export const RECIPE_TEMPLATES')
+        expect(from).toBeGreaterThan(-1)
+        const marker = text.indexOf(AUTHORED_MARKER, from)
+        return marker < 0 ? text.slice(from, text.indexOf('\n]\n', from) + 1) : text.slice(from, marker)
+      }
+      expect(withAuthored).toContain(AUTHORED_MARKER)
+      expect(without).not.toContain(AUTHORED_MARKER)
+      expect(above(withAuthored)).toBe(above(without))
+      expect(above(withAuthored)).toBe(above(readFileSync(TEMPLATES_MODULE_PATH, 'utf8')))
+
+      /* And the other half of the claim, from the authored side: the region below
+         the marker names both rows and neither of the 40. */
+      const below = withAuthored.slice(withAuthored.indexOf(AUTHORED_MARKER))
+      for (const entry of authored) expect(below).toContain(`name: '${entry.name}'`)
+      for (const entry of entries) expect(below).not.toContain(`name: '${entry.name}'`)
+      expect(authored).toHaveLength(2)
+    },
+    SLOW_MS,
+  )
+
+  it('runs the convention gate over the authored entries too, not only the fixtures', () => {
+    /* Which is why the corridor's convention has to exist before its template
+       does. Demonstrated by taking the gate away from it: a part set no
+       convention covers fails the *import*, naming the entry, whether it came
+       from a fixture or from `pipeline/authored.ts`. */
+    const invented: TemplateFixture = {
+      source: 'authored:blueprints.s2w.wall.yaml',
+      name: 'Wall on Tile: Ceiling (Any, Modular)',
+      type: 'blueprint',
+      tags: ['object|tile'],
+      parts: [
+        { name: 'ceiling', tags: { require: [{ tag: 'shape|roof' }] } },
+        { name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } },
+        { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
+      ],
+    }
+    expect(() => printTemplateModule(entries, [], [invented])).toThrow(/no slot convention covers/)
+    expect(() => printTemplateModule(entries, [], [invented])).toThrow(/Wall on Tile: Ceiling/)
+  })
+
+  it('refuses an authored name that slugs onto one of the 40', () => {
+    const [first] = entries
+    if (first === undefined) throw new Error('no templates to build the collision from')
+    expect(() => printTemplateModule(entries, [], [{ ...first, name: `${first.name}!` }])).toThrow(/slug to/)
+  })
 
   it('slugs the 40 names to 40 distinct ids, and refuses to emit a collision', () => {
     const ids = entries.map((entry) => templateSlug(entry.name))
