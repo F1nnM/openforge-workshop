@@ -558,7 +558,7 @@ describeFixtures(title, () => {
            is load-bearing since row B4.** The module has two sources now, so
            the tally below is a claim about the *whole* file rather than about
            its fixture half: a generated family whose tags spelled
-           `shape|corner` would break it, and none does — the 51 emit only
+           `shape|corner` would break it, and none does — the 47 emit only
            `role|`, `form|`, `build|` and `shape|base`. Passing `[]` here would
            still compile and would quietly narrow the assertion back to the 40,
            which is why this test pays for the corpus build. The byte-identity
@@ -620,7 +620,8 @@ describeFixtures(title, () => {
       expect(region(withFamilies)).toBe(region(readFileSync(TEMPLATES_MODULE_PATH, 'utf8')))
 
       /* And the other half of the same claim, from the family side: the only
-         `shape|` tag the 51 families emit is `shape|base`, which is why B6's
+         `shape|` tag the 47 families emit is `shape|base` — required by the base
+         family and denied by the other 46 since row D1 — which is why B6's
          `shape|corner` tally is a statement about the whole file and not just
          about its fixture region. */
       const familyRegion = withFamilies.slice(withFamilies.indexOf('export const GENERATED_FAMILIES'))

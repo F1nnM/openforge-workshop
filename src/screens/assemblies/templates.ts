@@ -1,5 +1,5 @@
 /**
- * The 40 recipe templates and the 51 generated families, as data.
+ * The 40 recipe templates and the 47 generated families, as data.
  *
  * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`
  * fixtures beside the JSON, `pipeline/families.ts` derives the families from the
@@ -11,7 +11,8 @@
  * `RECIPE_TEMPLATES` is the 40 read from the fixtures — all of them
  * `S2W: Wall on Tile`, reaching 35.4% of the corpus. `GENERATED_FAMILIES` is one
  * family per `(role, form, build)` key the emitted tags already carry, each with
- * one required slot, plus the bare-base family no such key can name.
+ * one required slot denying `shape|base`, plus the bare-base family no such key
+ * can name and which requires it.
  * `GENERATED_FAMILY_SIZES` is each family’s size control keyed by family id: a
  * placed instance adds a position’s tags to its `parentTags`, where the slot’s own
  * `constrain` block collects them, so size costs no new resolution code at all.
@@ -25,7 +26,7 @@
  * part of this screen that renders before the index lands.
  *
  * 40 templates over 20 fixture files, 128 parts.
- * 51 generated families over 10380 records, 350 size positions.
+ * 47 generated families over 8417 records, 304 size positions.
  */
 import type { RecipeTemplate } from './assembly'
 
@@ -1451,6 +1452,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|straight' }, { tag: 'build|separate wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1467,7 +1469,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|straight' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1484,22 +1486,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|curve' }, { tag: 'build|separate wall' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  {
-    id: 'wall-straight-thick-wall',
-    name: 'Wall: Straight (Thick Wall)',
-    source: 'wall|straight|thick wall',
-    tags: ['role|wall', 'form|straight', 'build|thick wall'],
-    parts: [
-      {
-        name: 'wall',
-        tags: {
-          require: [{ tag: 'role|wall' }, { tag: 'form|straight' }, { tag: 'build|thick wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1516,6 +1503,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|corner' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1532,24 +1520,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|straight' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  {
-    id: 'floor-curve',
-    name: 'Floor: Curve',
-    source: 'floor|curve|-',
-    tags: ['role|floor', 'form|curve'],
-    parts: [
-      {
-        name: 'floor',
-        tags: {
-          require: [{ tag: 'role|floor' }, { tag: 'form|curve' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1566,6 +1537,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|straight' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1582,6 +1554,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|straight' }, { tag: 'build|s-system' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1589,16 +1562,16 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
     ],
   },
   {
-    id: 'riser-straight',
-    name: 'Riser: Straight',
-    source: 'riser|straight|-',
-    tags: ['role|riser', 'form|straight'],
+    id: 'wall-straight-thick-wall',
+    name: 'Wall: Straight (Thick Wall)',
+    source: 'wall|straight|thick wall',
+    tags: ['role|wall', 'form|straight', 'build|thick wall'],
     parts: [
       {
-        name: 'riser',
+        name: 'wall',
         tags: {
-          require: [{ tag: 'role|riser' }, { tag: 'form|straight' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          require: [{ tag: 'role|wall' }, { tag: 'form|straight' }, { tag: 'build|thick wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1615,6 +1588,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|curve' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1631,6 +1605,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|curve' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1647,7 +1622,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'role|column' }, { tag: 'form|straight' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1655,16 +1630,16 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
     ],
   },
   {
-    id: 'stair-straight',
-    name: 'Stair: Straight',
-    source: 'stair|straight|-',
-    tags: ['role|stair', 'form|straight'],
+    id: 'floor-curve',
+    name: 'Floor: Curve',
+    source: 'floor|curve|-',
+    tags: ['role|floor', 'form|curve'],
     parts: [
       {
-        name: 'stair',
+        name: 'floor',
         tags: {
-          require: [{ tag: 'role|stair' }, { tag: 'form|straight' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          require: [{ tag: 'role|floor' }, { tag: 'form|curve' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1681,6 +1656,24 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|diagonal' }, { tag: 'build|separate wall' }],
+          deny: [{ tag: 'shape|base' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 'stair-straight',
+    name: 'Stair: Straight',
+    source: 'stair|straight|-',
+    tags: ['role|stair', 'form|straight'],
+    parts: [
+      {
+        name: 'stair',
+        tags: {
+          require: [{ tag: 'role|stair' }, { tag: 'form|straight' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1697,6 +1690,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|straight' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1713,6 +1707,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|straight' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1720,48 +1715,16 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
     ],
   },
   {
-    id: 'riser-curve',
-    name: 'Riser: Curve',
-    source: 'riser|curve|-',
-    tags: ['role|riser', 'form|curve'],
+    id: 'riser-straight',
+    name: 'Riser: Straight',
+    source: 'riser|straight|-',
+    tags: ['role|riser', 'form|straight'],
     parts: [
       {
         name: 'riser',
         tags: {
-          require: [{ tag: 'role|riser' }, { tag: 'form|curve' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  {
-    id: 'wall-corner-thick-wall',
-    name: 'Wall: Corner (Thick Wall)',
-    source: 'wall|corner|thick wall',
-    tags: ['role|wall', 'form|corner', 'build|thick wall'],
-    parts: [
-      {
-        name: 'wall',
-        tags: {
-          require: [{ tag: 'role|wall' }, { tag: 'form|corner' }, { tag: 'build|thick wall' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  {
-    id: 'floor-straight-separate-wall',
-    name: 'Floor: Straight (Separate Wall)',
-    source: 'floor|straight|separate wall',
-    tags: ['role|floor', 'form|straight', 'build|separate wall'],
-    parts: [
-      {
-        name: 'floor',
-        tags: {
-          require: [{ tag: 'role|floor' }, { tag: 'form|straight' }, { tag: 'build|separate wall' }],
+          require: [{ tag: 'role|riser' }, { tag: 'form|straight' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1778,7 +1741,24 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'roof',
         tags: {
           require: [{ tag: 'role|roof' }, { tag: 'form|straight' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 'wall-corner-thick-wall',
+    name: 'Wall: Corner (Thick Wall)',
+    source: 'wall|corner|thick wall',
+    tags: ['role|wall', 'form|corner', 'build|thick wall'],
+    parts: [
+      {
+        name: 'wall',
+        tags: {
+          require: [{ tag: 'role|wall' }, { tag: 'form|corner' }, { tag: 'build|thick wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1795,23 +1775,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'stair',
         tags: {
           require: [{ tag: 'role|stair' }, { tag: 'form|curve' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  {
-    id: 'wall-hex-thick-wall',
-    name: 'Wall: Hex (Thick Wall)',
-    source: 'wall|hex|thick wall',
-    tags: ['role|wall', 'form|hex', 'build|thick wall'],
-    parts: [
-      {
-        name: 'wall',
-        tags: {
-          require: [{ tag: 'role|wall' }, { tag: 'form|hex' }, { tag: 'build|thick wall' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1828,6 +1792,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'role|column' }, { tag: 'form|straight' }, { tag: 'build|separate wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1835,15 +1800,16 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
     ],
   },
   {
-    id: 'wall-straight-s2w',
-    name: 'Wall: Straight (S2W)',
-    source: 'wall|straight|s2w',
-    tags: ['role|wall', 'form|straight', 'build|s2w'],
+    id: 'riser-curve',
+    name: 'Riser: Curve',
+    source: 'riser|curve|-',
+    tags: ['role|riser', 'form|curve'],
     parts: [
       {
-        name: 'wall',
+        name: 'riser',
         tags: {
-          require: [{ tag: 'role|wall' }, { tag: 'form|straight' }, { tag: 'build|s2w' }],
+          require: [{ tag: 'role|riser' }, { tag: 'form|curve' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1860,22 +1826,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|corner' }, { tag: 'build|s2w' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  {
-    id: 'floor-curve-separate-wall',
-    name: 'Floor: Curve (Separate Wall)',
-    source: 'floor|curve|separate wall',
-    tags: ['role|floor', 'form|curve', 'build|separate wall'],
-    parts: [
-      {
-        name: 'floor',
-        tags: {
-          require: [{ tag: 'role|floor' }, { tag: 'form|curve' }, { tag: 'build|separate wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1892,6 +1843,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|corner' }, { tag: 'build|s-system' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1908,6 +1860,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|corner' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1924,7 +1877,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|corner' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1941,7 +1894,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'roof',
         tags: {
           require: [{ tag: 'role|roof' }, { tag: 'form|corner' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1958,7 +1911,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'decor',
         tags: {
           require: [{ tag: 'role|decor' }, { tag: 'form|straight' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1975,6 +1928,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|diagonal' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -1991,6 +1945,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'role|column' }, { tag: 'form|corner' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2007,6 +1962,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|octagon' }, { tag: 'build|separate wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2023,7 +1979,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'stair',
         tags: {
           require: [{ tag: 'role|stair' }, { tag: 'form|corner' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2040,6 +1996,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|internal_corner' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2056,6 +2013,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|curve' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2072,22 +2030,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|corner' }, { tag: 'build|wall on tile' }],
-          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
-        },
-        fulfills: [],
-      },
-    ],
-  },
-  {
-    id: 'wall-corner-separate-wall',
-    name: 'Wall: Corner (Separate Wall)',
-    source: 'wall|corner|separate wall',
-    tags: ['role|wall', 'form|corner', 'build|separate wall'],
-    parts: [
-      {
-        name: 'wall',
-        tags: {
-          require: [{ tag: 'role|wall' }, { tag: 'form|corner' }, { tag: 'build|separate wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2104,7 +2047,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|diagonal' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2121,6 +2064,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|diagonal' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2137,7 +2081,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|octagon' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2145,15 +2089,16 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
     ],
   },
   {
-    id: 'wall-internal-corner-s2w',
-    name: 'Wall: Internal Corner (S2W)',
-    source: 'wall|internal_corner|s2w',
-    tags: ['role|wall', 'form|internal_corner', 'build|s2w'],
+    id: 'wall-hex-thick-wall',
+    name: 'Wall: Hex (Thick Wall)',
+    source: 'wall|hex|thick wall',
+    tags: ['role|wall', 'form|hex', 'build|thick wall'],
     parts: [
       {
         name: 'wall',
         tags: {
-          require: [{ tag: 'role|wall' }, { tag: 'form|internal_corner' }, { tag: 'build|s2w' }],
+          require: [{ tag: 'role|wall' }, { tag: 'form|hex' }, { tag: 'build|thick wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2170,6 +2115,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|internal_corner' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2186,7 +2132,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'role|floor' }, { tag: 'form|internal_corner' }],
-          deny: [{ tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'build|s-system' }, { tag: 'build|s2w' }, { tag: 'build|separate wall' }, { tag: 'build|thick wall' }, { tag: 'build|wall on tile' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2203,6 +2149,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'role|wall' }, { tag: 'form|internal_corner' }, { tag: 'build|separate wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2219,6 +2166,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'role|column' }, { tag: 'form|straight' }, { tag: 'build|thick wall' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2235,6 +2183,7 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'role|column' }, { tag: 'form|straight' }, { tag: 'build|wall on tile' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2251,6 +2200,24 @@ export const GENERATED_FAMILIES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'role|column' }, { tag: 'form|diagonal' }, { tag: 'build|separate wall' }],
+          deny: [{ tag: 'shape|base' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 'wall-straight-s2w',
+    name: 'Wall: Straight (S2W)',
+    source: 'wall|straight|s2w',
+    tags: ['role|wall', 'form|straight', 'build|s2w'],
+    parts: [
+      {
+        name: 'wall',
+        tags: {
+          require: [{ tag: 'role|wall' }, { tag: 'form|straight' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -2281,30 +2248,26 @@ export const GENERATED_FAMILY_SIZES: Readonly<
   'wall-straight-separate-wall': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 1.5 deep', tags: ['size|width|2', 'size|depth|1.5'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '3 wide by 1.5 deep', tags: ['size|width|3', 'size|depth|1.5'] }, { label: '4 wide', tags: ['size|width|4'] }],
   'floor-straight': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1 wide by 2 deep', tags: ['size|width|1', 'size|depth|2'] }, { label: '1 wide by 3 deep', tags: ['size|width|1', 'size|depth|3'] }, { label: '1 wide by 4 deep', tags: ['size|width|1', 'size|depth|4'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 3 deep', tags: ['size|width|2', 'size|depth|3'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 2 deep', tags: ['size|width|3', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '3 wide by 4 deep', tags: ['size|width|3', 'size|depth|4'] }, { label: '4 wide', tags: ['size|width|4'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 3 deep', tags: ['size|width|4', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }, { label: '6 wide by 2 deep', tags: ['size|width|6', 'size|depth|2'] }, { label: '6 wide by 4 deep', tags: ['size|width|6', 'size|depth|4'] }, { label: '6 wide by 6 deep', tags: ['size|width|6', 'size|depth|6'] }, { label: '8 wide by 2 deep', tags: ['size|width|8', 'size|depth|2'] }, { label: '8 wide by 8 deep', tags: ['size|width|8', 'size|depth|8'] }],
   'wall-curve-separate-wall': [{ label: 'any size', tags: [] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide', tags: ['size|width|2'] }],
-  'wall-straight-thick-wall': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '6 wide by 2 deep', tags: ['size|width|6', 'size|depth|2'] }],
-  'wall-corner-s2w': [{ label: 'any size', tags: [] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
-  'wall-straight': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 1.5 deep', tags: ['size|width|3', 'size|depth|1.5'] }, { label: '4 wide', tags: ['size|width|4'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '6 wide by 6 deep', tags: ['size|width|6', 'size|depth|6'] }],
-  'floor-curve': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }, { label: '5 wide by 5 deep', tags: ['size|width|5', 'size|depth|5'] }, { label: '6 wide by 6 deep', tags: ['size|width|6', 'size|depth|6'] }, { label: '7 wide by 7 deep', tags: ['size|width|7', 'size|depth|7'] }, { label: '8 wide by 8 deep', tags: ['size|width|8', 'size|depth|8'] }],
+  'wall-corner-s2w': [{ label: 'any size', tags: [] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  'wall-straight': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '3 wide by 1.5 deep', tags: ['size|width|3', 'size|depth|1.5'] }, { label: '4 wide', tags: ['size|width|4'] }, { label: '6 wide by 6 deep', tags: ['size|width|6', 'size|depth|6'] }],
   'wall-straight-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1 wide by 2 deep', tags: ['size|width|1', 'size|depth|2'] }, { label: '1 wide by 3 deep', tags: ['size|width|1', 'size|depth|3'] }, { label: '1 wide by 4 deep', tags: ['size|width|1', 'size|depth|4'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 3 deep', tags: ['size|width|2', 'size|depth|3'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '3 wide by 2 deep', tags: ['size|width|3', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '3 wide by 4 deep', tags: ['size|width|3', 'size|depth|4'] }, { label: '4 wide', tags: ['size|width|4'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 3 deep', tags: ['size|width|4', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
   'wall-straight-s-system': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }],
-  'riser-straight': [{ label: 'any size', tags: [] }, { label: '1 wide by 0.5 deep', tags: ['size|width|1', 'size|depth|0.5'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1 wide by 2 deep', tags: ['size|width|1', 'size|depth|2'] }, { label: '1 wide by 3 deep', tags: ['size|width|1', 'size|depth|3'] }, { label: '1 wide by 4 deep', tags: ['size|width|1', 'size|depth|4'] }, { label: '2 wide by 0.5 deep', tags: ['size|width|2', 'size|depth|0.5'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 3 deep', tags: ['size|width|2', 'size|depth|3'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 2 deep', tags: ['size|width|3', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '3 wide by 4 deep', tags: ['size|width|3', 'size|depth|4'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 3 deep', tags: ['size|width|4', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
+  'wall-straight-thick-wall': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '6 wide by 2 deep', tags: ['size|width|6', 'size|depth|2'] }],
   'floor-curve-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }, { label: '6 wide by 6 deep', tags: ['size|width|6', 'size|depth|6'] }, { label: '8 wide by 8 deep', tags: ['size|width|8', 'size|depth|8'] }],
   'wall-curve-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }, { label: '6 wide by 6 deep', tags: ['size|width|6', 'size|depth|6'] }, { label: '8 wide by 8 deep', tags: ['size|width|8', 'size|depth|8'] }],
   'column-straight': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
-  'stair-straight': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide by 0.5 deep', tags: ['size|width|2', 'size|depth|0.5'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '4 wide', tags: ['size|width|4'] }],
+  'floor-curve': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }, { label: '6 wide by 6 deep', tags: ['size|width|6', 'size|depth|6'] }],
   'wall-diagonal-separate-wall': [{ label: 'any size', tags: [] }],
+  'stair-straight': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide by 0.5 deep', tags: ['size|width|2', 'size|depth|0.5'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '4 wide', tags: ['size|width|4'] }],
   'floor-straight-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1 wide by 2 deep', tags: ['size|width|1', 'size|depth|2'] }, { label: '1 wide by 3 deep', tags: ['size|width|1', 'size|depth|3'] }, { label: '1 wide by 4 deep', tags: ['size|width|1', 'size|depth|4'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 3 deep', tags: ['size|width|2', 'size|depth|3'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 2 deep', tags: ['size|width|3', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '3 wide by 4 deep', tags: ['size|width|3', 'size|depth|4'] }, { label: '4 wide', tags: ['size|width|4'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 3 deep', tags: ['size|width|4', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
   'floor-straight-s2w': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
-  'riser-curve': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }, { label: '5 wide by 5 deep', tags: ['size|width|5', 'size|depth|5'] }, { label: '7 wide by 7 deep', tags: ['size|width|7', 'size|depth|7'] }],
-  'wall-corner-thick-wall': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }],
-  'floor-straight-separate-wall': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
+  'riser-straight': [{ label: 'any size', tags: [] }, { label: '1 wide by 0.5 deep', tags: ['size|width|1', 'size|depth|0.5'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 0.5 deep', tags: ['size|width|2', 'size|depth|0.5'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
   'roof-straight': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1 wide by 1.5 deep', tags: ['size|width|1', 'size|depth|1.5'] }, { label: '1 wide by 2 deep', tags: ['size|width|1', 'size|depth|2'] }, { label: '1 wide by 2.5 deep', tags: ['size|width|1', 'size|depth|2.5'] }, { label: '1 wide by 3 deep', tags: ['size|width|1', 'size|depth|3'] }, { label: '1 wide by 3.5 deep', tags: ['size|width|1', 'size|depth|3.5'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 1.5 deep', tags: ['size|width|2', 'size|depth|1.5'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 2.5 deep', tags: ['size|width|2', 'size|depth|2.5'] }, { label: '2 wide by 3 deep', tags: ['size|width|2', 'size|depth|3'] }, { label: '2 wide by 3.5 deep', tags: ['size|width|2', 'size|depth|3.5'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 1.5 deep', tags: ['size|width|3', 'size|depth|1.5'] }, { label: '3 wide by 2 deep', tags: ['size|width|3', 'size|depth|2'] }, { label: '3 wide by 2.5 deep', tags: ['size|width|3', 'size|depth|2.5'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '3 wide by 3.5 deep', tags: ['size|width|3', 'size|depth|3.5'] }, { label: '4 wide', tags: ['size|width|4'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 1.5 deep', tags: ['size|width|4', 'size|depth|1.5'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 2.5 deep', tags: ['size|width|4', 'size|depth|2.5'] }, { label: '4 wide by 3 deep', tags: ['size|width|4', 'size|depth|3'] }, { label: '4 wide by 3.5 deep', tags: ['size|width|4', 'size|depth|3.5'] }, { label: '5 wide', tags: ['size|width|5'] }, { label: '6 wide', tags: ['size|width|6'] }, { label: '7 wide', tags: ['size|width|7'] }],
+  'wall-corner-thick-wall': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }],
   'stair-curve': [{ label: 'any size', tags: [] }],
-  'wall-hex-thick-wall': [{ label: 'any size', tags: [] }],
   'column-straight-separate-wall': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }],
-  'wall-straight-s2w': [{ label: 'any size', tags: [] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
+  'riser-curve': [{ label: 'any size', tags: [] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '5 wide by 5 deep', tags: ['size|width|5', 'size|depth|5'] }, { label: '7 wide by 7 deep', tags: ['size|width|7', 'size|depth|7'] }],
   'floor-corner-s2w': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
-  'floor-curve-separate-wall': [{ label: 'any size', tags: [] }],
   'wall-corner-s-system': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }],
   'wall-corner-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '4 wide', tags: ['size|width|4'] }],
   'floor-corner': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
@@ -2317,16 +2280,16 @@ export const GENERATED_FAMILY_SIZES: Readonly<
   'floor-internal-corner-s2w': [{ label: 'any size', tags: [] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
   'floor-curve-s2w': [{ label: 'any size', tags: [] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
   'floor-corner-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
-  'wall-corner-separate-wall': [{ label: 'any size', tags: [] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
   'floor-diagonal': [{ label: 'any size', tags: [] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
   'floor-diagonal-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
   'floor-octagon': [{ label: 'any size', tags: [] }],
-  'wall-internal-corner-s2w': [{ label: 'any size', tags: [] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  'wall-hex-thick-wall': [{ label: 'any size', tags: [] }],
   'floor-internal-corner-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
   'floor-internal-corner': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
   'wall-internal-corner-separate-wall': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '2 wide', tags: ['size|width|2'] }],
   'column-straight-thick-wall': [{ label: 'any size', tags: [] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
   'column-straight-wall-on-tile': [{ label: 'any size', tags: [] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }],
   'column-diagonal-separate-wall': [{ label: 'any size', tags: [] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  'wall-straight-s2w': [{ label: 'any size', tags: [] }, { label: '2 wide', tags: ['size|width|2'] }],
   'shape-base': [{ label: 'any size', tags: [] }, { label: '1 wide', tags: ['size|width|1'] }, { label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '1 wide by 2 deep', tags: ['size|width|1', 'size|depth|2'] }, { label: '1 wide by 3 deep', tags: ['size|width|1', 'size|depth|3'] }, { label: '1 wide by 4 deep', tags: ['size|width|1', 'size|depth|4'] }, { label: '1.5 wide', tags: ['size|width|1.5'] }, { label: '2 wide', tags: ['size|width|2'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 1.5 deep', tags: ['size|width|2', 'size|depth|1.5'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '2 wide by 3 deep', tags: ['size|width|2', 'size|depth|3'] }, { label: '2 wide by 4 deep', tags: ['size|width|2', 'size|depth|4'] }, { label: '3 wide', tags: ['size|width|3'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 1.5 deep', tags: ['size|width|3', 'size|depth|1.5'] }, { label: '3 wide by 2 deep', tags: ['size|width|3', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '3 wide by 4 deep', tags: ['size|width|3', 'size|depth|4'] }, { label: '4 wide', tags: ['size|width|4'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 3 deep', tags: ['size|width|4', 'size|depth|3'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }, { label: '5 wide by 5 deep', tags: ['size|width|5', 'size|depth|5'] }, { label: '6 wide by 4 deep', tags: ['size|width|6', 'size|depth|4'] }, { label: '6 wide by 6 deep', tags: ['size|width|6', 'size|depth|6'] }, { label: '7 wide by 7 deep', tags: ['size|width|7', 'size|depth|7'] }, { label: '8 wide by 2 deep', tags: ['size|width|8', 'size|depth|2'] }, { label: '8 wide by 8 deep', tags: ['size|width|8', 'size|depth|8'] }],
 }

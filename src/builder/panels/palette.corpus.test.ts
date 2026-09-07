@@ -21,7 +21,7 @@
  *       3. **the preview is not the print** — the catalog card renders the
  *          former and the bill's fills print the latter, and the disagreement is
  *          measured on all 931 two-sided items under all three locks.
- *   - **Blocks 4 to 9 are row C1's own**: the 91 rows, their grouping, the size
+ *   - **Blocks 4 to 9 are row C1's own**: the 87 rows, their grouping, the size
  *     control's domain, the map from an item back to a family, and the one
  *     contract this row cannot satisfy from inside its own files.
  *
@@ -35,7 +35,7 @@
  *
  * Nothing here renders anything. It is arithmetic over the emitted index and the
  * generated template module, so it says the palette's *premises* hold; whether
- * the panel then reads the right field is `panels.test.tsx`'s job, and whether 91
+ * the panel then reads the right field is `panels.test.tsx`'s job, and whether 87
  * rows are legible at 272px is a browser's. It also cannot prove any of this
  * *forward*: a future import is free to emit a design whose files disagree about
  * a footprint, or a family whose refs match nothing, and the point of measuring
@@ -234,26 +234,26 @@ describeCorpus('the row shows one file and the build prints another', () => {
   })
 })
 
-/* ------------------------------------------- 4. the 91 rows, and their ids */
+/* ------------------------------------------- 4. the 87 rows, and their ids */
 
-describeCorpus('the palette lists 91 templates and can arm every one of them', () => {
-  it('is B4’s 51 families plus the 40 shipped recipes, with distinct ids', () => {
-    expect(TEMPLATE_FAMILIES).toHaveLength(91)
-    expect(TEMPLATE_FAMILIES.filter((family) => family.kind === 'family')).toHaveLength(51)
+describeCorpus('the palette lists 87 templates and can arm every one of them', () => {
+  it('is B4’s 47 families plus the 40 shipped recipes, with distinct ids', () => {
+    expect(TEMPLATE_FAMILIES).toHaveLength(87)
+    expect(TEMPLATE_FAMILIES.filter((family) => family.kind === 'family')).toHaveLength(47)
     expect(TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe')).toHaveLength(40)
-    expect(new Set(TEMPLATE_FAMILIES.map((family) => family.id)).size).toBe(91)
+    expect(new Set(TEMPLATE_FAMILIES.map((family) => family.id)).size).toBe(87)
     // `PLACEABLE_TEMPLATES` is the same set as the resolver's own type, in the
     // same order, so a screen can build one lookup from it.
-    expect(PLACEABLE_TEMPLATES).toHaveLength(91)
+    expect(PLACEABLE_TEMPLATES).toHaveLength(87)
   })
 
   it('parses every id as a TemplateId, which is what row A8’s refusal rested on', () => {
     // A8 declined to arm anything because the list held `DesignId`s and a
-    // `DesignId` is a brand over `z.string().min(1)`: **all 91 template ids
+    // `DesignId` is a brand over `z.string().min(1)`: **all 87 template ids
     // satisfy it**, so the compiler could not have caught the cast and every
     // placement would have been reported `unknown-template`. The discrimination
     // runs the other way and is what makes this list armable — a `TemplateId` is
-    // a lowercase hyphenated slug, and the generator emits 91 of them.
+    // a lowercase hyphenated slug, and the generator emits 87 of them.
     expect(TEMPLATE_FAMILIES.filter((family) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(family.id))).toEqual([])
     // And no design in the corpus collides with one, which is the other half of
     // "not lexically disjoint but disjoint in fact".
@@ -261,7 +261,7 @@ describeCorpus('the palette lists 91 templates and can arm every one of them', (
     expect(items.filter((item) => ids.has(item.design)).map((item) => item.name)).toEqual([])
   })
 
-  it('groups the 51 single tiles by role in the order the corpus puts them', () => {
+  it('groups the 47 single tiles by role in the order the corpus puts them', () => {
     const records51 = new Map<string, number>()
     for (const record of records) {
       const role = resolveTags(loaded!, record).find((tag) => tag.startsWith('role|'))?.slice(5)
@@ -281,17 +281,19 @@ describeCorpus('the palette lists 91 templates and can arm every one of them', (
     })
     // The group order follows those records; the *family* counts do not follow
     // them, which is why the two lists are different and only one is the order.
+    // `wall` and `floor` were 19 and 17 until row D1 dropped the four families
+    // whose whole population was bases — two walls and two floors.
     const counts = GROUP_ORDER.map(
       (key) => TEMPLATE_FAMILIES.filter((family) => family.group === key).length,
     )
-    expect(counts).toEqual([19, 17, 2, 6, 3, 2, 1, 1])
+    expect(counts).toEqual([17, 15, 2, 6, 3, 2, 1, 1])
     // No `insert` group, although 285 records carry the role: `SKIPPED_ROLES`.
     expect(GROUP_ORDER).not.toContain('insert')
     // And **no ninth group for the 40 assemblies** — row D2 made the kind of
     // thing a row is a section rather than a group, so they carry no role and no
     // group at all. `GROUP_ORDER` covers the single tiles exactly.
     expect(TEMPLATE_FAMILIES.filter((family) => family.group === undefined)).toHaveLength(40)
-    expect(counts.reduce((total, one) => total + one, 0)).toBe(51)
+    expect(counts.reduce((total, one) => total + one, 0)).toBe(47)
   })
 })
 
@@ -301,16 +303,19 @@ describeCorpus('the palette lists 91 templates and can arm every one of them', (
  * Row **D2**, against the shipped corpus rather than the nine-item fixture.
  *
  * The defect was a *palette* defect and the numbers behind it are all in the
- * generated template module, so these are measurements of the real 91 rows: how
+ * generated template module, so these are measurements of the real 87 rows: how
  * many of them the word *corner* reaches, which kinds they are, and where the
  * assembly the owner described lands once the section and the ranking are
- * applied. The brief for this row said eleven one-slot rows contain the word;
- * the first assertion is the measured figure.
+ * applied. The brief for this row said eleven one-slot rows contain the word; it
+ * was sixteen when D2 measured it and is **fourteen** now that row D1 has
+ * dropped the two corner families whose whole population was bases
+ * (`Wall: Corner (Separate Wall)` and `Wall: Internal Corner (S2W)`). The first
+ * assertion is the measured figure, whatever it is.
  */
 describeCorpus('the query the owner ran', () => {
   const ASSEMBLY = 'S2W: Wall on Tile: Corner (Any, Single Piece)'
 
-  it('reaches 16 one-slot rows and 8 assemblies, not 11 and 8', () => {
+  it('reaches 14 one-slot rows and 8 assemblies, not the 11 the brief claimed', () => {
     const corner = TEMPLATE_FAMILIES.filter((family) =>
       [family.name, family.role, family.form, family.build]
         .filter((part) => part !== undefined)
@@ -319,19 +324,26 @@ describeCorpus('the query the owner ran', () => {
         .replace(/_/g, ' ')
         .includes('corner'),
     )
-    expect(corner.filter((family) => family.kind === 'family')).toHaveLength(16)
+    expect(corner.filter((family) => family.kind === 'family')).toHaveLength(14)
     expect(corner.filter((family) => family.kind === 'recipe')).toHaveLength(8)
-    // C1's list was in `GROUP_ORDER`, so all 8 assemblies were below all 16.
+    // C1's list was in `GROUP_ORDER`, so all 8 assemblies were below all 14.
     expect(corner.map((family) => family.kind).lastIndexOf('family')).toBeLessThan(
       corner.map((family) => family.kind).indexOf('recipe'),
     )
   })
 
-  it('puts the 5-slot corner assembly first of all 24', () => {
+  it('puts the 5-slot corner assembly first of all 22', () => {
     const sections = paletteSections(TEMPLATE_FAMILIES, 'corner')
     expect(sections.map((section) => section.key)).toEqual(['assemblies', 'tiles'])
     expect(sections.flatMap((section) => section.rows)[0]?.name).toBe(ASSEMBLY)
-    expect(sections.flatMap((section) => section.rows)).toHaveLength(24)
+    expect(sections.flatMap((section) => section.rows)).toHaveLength(22)
+
+    // Where it was: row 50 of 87 in the declared order, thirty-eight rows below
+    // the `Wall: Corner (Wall on Tile)` the owner actually found at row 12.
+    expect(TEMPLATE_FAMILIES.findIndex((family) => family.name === ASSEMBLY)).toBe(49)
+    expect(
+      TEMPLATE_FAMILIES.findIndex((family) => family.name === 'Wall: Corner (Wall on Tile)'),
+    ).toBe(11)
 
     // And it is the one the owner described: a floor, two walls and a column.
     const assembly = TEMPLATE_FAMILIES.find((family) => family.name === ASSEMBLY)
@@ -358,7 +370,7 @@ describeCorpus('the query the owner ran', () => {
 
   it('reorders nothing at all with an empty query', () => {
     // Ranking is something a query does. With nothing typed the 40 stay in
-    // fixture order and the 51 in the corpus order §3.1 argued for.
+    // fixture order and the 47 in the corpus order §3.1 argued for.
     expect(rankFamilies(TEMPLATE_FAMILIES, '')).toBe(TEMPLATE_FAMILIES)
     expect(paletteSections(TEMPLATE_FAMILIES, '').flatMap((section) => section.rows)).toEqual([
       ...TEMPLATE_FAMILIES.filter((family) => family.kind === 'recipe'),
@@ -385,40 +397,43 @@ describeCorpus('the query the owner ran', () => {
 
 /* ------------------------------------------------- 5. the size control's domain */
 
-describeCorpus('the size control is a control, and 8 families have none', () => {
-  it('holds 350 positions over the 51, median 5 and maximum 32', () => {
+describeCorpus('the size control is a control, and 7 families have none', () => {
+  it('holds 304 positions over the 47, median 4 and maximum 32', () => {
     const families = TEMPLATE_FAMILIES.filter((family) => family.kind === 'family')
-    // `TemplateFamily.sizes` is *what there is to choose*, so the 8 one-position
-    // tables arrive as empty; the emitted table is what holds 350.
+    // `TemplateFamily.sizes` is *what there is to choose*, so the 7 one-position
+    // tables arrive as empty; the emitted table is what holds 304.
     const offered = families.map((family) => family.sizes.length)
     const emitted = offered.map((length) => (length === 0 ? 1 : length))
-    expect(emitted.reduce((total, length) => total + length, 0)).toBe(350)
+    expect(emitted.reduce((total, length) => total + length, 0)).toBe(304)
 
     const sorted = [...emitted].sort((a, b) => a - b)
-    expect(sorted[Math.floor(sorted.length / 2)]).toBe(5)
+    expect(sorted[Math.floor(sorted.length / 2)]).toBe(4)
     expect(sorted[sorted.length - 1]).toBe(32)
   })
 
-  it('names the 8 rather than counting them — 5 empty domains and 3 inexpressible', () => {
+  it('names the 7 rather than counting them — 5 empty domains and 2 inexpressible', () => {
     // **The brief for this row said 5.** B3's five are the families whose records
-    // resolve no grid cell at all; the other three resolve cells that no `size|`
+    // resolve no grid cell at all; the other two resolve cells that no `size|`
     // tag can express (B4's 16 refused cells: 12 annular sectors, 3 columns at
     // 0.5 x 0.5, and one 3x0.5 curve wall). Both arrive as a one-position table
-    // and both must render no control, so the panel sees 8.
+    // and both must render no control, so the panel sees 7.
+    //
+    // It was 8 until row D1: `floor|curve|separate wall` was the third
+    // inexpressible one and that family is gone, because all 41 of its records
+    // were bases. The same row took `wall|hex|thick wall` from 56 records to 8.
     const bare = TEMPLATE_FAMILIES.filter(
       (family) => family.kind === 'family' && family.sizes.length === 0,
     ).map((family) => family.template.source)
     expect(bare.sort()).toEqual(
       [
-        // B3's five empty domains, 231 records.
+        // B3's five empty domains, 183 records.
         'wall|diagonal|separate wall',
         'wall|hex|thick wall',
         'decor|straight|-',
         'wall|octagon|separate wall',
         'floor|octagon|-',
-        // Three whose whole domain is inexpressible.
+        // Two whose whole domain is inexpressible.
         'stair|curve|-',
-        'floor|curve|separate wall',
         'column|corner|s2w',
       ].sort(),
     )
@@ -444,19 +459,29 @@ describeCorpus('the size control is a control, and 8 families have none', () => 
     expect(empty).toEqual([])
   })
 
-  it('counts the whole corpus once per family, and the base family twice over', () => {
-    // 10,380 candidate records against 8,702 in the index: `shape-base`'s 1,963
-    // are *also* in a role family, because a base keeps the role of the piece it
-    // sits under. That is why `GROUP_ORDER` puts `base` after the seven roles
-    // rather than in among them.
+  it('counts every record it can place exactly once, over all 47 families', () => {
+    // **8,417 candidate records against 8,702 in the index, and the 285 between
+    // them are the inserts no family is generated for.** So the 47 families
+    // *partition* what the palette can place — which they did not before row
+    // D1: the sum was 10,380, because `shape-base`'s 1,963 were also admitted
+    // by a role family (a base keeps the role of the piece it sits under) and
+    // 1,678 of the 10,380 were that double count less the inserts.
+    //
+    // `GROUP_ORDER` still puts `base` after the seven roles rather than among
+    // them, and the reason is unchanged: the *records* carrying `role|wall`
+    // include 1,117 bases, so a table of records per role and a table of
+    // families per role are two different readings of the corpus.
     const composition = createCompositionIndex(loaded!, aggregates)
     const total = TEMPLATE_FAMILIES.filter((family) => family.kind === 'family').reduce(
       (sum, family) =>
         sum + composition.candidatesFor(resolveSlotTags(family.template.parts[0]!.tags, family.template.tags, [])).tiles.length,
       0,
     )
-    expect(total).toBe(10_380)
-    expect(total - records.length).toBe(1678)
+    expect(total).toBe(8417)
+    expect(records.length - total).toBe(285)
+    expect(
+      records.filter((record) => resolveTags(loaded!, record).includes('role|insert')),
+    ).toHaveLength(285)
   })
 })
 
@@ -566,13 +591,13 @@ describeCorpus('every item but the inserts resolves to a family', () => {
  * generator owns, and the only acceptable answer to that is this comparison.
  */
 describeCorpus('the drawer constructs the key the generator emitted', () => {
-  /** The 50 keyed families. `shape-base` is not one of them by construction. */
+  /** The 46 keyed families. `shape-base` is not one of them by construction. */
   const keyed = TEMPLATE_FAMILIES.filter(
     (family) => family.kind === 'family' && family.template.source !== 'shape|base',
   )
 
-  it('reproduces all 50 ids and all 50 names, with no exceptions', () => {
-    expect(keyed).toHaveLength(50)
+  it('reproduces all 46 ids and all 46 names, with no exceptions', () => {
+    expect(keyed).toHaveLength(46)
     const wrong = keyed.flatMap((family) => {
       const [role = '', form = '', build = '-'] = family.template.source.split('|')
       const system = build === '-' ? undefined : build
@@ -642,7 +667,7 @@ describeCorpus('a placement resolves only against the whole template table', () 
     // **The seam row C1 cannot close from inside its own files, measured.**
     // `screens/builder/BuilderScreen.tsx` builds its recipe table as
     // `new Map(RECIPE_TEMPLATES.map(…))` — the 40 — which was right for every id
-    // that existed before this row and is wrong for all 51 families. Against that
+    // that existed before this row and is wrong for all 47 families. Against that
     // table every placement the new palette arms resolves to no parts and one
     // `warn` note, which `billView.ts` renders as *"1 placed piece names a recipe
     // this build does not ship"*. That file belongs to row C3;
@@ -669,7 +694,7 @@ describeCorpus('a placement resolves only against the whole template table', () 
     expect(whole.unfilled.map((slot) => slot.slot)).toEqual([family.template.parts[0]!.name])
   })
 
-  it('resolves all 91 against the whole table, and none of them against the 40', () => {
+  it('resolves all 87 against the whole table, and none of them against the 40', () => {
     const assembly = buildAssemblyIndex(loaded!)
     const composition = createCompositionIndex(loaded!, aggregates)
     const whole = lookupOver(PLACEABLE_TEMPLATES)
@@ -689,7 +714,7 @@ describeCorpus('a placement resolves only against the whole template table', () 
           (note) => note.code === 'unknown-template',
         ),
     )
-    // Exactly the 51 families: the 40 recipes are in both tables.
-    expect(unknownAgainstForty).toHaveLength(51)
+    // Exactly the 47 families: the 40 recipes are in both tables.
+    expect(unknownAgainstForty).toHaveLength(47)
   })
 })

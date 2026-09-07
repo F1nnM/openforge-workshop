@@ -3,22 +3,23 @@
  *
  * **A row is a template family, not an item and no longer a file** — row C1,
  * finishing §2.5's *"templates are the only placement unit"* on the one surface
- * that still listed the archive. `families.ts` holds the 91 rows and the axes;
+ * that still listed the archive. `families.ts` holds the 87 rows and the axes;
  * this module is the four questions a panel asks of them — *which rows does this
  * query leave*, *in what order*, *which section and group does each one go in*,
  * and *how many archive tiles would fill it* — plus the session's RECENT ring.
  *
  * ## Row D2: the list says which of two kinds a row is, before anything else
  *
- * C1 listed all 91 as one list because all 91 place through one function. The
- * project owner placed a corner from it, got one slot, and reported the template
- * system broken — the 5-slot assembly they had asked for was 23 rows below the
- * 1-slot family they found, under a heading naming a build system. So:
+ * C1 listed all 87 as one list because all 87 place through one function. The
+ * project owner placed a `Corner (Wall on Tile)` from it, got one slot, and
+ * reported the template system broken — the 5-slot assembly they had asked for
+ * was **row 50 of 87, thirty-eight rows below** the 1-slot family they found,
+ * under a heading naming a build system rather than a kind. So:
  * {@link paletteSections} splits the list in two with the assemblies first,
  * {@link rankFamilies} orders each section against the query, and every row
  * carries `TemplateFamily.slots`. Those three docblocks carry the measurements.
  *
- * ## It was a search over 3,822 items and row C1 left a list of 91
+ * ## It was a search over 3,822 items and row C1 left a list of 87
  *
  * The history is worth keeping because two of the three functions that used to
  * be here died of a *measurement* rather than of a redesign:
@@ -46,7 +47,7 @@
  * virtualised grid and the drawer, and the drawer's *"Use in builder"* is the
  * bridge back — which after this row hands over a family and a size instead of a
  * design that nothing could arm (`familyKey.ts#armForTags`, `store/selection.ts`).
- * The **search field** survives, repointed at the 91 rows it now lists, so
+ * The **search field** survives, repointed at the 87 rows it now lists, so
  * `/builder?q=corner` still narrows the palette and the URL is still linkable.
  *
  * ## No thumbnails, and that is the one thing that gets worse
@@ -63,7 +64,7 @@
  * — the three locks disagree for 37.1% of items), so a representative thumbnail
  * would show a tile the placement does not contain. What a row carries instead
  * is the family's name and {@link candidateCount}: a number the resolver itself
- * produced. Recognition rests on 91 *names*, which is the claim §3.1 actually
+ * produced. Recognition rests on 87 *names*, which is the claim §3.1 actually
  * makes; the pictures live one level down, in C3's slot editor, where a choice of
  * file is what is being made.
  *
@@ -78,7 +79,7 @@
  * choice belongs here rather than in the editor — but not as a facet on this
  * list:
  *
- *   - **Not a facet.** A texture is not an axis of a family: 91 rows over 36
+ *   - **Not a facet.** A texture is not an axis of a family: 87 rows over 36
  *     reachable roots is **3,276** rows, which is the recall cost §3.1 inverted
  *     back on itself. Every family admits tiles of many textures, so a texture
  *     chip would narrow *what a row's number counts*, not which rows exist.
@@ -98,13 +99,14 @@
  * ## RECENT mitigates the recognition cost; it does not fix it
  *
  * The UX research was explicit about that and this module is where the honesty
- * has to live, because the ring is the cheapest thing here to overclaim. 91 rows
+ * has to live, because the ring is the cheapest thing here to overclaim. 87 rows
  * over two sections and eight groups is still recall for anyone who does not
- * already know the axis names, and a ring of the last {@link MAX_RECENT} families the user armed helps
- * exactly the case where they are placing the same three families repeatedly —
- * which is most of building a room, and none of finding a family the first time.
+ * already know the axis names, and a ring of the last {@link MAX_RECENT} families
+ * the user armed helps exactly the case where they are placing the same three
+ * families repeatedly — which is most of building a room, and none of finding a
+ * family the first time.
  *
- * It is a **strip of chips and not a third section of rows**, because all 91 rows
+ * It is a **strip of chips and not a third section of rows**, because all 87 rows
  * are always listed and a group would put a second row on screen for the same
  * family — two rows reading as pressed, and two live copies of the size control
  * that lives inside the armed row. {@link MAX_RECENT} carries that argument.
@@ -188,19 +190,20 @@ export interface PaletteSection {
  *
  * ## Why the kind is the first distinction and not the ninth group
  *
- * C1's list was 91 rows in nine groups ordered by corpus records, so the 40
- * assemblies were the ninth group — rows 52 to 91 — under a heading reading
+ * C1's list was 87 rows in nine groups ordered by corpus records, so the 40
+ * assemblies were the ninth group — rows 48 to 87 — under a heading reading
  * `S2W: Wall on Tile`. The project owner placed a `Corner (Wall on Tile)`, found
  * a one-slot row and concluded the template system did not do what they had asked
- * for; `families.ts` quotes them. The assembly they wanted ships, 23 rows below
- * the family they found, and **sixteen** one-slot rows whose names also contain
- * *corner* sat between the two.
+ * for; `families.ts` quotes them. The family they found is row 12; the assembly
+ * they wanted is **row 50, thirty-eight rows below it**, and **fourteen**
+ * one-slot rows carry the word *corner* — the one they found among them, and ten
+ * more between it and row 50.
  *
  * None of that is a template defect, and ranking inside one flat list does not
  * fix it either: the two kinds behave differently once placed — one brings five
  * slots you fill individually, the other brings one — so a list that never says
  * which kind a row is has omitted the fact the user is choosing on. A section is
- * that fact, said once per section instead of 91 times.
+ * that fact, said once per section instead of 87 times.
  *
  * ## What the section order is, and what it is not
  *
@@ -211,11 +214,14 @@ export interface PaletteSection {
  * dropped. Inside a section {@link rankFamilies} orders the rows, and that is the
  * only part of this that judges the query.
  *
- * **The 51 one-slot rows are not second-class, and being second is not a
- * demotion.** B4 measured them reaching 8,417 records (96.7%) and 3,822 designs
- * (100%) against the 40 assemblies' 3,079 (35.4%), and every curve, riser, stair
- * and roof in the archive is reachable *only* through one of them — there is no
- * assembly for any of those roles. The owner rejected hiding them behind a toggle
+ * **The 47 one-slot rows are not second-class, and being second is not a
+ * demotion.** B4 measured them reaching 8,417 records (96.7%) and — row D1's
+ * correction to B4's *"3,822 designs (100%)"* — **3,728 designs (97.5%)**,
+ * because the missing 94 are the two `insert` keys no family is generated for
+ * and are exactly the `families.ts#INSERT_DESIGNS` the panel already names.
+ * Against that, the 40 assemblies reach 3,079 records (35.4%), and every curve,
+ * riser, stair and roof in the archive is reachable *only* through a one-slot
+ * row — there is no assembly for any of those roles. The owner rejected hiding them behind a toggle
  * for that reason, and it is why the second section keeps its own count, its own
  * role groups and its own facets rather than becoming a footnote.
  *
@@ -257,7 +263,7 @@ export function paletteSections(
  * every corner *and* every S2W.
  *
  * **Not the facet engine.** `@/search` ranks 3,822 items by text score over an
- * interned vocabulary; this is a substring test over 91 short strings, and
+ * interned vocabulary; this is a substring test over 87 short strings, and
  * borrowing the engine would mean indexing a second corpus that is not in the
  * catalog. What the two do share is the field the user types into, and `/builder`
  * still validates and carries `q` for it.
@@ -355,7 +361,7 @@ export function rowScore(family: TemplateFamily, tokens: readonly string[]): num
  * inverts, which is the property that makes this a ranking rather than a
  * preference.
  *
- * **0 for all 51 single-tile labels**, measured — the generator writes every one
+ * **0 for all 47 single-tile labels**, measured — the generator writes every one
  * of them as one segment plus a parenthesised build — so this term orders the
  * assemblies alone, which is where the fixtures put the qualifier structure.
  */
@@ -369,7 +375,7 @@ function qualifiers(family: TemplateFamily): number {
  *
  * The no-query case is the important half of that sentence: with nothing typed
  * every score is 0 and the sort is a no-op, so the 40 assemblies stay in fixture
- * order and the 51 single tiles in the corpus order §3.1 argued for. Ranking is
+ * order and the 47 single tiles in the corpus order §3.1 argued for. Ranking is
  * something a query does, not a permanent reordering.
  *
  * **How an assembly gets above a single tile.** Not here — {@link
@@ -416,7 +422,7 @@ export const ALL_FACETS: PaletteFacets = { form: undefined, build: undefined }
  * The rows a query and a pair of facets leave, in `TEMPLATE_FAMILIES` order.
  *
  * The facets are **single-select per axis** rather than multi-select, and the
- * reason is the row count: 91 rows over 7 forms and 6 build values means the
+ * reason is the row count: 87 rows over 7 forms and 6 build values means the
  * average chip narrows to 13, so a second chip on the same axis is almost always
  * a way to build an empty intersection by accident. Re-pressing the chosen chip
  * clears it, which is what `aria-pressed` promises and what the palette's rows
@@ -428,8 +434,8 @@ export const ALL_FACETS: PaletteFacets = { form: undefined, build: undefined }
  * now, and each axis is scoped to what a template **actually carries on itself**
  * rather than to whichever scope reads more simply:
  *
- *   - **`build` narrows both sections.** Every one of the 91 carries at most one
- *     `build|` tag of its own — all 40 assemblies are `build|s2w`, 34 of the 51
+ *   - **`build` narrows both sections.** Every one of the 87 carries at most one
+ *     `build|` tag of its own — all 40 assemblies are `build|s2w`, 30 of the 47
  *     single tiles name one of the five systems and the other 17 name none, which
  *     is `families.ts#NO_BUILD` and a disjoint set rather than a superset
  *     (`pipeline/families.ts#BUILD_TAGS` denies all five by name). One value per
@@ -551,7 +557,7 @@ function order(values: readonly string[], canonical: readonly string[]): readonl
  * `parentTags` exactly the way a placed instance's do — so the number on the row
  * is the number the fill solver will choose from and cannot drift from it. B4's
  * emitter proved the refs mean what the key means (0 over-admissions and 0
- * under-admissions over all 51 families at all 299 sized positions); this is
+ * under-admissions over all 47 families at all 257 sized positions); this is
  * that same resolution, live, against whatever index the app loaded.
  *
  * **Items, not files** — `SlotCandidates.items` — because the noun on screen is
@@ -561,7 +567,8 @@ function order(values: readonly string[], canonical: readonly string[]): readonl
  *
  * `undefined` for the 40 assemblies rather than 0: an assembly has 3 or 5 slots,
  * so one number cannot answer *"how many tiles fill this"*, and its row shows the
- * slot count and its build system instead. Measured over the emitted index, **all 51 families and all 350
+ * slot count and its build system instead. Measured over the emitted index,
+ * **all 47 families and all 304
  * positions admit at least one tile** — the 0 case is only reachable on a partial
  * catalog build, and such a row is still armed rather than refused, because §3.2
  * places a template whose slot has no candidate and reports the slot as *needs a
@@ -585,7 +592,7 @@ export type CandidateCounter = (family: TemplateFamily, size?: readonly string[]
 /**
  * A counter memoised per index, for the panel's render.
  *
- * 91 rows measure 7 ms over the real corpus and every keystroke re-renders the
+ * 87 rows measure 7 ms over the real corpus and every keystroke re-renders the
  * list, so the panel must not re-resolve on each one. The inverted index behind
  * it is `compositionIndexFor`'s, which is the **same instance** `BuilderScreen`
  * built for the bill and C3's slot editor built for its candidate grids — 10.7 ms
@@ -612,7 +619,7 @@ export function createCounter(file: CatalogFile, aggregates: AggregateIndex): Ca
  *
  * Six. It is a strip of chips above **both** sections rather than a third one,
  * and that shape is a consequence rather than a style choice: **a section would
- * duplicate rows.** All 91 rows are always listed, so a RECENT *section* puts a
+ * duplicate rows.** All 87 rows are always listed, so a RECENT *section* puts a
  * second row on screen for the same family — two rows reading as pressed, and,
  * because the size control lives inside the armed row, two live copies of one
  * control. A chip is visibly a shortcut to a row rather than a second row, and

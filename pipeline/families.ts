@@ -20,15 +20,17 @@
  * | 30 | 96.4% | 93.9% |
  * | **52** | **100%** | **100%** |
  *
- * **All 52 ship, less the two `insert` keys, plus one that is not on the list at
- * all.** The three departures from the plan's row split are each a measurement:
+ * **All 52 ship, less the two `insert` keys and the four keys whose only records
+ * are bases, plus one that is not on the list at all.** The four departures from
+ * the plan's row split are each a measurement:
  *
  *   - **The cut is "every key the corpus has", not the plan's first 20.** A
  *     generated family costs no authoring — the set is a `GROUP BY` over the
- *     emitted tags — so a rank-20 cut withholds **736 records (8.5%)** over 30
+ *     emitted tags — so a rank-20 cut withholds **493 records (5.7%)** over 26
  *     palette rows, in exchange for {@link FAMILY_TABLE_BYTES} bytes of bundle
  *     data. (The plan's own rank-20 cut withholds **835**: its ranking includes
- *     `insert|straight` at rank 9 and this one does not. Both are asserted, so
+ *     `insert|straight` at rank 9, this one does not, and its per-key counts
+ *     include the bases {@link BARE_BASE_KEY} now denies. Both are asserted, so
  *     neither can be quoted as the other.) It also withholds them *invisibly*:
  *     contract **C-i** records that an empty candidate set is indistinguishable
  *     from an archive gap, and a missing family is worse — there is no slot to
@@ -41,12 +43,34 @@
  *     slots** — 3,695 live slots walked through `src/composition`'s resolver —
  *     so an insert family would duplicate working machinery for 262 and add 23.
  *     {@link SKIPPED_ROLES} is the whole of that decision.
- *   - **There is a 51st family that no `(role, form, build)` key can name.** See
- *     {@link BARE_BASE_KEY}.
+ *   - **Four keys hold nothing but bases, and are not generated.** With the
+ *     base denied they would admit **nothing**, and all 134 of their records are
+ *     reached by the base family either way. {@link BASE_ONLY_KEYS} is the whole
+ *     of that decision.
+ *   - **There is one more family that no `(role, form, build)` key can name.**
+ *     See {@link BARE_BASE_KEY}.
  *
- * So **51 families**, reaching **8,417 of 8,702 records (96.7%)** and 3,822 of
- * 3,822 designs by the key alone, and **8,679 (99.7%)** counting the 262 inserts
- * the accessory slots already reach.
+ * So **47 families**, reaching **8,417 of 8,702 records (96.7%)** and 3,728 of
+ * 3,822 designs (97.5%) by the key alone, and **8,679 (99.7%)** counting the 262
+ * inserts the accessory slots already reach.
+ *
+ * The 47 populations are **disjoint**, and that is new with row D1: they sum to
+ * 8,417, which is exactly the number of non-insert records, so every record the
+ * palette can place is offered by exactly one family. The same sum was **10,380**
+ * before the base deny — the 1,963 bases counted twice, once in the base family
+ * and once under the role of the piece they sit under — which is the figure
+ * `src/builder/panels/palette.corpus.test.ts` reads as *"the whole corpus once
+ * per family, and the base family twice over"*.
+ *
+ * The 94 designs the families miss are exactly the insert-only designs
+ * `src/builder/panels/families.ts` ships as `INSERT_DESIGNS`. **The *3,822 of
+ * 3,822 designs* this file claimed before row D1 was never true of the
+ * families** — it is `designsOf(52)`, which counts the two insert keys this
+ * module does not generate — and neither is `docs/templates-plan.md` §10.1's
+ * correction 22, *"the families partition the corpus, so no design is outside
+ * them"*: they did not partition it (the bases were in two families) and 94
+ * designs were outside it. Both halves are asserted here, and the partition half
+ * is true for the first time as of this row.
  *
  * The plan's **99.0%** is not that number and not a rounding of it. It counts
  * 8,618 of 8,702, excluding 84 records over 25 designs — 56 `form|hex`, 26
@@ -59,20 +83,56 @@
  * hex and what B3 says of the other 28. `families.test.ts` computes both
  * figures side by side.
  *
- * ## `base` is not a role, so the base family has no key
+ * ## `base` is not a role, and every other family has to deny it
  *
  * Row **A9** proved it and rows **A8** and **B2** both left a hole for it: `base`
  * is a value of `layer`, not one of B1's eight roles, so **no family keyed on
- * `(role, form, build)` can be the base family.** Over the 1,963 bases the key
- * spreads them across eight of the 52 and none of them is a base — a base keeps
+ * `(role, form, build)` can be the base family.** The key spreads the 1,963
+ * bases across **17** of the 52 and none of those 17 is a base — a base keeps
  * the role of what it sits *under* (`role|wall` 1,117, `role|floor` 661,
- * `role|riser` 176, `role|stair` 9, recomputed here).
+ * `role|riser` 176, `role|stair` 9, recomputed here). **This file said *eight*
+ * before row D1 and the corpus says 17**, over 10 distinct `(role, form)` pairs;
+ * 17 is also, and not by coincidence, the number of families the missing deny
+ * broke.
  *
  * {@link BARE_BASE_KEY} is the answer A9 asked for: one slot, predicating on
  * `require: [{ tag: 'shape|base' }]`, which is **exactly coextensive with
  * `layer === 'base'` — 1,963 records both ways, zero exceptions in either
- * direction**, reproduced in `families.test.ts`. It is a 51st row rather than a
- * 53rd because the two insert keys drop out.
+ * direction**, reproduced in `families.test.ts`.
+ *
+ * ### The half row B4 missed: inheriting the role is also *admission* to it
+ *
+ * The finding above was recorded and then only half applied. B4 keyed the
+ * families on `(role, form, build)` and gave no family a `shape|base` deny, so
+ * every base flowed into the family of the piece it supports — and a slot that
+ * *is* a wall offered the plate that goes underneath one. The project owner hit
+ * it on a `Corner (S2W)` template and it was not one family:
+ *
+ * | over the keyed families | before D1 | after |
+ * | --- | ---: | ---: |
+ * | admitting at least one base | **17 of 50** | **0 of 46** |
+ * | base admissions outside the base family | **1,963** | **0** |
+ * | admitting *only* bases | **4** | — |
+ *
+ * The 1,963 is every base in the archive, and it is the same 1,963 as A9's
+ * count: a base is admitted by exactly one keyed family, its own, so the wrong
+ * admissions and the population are the same set counted twice. The worst four
+ * rows offered nothing else — `Wall: Corner (Separate Wall)` was twelve cards
+ * and every one a base.
+ *
+ * So **every family except the base family denies `shape|base`**, and the deny
+ * is exact for the reason the `require` is: the tag and `layer === 'base'` are
+ * the same 1,963 records with zero exceptions either way, re-measured here
+ * rather than inherited from A9. It is the *same ref* on both sides of the
+ * table — one family requires it, the other 46 deny it — which is why the fix
+ * costs the tag table nothing and the index nothing.
+ *
+ * The split happens at the **bucket**, not at the slot: `records`, `designs`,
+ * the size domain and the emission order are all counted off a family's bucket,
+ * so a bucket that still held bases would describe a population the slot
+ * denies. That is what makes the semantic round-trip in `families.test.ts` a
+ * check on this row — it compares the slot's admissions against *"the key's
+ * records that are not bases"*, in both directions, and both are 0.
  *
  * `src/generator/placement/placement.ts`'s archived arm and
  * `src/screens/builder/BuilderScreen.tsx`'s `placeGenerated` are its callers and
@@ -89,8 +149,8 @@
  *      `base` slot of the modular wall templates* — 48 candidates before the
  *      siblings are picked and 0 after. A one-slot family has no sibling to
  *      empty, so it cannot fail a walk at any depth. `families.test.ts` runs
- *      both walks over all 91 templates: first-candidate completes **24 of 40
- *      recipes and 51 of 51 families**, 75 of 91 (82.4%) against 60.0% before —
+ *      both walks over all 87 templates: first-candidate completes **24 of 40
+ *      recipes and 47 of 47 families**, 71 of 87 (81.6%) against 60.0% before —
  *      **by dilution**, because all 16 failures are still the same `base` slot
  *      and this row fixed none of them.
  *   2. **The builder already inserts bases, and not through a slot.** §3.2:
@@ -130,7 +190,7 @@
  * `no-footprint` before the cell is consulted, and the other **4,527** a
  * `no-cell` doubt. That is a *"needs a choice"* on a template whose only offset
  * is `[0, 0]` either way. And `verdictOf` makes every layout with no `edge` slot
- * `undecidable`, which all 51 are. So the honest reading is that the closure
+ * `undecidable`, which all 47 are. So the honest reading is that the closure
  * machinery has nothing to say about a one-slot family, not that a one-slot
  * family fails it. `families.test.ts` carries the arithmetic; the behavioural
  * half of it cannot live in `pipeline/` at all, because `offsets.ts` needs
@@ -165,18 +225,21 @@
  * ### The domain is B3's resolved cells, and 16 of the 295 are inexpressible
  *
  * A family's domain is the set of cells `pipeline/size.ts#resolveGridSize`
- * resolves for its own records — **295 cells over the 52 keys, median 4, maximum
- * 31**, which is B3's figure and reproduces exactly. Per cell, the position is
+ * resolves for its own records. B3's figure is **295 cells over the 52 keys,
+ * median 4, maximum 31** and reproduces exactly; the generator's own domain is
+ * smaller and differently shaped, because a family's records are its key's
+ * records *less the bases* — **242 cells over the 46 keyed families, plus 31 for
+ * the base family**. Per cell, the position is
  * the first of `{kind:'cell'}` then `{kind:'run'}` whose refs are tags the table
  * holds *and* which admits at least one of the family's records at that cell:
  *
  * | branch | positions | what it spells |
  * | --- | ---: | --- |
- * | `cell` | 251 | `size\|width\|w` + `size\|depth\|d` — exact on all 3,449 `rect` records |
+ * | `cell` | 209 | `size\|width\|w` + `size\|depth\|d` — exact on all 3,449 `rect` records |
  * | `run` | 48 | `size\|width\|w` alone, because the corpus does not tag a wall's depth |
  * | **neither** | **16** | the cell comes from *geometry* and the tags say nothing |
  *
- * 299 positions over the 51 families, plus {@link ANY_SIZE} on each, is the 350
+ * 257 positions over the 47 families, plus {@link ANY_SIZE} on each, is the 304
  * the emitter reports. The 16 refusals are named rather than counted, because
  * they are three facts and not a residue: **12** are 90 degree annular sectors,
  * whose cell is `rOut x rOut` and whose only `size|` tags are a radius and an
@@ -184,7 +247,14 @@
  * numeric values, 1 through 8, with no `0.5`; and **1** is
  * `wall|curve|separate wall`'s `3x0.5`, where the records at that cell are the
  * `QxG` walls whose own tag says 4. Their records are not lost — they sit at
- * {@link ANY_SIZE}, which is why every family has it.
+ * {@link ANY_SIZE}, which is why every family has it. The **16 is the same total
+ * before and after the base deny, and the same three facts**, but not the same
+ * sixteen cells: `floor|curve|separate wall`'s two sectors leave with the
+ * dropped family, and `riser|curve`'s `2x2` and `4x4` arrive — those two cells
+ * were spellable only because a **base** sat at each of them carrying the
+ * `size|width` / `size|depth` pair its own arc records do not. That is the
+ * refusal working as designed: a position is emitted only when it admits a
+ * record of the family, and after the deny neither does.
  *
  * ### `sizeRefs`'s `deny` is right for an edge slot and wrong for this one
  *
@@ -218,14 +288,14 @@
  *
  * This row's draft treated a `run` position as a *coarse cell* and worried about
  * it: `size|width|2` says nothing about depth, and the grammar has no prefix
- * `deny` to narrow it with, so `floor|straight|-`'s *2 wide* names 41
- * wall-thickness floor strips and admits **447** records. The measurement
+ * `deny` to narrow it with, so `floor|straight|-`'s *2 wide* names 32
+ * wall-thickness floor strips and admits **365** records. The measurement
  * retired the worry. `resolveGridSize` gives a `rect` record a run equal to its
- * width, so all 447 of those records **are** 2 units wide, and over all 299
+ * width, so all 365 of those records **are** 2 units wide, and over all 257
  * positions only **12** records are admitted at a position whose predicate they
  * do not satisfy — the 12 `QxG` bases above, and no others.
  *
- * What survives from the draft is one honest limitation: the 41 strips **cannot
+ * What survives from the draft is one honest limitation: the 32 strips **cannot
  * be isolated**, because a `2 x 0.5` position for them is not expressible. They
  * are reached at *2 wide* alongside every 2-by-anything floor, and that is the
  * corpus's silence about a wall's depth rather than a defect in the control.
@@ -238,7 +308,7 @@
  *
  * ## An absent build system needs a five-ref `deny`
  *
- * 16 of the 51 families have no build system, and **2,978 records (34.2%) carry
+ * 16 of the 47 families have no build system, and **2,978 records (34.2%) carry
  * no `build|` tag** — §"Build system" of `src/catalog/schema.ts` calls the absence
  * *"a real state, not a gap"*. `require` cannot express absence, so those
  * families deny all five build tags by name. That is exact rather than
@@ -246,7 +316,7 @@
  * occur in the table, **no record carries two** (8,702 of 8,702 carry 0 or 1),
  * and `CatalogRecord.build` equals its single tag's value on **8,702 of 8,702**.
  *
- * Without the deny those 16 families over-admit **3,712 records** — a
+ * Without the deny those 16 families over-admit **2,945 records** — a
  * `floor|straight` family would offer every s2w, wall-on-tile and separate-wall
  * floor as well — and `families.test.ts` measures the figure by resolving the
  * same 16 slots with the deny emptied.
@@ -275,9 +345,9 @@
  * The table ships in the bundle instead, in the lazily-mounted `/assemblies`
  * chunk row X9 landed, at {@link FAMILY_TABLE_BYTES} raw. The counterfactual is
  * priced against the same artefact at the same epoch — the construction B1, B2
- * and B3 all quote — and a `families` key carrying the 51 slots and their 350
- * size positions costs **+2,357 B brotli**, taking the index from 366,173 B to
- * 368,530 B.
+ * and B3 all quote — and a `families` key carrying the 47 slots and their 304
+ * size positions costs **+2,277 B brotli**, taking the index from 366,173 B to
+ * 368,450 B.
  *
  * The budget would carry it, as it would have carried the 40's +1,260 B. The
  * reason it is declined is `pipeline/templates.ts`'s reason for the 40,
@@ -296,10 +366,12 @@
  *
  * **Every generated slot is resolved through `src/composition`'s own resolver
  * and postings index, and the record set it admits is compared to the record set
- * the key selects.** At {@link ANY_SIZE} the two agree **exactly, 51 of 51
- * families, 0 over-admissions and 0 under-admissions**; at each of the 299 size
- * positions the admitted set is compared to what `sizeAdmits` admits within the
- * family, and agrees to within 12 admissions and 160 misses — both itemised
+ * the key selects.** At {@link ANY_SIZE} the two agree **exactly, 47 of 47
+ * families, 0 over-admissions and 0 under-admissions**, and *"the records its
+ * key selects"* now means the records its key selects that are **not bases** —
+ * which is what makes that guard the check on row D1's deny; at each of the 257
+ * size positions the admitted set is compared to what `sizeAdmits` admits within
+ * the family, and agrees to within 12 admissions and 128 misses — both itemised
  * there rather than summed away.
  *
  * A byte round-trip proves a reader lost nothing. This proves the *emitted refs
@@ -318,7 +390,7 @@
  * position is joined against, and `source` carries provenance, which for a
  * generated family is its key.
  *
- * It is a **second export** rather than 51 more entries in `RECIPE_TEMPLATES`,
+ * It is a **second export** rather than 47 more entries in `RECIPE_TEMPLATES`,
  * because that array's length is asserted to be 40 in six suites and quoted in
  * `AssembliesScreen` as *"N recipes from the archive's own blueprint
  * fixtures"* — which the generated families are not.
@@ -351,14 +423,86 @@ import { resolveGridSize } from './size'
 export const SKIPPED_ROLES: readonly string[] = ['insert']
 
 /**
- * The tag every base carries, and the key of the one family with no role.
+ * The tag every base carries: the key of the one family with no role, and the
+ * ref every other family denies.
  *
  * `shape|base` and `layer === 'base'` are the same 1,963 records with **zero
  * exceptions in either direction**, which row A9 measured and
  * `families.test.ts` reproduces. So this is a `require` ref rather than a new
  * axis, and it costs the tag table nothing.
+ *
+ * Its second use is row D1's fix and is the same ref read the other way: a base
+ * inherits the role of the piece it sits under, so `role|wall` selects 1,117
+ * bases, and a family whose slot *is* a wall must say so. See the module note.
  */
 export const BARE_BASE_KEY = 'shape|base'
+
+/**
+ * The four keys the generator drops, because every record under them is a base.
+ *
+ * | key | records | of which bases |
+ * | --- | ---: | ---: |
+ * | `floor|straight|separate wall` | 73 | 73 |
+ * | `floor|curve|separate wall` | 41 | 41 |
+ * | `wall|corner|separate wall` | 12 | 12 |
+ * | `wall|internal_corner|s2w` | 8 | 8 |
+ *
+ * Derived, not consulted: {@link deriveFamilies} drops a key whose non-base
+ * bucket is empty and never reads this list, which `families.test.ts` asserts by
+ * recomputing the dropped set from the corpus. The list is here so the four are
+ * *named* rather than counted.
+ *
+ * ## Why dropped rather than kept empty, which is the opposite of the rank-20 call
+ *
+ * The module note declines a rank-20 cut partly because contract **C-i** says an
+ * empty candidate set is indistinguishable from an archive gap, and a missing
+ * family is worse than an empty one — *"there is no slot to be empty"*. That
+ * argument does not reach these four, and the difference is measurable rather
+ * than a matter of degree:
+ *
+ *   1. **Nothing becomes unreachable.** A rank-20 cut withholds 493 records that
+ *      no other family offers. These four withhold **0**: all 134 of their
+ *      records are bases, and {@link BARE_BASE_KEY} admits every one of the
+ *      1,963. The union is 8,417 records over 3,728 designs with the four and
+ *      without them, asserted both ways in `families.test.ts`.
+ *   2. **An empty family is not a palette row with nothing in it — it is a
+ *      placement that can never be completed.** A family's one slot is required
+ *      by construction (`TemplatePart` cannot express `optional`),
+ *      `assembly/resolve.ts` reports the instance `slot-unfilled`, and
+ *      `BillOfTiles.complete` is then false — which is where
+ *      `useArchiveDownload` throws `IncompleteSceneError`. So
+ *      the row is not merely uninformative: pressing it arms a piece that
+ *      cannot be filled, cannot be downloaded, and blocks the download of the
+ *      whole room it sits in.
+ *   3. **Three suites already assert that no family matches nothing** — this
+ *      module's own round-trip, `palette.corpus.test.ts`'s *"no family that
+ *      matches nothing"*, and `src/template/corpus.test.ts` filling every
+ *      family at every position of its control. Keeping the four would have
+ *      meant retiring an invariant that predates this row, in exchange for four
+ *      rows whose only honest label is *"nothing here"*.
+ *   4. **B3's precedent points the same way.** Five families have an empty size
+ *      *domain* and the answer there was to render **no control** rather than a
+ *      control matching nothing; four families with an empty candidate domain
+ *      get no row rather than a row matching nothing.
+ *
+ * What the drop does cost is a *name*: the archive really does hold 12
+ * separate-wall corner bases, and after this row nothing in the palette is
+ * called `Wall: Corner (Separate Wall)`. They are reached under `Base (Bare)`
+ * instead, which is where a plate belongs — the key that named them held no wall
+ * to put on top.
+ *
+ * Nor do they lose a size: **93 of the 134 land on a sized position of the base
+ * family**, and the 41 that reach only `any size` are exactly
+ * `floor|curve|separate wall`'s, whose own family had no size control either —
+ * its whole domain was inexpressible, and it is one of the two entries this row
+ * retires from the palette's list of eight.
+ */
+export const BASE_ONLY_KEYS: readonly string[] = [
+  'floor|curve|separate wall',
+  'floor|straight|separate wall',
+  'wall|corner|separate wall',
+  'wall|internal_corner|s2w',
+]
 
 /** The five build systems, as the tags a build-absent family denies by name. */
 export const BUILD_TAGS: readonly string[] = [
@@ -435,10 +579,12 @@ export interface FamilySizePosition {
  * The first position of every family: no size requirement at all.
  *
  * Not a fallback. It is what makes B3's five empty-domain families —
- * `wall|diagonal|separate wall` (121), `wall|hex|thick wall` (56),
- * `decor|straight` (26), `wall|octagon|separate wall` (20) and `floor|octagon`
- * (8), 231 records — *a family with no size control* rather than a family that
- * matches nothing.
+ * `wall|diagonal|separate wall` (121), `decor|straight` (26),
+ * `wall|octagon|separate wall` (20), `wall|hex|thick wall` (8) and
+ * `floor|octagon` (8), 183 records — *a family with no size control* rather than
+ * a family that matches nothing. (B3's own count for the hex family was 56, and
+ * 48 of those 56 were bases: it is one of the two families the base deny moves
+ * most, from 56 records to 8.)
  *
  * It is also the only position two further populations can be reached at, both
  * measured in `families.test.ts`:
@@ -446,17 +592,21 @@ export interface FamilySizePosition {
  *   - **876 records with no resolved cell at all** — `pipeline/size.ts`'s 1,112
  *     refusals less the 236 that are inserts: 643 sub-90 degree sectors, 121
  *     diagonals, 56 hex, 28 half-pairs and 28 unstated.
- *   - **136 records whose cell the control names and whose tags do not say so**,
- *     134 of them 90 degree sectors and 26 `wall` footprints. Their cell
- *     resolves, the position exists, and the refs cannot reach them.
+ *   - **128 records whose cell the control names and whose tags do not say so**,
+ *     102 of them 90 degree sectors and 26 `wall` footprints. Their cell
+ *     resolves, the position exists, and the refs cannot reach them. It was 136
+ *     records over 160 incidences before the base deny: a base could be missed
+ *     twice, once in the base family and once under its role, and now it is
+ *     missed only in the base family, so the incidences and the records are the
+ *     same 128.
  */
 export const ANY_SIZE: FamilySizePosition = { label: 'any size', tags: [] }
 
 /** One generated family: a `RecipeTemplate` in waiting, plus its size domain. */
 export interface GeneratedFamily {
-  /** A slug of {@link key}. Distinct across the 51, and from all 40 fixture slugs. */
+  /** A slug of {@link key}. Distinct across the 47, and from all 40 fixture slugs. */
   readonly id: string
-  /** *"Wall: Straight (Separate Wall)"*. Distinct across the 51. */
+  /** *"Wall: Straight (Separate Wall)"*. Distinct across the 47. */
   readonly name: string
   /**
    * `role|form|build`, or {@link BARE_BASE_KEY}.
@@ -567,7 +717,7 @@ function positionFor(
  *
  * Deduplicated on the emitted tag list, because two cells can resolve to one
  * position: a `run` position drops the depth, so `2x0.5` and a hypothetical
- * `2x0.75` would both spell `size|width|2`. It happens on 0 of the 295 cells
+ * `2x0.75` would both spell `size|width|2`. It happens on 0 of the 273 cells
  * today and the dedupe is asserted rather than assumed, so a corpus that creates
  * one does not put the same position in a control twice.
  */
@@ -626,8 +776,8 @@ function slotFor(name: SlotName, require: readonly string[], deny: readonly stri
  *
  * The same construction `pipeline/templates.ts#templateSlug` uses, and
  * deliberately over the **key** rather than the name: the key is distinct across
- * the 51 by definition, so the slug is too, and it cannot move when a display
- * label in {@link LABELS} is reworded. `families.test.ts` asserts the 51 are
+ * the 47 by definition, so the slug is too, and it cannot move when a display
+ * label in {@link LABELS} is reworded. `families.test.ts` asserts the 47 are
  * distinct and that none collides with the 40 fixture slugs.
  *
  * A trailing `|-` for an absent build system disappears, because the trailing
@@ -643,12 +793,17 @@ export function familySlug(key: string): string {
 /**
  * Every generated family, in descending record count then ascending key.
  *
+ * A family's records are the records its key selects **less the bases**, and a
+ * key whose whole population is bases is not generated at all — see
+ * {@link BASE_ONLY_KEYS}. Both facts live here rather than at the slot, because
+ * the count, the size domain and this ordering are all read off the bucket.
+ *
  * Descending because that is the order the coverage curve is read in and the
  * order a palette grouped by role still wants within a group; the key
  * tie-breaks, so two families of equal size cannot swap between runs and move
  * the emitted bytes.
  *
- * The bare-base family is **last** rather than first, so the 50 keyed families
+ * The bare-base family is **last** rather than first, so the 46 keyed families
  * are a contiguous prefix and the curve can be computed off the head of the
  * array.
  */
@@ -668,6 +823,13 @@ export function deriveFamilies(file: CatalogFile): readonly GeneratedFamily[] {
     const tags = tagsOf(record)
     const role = axisValue(tags, 'role')
     if (SKIPPED_ROLES.includes(role)) continue
+    /* A base is not a member of the family it keys to — it is what that
+       family's piece *sits on*. It keys there because it inherits the role, so
+       the split has to happen here rather than in the sort: `records`, the size
+       domain and the emission order are all counted off this bucket, and a
+       bucket holding bases would make all three describe a population the slot
+       denies. See the module note on `shape|base`. */
+    if (tags.includes(BARE_BASE_KEY)) continue
     const form = axisValue(tags, 'form')
     const build = record.build
     const key = `${role}|${form}|${build ?? '-'}`
@@ -690,9 +852,14 @@ export function deriveFamilies(file: CatalogFile): readonly GeneratedFamily[] {
         name,
         key,
         tags: require,
-        /* The deny is the *absence* of a build system, which `require` cannot
-           say. Exact, because no record carries two build tags. */
-        slot: slotFor(bucket.role, require, bucket.build === undefined ? BUILD_TAGS : []),
+        /* Two denies, and neither is expressible as a `require`: `shape|base`
+           is the base that goes *under* this family's piece, and the five
+           build tags are the *absence* of a build system. Both exact — every
+           base carries the tag and no record carries two build tags. */
+        slot: slotFor(bucket.role, require, [
+          BARE_BASE_KEY,
+          ...(bucket.build === undefined ? BUILD_TAGS : []),
+        ]),
         sizes,
         records: bucket.records.length,
         designs: new Set(bucket.records.map((record) => record.design)).size,
@@ -732,7 +899,7 @@ export function deriveFamilies(file: CatalogFile): readonly GeneratedFamily[] {
  * entry"*; `conventionFor(['wall'])` is `undefined` and this row leaves it that
  * way. It is here so that a consumer needing the value has one source for it
  * rather than authoring a fourth copy, and so `families.test.ts` can assert
- * that all 51 layouts really are this one rule.
+ * that all 47 layouts really are this one rule.
  */
 export function familyLayout(family: GeneratedFamily): TemplateLayout {
   return {
@@ -747,33 +914,37 @@ export function familyLayout(family: GeneratedFamily): TemplateLayout {
  * Raw bytes the two generated consts add to {@link
  * import('./templates').TEMPLATES_MODULE_PATH}.
  *
- * The whole price of shipping all 51 families rather than the plan's first 20,
+ * The whole price of shipping all 47 families rather than the plan's first 20,
  * and the number the cut is argued against in the module note. Measured by
  * emitting the module twice — with the families and with none —
  * so `families.test.ts` fails when this constant and the emitter disagree,
  * rather than when a reader notices.
  *
- * 24,847 B of it is `GENERATED_FAMILIES` and 23,386 B is `GENERATED_FAMILY_SIZES`,
- * and at brotli-11 the whole delta is **1,998 B** of module source — the emitted
- * table is 51 near-identical blocks, which is the shape brotli is best at.
+ * 24,561 B of it is the `GENERATED_FAMILIES` const and 20,138 B the
+ * `GENERATED_FAMILY_SIZES` one. They sum to 44,699 rather than to the delta
+ * because the familyless module still spells both declarations (211 B of empty
+ * `[]` and `{}`) and its header line still states its counts, 7 B shorter. At
+ * brotli-11 the whole delta is **1,877 B** of module source, the emitted table
+ * being 47 near-identical blocks, which is the shape brotli is best at.
  *
- * ## What it costs the bundle, which is 0 B until someone imports it
+ * ## What it costs the bundle, which row C1 now pays
  *
- * Measured as an A/B of `npm run build` on this tree, and the first row is the
- * one that surprises: **nothing imports the two new consts yet, so rolldown
- * tree-shakes them out entirely.**
+ * The A/B this docblock carried was measured before row C1 imported the table,
+ * when rolldown still tree-shook both consts out of every chunk and the shipped
+ * cost was 0 B. C1 wired the palette, so the table ships: it lands in the lazy
+ * `placeOnPlan` chunk, which `src/builder/panels/families.ts` reaches through
+ * `@/screens/assemblies/templates`.
  *
- * | `/assemblies` chunk | raw | gzip |
+ * | lazy `placeOnPlan` chunk | raw | gzip |
  * | --- | ---: | ---: |
- * | as merged, nothing importing the table | 48.46 kB | 5.92 kB |
- * | with the two consts re-exported from the screen's barrel | **86.39 kB** | **8.43 kB** |
+ * | before the base deny, 51 families / 350 positions | 99,968 B | 13,501 B |
+ * | after, 47 families / 304 positions | **96,818 B** | **13,389 B** |
  *
- * So the shipped cost today is **0 B**, and the cost when row C1 wires the
- * palette is **+37,930 B raw / +2,570 B gzip** in row X9's *lazy* chunk — paid
- * by the people who open the palette and by nobody else. The entry chunk is
- * 506.22 kB in both builds, unchanged to the byte. `src/screens/assemblies/index.ts`
- * does not re-export them and this row must not edit it; the row report names
- * that as C1's one line.
+ * So this row **returns 3,150 B raw / 112 B gzip** to the one chunk that carries
+ * the table, and the entry chunk does not move — 509.73 kB in both builds, to
+ * the byte. Both rows are one `npm run build` on this tree either side of the
+ * regeneration, measured with `gzip -9` rather than read off the reporter, so
+ * they are comparable with each other and not with the table this replaced.
  *
  * The **index** gains 0 B in every case, which is structural: nothing on
  * `build.ts`'s path imports this module. Proved by digest, not by a byte count —
@@ -782,4 +953,4 @@ export function familyLayout(family: GeneratedFamily): TemplateLayout {
  * tree with row B2 reverted, and `npm run stamp` reports
  * `content 7bf89a1d617714ff` unchanged with `PIPELINE_VERSION` still 2.
  */
-export const FAMILY_TABLE_BYTES = 48_029
+export const FAMILY_TABLE_BYTES = 44_495

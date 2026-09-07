@@ -136,8 +136,12 @@ function report(
     `templates     ${String(templates.length)} recipes over ${String(new Set(templates.map((entry) => entry.source)).size)} yaml fixtures · ` +
       `${String(templates.reduce((total, entry) => total + entry.parts.length, 0))} parts · ` +
       `${formatBytes(Buffer.byteLength(module, 'utf8'))} raw of generated module, 0 B of the index`,
+    /* The whole sum, not the keyed families' own: since row D1 took the bases
+       out of the keyed families the 47 populations are disjoint, so the sum *is*
+       the union. Slicing the base family off used to avoid double-counting its
+       1,963 and would now under-report the reach as 74.2%. */
     `slot families ${String(families.length)} generated over ${String(families.reduce((total, family) => total + family.records, 0))} records ` +
-      `(${((100 * families.slice(0, -1).reduce((total, family) => total + family.records, 0)) / stats.records).toFixed(1)}% of the corpus by key) · ` +
+      `(${((100 * families.reduce((total, family) => total + family.records, 0)) / stats.records).toFixed(1)}% of the corpus by key) · ` +
       `${String(families.reduce((total, family) => total + family.sizes.length, 0))} size positions`,
     dryRun
       ? 'output        (dry run — nothing written)'

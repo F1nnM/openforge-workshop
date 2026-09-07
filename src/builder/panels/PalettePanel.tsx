@@ -1,12 +1,12 @@
 /**
- * The builder's left column — design-contract.md §2.4's palette: **the 91
- * templates this build can place**, as two sections — 40 assemblies, then 51
+ * The builder's left column — design-contract.md §2.4's palette: **the 87
+ * templates this build can place**, as two sections — 40 assemblies, then 47
  * single tiles grouped by role — with a slot count on every row, form and build
  * as facets and size as a control on the armed single tile.
  *
  * ## Row D2, and the report that caused it
  *
- * Row C1 listed all 91 as one list in nine groups, because all 91 place through
+ * Row C1 listed all 87 as one list in nine groups, because all 87 place through
  * one function. The project owner placed a `Corner (Wall on Tile)` from it and
  * reported:
  *
@@ -16,16 +16,17 @@
  * > I need to be able to do that though. Thats the whole point of the templates I
  * > wanted."*
  *
- * They had found a one-slot generated family. The assembly they were describing
- * ships — `S2W: Wall on Tile: Corner (Any, Single Piece)`, with `column`,
- * `right wall`, `left wall`, `floor` and `base` — as row 75 of 91, under a
- * heading that named a build system rather than a kind, with sixteen one-slot
- * rows whose names also say *corner* above it. **Nothing underneath was broken:
- * the palette had 91 rows of two different kinds and did not distinguish them.**
+ * They had found a one-slot generated family — row 12. The assembly they were
+ * describing ships — `S2W: Wall on Tile: Corner (Any, Single Piece)`, with
+ * `column`, `right wall`, `left wall`, `floor` and `base` — as **row 50 of 87**,
+ * under a heading that named a build system rather than a kind, with all
+ * fourteen one-slot rows whose names also say *corner* above it. **Nothing
+ * underneath was broken: the palette had 87 rows of two different kinds and did
+ * not distinguish them.**
  *
  * What this row changes is three things and no engine: the list is two sections
  * with the assemblies first (`palette.ts#paletteSections`), a query ranks each
- * section so `corner` puts `Corner (Any, Single Piece)` first of 24
+ * section so `corner` puts `Corner (Any, Single Piece)` first of 22
  * (`palette.ts#rankFamilies`), and every row states its slot count — 5 or 3 on
  * an assembly, 1 on a single tile — from `template.parts.length` and nothing
  * derived from it.
@@ -42,18 +43,18 @@
  * disjoint, so passing one for the other compiles and would report every
  * placement `unknown-template`.
  *
- * **This row makes it place templates.** The list is the 51 generated families
+ * **This row makes it place templates.** The list is the 47 generated families
  * plus the 40 shipped recipes, `arm()` writes `tools.setSelectedTemplate`, and
  * A8's disclaimer is gone with the list it was about. `palette.ts` carries the
  * argument for the shape of the list and `families.ts` for the rows themselves;
  * this file is the control.
  *
- * ## 91 rows, two sections, eight groups, and the cost that inverts
+ * ## 87 rows, two sections, eight groups, and the cost that inverts
  *
  * The UX research measured the honest cost of a tag-predicated palette: from
  * roughly 20 recognisable library rows to **3,862** entries, which is
- * recognition becoming recall. Role-predicated families make it **51** — walls
- * (19 families over 5,381 records), floors (17 / 2,162), risers, columns,
+ * recognition becoming recall. Role-predicated families make it **47** — walls
+ * (17 families over 5,381 records), floors (15 / 2,162), risers, columns,
  * stairs, roofs, decor and the one bare-base family — under the second of two
  * section headings, above which the 40 authored assemblies are a flat list.
  * **RECENT mitigates what is left of that cost and does not fix it**;
@@ -61,9 +62,10 @@
  * most likely to be quietly inflated later.
  *
  * **The single tiles are second and not lesser.** B4 measured them reaching
- * 96.7% of records and 100% of designs against the assemblies' 35.4%, and every
- * curve, riser, stair and roof is reachable only through one of them, so both
- * sections render in full, in one scroll, with their own counts.
+ * 96.7% of records and — row D1's correction — 97.5% of designs, against the
+ * assemblies' 35.4%, and every curve, riser, stair and roof is reachable only
+ * through one of them, so both sections render in full, in one scroll, with
+ * their own counts.
  *
  * There is no `insert` group and the panel says where inserts went instead: 285
  * records, **262 of them already reachable through a tile's own accessory
@@ -72,22 +74,22 @@
  * ## Size is one control on the armed row, not a row per size
  *
  * B3's measurement is the whole reason: keyed on `(role, form, build)` the
- * corpus needs 51 families; with size in the key it needs 217 to 277. So a
+ * corpus needs 47 families; with size in the key it needs 217 to 277. So a
  * position is a parameter — a set of tags that joins the instance's `parentTags`
  * where the slot's own `constrain` block collects them — and the control belongs
- * to the *armed* family rather than to all 91 at once, which would be 350
+ * to the *armed* family rather than to all 87 at once, which would be 304
  * positions on a 272px column.
  *
  * `any size` is the default and a real position: with nothing chosen the
- * `constrain` collects nothing and the family admits every size. **8 families get
- * no control at all** — 5 with no size domain and 3 whose domain no `size|` tag
+ * `constrain` collects nothing and the family admits every size. **7 families get
+ * no control at all** — 5 with no size domain and 2 whose domain no `size|` tag
  * can express (`families.ts` enumerates both) — because a control with one
  * position cannot be operated.
  *
  * ## What a row says: a name, a slot count, and one second fact
  *
  * Every row carries its name and its **slot count**, which is the fact the
- * owner's report was about and the reason it is on all 91 rather than on the 40
+ * owner's report was about and the reason it is on all 87 rather than on the 40
  * that surprised them. Beside it sits one more fact, and which one depends on
  * what the row *has*:
  *
@@ -131,7 +133,7 @@
  *
  * The whole `FacetSearch` from `/builder`, not just the text — `routeTree.tsx`
  * gives the builder route the facet schema precisely so this box is linkable.
- * **What it searches has changed**: `q` now narrows the 91 rows by name and axis
+ * **What it searches has changed**: `q` now narrows the 87 rows by name and axis
  * (`palette.ts#queryTokens`), not 3,822 items, so `?kinds=wall` is carried by the
  * route and no longer read here — there is nothing in a family for a catalog
  * facet to narrow.
@@ -319,7 +321,7 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
           `screens/builder/builder.test.tsx` reads *"which templates does `?q=`
           leave"* off this landmark, which is a question about the whole list and
           not about either section. It carries no count — the search field's
-          readout already says `24 of 91 templates` for exactly the same set. */}
+          readout already says `22 of 87 templates` for exactly the same set. */}
       <section className="of-pal-block" aria-label="Templates">
         {rows.length === 0 ? (
           <p className="of-pal-note">
@@ -387,8 +389,8 @@ const SECTION_NOTE: Readonly<Record<PaletteSection['key'], string>> = {
  * One section: its heading and count, its sentence, and its rows.
  *
  * The **assemblies have no sub-groups** and the single tiles have eight, which
- * is the asymmetry the data has: a role is what makes 51 one-slot rows findable
- * (§3.1's 3,862-to-51 measurement), and the 40 assemblies are already one flat
+ * is the asymmetry the data has: a role is what makes 47 one-slot rows findable
+ * (§3.1's 3,862-to-47 measurement), and the 40 assemblies are already one flat
  * list short enough to read — their sub-structure would have been the build
  * system, and today all 40 share one, so it is on the rows instead
  * ({@link rowFact}).
@@ -469,7 +471,7 @@ function PaletteGroupBlock({
  *
  * Heading-free, because its two callers put different headings above it — an
  * `<h2>` section for the 40 assemblies, an `<h3>` role group for each slice of
- * the 51 single tiles.
+ * the 47 single tiles.
  */
 function PaletteList({
   rows,
@@ -579,10 +581,10 @@ function rowFact(
  * longest domain is 32 positions and a horizontal scroller in a 272px column
  * hides most of them behind a gesture.
  *
- * Renders **nothing** when there is nothing to choose: 8 families have no
- * expressible domain, and no assembly has one at all. Those 8 get a sentence
+ * Renders **nothing** when there is nothing to choose: 7 families have no
+ * expressible domain, and no assembly has one at all. Those 7 get a sentence
  * instead of a control, because a row that simply omits the control it has on
- * its nineteen neighbours reads as a bug.
+ * its sixteen neighbours reads as a bug.
  *
  * **Row D2 checked the assembly case rather than inheriting it, and it holds.**
  * `GENERATED_FAMILY_SIZES` has no entry for any of the 40, so `family.sizes` is
@@ -665,11 +667,11 @@ type RecentEntry = { readonly family: TemplateFamily; readonly size: readonly st
 /**
  * RECENT, as a strip of chips above **both** sections.
  *
- * **A strip and not a third section**, because all 91 rows are always listed: a
+ * **A strip and not a third section**, because all 87 rows are always listed: a
  * section would put a second row on screen for the same family, and since the
  * size control lives inside the armed row it would put a second live copy of that
  * control there too. `palette.ts#MAX_RECENT` carries the argument and the
- * research's own caveat — this mitigates the recognition cost of 91 rows and
+ * research's own caveat — this mitigates the recognition cost of 87 rows and
  * does not fix it, which is why it is six chips and not a curated list.
  *
  * **Above both sections rather than inside one**, because the ring mixes the two
@@ -731,9 +733,9 @@ function RecentStrip({
  * only "Octagon" is a control with nothing to choose.
  *
  * **The two axes reach different numbers of sections, and the labels say which.**
- * `build` is a tag every one of the 91 templates carries at most one of, so its
+ * `build` is a tag every one of the 87 templates carries at most one of, so its
  * chips narrow both sections and its label is the bare axis name. `form` is a tag
- * only the 51 single tiles carry — an assembly's form lives in up to five
+ * only the 47 single tiles carry — an assembly's form lives in up to five
  * separate `require` blocks, one per part — so it narrows that section alone and
  * is labelled **Tile form** to say so. `palette.ts#filterFamilies` carries the
  * measurement and what C1's rule did instead: it hid all 40 assemblies, which

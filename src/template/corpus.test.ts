@@ -1036,18 +1036,20 @@ describeCorpus(
       expect(failing.every((id) => id.includes('corner') && id.endsWith('-single-piece'))).toBe(true)
     })
 
-    /* ------------------------------------------------- row B4's 51 families */
+    /* ------------------------------------------------- row B4's 47 families */
 
-    it('has no convention for any of B4’s 51 generated families, which is why size arrives as refs', () => {
+    it('has no convention for any of B4’s 47 generated families, which is why size arrives as refs', () => {
       /* The merge finding, and it corrects this row rather than B4. Every one of
-         B4's generated families has **exactly one part** — 19 `wall`, 17
+         B4's generated families has **exactly one part** — 17 `wall`, 15
          `floor`, 6 `column`, 3 `stair`, 2 `riser`, 2 `roof`, 1 `decor`, 1
          `base` — and it declines a layout deliberately, with four measurements
-         behind it. So none of them has a part-name set `rules.ts` has a
+         behind it. (51 families and 19/17 walls and floors until row D1 denied
+         `shape|base` on every family and dropped the four whose whole
+         population was bases.) So none of them has a part-name set `rules.ts` has a
          convention for, there is no anchor, and B3's per-slot derivation cannot
          fire: `FillContext.cell` narrows **nothing** on any palette row C1 is
          building. `FillContext.size` is what this measurement bought. */
-      expect(GENERATED_FAMILIES).toHaveLength(51)
+      expect(GENERATED_FAMILIES).toHaveLength(47)
       expect(GENERATED_FAMILIES.filter((family) => family.parts.length !== 1)).toEqual([])
       expect(
         GENERATED_FAMILIES.filter(
@@ -1060,7 +1062,7 @@ describeCorpus(
       expect(RECIPE_TEMPLATES.flatMap((template) => template.parts)).toHaveLength(128)
     })
 
-    it('fills all 51 generated families, at every one of their 350 size options', () => {
+    it('fills all 47 generated families, at every one of their 304 size options', () => {
       const { index, context: ctx } = ready()
       let options = 0
       const unfilled: string[] = []
@@ -1076,15 +1078,22 @@ describeCorpus(
       }
 
       /* The acceptance measurement for C1's palette: every row, at every size
-         its control offers, places filled. 350 options over 51 families, and
-         8 of those families offer nothing but *any size* — an empty domain,
-         which B3 predicted for 5 — so the no-tags option is exercised 51 times
-         over. */
-      expect(options).toBe(350)
+         its control offers, places filled. 304 options over 47 families, and
+         7 of those families offer nothing but *any size* — an empty domain,
+         which B3 predicted for 5 — so the no-tags option is exercised 47 times
+         over.
+
+         `unfilled` being empty is also what settled row D1's judgement call:
+         four families admitted nothing but bases, so denying the base left them
+         admitting nothing, and a family that admits nothing arrives here as a
+         row that cannot be filled at any size. They are dropped from the
+         generator instead, and their records are reached through `shape-base`.
+         (350 over 51 with 8 empty domains before that row.) */
+      expect(options).toBe(304)
       expect(unfilled).toEqual([])
       expect(
         Object.values(GENERATED_FAMILY_SIZES).filter((sizes) => sizes.length === 1),
-      ).toHaveLength(8)
+      ).toHaveLength(7)
     })
 
     /* --------------------------------------------------------- the scene scale */
