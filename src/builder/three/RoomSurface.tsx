@@ -117,6 +117,54 @@
  * The browser's own menu is suppressed on the canvas and only there — see
  * `onContextMenu` below for why that is two reasons rather than one taste.
  *
+ * ## Row D3: the piece under the pointer glows, and it is a drawing change only
+ *
+ * The owner asked that *"when hovering over a template in the editor, its
+ * outline glow slightly"*, and the section above is why that is load-bearing
+ * rather than decorative: a right click opens the slot editor on **whichever
+ * piece the pointer resolves to**, so a user has to be able to see which piece
+ * that is before pressing. Erase and move have had the same problem for longer.
+ *
+ * **Nothing was added to the pointer path to draw it.** `under` — `pieceAt` over
+ * the cursor this component has tracked for the ghost since the mockup — was
+ * already computed on every pointer move, for the erase ring and for the status
+ * hint, and `onMove` already called `invalidate` on every move. So the brief's
+ * warning about a hover handler that invalidates on every pointer move describes
+ * the surface as it already was, and the A/B says so: **ten pointer moves are
+ * ten invalidations before this row and ten after**, and a move over a hovered
+ * two-part piece goes from 0.187 ms to 0.221 ms (medians of ten 200-move rounds
+ * in jsdom against React's development build; the fastest rounds are 0.145 and
+ * 0.168) — **+0.03 ms**, against the 3.3 ms row C5 pays on a click. Over bare
+ * ground the two are the same to the noise floor. There is nothing here to
+ * throttle, and the reason there is nothing is that `pieceAt` returns the
+ * scene's own object: the outline is memoised on the piece, so 200 moves across
+ * one piece rebuild its geometry **zero** times.
+ *
+ * Three decisions in it, each of which could have gone the other way:
+ *
+ *   1. **The glow rings the instance and not the resolved part.** The drawing
+ *      below carries the arithmetic that settles it — on a single-part template
+ *      the two are the *same loop*, so a second cue would read as the glow being
+ *      brighter on some pieces than others rather than as a finer target.
+ *   2. **It goes out while a button is held**, because a held button here means
+ *      the camera: left orbits and right pans. {@link dragging} carries the
+ *      mechanism, and why it is read off `PointerEvent.buttons` rather than
+ *      tracked from the presses.
+ *   3. **It follows the cursor and not the pointer**, so `[`, `]` and the arrow
+ *      keys ring the piece they announce and a keyboard user gets the same cue
+ *      from the keyboard. That is also how this row found that neither keyboard
+ *      cursor writer asked for a frame at all — {@link moveCursor} has the
+ *      measurement — which is a defect in the *caret* that predates the glow.
+ *
+ * The erase ring is the same drawing at full strength rather than a second one,
+ * and two special cases went with it: the ring used to be skipped for any piece
+ * with a plate on it and the plate's own contour recoloured instead, so a
+ * template with one mesh loaded and two still waiting highlighted **only the two
+ * that were waiting**. It also used to be one loop at the *tallest* part's
+ * height, which drew a corner template's floor outline at its **wall's** top —
+ * 12.7 mm above the floor on this directory's fixture and 63.5 mm on a shipped
+ * wall, the height `surface.ts` measures its parallax against.
+ *
  * ## Row A4b: everything drawn is a **part**, and the preview is a whole piece
  *
  * A placement is N parts, so every list this component builds is a list of parts
@@ -225,6 +273,42 @@ const ACCENT = '#8f5b21'
 const GRID_LINE = '#79684d'
 const GRID_AXIS = '#8f5b21'
 
+/**
+ * The hover cue's colour: **`--acc` lifted 35% of the way to `--bg`**.
+ *
+ * The owner asked for a hovered outline to glow *"slightly"*, and this is that
+ * word as a number rather than as a taste. It is not a new colour in the
+ * design — it is the accent and the page ground, the two tokens §1's table
+ * already carries, mixed — so the cue cannot drift into the saturated
+ * selection colour the contract has no token for. `gesture.test.tsx` asserts
+ * the mix against `@/tokens` so a hand-edited digit fails rather than merely
+ * looking different.
+ *
+ * Measured against the three things the line is actually seen against, over
+ * all sixteen material families:
+ *
+ * | seen against | this | {@link ACCENT} |
+ * | --- | ---: | ---: |
+ * | the parchment ground, `--bg` | **2.39:1** | 4.19:1 |
+ * | a mesh-less part's own contour, worst family | **3.29:1** | 1.88:1 |
+ * | a family's own fill, worst family | 1.01:1 | 1.16:1 |
+ *
+ * The first row is the *"slightly"*: against the ground the plan is drawn on,
+ * a hovered outline carries 43% less contrast than the ring the erase gesture
+ * puts round the piece it would delete, so pointing at a piece cannot be read
+ * as arming it. The second is why it is nonetheless legible where the line
+ * lands — it overdraws the part's own dark contour, and it is a **larger**
+ * change to that contour than the accent itself would be. The third is a limit
+ * of the palette and not a tuning failure: no candidate colour, the accent
+ * included, clears **1.2:1** against all sixteen fills (the sweep ran
+ * `--acc`→`--bg` at nine mixes and `--acc`→`--ink` at two; every one landed
+ * between 1.00 and 1.16), because the families span L* 18 to 82 by design.
+ * `palette.ts` states the answer to that as a rule — silhouette is carried by
+ * the contour and not by the fill — and the contour is exactly where this cue
+ * is drawn.
+ */
+export const HOVER_GLOW = '#ae885a'
+
 export interface RoomSurfaceProps {
   readonly scene: PlanScene
   readonly room: Room3D
@@ -300,6 +384,34 @@ export function RoomSurface({
   const [cursor, setCursor] = useState<PlanPoint | null>(null)
   const [drag, setDrag] = useState<MoveDrag | null>(null)
   const [focused, setFocused] = useState(false)
+  /**
+   * Whether a button is held *while the pointer moves* — an orbit, a pan, or a
+   * carry. Row D3, and it exists to keep the hover glow off the camera.
+   *
+   * Read off `PointerEvent.buttons` on the move itself rather than tracked from
+   * the presses, and that is what makes it self-healing rather than merely
+   * shorter. `OrbitControls` captures the pointer, so a release outside the
+   * canvas never reaches `onUp` — a flag raised on `pointerdown` and cleared on
+   * `pointerup` can therefore stick raised, which for this flag would mean the
+   * glow silently never coming back. The next move with no button held clears
+   * it, whatever happened to the release.
+   *
+   * `buttons` and not `button`: this asks *what is held*, which is the plural
+   * question, and {@link SECONDARY_BUTTON}'s note is the singular one.
+   */
+  const [dragging, setDragging] = useState(false)
+  /**
+   * {@link dragging}, mirrored for the listeners — so a move that changes
+   * nothing enqueues nothing.
+   *
+   * Every pointer move already writes `cursor`, so the fiber always has a
+   * pending update when the button state is written and React's eager bail-out
+   * cannot fire; without this the hundreds of moves in a plain hover would each
+   * queue a second no-op update. Measured: without it a hover over bare ground
+   * cost **0.171 ms** a move against this row's 0.146 ms baseline, and with it
+   * the two are the same to the noise floor.
+   */
+  const buttonHeld = useRef(false)
   /** The cursor, readable from the stable listeners below. */
   const cursorRef = useRef<PlanPoint | null>(cursor)
   cursorRef.current = cursor
@@ -371,7 +483,6 @@ export function RoomSurface({
     const plates: PlatedPart[] = [
       ...scene.generated.map((piece) => ({
         key: piece.id,
-        id: piece.id,
         polygons: piece.polygons,
         tint: piece.style.tint,
         edge: piece.style.edge,
@@ -383,7 +494,6 @@ export function RoomSurface({
         if (geometries.has(part.record.blob)) continue
         plates.push({
           key: `${piece.id}:${part.slot}`,
-          id: piece.id,
           polygons: part.polygons,
           tint: part.style.tint,
           edge: part.style.edge,
@@ -394,8 +504,41 @@ export function RoomSurface({
     return plates
   }, [scene, geometries])
 
-  /** The placements with at least one plate on them, for the erase ring's test. */
-  const platedIds = useMemo(() => new Set(plated.map((plate) => plate.id)), [plated])
+  /**
+   * The piece under the pointer, as one outline per part at that part's own top.
+   *
+   * Row D3's drawing, and the arity is row A4b's again: a template is N parts at
+   * N elevations, so *"its outline"* is N loops and not one — and a loop per part
+   * is what keeps each one at the height the thing it rings actually reaches. The
+   * single union ring this replaced was drawn at the **tallest** part's top for
+   * the whole piece, so a corner template's floor outline was drawn at its
+   * wall's top: 12.7 mm up on this directory's fixture, 63.5 mm on a shipped
+   * wall. Nothing is added to the set of loops by the change:
+   * `piece.polygons` **is** `parts.flatMap((part) => part.polygons)` —
+   * `scene.ts`'s own identity, the one `edits.ts#planSlotEdit` also leans on — so
+   * these are the same loops the union drew, each at its own elevation instead of
+   * all of them at one.
+   *
+   * A generated base is one loop by construction: it names no recipe and so has
+   * no slots, exactly as its plate has none.
+   *
+   * **Memoised on the piece and not on the pointer**, which is the whole of this
+   * row's cost control. `pieceAt` returns the scene's own object, so `under`
+   * keeps its identity for as long as the pointer stays on one piece, and
+   * `PlateOutline`'s own geometry memo therefore survives every move across it:
+   * 200 moves over a two-part piece build **two** outlines, not 400.
+   */
+  const glow = useMemo<readonly GlowPart[]>(() => {
+    if (under === undefined) return []
+    if (under.kind === 'generated') {
+      return [{ key: under.id, polygons: under.polygons, heightMm: PLATE_HEIGHT_MM * 2 }]
+    }
+    return under.parts.map((part) => ({
+      key: `${under.id}:${part.slot}`,
+      polygons: part.polygons,
+      heightMm: partTopMm(part) + PLATE_HEIGHT_MM,
+    }))
+  }, [under, partTopMm])
 
   /* ------------------------------------------------------------- the mutations */
 
@@ -542,6 +685,18 @@ export function RoomSurface({
     const host = canvas.parentElement ?? canvas
 
     /**
+     * The glow's switch: on when the hand is empty, off while a button is held.
+     *
+     * Written through {@link buttonHeld} so a move that changes nothing costs
+     * nothing, which is what makes this affordable on a `pointermove`.
+     */
+    const glowWhileHeld = (held: boolean) => {
+      if (buttonHeld.current === held) return
+      buttonHeld.current = held
+      setDragging(held)
+    }
+
+    /**
      * A secondary release: the slot editor, if the gesture was a click.
      *
      * The 5 px test first and the pick second, in that order, because the pick
@@ -615,6 +770,12 @@ export function RoomSurface({
       // does: the sticky target exists so repeated `R` keeps turning the same
       // piece, and pointing somewhere else is the user saying otherwise.
       sticky.current = null
+      // A held button means the camera, here: left orbits and right pans. So the
+      // hover glow goes out for the duration, because a cue that hops from piece
+      // to piece while the view swings under a stationary hand is worse than no
+      // cue — the brief's own point, and this is the answer to it. A press with
+      // no travel never reaches this line, so a click keeps its glow.
+      glowWhileHeld(event.buttons !== 0)
       const pick = pickAt(event.clientX, event.clientY)
       if (pick === null) {
         setCursor(null)
@@ -632,6 +793,9 @@ export function RoomSurface({
     }
 
     const onUp = (event: PointerEvent) => {
+      // Whatever the release was, it ended it: the glow comes back on the piece
+      // the pointer finished over, without waiting for the next move.
+      glowWhileHeld(false)
       if (event.button === SECONDARY_BUTTON) {
         openSlotsAt(event)
         return
@@ -658,6 +822,7 @@ export function RoomSurface({
     }
 
     const onLeave = () => {
+      glowWhileHeld(false)
       // The mockup hides its ghost here too: a ghost frozen at the edge of the
       // canvas after the pointer has gone is a tile that looks placed and is not.
       setCursor(null)
@@ -665,6 +830,7 @@ export function RoomSurface({
     }
 
     const onCancel = (event: PointerEvent) => {
+      glowWhileHeld(false)
       secondary.current = null
       const started = press.current
       press.current = null
@@ -728,17 +894,35 @@ export function RoomSurface({
   const sticky = useRef<PlacementId | null>(null)
   const navIndex = useRef(-1)
 
-  const moveCursor = useCallback((dx: number, dz: number) => {
-    const { tools: state } = latest.current
-    const [x, z] = cursorRef.current ?? [0, 0]
-    const next: PlanPoint = [snapTo(x + dx, state.step), snapTo(z + dz, state.step)]
-    sticky.current = null
-    setCursor(next)
-    const piece = pieceAt(latest.current.scene, next)
-    latest.current.say(
-      `${describeCell(next[0], next[1])} — ${piece === undefined ? 'empty' : piece.label}${piece?.conflict === true ? ', overlapping' : ''}`,
-    )
-  }, [])
+  /**
+   * The cursor, one snap step over — and **a frame asked for**, which row D3
+   * found missing rather than added.
+   *
+   * `frameloop` is `demand`, so a state change that nothing invalidates is not
+   * drawn. Every other cursor writer already asked: `onMove` invalidates on
+   * every pointer move, `nudge` invalidates for the held piece, and the effect
+   * below invalidates when the ghost, the preview, the plates or the focus ring
+   * change. The two **keyboard** cursor writers — this and
+   * {@link stepToPiece} — did not, and the cursor is not in that effect's
+   * dependencies, so with nothing armed there was no `ghost` to change and an
+   * arrow key moved the caret in state without redrawing it. The glow inherits
+   * exactly the same path, which is how the omission surfaced.
+   */
+  const moveCursor = useCallback(
+    (dx: number, dz: number) => {
+      const { tools: state } = latest.current
+      const [x, z] = cursorRef.current ?? [0, 0]
+      const next: PlanPoint = [snapTo(x + dx, state.step), snapTo(z + dz, state.step)]
+      sticky.current = null
+      setCursor(next)
+      const piece = pieceAt(latest.current.scene, next)
+      latest.current.say(
+        `${describeCell(next[0], next[1])} — ${piece === undefined ? 'empty' : piece.label}${piece?.conflict === true ? ', overlapping' : ''}`,
+      )
+      invalidate()
+    },
+    [invalidate],
+  )
 
   const nudge = useCallback(
     (dx: number, dz: number) => {
@@ -762,17 +946,30 @@ export function RoomSurface({
     [invalidate],
   )
 
-  const stepToPiece = useCallback((direction: 1 | -1) => {
-    const order = navigationOrder(latest.current.scene)
-    if (order.length === 0) {
-      latest.current.say('No tiles placed yet.')
-      return
-    }
-    navIndex.current = (navIndex.current + direction + order.length) % order.length
-    const piece = order[navIndex.current] as ScenePiece
-    setCursor([piece.box.x + piece.box.w / 2, piece.box.z + piece.box.d / 2])
-    latest.current.say(`${String(navIndex.current + 1)} of ${String(order.length)}: ${piece.label}`)
-  }, [])
+  /**
+   * `[` and `]`: the cursor onto the next piece — which now **rings** it.
+   *
+   * The glow follows the cursor and not the pointer, so this navigation got a
+   * visible subject for free: a keyboard user stepping through a room sees each
+   * piece outlined as it is announced. That is the accessibility half of row D3
+   * and it cost one call to {@link invalidate} — see {@link moveCursor} for why
+   * that call was missing here too.
+   */
+  const stepToPiece = useCallback(
+    (direction: 1 | -1) => {
+      const order = navigationOrder(latest.current.scene)
+      if (order.length === 0) {
+        latest.current.say('No tiles placed yet.')
+        return
+      }
+      navIndex.current = (navIndex.current + direction + order.length) % order.length
+      const piece = order[navIndex.current] as ScenePiece
+      setCursor([piece.box.x + piece.box.w / 2, piece.box.z + piece.box.d / 2])
+      latest.current.say(`${String(navIndex.current + 1)} of ${String(order.length)}: ${piece.label}`)
+      invalidate()
+    },
+    [invalidate],
+  )
 
   useEffect(() => {
     const canvas = gl.domElement
@@ -1038,21 +1235,43 @@ export function RoomSurface({
           key={plate.key}
           parts={plate.polygons}
           tint={plate.tint}
-          edge={plate.id === under?.id && tools.tool === 'erase' ? ACCENT : plate.edge}
+          edge={plate.edge}
           heightMm={plate.heightMm}
         />
       ))}
 
       {/*
-        The piece under the pointer in erase mode, ringed at its own height, so
-        "click to remove that" names a piece the user can see is named. The ring
-        is the **instance's** union outline and not a part's, because erase takes
-        the whole placement — `removalOf` names one `PlacementId` — and ringing
-        one slot of five would promise a removal the store cannot make.
+        The piece under the pointer, ringed part by part — the owner's hover glow
+        and the erase gesture's own highlight, which are **one drawing at two
+        strengths** rather than two drawings. Row C8 is why the quiet one has to
+        exist at all: a right click opens the slot editor on whichever piece the
+        pointer resolves to, so a user has to be able to see which piece that is
+        before pressing. Erase keeps {@link ACCENT}, because a click there
+        *deletes* the thing being named and the loud cue is the honest one.
+
+        Every loop belongs to the **instance** and none of them is a part's alone
+        — even though a right click does resolve one level further, to the slot
+        whose part was hit. That level is deliberately not drawn, for a reason
+        that is arithmetic rather than taste: `piece.polygons` is the flat map of
+        its parts' polygons, so on a single-part template — the common case — a
+        second "resolved part" outline would be the *same loop drawn twice*, which
+        does not read as a finer cue, it reads as the whole glow being brighter on
+        some pieces than others. The slot is named in words instead, by
+        `planSlotEdit`, on the one gesture that uses it. The panel's own rows are
+        still the pointer-free way in, and they still list every piece.
+
+        Suppressed while a button is held: see {@link dragging}.
       */}
-      {under === undefined || tools.tool !== 'erase' || platedIds.has(under.id) ? null : (
-        <PlateOutline parts={under.polygons} colour={ACCENT} heightMm={heightOf(under) + PLATE_HEIGHT_MM} />
-      )}
+      {dragging
+        ? null
+        : glow.map((part) => (
+            <PlateOutline
+              key={part.key}
+              parts={part.polygons}
+              colour={tools.tool === 'erase' ? ACCENT : HOVER_GLOW}
+              heightMm={part.heightMm}
+            />
+          ))}
 
       {/*
         The armed marker: one cell at the snapped anchor, with no mesh behind it
@@ -1091,11 +1310,17 @@ export function RoomSurface({
 interface PlatedPart {
   /** Stable across renders: the placement, then the slot. */
   readonly key: string
-  /** The placement it belongs to, for the erase highlight. */
-  readonly id: PlacementId
   readonly polygons: readonly PlanPart[]
   readonly tint: string
   readonly edge: string
+  readonly heightMm: number
+}
+
+/** One loop of the hover glow: a part's outline, at that part's own top. */
+interface GlowPart {
+  /** Stable across renders: the placement, then the slot. */
+  readonly key: string
+  readonly polygons: readonly PlanPart[]
   readonly heightMm: number
 }
 
