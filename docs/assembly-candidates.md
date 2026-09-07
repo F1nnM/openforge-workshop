@@ -37,8 +37,8 @@ cross-product filler, and the 128-row version of Tier A is filler 127 times over
 it closes cleanly. It is worth a row for what it *is* — the shape the archive has no assembly for —
 and not for what it reaches, which is nothing. **Two prerequisites, both measured in §3.3.1:** its
 base slot must admit `shape|base|hallway`, the 2x2 piece upstream authored for exactly this shape and
-which the §3.3 predicate excludes; and its floor slot needs a minimum-depth predicate, because two
-0.5-deep walls on opposite faces leave **281 floor records with zero walkable width** and the closure
+which the §3.3 predicate excludes; and its floor slot needs a minimum-**depth** predicate, because two
+0.5-deep walls on opposite faces leave **270 floor records with zero walkable width** and the closure
 check passes every one of them.
 
 **Do not build the 3-wall dead end or the 4-wall closet.** Not because they are undecidable — they
@@ -209,22 +209,27 @@ measured fills its base from the 305-record wall-base pool and structurally excl
 upstream built for the shape. The predicate wants `shape|base|hallway`, and this is the same class of
 finding as §3.5's pinned base size: an authored fact no axis carries.
 
-**§3.3's floor slot admits 281 records that leave nothing to walk on.** Two 0.5-deep walls on
-opposite faces consume a full unit of depth, so the floor's *smallest* dimension is what decides
-whether a corridor has a floor. Over the 1,496-record floor pool — 1,224 `rect`, 272 non-`rect`:
+**§3.3's floor slot admits 270 records that leave nothing to walk on.** Two 0.5-deep walls on
+opposite faces consume a full unit — and **of one specific axis**. The convention fixes both walls at
+sides 0 and 2, which §3.3's drawn table shows are the two *z* faces, so the dimension that decides
+whether a corridor has a floor is the floor's **depth**, not its smallest dimension. The two readings
+disagree, and the first draft of this section used the wrong one:
 
-| floor min dimension | records | walkable across | |
-| ---: | ---: | ---: | --- |
-| 1 | **281** | **0.0** | two walls meet; the tile is solid stone |
-| 2 | 600 | 1.0 | 25.4 mm, one 25 mm mini base |
-| 3 | 99 | 2.0 | two abreast |
-| 4 | 209 | 3.0 | |
-| 6 | 20 | 5.0 | |
-| 8 | 15 | 7.0 | |
+| floor depth | records **by depth** | *(by min dimension)* | walkable across | |
+| ---: | ---: | ---: | ---: | --- |
+| 1 | **270** | *281* | **0.0** | the two walls meet; the tile is solid stone |
+| 2 | 564 | *600* | 1.0 | 25.4 mm, one 25 mm mini base |
+| 3 | 103 | *99* | 2.0 | two abreast |
+| 4 | 252 | *209* | 3.0 | |
+| 6 | 20 | *20* | 5.0 | |
+| 8 | 15 | *15* | 7.0 | |
 
-**943 of the 1,224 rect floors (736 designs) are usable**; the 281 lost are all the 1-unit strips.
+Depth is the right column. A `1 x 2` floor has a *min dimension* of 1 but a depth of 2, so it is a
+short corridor segment one unit long and perfectly walkable; a `2 x 1` floor is the solid one. Over
+the 1,496-record floor pool — 1,224 `rect`, 272 non-`rect` — **954 of the 1,224 rect floors (747
+designs) are usable by depth**, against 943 / 736 under the wrong reading.
 
-**And the 281 `closes`.** No overlapping pair, union = cell, area exact to the unit — §3.3's walked
+**And the 270 `closes`.** No overlapping pair, union = cell, area exact to the unit — §3.3's walked
 cell histogram counts `1x1 ×59` among them. This is the gap:
 
 > `placeTemplateSlots` proves that parts do not overlap and that they cover the cell. It cannot prove
@@ -559,8 +564,9 @@ records and +0 designs** (§2).
    **Author it with §3.3.1's two corrections, not with §3.3's predicates**: require
    `shape|base|hallway` on the base — `plain#base+hallway.2x2` is upstream's own corridor piece at
    2,040 triangles against the square base's 5,648, and none of its 12 records carries the
-   `shape|base|wall` that §3.3 demands — and put a minimum depth on the floor, or 281 of the 1,224
-   rect floors build a solid block of wall that the closure check calls `closes`.
+   `shape|base|wall` that §3.3 demands — and put a minimum **depth** on the floor, expressible today
+   as `deny size|depth|0.5, size|depth|1, size|depth|1.5`, or 270 of the 1,224 rect floors build a
+   solid block of wall that the closure check calls `closes`.
 5. **`(base, column, floor, wall)` — the wall + post — is the second candidate, and it is cheap**:
    21 of 21 walked combinations `closes`, no new part names, the first-candidate walk completes it. It
    needs the shipped corner's own authorship — the corner-wall pool *and* a base pinned to 2x2 with no
