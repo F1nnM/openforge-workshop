@@ -32,6 +32,27 @@
  *
  * No renderer runs, so nothing here is about the picture. `room.test.tsx`'s list
  * of what needs a GPU is unchanged.
+ *
+ * ## Row D3 shares the seam, and asserts a *drawing* through it
+ *
+ * The hover glow is drawn by the same component these tests already mount, from
+ * the same `under` this file's picks resolve, so it belongs here rather than in a
+ * second file that would copy the harness. It does need two things the gesture
+ * tests did not, and both are in the mocks above rather than in the tests:
+ * `invalidate` **counts** (a `frameloop="demand"` surface that changes state
+ * without asking for a frame does not redraw, which is a defect this row found in
+ * the keyboard path), and `plateEdgeGeometry` counts too, delegating to the real
+ * one — the glow's whole cost claim is that it builds an outline per hovered
+ * *piece* and not per pointer move, and a counter is the only way to say that.
+ *
+ * What it still cannot say is what the line looks like. jsdom renders r3f's
+ * elements as unknown DOM tags, so `<lineBasicMaterial color=…>` is readable as
+ * an attribute and **that is what the colour assertions read** — which piece is
+ * ringed, in which colour, and how many loops. Whether 0.9 of `#ae885a` reads as
+ * a glow over a lit stone tint is a question for a browser and a pair of eyes,
+ * and the contrast assertions below are the closest a headless test gets: they
+ * bound the colour against the ground and against all sixteen contours, in the
+ * palette's own units.
  */
 import { fireEvent, render } from '@testing-library/react'
 import { PerspectiveCamera } from 'three'
@@ -41,9 +62,14 @@ import type { PlanScene } from '@/builder/canvas'
 import { buildPlanScene, createStyleResolver, planCatalogFromFile } from '@/builder/canvas'
 import { FIXTURE_IDS, FIXTURE_SLOTS, fixtureCatalogFile, fixtureSlotLayout } from '@/builder/canvas/fixture'
 import { resolveMaterial } from '@/materials'
+import { contrastRatio, formatHex, parseHex } from '@/materials/color'
+import { MATERIALS } from '@/materials/palette'
 import { PlacementId } from '@/store'
 import { aGeneratedBase } from '@/store/fixture'
 import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR, CAMERA_POSITION, VIEW_RADIUS } from '@/three/frame'
+import { color } from '@/tokens/tokens'
+
+import type * as Markers from './markers'
 
 /*
   The three things `useThree` is asked for, and nothing else. The canvas sits in
@@ -62,12 +88,37 @@ camera.position.set(...CAMERA_POSITION)
 camera.lookAt(0, 0, 0)
 camera.updateMatrixWorld(true)
 
+/** Frames the surface has asked for. Row D3; see the docblock. */
+let frames = 0
+
+/*
+  One `invalidate`, defined once at module scope rather than per `useThree` call:
+  the surface has it in an effect's dependency list, so a fresh function every
+  render would invalidate on every render and the count would measure the mock.
+*/
+const invalidate = () => {
+  frames += 1
+}
+
 vi.mock('@react-three/fiber', () => ({
-  useThree: (selector: (state: unknown) => unknown) =>
-    selector({ camera, gl: { domElement: canvas }, invalidate: () => undefined }),
+  useThree: (selector: (state: unknown) => unknown) => selector({ camera, gl: { domElement: canvas }, invalidate }),
 }))
 
-const { RoomSurface } = await import('./RoomSurface')
+/** Outline geometries built. Row D3; the real function still does the work. */
+let outlineBuilds = 0
+
+vi.mock('./markers', async (importOriginal) => {
+  const actual = await importOriginal<typeof Markers>()
+  return {
+    ...actual,
+    plateEdgeGeometry: (...args: Parameters<typeof actual.plateEdgeGeometry>) => {
+      outlineBuilds += 1
+      return actual.plateEdgeGeometry(...args)
+    },
+  }
+})
+
+const { HOVER_GLOW, RoomSurface } = await import('./RoomSurface')
 const { fixtureFiller, planTools, sceneOf } = await import('./fixture')
 const { surfaceFit } = await import('./surface')
 const { buildRoom3D } = await import('./instances')
@@ -123,7 +174,7 @@ interface Mounted {
 }
 
 /** The surface, mounted over a scene, with every callback recording. */
-function mount(scene: PlanScene, options: { readonly wired?: boolean; readonly tool?: 'place' | 'move' } = {}) {
+function mount(scene: PlanScene, options: { readonly wired?: boolean; readonly tool?: 'place' | 'move' | 'erase' } = {}) {
   const state: Mounted = { opened: [], said: [], reached: [] }
   const onDown = (event: Event) => {
     state.reached.push((event as MouseEvent).button)
@@ -177,6 +228,44 @@ function press(type: string, button: number, at: readonly [number, number], init
     canvas,
     new MouseEvent(type, { bubbles: true, button, clientX: at[0], clientY: at[1], ...init }),
   )
+}
+
+/**
+ * A pointer move over the canvas. `buttons` is what is *held* during it, which
+ * is how the surface tells a hover from an orbit or a pan.
+ *
+ * `button` is `-1`, the UI Events value for *no button changed state* — which is
+ * what a move is, and it keeps a move clear of the surface’s `SECONDARY_BUTTON`.
+ */
+function hover(at: readonly [number, number] = [100, 100], buttons = 0) {
+  press('pointermove', -1, at, { buttons })
+}
+
+/**
+ * Every line colour in the drawing, in paint order.
+ *
+ * r3f's elements reach jsdom as unknown DOM tags, so a `<lineBasicMaterial>`'s
+ * colour is a readable attribute. Every outline in the surface is one of these:
+ * a plate's own contour, the ghost's fallback ring, the caret, and the glow.
+ */
+function lineColours(): string[] {
+  return [...document.querySelectorAll('linebasicmaterial')].map((node) => node.getAttribute('color') ?? '')
+}
+
+/** How many outlines are drawn in `colour`. */
+function ringsIn(colour: string): number {
+  return lineColours().filter((value) => value === colour).length
+}
+
+/** `--acc` mixed `amount` of the way to `to`, per channel in gamma-encoded sRGB. */
+function mix(from: string, to: string, amount: number): string {
+  const a = parseHex(from)
+  const b = parseHex(to)
+  return formatHex([
+    a[0] + (b[0] - a[0]) * amount,
+    a[1] + (b[1] - a[1]) * amount,
+    a[2] + (b[2] - a[2]) * amount,
+  ])
 }
 
 /** A press and a release of the secondary button, `travel` pixels apart. */
@@ -365,5 +454,164 @@ describe('the two presses stay apart', () => {
     // resolved primary click announces "No template is armed".
     expect(state.said.filter((text) => /armed/.test(text))).toEqual([])
     expect(state.opened).toHaveLength(1)
+  })
+})
+
+describe('the piece under the pointer glows', () => {
+  it('rings every part of it, once each, in the hover colour', () => {
+    // The two-part corner: `pieceAt` resolves the instance and the glow draws
+    // one loop per part, at that part's own top. Not one loop for the piece —
+    // `scene.ts` makes `piece.polygons` the flat map of its parts', so the loops
+    // are the same set either way, and per part is what puts each at its own
+    // elevation.
+    mount(corner(-1))
+    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    hover()
+    expect(ringsIn(HOVER_GLOW)).toBe(2)
+  })
+
+  it('draws nothing at all over bare ground', () => {
+    mount(sceneOf(CATALOG, []))
+    hover()
+    expect(ringsIn(HOVER_GLOW)).toBe(0)
+  })
+
+  it('rings a generated base too, which has one loop and no slots', () => {
+    const scene = buildPlanScene({}, CATALOG, STYLE, {
+      [PlacementId.parse('g0')]: aGeneratedBase({ x: -1, z: -1 }),
+    })
+    mount(scene)
+    hover()
+    expect(ringsIn(HOVER_GLOW)).toBe(1)
+  })
+
+  it('hands the loud ring to erase, where the click deletes what it names', () => {
+    // One drawing at two strengths and not two drawings: the same loops, in the
+    // accent, when the gesture the user is aiming is a removal.
+    mount(corner(-1), { tool: 'erase' })
+    hover()
+    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    expect(ringsIn(color.acc)).toBe(2)
+  })
+})
+
+describe('“slightly”, as the palette measures it', () => {
+  it('is the accent lifted 35% of the way to the page ground, and not a new colour', () => {
+    // The one assertion that keeps a hand-edited digit from becoming a design
+    // decision: both endpoints are tokens from §1's own table.
+    expect(HOVER_GLOW).toBe(mix(color.acc, color.bg, 0.35))
+  })
+
+  it('carries less contrast against the ground than the ring erase draws', () => {
+    // This is the whole of the word. Against the parchment the plan is drawn on,
+    // pointing at a piece must not read as arming it.
+    expect(contrastRatio(HOVER_GLOW, color.bg)).toBeLessThan(contrastRatio(color.acc, color.bg))
+    expect(contrastRatio(HOVER_GLOW, color.bg)).toBeGreaterThan(2)
+  })
+
+  it('is nonetheless a bigger change to every family’s contour than the accent is', () => {
+    // Where the line actually lands on a mesh-less part is on top of that part's
+    // own dark contour, and `palette.ts`'s rule is that silhouette is carried by
+    // the contour and not by the fill. So the cue being quiet against the ground
+    // costs nothing where it is read.
+    for (const family of Object.values(MATERIALS)) {
+      expect(contrastRatio(HOVER_GLOW, family.edge)).toBeGreaterThan(3.2)
+      expect(contrastRatio(HOVER_GLOW, family.edge)).toBeGreaterThan(contrastRatio(color.acc, family.edge))
+    }
+  })
+})
+
+describe('the glow and the camera', () => {
+  it('goes out while a button is held, because a held button is the camera', () => {
+    // Left orbits and right pans, and both keep firing `pointermove`. A cue that
+    // hopped from piece to piece while the view swung under a stationary hand
+    // would be worse than no cue.
+    mount(corner(-1))
+    hover()
+    expect(ringsIn(HOVER_GLOW)).toBe(2)
+    // The primary button: an orbit.
+    hover([100, 100], 1)
+    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    // Let go and it is back, so the suppression is a state and not a latch.
+    hover([100, 100], 0)
+    expect(ringsIn(HOVER_GLOW)).toBe(2)
+    // The secondary button: a pan, which row C8 corrected `OrbitControls` binds
+    // to `MOUSE.PAN` — and which the surface deliberately never claims.
+    hover([100, 100], 2)
+    expect(ringsIn(HOVER_GLOW)).toBe(0)
+  })
+
+  it('comes back on the release, without waiting for the next move', () => {
+    mount(corner(-1))
+    hover([100, 100], 1)
+    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    press('pointerup', 0, [100, 100])
+    expect(ringsIn(HOVER_GLOW)).toBe(2)
+  })
+
+  it('survives a click, which is a press with no travel in it', () => {
+    // The 5 px gesture: nothing moves, so nothing reports a held button, so the
+    // piece the user just clicked stays named.
+    mount(corner(-1))
+    hover()
+    press('pointerdown', 0, [100, 100])
+    press('pointerup', 0, [100, 100])
+    expect(ringsIn(HOVER_GLOW)).toBe(2)
+  })
+})
+
+describe('what the glow costs', () => {
+  it('builds an outline per hovered part, not per pointer move', () => {
+    // The row's cost claim, and the only mechanism behind it: `pieceAt` returns
+    // the scene's own object, so `under` keeps its identity while the pointer
+    // stays on one piece and `PlateOutline`'s geometry memo survives the move.
+    mount(corner(-1))
+    outlineBuilds = 0
+    hover([100, 100])
+    expect(outlineBuilds).toBe(2)
+    for (let i = 0; i < 20; i += 1) hover([100 + i, 100])
+    expect(outlineBuilds).toBe(2)
+  })
+
+  it('asks for no more frames than the surface asked for before it', () => {
+    // `onMove` already invalidated on every pointer move — for the ghost — so
+    // the glow rides a redraw that was already being paid for.
+    mount(corner(-1))
+    hover()
+    frames = 0
+    for (let i = 0; i < 10; i += 1) hover([100 + i, 100])
+    expect(frames).toBe(10)
+  })
+})
+
+describe('the keyboard gets the same cue, and asked for a frame that never came', () => {
+  it('rings the piece that ] steps to, with no pointer involved', () => {
+    // The glow follows the *cursor*, which the arrow keys and `[` / `]` write, so
+    // the piece a keyboard user is told about is the piece they can see ringed.
+    mount(corner(-1))
+    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    fireEvent.keyDown(canvas, { key: ']' })
+    expect(ringsIn(HOVER_GLOW)).toBe(2)
+  })
+
+  it('invalidates on a keyboard cursor move, which row D3 found it did not', () => {
+    /*
+      **A defect this row found rather than one it introduced.** `frameloop` is
+      `demand`, so a state change nothing invalidates is not drawn. `onMove`,
+      `nudge` and the effect over the ghost, the preview, the plates and the
+      focus ring all ask for a frame; `moveCursor` and `stepToPiece` did not, and
+      the cursor is not in that effect's dependencies — so with nothing armed
+      there was no `ghost` to change and an arrow key moved the caret in state
+      without redrawing it. Measured on the parent commit: an arrow key and a `]`
+      each invalidated **0** times. Both are 1 now.
+    */
+    mount(corner(-1))
+    fireEvent.keyDown(canvas, { key: 'x' })
+    frames = 0
+    fireEvent.keyDown(canvas, { key: 'ArrowRight' })
+    expect(frames).toBe(1)
+    frames = 0
+    fireEvent.keyDown(canvas, { key: ']' })
+    expect(frames).toBe(1)
   })
 })
