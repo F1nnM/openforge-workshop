@@ -20,15 +20,28 @@
   },
 
   "env": {
-    "staging": { "name": "openforge-workshop-staging" },
+    "staging": {
+      "name": "openforge-workshop-staging",
+      // A dash, not a dot: `staging-openforge-workshop` is a **first-level**
+      // subdomain of `mfinn.de`, which is what free Universal SSL covers
+      // (apex plus `*.mfinn.de`, one level only).
+      // `staging.openforge-workshop.mfinn.de` would read better and is not
+      // otherwise a problem — Cloudflare imposes no subdomain-depth limit, and
+      // attaching a Custom Domain issues an Advanced Certificate for the exact
+      // hostname — but a second-level name falls outside Universal SSL, and
+      // Advanced Certificate Manager is a paid add-on. The failure mode if that
+      // subscription is absent is a TLS handshake error *after* a green deploy,
+      // so the dash buys certainty rather than saving a subscription we know we
+      // need.
+      "routes": [{ "pattern": "staging-openforge-workshop.mfinn.de", "custom_domain": true }]
+    },
     "production": {
       "name": "openforge-workshop",
       // The Worker is the origin for this hostname: Cloudflare creates the DNS
       // record and manages the certificate, no separate zone config needed
       // beyond `mfinn.de` already being an active Cloudflare zone (it is — its
-      // nameservers are rajeev/melany.ns.cloudflare.com). Scoped to production
-      // only: `routes` is per-environment, and staging has no domain of its
-      // own, so it stays on its `*.workers.dev` URL.
+      // nameservers are rajeev/melany.ns.cloudflare.com). `routes` is
+      // per-environment, so this one and staging's above are independent.
       //
       // Note that this hostname is not vacant: it answers 200 today with an
       // unrelated page, from the zone's apex addresses. Attaching the custom
