@@ -182,7 +182,7 @@ export interface FillContext {
   readonly lock?: LockSystem | undefined
   /**
    * The room's design family — a `texture` root as `CatalogRecord.texture`
-   * carries it (`dungeon_stone`, `cut_stone`, `tudor`, …).
+   * carries it (`dungeon_stone`, `cut-stone`, `towne`, …).
    *
    * A **preference and never a filter**: it reorders the candidates and the
    * greying rule still decides, so a family that would close a sibling loses to
@@ -195,6 +195,36 @@ export interface FillContext {
    * collapse is lossless on texture, so every variant of an item answers the
    * same way and a per-file comparison would ask 3,822 more questions for the
    * same answer.
+   *
+   * ## Who sets it, and what it moves — row D6
+   *
+   * Nothing set it for three rows, and the defect that produced is one corner
+   * built out of **four** stone types: an `aztlan` column, two `cut-stone`
+   * walls, an `aztlan` floor and a `plain` base, all `complete: true`. It is now
+   * `@/store`'s `WorkshopState.design`, written by `@/ui/design-picker` and
+   * threaded by every solve site — the click's filler, `relock.ts`' scene
+   * re-solve, and the re-solve a design change fires.
+   *
+   * **What it actually reaches, measured over the live archive rather than
+   * assumed** (`@/ui/design-picker/corpus.test.ts` recomputes all of it):
+   *
+   * | family | slots honoured of 128 | recipes completed |
+   * | --- | ---: | ---: |
+   * | `dungeon_stone` | **89** | 40 of 40 |
+   * | `cut-stone` | **89** | 40 of 40 |
+   * | `towne` | 66 | 40 of 40 |
+   * | `aztlan` | 49 | 40 of 40 |
+   * | 22 of the 36 roots | **0** | 40 of 40 |
+   *
+   * Two things follow, and both are the reason the fallback contract above is
+   * worded the way it is. **The 88 non-base slots are honoured 88 of 88** by
+   * either of the top two families, so a room genuinely does come out in one
+   * design. And **the `base` slot honours a design on 1 of 40** — not a bug and
+   * not this preference failing: **38 of the 40 base slots have only `plain`
+   * candidates**, so there is nothing in the family to prefer and
+   * {@link rankBases}' five-criterion ladder decides, which is row A3's
+   * deliberate behaviour. Setting a design never empties a slot and never costs
+   * a completion: 40 of 40 under every one of the 36 roots.
    */
   readonly family?: string | undefined
   /**

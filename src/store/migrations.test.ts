@@ -188,6 +188,18 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
       lockChosen: false,
     },
   ],
+  [
+    6,
+    'template instances with fills, and no room design (row A1, before D6)',
+    /* The **current** scene minus `design`, which is exactly what makes this
+       version the interesting one in the table: it is the first historical blob
+       whose placements the current reader could in fact read, so the gate is the
+       *only* thing discarding it. Every earlier entry is refused twice over,
+       once by the stamp and again by `salvageTemplate`. `migrations.ts` states
+       why an additive field bumps the stamp anyway — one version number must
+       name one shape — and this entry is what makes the claim testable. */
+    { ...SCENE, design: undefined },
+  ],
 ]
 
 /** Deep clone through JSON, the way `localStorage` round-trips a payload. */
@@ -435,6 +447,10 @@ const GARBAGE: readonly (readonly [string, unknown])[] = [
   ['a numeric chosen flag', { lockChosen: 1 }],
   ['a null chosen flag', { lockChosen: null }],
   ['a numeric lock system', { lock: 3 }],
+  ['an empty room design', { design: '' }],
+  ['a numeric room design', { design: 7 }],
+  ['a null room design', { design: null }],
+  ['an object room design', { design: { root: 'dungeon_stone' } }],
   ['a leftover library, which no longer has a reader', { library: { [DESIGN_A]: true } }],
   ['a state-level prototype payload', JSON.parse(`{"__proto__":{"polluted":true},"lock":"magnetic"}`) as unknown],
   ['a very long template id', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, template: 'a'.repeat(5000) } } }],
@@ -539,6 +555,34 @@ describe('salvaging keeps what it can', () => {
     const recovered = salvageWorkshopState({ placements: {}, lock: 'openlock' })
     expect(recovered.state.lockChosen).toBe(false)
     expect(recovered.dropped).toEqual([])
+  })
+
+  it('reads an absent room design as no preference, silently', () => {
+    // Row D6. Absence is the shipped default — `defaultWorkshopState` sets out
+    // why the app does not start on the largest family — so it is the ordinary
+    // state and must not be reported as a drop.
+    const recovered = salvageWorkshopState({ placements: {}, lock: 'openlock' })
+    expect(recovered.state.design).toBeUndefined()
+    expect('design' in recovered.state).toBe(false)
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('keeps a room design the archive has never heard of, and says nothing', () => {
+    /* Deliberate, and the argument is in `salvageDesign`: checking the value
+       against the 36 reachable roots needs `catalog.json`, which `schema.ts`
+       keeps out of the store's closure — and the check would buy nothing,
+       because `FillContext.family` is a preference and never a filter. An
+       unknown design is honoured on no slot and every slot still fills. */
+    const recovered = salvageWorkshopState({ placements: {}, lock: 'openlock', design: 'cut_stone' })
+    expect(recovered.state.design).toBe('cut_stone')
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('resets an unreadable room design to no preference and keeps the scene', () => {
+    const recovered = salvageWorkshopState({ placements: { [PLACEMENT_A]: AN_INSTANCE }, design: 42 })
+    expect(recovered.state.design).toBeUndefined()
+    expect(Object.keys(recovered.state.placements)).toEqual([PLACEMENT_A])
+    expect(recovered.dropped[0]).toContain('design')
   })
 
   it('resets a wrong-typed chosen flag to false and says so', () => {

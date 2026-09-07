@@ -40,7 +40,9 @@ import {
   rotatePlacement,
   selectLockChosen,
   selectPlacementCount,
+  selectRoomDesign,
   setLockSystem,
+  setRoomDesign,
   unpinFill,
   useWorkshopStore,
 } from './workshopStore'
@@ -561,6 +563,97 @@ describe('lock preference', () => {
     expect(importWorkshop(file)).toEqual({ ok: true, dropped: [] })
     expect(state().lockChosen).toBe(true)
     expect(state().lock).toBe('magnetic')
+  })
+})
+
+/* --------------------------------------------------------------- room design */
+
+describe('room design', () => {
+  it('ships with none, and that is a decision rather than a gap', () => {
+    /* `defaultWorkshopState` sets out why: the lock has a default because some
+       joinery has to be printed and 99.9% reach makes one answer least-bad,
+       where the top two designs reach 122 and 111 of 179 placeable parts and
+       choosing between them for the user is choosing what their dungeon looks
+       like. */
+    expect(state().design).toBeUndefined()
+    expect(selectRoomDesign(state())).toBeUndefined()
+  })
+
+  it('holds one design for the whole room', () => {
+    setRoomDesign('dungeon_stone')
+    expect(state().design).toBe('dungeon_stone')
+    expect(selectRoomDesign(state())).toBe('dungeon_stone')
+  })
+
+  it('clears back to no design, which is one of the picker’s options', () => {
+    setRoomDesign('dungeon_stone')
+    setRoomDesign(undefined)
+    expect(state().design).toBeUndefined()
+  })
+
+  it('has no chosen flag beside it, and does not need one', () => {
+    // `lockChosen` exists because `lock === 'openlock'` cannot be told from
+    // "never opened the picker". The design's shipped value is *absent*, so the
+    // field answers that question by itself.
+    expect('designChosen' in state()).toBe(false)
+    setRoomDesign('cave')
+    expect(state().lockChosen).toBe(false)
+  })
+
+  it('does not itself re-solve a fill, and this is the boundary it holds', () => {
+    /* The same boundary `setLockSystem` holds, for the same reason: the repair
+       is `reSolveScene` walking the slots and calling `fillSlot`, and doing it
+       here would put the fill solver — and therefore the catalog — inside the
+       store. `BuilderScreen` is the caller. */
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    fillSlot(id, FLOOR, A_TILE)
+    const before = state().placements[id]?.fills[FLOOR]
+
+    setRoomDesign('dungeon_stone')
+
+    expect(state().placements[id]?.fills[FLOOR]).toBe(before)
+  })
+
+  it('survives a persist round trip', () => {
+    setRoomDesign('towne')
+    const payload = storedPayload()
+    expect((payload?.state as WorkshopState).design).toBe('towne')
+
+    resetWorkshop()
+    expect(state().design).toBeUndefined()
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+    void useWorkshopStore.persist.rehydrate()
+    expect(state().design).toBe('towne')
+  })
+
+  it('round-trips *no design* as an absent key rather than as a null', () => {
+    /* `JSON.stringify` drops an `undefined` value, so the persisted blob has no
+       `design` key at all — and `salvageDesign` reads an absent key as no
+       preference. The two halves have to agree or a cleared design would come
+       back as a `null` the schema refuses. */
+    setRoomDesign('towne')
+    setRoomDesign(undefined)
+    const payload = storedPayload()
+    expect('design' in (payload?.state as object)).toBe(false)
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+    void useWorkshopStore.persist.rehydrate()
+    expect(state().design).toBeUndefined()
+  })
+
+  it('survives an export and re-import', () => {
+    setRoomDesign('aztlan')
+    const file = exportWorkshop()
+    resetWorkshop()
+    expect(importWorkshop(file)).toEqual({ ok: true, dropped: [] })
+    expect(state().design).toBe('aztlan')
+  })
+
+  it('is cleared by a reset, like every other persisted field', () => {
+    setRoomDesign('aztlan')
+    resetWorkshop()
+    expect(state().design).toBeUndefined()
   })
 })
 

@@ -141,8 +141,10 @@ import {
   useGeneratedPlacements,
   useLockSystem,
   usePlacements,
+  useRoomDesign,
 } from '@/store'
 import { reSolveScene } from '@/template'
+import { DesignToggle } from '@/ui/design-picker'
 import { LockNotice, LockToggle } from '@/ui/lock-picker'
 import { Button, Eyebrow } from '@/ui/primitives'
 
@@ -214,6 +216,12 @@ function Builder({ index }: { index: CatalogIndex }) {
   const generatedMeshes = useGeneratedMeshes()
   const generatedHoldings = useGeneratedHoldings()
   const lock = useLockSystem()
+  /* Row **D6**. The room-wide design — a `texture` root or `undefined` — read
+     here rather than in the control, because every one of its three consumers is
+     in this component: the click's filler (through `<Builder3DPanel>`), the bill
+     has no opinion about it, and the re-solve below is the write that makes a
+     change visible at all. */
+  const design = useRoomDesign()
   /**
    * The surface's readout — one state, one writer, since row **R4**.
    *
@@ -319,6 +327,12 @@ function Builder({ index }: { index: CatalogIndex }) {
     () => (id: TemplateId): RecipeTemplate | undefined => recipes.get(id),
     [recipes],
   )
+  /* The same 91 as a **list**, for row D6's reach derivation, which walks every
+     template and cannot enumerate a lookup. Read off `recipes` rather than off
+     `PLACEABLE_TEMPLATES` a second time, so the figures the design control shows
+     are about the templates this screen can actually place — if the two ever
+     diverge, the control must follow the table the bill and the solver use. */
+  const designRecipes = useMemo(() => [...recipes.values()], [recipes])
   /**
    * **Row B2's slot conventions, wired.** The one thing the canvas cannot see.
    *
@@ -499,16 +513,45 @@ function Builder({ index }: { index: CatalogIndex }) {
   const latest = useRef({ placements, assembly, templates, composition })
   latest.current = { placements, assembly, templates, composition }
 
-  const previousLock = useRef(lock)
+  /**
+   * **One effect for both preferences, and row D6 is why it is one.**
+   *
+   * A design change is the *same* driver, the same memo and the same pinned
+   * guard as a lock change — `reSolveScene` re-solves every `auto` fill and
+   * `fillSlot` refuses every `pinned` one — so a second effect would be the same
+   * five lines with one word changed, and the two would drift the first time
+   * either preference gained an argument. It also makes the *simultaneous* case
+   * right by construction: a restored session that changes both in one commit
+   * re-solves once against both, where two effects would re-solve twice and the
+   * first pass would run against the other preference's stale value.
+   *
+   * A design change moves more of the room than a lock change does, which is the
+   * measurement that makes the write worth doing: over the 40 shipped recipes,
+   * setting `dungeon_stone` changes **108 of 128** slot fills, where a lock
+   * change cannot move which *item* fills a slot at all (`relock.ts`: the
+   * candidate set is lock-free). Its cost is *lower*, not higher — the family
+   * ordering finds an acceptable candidate sooner, so the memoised 250-instance
+   * re-solve measures **242 queries** against the lock's 288 — 8–9 ms against
+   * 11–13 ms, both inside a 16.7 ms frame, and only the queries are asserted
+   * (`relock.ts` records why a millisecond is not). The **write** is still the expensive
+   * half at scene scale and it is still A1's surface rather than this row's: see
+   * `relock.ts`, which names the three options and prices them.
+   */
+  const previous = useRef({ lock, design })
   useEffect(() => {
-    if (previousLock.current === lock) return
-    previousLock.current = lock
+    if (previous.current.lock === lock && previous.current.design === design) return
+    previous.current = { lock, design }
     reSolveScene(Object.values(latest.current.placements), latest.current.assembly, {
       templates: latest.current.templates,
       composition: latest.current.composition,
       lock,
+      /* Spread, because `exactOptionalPropertyTypes` makes `family: undefined`
+         and *no `family`* two different assignments — and `FillContext.family`
+         documents absent as "no preference", which is exactly what
+         `design === undefined` means. */
+      ...(design === undefined ? {} : { family: design }),
     })
-  }, [lock])
+  }, [lock, design])
 
   /**
    * Take what the drawer resolved and write it to the store.
@@ -630,6 +673,33 @@ function Builder({ index }: { index: CatalogIndex }) {
             `Place` was 100% unclickable at 1295px.
           */}
           <LockToggle />
+          {/*
+            Row **D6**, and the second room-wide preference in the band.
+
+            The owner's decision about the lock — *"not a dedicated screen, but a
+            toggle in the builder workarea, with an on-hover (i) or similar"* —
+            was made about exactly this shape of setting, so this is the same
+            trigger-plus-disclosure beside it rather than a new kind of control.
+            Row C1 argued the design belongs in the palette, which is still a
+            good argument and is not this row's to act on: `builder/panels/**`
+            is another row's, and the band is where the app already keeps the one
+            preference that rewrites a placed scene. Two of them side by side is
+            the better answer anyway — they are the *two* settings a change to
+            which re-solves the room, and a user who finds one finds the other.
+
+            The three authorities are the same objects the bill, the lock
+            re-solve and `<Builder3DPanel>`'s filler are built from, for row C5's
+            reason: `buildAssemblyIndex` is 8,702 records and
+            `compositionIndexFor` a 409,432-byte index this screen has already
+            paid for, and the reach figures are 139 candidate resolutions over
+            them — 12–15 ms, memoised inside the control on these three leaves.
+            `placed` is passed rather than read from the store inside the control
+            so a closed dialog does not wake on every placement.
+          */}
+          <DesignToggle
+            authorities={{ recipes: designRecipes, index: assembly, composition }}
+            placed={bill.placements}
+          />
         </div>
 
         {/* §2.4's two corner plates. Pointer-transparent, so a click near the
