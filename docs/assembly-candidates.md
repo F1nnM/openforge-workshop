@@ -191,17 +191,25 @@ records** over the connection variants, 2 designs (plain and electronics), tagge
 2x2 cell §3.3 closed on at area 4.00, reached independently: §3.3's cell came from the walk, this
 comes from upstream authorship.
 
-It is a distinct piece rather than a renamed square, and the triangle counts say so — exact from the
-binary-STL `84 + 50n` identity, all three at 2x2 openlock:
+It is a distinct piece rather than a renamed square, and the triangle counts say so — from the
+binary-STL `84 + 50n` identity, both at 2x2 openlock:
 
-| 2x2 base | triangles |
-| --- | ---: |
-| `plain#base+hallway.2x2.openlock` | **2,040** |
-| `plain#base+square.2x2.openlock` | 5,648 |
-| `plain#base+s2w+square+wall.2x2.openlock` | 4,765 |
+| 2x2 base | bytes | triangles |
+| --- | ---: | ---: |
+| `plain#base+hallway.2x2.openlock` | 102,084 | **2,040** |
+| `plain#base+square.2x2.openlock` | 282,484 | 5,648 |
 
 Under half the square base's geometry, which is what clips on **two opposite edges only** would cost
-— the two ends a corridor segment chains along, leaving its two long sides to carry the walls.
+— the two ends a corridor segment chains along, leaving its two long sides to carry the walls. The
+hallway figure is confirmed against the file itself: header `OpenSC…`, facet count field **2,040**,
+and `84 + 50 x 2040 = 102,084`, the byte length exactly.
+
+**A third row was here and has been withdrawn.** It read `plain#base+s2w+square+wall.2x2.openlock`
+at 4,765 triangles, which is not a number: `(238,380 - 84) / 50 = 4765.92`, and floor division hid
+the remainder. The file opens `solid ` — it is **ASCII STL**, so the identity does not apply to it at
+all. **1,013 of the 8,702 records (11.6%) are not binary**, 999 of them `texture|plain`; see
+`docs/tile-sizing.md`. The comparison above is unaffected, because both surviving rows are binary and
+divide exactly.
 
 **§3.3's base slot cannot reach it.** That slot requires `shape|base + shape|base|wall`, and
 **0 of the 12 hallway bases carry `shape|base|wall`** — checked all twelve. So the corridor as

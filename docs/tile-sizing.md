@@ -16,7 +16,28 @@ Four rows in a row were bitten by treating one as the other.
 
 A mesh is measured by reading its binary STL whole and taking axis-aligned bounds over
 every facet. Binary STL is exactly `84 + 50n` bytes, which is also the check that a file
-*is* one. The objects live at `https://objects.openforge.tools/models/{md5[0:6]}/{md5}.stl`
+*is* one — `src/three/stl/parse.ts#detectStlFormat` uses that arithmetic rather than
+sniffing for a `solid` header, because a binary header reading "solidworks" would fool the
+sniff.
+
+**But the identity is not a property of this corpus, only of its binary half.** Measured
+over the index: **7,689 of 8,702 records (88.4%) satisfy `84 + 50n`; 1,013 (11.6%) do
+not** — 847 distinct md5s over 193 designs, and **999 of the 1,013 are `texture|plain`**,
+which is to say the generated bases. Spot-checked against R2:
+`plain#base+s2w+square+wall.2x2.openlock.stl` opens `solid ` and is **ASCII**. So a
+triangle count derived from `bytes` is sound for 88.4% of the archive and **meaningless for
+the rest**, where it will usually still produce a plausible-looking non-integer that floor
+division hides. `parseStl` reads both formats correctly; it is the *byte arithmetic* that
+does not generalise, and `docs/assembly-candidates.md` §3.3.1 used it wrongly once — the row is
+withdrawn there with the arithmetic that exposed it.
+
+**One record is a valid binary STL with no geometry at all.**
+`aztlan#column.col+T.side+dragonlock.stl` is **84 bytes** — header
+`Exported from Blender-4.0.1`, facet count field **0**. It satisfies `84 + 50 x 0`, so
+`detectStlFormat` calls it binary and `parseStl` returns 0 triangles without an error,
+which is correct STL handling and a silently empty piece: it downloads, parses, and draws
+nothing. That is upstream's to fix; `src/mesh/corpus.test.ts` pins it so it cannot grow to
+two unnoticed. The objects live at `https://objects.openforge.tools/models/{md5[0:6]}/{md5}.stl`
 and **egress is free**, so measuring is cheap in money and costs only wall-clock: a median
 file is 10.36 MB, and 157 corner walls came to ~2.3 GB in a few minutes.
 
