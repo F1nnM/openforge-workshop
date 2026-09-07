@@ -33,42 +33,55 @@
  * No renderer runs, so nothing here is about the picture. `room.test.tsx`'s list
  * of what needs a GPU is unchanged.
  *
- * ## Row D3 shares the seam, and asserts a *drawing* through it
+ * ## Rows D3 and D7 share the seam, and D7 asserts a *request* through it
  *
- * The hover glow is drawn by the same component these tests already mount, from
- * the same `under` this file's picks resolve, so it belongs here rather than in a
- * second file that would copy the harness. It does need two things the gesture
- * tests did not, and both are in the mocks above rather than in the tests:
- * `invalidate` **counts** (a `frameloop="demand"` surface that changes state
- * without asking for a frame does not redraw, which is a defect this row found in
- * the keyboard path), and `plateEdgeGeometry` counts too, delegating to the real
- * one — the glow's whole cost claim is that it builds an outline per hovered
- * *piece* and not per pointer move, and a counter is the only way to say that.
+ * The hover cue comes off the same `under` this file's picks resolve, so it
+ * belongs here rather than in a second file that would copy the harness. It
+ * needs two things the gesture tests did not, and both are in the mocks above
+ * rather than in the tests: `invalidate` **counts** (a `frameloop="demand"`
+ * surface that changes state without asking for a frame does not redraw, which
+ * is a defect D3 found in the keyboard path), and `plateGeometry` counts too,
+ * delegating to the real one — the cue's cost claim is about what a pointer move
+ * allocates, and a counter is the only way to say that.
  *
- * What it still cannot say is what the line looks like. jsdom renders r3f's
- * elements as unknown DOM tags, so `<lineBasicMaterial color=…>` is readable as
- * an attribute and **that is what the colour assertions read** — which piece is
- * ringed, in which colour, and how many loops. Whether 0.9 of `#ae885a` reads as
- * a glow over a lit stone tint is a question for a browser and a pair of eyes,
- * and the contrast assertions below are the closest a headless test gets: they
- * bound the colour against the ground and against all sixteen contours, in the
- * palette's own units.
+ * **Row D7 changed what there is to assert, in the useful direction.** D3 drew
+ * the cue as `lineSegments` inside the surface's own tree, so its tests read
+ * `<lineBasicMaterial color=…>` off jsdom's unknown DOM tags and counted loops.
+ * D7 draws it as a silhouette in a post pass, which no jsdom test can see — and
+ * what the surface contributes instead is an `OutlineRequest`: the geometries
+ * that are *on screen*, the matrices they are drawn with, and a colour. That is
+ * a stronger thing to assert than a coloured tag, because it is exactly what was
+ * wrong before — D3's loops were built from the tagged footprint, the request is
+ * built from the drawn geometry, so an assertion on subject **identity** is an
+ * assertion that the cue traces the picture.
+ *
+ * The line assertions are kept and inverted: after a hover there must be **no**
+ * `lineBasicMaterial` in the cue's colour anywhere in the tree, which is the
+ * guard against D3's drawing coming back beside the new one.
+ *
+ * What no headless test can say is what the silhouette looks like — that is a
+ * browser and a pixel diff, and row D7 reports one. The contrast assertions
+ * below are the closest this gets: they bound the colour against the ground and
+ * against all sixteen contours, in the palette's own units.
  */
 import { fireEvent, render } from '@testing-library/react'
-import { PerspectiveCamera } from 'three'
+import { Box3, BufferAttribute, BufferGeometry, Matrix4, PerspectiveCamera, Vector3 } from 'three'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { PlanScene } from '@/builder/canvas'
 import { buildPlanScene, createStyleResolver, planCatalogFromFile } from '@/builder/canvas'
 import { FIXTURE_IDS, FIXTURE_SLOTS, fixtureCatalogFile, fixtureSlotLayout } from '@/builder/canvas/fixture'
+import type { BlobId } from '@/catalog'
 import { resolveMaterial } from '@/materials'
 import { contrastRatio, formatHex, parseHex } from '@/materials/color'
 import { MATERIALS } from '@/materials/palette'
 import { PlacementId } from '@/store'
 import { aGeneratedBase } from '@/store/fixture'
 import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR, CAMERA_POSITION, VIEW_RADIUS } from '@/three/frame'
+import type { OutlineRequest } from '@/three/outline'
 import { color } from '@/tokens/tokens'
 
+import type { LodGeometry } from './loadLod'
 import type * as Markers from './markers'
 
 /*
@@ -104,16 +117,41 @@ vi.mock('@react-three/fiber', () => ({
   useThree: (selector: (state: unknown) => unknown) => selector({ camera, gl: { domElement: canvas }, invalidate }),
 }))
 
-/** Outline geometries built. Row D3; the real function still does the work. */
-let outlineBuilds = 0
+/**
+ * Plate geometries built. Row D7; the real function still does the work.
+ *
+ * `plateGeometry` and not D3's `plateEdgeGeometry`, because the plate's geometry
+ * is now the *silhouette's* geometry as well — the surface owns one object that
+ * the plate draws and the cue outlines, which is the whole reason the cue traces
+ * what is on screen. So this counter is what says a pointer move allocates
+ * nothing.
+ */
+let plateBuilds = 0
+
+/*
+  The instanced draw is stubbed, and only because jsdom cannot host it.
+
+  `InstancedTiles` writes matrices through the ref r3f gives it — but with r3f
+  mocked, `<instancedMesh>` reaches jsdom as an unknown DOM tag and the ref is an
+  `HTMLElement`, so `setMatrixAt` does not exist and the effect throws. That is
+  why every test in this file before row D7 passed an empty geometry map: with no
+  mesh anywhere, the component never mounted.
+
+  D7 needs the opposite — a room with real groups in it, because the hover cue's
+  subjects come out of `Room3D.groups` — so the *draw* is stubbed while
+  `buildRoom3D` runs for real. Nothing is lost: the matrices under test are the
+  ones this file reads back off the room it built, and `instances.test.ts`
+  asserts that projection against the repository's own GLB.
+*/
+vi.mock('./InstancedTiles', () => ({ InstancedTiles: () => null }))
 
 vi.mock('./markers', async (importOriginal) => {
   const actual = await importOriginal<typeof Markers>()
   return {
     ...actual,
-    plateEdgeGeometry: (...args: Parameters<typeof actual.plateEdgeGeometry>) => {
-      outlineBuilds += 1
-      return actual.plateEdgeGeometry(...args)
+    plateGeometry: (...args: Parameters<typeof actual.plateGeometry>) => {
+      plateBuilds += 1
+      return actual.plateGeometry(...args)
     },
   }
 })
@@ -171,11 +209,27 @@ interface Mounted {
   readonly said: string[]
   /** Presses that reached the canvas — i.e. that the surface did **not** claim. */
   readonly reached: number[]
+  /**
+   * Every hover cue published, in order. Row D7.
+   *
+   * The list and not the last one, because the row's cost claim is about *how
+   * many times* it is published: a request per piece the pointer crosses, and
+   * nothing at all for the moves in between.
+   */
+  readonly cues: OutlineRequest[]
 }
 
 /** The surface, mounted over a scene, with every callback recording. */
-function mount(scene: PlanScene, options: { readonly wired?: boolean; readonly tool?: 'place' | 'move' | 'erase' } = {}) {
-  const state: Mounted = { opened: [], said: [], reached: [] }
+function mount(
+  scene: PlanScene,
+  options: {
+    readonly wired?: boolean
+    readonly tool?: 'place' | 'move' | 'erase'
+    /** Store objects by blob, for the tests that want a mesh instead of a plate. */
+    readonly geometries?: ReadonlyMap<string, LodGeometry>
+  } = {},
+) {
+  const state: Mounted = { opened: [], said: [], reached: [], cues: [] }
   const onDown = (event: Event) => {
     state.reached.push((event as MouseEvent).button)
   }
@@ -184,8 +238,9 @@ function mount(scene: PlanScene, options: { readonly wired?: boolean; readonly t
     canvas.removeEventListener('pointerdown', onDown)
   })
 
+  const geometries = options.geometries ?? new Map<string, LodGeometry>()
   const room = buildRoom3D(scene, {
-    geometries: new Map(),
+    geometries,
     resolve: (record) => resolveMaterial(CATALOG.tags(record), record.file),
     viewRadius: VIEW_RADIUS,
   })
@@ -195,7 +250,7 @@ function mount(scene: PlanScene, options: { readonly wired?: boolean; readonly t
       armed={null}
       fill={fixtureFiller()}
       fit={FIT}
-      geometries={new Map()}
+      geometries={geometries}
       keyHelpId="of-keys"
       label="a room"
       {...(options.wired === false
@@ -203,6 +258,7 @@ function mount(scene: PlanScene, options: { readonly wired?: boolean; readonly t
         : {
             onEditSlots: (placement, slot) => state.opened.push({ placement, slot }),
           })}
+      onOutline={(request) => state.cues.push(request)}
       onStatus={() => undefined}
       room={room}
       scene={scene}
@@ -255,6 +311,59 @@ function lineColours(): string[] {
 /** How many outlines are drawn in `colour`. */
 function ringsIn(colour: string): number {
   return lineColours().filter((value) => value === colour).length
+}
+
+/**
+ * The cue as it stands: how many silhouettes, and in what colour.
+ *
+ * The *last* published request, because the surface publishes on change and a
+ * reader asking "what is outlined now" wants the latest. `state.cues.length` is
+ * the separate question the cost tests ask.
+ */
+function cue(state: Mounted): { count: number; colour: string } {
+  const last = state.cues.at(-1)
+  return { count: last?.subjects.length ?? 0, colour: last?.colour ?? '' }
+}
+
+/**
+ * A store object, without a store — a mesh 25.4 x 12.7 x 63.5 mm, Z-up.
+ *
+ * Hand-built rather than parsed from `fixtures/wall-8180da93.glb`, and the
+ * distinction matters: `instances.test.ts` parses the real object because it
+ * asserts things about *bytes* — the node transform, the attribute set, the
+ * triangle count. What the cue asserts is **identity**: that the subject handed
+ * to the pass is the group's own `geometry` object carrying the group's own
+ * matrix, scaled by the surface's fit. Any non-degenerate bounds prove that, and
+ * a synthetic one keeps a WASM decoder out of a jsdom suite.
+ *
+ * The dimensions are a shipped wall's, so `tileMatrix` stands up something with
+ * the proportions of a real piece rather than a unit cube.
+ */
+function lodFixture(blob: string): LodGeometry {
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 25.4, 0, 0, 0, 12.7, 63.5]), 3))
+  return {
+    blob: blob as BlobId,
+    source: 'lod',
+    geometry,
+    bounds: new Box3(new Vector3(0, 0, 0), new Vector3(25.4, 12.7, 63.5)),
+    triangles: 1,
+    vertices: 3,
+    bytes: 0,
+    decodedBytes: 0,
+    nodeScale: 1,
+    footprintDelta: () => ({ w: 0, d: 0, worst: 0 }),
+    dispose: () => undefined,
+  }
+}
+
+/** One store object per blob the scene's parts name, so every part has a mesh. */
+function meshesFor(scene: PlanScene): Map<string, LodGeometry> {
+  const geometries = new Map<string, LodGeometry>()
+  for (const piece of scene.pieces) {
+    for (const part of piece.parts) geometries.set(part.record.blob, lodFixture(part.record.blob))
+  }
+  return geometries
 }
 
 /** `--acc` mixed `amount` of the way to `to`, per channel in gamma-encoded sRGB. */
@@ -457,41 +566,107 @@ describe('the two presses stay apart', () => {
   })
 })
 
-describe('the piece under the pointer glows', () => {
-  it('rings every part of it, once each, in the hover colour', () => {
-    // The two-part corner: `pieceAt` resolves the instance and the glow draws
-    // one loop per part, at that part's own top. Not one loop for the piece —
-    // `scene.ts` makes `piece.polygons` the flat map of its parts', so the loops
-    // are the same set either way, and per part is what puts each at its own
-    // elevation.
-    mount(corner(-1))
-    expect(ringsIn(HOVER_GLOW)).toBe(0)
+describe('the piece under the pointer is outlined by its own silhouette', () => {
+  it('publishes one subject per drawn part, in the hover colour', () => {
+    // The two-part corner, with no mesh for either part — so both are drawn as
+    // footprint plates and both plates are what the cue outlines. The pass
+    // unions them, so this is two subjects and one loop on screen.
+    const state = mount(corner(-1))
+    expect(cue(state).count).toBe(0)
     hover()
-    expect(ringsIn(HOVER_GLOW)).toBe(2)
+    expect(cue(state)).toEqual({ count: 2, colour: HOVER_GLOW })
   })
 
-  it('draws nothing at all over bare ground', () => {
-    mount(sceneOf(CATALOG, []))
+  it('hands the pass the geometry that is drawn, not a footprint polygon', () => {
+    /*
+      **The row.** D3 built the cue from `polygons` — the tagged footprint — as a
+      flat loop lifted to the part's top, which on a wall is a rectangle floating
+      over the mesh. The subject's `geometry` must therefore be the very object
+      the room draws: identical by reference to the `InstancedMesh`'s geometry for
+      a part with a mesh, and to the plate's geometry for one without.
+    */
+    const scene = corner(-1)
+    const geometries = meshesFor(scene)
+    const state = mount(scene, { geometries })
     hover()
-    expect(ringsIn(HOVER_GLOW)).toBe(0)
+
+    const drawn = [...geometries.values()].map((lod) => lod.geometry)
+    const last = state.cues.at(-1)
+    expect(last?.subjects).toHaveLength(2)
+    for (const subject of last?.subjects ?? []) expect(drawn).toContain(subject.geometry)
   })
 
-  it('rings a generated base too, which has one loop and no slots', () => {
+  it('carries the matrix the instance is drawn with, in the surface’s own frame', () => {
+    // Not `tileMatrix` run a second time: the matrix is read out of the built
+    // room, so the cue cannot disagree with the picture about where the piece
+    // is. What the surface adds is its group's scale, because the pass draws in
+    // the scene's frame and the room is drawn in millimetres inside a scaled
+    // group.
+    const scene = corner(-1)
+    const room = buildRoom3D(scene, {
+      geometries: meshesFor(scene),
+      resolve: (record) => resolveMaterial(CATALOG.tags(record), record.file),
+      viewRadius: VIEW_RADIUS,
+    })
+    const state = mount(scene, { geometries: meshesFor(scene) })
+    hover()
+
+    const scale = new Matrix4().makeScale(FIT.scale, FIT.scale, FIT.scale)
+    const expected = room.groups.flatMap((group) =>
+      group.matrices.map((matrix) => new Matrix4().multiplyMatrices(scale, matrix).elements.join()),
+    )
+    const published = (state.cues.at(-1)?.subjects ?? []).map((subject) => subject.matrix.elements.join())
+    expect(published.length).toBe(2)
+    for (const matrix of published) expect(expected).toContain(matrix)
+  })
+
+  it('draws no line for the cue, which is what row D3 got wrong', () => {
+    // The guard against the old drawing coming back beside the new one. The
+    // plates keep their own contours — that is what a plate *is* — so the
+    // assertion is on the cue's two colours and not on the count of lines.
+    const state = mount(corner(-1))
+    hover()
+    expect(cue(state).count).toBe(2)
+    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    expect(ringsIn(color.acc)).toBe(0)
+  })
+
+  it('publishes nothing at all over bare ground', () => {
+    const state = mount(sceneOf(CATALOG, []))
+    hover()
+    expect(cue(state).count).toBe(0)
+  })
+
+  it('outlines a generated base too, which is a plate and has no slots', () => {
     const scene = buildPlanScene({}, CATALOG, STYLE, {
       [PlacementId.parse('g0')]: aGeneratedBase({ x: -1, z: -1 }),
     })
-    mount(scene)
+    const state = mount(scene)
     hover()
-    expect(ringsIn(HOVER_GLOW)).toBe(1)
+    expect(cue(state).count).toBe(1)
   })
 
-  it('hands the loud ring to erase, where the click deletes what it names', () => {
-    // One drawing at two strengths and not two drawings: the same loops, in the
-    // accent, when the gesture the user is aiming is a removal.
-    mount(corner(-1), { tool: 'erase' })
+  it('outlines a half-converted template whole, mesh part and plate part alike', () => {
+    /*
+      The case D3's predecessor got wrong in the other direction: it *skipped*
+      the ring for any piece carrying a plate, so a template with one mesh loaded
+      and one still waiting highlighted only the one that was waiting. One rule
+      here — outline whatever each part is drawn as — so a piece half way through
+      converting is still outlined as one piece.
+    */
+    const scene = corner(-1)
+    const first = scene.pieces[0]?.parts[0]?.record.blob
+    const state = mount(scene, { geometries: new Map([[String(first), lodFixture(String(first))]]) })
     hover()
-    expect(ringsIn(HOVER_GLOW)).toBe(0)
-    expect(ringsIn(color.acc)).toBe(2)
+    expect(cue(state).count).toBe(2)
+  })
+
+  it('hands the loud colour to erase, where the click deletes what it names', () => {
+    // One drawing at two strengths and not two drawings: the same silhouettes,
+    // in the accent, when the gesture the user is aiming is a removal.
+    const state = mount(corner(-1), { tool: 'erase' })
+    hover()
+    expect(cue(state)).toEqual({ count: 2, colour: color.acc })
   })
 })
 
@@ -521,61 +696,73 @@ describe('“slightly”, as the palette measures it', () => {
   })
 })
 
-describe('the glow and the camera', () => {
+describe('the cue and the camera', () => {
   it('goes out while a button is held, because a held button is the camera', () => {
     // Left orbits and right pans, and both keep firing `pointermove`. A cue that
     // hopped from piece to piece while the view swung under a stationary hand
     // would be worse than no cue.
-    mount(corner(-1))
+    const state = mount(corner(-1))
     hover()
-    expect(ringsIn(HOVER_GLOW)).toBe(2)
+    expect(cue(state).count).toBe(2)
     // The primary button: an orbit.
     hover([100, 100], 1)
-    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    expect(cue(state).count).toBe(0)
     // Let go and it is back, so the suppression is a state and not a latch.
     hover([100, 100], 0)
-    expect(ringsIn(HOVER_GLOW)).toBe(2)
+    expect(cue(state).count).toBe(2)
     // The secondary button: a pan, which row C8 corrected `OrbitControls` binds
     // to `MOUSE.PAN` — and which the surface deliberately never claims.
     hover([100, 100], 2)
-    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    expect(cue(state).count).toBe(0)
   })
 
   it('comes back on the release, without waiting for the next move', () => {
-    mount(corner(-1))
+    const state = mount(corner(-1))
     hover([100, 100], 1)
-    expect(ringsIn(HOVER_GLOW)).toBe(0)
+    expect(cue(state).count).toBe(0)
     press('pointerup', 0, [100, 100])
-    expect(ringsIn(HOVER_GLOW)).toBe(2)
+    expect(cue(state).count).toBe(2)
   })
 
   it('survives a click, which is a press with no travel in it', () => {
     // The 5 px gesture: nothing moves, so nothing reports a held button, so the
     // piece the user just clicked stays named.
-    mount(corner(-1))
+    const state = mount(corner(-1))
     hover()
     press('pointerdown', 0, [100, 100])
     press('pointerup', 0, [100, 100])
-    expect(ringsIn(HOVER_GLOW)).toBe(2)
+    expect(cue(state).count).toBe(2)
   })
 })
 
-describe('what the glow costs', () => {
-  it('builds an outline per hovered part, not per pointer move', () => {
-    // The row's cost claim, and the only mechanism behind it: `pieceAt` returns
-    // the scene's own object, so `under` keeps its identity while the pointer
-    // stays on one piece and `PlateOutline`'s geometry memo survives the move.
-    mount(corner(-1))
-    outlineBuilds = 0
+describe('what the cue costs', () => {
+  it('publishes once per piece the pointer crosses, not once per move', () => {
+    // The row's cost claim, and the mechanism is D3's: `pieceAt` returns the
+    // scene's own object, so `under` keeps its identity while the pointer stays
+    // on one piece, the subject list is memoised on it, and the effect that
+    // publishes has nothing new to publish.
+    const state = mount(corner(-1))
     hover([100, 100])
-    expect(outlineBuilds).toBe(2)
+    const published = state.cues.length
     for (let i = 0; i < 20; i += 1) hover([100 + i, 100])
-    expect(outlineBuilds).toBe(2)
+    expect(state.cues.length).toBe(published)
+  })
+
+  it('allocates no geometry for a hover, because the plate already built it', () => {
+    // What D7 buys over D3 on cost as well as on looks: D3 built an outline
+    // geometry per hovered part, so entering a two-part piece built two. The cue
+    // now borrows the geometry that is already on screen, so entering a piece
+    // builds none — the count is whatever the scene's plates cost at mount.
+    mount(corner(-1))
+    plateBuilds = 0
+    hover([100, 100])
+    for (let i = 0; i < 20; i += 1) hover([100 + i, 100])
+    expect(plateBuilds).toBe(0)
   })
 
   it('asks for no more frames than the surface asked for before it', () => {
     // `onMove` already invalidated on every pointer move — for the ghost — so
-    // the glow rides a redraw that was already being paid for.
+    // the cue rides a redraw that was already being paid for.
     mount(corner(-1))
     hover()
     frames = 0
@@ -585,13 +772,13 @@ describe('what the glow costs', () => {
 })
 
 describe('the keyboard gets the same cue, and asked for a frame that never came', () => {
-  it('rings the piece that ] steps to, with no pointer involved', () => {
-    // The glow follows the *cursor*, which the arrow keys and `[` / `]` write, so
-    // the piece a keyboard user is told about is the piece they can see ringed.
-    mount(corner(-1))
-    expect(ringsIn(HOVER_GLOW)).toBe(0)
+  it('outlines the piece that ] steps to, with no pointer involved', () => {
+    // The cue follows the *cursor*, which the arrow keys and `[` / `]` write, so
+    // the piece a keyboard user is told about is the piece they can see outlined.
+    const state = mount(corner(-1))
+    expect(cue(state).count).toBe(0)
     fireEvent.keyDown(canvas, { key: ']' })
-    expect(ringsIn(HOVER_GLOW)).toBe(2)
+    expect(cue(state).count).toBe(2)
   })
 
   it('invalidates on a keyboard cursor move, which row D3 found it did not', () => {
