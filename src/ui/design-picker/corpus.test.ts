@@ -81,8 +81,10 @@ function corpus(): Corpus {
   cached = {
     index: buildAssemblyIndex(file),
     composition: createCompositionIndex(file, buildAggregateIndex(file)),
-    /* The 40 fixtures, not row E3's two authored beside them: the 128-slot and
-       108-of-128 figures below are measurements of upstream's recipes. */
+    /* The 40 fixtures, which since row E3's withdrawal is the whole of
+       `RECIPE_TEMPLATES`. The filter stays: it is what says the 128-slot and
+       108-of-128 figures below are measurements of *upstream's* recipes, and a
+       future authored row must not join them silently. */
     recipes: RECIPE_TEMPLATES.filter((template) => !template.source.startsWith('authored:')),
     placeable: PLACEABLE_TEMPLATES,
   }
@@ -341,30 +343,33 @@ describeCorpus(corpusTitle, () => {
         ` · untextured ${String(reach.untextured)}` +
         ` · top ${reach.entries.slice(0, 4).map((e) => `${e.family}=${String(e.parts)}`).join(' ')}\n`,
     )
-    /* 140 and 42 since row **E3** appended two authored assemblies to
-       `RECIPE_TEMPLATES` — 5 more non-base slots (the widened wall's wall and
-       floor, the corridor's two walls and floor) and 2 more base slots. The
-       headline is unmoved: **28 designs offered and 8 cut**, because a design's
-       reach is a property of the archive's textures and not of how many rows
-       ask for them. */
-    expect(reach.totalParts).toBe(140)
-    expect(reach.baseSlots).toBe(42)
+    /* 135 and 40 again: row E3 appended two authored assemblies to
+       `RECIPE_TEMPLATES` — 5 more non-base slots and 2 more base slots, taking
+       these to 140 and 42 — and both are withdrawn. The headline never moved
+       through either change: **28 designs offered and 8 cut**, because a design's
+       reach is a property of the archive's textures and not of how many rows ask
+       for them. */
+    expect(reach.totalParts).toBe(135)
+    expect(reach.baseSlots).toBe(40)
     expect(reach.roots).toBe(36)
     expect(reach.entries).toHaveLength(28)
     expect(reach.unreached).toBe(8)
     expect(reach.untextured).toBe(44)
     expect(reach.entries.slice(0, 4).map((entry) => [entry.family, entry.parts])).toEqual([
-      /* Down one each from this row's own first pass, then up five: D1 dropped
-         four base-only families, each a single part, so the part total fell 139
-         to 135 and three of these four lost the one part they had in a dropped
-         family (`towne` had none in them and did not move); row **E3** then added
-         five non-base slots, and all four designs reach all five — every one of
-         them is a wall or a floor pool of thousands of records. What has not moved
-         through either change is the headline, 28 designs offered and 8 cut. */
-      ['dungeon_stone', 124],
-      ['cut-stone', 113],
-      ['towne', 90],
-      ['aztlan', 60],
+      /* Down one each from this row's own first pass: D1 dropped four base-only
+         families, each a single part, so the part total fell 139 to 135 and three
+         of these four lost the one part they had in a dropped family (`towne` had
+         none in them and did not move). Row E3 then added seven slots and took
+         these to 124 / 113 / 90 / 60; withdrawing it takes 5 back off the first
+         three and **2 off `aztlan`**, which is the interesting number — E3's
+         seven slots were not all reachable by every design, so the four do not
+         move together and a single subtraction would have been wrong. What has
+         not moved through any of it is the headline, 28 designs offered and
+         8 cut. */
+      ['dungeon_stone', 119],
+      ['cut-stone', 108],
+      ['towne', 85],
+      ['aztlan', 58],
     ])
     // Descending, which is the ordering `DesignPicker` renders and does not sort.
     for (let at = 1; at < reach.entries.length; at += 1) {

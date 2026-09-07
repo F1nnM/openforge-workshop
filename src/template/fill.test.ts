@@ -207,9 +207,6 @@ describe('the base slot', () => {
       ['wall-on-tile', ['base']],
       ['external-corner', ['base']],
       ['internal-corner', ['base']],
-      /* Row **E3**'s corridor: two walls and a floor, all three resting on the
-         one base, so the ladder has exactly one slot to rank on this shape too. */
-      ['corridor', ['base']],
     ])
   })
 

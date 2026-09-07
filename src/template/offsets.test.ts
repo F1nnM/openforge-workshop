@@ -31,22 +31,26 @@ import { describe, expect, it } from 'vitest'
 
 import {
   SNAP_STEP,
+  boxShape,
   footprintShape,
   rotatedExtent,
   slotGeometry,
   snapTo,
   unionBox,
 } from '@/builder/canvas'
-import type { Extent, PlanBox, SlotLayout } from '@/builder/canvas'
+import type { Extent, PlanBox, PlanShape, SlotLayout } from '@/builder/canvas'
 import type { Footprint } from '@/catalog'
 import { WALL_THICKNESS_UNITS } from '@/catalog'
 
 import type { SlotPlacement } from './offsets'
 import {
+  NO_INSETS,
   cornerReservation,
+  edgeInsets,
   edgeRun,
   placeTemplateSlots,
   quarterTurn,
+  residualBox,
   slotDoubtSentence,
   slotElevationMm,
   slotOffset,
@@ -54,7 +58,6 @@ import {
 } from './offsets'
 import type { SlotName, SlotRule, TemplateLayout } from './rules'
 import {
-  CORRIDOR,
   EXTERNAL_CORNER,
   INTERNAL_CORNER,
   SLOT_CONVENTIONS,
@@ -116,35 +119,6 @@ const CORNER_OVER_RUN = feetOf([
   ['column', column],
 ])
 
-/**
- * A 2 x 2 corridor: two 2-unit walls on **opposite** faces of a 2 x 2 cell.
- *
- * Row **E3**'s shape, and the geometry `rules.ts#CORRIDOR` draws in prose:
- * `base` and `floor` at x ∈ [0, 2] z ∈ [0, 2], `right wall` at z ∈ [0, 0.5],
- * `left wall` at z ∈ [1.5, 2]. Two walls, no column, no mitre.
- */
-const CORRIDOR_2X2 = feetOf([
-  ['base', rect(2, 2)],
-  ['floor', rect(2, 2)],
-  ['right wall', wall(2)],
-  ['left wall', wall(2)],
-])
-
-/**
- * The same corridor on a **1 x 1** cell, which is a wall and not a corridor.
- *
- * Geometrically flawless: no overlapping pair, union exactly the cell, area
- * exact. Functionally a solid block of stone — the two 0.5-deep walls meet in the
- * middle. 270 rect floors over 187 designs are this case, and this fixture is the
- * one place the `no-walk` doubt is exercised without the archive.
- */
-const CORRIDOR_1X1 = feetOf([
-  ['base', rect(1, 1)],
-  ['floor', rect(1, 1)],
-  ['right wall', wall(1)],
-  ['left wall', wall(1)],
-])
-
 const ruleOf = (layout: TemplateLayout, part: SlotName): SlotRule => {
   const rule = ruleFor(layout, part)
   if (rule === undefined) throw new Error(`no rule for ${part}`)
@@ -186,8 +160,21 @@ describe('slotOffset', () => {
   it('puts a cell anchor at the template’s own centre', () => {
     expect(slotOffset(ruleOf(WALL_ON_TILE, 'base'), { w: 2, d: 2 }, { w: 2, d: 2 })).toEqual([0, 0])
     // And it does so whatever the fill's extent is, which is the point of the
-    // anchor: 8 distinct floor footprints and 25 base footprints reach here.
-    expect(slotOffset(ruleOf(WALL_ON_TILE, 'floor'), { w: 4, d: 2 }, { w: 1, d: 1 })).toEqual([0, 0])
+    // anchor: 25 distinct base footprints reach here.
+    expect(slotOffset(ruleOf(WALL_ON_TILE, 'base'), { w: 4, d: 2 }, { w: 1, d: 1 })).toEqual([0, 0])
+  })
+
+  it('puts a residual anchor where the walls leave room, and needs the insets to know', () => {
+    /* The `floor` rule, which used to be the case above's second line. Both
+       arguments matter and the second is the one that is easy to lose: with the
+       insets the floor sits a quarter unit off the cell's centre, without them it
+       sits *on* it — which is precisely the wrong answer this anchor replaced.
+       `offsets.ts`'s module note explains why the parameter defaults anyway. */
+    const floor = ruleOf(WALL_ON_TILE, 'floor')
+    const cell = { w: 2, d: 2 }
+    const insets = { minX: 0, maxX: 0, minZ: WALL_THICKNESS_UNITS, maxZ: 0 }
+    expect(slotOffset(floor, cell, cell, 0, insets)).toEqual([0, 0.25])
+    expect(slotOffset(floor, cell, cell)).toEqual([0, 0])
   })
 
   it('puts an edge anchor flush against its face and centred across it', () => {
@@ -257,6 +244,40 @@ describe('slotOffset', () => {
     // And an unfilled corner reserves nothing, so the wall does not move off
     // centre for a column that is not there.
     expect(slotOffset(rule, { w: 2, d: 2 }, part, 0)).toEqual([0, -0.75])
+  })
+})
+
+describe('residualBox', () => {
+  it('centres the remainder on the cell when the two ends of an axis are eaten equally', () => {
+    /* The formula's own property, stated where no convention can state it: the
+       offset is `(minX - maxX) / 2`, a *difference*, so an axis eaten equally
+       from both ends leaves the remainder centred and only its extent shrinks.
+       No convention in the table takes from both ends of one axis — row E3's
+       corridor did and is withdrawn — so this is the arithmetic's guarantee
+       rather than a measurement of a shipped recipe, and it is what keeps a
+       fourth convention from needing a fourth formula. */
+    expect(residualBox({ w: 2, d: 2 }, { minX: 0.5, maxX: 0.5, minZ: 0, maxZ: 0 })).toEqual({
+      offset: [0, 0],
+      extent: { w: 1, d: 2 },
+    })
+  })
+
+  it('pushes the remainder away from whichever end is eaten, and normalises -0', () => {
+    // `+ 0` on both terms, for `quarterTurn`'s reason: a `-0` survives in memory
+    // but not through `JSON.stringify`, and this offset reaches the store's codec.
+    const near = residualBox({ w: 2, d: 2 }, { minX: 0.5, maxX: 0, minZ: 0, maxZ: 0.5 })
+    expect(near).toEqual({ offset: [0.25, -0.25], extent: { w: 1.5, d: 1.5 } })
+    expect(Object.is(residualBox({ w: 1, d: 1 }, NO_INSETS).offset[0], -0)).toBe(false)
+  })
+
+  it('is the cell itself when nothing is eaten, which is the `cell` anchor’s answer', () => {
+    /* Why one anchor covers a convention with edges and one without. `NO_INSETS`
+       in gives the cell out at the origin — exactly what `slotOffset` returns for
+       a `cell` rule — so `internal-corner` needs no exception. */
+    expect(residualBox({ w: 4, d: 2 }, NO_INSETS)).toEqual({
+      offset: [0, 0],
+      extent: { w: 4, d: 2 },
+    })
   })
 })
 
@@ -428,12 +449,12 @@ describe('slotYaw', () => {
         .map(slotYaw)
         .sort((a, b) => a - b),
     ).toEqual(
-      /* 15 slots over the four conventions: 12 on the reference face, the
-         external corner's left wall at 270, the internal corner's column at 180
-         and — row **E3** — the corridor's left wall at 180, which is the only
-         one of the four that puts a slot two quarter-turns from the reference
-         face without a corner between them. */
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 180, 180, 270],
+      /* 11 slots over the three conventions: 9 on the reference face, the
+         external corner's left wall at 270 and the internal corner's column at
+         180. Row E3's corridor put a fourth slot at 180 — its left wall, the only
+         slot in the table two quarter-turns from the reference face with no
+         corner between them — and it is withdrawn with the convention. */
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 180, 270],
     )
     for (const side of [0, 1, 2, 3] as const) {
       const rule: SlotRule = { part: 'wall', anchor: 'edge', side, restsOn: null }
@@ -559,9 +580,15 @@ describe('placeTemplateSlots', () => {
     expect(placed.doubts).toEqual([])
     expect(placed.cell).toEqual({ w: 2, d: 2 })
     expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'wall'])
+    /* The base at the cell's own centre, the floor a quarter unit off it — the
+       centre of the 2 x 1.5 the wall leaves — and the wall flush to face 0 at
+       `-(2 - 0.5) / 2`. The floor's quarter unit is the whole of this change:
+       under a `cell` anchor it was `[0, 0]`, and an `s2w` floor measures 2 x 1.5
+       against a tag that says 2 x 2, so centring it put 0.25 of the slab under
+       the wall. */
     expect(placed.slots.map((slot) => slot.offset)).toEqual([
       [0, 0],
-      [0, 0],
+      [0, 0.25],
       [0, -0.75],
     ])
     expect(placed.slots.map((slot) => slot.restsOn)).toEqual([null, 'base', 'base'])
@@ -632,42 +659,139 @@ describe('placeTemplateSlots', () => {
     )
   })
 
-  it('places a closing corridor, with its two walls on opposite faces and nothing reserved', () => {
-    /* Row **E3**. The `dz` inset is the same `-(2 - 0.5) / 2 = -0.75` a
-       `wall-on-tile` edge gets, because both walls are flush to their own face —
-       and it comes back as `+0.75` on the far face after the quarter turn. `dx`
-       is **0** on both, which is the whole difference from a corner: nothing is
-       `corner`-anchored, so `cornerReservation` is 0 on all four faces and
-       neither wall is shifted along its face. */
-    const placed = placeTemplateSlots(CORRIDOR, CORRIDOR_2X2)
-    expect(placed.verdict).toBe('closes')
-    expect(placed.doubts).toEqual([])
-    expect(placed.cell).toEqual({ w: 2, d: 2 })
-    expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'right wall', 'left wall'])
+  it('gives a wall-on-tile floor the cell less its one wall, and nothing beside it', () => {
+    /* The residual, on the simplest layout that has one. A 2 x 2 cell with a
+       half-unit wall on face 0 leaves the floor `z ∈ [0.5, 2]` — 2 x 1.5 — so its
+       centre sits a quarter unit further from face 0 than the cell's does. Which
+       is exactly the quarter unit an `s2w` floor was drawn wrong by while the
+       anchor was `cell`: the slab measures 2 x 1.5 and the tag says 2 x 2, so
+       centring it in the cell put 0.25 of it under the wall and left 0.25 of base
+       bare at the far edge. */
+    const placed = placeTemplateSlots(WALL_ON_TILE, WALL_2X2)
     const byPart = new Map(placed.slots.map((slot) => [slot.part, slot]))
-    expect(byPart.get('right wall')?.offset).toEqual([0, -0.75])
-    expect(byPart.get('right wall')?.yaw).toBe(0)
-    expect(byPart.get('left wall')?.offset).toEqual([0, 0.75])
-    expect(byPart.get('left wall')?.yaw).toBe(180)
-    expect(placed.slots.map((slot) => slot.restsOn)).toEqual([null, 'base', 'base', 'base'])
-    // Read off the rule rather than restated: 0 on every face of a layout with
-    // no corner slot, which is what makes the two walls simply flush.
-    for (const side of [0, 1, 2, 3] as const) {
-      expect(cornerReservation(CORRIDOR, CORRIDOR_2X2, side), `face ${String(side)}`).toBe(0)
-    }
+    expect(byPart.get('floor')?.anchor).toBe('residual')
+    expect(byPart.get('floor')?.offset).toEqual([0, 0.25])
+    expect(byPart.get('floor')?.residual).toEqual({ w: 2, d: 1.5 })
+    /* And the `base` is untouched: it is `cell`-anchored because the walls stand
+       **on** it, which is the one part of the template that really does fill the
+       whole cell. */
+    expect(byPart.get('base')?.anchor).toBe('cell')
+    expect(byPart.get('base')?.offset).toEqual([0, 0])
+    expect(byPart.get('base')?.residual).toBeUndefined()
   })
 
-  it('calls a 1 x 1 corridor `fails` on `no-walk`, where the arithmetic alone calls it closed', () => {
-    /* **The check that decides whether the corridor is honest.** Every other
-       assertion about this cell passes: the two walls do not overlap, they cover
-       it exactly, the area is 1.00 and A10's rigid body holds. And it is a wall.
+  it('gives an external corner’s floor the 1.5 x 1.5 its two walls leave', () => {
+    /* The measured case. `tools/measure/measurements.json` reads
+       `dungeon_stone%block#floor+s2w+curved.2x2` at **1.5 x 1.5** inside a tagged
+       2 x 2 and the `4x4` at **3.5 x 3.5** inside a tagged 4 x 4 — 0.5 short on
+       each walled axis, authored in place in the nominal cell. Both are
+       reproduced here from the walls' own footprints and nothing else, which is
+       what makes the residual a derivation rather than a number somebody wrote
+       down. `corpus.test.ts` joins the two against the sidecar. */
+    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_2X2)
+    const floor = placed.slots.find((slot) => slot.part === 'floor')
+    expect(floor?.residual).toEqual({ w: 1.5, d: 1.5 })
+    // Walls on faces 0 (`-z`) and 3 (`-x`), so the remainder is pushed to `+x, +z`.
+    expect(floor?.offset).toEqual([0.25, 0.25])
 
-       `placeTemplateSlots` proves that parts do not overlap and that they cover
-       the cell; it cannot prove that anything is left to walk on, and until this
-       convention no layout had two slots eating one axis. So the doubt names the
-       **cell** slot — neither wall is wrong — and reports the two numbers:
-       1 unit across, 1 unit taken. */
-    const placed = placeTemplateSlots(CORRIDOR, CORRIDOR_1X1)
+    const big = placeTemplateSlots(
+      EXTERNAL_CORNER,
+      feetOf([
+        ['base', rect(4, 4)],
+        ['floor', rect(4, 4)],
+        ['right wall', wall(3.5)],
+        ['left wall', wall(3.5)],
+        ['column', column],
+      ]),
+    )
+    expect(big.slots.find((slot) => slot.part === 'floor')?.residual).toEqual({ w: 3.5, d: 3.5 })
+  })
+
+  it('leaves an internal corner’s residual equal to its cell, having no wall to subtract', () => {
+    /* Why one anchor covers all three conventions instead of this one keeping
+       `cell`. With no `edge` slot the insets are all 0, so `residualBox` returns
+       the cell at offset `[0, 0]` — the `cell` anchor's own answer, reached by
+       arithmetic rather than by a branch. Its 18 candidates are all `rect 2x2`
+       with the column's square taken out of the middle of the run, so the whole
+       cell is the right box for them. */
+    const placed = placeTemplateSlots(INTERNAL_CORNER, CORNER_2X2)
+    const floor = placed.slots.find((slot) => slot.part === 'floor')
+    expect(floor?.offset).toEqual([0, 0])
+    expect(floor?.residual).toEqual({ w: 2, d: 2 })
+    expect(edgeInsets(INTERNAL_CORNER, CORNER_2X2)).toEqual(NO_INSETS)
+  })
+
+  it('reads each wall’s depth off the face it is anchored to, not off one axis', () => {
+    /* `edgeInsets` is named by face rather than by axis because the two faces of
+       one axis are eaten independently. Face 0 is `-z` and face 3 is `-x`, so an
+       external corner takes from `minZ` and `minX` and from neither far face —
+       which is what puts its floor at `+x, +z` rather than in the middle. */
+    expect(edgeInsets(EXTERNAL_CORNER, CORNER_2X2)).toEqual({
+      minX: 0.5,
+      maxX: 0,
+      minZ: 0.5,
+      maxZ: 0,
+    })
+    expect(edgeInsets(WALL_ON_TILE, WALL_2X2)).toEqual({ minX: 0, maxX: 0, minZ: 0.5, maxZ: 0 })
+  })
+
+  it('contributes nothing for a wall that is unfilled, so an incomplete fill keeps the whole cell', () => {
+    /* The honest answer and the useful one at once: while the user has not chosen
+       a wall the floor really does have the run of the cell, and the slot's own
+       `unfilled` doubt is what says the template is incomplete. A guessed
+       half-unit here would shrink the floor for a wall nobody has picked. */
+    const placed = placeTemplateSlots(
+      WALL_ON_TILE,
+      feetOf([
+        ['base', rect(2, 2)],
+        ['floor', rect(2, 2)],
+      ]),
+    )
+    const floor = placed.slots.find((slot) => slot.part === 'floor')
+    expect(floor?.residual).toEqual({ w: 2, d: 2 })
+    expect(floor?.offset).toEqual([0, 0])
+    expect(placed.doubts).toEqual([{ part: 'wall', code: 'unfilled' }])
+  })
+
+  it('contributes nothing for a wall with no run, which the rule has already refused a place', () => {
+    /* A `diag`, `tri` or `arc` fill does not lie along its face at all, so its
+       bounding box says nothing about how much of the cell's axis it takes. Row
+       E3 made this correction to the paired walkability check and the residual
+       inherits it: a part the rule declined to place must not silently move
+       another part. The `no-run` doubt is the report, and the floor keeps the
+       cell. */
+    const placed = placeTemplateSlots(
+      WALL_ON_TILE,
+      feetOf([
+        ['base', rect(2, 2)],
+        ['floor', rect(2, 2)],
+        ['wall', { shape: 'diag', run: 2.828 }],
+      ]),
+    )
+    expect(placed.doubts).toEqual([{ part: 'wall', code: 'no-run' }])
+    expect(placed.slots.find((slot) => slot.part === 'floor')?.residual).toEqual({ w: 2, d: 2 })
+  })
+
+  it('calls a wall as deep as its own cell `fails` on `no-walk`, where the runs still tile', () => {
+    /* **The one combination of the 40 that reaches this doubt**, and the one row
+       E3's pairing could not see. `rough_stone#column+low.I.openforge.stl`
+       resolves to a `rect 1x1`, not a half-unit run, so on a 1 x 1 cell it eats
+       the whole depth and the floor is a slab of zero extent.
+
+       Its run *tiles the face exactly* — `edgeRun` of a `rect 1x1` is 1 on a
+       1-unit span — so `over-run` was never going to catch it, and with only one
+       `edge` slot the old opposed-pair check never looked at the axis at all. So
+       the combination came out `closes` with no doubts. The doubt names the
+       **cell** slot: the wall is not wrong, the floor is the part with nothing
+       left. */
+    const placed = placeTemplateSlots(
+      WALL_ON_TILE,
+      feetOf([
+        ['base', rect(1, 1)],
+        ['floor', rect(1, 1)],
+        ['wall', rect(1, 1)],
+      ]),
+    )
     expect(placed.verdict).toBe('fails')
     expect(placed.doubts).toEqual([{ part: 'floor', code: 'no-walk', want: 1, got: 1 }])
     expect(slotDoubtSentence(placed.doubts[0] as never)).toBe(
@@ -675,81 +799,40 @@ describe('placeTemplateSlots', () => {
         'so nothing is left to walk on.',
     )
     /* Placed anyway, exactly as an `over-run` is — row D8's split. The parts do
-       have positions and the union really is the cell; what is wrong is the
-       result, not the arithmetic. */
-    expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'right wall', 'left wall'])
-    // And every face closes, which is why no `over-run` is raised beside it.
+       have positions; what is wrong is the result, not the arithmetic. */
+    expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'wall'])
     expect(placed.doubts.filter((doubt) => doubt.code === 'over-run')).toEqual([])
   })
 
-  it('leaves a 2-deep cell alone, so the doubt fires on nothing walkable rather than on two walls', () => {
-    /* The boundary, from the useful side: 2 units of depth minus 1 unit of wall
-       is one 25.4 mm cell — one 25 mm mini base abreast — and that is a corridor.
-       The check is `span - eaten > 0` and not a margin somebody chose. */
+  it('leaves half a unit of walkable depth alone, so the boundary is `> 0` and not a margin', () => {
+    /* The useful side of the same boundary. A single half-unit wall on a 1 x 1
+       cell leaves 0.5 to walk on and is an ordinary wall tile — 979 of the 1,143
+       `wall-on-tile` combinations close on exactly that arrangement. The check is
+       `span - eaten > 0` and not a threshold somebody chose. */
     const placed = placeTemplateSlots(
-      CORRIDOR,
+      WALL_ON_TILE,
       feetOf([
-        ['base', rect(1, 2)],
-        ['floor', rect(1, 2)],
-        ['right wall', wall(1)],
-        ['left wall', wall(1)],
+        ['base', rect(1, 1)],
+        ['floor', rect(1, 1)],
+        ['wall', wall(1)],
       ]),
     )
     expect(placed.verdict).toBe('closes')
     expect(placed.doubts).toEqual([])
-    /* And the axis it reads is **depth** and not the smaller dimension: this
-       floor's smallest dimension is 1 and it is perfectly walkable, while the
-       same rectangle turned 90° is solid. That is the correction #135 makes to
-       D10 §3.3, as arithmetic. */
-    const turned = placeTemplateSlots(
-      CORRIDOR,
-      feetOf([
-        ['base', rect(2, 1)],
-        ['floor', rect(2, 1)],
-        ['right wall', wall(2)],
-        ['left wall', wall(2)],
-      ]),
-    )
-    expect(turned.verdict).toBe('fails')
-    expect(turned.doubts).toEqual([{ part: 'floor', code: 'no-walk', want: 1, got: 1 }])
+    expect(placed.slots.find((slot) => slot.part === 'floor')?.residual).toEqual({ w: 1, d: 0.5 })
   })
 
-  it('stays silent when only one of the two opposed slots is filled', () => {
-    /* A single wall on a 1 x 1 cell leaves 0.5 of walkable depth and is an
-       ordinary wall tile — 980 of the 1,143 `wall-on-tile` combinations close on
-       exactly that. So an unfilled opposed sibling makes the pair silent rather
-       than doubtful, and the sibling's own `unfilled` doubt is the honest report.
-       Without this the check would fire on every partially-filled corridor and
-       call an incomplete fill a bad shape. */
-    const placed = placeTemplateSlots(
-      CORRIDOR,
-      feetOf([
-        ['base', rect(1, 1)],
-        ['floor', rect(1, 1)],
-        ['right wall', wall(1)],
-      ]),
-    )
-    expect(placed.doubts).toEqual([{ part: 'left wall', code: 'unfilled' }])
-    expect(placed.verdict).toBe('undecidable')
-  })
-
-  it('cannot fire on any of the three conventions the fixtures use', () => {
-    /* Structural rather than lucky, and the reason the check arrives with the
-       corridor and not before: `no-walk` needs two `edge` slots two quarter-turns
-       apart. `wall-on-tile` has one edge, `external-corner` has two at sides 0
-       and 3 — adjacent — and `internal-corner` has none. So **0 of the 1,215
-       walked combinations of the 40 fixtures** can reach it, which
-       `corpus.test.ts` confirms against the archive rather than by construction. */
-    for (const feet of [WALL_2X2, CORNER_2X2, CORNER_OVER_RUN]) {
-      for (const convention of [WALL_ON_TILE, EXTERNAL_CORNER, INTERNAL_CORNER]) {
-        const placed = placeTemplateSlots(convention, feet)
-        expect(
-          placed.doubts.filter((doubt) => doubt.code === 'no-walk'),
-          convention.id,
-        ).toEqual([])
-      }
+  it('cannot fire on either axis of a closing corner, however the cell is shaped', () => {
+    /* An external corner takes half a unit off each of two *different* axes, so a
+       cell needs only to exceed 0.5 on both to leave something walkable — and
+       every `rect` in the corner recipes' floor pools is 1 x 1 or larger.
+       `corpus.test.ts` measures the archive; this is the arithmetic. */
+    for (const feet of [CORNER_2X2, CORNER_OVER_RUN]) {
+      const placed = placeTemplateSlots(EXTERNAL_CORNER, feet)
+      expect(placed.doubts.filter((doubt) => doubt.code === 'no-walk')).toEqual([])
     }
   })
+
 
   it('refuses a fill with no footprint rather than drawing its bounding box', () => {
     const placed = placeTemplateSlots(
@@ -881,17 +964,32 @@ describe('slotDoubtSentence', () => {
 describe('the offsets, placed by the canvas', () => {
   const QUARTERS = [0, 90, 180, 270] as const
 
+  /**
+   * The box one placement is drawn at: the fill's own rotated footprint, or the
+   * residual where the rule narrowed it.
+   *
+   * The same two lines `builder/canvas/catalog.ts#templateSlotLayout` and
+   * `scene.ts#drawnShape` run, which is what makes this block a measurement of
+   * the seam rather than of a third convention. A residual needs no
+   * `rotatedExtent`: it is the cell slot, `cellExtentOf` admits only a `rect`,
+   * and its yaw is 0.
+   */
+  function drawnAt(placement: SlotPlacement, shape: PlanShape): Extent {
+    return placement.residual ?? rotatedExtent(shape.extent, placement.yaw + shape.angle)
+  }
+
   /** One of this module's placements, read into the canvas's `SlotLayout`. */
   function layoutOf(placement: SlotPlacement, cell: Extent, foot: Footprint): SlotLayout {
     const shape = footprintShape(foot)
     if (shape === undefined) throw new Error(`${placement.part} has no shape`)
-    const drawn = rotatedExtent(shape.extent, placement.yaw + shape.angle)
+    const drawn = drawnAt(placement, shape)
     return {
       dx: placement.offset[0] - drawn.w / 2 + cell.w / 2,
       dz: placement.offset[1] - drawn.d / 2 + cell.d / 2,
       rotation: placement.yaw,
       elevationMm: 0,
       cell,
+      ...(placement.residual === undefined ? {} : { residual: placement.residual }),
     }
   }
 
@@ -909,8 +1007,21 @@ describe('the offsets, placed by the canvas', () => {
       if (foot === undefined) throw new Error(`${slot.part} has no fill`)
       const shape = footprintShape(foot)
       if (shape === undefined) throw new Error(`${slot.part} has no shape`)
-      return slotGeometry(shape, layoutOf(slot, cell, foot), [0, 0], rotation).box
+      /* `boxShape` where the rule narrowed the slot, exactly as `scene.ts` does
+         it — the narrowing has to reach the *shape* and not only the offset, or
+         the part is drawn at its tagged extent from the residual's corner and
+         hangs off the cell by what the walls took. */
+      const drawn = slot.residual === undefined ? shape : boxShape(slot.residual)
+      return slotGeometry(drawn, layoutOf(slot, cell, foot), [0, 0], rotation).box
     })
+  }
+
+  /** Whether two plan boxes share interior area. Abutting is not overlapping. */
+  function boxesOverlap(a: PlanBox, b: PlanBox): boolean {
+    const gap = 1e-9
+    return (
+      a.x + a.w - b.x > gap && b.x + b.w - a.x > gap && a.z + a.d - b.z > gap && b.z + b.d - a.z > gap
+    )
   }
 
   function unionAt(
@@ -922,6 +1033,56 @@ describe('the offsets, placed by the canvas', () => {
     if (union === undefined) throw new Error('a placed template must have a box')
     return union
   }
+
+  it('tiles the cell — every closing template’s parts are pairwise disjoint and sum to it', () => {
+    /* **The invariant the `residual` anchor bought, and the reason it is worth an
+       anchor.** Under a `cell`-anchored floor the union was the cell *because the
+       floor alone covered it*: the floor's box overlapped every wall and the
+       column, so `unionAt` returning the cell said nothing about whether the
+       parts fit together. Now they tile it.
+
+       The `base` is excluded and it is the only exclusion: it is the one part
+       that really does fill the whole cell, and it lies **under** everything at
+       elevation 0 while the floor, walls and column all stand on it at 6 mm. So
+       overlap in plan is not overlap in space for that pair, which is exactly
+       what `overlap.ts` reads `SlotLayout.elevationMm` for.
+
+       Areas as well as pairs, because disjointness alone would also be satisfied
+       by parts that leave a gap: 1.5² + 1.5·0.5 + 1.5·0.5 + 0.5² is 4.00 on the
+       corner, and 2·1.5 + 2·0.5 is 4.00 on the wall recipe. */
+    const cases = [
+      { layout: WALL_ON_TILE, feet: WALL_2X2, cell: { w: 2, d: 2 } },
+      { layout: EXTERNAL_CORNER, feet: CORNER_2X2, cell: { w: 2, d: 2 } },
+    ]
+    for (const { layout, feet, cell } of cases) {
+      for (const rotation of QUARTERS) {
+        const placed = placeTemplateSlots(layout, feet)
+        const boxes = placed.slots
+          .map((slot, index) => ({ part: slot.part, box: boxesAt(layout, feet, rotation)[index] }))
+          .filter((entry) => entry.part !== 'base')
+        const where = `${layout.id} @${String(rotation)}`
+        for (const [i, a] of boxes.entries()) {
+          for (const b of boxes.slice(i + 1)) {
+            /* Touching is not overlapping — the wall abuts the column and the
+               floor abuts both — so the comparison is on open interiors, which
+               is what `boxesOverlap` below computes and what `overlap.ts` means
+               by a conflict. */
+            expect(
+              boxesOverlap(a.box as PlanBox, b.box as PlanBox),
+              `${where}: ${a.part} vs ${b.part}`,
+            ).toBe(false)
+          }
+        }
+        const area = boxes.reduce((total, entry) => total + (entry.box?.w ?? 0) * (entry.box?.d ?? 0), 0)
+        expect(area, where).toBeCloseTo(cell.w * cell.d, 9)
+        expect(unionAt(layout, feet, rotation), where).toEqual(
+          rotation % 180 === 0
+            ? { x: 0, z: 0, w: cell.w, d: cell.d }
+            : { x: -cell.d + cell.w, z: 0, w: cell.d, d: cell.w },
+        )
+      }
+    }
+  })
 
   it('lays a closing 2 x 2 wall-on-tile inside its own cell, at every quarter turn', () => {
     /* The 96-part convention, on the fills that close it — the run of the wall

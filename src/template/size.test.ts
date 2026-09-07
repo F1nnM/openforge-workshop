@@ -25,8 +25,8 @@ import { assemblyState, createRecipeIndex } from '@/screens/assemblies/assembly'
 import { RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
 
 import { edgeRun, placeTemplateSlots } from './offsets'
-import type { SlotName, TemplateLayout } from './rules'
-import { EXTERNAL_CORNER, INTERNAL_CORNER, WALL_ON_TILE, conventionFor } from './rules'
+import type { SlotName, SlotRule, TemplateLayout } from './rules'
+import { EXTERNAL_CORNER, INTERNAL_CORNER, WALL_ON_TILE, conventionFor, ruleFor } from './rules'
 import type { GridSize, SizePredicate } from './size'
 import {
   GRID_UNITS,
@@ -206,10 +206,31 @@ describe('a layout’s predicates come from one cell', () => {
     const predicates = layoutSizePredicates(WALL_ON_TILE, { w: 2, d: 2 })
     expect(predicates).toEqual([
       { part: 'base', anchor: 'cell', size: { kind: 'cell', w: 2, d: 2 } },
-      { part: 'floor', anchor: 'cell', size: { kind: 'cell', w: 2, d: 2 } },
+      /* `residual` and it asks for the **cell**, which is deliberate and is the
+         next case's subject: the floor is *drawn* at what the wall leaves and
+         *selected* by its own tags, and an `s2w` floor's tags name its tile. */
+      { part: 'floor', anchor: 'residual', size: { kind: 'cell', w: 2, d: 2 } },
       { part: 'wall', anchor: 'edge', size: { kind: 'run', run: 2 } },
     ])
     expect(cornerSpanOf(WALL_ON_TILE)).toBe(0)
+  })
+
+  it('asks the cell of a `residual` slot, not the residual, so the tags can answer', () => {
+    /* The shared branch in `slotSizePredicate`, asserted rather than left to look
+       like an oversight. A `residual` slot is drawn at what the walls leave and
+       selected by what its tags say, and for an `s2w` floor those are two
+       different numbers: 1.5 x 1.5 of geometry behind a `size|width|2 +
+       size|depth|2` pair. Asking the archive for the residual would ask for a
+       `size|width|1.5` floor to fill a 2 x 2 recipe, and every one of the 88
+       `shape|floor|wall` and 41 `shape|floor|corner` records is tagged at its
+       tile size instead — so the pool would be empty. */
+    const cell = { w: 2, d: 2 }
+    const floor = ruleFor(WALL_ON_TILE, 'floor')
+    const base = ruleFor(WALL_ON_TILE, 'base')
+    expect(floor?.anchor).toBe('residual')
+    expect(base?.anchor).toBe('cell')
+    expect(slotSizePredicate(floor as SlotRule, cell)).toEqual(slotSizePredicate(base as SlotRule, cell))
+    expect(slotSizePredicate(floor as SlotRule, cell)).toEqual({ kind: 'cell', w: 2, d: 2 })
   })
 
   it('takes the column’s half unit off both walls of an external corner', () => {
@@ -459,12 +480,21 @@ describeCorpus(corpusTitle, () => {
     expect((runs.get('2') ?? 0) + (runs.get('1.5') ?? 0)).toBe(1663 + 1094)
   }, SLOW_MS)
 
-  it('splits B2’s verdicts 980 / 25 / 138 for `wall-on-tile`, which is not a run comparison', () => {
+  it('splits B2’s verdicts 979 / 26 / 138 for `wall-on-tile`, which is not a run comparison', () => {
     /* The brief quotes *"a wall's run equal to the floor cell's width on 980 of
        1,143"*. That figure is B2's per-convention **verdict** split, and the
-       distinction matters: of the 163 non-closures, only **25** are a size
+       distinction matters: of the 164 non-closures, only **26** are a size
        mismatch and 138 are fills with no run to compare at all. So exactness
-       costs 25 combinations rather than 163. */
+       costs 26 combinations rather than 164.
+
+       **It was 980 / 25 / 138 until the residual anchor.** The one that moved is
+       the 1 x 1 cell whose `wall` slot resolves to
+       `rough_stone#column+low.I.openforge.stl`, a `rect 1x1` rather than a
+       half-unit run: its run tiles the 1-unit face exactly, so `over-run` never
+       saw it, and it ate the cell's whole depth, so the floor was a slab of zero
+       extent that the old paired walkability check had no opposed sibling to
+       compare against. `offsets.ts#walkability` carries the reasoning and
+       `corpus.test.ts` names the combination. */
     const per = new Map<string, Record<string, number>>()
     for (const combination of combinations) {
       const id = conventionFor(combination.template.parts.map((part) => part.name))?.id ?? '?'
@@ -473,7 +503,7 @@ describeCorpus(corpusTitle, () => {
       row[verdict] = (row[verdict] ?? 0) + 1
       per.set(id, row)
     }
-    expect(per.get('wall-on-tile')).toEqual({ closes: 980, fails: 25, undecidable: 138 })
+    expect(per.get('wall-on-tile')).toEqual({ closes: 979, fails: 26, undecidable: 138 })
     const wallOnTile = per.get('wall-on-tile')
     const walked = Object.values(wallOnTile ?? {}).reduce((a, b) => a + b, 0)
     expect(walked).toBe(1143)

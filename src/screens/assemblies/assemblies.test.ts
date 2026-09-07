@@ -403,37 +403,36 @@ describe('the shipped templates', () => {
    */
   const FIXTURES = RECIPE_TEMPLATES.filter((template) => !template.source.startsWith('authored:'))
 
-  it('are 40 from the fixtures, over 20 files with 128 parts, plus row E3’s 2', () => {
+  it('are 40 from the fixtures, over 20 files with 128 parts, and nothing beside them', () => {
     expect(FIXTURES).toHaveLength(40)
     expect(new Set(FIXTURES.map((template) => template.source)).size).toBe(20)
     expect(FIXTURES.reduce((total, template) => total + template.parts.length, 0)).toBe(128)
 
     /* And the whole shipped array, which is what the palette and this screen
-       list: 42 over 21 distinct `source` values — the 20 fixtures plus one
-       `authored:` value both of E3's rows carry, because both derive from
-       `blueprints.s2w.wall.yaml`. */
-    expect(RECIPE_TEMPLATES).toHaveLength(42)
-    expect(new Set(RECIPE_TEMPLATES.map((template) => template.source)).size).toBe(21)
-    expect(RECIPE_TEMPLATES.reduce((total, template) => total + template.parts.length, 0)).toBe(135)
+       list: the same 40 over the same 20 `source` values. Row E3 briefly added a
+       21st — one `authored:` value both its rows carried, because both derived
+       from `blueprints.s2w.wall.yaml` — and both rows are withdrawn. */
+    expect(RECIPE_TEMPLATES).toHaveLength(40)
+    expect(new Set(RECIPE_TEMPLATES.map((template) => template.source)).size).toBe(20)
+    expect(RECIPE_TEMPLATES.reduce((total, template) => total + template.parts.length, 0)).toBe(128)
   })
 
   it('carry unique names and unique slugs', () => {
-    expect(new Set(RECIPE_TEMPLATES.map((template) => template.name)).size).toBe(42)
-    expect(new Set(RECIPE_TEMPLATES.map((template) => template.id)).size).toBe(42)
+    expect(new Set(RECIPE_TEMPLATES.map((template) => template.name)).size).toBe(40)
+    expect(new Set(RECIPE_TEMPLATES.map((template) => template.id)).size).toBe(40)
   })
 
-  it('split 20 and 22 between the two build kinds, which is what the screen groups on', () => {
+  it('split 20 and 20 between the two build kinds, which is what the screen groups on', () => {
     const single = RECIPE_TEMPLATES.filter((template) =>
       template.tags.includes('build|s2w|single_piece'),
     )
     const modular = RECIPE_TEMPLATES.filter((template) => template.tags.includes('build|s2w|modular'))
 
     expect(single).toHaveLength(20)
-    /* 22 since row **E3**: both authored rows carry `build|s2w|modular`, one by
-       inheriting the fixture's tag list outright and one by naming it. The sum
-       is what matters — a row in neither group is a row this screen does not
-       show at all. */
-    expect(modular).toHaveLength(22)
+    /* 20 again: row E3's two authored rows both carried `build|s2w|modular` and
+       both are withdrawn. The sum is what matters — a row in neither group is a
+       row this screen does not show at all. */
+    expect(modular).toHaveLength(20)
     expect(single.length + modular.length).toBe(RECIPE_TEMPLATES.length)
   })
 
@@ -443,13 +442,14 @@ describe('the shipped templates', () => {
       .flatMap((part) => part.tags.constrain ?? [])
       .filter((entry) => 'tag' in entry && entry.siblings !== undefined)
 
-    /* 34: the fixtures' 30 plus row **E3**'s 4 — the corridor's two walls each
-       constrain `connection|side` on the other, and its base collects
-       `connection` from both, where the shipped modular base collects from one
-       `wall`. The `fulfills` census is unmoved at 20, because an authored slot
-       deliberately does not carry it: `fulfills` is scoped to a part's own
-       *nested* slots and this module measured it a no-op against `SlotFills`. */
-    expect(siblings).toHaveLength(34)
+    /* 30, the fixtures' own. Row E3 took it to 34 — its corridor's two walls each
+       constrained `connection|side` on the other and its base collected
+       `connection` from both, where a shipped modular base collects from one
+       `wall` — and the corridor is withdrawn. The `fulfills` census never moved
+       at all: an authored slot deliberately did not carry it, because `fulfills`
+       is scoped to a part's own *nested* slots and this module measured it a
+       no-op against `SlotFills`. */
+    expect(siblings).toHaveLength(30)
     expect(parts.flatMap((part) => part.fulfills)).toEqual(Array.from({ length: 20 }, () => 'base'))
   })
 

@@ -720,6 +720,7 @@ defect it looked like from the outside, and two of them were this plan's errors 
 | #135 | **E2** | the corridor's floor and base, and a layout the closure check cannot judge |
 | #136 | **E3** | a wall assembly that takes any floor, and a corridor |
 | #137 | **E4** | the byte identity is a property of binary STL, not of this corpus |
+| #143 | **E5** | the floor fills what the walls leave, and E3 is withdrawn |
 
 **Row D5 was specified and never dispatched.** D4 recommended hand-authoring four assemblies; D10's
 enumeration then measured that **sixteen of seventeen candidates add nothing** — the floor axis is a
@@ -740,7 +741,46 @@ anything is left to walk on.** Two opposed `edge` slots can eat a cell's whole e
 disjointness and coverage both hold, so a 1x1 corridor is geometrically flawless and functionally a
 wall. No shipped template could have exposed it — the corridor is the first layout in which two slots
 consume the same axis. E3 added a sixth doubt code, `no-walk`, and **0 of the 40 fixtures' 1,215
-combinations can reach it.**
+combinations could reach it** — see E5 below, where the same check reaches one.
+
+### E5 withdrew both of E3's assemblies, and the reason is the floor slot
+
+**E3 was wrong, and the report that found it was a screenshot.** The project owner placed an s2w
+corner and the floor sat centred in the cell with a quarter-unit gap at each open edge and a
+quarter unit of itself under each wall.
+
+The cause was one anchor. `rules.ts` gave the `floor` slot `cell` — *"the slot fills the template's
+footprint"* — and every floor slot of every one of the 40 requires `build|s2w`, where **an s2w floor
+is the tile minus the strip its separately printed wall stands on.**
+`tools/measure/measurements.json` reads `…#floor+s2w+curved.2x2` at **1.5 × 1.5** in a tagged 2 × 2
+and the `4x4` at **3.5 × 3.5** in a tagged 4 × 4 — 0.5 short per walled axis. The tag cannot say so:
+`size|width|2 + size|depth|2` names the **tile**, which is right for where the piece sits on the grid
+and wrong for where the slab sits inside it. So `place.ts` centred a 1.5 slab in a 2.0 box, and
+nothing caught it because **4 of the 128 parts have even one candidate with a measured bounding
+box** — no test ever held the tag and the mesh at once.
+
+The fix is a fourth anchor, `residual`: the cell less the depth each `edge` slot takes off its own
+face, from that wall's own footprint. It invents no number and reproduces both measured floors. It
+also makes a template a **tiling** for the first time — under `cell` the floor's box overlapped every
+wall and the union test passed only because the floor covered the cell alone.
+
+**Both of E3's assemblies rested on the defect and neither survives it.** The widened wall *was* the
+floor-slot widening, so with `build|s2w` restored it is the shipped `(Any, Modular)` recipe plus two
+`deny shape|base` repairs — two near-identical palette rows, which is the complaint D2 fixed. And the
+corridor cannot take an s2w floor at all: it needs one 0.5 short on two **opposed** faces, and the
+archive's whole s2w floor vocabulary is `wall` (one face, 88 records), `corner` (two adjacent, 41),
+`internal_corner` (18), `curved` (17) and 12 bare. An s2w corridor is two `wall-on-tile` cells side
+by side, not one recipe. So `pipeline/authored.ts`, the `CORRIDOR` convention and the
+`AUTHORED_MARKER` are gone, the assemblies section is back to **3,079 records / 905 designs**, and
+`RECIPE_TEMPLATES` is the fixtures' content with nothing appended — which makes the byte-identity
+guard a claim about the whole array instead of about the half above a marker.
+
+`no-walk` survives the corridor, generalised and **reachable**: it now compares the residual on both
+axes rather than pairing opposed edges, and **1 of the 1,215 combinations reaches it** — a 1 × 1 cell
+whose `wall` slot resolves to `rough_stone#column+low.I.openforge.stl`, a `rect 1x1` rather than a
+half-unit run, which eats the cell's whole depth. Its run tiles the face exactly, so `over-run` never
+saw it, and with one edge slot the paired check never looked at the axis. It came out `closes` with
+no doubts for the life of E3.
 
 ---
 

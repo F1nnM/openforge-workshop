@@ -656,14 +656,24 @@ describe('the wired slot layout', () => {
       north face, the left wall's 0.5 x 1.5 starts half a unit down the west
       face, and the 0.5 x 0.5 column has the square where the two meet to itself.
       No overlap, no gap, no doubt.
+
+      **The `residual` anchor changed one more: the floor's.** It used to be
+      `0, 0` at the cell's own extent, and it is now `0.5, 0.5` at a 1.5 x 1.5
+      box — the square the two walls and the column leave. An `s2w` floor is
+      tagged with the size of its *tile* and measures half a unit less on each
+      walled axis, so drawing it at 2 x 2 put a quarter of it under each wall and
+      left a quarter unit of base bare at each open edge. `residual` is the box
+      the renderer draws and `dx`/`dz` are that box's minimum corner, so the five
+      parts now tile the cell exactly instead of the floor covering it alone.
     */
     expect(at(FIXTURE_SLOTS.base)).toEqual({ dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell: FIXTURE_CELL })
     expect(at(FIXTURE_SLOTS.floor)).toEqual({
-      dx: 0,
-      dz: 0,
+      dx: 0.5,
+      dz: 0.5,
       rotation: 0,
       elevationMm: BASE_LIFT_MM,
       cell: FIXTURE_CELL,
+      residual: { w: 1.5, d: 1.5 },
     })
     expect(at(FIXTURE_SLOTS.column)).toEqual({
       dx: 0,
@@ -750,9 +760,9 @@ describe('the wired slot layout', () => {
     // chain one step long rather than N.
     expect(
       SLOT_CONVENTIONS.map((convention) => convention.slots.find((rule) => rule.part === 'base')?.restsOn),
-      // Four conventions since row E3's corridor, and every one of them rests
-      // its whole stack on the one `base` slot.
-    ).toEqual([null, null, null, null])
+      // All three conventions, and every one of them rests its whole stack on the
+      // one `base` slot.
+    ).toEqual([null, null, null])
   })
 
   it('is a no-op for a family with no convention, and for a family this build lacks', () => {
