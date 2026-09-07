@@ -21,6 +21,15 @@
 
   "env": {
     "staging": { "name": "openforge-workshop-staging" },
-    "production": { "name": "openforge-workshop" }
+    "production": {
+      "name": "openforge-workshop",
+      // The Worker is the origin for this hostname: Cloudflare creates the DNS
+      // record and manages the certificate, no separate zone config needed
+      // beyond `openforge.tools` already being an active zone (it is —
+      // `objects.openforge.tools` already lives there). Scoped to production
+      // only: `routes` is per-environment, and staging has no domain of its
+      // own, so it stays on its `*.workers.dev` URL.
+      "routes": [{ "pattern": "workshop.openforge.tools", "custom_domain": true }]
+    }
   }
 }
