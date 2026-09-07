@@ -630,6 +630,120 @@ list was wrong four ways and two of them were real code:
 
 ---
 
+## 7.1 What actually shipped, as a ledger
+
+§7 above is the **plan**, kept as written so the cut can be judged against the outcome. This is the
+outcome: every PR merged into `epic/v2`, in order, with the row it carried. Row ids are taken from
+the PR bodies, not inferred.
+
+Two things the plan did not anticipate, and both are visible here:
+
+1. **The A wave landed as one PR, not eight.** Row A1 proved the plan's own cut wrong — A1 alone
+   leaves **47 type errors across 27 files owned by seven different rows**, and `npm run build` runs
+   `tsc -b` first, so the build is red too. *Additive* substrate lands inert; substrate that renames
+   or removes cannot. #107 is 96 files and eight rows for that reason. §7's decision to cut A1 alone
+   is the one clear error in the table.
+2. **A whole defect-response wave (D) and an authoring wave (E) exist that §7 has no rows for**,
+   because both were commissioned from browser reports and questions after the C wave landed. They
+   are a third of the series.
+
+| PR | row(s) | what it did |
+| ---: | --- | --- |
+| #101 | X1 | fetch the pinned fixtures and stamp before the deploy verifies |
+| #102 | — | this plan |
+| #103 | **A0** | delete the library screen and every reader of the `library` field |
+| #104 | **B1** | infer a `role` and a `form` for every record, as interned tags |
+| #105 | A9, B4, B6, C4 | record the row findings the lost research reports carried |
+| #106 | **B2** | a template's slot geometry, as a rule with no numbers in it |
+| #107 | **A1, A2, A3, A4a, A4b, A5, A9, A8** | the substrate, atomically — store to renderer, 96 files |
+| #108 | **A7** | elevation-aware collision, and a rigid footprint under rotation |
+| #109 | A9, A10, B6 | make the plan true, and guard the fixture defect it works around (§9.1) |
+| #110 | **B3** | resolve a record's grid size, and derive a slot's size predicate |
+| #111 | **C4** | the bill counts files, and a fill can be wrong |
+| #112 | **B4** (absorbing **B5**) | generate the template families, one slot each |
+| #113 | **C2** | default fills in one click, and the lock re-solve behind the pinned bit |
+| #114 | C1, C2 | apply a family's size as refs, because a one-slot family has no anchor |
+| #115 | B3, B4, C2 | reconcile the 5-versus-8 empty size domain (§10) |
+| #116 | **C1** | the palette places templates |
+| #117 | **C3** | customise a template's slots from a right click |
+| #118 | **A11** | clear a fill, and hand a slot back to the lock |
+| #119 | **C5** | a placed template arrives filled, at the size the palette armed |
+| #120 | C5 | take a floor of repeats for the median too, and cap the scene re-solve |
+| #121 | C5 | put a floor under the per-test timeout |
+| #122 | **C6** | wire the real slot layout, so a template's parts stand where they belong |
+| #123 | **C7** | give the second composition site the real layout rule |
+| #124 | **C8** | right-click the piece to customise its slots |
+
+### The D wave — four browser reports, and what they turned out to be
+
+The project owner placed a `Corner (Wall on Tile)` and reported four things. None of the four was the
+defect it looked like from the outside, and two of them were this plan's errors rather than code's.
+
+| PR | row | what it did |
+| ---: | --- | --- |
+| #125 | **D4** | *research*: assemblies cannot be generated per build system, and need not be |
+| #126 | **D3** | the piece under the pointer glows, and the caret asks for a frame |
+| #127 | **D2** | assemblies first, then single tiles |
+| #128 | **D1** | a wall slot no longer offers the base that goes under a wall |
+| #129 | **D6** | a room-wide design, with manual deviations always allowed |
+| #130 | **D8** | an over-running part places and turns, instead of piling on the corner |
+| #131 | **D7** | the hover cue traces the tile's silhouette, and the stage keeps its passes |
+| #132 | **D9** | a corner wall runs 1.5, and the tag that says 2 names its cell |
+| #134 | **D10** | seventeen assembly candidates measured, and sixteen add nothing |
+
+- **"Bases offered in a wall slot"** was real and **17× wider than the case found**: 17 of 50
+  families admitted bases, **1,963 admissions — every base in the archive** — and four families
+  admitted nothing else. D1 took it to zero and bought a property the families never had: the 47
+  populations are now **disjoint and sum to the non-insert corpus**. The old sum was 10,380 because
+  every base was counted twice.
+- **"The corner shows one slot only"** was not a defect at all. The palette carried **91 rows of two
+  kinds with nothing telling them apart** — 51 one-slot generated families and 40 multi-slot
+  upstream recipes — and the five-slot corner the owner described *already existed and worked*. D2
+  split the sections. Its own first fix then reintroduced the complaint: an assembly carries no
+  `form|` tag, so pressing the `Corner` chip **hid all 40 assemblies and emptied the section holding
+  the answer**. It caught that itself and scoped the facet to single tiles.
+- **"The glow is a 1px border floating on top"** was true, and D7 replaced D3's approach with a real
+  silhouette — finding on the way that **N8AO had been misconfigured in every `npm run dev` frame
+  since the stack was written**, because `useStageComposer` returned a composer from a `useMemo`
+  while writing passes into refs, so StrictMode's double-invoke left the refs on a discarded chain.
+- **"The parts overlap"** was the deepest. It resolved to §2 of `docs/tile-sizing.md`: a corner wall
+  tagged `size|width|2` **runs 1.5**, the tag names the cell rather than the piece, and the footprint
+  had been derived from the tag — so **collision and the footprint plate were half a unit too wide
+  for the life of the project**, and the over-run doubt was a phantom. D9 settled it by measuring 157
+  meshes off R2.
+
+### The E wave — the documents, and the two authored assemblies
+
+| PR | row | what it did |
+| ---: | --- | --- |
+| #133 | **E1** | `docs/tile-sizing.md` — everything measured about how big a tile is |
+| #135 | **E2** | the corridor's floor and base, and a layout the closure check cannot judge |
+| #136 | **E3** | a wall assembly that takes any floor, and a corridor |
+| #137 | **E4** | the byte identity is a property of binary STL, not of this corpus |
+
+**Row D5 was specified and never dispatched.** D4 recommended hand-authoring four assemblies; D10's
+enumeration then measured that **sixteen of seventeen candidates add nothing** — the floor axis is a
+nesting rather than a partition, so the narrower predicates are strict subsets of the widest. E3
+shipped the one that pays (**905 → 1,893 designs**) and the corridor, which pays in shape rather than
+reach: **+12 records / +2 designs**, the `shape|base|hallway` pieces that no other recipe can reach.
+
+E3 also answered a question D10 could not have: D10 called the widened wall *"an edit, not an
+addition"*, and **that edit is impossible** — the fixtures are pinned and read-only, and
+`pipeline/templates.ts` earns its trust from their byte-identical round-trip. `pipeline/authored.ts`
+names, per slot, the fixture template and part each authored slot derives from and the exact refs
+added and removed, so a fixture refresh cannot leave an authored predicate silently stale.
+
+### The corridor added a check nothing else needed
+
+`placeTemplateSlots` proves parts do not overlap and that they cover the cell. **It cannot prove
+anything is left to walk on.** Two opposed `edge` slots can eat a cell's whole extent while
+disjointness and coverage both hold, so a 1x1 corridor is geometrically flawless and functionally a
+wall. No shipped template could have exposed it — the corridor is the first layout in which two slots
+consume the same axis. E3 added a sixth doubt code, `no-walk`, and **0 of the 40 fixtures' 1,215
+combinations can reach it.**
+
+---
+
 ## 8. Contract dependencies
 
 Pairs that share no file and must still agree. Each of these ships a broken feature with every PR
@@ -980,32 +1094,44 @@ question each answers.
 
 ## 11. Still open, and owned by nobody
 
-Four of these are row A1's and A8's findings; the last two are row D9's. None of the six is a bug in
-anything that has landed — they are decisions this plan never took, and none of them is named in §7
-against a row.
+**Three of the six once listed here had already shipped, and this section did not say so for several
+rows.** That is the exact failure the section exists to prevent, so it is recorded rather than
+quietly edited: a list of unowned work is only useful if closing an item updates it, and
+`src/template/relock.ts` named two of the closures in its own docblock while this document went on
+calling them open.
 
-1. **There is no unpin.** Once a slot is pinned it is permanently deaf to the lock. §3.3 never offers
-   "reset this slot", so A1 did not invent the action — but a user who pins one wall can never hand
-   it back to their lock preference. A one-action fix in a row that has already landed, which is
-   exactly why it needs an owner named rather than assumed.
-2. **A pinned fill can become unprintable under a new lock, and nothing warns.** `pinned: true` means
-   "print this exact file"; that file may be an openlock variant while the build is now dragonlock.
-   Detecting it needs a comparison the store cannot make. It belongs to A3 or C4 and is in neither
-   of their §7 rows.
-3. **The lock re-solve has never been measured at scene scale.** A lock toggle costs instances times
-   slots solver calls — 250 instances at 5 slots is **1,250 candidate queries, synchronously, on one
-   click**. Row C2 is the natural owner; nothing in its §7 row mentions it.
-4. **One measured loss is unowned.** A8 deleted four bill surfaces rather than repointing them,
+### Closed
+
+1. ~~**There is no unpin.**~~ **Closed by row A11 in #118.** `@/store#unpinFill` hands a slot back to
+   the lock while keeping a printable file; `@/store#clearFill` leaves a hole and refuses the
+   download — two actions for two intents, and `relock.ts:111` says so.
+   `builder/panels/slots/slotEditor.ts#handSlotToLock` is the caller that makes an unpin visible by
+   re-solving.
+2. ~~**A pinned fill can become unprintable under a new lock, and nothing warns.**~~ **Closed.**
+   `src/template/relock.test.ts` carries *"warns that a pinned fill cannot print under the new
+   lock"*, and its docblock names this gap as the reason it exists.
+3. ~~**The lock re-solve has never been measured at scene scale.**~~ **Closed, and the surprise was
+   that the solver is not the expensive half.** 250 instances over 750 slots costs **66.6 ms per
+   instance / 1,790 queries**, and **10.4 ms / 288 queries** memoised — it prints in every full test
+   run. Row C5's follow-ups (#120, #121) put a floor under the measurement so it cannot silently
+   become a different benchmark.
+
+### Genuinely open
+
+4. **One measured loss is unowned.** Row A8 deleted four bill surfaces rather than repointing them,
    because each reported a fact nothing computes now. One of the four was the `unknown-joinery`
-   mark — the only surface for the **93 items (2.4%)** with no connector tag anywhere.
-5. **The 36 `shape|corner|wall` L-pieces have no footprint primitive.** Row D9 measured all 36 —
-   one print carrying both legs of a corner, measuring its tagged size in *both* plan axes (`IA` 1 ×
-   1, `A` 2 × 2, `D` 3 × 3, `Q` 4 × 4, all within 0.055 u) — and left their `{shape:'wall',
-   length:n}` footprint alone, because an L is not a 0.5-deep run and `Footprint` has no case that
-   is. `rect` would claim a filled square and collide against the whole cell; `none` would unplace
-   36 tiles. Either is a **classification** change, so it also moves the RECT/WALL/ARC tallies
-   `docs/verify-catalog-facts.py` mirrors and `pipeline/catalog.test.ts` asserts — which is why D9,
-   whose correction was a parameter and touched no tally, did not take it.
+   mark — the only surface for the **93 items (2.4%)** with no connector tag anywhere. The verdict is
+   still computed, in `src/catalog/aggregate.ts`, and `billView.ts`'s own docblock records that it
+   *"does not come back"*. So this is a rendering gap over a live value, not a lost computation.
+5. **The 36 `shape|corner|wall` L-pieces have no footprint primitive.** Row D9 measured all 36 — one
+   print carrying both legs of a corner, measuring its tagged size in *both* plan axes (`IA` 1 x 1,
+   `A` 2 x 2, `D` 3 x 3, `Q` 4 x 4, all within 0.055 u) — and left their `{shape:'wall', length:n}`
+   footprint alone, because an L is not a 0.5-deep run and `Footprint` has no case that is. Its cases
+   are `arc`, `column`, `diag`, `none`, `rect`, `tri`, `wall`. `rect` would claim a filled square and
+   collide against the whole cell; `none` would unplace 36 tiles. Either is a **classification**
+   change, so it also moves the RECT/WALL/ARC tallies `docs/verify-catalog-facts.py` mirrors and
+   `pipeline/catalog.test.ts` asserts — which is why D9, whose correction was a parameter and touched
+   no tally, did not take it.
 6. **102 designs lost their exact size chip, and the fix is a priced tag.** The cost of D9's
    correction, measured in `src/builder/panels/palette.corpus.test.ts`: a size position is a *tag*
    ref, and a corner wall's only `size|width` tag says 2 while its measured run is 1.5. So those
@@ -1013,4 +1139,24 @@ against a row.
    hits, 86.0% → 83.3%. Nothing is unreachable and the geometry drawn is the corrected 1.5; what is
    lost is the chip. The fix is the derived `size|run|<r>` tag `src/template/size.ts` prices at
    **+300 B** and declines for a tag-table reason, and D9 raised its stake from 84 records to 679
-   (`RUN_UNREACHABLE`). It is B4/B5's table, and it is in neither of their §7 rows.
+   (`RUN_UNREACHABLE`). It is B4's table, and it is in neither of its §7 rows.
+7. **`cornerReservation` is wrong for a face flanked by two corners, and the verdict inverts.** Row
+   D10 measured it: corner spans are summed **signed**, so two corners at opposite ends of one face
+   cancel to 0 where the correct magnitude is 1.0. On a 3-wall dead end's back face the run that
+   *tiles* (1.0) reports **`fails`**, while the run that overlaps both columns (2.0) reports
+   **`closes` with an empty doubt list**; a 4-wall closet reports `closes` and draws **12 overlapping
+   pairs**. **Nothing reachable today is affected** — no shipped convention has two corner-anchored
+   slots (`wall-on-tile` has none; both corner conventions have exactly one) — so it blocks only the
+   two multi-column shapes, which is why row E3 was told not to touch it. The pool exists: 252 files
+   at run 1.0. It is the same class of decision D8 declined to make without a measurement.
+8. **One record's mesh has no geometry, and it is upstream's to fix.**
+   `aztlan#column.col+T.side+dragonlock.stl` is 84 bytes — a valid binary STL whose facet count field
+   is **0**. It downloads, parses and draws nothing, and refusing a valid empty STL in the parser
+   would be the wrong fix. `src/mesh/corpus.test.ts` pins it as a singleton so a second cannot appear
+   unnoticed (#137).
+9. **The palette's docblocks still say 87 rows, and one screen sentence is now untrue of two rows.**
+   Row E3 added two assemblies without owning `src/builder/panels/**`, so ~15 present-tense "87"
+   claims there are now 89, and `src/screens/assemblies/AssembliesScreen.tsx:139` renders *"42
+   recipes from the archive's own blueprint fixtures"* — true of 40 of them. Nothing asserts that
+   sentence, so nothing fails. `src/screens/assemblies/measure.ts#assertTemplates` also hard-codes
+   `!== 40` as a runtime invariant, which E3 avoided rather than changed.
