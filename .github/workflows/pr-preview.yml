@@ -19,6 +19,15 @@ name: PR Preview
 # `npm run build` still fails outright on a type error, so a broken PR gets no
 # preview rather than a silently stale one.
 #
+# ## The URL requires sign-in, and that is Cloudflare Access, not this workflow
+#
+# Every preview URL of `openforge-workshop-staging` sits behind a Cloudflare
+# Access application scoped to a `preview_worker` destination on that one
+# Worker — its production route is a separate destination and is not gated.
+# That policy lives in the Cloudflare dashboard (Access → Applications →
+# "OpenForge Workshop — PR previews"), not in this repo, because it is a
+# statement about who may view a preview rather than about how one is built.
+#
 # ## What happens when the PR closes, and what does not
 #
 # **There is no way to take the preview itself down, on this PR or any other.**

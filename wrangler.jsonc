@@ -53,6 +53,13 @@
       // same way it already did — this line changes only whether a *preview*
       // of a version is public, not whether the Worker gets a permanent
       // `workers.dev` address alongside its custom domain.
+      //
+      // "Public" is the wrong word regardless: every preview URL of this
+      // Worker sits behind a Cloudflare Access application (dashboard →
+      // Access → Applications → "OpenForge Workshop — PR previews"), so
+      // `previews_enabled` controls whether a URL exists at all, not whether
+      // it is visitable without signing in. That policy is account
+      // configuration and has no file to live in here.
       "preview_urls": true
     },
     "production": {
