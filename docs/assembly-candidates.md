@@ -35,7 +35,11 @@ cross-product filler, and the 128-row version of Tier A is filler 127 times over
 **Optionally build one more: the corridor.** It needs a fourth layout convention, §8 of
 `docs/assembly-generation.md` argued against one on grounds that do not survive measurement (§3), and
 it closes cleanly. It is worth a row for what it *is* — the shape the archive has no assembly for —
-and not for what it reaches, which is nothing.
+and not for what it reaches, which is nothing. **Two prerequisites, both measured in §3.3.1:** its
+base slot must admit `shape|base|hallway`, the 2x2 piece upstream authored for exactly this shape and
+which the §3.3 predicate excludes; and its floor slot needs a minimum-depth predicate, because two
+0.5-deep walls on opposite faces leave **281 floor records with zero walkable width** and the closure
+check passes every one of them.
 
 **Do not build the 3-wall dead end or the 4-wall closet.** Not because they are undecidable — they
 are decidable, and they *fail* — but because `offsets.ts#cornerReservation` returns the wrong number
@@ -174,6 +178,69 @@ holds.
 predicated on bare `shape|wall` (no `build|separate wall`) fills with a `{shape:'wall', length:1.5}`
 s2w piece and comes out **`fails`, `want=2 got=1.5` on both walls**. Requiring `build|separate wall`
 is what makes it close, and no axis carries that fact.
+
+### 3.3.1 The corridor's floor and base, measured after the fact
+
+Two corrections to §3.3's predicates, and one gap in the closure check that only a corridor could
+have exposed. Measured on this tree against `public/catalog/catalog.json`, prompted by the project
+owner asking whether a fitting floor piece exists at all.
+
+**The archive already ships a corridor piece, and it is a base.** `plain#base+hallway.2x2` — **12
+records** over the connection variants, 2 designs (plain and electronics), tagged
+`size|width|2 + size|depth|2`, plus the inferred `role|floor` and `form|straight`. That is the same
+2x2 cell §3.3 closed on at area 4.00, reached independently: §3.3's cell came from the walk, this
+comes from upstream authorship.
+
+It is a distinct piece rather than a renamed square, and the triangle counts say so — exact from the
+binary-STL `84 + 50n` identity, all three at 2x2 openlock:
+
+| 2x2 base | triangles |
+| --- | ---: |
+| `plain#base+hallway.2x2.openlock` | **2,040** |
+| `plain#base+square.2x2.openlock` | 5,648 |
+| `plain#base+s2w+square+wall.2x2.openlock` | 4,765 |
+
+Under half the square base's geometry, which is what clips on **two opposite edges only** would cost
+— the two ends a corridor segment chains along, leaving its two long sides to carry the walls.
+
+**§3.3's base slot cannot reach it.** That slot requires `shape|base + shape|base|wall`, and
+**0 of the 12 hallway bases carry `shape|base|wall`** — checked all twelve. So the corridor as
+measured fills its base from the 305-record wall-base pool and structurally excludes the one piece
+upstream built for the shape. The predicate wants `shape|base|hallway`, and this is the same class of
+finding as §3.5's pinned base size: an authored fact no axis carries.
+
+**§3.3's floor slot admits 281 records that leave nothing to walk on.** Two 0.5-deep walls on
+opposite faces consume a full unit of depth, so the floor's *smallest* dimension is what decides
+whether a corridor has a floor. Over the 1,496-record floor pool — 1,224 `rect`, 272 non-`rect`:
+
+| floor min dimension | records | walkable across | |
+| ---: | ---: | ---: | --- |
+| 1 | **281** | **0.0** | two walls meet; the tile is solid stone |
+| 2 | 600 | 1.0 | 25.4 mm, one 25 mm mini base |
+| 3 | 99 | 2.0 | two abreast |
+| 4 | 209 | 3.0 | |
+| 6 | 20 | 5.0 | |
+| 8 | 15 | 7.0 | |
+
+**943 of the 1,224 rect floors (736 designs) are usable**; the 281 lost are all the 1-unit strips.
+
+**And the 281 `closes`.** No overlapping pair, union = cell, area exact to the unit — §3.3's walked
+cell histogram counts `1x1 ×59` among them. This is the gap:
+
+> `placeTemplateSlots` proves that parts do not overlap and that they cover the cell. It cannot prove
+> that anything is left to walk on.
+
+A 1x1 corridor is geometrically flawless and functionally a wall. The shipped 40 never needed the
+check — one 0.5 wall on a 1-unit floor still leaves 0.5 — and a corridor is the first layout in which
+**two slots eat the same axis**. So a corridor needs a minimum-depth predicate on its floor, which is
+a *third* kind of authorship beyond the two this document already records: §3.5's pinned size stops a
+sibling being poisoned, while this one exists to preserve function.
+
+Whether the default should be 2 or 3 units across is a design decision and not a measurement. 1 grid
+unit is 25.4 mm against a 25 mm mini base, so a 2x2 corridor is one mini wide with 0.4 mm to spare;
+two abreast needs min-dim 3, and that pool is 99 records against 600. Upstream calls the 2x2 piece a
+hallway, which is the strongest argument for taking 2 as the default and letting the armed size
+control widen it, rather than predicating the recipe on 3.
 
 ### 3.4 The two-corner faces: a code defect, and the verdict is inverted
 
@@ -489,6 +556,11 @@ records and +0 designs** (§2).
    4.00 with no doubts, closes on **263 of 382** walked combinations, and draws with no overlap. §8's
    argument against a fourth convention does not apply to it and does not apply to the wall + post
    either. Its coverage gain is **zero**, and that should be said out loud rather than dressed up.
+   **Author it with §3.3.1's two corrections, not with §3.3's predicates**: require
+   `shape|base|hallway` on the base — `plain#base+hallway.2x2` is upstream's own corridor piece at
+   2,040 triangles against the square base's 5,648, and none of its 12 records carries the
+   `shape|base|wall` that §3.3 demands — and put a minimum depth on the floor, or 281 of the 1,224
+   rect floors build a solid block of wall that the closure check calls `closes`.
 5. **`(base, column, floor, wall)` — the wall + post — is the second candidate, and it is cheap**:
    21 of 21 walked combinations `closes`, no new part names, the first-candidate walk completes it. It
    needs the shipped corner's own authorship — the corner-wall pool *and* a base pinned to 2x2 with no
@@ -503,6 +575,11 @@ records and +0 designs** (§2).
    generalisation is not: two of the four candidate fourth conventions close on A10's invariant, and
    the project already ships an `undecidable` convention (`internal-corner`, 38 of 38) that nobody
    minds.
+9. **`placeTemplateSlots` cannot see an unwalkable layout, and nothing else can either.** It proves
+   disjointness and coverage; a 1x1 corridor satisfies both and is 100% wall (§3.3.1). The shipped 40
+   never needed the check because no two of their slots eat the same axis. Any future convention that
+   puts two `edge` slots on opposite faces inherits this, so the check belongs with the convention
+   rather than with the recipe.
 
 ---
 
