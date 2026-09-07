@@ -421,14 +421,29 @@ describeCorpus(corpusTitle, () => {
       /* **The 8 the plan's §9 singles out.** Every one is a `single_piece`
          corner: two `size|width|2` walls plus a 0.5 column on a 2 x 2 cell,
          where `2 + 0.5 !== 2`. The meshes must be mitred back physically and
-         **nothing in the corpus records the mitre** — 0 of the 266
-         `shape|corner|left`/`right` records have a measured mesh, asserted
-         below. So the doubt names the edge and the sum and stops: *do not
-         silently write 1.5*. */
+         **nothing in the corpus records the mitre** — 0 of the **245** records
+         carrying `shape|corner|left` and/or `shape|corner|right` (266 tag
+         references over 245 records; 21 files carry both) have a measured mesh,
+         asserted below. So the doubt names the edge and the sum and stops: *do
+         not silently write 1.5*.
+
+         **Row D8: all five slots place regardless.** The doubt says the runs do
+         not tile the face; it does not say the wall has nowhere to be. Refusing
+         it a coordinate made `catalog.ts` draw it at the cell corner unrotated,
+         piling both walls and the column on one square — the defect the project
+         owner reported. `offsets.test.ts` measures that the five placed parts
+         still union to exactly the 2 x 2 cell on all four quarters, so nothing
+         overhangs and A10's rigid body survives. */
       expect(one.template.tags).toContain('build|s2w|single_piece')
       expect(one.placed.doubts.map((doubt) => doubt.code)).toEqual(['over-run', 'over-run'])
       expect(one.placed.doubts.every((doubt) => doubt.want === 2 && doubt.got === 2.5)).toBe(true)
-      expect(one.placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'column'])
+      expect(one.placed.slots.map((slot) => slot.part)).toEqual([
+        'base',
+        'floor',
+        'right wall',
+        'left wall',
+        'column',
+      ])
       expect(JSON.stringify(one.placed)).not.toContain('1.5')
     }
   })

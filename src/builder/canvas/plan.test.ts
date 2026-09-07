@@ -19,7 +19,16 @@ import { describe, expect, it } from 'vitest'
 import type { TileId } from '@/catalog'
 import type { PlacementId, SlotName, TemplateId, WorkshopState } from '@/store'
 
-import { BASE_LIFT_MM, createStyleResolver, originSlotLayout, planCatalogFromFile, templateSlotLayout } from './catalog'
+import {
+  BASE_LIFT_MM,
+  createStyleResolver,
+  isSlotLayout,
+  originSlotLayout,
+  planCatalogFromFile,
+  templateSlotLayout,
+} from './catalog'
+import type { SlotLayoutAnswer } from './catalog'
+import type { SlotLayout } from './geometry'
 import {
   FIXTURE_CELL,
   FIXTURE_IDS,
@@ -611,16 +620,32 @@ describe('the wired slot layout', () => {
     [FIXTURE_SLOTS.leftWall, record(FIXTURE_IDS.wall2)],
     [FIXTURE_SLOTS.column, record(FIXTURE_IDS.column)],
   ])
-  const at = (slot: SlotName, fills = CORNER) => layout(FIXTURE_TEMPLATE, slot, fills)
+  const answerAt = (slot: SlotName, fills = CORNER) => layout(FIXTURE_TEMPLATE, slot, fills)
+  /** The rule's answer, asserted to be a position rather than a refusal. */
+  const positionOf = (answer: SlotLayoutAnswer, where: string): SlotLayout => {
+    if (!isSlotLayout(answer)) throw new Error(`${where} was refused: ${answer.refused}`)
+    return answer
+  }
+  const at = (slot: SlotName, fills = CORNER) => positionOf(answerAt(slot, fills), slot)
 
-  it('lays a 2 x 2 corner’s five slots out, and two of the five refuse a coordinate', () => {
+  it('lays a 2 x 2 corner’s five slots out, over-running walls included', () => {
     /*
-      **The table this row is judged on.** The 2-unit walls are the corpus's own
-      8 `single_piece` mitres: two 2-unit runs plus a 0.5 column cannot share two
-      2-unit edges, `placeTemplateSlots` answers `over-run want 2 got 2.5`, and
-      the plan forbids inventing the number that would make them fit. So they
-      keep the cell's own corner — where they draw today — and gain the cell, so
-      the assembly is still rigid.
+      **The table this row is judged on, and row D8 changed one number in it.**
+      The 2-unit walls are the corpus's own 8 `single_piece` mitres:
+      `placeTemplateSlots` answers `over-run want 2 got 2.5` for both, because
+      two 2-unit runs and a 0.5 column do not tile two 2-unit edges end to end.
+      That doubt stands and the plan still forbids inventing the number that
+      would close it — but it is a *warning* now, not a refusal, so both walls
+      are laid out at the faces they are anchored to.
+
+      Every part lands at the cell's minimum corner because every anchor here is
+      flush to `-x`/`-z`, and the *extents* are what separate them: the right
+      wall runs 2 x 0.5 along the north face, the left wall is turned a quarter
+      so its 0.5 x 2 runs down the west face, and the 0.5 x 0.5 column sits in
+      the square where the two meet. **`rotation: 270` on the left wall is the
+      whole of the reported defect**: before this row both walls came back
+      `rotation: 0` at the same corner, so they drew through each other along one
+      face and left the other face bare.
     */
     expect(at(FIXTURE_SLOTS.base)).toEqual({ dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell: FIXTURE_CELL })
     expect(at(FIXTURE_SLOTS.floor)).toEqual({
@@ -637,15 +662,65 @@ describe('the wired slot layout', () => {
       elevationMm: BASE_LIFT_MM,
       cell: FIXTURE_CELL,
     })
-    for (const wall of [FIXTURE_SLOTS.rightWall, FIXTURE_SLOTS.leftWall]) {
-      expect(at(wall), wall).toEqual({
-        dx: 0,
-        dz: 0,
-        rotation: 0,
-        elevationMm: BASE_LIFT_MM,
-        cell: FIXTURE_CELL,
-      })
-    }
+    expect(at(FIXTURE_SLOTS.rightWall)).toEqual({
+      dx: 0,
+      dz: 0,
+      rotation: 0,
+      elevationMm: BASE_LIFT_MM,
+      cell: FIXTURE_CELL,
+    })
+    expect(at(FIXTURE_SLOTS.leftWall)).toEqual({
+      dx: 0,
+      dz: 0,
+      rotation: 270,
+      elevationMm: BASE_LIFT_MM,
+      cell: FIXTURE_CELL,
+    })
+  })
+
+  it('refuses a coordinate for a fill with no run, and says why in the editor’s words', () => {
+    /*
+      The other half of row D8, and the case the fix does *not* place: a `diag`
+      fill in an `edge` slot has no straight run to lie along at all — 104 of
+      B2's 1,215 walked combinations — so anchoring it flush from its bounding
+      box would set a 45° wall against an axis it does not lie on. There is no
+      position, the rule says so, and the sentence is `slotDoubtSentence`'s so
+      the plan and C3's slot editor do not describe one fault two ways.
+    */
+    const diagonal = new Map([
+      [FIXTURE_SLOTS.base, record(FIXTURE_IDS.floor2)],
+      [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
+      [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.diag)],
+    ])
+    const answer = layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, diagonal)
+    expect(isSlotLayout(answer)).toBe(false)
+    expect(isSlotLayout(answer) ? '' : answer.refused).toBe(
+      'The wall part has no straight run, so it does not lie along an edge of this cell.',
+    )
+    // And the scene draws nothing for it rather than stacking it on the origin,
+    // which is what the old `dx = dz = 0` answer did.
+    const scene = buildPlanScene(
+      familyOf(OTHER_FIXTURE_TEMPLATE, [
+        [
+          'diag',
+          [
+            [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.wall, FIXTURE_IDS.diag],
+          ],
+          0,
+          0,
+          0,
+        ],
+      ]),
+      wired,
+      wiredStyle,
+    )
+    expect(scene.undrawable.map((one) => one.slot)).toEqual([FIXTURE_SLOTS.wall])
+    expect(scene.undrawable[0]?.reason).toBe(
+      'The wall part has no straight run, so it does not lie along an edge of this cell. It is not drawn.',
+    )
+    expect(scene.pieces[0]?.parts.map((part) => part.slot).sort()).toEqual(['base', 'floor'])
   })
 
   it('asks for one height and always the base’s, which is what makes 6 mm a constant', () => {
@@ -688,11 +763,13 @@ describe('the wired slot layout', () => {
       [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
       [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.wall2)],
     ])
-    const wallLayout = layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase)
+    const wallLayout = positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase), 'wall')
     expect(wallLayout.elevationMm).toBe(0)
     // And with a base in the map it is one base up.
     noBase.set(FIXTURE_SLOTS.base, record(FIXTURE_IDS.floor2))
-    expect(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase).elevationMm).toBe(BASE_LIFT_MM)
+    expect(
+      positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase), 'wall').elevationMm,
+    ).toBe(BASE_LIFT_MM)
   })
 
   it('reads the cell off the cell slot, so a 2 x 1 floor is not laid out in a 2 x 2', () => {
@@ -703,8 +780,8 @@ describe('the wired slot layout', () => {
       [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.angled)],
       [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.wall2)],
     ])
-    expect(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, small).cell).toEqual({ w: 2, d: 1 })
-    expect(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.base, small).cell).toEqual({ w: 2, d: 1 })
+    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, small), 'wall').cell).toEqual({ w: 2, d: 1 })
+    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.base, small), 'base').cell).toEqual({ w: 2, d: 1 })
   })
 
   it('never snaps an offset, and never lands off the 0.25 lattice either', () => {

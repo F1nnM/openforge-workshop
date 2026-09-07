@@ -483,6 +483,24 @@ function resolveInstance(
       })
       continue
     }
+    // A drawable footprint the *recipe* has nowhere to put — row D8's
+    // `UnplaceableSlotPart`. Checked after the footprint so that a `none` fill
+    // keeps its own sentence, which names the footprint rather than the rule.
+    // The reason is `slotDoubtSentence`'s, so the plan and C3's slot editor
+    // describe one fault the same way.
+    if (slot.kind === 'unplaceable') {
+      omissions.push({
+        list: 'undrawable',
+        omission: {
+          id,
+          template: instance.template,
+          slot: slot.slot,
+          tile: slot.fill.tile,
+          reason: `${slot.reason} It is not drawn.`,
+        },
+      })
+      continue
+    }
     parts.push(placePart(slot, shape, slotGeometry(shape, slot.layout, origin, instance.rotation), style))
   }
 
