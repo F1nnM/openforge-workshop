@@ -455,18 +455,39 @@ describe('placeTemplateSlots', () => {
     expect(byPart.get('column')?.offset).toEqual([-0.75, -0.75])
   })
 
-  it('surfaces the 8 single-piece mitres as needing a choice, and writes no 1.5', () => {
+  it('warns about the 8 single-piece mitres, places them anyway, and writes no 1.5', () => {
     /* §9 of the plan, verbatim: *"the mitre is in no tag and no measurement. Do
-       not silently write 1.5."* So the verdict is `fails`, the two walls get no
-       coordinate at all, and the doubt reports the edge and the sum — never the
-       difference and never a corrected run. */
+       not silently write 1.5."* So the verdict is `fails` and the doubt reports
+       the edge and the sum — never the difference and never a corrected run.
+
+       **Row D8 changed what happens next.** The two walls used to get no
+       coordinate, and `catalog.ts` then drew them at `dx = dz = 0` unrotated —
+       one pile on one square, which the project owner reported. The doubt is a
+       warning about the *sum*, not a claim that the part has nowhere to go: each
+       wall's position is the face it is anchored to, and the yaws below are what
+       separate two 2-unit runs onto two adjacent faces. Still no 1.5 anywhere in
+       the answer. */
     const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_MITRE)
     expect(placed.verdict).toBe('fails')
     expect(placed.doubts).toEqual([
       { part: 'right wall', code: 'over-run', want: 2, got: 2.5 },
       { part: 'left wall', code: 'over-run', want: 2, got: 2.5 },
     ])
-    expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'column'])
+    expect(placed.slots.map((slot) => slot.part)).toEqual([
+      'base',
+      'floor',
+      'right wall',
+      'left wall',
+      'column',
+    ])
+    const byPart = new Map(placed.slots.map((slot) => [slot.part, slot]))
+    // The same offsets and yaws the *closing* modular corner gets for its own
+    // 1.5 runs, because the anchor does not depend on whether the sum closes:
+    // flush to `-z` at side 0, flush to `-x` at side 3.
+    expect(byPart.get('right wall')?.offset).toEqual([0, -0.75])
+    expect(byPart.get('right wall')?.yaw).toBe(0)
+    expect(byPart.get('left wall')?.offset).toEqual([-0.75, 0])
+    expect(byPart.get('left wall')?.yaw).toBe(270)
     expect(JSON.stringify(placed)).not.toContain('1.5')
     expect(slotDoubtSentence(placed.doubts[0] as never)).toBe(
       'The right wall part needs a choice: this edge is 2 units and the pieces on it come to 2.5.',
@@ -661,22 +682,39 @@ describe('the offsets, placed by the canvas', () => {
     }
   })
 
-  it('is 4.00 units² for a 2 x 2 corner, not 7.56', () => {
+  it('is 4.00 units² for a 2 x 2 corner, not 7.56 — with all five parts drawn', () => {
     /* The figure row A10 had to settle, measured from the conventions rather
-       than from a fixture. The external corner's two 2-unit walls earn
-       `over-run` doubts on a 2 x 2 floor — the 8 documented failures, since two
-       2-unit runs and a 0.5 column cannot share two 2-unit edges — so the three
-       parts that *do* place are the base, the floor and the column, and they
-       union to the cell. Nothing overhangs it at 0°, so 7.56 could not have been
-       the unrotated footprint of a 2 x 2 anything. */
+       than from a fixture. Nothing overhangs the cell at 0°, so 7.56 could not
+       have been the unrotated footprint of a 2 x 2 anything.
+
+       **Row D8 strengthened this from three parts to five, which is the load
+       bearing half.** A10 could only measure the base, the floor and the column,
+       because the two 2-unit walls earned `over-run` and were refused a
+       coordinate. They are placed now, and the union is *still* exactly the
+       cell: two 2-unit walls flush to two adjacent 2-unit faces overlap in the
+       0.5 x 0.5 corner square and overhang nothing. So the answer to *"does the
+       fix break A10's invariant"* is measured here and it is no — the pieces
+       genuinely fit inside the cell, which is the brief's own condition on
+       drawing them. */
     const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_2X2)
     expect(placed.doubts.map((doubt) => doubt.code)).toEqual(['over-run', 'over-run'])
-    expect(placed.slots.map((slot) => slot.part)).toEqual(['base', 'floor', 'column'])
+    expect(placed.slots).toHaveLength(5)
 
     for (const rotation of QUARTERS) {
       const union = unionAt(EXTERNAL_CORNER, CORNER_2X2, rotation)
       expect(union, `rotation ${String(rotation)}`).toEqual({ x: 0, z: 0, w: 2, d: 2 })
       expect(union.w * union.d).toBe(4)
+    }
+
+    // And every part is inside the cell at every quarter, part by part — the
+    // property that makes the union figure mean "fits" rather than "cancels".
+    for (const rotation of QUARTERS) {
+      for (const box of boxesAt(EXTERNAL_CORNER, CORNER_2X2, rotation)) {
+        expect(box.x, `rotation ${String(rotation)}`).toBeGreaterThanOrEqual(0)
+        expect(box.z, `rotation ${String(rotation)}`).toBeGreaterThanOrEqual(0)
+        expect(box.x + box.w, `rotation ${String(rotation)}`).toBeLessThanOrEqual(2)
+        expect(box.z + box.d, `rotation ${String(rotation)}`).toBeLessThanOrEqual(2)
+      }
     }
   })
 

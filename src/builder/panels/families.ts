@@ -1,5 +1,5 @@
 /**
- * The 91 placeable templates, as the palette's rows — and the map from a catalog
+ * The 87 placeable templates, as the palette's rows — and the map from a catalog
  * item back to one of them.
  *
  * Row **C1**. `templates.ts` emits two arrays and a size table and says nothing
@@ -17,13 +17,22 @@
  * every page**. That file carries the A/B build and the tests that keep the
  * construction and this table in step.
  *
- * ## 91, and they are two different kinds of thing
+ * ## 87, and they are two different kinds of thing
  *
- *   - **51 generated families** (`GENERATED_FAMILIES`), one required slot each,
+ *   - **47 generated families** (`GENERATED_FAMILIES`), one required slot each,
  *     keyed on B4's derived `(role, form, build)` — plus `shape-base`, which no
  *     such key can name because `base` is a `layer` value and not one of B1's
  *     eight roles (row A9 proved that, and `shape|base` is coextensive with
  *     `layer === 'base'` on all 1,963 records with zero exceptions either way).
+ *
+ *     **It was 51 until row D1.** A base keeps the role of the piece it sits
+ *     under, so the key selected all 1,963 of them into a role family as well —
+ *     17 rows offering bases, 1,963 wrong candidates, and four rows whose every
+ *     candidate was a base. Every family now denies `shape|base` and the four
+ *     that admitted nothing else are not generated: two walls
+ *     (`wall|corner|separate wall`, `wall|internal_corner|s2w`) and two floors
+ *     (`floor|straight|separate wall`, `floor|curve|separate wall`), 134 records
+ *     between them, all reached through `shape-base` instead.
  *   - **40 shipped recipes** (`RECIPE_TEMPLATES`), read from the 20 blueprint
  *     fixtures, 128 authored parts between them, every one of them a
  *     `S2W: Wall on Tile` composition.
@@ -39,9 +48,10 @@
  *
  * Everything underneath was working. `S2W: Wall on Tile: Corner (Any, Single
  * Piece)` ships, with `[column, right wall, left wall, floor, base]` — the floor,
- * the two walls and the column, in their own words. It was row 75 of 91, under a
+ * the two walls and the column, in their own words. It was row 50 of 87, under a
  * heading that named a build system rather than a kind, and the eleven — measured
- * **sixteen** — one-slot rows whose names also say *corner* were above it. So the
+ * **fourteen**, and sixteen before row D1's drop — one-slot rows whose names also
+ * say *corner* were above it. So the
  * kind of thing a row is is the **first** distinction the palette makes now
  * (`palette.ts#paletteSections`), and the slot count is on every row.
  *
@@ -55,7 +65,7 @@
  * §3.1's measurement is the whole argument for this shape: predicated on raw
  * tags the palette would have grown from roughly 20 recognisable library rows to
  * **3,862** entries — recognition becoming recall. Role-predicated families make
- * it **51**, in eight groups, under one section heading.
+ * it **47**, in eight groups, under one section heading.
  *
  * {@link GROUP_ORDER} is ordered by the corpus, not alphabetically, and the
  * figures are records carrying each `role|` tag over the emitted index (measured
@@ -63,8 +73,8 @@
  *
  * | group | records | families |
  * | --- | ---: | ---: |
- * | wall | 5,381 | 19 |
- * | floor | 2,162 | 17 |
+ * | wall | 5,381 | 17 |
+ * | floor | 2,162 | 15 |
  * | riser | 319 | 2 |
  * | column | 223 | 6 |
  * | stair | 206 | 3 |
@@ -75,10 +85,14 @@
  * The family counts do **not** follow the record counts — riser has 319 records
  * in 2 families and column 223 in 6 — so the two orderings are different lists
  * and the one that matters is where a user will look first. `base` sits after the
- * seven roles rather than in them because its 1,963 records are *also* counted
- * under a role (a base keeps the role of the piece it sits under: 1,117 wall,
- * 661 floor, 176 riser, 9 stair), so putting it in the table's flow would
- * double-count the corpus in the reader's head.
+ * seven roles rather than in them because the *records* column double-counts it:
+ * a base keeps the role of the piece it sits under (1,117 wall, 661 floor, 176
+ * riser, 9 stair), so all 1,963 are inside the 5,381 and the 2,162 as well.
+ *
+ * What no longer double-counts is the **candidates**: since row D1 every family
+ * denies `shape|base`, so the 47 rows offer 8,417 records between them and each
+ * of those records exactly once — the whole corpus less the 285 inserts.
+ * `palette.corpus.test.ts` measures that as a partition; it read 10,380 before.
  *
  * **There is no `insert` group, and its absence is measured rather than
  * incidental.** `role|insert` is a perfect bijection with `layer === 'insert'` —
@@ -89,35 +103,40 @@
  * and the panel says where a door lives instead of listing 94 designs it cannot
  * place. {@link INSERT_DESIGNS} is that count from the other end.
  *
- * ## Size is a control on the family, and 8 families have none
+ * ## Size is a control on the family, and 7 families have none
  *
  * B3's reason it is a control at all: keyed on `(role, form, build)` the corpus
- * needs 51 families and keyed with size in the key, 217 to 277. So a position is
+ * needs 47 families and keyed with size in the key, 217 to 277. So a position is
  * a *parameter* of one placed instance, and `GENERATED_FAMILY_SIZES` holds the
- * domain — **350 positions across the 51**, median 5 and maximum 32 counting the
+ * domain — **304 positions across the 47**, median 4 and maximum 32 counting the
  * `any size` position every family carries.
  *
- * **The brief for this row said 5 families have no size domain. Measured, 8 have
+ * **The brief for this row said 5 families have no size domain. Measured, 7 have
  * no size control**, and the difference is not a mistake in either figure — it is
  * two causes that produce the same row:
  *
  *   - **B3's five empty domains** — `wall|diagonal|separate wall` (121 records),
- *     `wall|hex|thick wall` (56), `decor|straight` (26),
- *     `wall|octagon|separate wall` (20), `floor|octagon` (8); 231 records that
+ *     `decor|straight` (26), `wall|octagon|separate wall` (20),
+ *     `wall|hex|thick wall` (8) and `floor|octagon` (8); 183 records that
  *     resolve no grid cell at all.
- *   - **three whose whole domain is inexpressible** — `stair|curve`,
- *     `floor|curve|separate wall` and `column|corner|s2w`. Their records *do*
- *     resolve cells; no `size|` tag names them, which is B4's 16 refused cells
- *     (12 annular sectors whose cell is `rOut x rOut`, 3 columns at `0.5 x 0.5`
- *     where `size|width` has no `0.5`, and one `3x0.5` curve wall).
+ *   - **two whose whole domain is inexpressible** — `stair|curve` and
+ *     `column|corner|s2w`. Their records *do* resolve cells; no `size|` tag
+ *     names them, which is B4's 16 refused cells (12 annular sectors whose cell
+ *     is `rOut x rOut`, 3 columns at `0.5 x 0.5` where `size|width` has no
+ *     `0.5`, and one `3x0.5` curve wall).
  *
  * Both arrive here as a one-entry table, and the panel must render **no control**
  * rather than a control with one position in it — a radio group of one is a
  * control that cannot be operated. {@link TemplateFamily.sizes} is therefore
- * empty for all 8, and `[]` never means "any size is unavailable": with no size
+ * empty for all 7, and `[]` never means "any size is unavailable": with no size
  * chosen the slot's `constrain` block collects nothing and the family admits
  * every size, which is what makes `any size` a real default rather than a missing
  * selection.
+ *
+ * Two of those figures are row D1's and both moved for the same reason: the
+ * third inexpressible family was `floor|curve|separate wall`, which is gone
+ * because all 41 of its records were bases, and `wall|hex|thick wall` fell from
+ * 56 records to 8 because 48 of its 56 were.
  */
 import type { RecipeTemplate } from '@/screens/assemblies'
 import { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
@@ -147,9 +166,9 @@ export interface SizePosition {
  * **The code's word and the screen's word are not the same word, and row D2
  * fixed the screen's.** `recipe` is what `screens/assemblies` calls a
  * multi-slot composition and it stays the name in the types; on screen those 40
- * rows are **assemblies** and the 51 one-slot rows are **single tiles**, because
+ * rows are **assemblies** and the 47 one-slot rows are **single tiles**, because
  * the owner's report of this palette was that it *"shows everywhere as having
- * one slot only"* — the two kinds were listed as one list of 91 and the words
+ * one slot only"* — the two kinds were listed as one list of 87 and the words
  * `family` and `recipe` were nowhere on it. `palette.ts#SECTION_LABEL` is the
  * one place the display words are spelled.
  */
@@ -161,7 +180,7 @@ export type FamilyKind = 'family' | 'recipe'
  * **The 40 assemblies are not in here and no longer have a group.** They were a
  * ninth `recipe` group under a heading that said `S2W: Wall on Tile`, which is
  * how the owner came to place a one-slot corner and conclude the templates were
- * broken: the assembly they wanted was 51 rows further down under a heading
+ * broken: the assembly they wanted was thirty-eight rows further down under a heading
  * naming a build system rather than a kind. Row D2 makes the kind the *section*
  * (`palette.ts#paletteSections`) and the role the sub-group inside one of them,
  * so `TemplateFamily.group` is `undefined` for all 40.
@@ -170,7 +189,7 @@ export type GroupKey = 'wall' | 'floor' | 'riser' | 'column' | 'stair' | 'roof' 
 
 /** One palette row: a template, with what the panel needs to show and filter it. */
 export interface TemplateFamily {
-  /** Branded on the way in; all 91 emitted ids parse. */
+  /** Branded on the way in; all 87 emitted ids parse. */
   readonly id: TemplateId
   /** The template's own name — `"Wall: Corner (S2W)"`, `"S2W: Wall on Tile: Wall: Torch (Modular)"`. */
   readonly name: string
@@ -201,7 +220,7 @@ export interface TemplateFamily {
   /**
    * Slots to fill — **`template.parts.length` and nothing derived from it**.
    *
-   * 1 for all 51 families; **3 or 5** across the 40 assemblies — the 4 outer
+   * 1 for all 47 families; **3 or 5** across the 40 assemblies — the 4 outer
    * corners at 5, the other 36 at 3 (measured; C1's docblock said *"2 to 5"*
    * and no template has 2 or 4). Row D2 puts this number on every row, and
    * it is the row's whole job to be the number the next surface agrees with:
@@ -216,8 +235,8 @@ export interface TemplateFamily {
   /**
    * The size control's positions, or **empty when there is nothing to choose**.
    *
-   * Empty for the 40 recipes and for the 8 families whose table holds only
-   * `any size` — see the module note for the two different causes of that 8, and
+   * Empty for the 40 recipes and for the 7 families whose table holds only
+   * `any size` — see the module note for the two different causes of that 7, and
    * for why an empty control is not an unavailable one.
    */
   readonly sizes: readonly SizePosition[]
@@ -266,7 +285,7 @@ export const GROUP_LABEL: Readonly<Record<GroupKey, string>> = {
  * The facet chips' labels, from `familyKey.ts`'s one table.
  *
  * Re-exported rather than declared, because the same 20 strings are what
- * `pipeline/families.ts` baked into the 51 generated names — two copies of them
+ * `pipeline/families.ts` baked into the 47 generated names — two copies of them
  * in `src/` would be two copies too many, and the copy that exists is compared
  * to the generator's output by `palette.corpus.test.ts`.
  */
@@ -300,7 +319,7 @@ const RECIPE_PREFIX = 'S2W: Wall on Tile: '
 /**
  * The size table for an id, reduced to *what there is to choose*.
  *
- * One position is nothing to choose — see the module note on the 8 — and a
+ * One position is nothing to choose — see the module note on the 7 — and a
  * recipe has no entry in the table at all.
  */
 function sizesFor(id: string): readonly SizePosition[] {
@@ -317,7 +336,7 @@ function familyOf(template: RecipeTemplate, kind: FamilyKind): TemplateFamily {
   const prefix = group === undefined ? RECIPE_PREFIX : `${GROUP_LABEL[group]}: `
   return {
     // Parsed rather than cast: the pattern is the one thing about a generated id
-    // this module can check, all 91 pass it today, and a generator that emitted
+    // this module can check, all 87 pass it today, and a generator that emitted
     // `Wall Straight` should fail here loudly rather than resolve to nothing on
     // the grid three rows later.
     id: TemplateId.parse(template.id),
@@ -339,14 +358,14 @@ const groupRank = (family: TemplateFamily): number =>
   family.group === undefined ? GROUP_ORDER.length : GROUP_ORDER.indexOf(family.group)
 
 /**
- * All 91, in group order.
+ * All 87, in group order.
  *
  * A module constant because it is a pure function of two generated arrays: the
  * panel would otherwise rebuild it on every mount, and nothing about it can
  * change while the bundle is loaded.
  *
  * **This is a declared order and not the display order any more.** Row D2 shows
- * the 40 assemblies *above* the 51 single tiles, and does it in
+ * the 40 assemblies *above* the 47 single tiles, and does it in
  * `palette.ts#paletteSections` rather than by resorting this array — because
  * this array is also {@link PLACEABLE_TEMPLATES}, which two screens build a
  * `Map` from, and moving it would be moving a list for a reason that belongs to
@@ -368,7 +387,7 @@ export const TEMPLATE_FAMILIES: readonly TemplateFamily[] = [
  * not hold with one `unknown-template` note and no parts, and `billView.ts`
  * renders that as *"1 placed piece names a recipe this build does not ship"*.
  * The screen holds `new Map(RECIPE_TEMPLATES.map(…))` — the 40 — which is
- * correct for every id that existed before this row and wrong for all 51
+ * correct for every id that existed before this row and wrong for all 47
  * families. `src/screens/builder/BuilderScreen.tsx` belongs to row C3; this
  * export is the one line it needs.
  */
@@ -395,7 +414,7 @@ export function familyById(id: string): TemplateFamily | undefined {
  *
  * It is a **narrowing and never an invention**: a position whose tags the arm
  * does not carry cannot be chosen. `[]` — `any size` — is what is left when none
- * is, which covers the 8 families with no control, the 522 designs whose cell no
+ * is, which covers the 7 families with no control, the 522 designs whose cell no
  * position expresses, all 40 recipes, and the one reachable failure of a
  * handoff: a catalog re-import between the press and the claim retiring the cell
  * a tile was measured at.

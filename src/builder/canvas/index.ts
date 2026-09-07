@@ -176,6 +176,7 @@ export type { PlanTool, PlanToolDefaults, PlanTools } from './usePlanTools'
 export {
   BASE_LIFT_MM,
   createStyleResolver,
+  isSlotLayout,
   originSlotLayout,
   planCatalogFromFile,
   templateSlotLayout,
@@ -186,9 +187,12 @@ export type {
   PlanSlotPartBase,
   PlanStyle,
   ResolvedSlotPart,
+  SlotLayoutAnswer,
   SlotLayoutRule,
   SlotRecords,
+  SlotRefusal,
   StrandedSlotPart,
+  UnplaceableSlotPart,
 } from './catalog'
 
 export {

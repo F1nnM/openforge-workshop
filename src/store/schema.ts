@@ -448,6 +448,55 @@ export const WorkshopState = z.object({
    * Persisted, because the whole point is that it survives a reload.
    */
   lockChosen: z.boolean(),
+  /**
+   * The room's **design** — one `texture` root for the whole scene, or absent
+   * for *no preference*.
+   *
+   * The owner's requirement, verbatim: *"Room-Wide Design as the default,
+   * manual deviations are always allowed."* Row C1 argued for exactly this
+   * field in `builder/panels/palette.ts` and deliberately built nothing,
+   * because at the time nothing read it; row C2's solver has read
+   * `FillContext.family` as its **first** preference since it shipped and
+   * nothing set it. The measured consequence is one corner drawn out of four
+   * stone types — see `@/template`'s `FillContext.family`.
+   *
+   * ## Why it is called `design` here and `family` there
+   *
+   * `family` is taken. In this epic it means a *template* family — a
+   * {@link TemplateId}, `builder/panels/families.ts`' `TemplateFamily`, the
+   * thing the palette arms — so `WorkshopState.family` would read as "the armed
+   * recipe" at every call site. `design` is the owner's own word and the word
+   * §1.6 uses (*"filterable by design"*). It reaches the solver as
+   * {@link FillContext.family} and the value is the same in both: a `texture`
+   * root exactly as {@link CatalogRecord.texture} carries it.
+   *
+   * ## A string, not an enum, and not validated against the archive
+   *
+   * The 36 reachable roots are a fact about `catalog.json`, which this module
+   * must not reach — `schema.ts`' own rule is that anything derivable from the
+   * catalog is absent, because a derived value in `localStorage` goes stale the
+   * moment the catalog is reimported. A root spelled `cut_stone` when the
+   * archive says `cut-stone` therefore *parses*, and it **fails open** rather
+   * than closed: `FillContext.family` is a preference and never a filter, so a
+   * design no record carries is honoured on no slot and every slot still fills.
+   * That is the fallback contract C2 documented, and it is the reason this field
+   * needs no catalog to be safe.
+   *
+   * `.optional()` rather than a required value with a sentinel, and unlike
+   * {@link SlotFill.pinned} that is right here: *no room design* is the shipped
+   * default and the state a user returns to, so there is no producer for whom
+   * the absent case is a mistake. It mirrors `FillContext.family?` one field
+   * over, so the store's shape and the solver's shape are the same shape.
+   *
+   * **Measured, over the 91 families this build can place and their 179
+   * slots:** 28 of the 36 reachable roots reach at least one slot and 8 reach
+   * none; the best two reach 122 and 111 of 179. The **base** slot is the
+   * exception and is not a bug — **38 of 40 base slots have only `plain`
+   * candidates**, so row A3's `rankBases` keeps deciding them. `@/ui/design-picker`'s
+   * `reach.ts` re-derives all of that from the emitted index rather than
+   * carrying it as a constant.
+   */
+  design: z.string().min(1).optional(),
 })
 export type WorkshopState = z.infer<typeof WorkshopState>
 
@@ -488,6 +537,18 @@ export function filledSlots<K extends string>(fills: Readonly<Partial<Record<K, 
  * A function, not a frozen constant, because the caller owns the result: the
  * store mutates its copy, and handing every caller the same object would let a
  * migration's fallback alias the store's live state.
+ *
+ * {@link WorkshopState.design} is **absent** rather than set to the largest
+ * family, and the largest family is a real temptation: `dungeon_stone` holds
+ * 1,566 of the 3,822 items and reaches 122 of the 179 placeable slots, so
+ * defaulting to it would make the very first placement look designed. It is
+ * declined for {@link DEFAULT_LOCK_SYSTEM}'s reason read the other way round —
+ * the lock has a default because *some* joinery has to be printed and 99.9%
+ * reach makes one answer obviously least-bad, where a design has no such
+ * answer: the top two roots reach 122 and 111 slots and picking between them
+ * for the user is picking what their dungeon looks like. So the shipped state
+ * is the one C2 already specified, `family === undefined`, under which the
+ * solver falls through to the preferred variant and the ascending address.
  */
 export function defaultWorkshopState(): WorkshopState {
   return { placements: {}, generated: {}, lock: DEFAULT_LOCK_SYSTEM, lockChosen: false }

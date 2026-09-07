@@ -1,0 +1,345 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   OpenForge Workshop — the room design picker.
+
+   Hand-written CSS on the Parchment tokens, following `../lock-picker/
+   lock-picker.css`, which this file is deliberately a sibling of rather than a
+   variation on: the two controls sit in the same band, at the same size, and a
+   second visual language for the second room-wide preference would read as two
+   unrelated things. Unlayered and light-only, for that file's reasons.
+
+   ## The one rule this file exists to serve
+
+   Twenty-nine options must not read as a flat list of names. The reach spread is
+   **120 parts to 1** — far wider than the lock picker's 88.3 to 78.7 — so the
+   number is on every row and so is a bar, on one shared track, and the rows
+   arrive in reach order from the derivation.
+
+     - The track is scaled to the **best** design rather than to the 139 parts,
+       because at 139 every bar in the tail would be under two pixels and the
+       comparison a reader makes is against the best design available. The
+       honest denominator is printed as the number beside it, and the footer says
+       what the number is.
+     - Two numeric columns, right-aligned and tabular: **parts** (what this
+       setting reaches) and **items** (how big the design is in the archive).
+       They run different ways on real data — `shingles` is 2 parts out of 82
+       items — which is the whole reason the second column exists rather than
+       being folded into the bar.
+     - *No room design* is the first row and looks like a row, not like a reset:
+       it is the shipped default and a decision a user returns to.
+     - Selection is structural — border, inset rule, ground — so it does not
+       compete with the figure, which is the only accent-coloured thing on a row.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-design-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── The group ───────────────────────────────────────────────────────────── */
+
+.of-design-options {
+  /* A fieldset carries a UA border, padding and min-inline-size, all three of
+     which fight the grid rows below. Reset explicitly rather than relying on
+     Preflight. */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+  border: 0;
+  /* 29 options do not fit a dialog, and the alternative to scrolling here is
+     scrolling the whole popup — which would take the consequence paragraph and
+     the footer off screen while the list is being read, and those are what the
+     figures mean. The popup's own overflow stays for the small viewport case. */
+  max-height: 46vh;
+  overflow-y: auto;
+  /* Room for the scrollbar so the last column does not sit under it. */
+  padding-right: 2px;
+}
+
+.of-design-legend {
+  /* The dialog's own title already says "Room design", so the legend is the
+     group's accessible label and not a second heading. Kept in the tree and out
+     of the layout, which is `VisuallyHidden`'s treatment written inline because
+     a `<legend>` cannot be wrapped without leaving the fieldset. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── One option ─────────────────────────────────────────────────────────── */
+
+.of-design-option {
+  display: grid;
+  /* radio · name · track · parts · items. The name column is capped so a long
+     root (`mortar_and_stone`) does not push the track out of alignment with the
+     rows above it — the shared track is the whole comparison. */
+  grid-template-columns: auto minmax(0, 8.5rem) 1fr 3rem 3.5rem;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.of-design-option:hover {
+  background: var(--bg2);
+}
+
+.of-design-option[data-selected] {
+  background: var(--bg2);
+  border-color: var(--line);
+  box-shadow: inset 3px 0 0 0 var(--acc);
+}
+
+/* The *no design* row spans the numeric columns with a note instead: there is no
+   reach to state, and printing `0` under **parts** would say the wrong thing —
+   with no design every part is still filled. */
+.of-design-option[data-none] {
+  grid-template-columns: auto minmax(0, 8.5rem) 1fr;
+}
+
+.of-design-radio {
+  /* Sized and coloured, not replaced: the UA control is the accessible one and
+     `accent-color` is enough to bring it into the palette. */
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--acc);
+  cursor: pointer;
+}
+
+.of-design-name {
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--ink);
+  overflow-wrap: break-word;
+}
+
+.of-design-option[data-selected] .of-design-name {
+  font-weight: 600;
+}
+
+.of-design-none-note {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--mut);
+}
+
+/* The shared track. One height for every row, so the fills are comparable
+   rather than each scaled to itself. */
+.of-design-track {
+  position: relative;
+  display: block;
+  height: 6px;
+  min-width: 0;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  overflow: hidden;
+}
+
+.of-design-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--of-design-bar, 0%);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--acc) 55%, transparent);
+}
+
+.of-design-option[data-selected] .of-design-fill {
+  background: var(--acc);
+}
+
+/* Mono means measured — the design's rule, and both columns are read off the
+   emitted index every session. Tabular so the two columns line up down 29 rows,
+   which is what makes the list scannable at all. */
+.of-design-parts,
+.of-design-items {
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.of-design-parts {
+  color: var(--acc);
+}
+
+.of-design-items {
+  color: var(--mut);
+}
+
+.of-design-empty {
+  margin: 6px 9px 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--mut);
+}
+
+/* ── The footer facts and the consequence ───────────────────────────────── */
+
+.of-design-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.of-design-fact {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.of-design-fact strong {
+  font-weight: 600;
+}
+
+/* Two tones, and the difference is whether there is a scene to rewrite — the
+   lock picker's rule, and it matters more here, because a design change does
+   move placed files where a lock change does not. */
+.of-design-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--mut);
+}
+
+.of-design-note[data-tone='warn'] {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 0 var(--acc);
+  color: var(--ink);
+}
+
+.of-design-note-lead,
+.of-design-note-body {
+  margin: 0;
+}
+
+.of-design-note-body {
+  color: var(--mut);
+}
+
+.of-design-mono {
+  font-family: var(--face-mono);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* ── The work-area toggle ───────────────────────────────────────────────────
+   `../lock-picker/lock-picker.css`' plate, at the same size and in the same
+   band. Not a shared class: the two files are separate CSS imports behind
+   separate components, and a common `.of-band-toggle` would put one of them in
+   the other's chunk to save nine declarations.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-design-toggle {
+  display: inline-flex;
+  /* Wrap and shrink rather than overflow, for the defect row L1 measured on the
+     lock toggle: an `inline-flex` at its content width will not shrink below it,
+     and this band is capped by the stage's gutter — so a narrow stage used to
+     push the control out of the slot and under the 3D plate. */
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg2);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.of-design-toggle:hover,
+.of-design-toggle[data-popup-open] {
+  border-color: var(--acc);
+}
+
+.of-design-toggle-key {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+
+.of-design-toggle-name {
+  font-weight: 500;
+}
+
+.of-design-toggle-parts {
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--acc);
+}
+
+/* The `(i)`. A ring rather than a glyph from an icon set: the app ships no icon
+   font and one inline SVG for one character would be the start of one. */
+.of-design-toggle-info {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  font-style: italic;
+  line-height: 1;
+  color: var(--mut);
+}
+
+.of-design-toggle:hover .of-design-toggle-info,
+.of-design-toggle[data-popup-open] .of-design-toggle-info {
+  border-color: var(--acc);
+  color: var(--acc);
+}
+
+/* The disclosure. `@/ui/primitives`' `Dialog`, widened to the lock dialog's
+   width so the two overlays in this band are one size — and because the five
+   columns of an option row stop being legible under it. */
+.of-design-dialog {
+  --of-dialog-width: 468px;
+}
+
+.of-design-pop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of-design-toggle,
+  .of-design-option {
+    transition: none;
+  }
+}

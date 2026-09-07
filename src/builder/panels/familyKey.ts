@@ -2,7 +2,7 @@
  * The family a tile belongs to, derived from the tile's own tags and **without
  * the template table**.
  *
- * Row **C1**. `families.ts` is the palette's 91 rows and it value-imports
+ * Row **C1**. `families.ts` is the palette's 87 rows and it value-imports
  * `screens/assemblies/templates.ts`; this module is the one question the *catalog
  * drawer* asks — *"which family admits this tile, and at what size"* — answered
  * from B4's key rule rather than by looking the answer up.
@@ -35,9 +35,9 @@
  * and the only acceptable answer to that is a test that compares them. Over the
  * emitted index and the generated module, `palette.corpus.test.ts` measures:
  *
- *   - **0 mismatches in 50 ids and 0 in 50 names** — {@link familySlug} and
+ *   - **0 mismatches in 46 ids and 0 in 46 names** — {@link familySlug} and
  *     {@link familyName} reproduce `pipeline/families.ts` exactly on every
- *     `(role, form, build)` family. (The 51st is `shape-base`, which no such key
+ *     `(role, form, build)` family. (The 47th is `shape-base`, which no such key
  *     names and which {@link armForTags} answers by tag.)
  *   - **3,728 of 3,822 designs resolve, and every constructed id names a family
  *     this build ships** — which is B4's generation rule seen from the other
@@ -68,11 +68,11 @@ import { TemplateId } from '@/store'
  *
  * **A copy of `pipeline/families.ts#LABELS`, and the duplication is deliberate.**
  * That module is outside `src/`'s composite project, the names it produces are
- * baked into the generated `name` of all 51 families, and a casing rule would
+ * baked into the generated `name` of all 47 families, and a casing rule would
  * have to know that `s2w` is `S2W`, that `s-system` keeps its hyphen and that
  * `wall on tile` keeps its lower-case `on` — three exceptions over five values.
  * `palette.corpus.test.ts` compares the names this table produces to the names
- * the generator emitted, on all 50 keyed families, so the copy cannot drift
+ * the generator emitted, on all 46 keyed families, so the copy cannot drift
  * silently.
  */
 export const AXIS_LABEL: Readonly<Record<string, string>> = {
@@ -110,10 +110,14 @@ export function axisLabel(value: string): string {
 /**
  * The build facet's value for a family whose key carries no build system.
  *
- * A real position and not an absence: 17 of the 51 keys are build-absent, and
- * their slot **denies all five** `build|` tags by name rather than ignoring them
- * (`pipeline/families.ts#BUILD_TAGS`), so *"no build system"* admits a
- * different, disjoint set of records from any of the five — not a superset.
+ * A real position and not an absence: **16 of the 47 families** are
+ * build-absent, and their slot **denies all five** `build|` tags by name rather
+ * than ignoring them (`pipeline/families.ts#BUILD_TAGS`), so *"no build system"*
+ * admits a different, disjoint set of records from any of the five — not a
+ * superset. (This said *17 of the 51 keys*; the corpus has 18 build-absent keys,
+ * two of them the `insert` keys no family is generated for, and the generator
+ * emits 16 build-absent families — both before row D1 and after, since none of
+ * the four families it dropped was one.)
  */
 export const NO_BUILD = 'none'
 
@@ -178,6 +182,11 @@ export interface FamilyArm {
  * it sits under — 1,117 of them are `role|wall` — so asking the role first would
  * file every base under a wall or floor family whose slot denies `shape|base`'s
  * records outright, and arm a family that cannot admit the tile on screen.
+ *
+ * That deny is row **D1** and it did not exist when this was written: the order
+ * here was right for a reason that had not been implemented yet. Two of the
+ * families the role-first reading would have named are not even generated any
+ * more, because every record under their key was a base.
  *
  * `undefined` for the two cases {@link ArmRefusal} names.
  */

@@ -83,7 +83,7 @@ import {
 } from '@/screens/assemblies'
 import { compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
 import type { SlotName, TemplateInstance } from '@/store'
-import { clearFill, pinFill, useLockSystem } from '@/store'
+import { clearFill, pinFill, useLockSystem, useRoomDesign } from '@/store'
 import type { BaseGap } from '@/assembly'
 import { slotDoubtSentence } from '@/template'
 import { Button, Chip, Dialog, Eyebrow } from '@/ui/primitives'
@@ -144,6 +144,17 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
      fill names an exact file — so adding one to its props for this would say the
      panel depends on the preference when only this press does. */
   const lock = useLockSystem()
+  /*
+    The room's design, read beside the lock and for the same reason: both are
+    preferences the re-solve must honour, and neither is a prop.
+
+    Named `roomDesign` because `design` in this component is already the *filter*
+    the candidate grid is narrowed by — a different mechanism over texture
+    buckets, chosen per press and thrown away when the dialog closes. Two
+    meanings of the word one scope apart is exactly how a room preference would
+    get silently overwritten by a grid filter.
+  */
+  const roomDesign = useRoomDesign()
 
   // Recomputed on every store write to this instance, because that is the row:
   // a pick narrows its siblings, so a candidate set is correct only until the
@@ -251,7 +262,7 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
             // carries the argument for why the re-solve cannot wait for the next
             // lock change: an unpin on its own removes the slot from C2's pin
             // warning while leaving the mismatched file in the pack.
-            handSlotToLock(index, recipes, template, instance, shown.name, lock)
+            handSlotToLock(index, recipes, template, instance, shown.name, lock, roomDesign)
           }}
           refused={refused}
           slot={shown}

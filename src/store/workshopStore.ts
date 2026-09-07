@@ -638,6 +638,57 @@ export function acknowledgeLockSystem(): void {
   useWorkshopStore.setState({ lockChosen: true })
 }
 
+/* --------------------------------------------------------------- room design */
+
+/**
+ * Choose the room-wide design, or clear it with `undefined`.
+ *
+ * The owner's requirement is *"Room-Wide Design as the default, manual
+ * deviations are always allowed"*, and the two halves land in two different
+ * places: this action is the default, and the deviation is
+ * {@link SlotFill.pinned} — which this action cannot touch, because it writes
+ * one scalar and no fill.
+ *
+ * **The trigger, not the repair**, exactly as {@link setLockSystem} is. A design
+ * change has to rewrite every `auto` fill in the scene or it changes nothing at
+ * all: a fill names an exact file (decision D1), and row A2 proved
+ * `planSceneMeshes` is lock-free, so the new design reaches the drawing, the
+ * bill and mesh conversion through the placements and through nothing else.
+ * Measured on the live archive over the 40 shipped recipes, setting
+ * `dungeon_stone` moves **108 of 128** slot fills — so a design change that did
+ * not re-solve would be contract **C-k**'s failure with a second control: the
+ * picker moves, and nothing on the grid does.
+ *
+ * The re-solve is `@/template`'s `reSolveScene` and its caller is
+ * `BuilderScreen`, for the reason that row wrote down for the lock: the driver
+ * needs the assembly index, the composition index, the template table and every
+ * placement, and the screen is the only party holding all four. Doing it here
+ * would put the fill solver — and therefore the catalog — inside the store,
+ * which is the dependency `schema.ts` spends its `TemplateId` docblock refusing.
+ *
+ * ## No `designChosen` flag beside it, and that is not an oversight
+ *
+ * `lockChosen` exists because `lock === 'openlock'` cannot be told from *never
+ * opened the picker*, and the app has to know whether it still owes the user a
+ * notice about a preference worth up to 40.2 percentage points of catalog reach.
+ * `design` has no such ambiguity: the shipped default is **absent**, so the
+ * field answers "has the user chosen?" by itself, and there is no notice to
+ * suppress — a room with no design still fills every slot, which is C2's
+ * fallback contract rather than a degraded state.
+ *
+ * A single action rather than a set/clear pair for the same reason: *no design*
+ * is one of the picker's options and not the absence of a press, so it is one
+ * value of one parameter. `undefined` is spelled rather than defaulted so a
+ * caller cannot clear the room's design by forgetting an argument.
+ */
+export function setRoomDesign(design: string | undefined): void {
+  /* `set` merges, so `{ design: undefined }` writes the key as `undefined` —
+     which is what a reader sees as "no design", and what `JSON.stringify` then
+     drops on the way to `localStorage`, so the rehydrated state and the live one
+     agree. `migrations.ts#salvageDesign` reads an absent key the same way. */
+  useWorkshopStore.setState({ design })
+}
+
 /* --------------------------------------------------------------------- reset */
 
 /**
@@ -724,6 +775,14 @@ export const selectLockSystem = (state: WorkshopState): LockSystem => state.lock
  */
 export const selectLockChosen = (state: WorkshopState): boolean => state.lockChosen
 
+/**
+ * The room-wide design, or `undefined` for no preference.
+ *
+ * A scalar, so every subscriber to it wakes only when the design itself moves —
+ * the reason the store is read through selectors rather than whole.
+ */
+export const selectRoomDesign = (state: WorkshopState): string | undefined => state.design
+
 /* --------------------------------------------------------------------- hooks */
 
 /** @see selectPlacements */
@@ -754,4 +813,9 @@ export function useLockSystem(): LockSystem {
 /** @see selectLockChosen */
 export function useLockChosen(): boolean {
   return useWorkshopStore(selectLockChosen)
+}
+
+/** The room-wide design as render state. `undefined` for no preference. */
+export function useRoomDesign(): string | undefined {
+  return useWorkshopStore(selectRoomDesign)
 }

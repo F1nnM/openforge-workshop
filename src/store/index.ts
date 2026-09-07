@@ -76,7 +76,9 @@ export {
   selectPlacement,
   selectPlacementCount,
   selectPlacements,
+  selectRoomDesign,
   setLockSystem,
+  setRoomDesign,
   unpinFill,
   useGeneratedPlacements,
   useLockChosen,
@@ -84,6 +86,7 @@ export {
   usePlacement,
   usePlacementCount,
   usePlacements,
+  useRoomDesign,
   useWorkshopStore,
 } from './workshopStore'
 

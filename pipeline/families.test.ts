@@ -13,10 +13,17 @@
  * So the guard here is **semantic**: every generated slot is resolved through
  * `src/composition`'s own `resolveSlotTags` and postings index — the same pair of
  * calls the browser will make — and the record set it admits is compared to the
- * record set its key selects. At `ANY_SIZE` the two agree exactly, **51 of 51,
- * in both directions**; at each of the 350 size positions the admitted set is
- * exactly what `sizeAdmits` admits within the family, which is B3's ground truth
- * rather than a restatement of the refs.
+ * record set its key selects, less the bases. At `ANY_SIZE` the two agree
+ * exactly, **47 of 47, in both directions**; at each of the 257 size positions
+ * the admitted set is exactly what `sizeAdmits` admits within the family, which
+ * is B3's ground truth rather than a restatement of the refs.
+ *
+ * *"Less the bases"* is row **D1** and it is where this guard earns its keep. A
+ * base keeps the role of the piece it sits under, so the key selects it into a
+ * wall family; the slot denies `shape|base`, so it must not be admitted there.
+ * The two sides of the comparison are therefore *"what the key selects, minus
+ * the bases"* against *"what the resolver offers"*, and the 0/0 is what says the
+ * deny reaches every family and reaches nothing else.
  *
  * That is strictly stronger than the round-trip it replaces. A byte comparison
  * proves the emitted table *is* its source; this proves the emitted table
@@ -33,8 +40,12 @@
  *   3. **The two departures from a sibling row**, both measured in both
  *      directions: dropping `sizeRefs`'s `deny`, and generating no `insert`
  *      family.
- *   4. **The greedy walk**, greying-aware, over all 91 templates — because the
+ *   4. **The greedy walk**, greying-aware, over all 87 templates — because the
  *      brief asks whether these families make the 24-of-40 completion worse.
+ *   5. **The base deny, in both directions and at both ends** — 0 bases admitted
+ *      outside the base family, all 1,963 admitted inside it, the four
+ *      base-only keys named, and the union of the families unmoved by any of
+ *      it.
  *
  * Skipped **loudly** with the path it looked in when the fixtures are absent, on
  * `catalog.test.ts`'s argument: a quietly skipped real-data test is worse than a
@@ -57,6 +68,7 @@ import type { FamilySizePosition, GeneratedFamily } from './families'
 import {
   ANY_SIZE,
   BARE_BASE_KEY,
+  BASE_ONLY_KEYS,
   BUILD_TAGS,
   FAMILY_TABLE_BYTES,
   SKIPPED_ROLES,
@@ -111,11 +123,24 @@ describeCorpus(title, () => {
     ? createCompositionIndex(file)
     : ({} as unknown as CompositionIndex)
 
-  /** The records a family's key selects — the population the slot has to match. */
+  /** Whether a record is a base — the tag, which A9 proved is `layer === 'base'`. */
+  const isBase = (record: CatalogRecord): boolean => tags(record).includes(BARE_BASE_KEY)
+
+  /** The base tiles by id, for reading a resolver's answer rather than a record. */
+  const baseTiles = new Set<TileId>(file.records.filter(isBase).map((record) => record.id))
+
+  /**
+   * The records a family's key selects — the population the slot has to match.
+   *
+   * **Bases are the base family's and nobody else's**, which is row D1: the key
+   * selects a base into the family of the piece it sits under, and the slot
+   * denies it there. So the population of a keyed family is its key's records
+   * less the bases, and the semantic round-trip compares against that.
+   */
   const populationOf = (family: GeneratedFamily): readonly CatalogRecord[] =>
     family.key === BARE_BASE_KEY
-      ? file.records.filter((record) => tags(record).includes(BARE_BASE_KEY))
-      : file.records.filter((record) => keyOf(record) === family.key)
+      ? file.records.filter(isBase)
+      : file.records.filter((record) => keyOf(record) === family.key && !isBase(record))
 
   /** The tiles the app's own resolver offers for a family at one size position. */
   const candidatesOf = (family: GeneratedFamily, position: FamilySizePosition): readonly TileId[] =>
@@ -129,7 +154,7 @@ describeCorpus(title, () => {
   /* ------------------------------------------------------------------ the guard */
 
   describe('the semantic round-trip, which replaces the byte one', () => {
-    it('admits exactly the records its key selects, for all 51 families', () => {
+    it('admits exactly the records its key selects less the bases, for all 47', () => {
       /* The guard. `resolveSlotTags` + `candidatesFor` is what
          `src/composition/candidates.ts` does for a tile's accessory slot, so
          this is the browser's answer and not a second implementation of it.
@@ -145,7 +170,7 @@ describeCorpus(title, () => {
       }
       expect(overAdmitted).toBe(0)
       expect(underAdmitted).toBe(0)
-      expect(families).toHaveLength(51)
+      expect(families).toHaveLength(47)
     })
 
     it('resolves every ref it emits, so no family can match nothing', () => {
@@ -179,7 +204,7 @@ describeCorpus(title, () => {
       }
     })
 
-    it('agrees with `sizeAdmits` at 299 positions to within 12 and 160', () => {
+    it('agrees with `sizeAdmits` at 257 positions to within 12 and 128', () => {
       /* The other half of the guard, against B3's own ground truth rather than
          against the refs that produced the position. A position's *label*
          carries the predicate it means — a `cell` position reads "w wide by d
@@ -193,7 +218,13 @@ describeCorpus(title, () => {
          | direction | incidences | records |
          | --- | ---: | ---: |
          | the refs admit what the predicate does not | 12 | 12 |
-         | the predicate admits what the refs do not | 160 | 136 |
+         | the predicate admits what the refs do not | 128 | 128 |
+
+         Both were larger before row D1's base deny — 160 incidences over 136
+         records — and for a reason worth keeping: a base could be missed twice,
+         once in the base family and once under the role of the piece it sits
+         under. Now it is missed only in the base family, so the incidences and
+         the records are the same 128.
       */
       let positions = 0
       let admittedBeyond = 0
@@ -217,15 +248,15 @@ describeCorpus(title, () => {
           }
         }
       }
-      expect(positions).toBe(299)
-      expect(families.reduce((total, family) => total + family.sizes.length, 0)).toBe(350)
+      expect(positions).toBe(257)
+      expect(families.reduce((total, family) => total + family.sizes.length, 0)).toBe(304)
       expect(admittedBeyond).toBe(12)
-      expect(missed).toBe(160)
-      expect(missedRecords.size).toBe(136)
-      expect(missedRecords.size / 8702).toBeCloseTo(0.0156, 4)
+      expect(missed).toBe(128)
+      expect(missedRecords.size).toBe(128)
+      expect(missedRecords.size / 8702).toBeCloseTo(0.0147, 4)
     })
 
-    it('misses 136 records whose cell is geometry the tags do not state', () => {
+    it('misses 128 records whose cell is geometry the tags do not state', () => {
       /* The 136, by why. Every one of them resolves a cell the control *names*
          and carries no tag saying so, so it is reachable at `ANY_SIZE` and
          nowhere else — which is a third reason every family has that position,
@@ -245,28 +276,57 @@ describeCorpus(title, () => {
           }
         }
       }
-      /* 134 of the 160 are 90 degree annular sectors, whose cell is `rOut x rOut`
+      /* 102 of the 128 are 90 degree annular sectors, whose cell is `rOut x rOut`
          and whose only `size|` tags are a radius and an angle. The other 26 are
          `wall` footprints: 14 stair strips at a 0.5 depth the corpus never tags,
          and the 12 `QxG` bases whose tagged width is a unit wider than their
-         measured run. */
-      expect(Object.fromEntries(reasons)).toEqual({ arc: 134, wall: 26 })
+         measured run. By family, since the base deny moved 32 of the arcs out of
+         a role family and into the base family alone: */
+      expect(Object.fromEntries(reasons)).toEqual({ arc: 102, wall: 26 })
+      const byFamily = new Map<string, number>()
+      for (const family of families) {
+        const population = populationOf(family)
+        for (const position of family.sizes) {
+          if (position.tags.length === 0) continue
+          const predicate = predicateFromLabel(position.label)
+          const actual = new Set(candidatesOf(family, position))
+          for (const record of population) {
+            if (!sizeAdmits(predicate, sizeOf(record))) continue
+            if (actual.has(record.id)) continue
+            byFamily.set(family.key, (byFamily.get(family.key) ?? 0) + 1)
+          }
+        }
+      }
+      expect(Object.fromEntries(byFamily)).toEqual({
+        'shape|base': 101,
+        'stair|straight|-': 14,
+        'floor|curve|-': 10,
+        'floor|curve|s2w': 3,
+      })
     })
   })
 
   /* ------------------------------------------------------------------- the keys */
 
   describe('the key, and the plan’s coverage curve', () => {
-    it('finds 52 keys, generates 50, and reproduces the curve', () => {
+    it('finds 52 keys, generates 46, and reproduces the curve', () => {
       const keys = new Map<string, number>()
       for (const record of file.records) keys.set(keyOf(record), (keys.get(keyOf(record)) ?? 0) + 1)
       expect(keys.size).toBe(52)
-      /* The two that are not generated, and they are the whole difference. */
-      expect(families.filter((family) => family.key !== BARE_BASE_KEY)).toHaveLength(50)
+      /* The six that are not generated, and they are the whole difference: the
+         two `insert` keys and the four whose every record is a base. */
+      expect(families.filter((family) => family.key !== BARE_BASE_KEY)).toHaveLength(46)
       expect([...keys].filter(([key]) => key.startsWith('insert|'))).toEqual([
         ['insert|straight|-', 260],
         ['insert|curve|-', 25],
       ])
+      const generated = new Set(families.map((family) => family.key))
+      expect(
+        [...keys.keys()]
+          .filter((key) => !generated.has(key) && !key.startsWith('insert|'))
+          .sort(),
+      ).toEqual([...BASE_ONLY_KEYS])
+      expect(52 - 2 - BASE_ONLY_KEYS.length + 1).toBe(47)
 
       /* §2.5's curve, over the 52 keys in descending record count — the order
          `deriveFamilies` emits in, extended with the two insert keys so the
@@ -297,7 +357,7 @@ describeCorpus(title, () => {
       expect(designsOf(52)).toBe(3822)
     })
 
-    it('takes the reach from 3,079 records to 8,417, and 8,679 with the slots', () => {
+    it('takes the reach from 3,079 records to 8,417, and partitions what it reaches', () => {
       /* The row's headline, and it is *not* the plan's 99.0% — that figure counts
          the 285 inserts as reached by a family and 84 records as reached by
          nothing. This row generates no insert family, so the two disagree by
@@ -324,11 +384,21 @@ describeCorpus(title, () => {
       ).toBe(905)
       expect(file.records.filter((record) => record.foot.shape === 'wall')).toHaveLength(3079)
 
+      /* The 46 keyed families hold 6,454 records and the base family the other
+         1,963, and the union is the 8,417 the row is quoted at. Before row D1
+         the keyed families summed to 8,417 *on their own* and the base family's
+         1,963 were counted a second time inside them; the sum below is now the
+         union, which is what makes it a partition rather than a coincidence. */
       const byKey = families
         .filter((family) => family.key !== BARE_BASE_KEY)
         .reduce((total, family) => total + family.records, 0)
-      expect(byKey).toBe(8417)
-      expect(byKey / 8702).toBeCloseTo(0.967, 3)
+      expect(byKey).toBe(6454)
+      const union = families.reduce((sum, family) => sum + family.records, 0)
+      expect(union).toBe(8417)
+      expect(union / 8702).toBeCloseTo(0.967, 3)
+      /* And it is exactly the non-insert corpus: every record the palette can
+         place is offered by exactly one family. */
+      expect(file.records.filter((record) => record.layer !== 'insert')).toHaveLength(8417)
 
       /* The per-family counts are the generator's own, so they are checked
          against the population rather than trusted: a `records` or `designs`
@@ -342,6 +412,28 @@ describeCorpus(title, () => {
       const reachedByKey = new Set(
         families.flatMap((family) => populationOf(family).map((record) => record.id)),
       )
+      expect(reachedByKey.size).toBe(union)
+
+      /* Designs, which this module claimed at 3,822 of 3,822 before row D1 and
+         which is **3,728**. The 3,822 is `designsOf(52)` above — every design
+         with a record under any of the 52 keys, including the two `insert` keys
+         no family is generated for — and the 94 between them are the
+         insert-only designs `src/builder/panels/families.ts` ships as
+         `INSERT_DESIGNS`. `docs/templates-plan.md` §10.1's correction 22 is
+         wrong on both halves for the same reason: 94 designs were outside the
+         families, and the families did not partition the corpus until this row
+         took the bases out of them. */
+      const reachedDesigns = new Set(
+        file.records.filter((record) => reachedByKey.has(record.id)).map((record) => record.design),
+      )
+      expect(reachedDesigns.size).toBe(3728)
+      expect(reachedDesigns.size / 3822).toBeCloseTo(0.975, 3)
+      expect(3822 - reachedDesigns.size).toBe(94)
+      const insertOnly = new Set(
+        file.records.filter((record) => !reachedByKey.has(record.id)).map((record) => record.design),
+      )
+      expect(insertOnly.size).toBe(94)
+      expect([...insertOnly].filter((design) => reachedDesigns.has(design))).toEqual([])
       const inserts = file.records.filter((record) => record.layer === 'insert')
       expect(inserts).toHaveLength(285)
       expect(inserts.filter((record) => reachedByKey.has(record.id))).toHaveLength(0)
@@ -362,8 +454,8 @@ describeCorpus(title, () => {
       }
       expect(slots).toBe(3695)
       expect(reachedInserts.size).toBe(262)
-      expect(byKey + reachedInserts.size).toBe(8679)
-      expect((byKey + reachedInserts.size) / 8702).toBeCloseTo(0.997, 3)
+      expect(union + reachedInserts.size).toBe(8679)
+      expect((union + reachedInserts.size) / 8702).toBeCloseTo(0.997, 3)
 
       /* And the 23 that neither reaches. Named rather than rounded: they are
          inserts whose hosts declare no slot that admits them, which is a gap in
@@ -396,7 +488,7 @@ describeCorpus(title, () => {
       expect(planExcludes.filter((record) => !reachedByKey.has(record.id))).toEqual([])
     })
 
-    it('needs a five-ref deny for an absent build system, and 3,712 records say so', () => {
+    it('needs a five-ref deny for an absent build system, and 2,945 records say so', () => {
       /* `require` cannot express absence. The deny is exact because of three
          facts, all asserted here: five `build|` tags occur, no record carries
          two, and `CatalogRecord.build` is its single tag's value. */
@@ -411,26 +503,38 @@ describeCorpus(title, () => {
       }
       expect(file.records.filter((record) => record.build === undefined)).toHaveLength(2978)
 
+      /* Every keyed family denies `shape|base` (row D1) and the 16 with no
+         build system deny the five build tags after it; the base family denies
+         nothing. */
       const absent = families.filter((family) => family.key.endsWith('|-'))
       expect(absent).toHaveLength(16)
-      for (const family of absent) expect(family.slot.tags.deny?.map((ref) => ref.tag)).toEqual([...BUILD_TAGS])
-      for (const family of families.filter((family) => !family.key.endsWith('|-'))) {
-        expect(family.slot.tags.deny).toBeUndefined()
+      for (const family of absent) {
+        expect(family.slot.tags.deny?.map((ref) => ref.tag)).toEqual([BARE_BASE_KEY, ...BUILD_TAGS])
+      }
+      for (const family of families.filter(
+        (family) => !family.key.endsWith('|-') && family.key !== BARE_BASE_KEY,
+      )) {
+        expect(family.slot.tags.deny?.map((ref) => ref.tag)).toEqual([BARE_BASE_KEY])
       }
 
-      /* What the deny buys, by resolving the same 17 slots without it. */
+      /* What the build deny buys, by resolving the same 16 slots with only the
+         base deny left on them. 3,712 before row D1, when the widened slots
+         picked up every build system's bases as well. */
       let withoutDeny = 0
       for (const family of absent) {
-        const widened: PartSlot = { ...family.slot, tags: { ...family.slot.tags, deny: [] } }
+        const widened: PartSlot = {
+          ...family.slot,
+          tags: { ...family.slot.tags, deny: [{ tag: BARE_BASE_KEY }] },
+        }
         const admitted = index.candidatesFor(resolveSlotTags(widened.tags, [...family.tags], [])).tiles
         withoutDeny += admitted.length - family.records
       }
-      expect(withoutDeny).toBe(3712)
+      expect(withoutDeny).toBe(2945)
     })
 
-    it('slugs 51 keys to 51 ids, none colliding with a fixture template', () => {
+    it('slugs 47 keys to 47 ids, none colliding with a fixture template', () => {
       const ids = families.map((family) => family.id)
-      expect(new Set(ids).size).toBe(51)
+      expect(new Set(ids).size).toBe(47)
       expect(ids.every((id) => /^[a-z0-9-]+$/.test(id))).toBe(true)
       const fixtureIds = new Set(loadTemplateFixtures(FIXTURES_DIR).map((entry) => templateSlug(entry.name)))
       expect(ids.filter((id) => fixtureIds.has(id))).toEqual([])
@@ -438,7 +542,7 @@ describeCorpus(title, () => {
       expect(familySlug('floor|straight|-')).toBe('floor-straight')
       expect(familySlug('wall|internal_corner|separate wall')).toBe('wall-internal-corner-separate-wall')
       expect(familySlug(BARE_BASE_KEY)).toBe('shape-base')
-      expect(new Set(families.map((family) => family.name)).size).toBe(51)
+      expect(new Set(families.map((family) => family.name)).size).toBe(47)
     })
   })
 
@@ -478,16 +582,199 @@ describeCorpus(title, () => {
       /* 31 cells resolve, 2 cannot be spelled, and `ANY_SIZE` is the 30th. */
       expect(base.sizes).toHaveLength(30)
       expect(base.sizes[0]).toEqual(ANY_SIZE)
-      /* It is last in the array, so the 50 keyed families are a contiguous
+      /* It is last in the array, so the 46 keyed families are a contiguous
          prefix and the coverage curve can be read off the head. */
       expect(families.at(-1)).toBe(base)
+    })
+  })
+
+  /* -------------------------------------------------------------- the base deny */
+
+  describe('the base deny, which is row D1', () => {
+    /**
+     * The slot row B4 emitted for a key, rebuilt from the key itself.
+     *
+     * The four base-only families no longer exist, so the defect cannot be
+     * measured by widening the emitted slots — there is nothing left to widen
+     * for four of the seventeen. This rebuilds what B4 emitted from the key
+     * string instead: the two total axes, the build tag when the key has one and
+     * the five-ref build deny when it does not, and **no `shape|base` deny**.
+     * Every other slot the generator emits today is identical to this plus that
+     * one ref, which the assertion below checks family by family rather than
+     * trusting the reconstruction.
+     */
+    const beforeD1 = (key: string): PartSlot => {
+      const [role = '', form = '', build = '-'] = key.split('|')
+      const require = [`role|${role}`, `form|${form}`, ...(build === '-' ? [] : [`build|${build}`])]
+      return {
+        name: role,
+        tags: {
+          require: require.map((tag) => ({ tag })),
+          ...(build === '-' ? { deny: BUILD_TAGS.map((tag) => ({ tag })) } : {}),
+          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+        },
+      }
+    }
+
+    /** Every non-insert key the corpus holds — the 50 B4 generated a family for. */
+    const nonInsertKeys = [...new Set(file.records.map(keyOf))]
+      .filter((key) => !key.startsWith('insert|'))
+      .sort()
+
+    it('reproduces the defect: 17 of B4’s 51 offered bases, 1,963 admissions', () => {
+      /* The owner's report, measured. A `Corner (S2W)` slot offered *"a straight
+         wall, a pre-made corner piece and some bases (not floors, bases)"*, and
+         it was not one family: the key selects a base into the family of the
+         piece it sits under, so **every base in the archive was offered
+         somewhere it does not belong** — 1,963 admissions over 17 families, four
+         of which admitted nothing else.
+
+         The 1,963 is not a coincidence of two measurements meeting: a base
+         carries one `role|` and one `form|` tag and one build system at most, so
+         it is selected by exactly one key, and the wrong admissions and the
+         population of bases are the same set counted twice. */
+      const wrong: string[] = []
+      let admissions = 0
+      const only: string[] = []
+      for (const key of nonInsertKeys) {
+        const slot = beforeD1(key)
+        const tiles = index.candidatesFor(
+          resolveSlotTags(slot.tags, [...(slot.tags.require ?? []).map((ref) => ref.tag)], []),
+        ).tiles
+        const bases = tiles.filter((tile) => baseTiles.has(tile))
+        if (bases.length === 0) continue
+        wrong.push(key)
+        admissions += bases.length
+        if (bases.length === tiles.length) only.push(key)
+      }
+      expect(wrong).toHaveLength(17)
+      expect(admissions).toBe(1963)
+      expect(file.records.filter(isBase)).toHaveLength(1963)
+      expect(only.sort()).toEqual([...BASE_ONLY_KEYS])
+    })
+
+    it('admits 0 bases outside the base family and all 1,963 inside it', () => {
+      /* The fix, in both directions and through the resolver the browser uses.
+         `deny` is exact tag equality and `shape|base` is coextensive with
+         `layer === 'base'` on all 8,702 with no exception either way, so the two
+         numbers below are the whole of it. */
+      let outside = 0
+      for (const family of families) {
+        if (family.key === BARE_BASE_KEY) continue
+        expect(family.slot.tags.deny?.map((ref) => ref.tag)).toContain(BARE_BASE_KEY)
+        outside += candidatesOf(family, ANY_SIZE).filter((tile) => baseTiles.has(tile)).length
+      }
+      expect(outside).toBe(0)
+
+      const base = byId.get(familySlug(BARE_BASE_KEY))
+      if (base === undefined) throw new Error('no bare-base family')
+      expect(base.slot.tags.require).toEqual([{ tag: BARE_BASE_KEY }])
+      expect(base.slot.tags.deny).toBeUndefined()
+      const inside = new Set(candidatesOf(base, ANY_SIZE))
+      expect(inside.size).toBe(1963)
+      expect(file.records.filter((record) => isBase(record) && !inside.has(record.id))).toEqual([])
+
+      /* And the deny is the *only* difference from what B4 emitted: every keyed
+         slot is `beforeD1(key)` plus the one ref. */
+      for (const family of families) {
+        if (family.key === BARE_BASE_KEY) continue
+        const before = beforeD1(family.key)
+        expect(family.slot.name).toBe(before.name)
+        expect(family.slot.tags.require).toEqual(before.tags.require)
+        expect(family.slot.tags.constrain).toEqual(before.tags.constrain)
+        expect(family.slot.tags.deny?.map((ref) => ref.tag)).toEqual([
+          BARE_BASE_KEY,
+          ...(before.tags.deny ?? []).map((ref) => ref.tag),
+        ])
+      }
+    })
+
+    it('costs the 46 families 1,829 wrong admissions, and the four dropped 134', () => {
+      /* The 1,963, split the way the fix splits it: 1,829 taken off the
+         families that survive, and 134 that leave with the four dropped keys.
+         Both halves measured, because "1,963" on its own would be satisfied by a
+         deny that reached only the big families. */
+      let widened = 0
+      for (const family of families) {
+        if (family.key === BARE_BASE_KEY) continue
+        const slot: PartSlot = {
+          ...family.slot,
+          tags: {
+            ...family.slot.tags,
+            deny: (family.slot.tags.deny ?? []).filter((ref) => ref.tag !== BARE_BASE_KEY),
+          },
+        }
+        const tiles = index.candidatesFor(resolveSlotTags(slot.tags, [...family.tags], [])).tiles
+        widened += tiles.length - family.records
+      }
+      expect(widened).toBe(1829)
+
+      const dropped = file.records.filter((record) => BASE_ONLY_KEYS.includes(keyOf(record)))
+      expect(dropped).toHaveLength(134)
+      expect(dropped.filter((record) => !isBase(record))).toEqual([])
+      expect(widened + dropped.length).toBe(1963)
+    })
+
+    it('drops four keys and withholds nothing, because the base family has all 134', () => {
+      /* The judgement call. A rank-20 cut is declined in the module note because
+         a missing family withholds records invisibly; these four withhold
+         **nothing**, which is the difference and is measured rather than argued:
+         every one of their 134 records is a base, and the base family admits all
+         1,963. So the union of the families is the same with them and without. */
+      const base = byId.get(familySlug(BARE_BASE_KEY))
+      if (base === undefined) throw new Error('no bare-base family')
+      const reachable = new Set(candidatesOf(base, ANY_SIZE))
+      const dropped = file.records.filter((entry) => BASE_ONLY_KEYS.includes(keyOf(entry)))
+      expect(dropped).toHaveLength(134)
+      for (const record of dropped) expect(reachable.has(record.id), record.id).toBe(true)
+
+      /* And they do not lose a size either: 93 of the 134 land on a sized
+         position of the base family, and the 41 that reach only `any size` are
+         exactly `floor|curve|separate wall`'s — a family whose own domain was
+         inexpressible, so it had no size control to lose. */
+      const sized = new Set<TileId>()
+      for (const position of base.sizes) {
+        if (position.tags.length === 0) continue
+        for (const tile of candidatesOf(base, position)) sized.add(tile)
+      }
+      const onlyAny = dropped.filter((record) => !sized.has(record.id))
+      expect(dropped.length - onlyAny.length).toBe(93)
+      expect(onlyAny).toHaveLength(41)
+      expect(new Set(onlyAny.map(keyOf))).toEqual(new Set(['floor|curve|separate wall']))
+
+      /* And the other half: they would have admitted nothing at all with the
+         deny on, which is worse than a wrong candidate. A family's one slot is
+         required by construction, so `assembly/resolve.ts` reports the instance
+         `slot-unfilled`, `BillOfTiles.complete` is false and the room's download
+         is refused for as long as the piece is on the plan. */
+      for (const key of BASE_ONLY_KEYS) {
+        const slot = beforeD1(key)
+        const withDeny: PartSlot = {
+          ...slot,
+          tags: {
+            ...slot.tags,
+            deny: [{ tag: BARE_BASE_KEY }, ...(slot.tags.deny ?? [])],
+          },
+        }
+        const tiles = index.candidatesFor(
+          resolveSlotTags(withDeny.tags, [...(slot.tags.require ?? []).map((ref) => ref.tag)], []),
+        ).tiles
+        expect(tiles, key).toEqual([])
+      }
+      expect(families.filter((family) => BASE_ONLY_KEYS.includes(family.key))).toEqual([])
+      expect([...BASE_ONLY_KEYS]).toEqual([
+        'floor|curve|separate wall',
+        'floor|straight|separate wall',
+        'wall|corner|separate wall',
+        'wall|internal_corner|s2w',
+      ])
     })
   })
 
   /* ------------------------------------------------------------------- the size */
 
   describe('the size control', () => {
-    it('finds B3’s 295 cells over the 52 keys, and spells 270 of its own 284', () => {
+    it('finds B3’s 295 cells over the 52 keys, and spells 228 of its own 242', () => {
       const cells = new Map<string, Set<string>>()
       for (const record of file.records) {
         const size = sizeOf(record)
@@ -498,18 +785,36 @@ describeCorpus(title, () => {
       }
       expect([...cells.values()].reduce((total, set) => total + set.size, 0)).toBe(295)
 
-      /* Of the 295, how many the generator can name. Counted over its own 50
-         keyed families, so the two insert keys' 9 spelled and 2 refused are
-         added back below to land on B3's 295 and keep the two comparable. */
+      /* Of the 295, how many the generator's own domain holds — and after row
+         D1 the two are counted over different populations, which is why the
+         arithmetic below is spelled out rather than reconciled to 295.
+
+         B3's 295 is cells over the 52 keys with every record in them. A keyed
+         family's records are its key's less the bases, so its domain is smaller:
+         **242 cells over the 46 keyed families**, 228 spelled and 14 refused,
+         plus the base family's own **31** — 29 spelled and 2 refused — for 273.
+         The 22 between 295 and 273 are the two insert keys' 11 and 11 more that
+         only a base occupied in its key. */
       const named = families.filter((family) => family.key !== BARE_BASE_KEY)
       const spelled = named.reduce((total, family) => total + family.sizes.length - 1, 0)
       const refused = named.reduce((total, family) => total + family.inexpressibleCells.length, 0)
-      /* The two insert keys contribute 9 spelled and 2 refused, which is why
-         these do not sum to 295 on their own. */
-      expect(spelled).toBe(270)
+      expect(spelled).toBe(228)
       expect(refused).toBe(14)
-      expect(spelled + refused).toBe(284)
-      expect(284 + 9 + 2).toBe(295)
+      expect(spelled + refused).toBe(242)
+      const base = byId.get(familySlug(BARE_BASE_KEY))
+      if (base === undefined) throw new Error('no bare-base family')
+      expect(base.sizes.length - 1 + base.inexpressibleCells.length).toBe(31)
+      expect(242 + 31).toBe(273)
+      /* The 11 that are the insert keys', measured rather than assumed, so the
+         other 11 are named as what they are: cells no non-base record of their
+         own key resolves to. */
+      const cellsOfKeys = (keep: (key: string) => boolean): number => {
+        let count = 0
+        for (const [key, set] of cells) if (keep(key)) count += set.size
+        return count
+      }
+      expect(cellsOfKeys((key) => key.startsWith('insert|'))).toBe(11)
+      expect(cellsOfKeys((key) => !key.startsWith('insert|'))).toBe(284)
 
       /* And nothing was deduped away: every family's positions carry distinct
          tag lists, and its positions plus its refusals account for every cell
@@ -545,18 +850,41 @@ describeCorpus(title, () => {
         'wall|curve|separate wall 3x0.5',
         'wall|curve|separate wall 4x4',
         'wall|curve|separate wall 4.5x4.5',
+        'column|straight|- 0.5x0.5',
         'floor|curve|- 2.5x2.5',
         'floor|curve|- 4.5x4.5',
-        'column|straight|- 0.5x0.5',
         'stair|curve|- 2x2',
         'stair|curve|- 4x4',
         'column|straight|separate wall 0.5x0.5',
-        'floor|curve|separate wall 2x2',
-        'floor|curve|separate wall 4x4',
+        'riser|curve|- 2x2',
+        'riser|curve|- 4x4',
         'column|corner|s2w 0.5x0.5',
         'shape|base 2.5x2.5',
         'shape|base 4.5x4.5',
       ])
+      /* Still 16 and still the same three facts after row D1, but not the same
+         sixteen cells: `floor|curve|separate wall`'s two sectors left with the
+         dropped family, and `riser|curve`'s `2x2` and `4x4` arrived — those two
+         were spellable only because a **base** sat at each of them carrying the
+         `size|width` / `size|depth` pair the arc records at that cell do not.
+         Measured, because it is the mechanism and not a coincidence: */
+      for (const [cell, w, d] of [
+        ['2x2', 2, 2],
+        ['4x4', 4, 4],
+      ] as const) {
+        const at = file.records.filter((record) => {
+          const size = sizeOf(record)
+          return keyOf(record) === 'riser|curve|-' && size?.w === w && size.d === d
+        })
+        expect(at, cell).toHaveLength(12)
+        const tagged = at.filter(
+          (record) =>
+            tags(record).includes(`size|width|${String(w)}`) &&
+            tags(record).includes(`size|depth|${String(d)}`),
+        )
+        expect(tagged, cell).toHaveLength(8)
+        expect(tagged.filter((record) => !isBase(record)), cell).toEqual([])
+      }
       expect(sizeRefsResolve({ kind: 'cell', w: 0.5, d: 0.5 }, has)).toBe(false)
       expect(sizeRefsResolve({ kind: 'cell', w: 4.5, d: 4.5 }, has)).toBe(false)
       /* Nothing is lost by the refusal: every record at a refused cell is still
@@ -568,7 +896,7 @@ describeCorpus(title, () => {
       }
     })
 
-    it('leaves B3’s five families with `ANY_SIZE` alone, and nothing matching nothing', () => {
+    it('leaves B3’s five families with `ANY_SIZE` alone, and two more beside them', () => {
       /* B3 named the five and asked for *a family with no size control* rather
          than one that matches nothing. `ANY_SIZE` is what makes that the
          degenerate case of the same control instead of a special case. */
@@ -576,18 +904,22 @@ describeCorpus(title, () => {
       expect(single.map((family) => `${family.key} ${String(family.records)}`)).toEqual([
         'wall|diagonal|separate wall 121',
         'stair|curve|- 64',
-        'wall|hex|thick wall 56',
-        'floor|curve|separate wall 41',
         'decor|straight|- 26',
         'column|corner|s2w 20',
         'wall|octagon|separate wall 20',
         'floor|octagon|- 8',
+        'wall|hex|thick wall 8',
       ])
       /* Five of B3's are here. The three it did not name are families whose
          cells *resolve* but cannot be spelled — B3 measured the domain, this row
          measures the vocabulary, and the extra three are the gap between them:
-         `stair|curve` (64, two 90 degree sectors), `floor|curve|separate wall`
-         (41, the same) and `column|corner|s2w` (20, a 0.5 cell). */
+         `stair|curve` (64, two 90 degree sectors) and `column|corner|s2w` (20, a
+         0.5 cell). It named a third, `floor|curve|separate wall` (41), and row
+         D1 dropped that family: all 41 of its records were bases.
+
+         `wall|hex|thick wall` is the same family in both lists and its count
+         moved most of any: **56 records before the base deny and 8 after**, 48
+         of the 56 having been bases. */
       for (const key of [
         'wall|diagonal|separate wall',
         'wall|hex|thick wall',
@@ -597,18 +929,18 @@ describeCorpus(title, () => {
       ]) {
         expect(single.map((family) => family.key)).toContain(key)
       }
-      expect(single.reduce((total, family) => total + family.records, 0)).toBe(356)
+      expect(single.reduce((total, family) => total + family.records, 0)).toBe(267)
       for (const family of single) expect(candidatesOf(family, ANY_SIZE).length).toBe(family.records)
     })
 
-    it('spells 48 run positions and 251 cell positions, and every label is true', () => {
+    it('spells 48 run positions and 209 cell positions, and every label is true', () => {
       /* A `run` position is *coarser than a cell* — `size|width|2` says nothing
          about depth, and `require`/`deny` are exact tag equality so the grammar
          has no prefix deny to narrow it with. That was this row's draft worry
          and the measurement retired it: a `run` position is not an approximate
          cell, it **is** `{kind:'run'}`, and `resolveGridSize` gives a `rect`
-         record a run equal to its width. So the 447 records
-         `floor|straight`'s *"2 wide"* admits are 447 records 2 units wide, and
+         record a run equal to its width. So the 365 records
+         `floor|straight`'s *"2 wide"* admits are 365 records 2 units wide, and
          only 12 records corpus-wide are admitted at a position whose predicate
          they do not satisfy. */
       let run = 0
@@ -631,11 +963,11 @@ describeCorpus(title, () => {
         }
       }
       expect(run).toBe(48)
-      expect(cell).toBe(251)
-      expect(run + cell).toBe(299)
+      expect(cell).toBe(209)
+      expect(run + cell).toBe(257)
 
-      /* The widest position in the table, which is the one worth naming: 41 of
-         the 447 are the wall-thickness floor strips B1 files under `role|floor`,
+      /* The widest position in the table, which is the one worth naming: 32 of
+         the 365 are the wall-thickness floor strips B1 files under `role|floor`,
          and the corpus does not tag their depth, so a *"2 by 0.5"* position for
          them is not expressible. They are not lost — the coarse position reaches
          them — they just cannot be isolated from the 2-by-anything floors. */
@@ -643,10 +975,14 @@ describeCorpus(title, () => {
       if (floors === undefined) throw new Error('no floor|straight family')
       const twoWide = floors.sizes.find((position) => position.label === '2 wide')
       if (twoWide === undefined) throw new Error('no 2-wide position on floor|straight')
-      expect(candidatesOf(floors, twoWide)).toHaveLength(447)
+      const atTwoWide = candidatesOf(floors, twoWide)
+      expect(atTwoWide).toHaveLength(365)
+      expect(
+        atTwoWide.filter((tile) => file.records.find((record) => record.id === tile)?.foot.shape === 'wall'),
+      ).toHaveLength(32)
       expect(
         populationOf(floors).filter((record) => record.foot.shape === 'wall'),
-      ).toHaveLength(65)
+      ).toHaveLength(38)
     })
 
     it('drops `sizeRefs`’s deny, and the trade is 12 labels against 241 records', () => {
@@ -688,6 +1024,22 @@ describeCorpus(title, () => {
         'floor|diagonal|-': 8,
         'column|diagonal|separate wall': 1,
       })
+      /* 36 of the 241 are bases, so after row D1 their *own family* is the base
+         family and the total is unchanged either way. */
+      const perFamily = new Map<string, number>()
+      for (const record of denied) {
+        const key = isBase(record) ? BARE_BASE_KEY : keyOf(record)
+        perFamily.set(key, (perFamily.get(key) ?? 0) + 1)
+      }
+      expect(Object.fromEntries(perFamily)).toEqual({
+        'shape|base': 36,
+        'wall|curve|separate wall': 48,
+        'wall|diagonal|separate wall': 121,
+        'floor|curve|-': 27,
+        'floor|diagonal|-': 8,
+        'column|diagonal|separate wall': 1,
+      })
+      expect(denied.filter(isBase)).toHaveLength(36)
 
       /* What dropping it costs: 12 records at one position of one family, and
          they are the 12 the `admittedBeyond` count above found. */
@@ -760,7 +1112,7 @@ describeCorpus(title, () => {
   /* ------------------------------------------------------------------- the walk */
 
   it(
-    'completes 24 of 40 recipes and 51 of 51 families on a first-candidate walk',
+    'completes 24 of 40 recipes and 47 of 47 families on a first-candidate walk',
     () => {
       /* The brief's question: do these families make the 24-of-40 completion
          worse? They cannot, and the reason is structural rather than lucky — a
@@ -771,15 +1123,17 @@ describeCorpus(title, () => {
          Both walks are the same function with one clause different, so the
          difference between them is the greying rule and nothing else:
 
-         | walk | recipes | families | all 91 |
+         | walk | recipes | families | all 87 |
          | --- | ---: | ---: | ---: |
-         | first candidate | **24 of 40** | 51 of 51 | 75 (82.4%) |
-         | first that empties no open sibling | 40 of 40 | 51 of 51 | 91 (100%) |
+         | first candidate | **24 of 40** | 47 of 47 | 71 (81.6%) |
+         | first that empties no open sibling | 40 of 40 | 47 of 47 | 87 (100%) |
 
-         So the naive rate moves from 60.0% to 82.4% **by dilution**. The 16
+         So the naive rate moves from 60.0% to 81.6% **by dilution**. The 16
          failures are the same 16, all of them the `base` slot of the modular
          wall recipes, and this row has not fixed one of them — row C2 owns the
-         solver. What it has done is add 51 templates that cannot fail. */
+         solver. What it has done is add 47 templates that cannot fail. Row D1
+         dropped four of them and the rate moved with the denominator rather than
+         with any walk: the four were four that could not fail either. */
       const step = (
         part: PartSlot,
         parentTags: readonly string[],
@@ -827,11 +1181,11 @@ describeCorpus(title, () => {
       expect(new Set(failures.filter((part) => part !== undefined))).toEqual(new Set(['base']))
       expect(fixtures.filter((entry) => greying(entry.parts, entry.tags) === undefined)).toHaveLength(40)
 
-      expect(families.filter((family) => naive([family.slot], family.tags) === undefined)).toHaveLength(51)
-      expect(families.filter((family) => greying([family.slot], family.tags) === undefined)).toHaveLength(51)
+      expect(families.filter((family) => naive([family.slot], family.tags) === undefined)).toHaveLength(47)
+      expect(families.filter((family) => greying([family.slot], family.tags) === undefined)).toHaveLength(47)
 
-      expect(24 + 51).toBe(75)
-      expect(75 / (fixtures.length + families.length)).toBeCloseTo(0.824, 3)
+      expect(24 + 47).toBe(71)
+      expect(71 / (fixtures.length + families.length)).toBeCloseTo(0.816, 3)
       expect(24 / fixtures.length).toBeCloseTo(0.6, 3)
     },
     SLOW_MS,
@@ -869,7 +1223,7 @@ describeCorpus(title, () => {
 
         /* The counterfactual, priced against the same artefact at the same epoch
            — the construction rows B1, B2 and B3 all quote. A `families` key
-           carrying the 51 slots and their 350 size positions costs the index
+           carrying the 47 slots and their 304 size positions costs the index
            real bytes, and it would buy nothing: the palette needs the table
            before the 5.6 MB index lands, which is `pipeline/templates.ts`'s
            argument for the 40 verbatim. */
@@ -890,13 +1244,13 @@ describeCorpus(title, () => {
           `\n[families] index ${String(size.brotli)} B unchanged · the same table inside it ` +
             `${String(inIndex.brotli)} B (+${String(inIndex.brotli - size.brotli)})\n`,
         )
-        expect(inIndex.brotli - size.brotli).toBe(2357)
+        expect(inIndex.brotli - size.brotli).toBe(2277)
       },
       SLOW_MS,
     )
 
-    it('costs 48,029 raw bytes of the generated module, and prices the cut', () => {
-      /* The whole price of shipping all 51 rather than the plan's first 20 — and
+    it('costs 44,495 raw bytes of the generated module, and prices the cut', () => {
+      /* The whole price of shipping all 47 rather than the plan's first 20 — and
          `FAMILY_TABLE_BYTES` is asserted against the emitter rather than
          quoted, so a family set that grows moves the constant or fails. */
       const fixtures = loadTemplateFixtures(FIXTURES_DIR)
@@ -908,9 +1262,9 @@ describeCorpus(title, () => {
       /* What a rank-20 cut would have withheld, which is the argument. */
       const ranked = families.filter((family) => family.key !== BARE_BASE_KEY)
       const withheld = ranked.slice(20).reduce((total, family) => total + family.records, 0)
-      expect(withheld).toBe(736)
-      expect(withheld / 8702).toBeCloseTo(0.085, 3)
-      expect(ranked.slice(20)).toHaveLength(30)
+      expect(withheld).toBe(493)
+      expect(withheld / 8702).toBeCloseTo(0.057, 3)
+      expect(ranked.slice(20)).toHaveLength(26)
       /* The plan's own rank-20 cut withholds 835 rather than 736, because its
          ranking includes `insert|straight` at rank 9 and this one does not. Both
          are stated so neither can be quoted as the other. */

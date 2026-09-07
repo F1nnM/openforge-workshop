@@ -178,7 +178,7 @@
   white-space: nowrap;
 }
 
-/* Row D2 puts this on all 91 rows and it is the row's answer to the report that
+/* Row D2 puts this on all 87 rows and it is the row's answer to the report that
    caused the row: a placement that brings five slots and one that brings one
    were indistinguishable. Held at the row's own ink so it reads before the
    fact beside it, which is a quantity rather than a kind. */
@@ -201,13 +201,13 @@
 }
 
 /* ── The palette's sections, groups, facets and size control ─────────────────
-   Two sections over 91 rows — 40 assemblies, then 51 single tiles in eight role
+   Two sections over 87 rows — 40 assemblies, then 47 single tiles in eight role
    groups — two facet axes, and one size control that appears inside the armed
    row. Every measurement behind the shape is in `palette.ts` and `families.ts`.
    ──────────────────────────────────────────────────────────────────────────── */
 
 /* A section is the palette's coarsest division and the one row D2 added: the
-   kind of thing a row is, said once instead of on 91 rows. Spaced further apart
+   kind of thing a row is, said once instead of on 87 rows. Spaced further apart
    than the role groups inside one of them, because that is the whole claim —
    these two lists are more different from each other than WALL is from FLOOR. */
 .of-pal-section {
@@ -306,7 +306,7 @@
   opacity: 0.7;
 }
 
-/* The sentence the 8 families with no expressible size domain get instead of a
+/* The sentence the 7 families with no expressible size domain get instead of a
    control, indented to the control's own inset so it reads as the row's. */
 .of-pal-nosize {
   padding: 0 6px 4px;

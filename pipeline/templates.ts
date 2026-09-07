@@ -860,7 +860,7 @@ export function printTemplateModule(
 
   return `${[
     '/**',
-    ' * The 40 recipe templates and the 51 generated families, as data.',
+    ` * The ${String(entries.length)} recipe templates and the ${String(families.length)} generated families, as data.`,
     ' *',
     ' * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`',
     ' * fixtures beside the JSON, `pipeline/families.ts` derives the families from the',
@@ -872,7 +872,8 @@ export function printTemplateModule(
     ' * `RECIPE_TEMPLATES` is the 40 read from the fixtures — all of them',
     ' * `S2W: Wall on Tile`, reaching 35.4% of the corpus. `GENERATED_FAMILIES` is one',
     ' * family per `(role, form, build)` key the emitted tags already carry, each with',
-    ' * one required slot, plus the bare-base family no such key can name.',
+    ' * one required slot denying `shape|base`, plus the bare-base family no such key',
+    ' * can name and which requires it.',
     ' * `GENERATED_FAMILY_SIZES` is each family’s size control keyed by family id: a',
     ' * placed instance adds a position’s tags to its `parentTags`, where the slot’s own',
     ' * `constrain` block collects them, so size costs no new resolution code at all.',
