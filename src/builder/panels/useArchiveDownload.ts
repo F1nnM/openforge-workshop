@@ -505,7 +505,13 @@ export function useArchiveDownload({
    *
    * The pack module is loaded again here rather than held from `start`, and only
    * when the part actually carries a generated mesh — an all-catalog part costs
-   * no dynamic import at all.
+   * no dynamic import at all. It is then **held for `classify`**, for the same
+   * reason `start` holds it: `generatedBlobSource.open` re-checks every hold at
+   * stream time and can raise `GeneratedMeshRefusedError` *during* the save, and
+   * every branch for row S5's three errors is an `instanceof` against a class
+   * that lives inside `pack.ts`. Passing `undefined` there would degrade a
+   * refused mesh to the generic "the download failed" — and mark it retryable,
+   * which it is not: retrying ships the same bytes.
    */
   const saveSplitPart = useCallback(
     (index: number) => {
@@ -519,12 +525,14 @@ export function useArchiveDownload({
       const of = splitPlans?.length ?? 0
 
       void (async () => {
+        let pack: GeneratedPack | undefined
         try {
           const blobs = source ?? r2BlobSource(assets)
-          const packSource =
-            plan.generated.length === 0 || generated === undefined
-              ? blobs
-              : (await (loadPack ?? loadGeneratedPack)()).generatedBlobSource(generated.holdings, blobs)
+          let packSource: BlobSource = blobs
+          if (plan.generated.length > 0 && generated !== undefined) {
+            pack = await (loadPack ?? loadGeneratedPack)()
+            packSource = pack.generatedBlobSource(generated.holdings, blobs)
+          }
           const outcome = await runSave(plan, packSource, controller, { index, of })
           if (outcome === 'cancelled') setState({ status: 'idle' })
         } catch (error) {
@@ -532,7 +540,7 @@ export function useArchiveDownload({
             setState({ status: 'idle' })
             return
           }
-          setState({ status: 'failed', failure: classify(error, plan, undefined) })
+          setState({ status: 'failed', failure: classify(error, plan, pack) })
         } finally {
           running.current = false
           abort.current = null
