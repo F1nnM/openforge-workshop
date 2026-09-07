@@ -292,7 +292,7 @@ export interface ArchivePlanOptions {
  * {@link ArchivePlanOptions.generatedAt}, because `bill.lines` is already ordered
  * by catalog path rather than by placement order.
  */
-export function buildArchivePlan(bill: BillOfTiles, options: ArchivePlanOptions): ArchivePlan {
+export function buildArchivePlan(bill: Pick<BillOfTiles, 'lines' | 'download'>, options: ArchivePlanOptions): ArchivePlan {
   const section = options.generated
   const generatedMeshes = section?.meshes ?? []
   // Empty means empty of *models*, generated ones included. A room built
@@ -447,7 +447,7 @@ function textEntry(name: string, text: string): ArchiveTextEntry {
   return { kind: 'text', name, text, bytes: utf8Length(text) }
 }
 
-function defaultFilename(generatedAt: Date): string {
+export function defaultFilename(generatedAt: Date): string {
   const date = generatedAt.toISOString().slice(0, 10)
   return `openforge-room-${date}.zip`
 }

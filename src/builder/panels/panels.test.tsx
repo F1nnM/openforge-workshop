@@ -1108,6 +1108,8 @@ function inertDownload(bill: BillOfTiles): ArchiveDownload {
     cancel: () => undefined,
     dismiss: () => undefined,
     saveUrlList: () => undefined,
+    splitPlans: undefined,
+    saveSplitPart: () => undefined,
   }
 }
 
@@ -1763,6 +1765,91 @@ describe('the download action', () => {
     expect(urls).toHaveLength(2)
     expect(urls.some((type) => type.startsWith('text/plain'))).toBe(true)
     expect(urls.some((type) => type.startsWith('text/csv'))).toBe(true)
+  })
+
+  /**
+   * **Splitting is not offered when it cannot help.**
+   *
+   * One 600 MB file against a 1 MB ceiling: every candidate part is already over
+   * the limit before a byte of licensing is reserved, so `splitArchivePlans`
+   * raises `ArchivePartTooLargeError` and the failure carries no parts. The URL
+   * list stays the only offer, which is what the test above asserts it still is.
+   */
+  it('does not offer to split when one file alone is over the limit', async () => {
+    place('big')
+    render(
+      <DownloadHarness
+        environment={blobEnvironment(1_000_000)}
+        source={fakeSource(() => 'ok', sizesOf(file))}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
+    const alert = await failureText()
+
+    expect(alert).toHaveAttribute('data-kind', 'too-large')
+    expect(within(alert).queryByRole('button', { name: /Save as .* smaller files/ })).toBeNull()
+    expect(alert).toHaveTextContent(/Take the URL list instead and feed it to a download manager/)
+  })
+
+  /**
+   * **The split offer, taken one part at a time.**
+   *
+   * Six distinct files — 8 MB, 3 MB, 1.2 MB, 1 MB, 0.9 MB and 0.5 MB, 14.6 MB
+   * of models between them — against a 12 MB ceiling. The room does not fit, so
+   * the refusal fires exactly as above; but the largest single file (8 MB) sits
+   * inside a part's 10 MB budget (12 MB less `SPLIT_OVERHEAD_BYTES`), so
+   * first-fit-decreasing packs the six into **two** parts and the failure now
+   * carries them.
+   *
+   * Each part is saved on its own press. Nothing is auto-triggered: two
+   * back-to-back saves with no user gesture between them is the shape browsers
+   * popup-block.
+   */
+  it('offers a too-large room as several smaller parts, saved one press at a time', async () => {
+    place('floor2', 0, 0)
+    place('wallNoBase', 2, 0)
+    place('arc', 4, 0)
+    place('floor1', 6, 0)
+    place('slab', 8, 0)
+    place('base2', 10, 0)
+    render(
+      <DownloadHarness
+        environment={blobEnvironment(12_000_000)}
+        source={fakeSource(() => 'ok', sizesOf(file))}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
+    const alert = await failureText()
+    expect(alert).toHaveAttribute('data-kind', 'too-large')
+    expect(alert).toHaveTextContent(/Save it as 2 smaller archives instead/)
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Save as 2 smaller files' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Saved part 1 of 2/)).toBeInTheDocument()
+    })
+    expect(saved).toHaveLength(1)
+    expect(saved[0]?.filename).toMatch(/^openforge-room-\d{4}-\d{2}-\d{2}-part-1-of-2\.zip$/)
+    expect(saved[0]?.blob.size).toBeLessThanOrEqual(12_000_000)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save part 2 of 2' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Saved all 2 parts/)).toBeInTheDocument()
+    })
+    expect(saved).toHaveLength(2)
+    expect(saved[1]?.filename).toMatch(/-part-2-of-2\.zip$/)
+    // Every model byte in the bill landed in one part or the other, once —
+    // and only once: the upper bound is tight enough that a file duplicated
+    // across both parts (adding at least base2's 500,000 bytes) would fail
+    // it, while the gap above the measured total (14,608,166: the 14,600,000
+    // of model bytes plus two parts' worth of LICENSE.txt/ATTRIBUTION.csv
+    // overhead) stays loose enough not to flake on that overhead's exact size.
+    const totalSavedBytes = saved.reduce((sum, entry) => sum + entry.blob.size, 0)
+    expect(totalSavedBytes).toBeGreaterThan(14_600_000)
+    expect(totalSavedBytes).toBeLessThan(14_800_000)
   })
 
   it('says so when the browser offers no way to save a file at all', async () => {

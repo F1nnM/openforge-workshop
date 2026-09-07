@@ -358,9 +358,9 @@ that facet needs a first-class "unspecified". **Zero bases carry `build|wall on 
 
 ```
                     ┌──────────────────────────────────────────────┐
-   Browser ───────► │ workshop.openforge.tools                     │  Worker + Static Assets
-                    │  static SPA + catalog index                  │  (SPA fallback routing)
-                    │                                              │
+   Browser ───────► │ openforge-workshop.mfinn.de                  │  static assets only,
+                    │  static SPA + catalog index                  │  no Worker script
+                    │                                              │  (SPA fallback routing)
                     │  ┌────────────────────────────────────────┐  │
                     │  │ base generator — PART OF THIS APP      │  │  lazy chunk,
                     │  │ vendored .scad (Apache-2.0)            │  │  no second origin
@@ -368,22 +368,23 @@ that facet needs a first-class "unspecified". **Zero bases carry `build|wall on 
                     │  └────────────────────────────────────────┘  │
                     └──────────────┬───────────────────────────────┘
                                    │
-        ┌──────────────────────────┴──────────┐
-        ▼                                     ▼
-┌───────────────┐                    ┌──────────────────┐
-│ objects.      │                    │ zip Worker       │
-│ openforge.    │                    │ (fallback only:  │
-│ tools  (R2)   │                    │  iOS, >1 GB)     │
-│ /models/      │                    └──────────────────┘
-│ /sprites/     │
-│ /thumbs/  NEW │
-│ /lod/     NEW │
-└───────────────┘
+                                   ▼
+                          ┌───────────────┐
+                          │ objects.      │
+                          │ openforge.    │
+                          │ tools  (R2)   │
+                          │ /models/      │
+                          │ /sprites/     │
+                          │ /thumbs/  NEW │
+                          │ /lod/     NEW │
+                          └───────────────┘
 ```
 
-Three deliberate boundaries: the SPA holds no server state; R2 is read-only on its own custom
-domain and never proxied through the Worker (egress is free, proxying would burn CPU for
-nothing); and the zip Worker is a fallback, not the default.
+Two deliberate boundaries: the SPA holds no server state, and R2 is read-only on its own custom
+domain and never proxied through anything (egress is free, and there is nothing here to proxy
+through). A browser with no streaming save and a room too large to buffer gets it as several
+smaller archives instead of one, built and saved entirely client-side — see §11 — rather than a
+server-side fallback.
 
 **The generator is part of this app**, not a separate service. The original catalog embedded
 someone else's generator behind an iframe; this one is ours — the Apache-2.0 `.scad` geometry is
@@ -399,7 +400,7 @@ All versions installed together and verified: **154 packages, zero peer conflict
 
 | Layer | Choice | Note |
 | --- | --- | --- |
-| Host | **Cloudflare Workers + Static Assets**, Wrangler 4.127.1 | Matches `@cloudflare/vite-plugin`'s peer floor exactly |
+| Host | **Cloudflare Workers Static Assets** (no Worker script), Wrangler 4.127.1 | Matches `@cloudflare/vite-plugin`'s peer floor exactly |
 | Build | **Vite 8.2.2** + `@cloudflare/vite-plugin` 1.54.2 | Requires Node `^20.19 \|\| >=22.12`; pin `.nvmrc` to 22 |
 | UI | **React 19.2.8**, pinned `~19.2` | r3f 9.7.0 peers `>=19 <19.3` — a React minor is an r3f-coordinated upgrade |
 | Routing | **@tanstack/react-router 1.170.32** | `validateSearch` for typed, shareable filter state |
@@ -784,22 +785,24 @@ of any byte counter we can write* — in the browser's download manager, where w
 it. An unverifiable streaming path is worse than an honest refusal, so the chosen path uses
 no service worker at all and that failure mode does not exist. iOS Safari has no
 `showSaveFilePicker`, so it always buffers and refuses above 512 MB; a gigabyte-scale room
-cannot be downloaded as one file on an iPhone from a static site, and the Worker fallback
-and URL list are the answers there.
+cannot be downloaded as one file on an iPhone from a static site, and splitting it into
+several smaller archives, or falling back to a URL list, are the answers there.
 
 Because STORE makes the predicted length exact, the stream counts its own bytes and fails if
 they differ in either direction. That catches a short body behind an HTTP 200 — the classic
 silent truncation, which is invisible in a streamed ZIP because entry sizes are written
 last.
 
-**Fallback, a Cloudflare Worker:** the same library streaming R2 objects, for iOS Safari and
-multi-GB rooms.
+**Fallback, client-side splitting:** for a browser with no `showSaveFilePicker` and a room over
+the buffering ceiling, `download/split.ts` bin-packs the bill into several archives — each under
+the ceiling — built and saved through the same `buildArchivePlan`/`saveArchive` path, one part at
+a time. No server, no second origin, no proxying R2 through anything.
 
 - **Dedupe by md5** — 171 md5s are shared across 520 rows.
 - **Disambiguate colliding filenames** — 89 filenames map to 2–3 different meshes; naming zip
   entries by filename silently overwrites. Prefix from `full_name`.
 - **Size is a warning surface.** A 50-placement room at p95 is well over a gigabyte. Warn
-  above a threshold and offer a URL list as the degradation path.
+  above a threshold and offer split parts, or a URL list, as the degradation path.
 
 `client-zip` cannot compress, and 870 STLs are ASCII (which deflate 5–10×). That is a real
 trade: an exact progress bar versus a much smaller download. **v1 takes client-zip**;
