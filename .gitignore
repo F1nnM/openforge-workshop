@@ -42,5 +42,10 @@ __pycache__/
 tmp/
 scratch/
 
+# agent scratch — .claude/ holds worktrees of this very repo, so an unguarded
+# `git add -A` would stage a nested checkout. .impeccable/ is design-tool state.
+.claude/
+.impeccable/
+
 # npm
 package-lock.json.bak

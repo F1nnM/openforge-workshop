@@ -60,11 +60,21 @@ jobs:
     # Only the four events that mean "build and show me this PR". `closed` is
     # the fifth member of the trigger above and belongs to the `close` job
     # below instead.
-    if: github.event.action != 'closed'
-    # `pull_request` (not `pull_request_target`) withholds repository secrets
-    # from a fork's PRs regardless of this environment, so a fork PR builds
-    # nothing here rather than running untrusted code against real
-    # credentials. That is the safe default, not a gap to close.
+    #
+    # The second clause skips fork PRs outright. `pull_request` (not
+    # `pull_request_target`) already withholds repository secrets from a fork
+    # regardless of this environment, and that is the safe default rather than
+    # a gap to close — but withholding them does not stop the job *running*.
+    # Without this clause a fork's PR installs, builds, and then dies at
+    # `wrangler versions upload` with no credentials, so the first thing an
+    # outside contributor sees on a public repo is a red X they cannot fix and
+    # that says nothing about their change. `GITHUB_TOKEN` is read-only on a
+    # fork's `pull_request` too, so the comment step could not post the
+    # explanation either. Skipped, the check is simply absent, which is the
+    # honest report: this repo cannot preview a fork.
+    if: >-
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment: staging
     steps:
