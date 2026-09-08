@@ -719,6 +719,7 @@ export function RoomSurface({
             z: edit.anchor[1],
             rotation: edit.rotation,
             fills: edit.fills,
+            position: edit.position,
           })
           break
         case 'remove':
@@ -791,7 +792,7 @@ export function RoomSurface({
         return
       }
       const solved = family === null ? undefined : solve(family, state.armedPosition)
-      run(planPlacement(family, state.rotation, at, state.step, solved))
+      run(planPlacement(family, state.rotation, at, state.step, solved, state.armedPosition))
     },
     [],
   )
