@@ -47,10 +47,25 @@ import { describe, expect, it } from 'vitest'
 import type { Extent, PlanPart } from '@/builder/canvas'
 import { boxShape, footprintShape, partsOverlap, planBand, planParts, rotatedExtent } from '@/builder/canvas'
 import type { CatalogRecord, Footprint } from '@/catalog'
+import type { CatalogFile as CatalogFileValue } from '@/catalog'
 import { CatalogFile, GRID_UNIT_MM, WALL_THICKNESS_UNITS, resolveTags } from '@/catalog'
 import type { AssemblyChoice, RecipeIndex, RecipeTemplate } from '@/assembly/recipeWalk'
 import { assemblyState, createRecipeIndex } from '@/assembly/recipeWalk'
-import { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from '@/assembly/templates'
+import {
+  ASSEMBLY_CONTROLS,
+  ASSEMBLY_TEMPLATES,
+  GENERATED_FAMILIES,
+  GENERATED_FAMILY_SIZES,
+  RECIPE_TEMPLATES,
+} from '@/assembly/templates'
+/* The leaf module rather than `@/builder/three`: that barrel pulls the R3F
+   canvas and its loaders, and what is wanted here is one pure function that
+   splits an armed filter list into the solver's two size fields. */
+import { positionContextFor } from '@/builder/three/fills'
+/* The same table the palette row and the slot editor read their domains off,
+   because the reachability half of the assertion below is a claim about what
+   those two surfaces offer and not about what the fold emitted. */
+import { familyById } from '@/builder/panels/families'
 
 import { buildAggregateIndex } from '@/catalog'
 import type { AssemblyIndex, AssemblyTemplate } from '@/assembly'
@@ -1086,9 +1101,11 @@ describeCorpus(
     /* Every figure below is computed from these three, so a `!` here would be the
        only unchecked claim in the block. `describeCorpus` skips when the artefact
        is absent, so the guard is unreachable rather than defensive. */
-    const ready = (): { index: AssemblyIndex; context: FillContext } => {
-      if (assembly === undefined || context === undefined) throw new Error('no catalog')
-      return { index: assembly, context }
+    const ready = (): { index: AssemblyIndex; context: FillContext; file: CatalogFileValue } => {
+      if (assembly === undefined || context === undefined || catalog === undefined) {
+        throw new Error('no catalog')
+      }
+      return { index: assembly, context, file: catalog }
     }
 
     /* ------------------------------------------------- the policy comparison */
@@ -1454,6 +1471,147 @@ describeCorpus(
       }
 
       expect(drift).toEqual([])
+    })
+
+    /* ------------------------------------------- the two routes for one size */
+
+    it('places and edits an assembly through two size routes that agree', () => {
+      /* **The placement click and the slot editor narrow by the same size two
+         different ways, and this is where they are checked against each other.**
+
+         `three/fills.ts#positionContextFor` splits the armed filters: a
+         `(width, depth)` pair over a template that *has* a layout becomes
+         {@link FillContext.cell}, which B3's anchor derivation spreads per slot —
+         a 2x2 floor and a 2-unit *run* of wall — while the component and height
+         axes ride as `parentTags`. The slot editor has no such split:
+         `panels/slots/slotEditor.ts` poses the instance's whole `filters` list
+         onto `template.tags`, so its size tags reach each slot through that
+         slot's own `constrain` block.
+
+         Two routes for one number is a real risk rather than a theoretical one:
+         the fold gave the assemblies a layout *and* a size domain, so both
+         branches are live on the same ten templates. A disagreement means the
+         editor offering a file the placement's own re-solve would not choose.
+
+         Compared as the chosen **tile** per slot rather than as a candidate
+         count, for the reason the one-slot version of this test gives: two
+         different sets can be the same size, and the fill is what a user sees.
+
+         ## They do not agree everywhere, and the difference is reported
+
+         Four `(assembly, position, slot)` triples differ, all of them the two
+         **external-corner single-piece** assemblies' `right wall` and
+         `left wall`. On the `cell` route those slots come back **empty**; on the
+         `parentTags` route they fill.
+
+         The cause is row **D9**'s tag-against-geometry mismatch, reached from a
+         new direction. `size.ts#slotSizePredicate` gives an `edge` slot the
+         anchored face's run *minus* the corner span, so a 2x2 external corner
+         asks its walls for `size|width|1.5` — which is the honest geometry, and
+         which **no corner wall carries**: D9 measured them at 1.5 units while the
+         corpus tags them `size|width|2`. The `parentTags` route asks for the tag
+         instead, the records have it, and the slot fills. So the routes disagree
+         exactly where the corpus disagrees with itself, and B6's precedent
+         applies — an upstream tag defect is recorded, not normalised.
+
+         **No surface can reach it**, which is why it is a finding and not a bug
+         to fix here: those two assemblies' whole size domain is the single
+         `2 wide by 2 deep` their slots already `require`, and
+         `panels/families.ts#sizesFor` drops a one-position axis because a
+         one-position control cannot be operated. So `TemplateFamily.sizes` is
+         empty for all eight corners, neither the palette row nor the slot editor
+         renders the chip, and nothing ever hands that position to either route.
+         The split below asserts that reachability claim rather than asserting the
+         reader's word for it: if a future row starts offering one-position axes,
+         `unreachable` becomes reachable and this test fails naming these four.
+
+         Fixing it would mean either an `edge` predicate that asks for the tag
+         rather than for the geometry — which is `size.ts`' own decision for
+         `residual` and is argued there — or the mitre in a tag. Both are B3's and
+         the archive's, not this row's. */
+      const { index, context: ctx, file } = ready()
+      const recipes = createRecipeIndex(file, ctx.composition)
+      const drift: string[] = []
+      const unreachable: string[] = []
+      let compared = 0
+      let cells = 0
+
+      for (const assembly of ASSEMBLY_TEMPLATES) {
+        const controls = ASSEMBLY_CONTROLS[assembly.id]
+        if (controls === undefined) continue
+        /* What the two surfaces actually offer, read off the same table they read
+           rather than off `ASSEMBLY_CONTROLS` directly — a one-position axis is
+           dropped there and that is the whole reachability question. */
+        const offered = familyById(assembly.id)?.sizes ?? []
+        /* Every size position against every component position, because the two
+           axes reach the slots by *different* routes on this path — the size as
+           a cell and the component as `parentTags` — so a pair is the only thing
+           that exercises the split. The height axis is left at *any*: it narrows
+           the same merged wall slot the component does and adds no third route. */
+        const components =
+          controls.component.length === 0 ? [{ label: 'any component', tags: [] }] : controls.component
+
+        for (const size of controls.size) {
+          const reachable = offered.some((one) => one.label === size.label)
+          const into = reachable ? drift : unreachable
+          for (const component of components) {
+            const filters = [...component.tags, ...size.tags]
+            const split = positionContextFor(assembly, filters)
+            if (split.cell !== undefined) cells += 1
+            compared += 1
+
+            // The placement click's route: a cell, plus the other axes as parentTags.
+            const placed = solveTemplateFills(assembly, index, { ...ctx, ...split })
+            // The slot editor's route: the whole list posed as the template's own tags.
+            const posed: RecipeTemplate = { ...assembly, tags: [...assembly.tags, ...filters] }
+            const edited = solveTemplateFills(posed, index, ctx)
+
+            for (const part of assembly.parts) {
+              const one = placed.fills[part.name]
+              const other = edited.fills[part.name]
+              if (one === other) continue
+              into.push(`${assembly.id} / ${size.label} / ${component.label} / ${part.name}`)
+            }
+
+            /* And the editor's own pool — `assemblyState`'s, which is what the
+               dialog lists — must actually contain what the click placed. This is
+               the failure the two routes agreeing does not by itself rule out:
+               they could pick the same file out of two different sets. */
+            const state = assemblyState(recipes, posed, {})
+            for (const step of state.steps) {
+              const chosen = placed.fills[step.name]
+              if (chosen === undefined) continue
+              if (step.options.some((option) => option.tiles.includes(chosen))) continue
+              into.push(
+                `${assembly.id} / ${size.label} / ${component.label} / ${step.name}: ` +
+                  `the editor does not offer ${String(chosen)}, which the click places`,
+              )
+            }
+          }
+        }
+      }
+
+      /* Every position takes the `cell` branch, because all ten assemblies match
+         one of B2's three part-name conventions and every position of their size
+         axis pins both spans — which is what the fold's fixed-size split bought,
+         asserted here rather than assumed. */
+      /* 60 for the modular wall (4 sizes x 15 components), 120 for the
+         single-piece wall (8 x 15), and one apiece for the eight corners, whose
+         component axis is empty. */
+      expect(compared).toBe(188)
+      expect(cells).toBe(compared)
+
+      // What a user can actually arm: the two routes agree on all of it.
+      expect(drift).toEqual([])
+
+      // And the four they do not agree on, which no surface offers. See above.
+      expect(unreachable).toEqual([
+        's2w-wall-on-tile-corner-low-single-piece / 2 wide by 2 deep / any component / right wall',
+        's2w-wall-on-tile-corner-low-single-piece / 2 wide by 2 deep / any component / left wall',
+        's2w-wall-on-tile-corner-full-single-piece / 2 wide by 2 deep / any component / right wall',
+        's2w-wall-on-tile-corner-full-single-piece / 2 wide by 2 deep / any component / left wall',
+      ])
+      expect(ASSEMBLY_TEMPLATES.filter((one) => (familyById(one.id)?.sizes ?? []).length > 0)).toHaveLength(2)
     })
 
     /* --------------------------------------------------------- the scene scale */
