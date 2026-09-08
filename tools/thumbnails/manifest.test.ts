@@ -94,7 +94,9 @@ describe('buildUploadManifest', () => {
     const notes = manifest().notes.join('\n')
     expect(notes).toMatch(/R2 write credentials.*OPEN/)
     expect(notes).toMatch(/Nothing here has been uploaded/)
-    expect(notes).toMatch(/CORS rule.*FIRST/)
+    // The bucket is ours now, so the note states the ordering as a rule for
+    // changing it rather than as a task waiting on a zone admin.
+    expect(notes).toMatch(/CORS before cache/)
     expect(notes).toMatch(/falls back to the sprite sheet/)
   })
 
@@ -111,7 +113,11 @@ describe('buildUploadManifest', () => {
   })
 
   it('emits commands that name the staged directory and the prefix', () => {
-    const commands = uploadCommands('tools/thumbnails/out', 'thumbs').join('\n')
+    const commands = uploadCommands('tools/thumbnails/out', 'thumbs', 'https://objects.example.test/thumbs').join(
+      '\n',
+    )
+    expect(commands).toContain('https://objects.example.test/thumbs')
+    expect(commands).not.toContain('objects.openforge.tools')
     expect(commands).toContain('tools/thumbnails/out/thumbs')
     expect(commands).toContain('s3://$R2_BUCKET/thumbs')
     expect(commands).toContain('r2.cloudflarestorage.com')

@@ -238,7 +238,7 @@ export function buildLodManifest(inputs: ManifestInputs): LodManifest {
       aboveGate: entries.filter((entry) => entry.aboveGate).length,
       unfaithful: entries.filter((entry) => entry.fidelity !== null && !entry.fidelity.acceptable).length,
     },
-    commands: uploadCommands(inputs.staged, inputs.prefix),
+    commands: uploadCommands(inputs.staged, inputs.prefix, inputs.publicBase),
     notes: lodNotes(entries.length, inputs.meshopt),
     entries,
   }
@@ -296,7 +296,7 @@ export function lodFormat(inputs: Pick<ManifestInputs, 'meshopt' | 'minTriangles
  * pass. `wrangler r2 object put` is one HTTP request per object and would be
  * 8,353 invocations, so it appears only as the single-object spot check.
  */
-export function uploadCommands(staged: string, prefix: string): string[] {
+export function uploadCommands(staged: string, prefix: string, publicBase: string): string[] {
   return [
     '# Credentials — an R2 API token scoped to Object Read & Write on this bucket only.',
     'export AWS_ACCESS_KEY_ID=…',
@@ -319,7 +319,7 @@ export function uploadCommands(staged: string, prefix: string): string[] {
     '  --size-only',
     '',
     '# Spot check one object through the public hostname, not the S3 endpoint.',
-    '#   curl -sSI https://objects.openforge.tools/<key from entries[0].key>',
+    `#   curl -sSI ${publicBase}/<shard>/<md5>.glb   # see entries[0].key`,
   ]
 }
 
@@ -327,9 +327,10 @@ function lodNotes(objects: number, meshopt: boolean): string[] {
   const notes = [
     'v2-pr-series.md, non-PR blockers: B2, R2 write credentials for the /lod/ prefix, is OPEN. ' +
       'Nothing here has been uploaded.',
-    'Zone admin, B1, same table: add the unconditional CORS rule on objects.openforge.tools FIRST, ' +
-      'then the cache rule. In that order — a cache rule installed before CORS caches responses ' +
-      'without the CORS headers, and the app then fails on cached 200s that look fine in curl.',
+    'The store is served from this project’s own bucket, so its CORS policy and cache rule are ' +
+      'ours and are already set. The ordering that mattered still does if either is ever changed: ' +
+      'CORS before cache, because a cache rule installed first caches responses without the CORS ' +
+      'headers, and the app then fails on cached 200s that look fine in curl.',
     `Expect ${String(objects)} objects. Compare against the distinct-md5 count in catalog.json ` +
       'before believing the store is complete.',
     'Objects are content-addressed on the source mesh md5, so the sync is safe to repeat and ' +

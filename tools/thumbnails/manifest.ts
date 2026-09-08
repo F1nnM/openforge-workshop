@@ -136,7 +136,7 @@ export function buildUploadManifest(inputs: ManifestInputs): UploadManifest {
       objects: entries.length,
       bytes: entries.reduce((total, entry) => total + entry.bytes, 0),
     },
-    commands: uploadCommands(inputs.staged, inputs.prefix),
+    commands: uploadCommands(inputs.staged, inputs.prefix, inputs.catalog.assets.thumbs),
     notes: uploadNotes(entries.length),
     entries,
   }
@@ -151,7 +151,7 @@ export function buildUploadManifest(inputs: ManifestInputs): UploadManifest {
  * pass. `wrangler r2 object put` is one HTTP request per object and would be
  * 8,702 invocations, so it appears only as the single-object spot check.
  */
-export function uploadCommands(staged: string, prefix: string): string[] {
+export function uploadCommands(staged: string, prefix: string, publicBase: string): string[] {
   return [
     '# Credentials — an R2 API token scoped to Object Read & Write on this bucket only.',
     'export AWS_ACCESS_KEY_ID=…',
@@ -174,7 +174,7 @@ export function uploadCommands(staged: string, prefix: string): string[] {
     '  --size-only',
     '',
     '# Spot check one object through the public hostname, not the S3 endpoint.',
-    '#   curl -sSI https://objects.openforge.tools/<key from entries[0].key>',
+    `#   curl -sSI ${publicBase}/<shard>/<md5>.webp   # see entries[0].key`,
   ]
 }
 
@@ -182,9 +182,10 @@ function uploadNotes(objects: number): string[] {
   return [
     'v1-pr-series.md, non-PR blockers: R2 write credentials for the /thumbs/ prefix are OPEN. ' +
       'Nothing here has been uploaded.',
-    'Zone admin, same table: add the unconditional CORS rule on objects.openforge.tools FIRST, ' +
-      'then the cache rule. In that order — a cache rule installed before CORS caches responses ' +
-      'without the CORS headers, and the app then fails on cached 200s that look fine in curl.',
+    'The store is served from this project’s own bucket, so its CORS policy and cache rule are ' +
+      'ours and are already set. The ordering that mattered still does if either is ever changed: ' +
+      'CORS before cache, because a cache rule installed first caches responses without the CORS ' +
+      'headers, and the app then fails on cached 200s that look fine in curl.',
     `Expect ${String(objects)} objects. Compare against the sprite-carrying record count in ` +
       'catalog.json before believing the backfill is complete.',
     'Objects are content-addressed on the source mesh md5, so the sync is safe to repeat and ' +

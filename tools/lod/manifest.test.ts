@@ -118,6 +118,23 @@ describe('buildLodManifest', () => {
     expect(notes).toContain('ours to mint')
   })
 
+  it('spot-checks through the store’s own hostname, not a hardcoded one', () => {
+    // The manifest is what a human holding credentials reads at the moment the
+    // sync finishes. A spot-check naming the wrong host sends them to a bucket
+    // they did not write to, and a 404 there means nothing at all.
+    const commands = manifest().commands.join('\n')
+    expect(commands).toContain('https://objects.example.test/lod')
+    expect(commands).not.toContain('objects.openforge.tools')
+  })
+
+  it('does not send the reader to configure a zone they do not own', () => {
+    // B1's CORS-then-cache ordering applies to the bucket that serves the store.
+    // That is ours now, and it is already configured; telling the reader to go
+    // set rules on upstream's zone is an instruction they cannot carry out.
+    const notes = manifest().notes.join('\n')
+    expect(notes).not.toContain('objects.openforge.tools')
+  })
+
   it('warns G2 about the node transform and the decoder', () => {
     const notes = manifest().notes.join('\n')
     expect(notes).toContain('node.matrixWorld')
