@@ -171,7 +171,7 @@
  * source of truth and both are projections of it.
  */
 export { usePlanTools } from './usePlanTools'
-export type { PlanTool, PlanToolDefaults, PlanTools } from './usePlanTools'
+export type { PlanTool, PlanToolDefaults, PlanTools, PositionAxis } from './usePlanTools'
 
 export {
   BASE_LIFT_MM,

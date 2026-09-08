@@ -206,10 +206,11 @@ function PaletteHarness({ query = '' }: { query?: string }) {
         onQueryChange={() => undefined}
       />
       <p data-testid="selected-template">{tools.selectedTemplate ?? 'none'}</p>
-      {/* Row C5: the armed **size**, as `PlanTools` now carries it. The chip on
-          screen is the same fact rendered by the panel; this is the fact the 3D
-          surface reads to solve the fills, and the two must not diverge. */}
-      <p data-testid="armed-size">{tools.armedSize.join(' ') || 'any'}</p>
+      {/* Row C5: the armed **control position**, as `PlanTools` now carries it —
+          every axis's tags joined. The chips on screen are the same fact
+          rendered by the panel; this is what the 3D surface reads to solve the
+          fills, and the two must not diverge. */}
+      <p data-testid="armed-size">{tools.armedPosition.join(' ') || 'any'}</p>
       <p data-testid="tool">{tools.tool}</p>
     </div>
   )
@@ -612,6 +613,60 @@ describe('the palette', () => {
 
     fireEvent.click(row('S2W: Wall on Tile: Wall (Single Piece)'))
     expect(screen.getByRole('group', { name: /^Size for/ })).toBeInTheDocument()
+  })
+
+  it('offers the 14 folded components as a control, and arming one keeps the size', () => {
+    /* **What the 30 removed rows became.** `Arched Door` and `Rectangular Door`
+       differed by one tag on one slot and shipped as two of the 40; they are two
+       chips on one row now. The regression this guards is the one that would make
+       the fold a loss rather than a simplification: if picking a component
+       cleared the size, the two controls could not be used together and a user
+       would have to choose which of the two facts about their placement to keep. */
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('S2W: Wall on Tile: Wall (Single Piece)'))
+
+    const component = screen.getByRole('group', { name: /^Component for/ })
+    // 14 components plus `any component`, which is a real position carrying no tag.
+    expect(within(component).getAllByRole('button')).toHaveLength(15)
+    expect(within(component).getByRole('button', { name: 'Component: arched door' })).toBeInTheDocument()
+    expect(within(component).getByRole('button', { name: 'Component: rectangular door' })).toBeInTheDocument()
+    // `any component` is pressed until something else is, rather than nothing being.
+    expect(
+      within(component).getByRole('button', { name: 'Component: any component' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+
+    // A height axis too, because `shape|wall` and `shape|wall|low` are disjoint.
+    const height = screen.getByRole('group', { name: /^Height for/ })
+    expect(within(height).getAllByRole('button').map((one) => one.textContent)).toEqual([
+      'any height',
+      'full',
+      'low',
+    ])
+
+    const size = screen.getByRole('group', { name: /^Size for/ })
+    fireEvent.click(within(size).getAllByRole('button')[0]!)
+    const chosenSize = screen.getByTestId('armed-size').textContent ?? ''
+    expect(chosenSize).toContain('size|width|')
+
+    fireEvent.click(within(component).getByRole('button', { name: 'Component: arched door' }))
+    const both = screen.getByTestId('armed-size').textContent ?? ''
+    expect(both).toContain('component|door|arched')
+    // The size survived the component press, which is the point.
+    for (const tag of chosenSize.split(' ')) expect(both).toContain(tag)
+  })
+
+  it('gives a corner no component or height control, because it has neither', () => {
+    /* The corners are not folded: their low/full split is two templates because
+       `shape|column` overlaps its `|low` qualifier, so there is no position to
+       offer and no component variant to offer either. An empty axis renders
+       nothing rather than an empty group. */
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('S2W: Wall on Tile: Corner: Full (Single Piece)'))
+
+    expect(screen.queryByRole('group', { name: /^Component for/ })).toBeNull()
+    expect(screen.queryByRole('group', { name: /^Height for/ })).toBeNull()
   })
 
   it('remembers what was armed, newest first, as a strip and not a third section', () => {

@@ -32,42 +32,45 @@ describe('the armed size', () => {
     // who never touches the control should place at.
     const { result } = renderHook(() => usePlanTools())
 
-    expect(result.current.armedSize).toEqual([])
+    expect(result.current.armedPosition).toEqual([])
   })
 
   it('is the position the palette wrote, in the corpus’s own spelling', () => {
     const { result } = renderHook(() => usePlanTools())
 
     act(() => {
-      result.current.setArmedSize(TWO_BY_TWO)
+      result.current.setArmedPosition('size', TWO_BY_TWO)
     })
 
-    expect(result.current.armedSize).toEqual(TWO_BY_TWO)
+    expect(result.current.armedPosition).toEqual(TWO_BY_TWO)
   })
 
   it('is dropped when a **different** family is armed', () => {
-    /* The rule this file exists for. B4's size domains are per family — 350
-       options over 51 families and 8 with none — so `2 x 2` carried across can
-       be a size the new family's candidates do not carry, which C2 classifies
-       `no-candidate` and no sibling change can reopen. The angle is reset for
-       the same shape of reason, which `usePlanTools` argues at length. */
+    /* The rule this file exists for. The size domains are per row — 303
+       positions over 47 families with 7 having none, and an assembly's own
+       domain on top — so `2 x 2` carried across can be a size the new row's
+       candidates do not carry, which C2 classifies `no-candidate` and no sibling
+       change can reopen. Since the recipe fold the same is true of a *component*:
+       carrying an arched door onto a corner arms a tag that row cannot express.
+       The angle is reset for the same shape of reason, which `usePlanTools`
+       argues at length. */
     const { result } = renderHook(() => usePlanTools())
 
     act(() => {
       result.current.setSelectedTemplate(FLOOR)
     })
     act(() => {
-      result.current.setArmedSize(TWO_BY_TWO)
+      result.current.setArmedPosition('size', TWO_BY_TWO)
       result.current.rotate(90)
     })
-    expect(result.current.armedSize).toEqual(TWO_BY_TWO)
+    expect(result.current.armedPosition).toEqual(TWO_BY_TWO)
     expect(result.current.rotation).toBe(90)
 
     act(() => {
       result.current.setSelectedTemplate(WALL)
     })
 
-    expect(result.current.armedSize).toEqual([])
+    expect(result.current.armedPosition).toEqual([])
     expect(result.current.rotation).toBe(0)
   })
 
@@ -80,17 +83,46 @@ describe('the armed size', () => {
 
     act(() => {
       result.current.setSelectedTemplate(FLOOR)
-      result.current.setArmedSize(TWO_BY_TWO)
+      result.current.setArmedPosition('size', TWO_BY_TWO)
     })
 
     expect(result.current.selectedTemplate).toBe(FLOOR)
-    expect(result.current.armedSize).toEqual(TWO_BY_TWO)
+    expect(result.current.armedPosition).toEqual(TWO_BY_TWO)
+  })
+
+  it('keeps one axis when another is chosen, so a component does not clear a size', () => {
+    /* What the per-axis setter is for. Before the recipe fold there was one axis
+       and one list; three axes sharing a single setter would make every control
+       responsible for re-sending the other two, and the first one to forget
+       would silently drop a choice the user had made. */
+    const { result } = renderHook(() => usePlanTools())
+
+    act(() => {
+      result.current.setSelectedTemplate(WALL)
+    })
+    act(() => {
+      result.current.setArmedPosition('size', TWO_BY_TWO)
+    })
+    act(() => {
+      result.current.setArmedPosition('component', ['component|door|arched'])
+    })
+
+    expect(result.current.armedPosition).toEqual(
+      expect.arrayContaining([...TWO_BY_TWO, 'component|door|arched']),
+    )
+    expect(result.current.armedPosition).toHaveLength(3)
+
+    // And arming a different row still clears every axis at once.
+    act(() => {
+      result.current.setSelectedTemplate(FLOOR)
+    })
+    expect(result.current.armedPosition).toEqual([])
   })
 
   it('takes a default, so a test can arm a size without a palette', () => {
-    const { result } = renderHook(() => usePlanTools({ selectedTemplate: FLOOR, armedSize: TWO_BY_TWO }))
+    const { result } = renderHook(() => usePlanTools({ selectedTemplate: FLOOR, armedPosition: TWO_BY_TWO }))
 
-    expect(result.current.armedSize).toEqual(TWO_BY_TWO)
+    expect(result.current.armedPosition).toEqual(TWO_BY_TWO)
   })
 
   it('is stable across renders that change nothing, because the surface memoises on it', () => {
@@ -100,10 +132,10 @@ describe('the armed size', () => {
        re-run. `useState` holds the same array, so this is a property of the hook
        rather than of the caller. */
     const { result, rerender } = renderHook(() => usePlanTools())
-    const first = result.current.armedSize
+    const first = result.current.armedPosition
 
     rerender()
 
-    expect(result.current.armedSize).toBe(first)
+    expect(result.current.armedPosition).toBe(first)
   })
 })

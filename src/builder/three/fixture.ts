@@ -40,7 +40,7 @@
  */
 import type { AssemblyTemplate } from '@/assembly'
 import { buildAssemblyIndex } from '@/assembly'
-import type { PlanCatalog, PlanScene, PlanTools, SnapMode } from '@/builder/canvas'
+import type { PlanCatalog, PlanScene, PlanTools, PositionAxis, SnapMode } from '@/builder/canvas'
 import { SNAP_STEP, buildPlanScene, createStyleResolver } from '@/builder/canvas'
 import {
   FIXTURE_SLOTS,
@@ -148,7 +148,7 @@ export interface ToolCalls {
   readonly snap: SnapMode[]
   readonly selected: (string | null)[]
   /** Row C5: the size positions the palette armed. */
-  readonly armedSize: (readonly string[])[]
+  readonly armedPosition: { readonly axis: PositionAxis; readonly tags: readonly string[] }[]
   toggledSnap: number
 }
 
@@ -160,12 +160,12 @@ export interface ToolCalls {
  * `FIXTURE_TEMPLATE` should not have to say so twice.
  */
 export function planTools(
-  overrides: Partial<Pick<PlanTools, 'tool' | 'snap' | 'rotation' | 'armedSize'>> & {
+  overrides: Partial<Pick<PlanTools, 'tool' | 'snap' | 'rotation' | 'armedPosition'>> & {
     readonly selectedTemplate?: string | null | undefined
   } = {},
 ): PlanTools & { readonly calls: ToolCalls } {
   const snap: SnapMode = overrides.snap ?? 'fine'
-  const calls: ToolCalls = { rotate: [], tool: [], snap: [], selected: [], armedSize: [], toggledSnap: 0 }
+  const calls: ToolCalls = { rotate: [], tool: [], snap: [], selected: [], armedPosition: [], toggledSnap: 0 }
   const selected = overrides.selectedTemplate ?? null
   return {
     tool: overrides.tool ?? 'place',
@@ -173,11 +173,12 @@ export function planTools(
     step: SNAP_STEP[snap],
     rotation: overrides.rotation ?? 0,
     selectedTemplate: selected === null ? null : (selected as TemplateId),
-    /* Row C5's other half of *what is armed*. A plain field, defaulting to the
-       palette's `any size` position — which is `[]` and a real position rather
-       than an absence, so a test that says nothing about size still exercises
-       the path a user who never touched the control takes. */
-    armedSize: overrides.armedSize ?? [],
+    /* Row C5's other half of *what is armed*, and since the recipe fold every
+       axis of it at once. A plain field, defaulting to the palette's `any size`
+       position — which is `[]` and a real position rather than an absence, so a
+       test that says nothing about it still exercises the path a user who never
+       touched a control takes. */
+    armedPosition: overrides.armedPosition ?? [],
     setTool: (next) => calls.tool.push(next),
     toggleTool: () => calls.tool.push('toggle'),
     setSnap: (next) => calls.snap.push(next),
@@ -187,7 +188,7 @@ export function planTools(
     rotate: (step, direction = 1) => calls.rotate.push({ step, direction }),
     setRotation: () => undefined,
     setSelectedTemplate: (id) => calls.selected.push(id),
-    setArmedSize: (size) => calls.armedSize.push(size),
+    setArmedPosition: (axis, tags) => calls.armedPosition.push({ axis, tags }),
     calls,
   }
 }

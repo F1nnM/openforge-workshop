@@ -790,7 +790,7 @@ export function RoomSurface({
         run(planRemoval(current, at))
         return
       }
-      const solved = family === null ? undefined : solve(family, state.armedSize)
+      const solved = family === null ? undefined : solve(family, state.armedPosition)
       run(planPlacement(family, state.rotation, at, state.step, solved))
     },
     [],

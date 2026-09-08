@@ -149,7 +149,7 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
-import type { PlanTools } from '@/builder/canvas'
+import type { PlanTools, PositionAxis } from '@/builder/canvas'
 import type { FacetSearch } from '@/search'
 import { MAX_QUERY_LENGTH } from '@/search'
 import type { CatalogIndex } from '@/screens/catalog'
@@ -226,13 +226,16 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
    * reached a placement was the family alone (`three/edits.ts` placed with
    * `fills: {}`), so the position narrowed the count on screen and nothing else.
    * C5 solves the fills on the click and hands the position to
-   * `FillContext.size`, so *2 wide by 2 deep* now decides what lands. Nothing
-   * else in this file changes: `size` still reads the position and `setSize`
-   * still writes it, and the state simply lives one level up where the surface
-   * can see it.
+   * `FillContext.position`, so *2 wide by 2 deep* now decides what lands. The
+   * state lives one level up, where the surface can see it.
+   *
+   * **Three axes since the recipe fold**, and the hook keeps them apart so that
+   * choosing a component does not clear a size. `position` here is all of them
+   * joined, which is what a control compares against to know whether it is the
+   * chosen chip.
    */
-  const size = tools.armedSize
-  const setSize = tools.setArmedSize
+  const position = tools.armedPosition
+  const setAxis = tools.setArmedPosition
   /** The RECENT ring, snapshotted — `palette.ts` owns the ring itself. */
   const [recent, setRecent] = useState<readonly RecentEntry[]>(() => recentArms())
 
@@ -241,7 +244,10 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
   const arm = useCallback(
     (family: TemplateFamily, position: readonly string[] = []) => {
       tools.setSelectedTemplate(family.id)
-      setSize(position)
+      /* `setSelectedTemplate` has just cleared every axis, so this writes the
+         one the caller asked for onto a clean position rather than merging into
+         whatever the previous row was armed at. */
+      if (position.length > 0) setAxis('size', position)
       rememberArm({ template: family.id, size: position })
       setRecent(recentArms())
       // §3: selecting forces place mode. Arming a family while the eraser is up
@@ -252,8 +258,8 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
   )
 
   const disarm = useCallback(() => {
+    // `setSelectedTemplate(null)` clears every axis on its own.
     tools.setSelectedTemplate(null)
-    setSize([])
   }, [tools])
 
   /**
@@ -264,13 +270,20 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
    * strip exists to offer back, and a chip that came back at `any size` would
    * drop the only part of it they made twice.
    */
-  const chooseSize = useCallback(
-    (family: TemplateFamily, position: readonly string[]) => {
-      setSize(position)
-      rememberArm({ template: family.id, size: position })
-      setRecent(recentArms())
+  const chooseAxis = useCallback(
+    (family: TemplateFamily, axis: PositionAxis, tags: readonly string[]) => {
+      setAxis(axis, tags)
+      /* Only a size goes into the ring. The ring re-arms a row *at a size* — four
+         2x2 floors and then a fifth — and `PendingArm` carries one position, so a
+         chip that also restored a component would need a shape the store does not
+         have. Choosing a component still arms; it just does not re-write the
+         chip. */
+      if (axis === 'size') {
+        rememberArm({ template: family.id, size: tags })
+        setRecent(recentArms())
+      }
     },
-    [setSize],
+    [setAxis],
   )
 
   // Row G5's one call site. Claiming is read-and-clear, so this is a one-shot
@@ -335,7 +348,7 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
             the last six things armed is a fact about the session and not about
             either list. `palette.ts#MAX_RECENT` carries the rest. */}
         {recentRows.length > 0 ? (
-          <RecentStrip rows={recentRows} armed={armed} size={size} arm={arm} />
+          <RecentStrip rows={recentRows} armed={armed} size={position} arm={arm} />
         ) : null}
 
         {sections.map((section) => (
@@ -343,11 +356,11 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
             key={section.key}
             section={section}
             armed={armed}
-            size={size}
+            position={position}
             count={count}
             arm={arm}
             disarm={disarm}
-            onSize={chooseSize}
+            onAxis={chooseAxis}
           />
         ))}
 
@@ -398,22 +411,22 @@ const SECTION_NOTE: Readonly<Record<PaletteSection['key'], string>> = {
 function PaletteSectionBlock({
   section,
   armed,
-  size,
+  position,
   count,
   arm,
   disarm,
-  onSize,
+  onAxis,
 }: {
   readonly section: PaletteSection
   readonly armed: PlanTools['selectedTemplate']
-  readonly size: readonly string[]
+  readonly position: readonly string[]
   readonly count: CandidateCounter
   readonly arm: (family: TemplateFamily, position?: readonly string[]) => void
   readonly disarm: () => void
-  readonly onSize: (family: TemplateFamily, position: readonly string[]) => void
+  readonly onAxis: (family: TemplateFamily, axis: PositionAxis, tags: readonly string[]) => void
 }) {
   const headingId = useId()
-  const rowProps = { armed, size, count, arm, disarm, onSize }
+  const rowProps = { armed, position, count, arm, disarm, onAxis }
   return (
     <section className="of-pal-section" aria-labelledby={headingId}>
       <h2 className="of-pal-heading" id={headingId}>
@@ -437,11 +450,12 @@ function PaletteSectionBlock({
 /** What every row renderer needs from the panel. */
 interface RowProps {
   readonly armed: PlanTools['selectedTemplate']
-  readonly size: readonly string[]
+  /** Every axis's tags, joined — see `usePlanTools#armedPosition`. */
+  readonly position: readonly string[]
   readonly count: CandidateCounter
   readonly arm: (family: TemplateFamily, position?: readonly string[]) => void
   readonly disarm: () => void
-  readonly onSize: (family: TemplateFamily, position: readonly string[]) => void
+  readonly onAxis: (family: TemplateFamily, axis: PositionAxis, tags: readonly string[]) => void
 }
 
 /** One role group of the single-tile section: a sub-heading over a {@link PaletteList}. */
@@ -476,11 +490,11 @@ function PaletteGroupBlock({
 function PaletteList({
   rows,
   armed,
-  size,
+  position,
   count,
   arm,
   disarm,
-  onSize,
+  onAxis,
 }: RowProps & { readonly rows: readonly TemplateFamily[] }) {
   return (
     <ul className="of-pal-list" role="list">
@@ -489,7 +503,7 @@ function PaletteList({
         // The count follows the armed position, because that is the set a fill
         // will be chosen from. An unarmed row counts what it admits at `any
         // size`, which is what it will arm at.
-        const fact = rowFact(family, count(family, selected ? size : []))
+        const fact = rowFact(family, count(family, selected ? position : []))
         const slots = slotLabel(family.slots)
         return (
           <li key={family.id} className="of-pal-row" data-selected={selected ? '' : undefined}>
@@ -518,7 +532,7 @@ function PaletteList({
               </span>
             </button>
             {selected ? (
-              <SizeControl family={family} size={size} count={count} onSize={onSize} />
+              <RowControls family={family} position={position} count={count} onAxis={onAxis} />
             ) : null}
           </li>
         )
@@ -572,41 +586,140 @@ function rowFact(
 }
 
 /**
- * The armed family's size control.
+ * The armed row's controls: **size, and since the recipe fold component and
+ * height as well.**
  *
- * A `role="group"` of `aria-pressed` buttons and not a `<select>`: B3 measured
- * the domain at a **median of 4 cells and a maximum of 31** — a control, not a
- * dropdown — and every position carries its own candidate count, which a
- * `<select>` has nowhere to put. Wrapped rather than scrolled, because the
- * longest domain is 32 positions and a horizontal scroller in a 272px column
- * hides most of them behind a gesture.
+ * A `role="group"` of `aria-pressed` buttons per axis and not a `<select>`: B3
+ * measured the size domain at a **median of 4 cells and a maximum of 31** — a
+ * control, not a dropdown — and every size position carries its own candidate
+ * count, which a `<select>` has nowhere to put. Wrapped rather than scrolled,
+ * because the longest domain is 32 positions and a horizontal scroller in a
+ * 272px column hides most of them behind a gesture.
  *
- * Renders **nothing** when there is nothing to choose: 7 families have no
- * expressible domain, and no assembly has one at all. Those 7 get a sentence
- * instead of a control, because a row that simply omits the control it has on
- * its sixteen neighbours reads as a bug.
+ * ## What the fold changed here, and what it did not
  *
- * **Row D2 checked the assembly case rather than inheriting it, and it holds.**
- * `GENERATED_FAMILY_SIZES` has no entry for any of the 40, so `family.sizes` is
- * empty for all of them — but the reason it should be is in the fixtures: an
- * assembly's parts `require` their sizes outright (the 5-part corner asks for
- * `size|width|2` on each wall and `size|width|2` + `size|depth|2` on the floor),
- * so a size is part of *which assembly this is* rather than a parameter of the
- * placement. A control here would offer a position whose tags join `parentTags`
- * where no `constrain` collects them — a chip that changed nothing. So no
- * control, and no sentence either: an assembly has no neighbour with one, so
- * there is no missing control to explain.
+ * Row D2 wrote that no assembly has a size control, and gave the reason: an
+ * assembly's parts *"`require` their sizes outright … so a size is part of which
+ * assembly this is"*, and a control would be *"a chip that changed nothing."*
+ * **True of the 8 corners and false of the 32 wall recipes.** The corners really
+ * do require `size|width|2` and `size|depth|2` on their slots, so their whole
+ * domain is that one 2x2 and they still get no control. The wall recipes carried
+ * `constrain: [size|width, size|depth]` and no size of their own — so `constrain`
+ * collected nothing and the assembly's size was whatever the user happened to
+ * click. Those two now have a domain of pairs that each pin one footprint.
+ *
+ * The **component** axis is what the fold bought in exchange for 30 rows: 14
+ * component variants that used to be 14 templates are 14 positions on one. The
+ * **height** axis is `shape|wall` against `shape|wall|low`, which are disjoint in
+ * the corpus — so it also reaches the 527 low walls that `Wall (Any)`'s
+ * `shape|wall` require could not see at all.
+ *
+ * Renders **nothing for an axis with nothing to choose**: a one-position axis is
+ * a control that cannot be operated. The 7 families with no expressible size get
+ * a sentence instead, because a row that simply omits the control its sixteen
+ * neighbours have reads as a bug; an axis no *assembly* has needs no sentence,
+ * since there is no neighbour to compare against.
  */
+function RowControls({
+  family,
+  position,
+  count,
+  onAxis,
+}: {
+  readonly family: TemplateFamily
+  readonly position: readonly string[]
+  readonly count: CandidateCounter
+  readonly onAxis: (family: TemplateFamily, axis: PositionAxis, tags: readonly string[]) => void
+}) {
+  return (
+    <>
+      <AxisControl
+        family={family}
+        axis="component"
+        label="Component"
+        entries={family.controls?.component ?? []}
+        position={position}
+        onAxis={onAxis}
+      />
+      <AxisControl
+        family={family}
+        axis="height"
+        label="Height"
+        entries={family.controls?.height ?? []}
+        position={position}
+        onAxis={onAxis}
+      />
+      <SizeControl family={family} size={position} count={count} onAxis={onAxis} />
+    </>
+  )
+}
+
+/**
+ * One non-size axis, as labelled chips.
+ *
+ * No candidate count, and that is the difference from the size control rather
+ * than an omission. `candidateCount` answers *"how many tiles does this row's one
+ * slot admit"* and every row with a component axis is a **3-slot** assembly, so
+ * there is no one number — the same reason an assembly shows its build system
+ * where a single tile shows a count.
+ */
+function AxisControl({
+  family,
+  axis,
+  label,
+  entries,
+  position,
+  onAxis,
+}: {
+  readonly family: TemplateFamily
+  readonly axis: PositionAxis
+  readonly label: string
+  readonly entries: readonly SizePosition[]
+  readonly position: readonly string[]
+  readonly onAxis: (family: TemplateFamily, axis: PositionAxis, tags: readonly string[]) => void
+}) {
+  // One position is nothing to choose, and none is nothing to show.
+  if (entries.length < 2) return null
+  return (
+    <div className="of-pal-sizes" role="group" aria-label={`${label} for ${family.name}`}>
+      {entries.map((entry) => {
+        /* An `any` position carries no tags, so it is chosen exactly when no tag
+           of this axis is armed — which is what makes it a real position rather
+           than the absence of one. */
+        const chosen =
+          entry.tags.length === 0
+            ? !entries.some((other) => other.tags.length > 0 && other.tags.every((tag) => position.includes(tag)))
+            : entry.tags.every((tag) => position.includes(tag))
+        return (
+          <button
+            key={entry.label}
+            type="button"
+            className="of-pal-sizebtn"
+            aria-pressed={chosen}
+            aria-label={`${label}: ${entry.label}`}
+            onClick={() => {
+              onAxis(family, axis, entry.tags)
+            }}
+          >
+            {entry.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The size axis, which is the only one carrying a candidate count per position. */
 function SizeControl({
   family,
   size,
   count,
-  onSize,
+  onAxis,
 }: {
   readonly family: TemplateFamily
   readonly size: readonly string[]
   readonly count: CandidateCounter
-  readonly onSize: (family: TemplateFamily, position: readonly string[]) => void
+  readonly onAxis: (family: TemplateFamily, axis: PositionAxis, tags: readonly string[]) => void
 }) {
   if (family.sizes.length === 0) {
     if (family.kind === 'recipe') return null
@@ -618,24 +731,24 @@ function SizeControl({
   }
   return (
     <div className="of-pal-sizes" role="group" aria-label={`Size for ${family.name}`}>
-      {family.sizes.map((position: SizePosition) => {
-        const chosen = position.tags.length === size.length && position.tags.every((tag) => size.includes(tag))
-        const candidates = count(family, position.tags) ?? 0
+      {family.sizes.map((entry: SizePosition) => {
+        const chosen = entry.tags.length === size.length && entry.tags.every((tag) => size.includes(tag))
+        const candidates = count(family, entry.tags) ?? 0
         return (
           <button
-            key={position.label}
+            key={entry.label}
             type="button"
             className="of-pal-sizebtn"
             aria-pressed={chosen}
             /* The authored label in full plus the count: the visible text is
                abbreviated to fit, and a number with no noun beside it says
                nothing on its own. */
-            aria-label={`${position.label}, ${countLabel(candidates)} tiles`}
+            aria-label={`${entry.label}, ${countLabel(candidates)} tiles`}
             onClick={() => {
-              onSize(family, position.tags)
+              onAxis(family, 'size', entry.tags)
             }}
           >
-            {sizeChipLabel(position.label)}
+            {sizeChipLabel(entry.label)}
             <span className="of-pal-sizecount">{countLabel(candidates)}</span>
           </button>
         )
