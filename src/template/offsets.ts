@@ -589,6 +589,23 @@ export interface PlacedTemplate {
 }
 
 /**
+ * The anchor a rule takes for **this** fill.
+ *
+ * `cell` and `residual` differ only by what the `edge` slots take off the cell,
+ * so a slot whose fill is authored to the residual is already described by the
+ * anchor beside it — see `rules.ts#isInsetFill` for the meshes that say which
+ * fills those are.
+ *
+ * Only a `cell` rule can move. An `edge` or `corner` rule is anchored to a
+ * *face*, and a fill being inset says nothing about which face it gave up; an
+ * s2w base gives up the faces its own template's walls stand on, which is
+ * exactly what the residual already computes and an edge anchor does not.
+ */
+function effectiveAnchor(rule: SlotRule, insetParts: ReadonlySet<SlotName>): SlotAnchor {
+  return rule.anchor === 'cell' && insetParts.has(rule.part) ? 'residual' : rule.anchor
+}
+
+/**
  * The fill-time entry point: a layout plus the resolved footprint of each fill,
  * to a placement per slot plus whatever the rule could not answer.
  *
@@ -600,10 +617,28 @@ export interface PlacedTemplate {
  *
  * A slot whose face does not tile is a *different* case and gets both a doubt
  * and its position; see the `over-run` note in the loop below.
+ *
+ * ## `insetParts`, and why it is slot names rather than records
+ *
+ * The parts whose **fill** is authored short of the cell its tag names, so its
+ * box is the residual. `rules.ts#isInsetFill` decides which those are and its
+ * docblock carries the meshes; the population is the 95 s2w bases and the defect
+ * is 18 of the 40 recipes drawing one a quarter unit out.
+ *
+ * It arrives as a `Set<SlotName>` and not as the fills themselves because this
+ * module takes **footprints only** and has no `CatalogRecord` in its closure —
+ * and cannot get one usefully, since the discriminator is a tag and a footprint
+ * cannot carry it: a 2 x 2 s2w base and a 2 x 2 plain base have byte-identical
+ * `foot`. So the record-to-boolean step stays with the three callers that
+ * already hold fills, and what crosses the boundary is the answer.
+ *
+ * Defaulting to empty is what keeps every existing caller and all 20
+ * `(Single Piece)` recipes on the anchor they had.
  */
 export function placeTemplateSlots(
   layout: TemplateLayout,
   feet: ReadonlyMap<SlotName, Footprint>,
+  insetParts: ReadonlySet<SlotName> = new Set(),
 ): PlacedTemplate {
   const slots: SlotPlacement[] = []
   const doubts: SlotDoubt[] = []
@@ -674,14 +709,19 @@ export function placeTemplateSlots(
         doubts.push({ part: rule.part, code: 'over-run', want: span, got: run + taken })
       }
     }
+    /* Resolved here and not before the loop: `edgeInsets` above reads
+       `rule.anchor` deliberately, because the residual is defined *by* the edge
+       slots — an inset base feeding back into the insets would shrink the very
+       box it is being fitted to. */
+    const anchor = effectiveAnchor(rule, insetParts)
     slots.push({
       part: rule.part,
-      anchor: rule.anchor,
+      anchor,
       side: rule.side,
-      offset: slotOffset(rule, cell, part, reserved, insets),
+      offset: slotOffset({ ...rule, anchor }, cell, part, reserved, insets),
       yaw: slotYaw(rule),
       restsOn: rule.restsOn,
-      ...(rule.anchor === 'residual' && residual !== undefined ? { residual: residual.extent } : {}),
+      ...(anchor === 'residual' && residual !== undefined ? { residual: residual.extent } : {}),
     })
   }
 
