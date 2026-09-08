@@ -74,7 +74,7 @@ import { filledSlots } from '@/store'
 
 import type { Footprint } from '@/catalog'
 import type { SlotName as PartName } from '@/template/rules'
-import { layoutFor } from '@/template/rules'
+import { isInsetFill, layoutFor } from '@/template/rules'
 import type { PlacedTemplate } from '@/template/offsets'
 import { placeTemplateSlots, slotDoubtSentence, slotElevationMm } from '@/template/offsets'
 
@@ -116,8 +116,28 @@ export type SlotRecords = ReadonlyMap<SlotName, CatalogRecord>
  * it, and the canvas must reach neither. The builder screen composes them and
  * passes the result here, exactly as it already does for the catalog file
  * itself.
+ *
+ * ## `tags`, and why the rule is handed a decoder rather than closing over one
+ *
+ * A rule needs a fill's **tags** and not only its footprint, because
+ * `template/rules.ts#isInsetFill` is what decides whether a slot takes the cell
+ * box or the residual — and a footprint cannot answer it: a 2 x 2 s2w base and a
+ * 2 x 2 plain base have byte-identical `foot`.
+ *
+ * A `CatalogRecord` carries its tags as **indices into the file's table**, so
+ * decoding needs the file. {@link planCatalogFromFile} already holds it and
+ * already memoises `resolveTags` per record for its own `tags` method, so it
+ * passes that same cached reader in. The alternative — injecting a decoder at
+ * each construction site — was tried and is worse: `screens/detail/placeOnPlan.ts`
+ * composes its rule at **module scope** with no file in reach, deliberately, and
+ * would have had to build one per call and lose that.
  */
-export type SlotLayoutRule = (template: TemplateId, slot: SlotName, fills: SlotRecords) => SlotLayoutAnswer
+export type SlotLayoutRule = (
+  template: TemplateId,
+  slot: SlotName,
+  fills: SlotRecords,
+  tags: (record: CatalogRecord) => readonly string[],
+) => SlotLayoutAnswer
 
 /**
  * A rule's answer for one slot: where it sits, or why it sits nowhere.
@@ -289,7 +309,7 @@ export const BASE_LIFT_MM = 6
 export function templateSlotLayout(
   parts: (template: TemplateId) => readonly PartName[] | undefined,
 ): SlotLayoutRule {
-  return (template, slot, fills) => {
+  return (template, slot, fills, tags) => {
     const names = parts(template)
     const layout = names === undefined ? undefined : layoutFor(names)
     // No recipe, or a recipe with no convention — B4's 51 one-slot families, and
@@ -299,7 +319,14 @@ export function templateSlotLayout(
     if (layout === undefined) return ORIGIN_LAYOUT
 
     const elevationMm = slotElevationMm(layout, slot, (resting) => liftOf(fills.get(resting as SlotName)))
-    const placed = placeTemplateSlots(layout, footprintsOf(fills))
+    /* Which fills are authored short of the cell their tag names — the 95 s2w
+       bases. Read off the *fill* and never off the recipe, because
+       `Corner (Any, Modular)` and the drain's modular recipe each admit both an
+       s2w and a plain base in the same slot, so a per-recipe answer is wrong for
+       one of them. `rules.ts#isInsetFill` carries the meshes. */
+    const insetParts = new Set<SlotName>()
+    for (const [name, fill] of fills) if (isInsetFill(tags(fill))) insetParts.add(name)
+    const placed = placeTemplateSlots(layout, footprintsOf(fills), insetParts)
     const cell = placed.cell
     const placement = placed.slots.find((one) => one.part === slot)
     const record = fills.get(slot)
@@ -492,17 +519,25 @@ export function planCatalogFromFile(file: CatalogFile, layout: SlotLayoutRule = 
   const tags = new Map<string, readonly string[]>()
   const layouts = new Map<string, SlotLayoutAnswer>()
 
+  /* A free function rather than only a method on `view`, because the layout rule
+     is handed it as a value — see {@link SlotLayoutRule}'s `tags` — and passing
+     `view.tags` unbound is exactly what `@typescript-eslint/unbound-method`
+     exists to stop. `view.tags` delegates, so there is one cache and not two. */
+  const tagsOf = (record: CatalogRecord): readonly string[] => {
+    let cached = tags.get(record.id)
+    if (cached === undefined) {
+      cached = resolveTags(file, record)
+      tags.set(record.id, cached)
+    }
+    return cached
+  }
+
   const view: PlanCatalog = {
     record(tile) {
       return byId.get(tile)
     },
     tags(record) {
-      let cached = tags.get(record.id)
-      if (cached === undefined) {
-        cached = resolveTags(file, record)
-        tags.set(record.id, cached)
-      }
-      return cached
+      return tagsOf(record)
     },
     parts(instance) {
       // Sorted by slot name, and that is determinism and nothing more. The
@@ -547,7 +582,7 @@ export function planCatalogFromFile(file: CatalogFile, layout: SlotLayoutRule = 
         // frame would defeat the memo for exactly the templates that need it.
         let answer = layouts.get(key)
         if (answer === undefined) {
-          answer = layout(instance.template, slot, records)
+          answer = layout(instance.template, slot, records, tagsOf)
           layouts.set(key, answer)
         }
         if (!isSlotLayout(answer)) {

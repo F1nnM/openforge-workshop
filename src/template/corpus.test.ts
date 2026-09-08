@@ -74,7 +74,7 @@ import {
 import type { PlacedTemplate, SlotDoubtCode } from './offsets'
 import { cornerReservation, edgeInsets, placeTemplateSlots, residualBox, slotOffset } from './offsets'
 import type { SlotName, TemplateLayout } from './rules'
-import { SLOT_CONVENTIONS, conventionFor, ruleFor } from './rules'
+import { SLOT_CONVENTIONS, conventionFor, isInsetFill, ruleFor } from './rules'
 
 /* ----------------------------------------------------------------- the corpus */
 
@@ -856,6 +856,115 @@ describeCorpus(corpusTitle, () => {
     process.stdout.write(
       `\n[template] s2w floors: ${String(rows.length)} measured, ${String(exact.length)} reproduced exactly by the residual\n`,
     )
+  })
+
+  it('reproduces every s2w base’s extent as the residual too, and leaves the other 1,868 alone', () => {
+    /* **The same argument as the floor above, for the slot that never got it.**
+       `rules.ts` anchors `base` to `cell` on all 40 recipes on the strength of
+       *"every candidate is `layer === 'base'`"*, which is true and does not
+       imply the mesh fills the cell. An s2w base is the tile minus the same wall
+       strip its floor gives up, so `place.ts` centred a short slab in a full box
+       and left it a quarter unit out — 18 of the 40, every one `(Modular)`.
+
+       **The sidecar cannot witness this and that is the finding, not a gap.** It
+       covers 1,284 of 8,702 records and **0 of the 95** s2w bases, which is why
+       the extents below were read from the `/lod/` store instead, at the
+       `{md5[:6]}/{md5}.glb` scheme `three/lod.ts#lodGlbUrl` builds. They are
+       transcribed rather than fetched because a unit test must not depend on the
+       network; what is *computed* here is the residual they are compared to, and
+       what the corpus checks is that the population, the tagging and the
+       complement are still what the transcription assumed. */
+    const measured = measuredExtents()
+    const tagsOf = (record: CatalogRecord): readonly string[] => resolveTags(file as CatalogFile, record)
+    const bases = (file?.records ?? []).filter((record) => isInsetFill(tagsOf(record)))
+
+    expect(bases).toHaveLength(95)
+    expect(bases.filter((record) => measured[record.blob]?.extent !== undefined)).toEqual([])
+
+    /* Read off `/lod/`: tagged cell, mesh extent, and how many faces the piece
+       gives up. A `wall` base gives up one, a `corner` two on adjacent faces,
+       and an `internal_corner` none — which is why the last row is full-cell and
+       needs no exception anywhere in the code. */
+    const lod = [
+      { file: 'plain#base+s2w+square+wall.2x2', cell: { w: 2, d: 2 }, mesh: { w: 2, d: 1.5 }, walled: 1 },
+      { file: 'plain#base+s2w+square+wall.4x2', cell: { w: 4, d: 2 }, mesh: { w: 4, d: 1.5 }, walled: 1 },
+      { file: 'plain#base+s2w+square+wall.4x4', cell: { w: 4, d: 4 }, mesh: { w: 4, d: 3.5 }, walled: 1 },
+      { file: 'plain#base+s2w+square+corner.2x2', cell: { w: 2, d: 2 }, mesh: { w: 1.5, d: 1.5 }, walled: 2 },
+      { file: 'plain#base+s2w+square+corner.4x4', cell: { w: 4, d: 4 }, mesh: { w: 3.5, d: 3.5 }, walled: 2 },
+      { file: 'plain#base+square+s2w+internal_corner.2x2', cell: { w: 2, d: 2 }, mesh: { w: 2, d: 2 }, walled: 0 },
+    ]
+    for (const row of lod) {
+      /* Every one of them is a record this build ships, so a fixture import that
+         renamed or retagged them fails here rather than leaving the table as
+         folklore. */
+      expect(
+        (file?.records ?? []).some((record) => record.file.startsWith(row.file) && isInsetFill(tagsOf(record))),
+        row.file,
+      ).toBe(true)
+      const insets = {
+        minZ: row.walled >= 1 ? WALL_THICKNESS_UNITS : 0,
+        minX: row.walled >= 2 ? WALL_THICKNESS_UNITS : 0,
+        maxX: 0,
+        maxZ: 0,
+      }
+      const residual = residualBox(row.cell, insets).extent
+      expect(residual.w, `${row.file} w`).toBeCloseTo(row.mesh.w, 1e-6)
+      expect(residual.d, `${row.file} d`).toBeCloseTo(row.mesh.d, 1e-6)
+    }
+
+    /* And the complement, which is what says `cell` was not simply wrong for
+       every base: of the rect bases the sidecar *does* cover, every one measures
+       the cell its tag names. So the anchor had to move for one population and
+       stay for the other, which is why it is decided per fill. */
+    let plain = 0
+    for (const record of file?.records ?? []) {
+      if (record.layer !== 'base' || record.foot.shape !== 'rect') continue
+      if (isInsetFill(tagsOf(record))) continue
+      const extent = measured[record.blob]?.extent
+      if (extent === undefined) continue
+      plain += 1
+      const mesh = {
+        w: ((extent.maxMm[0] ?? 0) - (extent.minMm[0] ?? 0)) / GRID_UNIT_MM,
+        d: ((extent.maxMm[1] ?? 0) - (extent.minMm[1] ?? 0)) / GRID_UNIT_MM,
+      }
+      expect(Math.abs(mesh.w - record.foot.w), `${record.file} w`).toBeLessThan(0.02)
+      expect(Math.abs(mesh.d - record.foot.d), `${record.file} d`).toBeLessThan(0.02)
+    }
+    expect(plain).toBe(120)
+
+    process.stdout.write(
+      `\n[template] s2w bases: ${String(bases.length)} tagged, 0 in the sidecar, ${String(lod.length)} read from /lod/; ${String(plain)} plain bases measure their cell\n`,
+    )
+  })
+
+  it('flips the base onto the residual for an s2w fill and leaves a plain one alone', () => {
+    /* The composition, on the archive's own records rather than on the hand
+       fixtures `offsets.test.ts` uses: take a real s2w wall base and a real plain
+       base of the same tagged cell, and the anchor differs on the fill alone. */
+    const tagsOf = (record: CatalogRecord): readonly string[] => resolveTags(file as CatalogFile, record)
+    const at2x2 = (record: CatalogRecord): boolean =>
+      record.layer === 'base' && record.foot.shape === 'rect' && record.foot.w === 2 && record.foot.d === 2
+    const s2wBase = (file?.records ?? []).find((record) => at2x2(record) && isInsetFill(tagsOf(record)))
+    const plainBase = (file?.records ?? []).find((record) => at2x2(record) && !isInsetFill(tagsOf(record)))
+    expect(s2wBase).toBeDefined()
+    expect(plainBase).toBeDefined()
+
+    const feet = new Map<SlotName, Footprint>([
+      ['base', { shape: 'rect', w: 2, d: 2 }],
+      ['floor', { shape: 'rect', w: 2, d: 2 }],
+      ['wall', { shape: 'wall', length: 2 }],
+    ])
+    const anchorFor = (record: CatalogRecord) => {
+      const inset = new Set<SlotName>()
+      if (isInsetFill(tagsOf(record))) inset.add('base')
+      const placed = placeTemplateSlots(conventionFor(['base', 'floor', 'wall'] as SlotName[]) as TemplateLayout, feet, inset)
+      return placed.slots.find((slot) => slot.part === 'base')
+    }
+
+    expect(anchorFor(s2wBase as CatalogRecord)?.anchor).toBe('residual')
+    expect(anchorFor(s2wBase as CatalogRecord)?.residual).toEqual({ w: 2, d: 1.5 })
+    expect(anchorFor(plainBase as CatalogRecord)?.anchor).toBe('cell')
+    expect(anchorFor(plainBase as CatalogRecord)?.residual).toBeUndefined()
   })
 
   it('has no measured mesh at all for the corner families, so the mitre cannot be settled', () => {

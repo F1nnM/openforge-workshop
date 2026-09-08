@@ -282,7 +282,15 @@ function placementOf(template: AssemblyTemplate, solved: TemplateFill): Placemen
     /* No layout, no doubts, and that is not a gap in the disclosure: B2's three
        outputs are all constants for one slot at the origin, so B4's 51
        one-slot families decline a convention deliberately and there is nothing
-       for `placeTemplateSlots` to be undecided about. */
+       for `placeTemplateSlots` to be undecided about.
+
+       No `insetParts` either, and that is deliberate rather than forgotten: the
+       inset anchor moves a slot's `offset` and `residual`, and this call reads
+       **only** `doubts`. A `cell` slot becoming `residual` raises and silences no
+       doubt — the `unfilled`, `no-footprint`, `no-run` and `over-run` branches
+       all run before the anchor is resolved, and `no-walk` reads the insets the
+       *declared* `edge` rules give. So passing a set here could only cost the
+       caller a tag decoder it has no other use for. */
     doubts: layout === undefined ? [] : placeTemplateSlots(layout, feet).doubts,
     known: true,
     queries: solved.queries,

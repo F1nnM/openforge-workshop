@@ -16,7 +16,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { TileId } from '@/catalog'
+import type { CatalogRecord, TileId } from '@/catalog'
+import { resolveTags } from '@/catalog'
 import type { PlacementId, SlotName, TemplateId, WorkshopState } from '@/store'
 
 import {
@@ -612,6 +613,13 @@ describe('the band, and why row A7 could not delete it — re-measured under row
  */
 describe('the wired slot layout', () => {
   const layout = templateSlotLayout(fixtureTemplateParts)
+  /* The tag reader `planCatalogFromFile` hands the rule in production, built
+     here off the same fixture file. No fixture record is an `shape|base|s2w`
+     base, so nothing in this block is inset and every position below is the
+     answer it was before the parameter existed — which is the point of reading
+     the real tags rather than stubbing them: a fixture that gained an s2w base
+     would change these numbers rather than quietly not. */
+  const fixtureTags = (fill: CatalogRecord): readonly string[] => resolveTags(file, fill)
   /**
    * The five records of a filled 2 x 2 corner, as the rule receives them.
    *
@@ -629,7 +637,7 @@ describe('the wired slot layout', () => {
     [FIXTURE_SLOTS.leftWall, record(FIXTURE_IDS.cornerWall)],
     [FIXTURE_SLOTS.column, record(FIXTURE_IDS.column)],
   ])
-  const answerAt = (slot: SlotName, fills = CORNER) => layout(FIXTURE_TEMPLATE, slot, fills)
+  const answerAt = (slot: SlotName, fills = CORNER) => layout(FIXTURE_TEMPLATE, slot, fills, fixtureTags)
   /** The rule's answer, asserted to be a position rather than a refusal. */
   const positionOf = (answer: SlotLayoutAnswer, where: string): SlotLayout => {
     if (!isSlotLayout(answer)) throw new Error(`${where} was refused: ${answer.refused}`)
@@ -712,7 +720,7 @@ describe('the wired slot layout', () => {
       [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
       [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.diag)],
     ])
-    const answer = layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, diagonal)
+    const answer = layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, diagonal, fixtureTags)
     expect(isSlotLayout(answer)).toBe(false)
     expect(isSlotLayout(answer) ? '' : answer.refused).toBe(
       'The wall part has no straight run, so it does not lie along an edge of this cell.',
@@ -769,7 +777,7 @@ describe('the wired slot layout', () => {
     // B4's 51 generated families: C2 measured 0 of 51 with a part-name set
     // `rules.ts` has a convention for, and a one-slot family needs none.
     const bare = new Map([[FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)]])
-    expect(layout('shape-base' as TemplateId, FIXTURE_SLOTS.floor, bare)).toEqual({
+    expect(layout('shape-base' as TemplateId, FIXTURE_SLOTS.floor, bare, fixtureTags)).toEqual({
       dx: 0,
       dz: 0,
       rotation: 0,
@@ -785,12 +793,12 @@ describe('the wired slot layout', () => {
       [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
       [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.wall2)],
     ])
-    const wallLayout = positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase), 'wall')
+    const wallLayout = positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase, fixtureTags), 'wall')
     expect(wallLayout.elevationMm).toBe(0)
     // And with a base in the map it is one base up.
     noBase.set(FIXTURE_SLOTS.base, record(FIXTURE_IDS.floor2))
     expect(
-      positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase), 'wall').elevationMm,
+      positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase, fixtureTags), 'wall').elevationMm,
     ).toBe(BASE_LIFT_MM)
   })
 
@@ -802,8 +810,8 @@ describe('the wired slot layout', () => {
       [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.angled)],
       [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.wall2)],
     ])
-    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, small), 'wall').cell).toEqual({ w: 2, d: 1 })
-    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.base, small), 'base').cell).toEqual({ w: 2, d: 1 })
+    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, small, fixtureTags), 'wall').cell).toEqual({ w: 2, d: 1 })
+    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.base, small, fixtureTags), 'base').cell).toEqual({ w: 2, d: 1 })
   })
 
   it('never snaps an offset, and never lands off the 0.25 lattice either', () => {

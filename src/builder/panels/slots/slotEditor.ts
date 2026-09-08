@@ -288,6 +288,12 @@ function layoutOf(
     const record = fill === undefined ? undefined : index.byId.get(fill.tile)
     if (record !== undefined) feet.set(slot as SlotName, record.foot)
   }
+  /* No `insetParts`, deliberately. What this reads off the placement is `cell`
+     and the doubts, and it derives its size predicates from `layout.slots` — the
+     *declared* rules — rather than from the placed ones. The inset anchor changes
+     an `offset` and a `residual` and neither is read here, so the empty default
+     is the whole answer. Whether an inset base should also narrow its own size
+     predicate is B3's question and not this row's. */
   const placed = placeTemplateSlots(layout, feet)
   const span = cornerSpanOf(layout)
   const sides = new Map<string, ReturnType<typeof slotSizePredicate>>()
