@@ -443,12 +443,12 @@ export function BuilderRoom({
 
       <p className="of-b3d-keys" id={KEY_HELP_ID}>
         Drag to orbit, drag with the right or middle button or with Ctrl to pan across the plan, and scroll to zoom.
-        Click the plan to place the armed tile and click a tile to remove it in Erase mode. Right-click a piece to
-        choose what goes in its slots, or use the Pieces on the plan list beside the drawing. Arrow keys move the plan
-        cursor by the snap step, Shift for four steps; Enter places the armed tile, Delete removes the one under the cursor and R
-        turns it. Shift and Enter together pick the tile under the cursor up to move it; the arrow keys then carry it,
-        Enter drops it and Escape puts it back. Square brackets step through the placed tiles. G switches snap between
-        half a unit and one unit, and P, E and M switch between place, erase and move.
+        Click the plan to place the armed tile and click a tile to remove it in Erase mode. Select a piece and press
+        Slots on it, or Enter, to choose what goes in its slots — or press Slots on its row in the bill of tiles. Arrow
+        keys move the selected piece, or the plan cursor when nothing is selected, by the snap step, Shift for four
+        steps; with nothing selected Enter places the armed tile, Delete removes the selected piece and R turns it.
+        Escape drops the selection, or disarms the palette. Square brackets step through the placed tiles, and G
+        switches snap between half a unit and one unit.
       </p>
 
       <p className="of-b3d-live" aria-live="polite" aria-atomic="true">

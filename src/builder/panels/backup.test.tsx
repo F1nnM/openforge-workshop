@@ -220,4 +220,29 @@ describe('export and import', () => {
     expect(screen.getByLabelText('Import JSON', { selector: 'input' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Export JSON' })).toBeInTheDocument()
   })
+
+  /**
+   * **It is a line in the bill column's footer now, not a section of its own.**
+   *
+   * Every pixel this takes is a pixel of parts list — the column's `1fr` row is
+   * the bill — and it took a heading plus a four-line paragraph to say two
+   * things: the store is not durable, and importing replaces. Both survive; the
+   * paragraph does not. The landmark survives too, unlabelled on screen and
+   * named for assistive technology, because the import report below it has to be
+   * findable and scoped.
+   */
+  it('says what a backup is for in one line, not a paragraph', () => {
+    render(<BackupPanel />)
+
+    expect(
+      screen.getByText(/Browsers clear this storage. Import replaces what is here./),
+    ).toBeInTheDocument()
+    // The four lines that used to say it, including Safari's week — a fact worth
+    // knowing and not worth spending a quarter of the column on unprompted.
+    expect(screen.queryByText(/Safari after a week without a visit/)).toBeNull()
+    // No visible heading over two buttons in a footer strip: the region keeps its
+    // accessible name, and a mono eyebrow there is a section where none is left.
+    expect(screen.queryByRole('heading', { name: 'Backup' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Backup' })).toBeInTheDocument()
+  })
 })

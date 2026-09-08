@@ -661,17 +661,54 @@ describe('the keyboard path exists in the document', () => {
     })
     const keys = document.querySelector('#of-b3d-keys')
     expect(keys?.textContent).toMatch(/Drag to orbit/)
-    expect(keys?.textContent).toMatch(/Arrow keys move the plan cursor/)
-    expect(keys?.textContent).toMatch(/Escape puts it back/)
     /*
-      Row **C8**. The right click is on the drawing now, so the key map has to
-      say so — and it has to say the *other* route in the same breath, because a
-      right click has no keyboard equivalent every platform agrees on and this
-      paragraph is what the canvas's `aria-describedby` points at. The second
-      sentence is the panel's list, named as the pointer-free way in.
+      **The arrows do one of two things and the paragraph has to say which.**
+      `onKey` branches on the selection: with one they nudge the piece, with none
+      they walk the plan cursor. It read as unconditional until the selection
+      model arrived.
     */
-    expect(keys?.textContent).toMatch(/Right-click a piece to choose what goes in its slots/)
-    expect(keys?.textContent).toMatch(/Pieces on the plan list/)
+    expect(keys?.textContent).toMatch(
+      /Arrow keys move the selected piece, or the plan cursor when nothing is selected/,
+    )
+    /*
+      **Three claims left with no binding behind them, deleted rather than
+      restated.** `Shift`+`Enter` picked a tile up to move it and `Escape` put it
+      back, which is what the arrows-nudge-the-selection path replaced — there is
+      no `shiftKey` branch on `Enter` in `onKey` at all — and `P`, `E` and `M`
+      switched the three modes, which `onKey` has no cases for. A key map is the
+      canvas's `aria-describedby`, so a binding named in it that does not exist
+      is worse than one left out: the user it is written for cannot see the
+      drawing to discover the truth.
+    */
+    expect(keys?.textContent).not.toMatch(/Shift and Enter together/)
+    expect(keys?.textContent).not.toMatch(/P, E and M/)
+    // What `Escape` does do, which is two things and neither of them a move.
+    expect(keys?.textContent).toMatch(/Escape drops the selection, or disarms the palette/)
+    /*
+      **Both routes to the editor, and the sentence had gone stale on both.**
+      It named a right click, which the selection model took back for the camera
+      — the secondary button cancels what is armed now and opens nothing — and it
+      sent the keyboard user to a list of the placed pieces beside the drawing,
+      which the sidebar cleanup deleted. So it names the two that exist: the
+      action bar over the selected piece, and a `Slots` press on the bill's own
+      row. This paragraph is what the canvas's `aria-describedby` points at, so a
+      route named here that is not there is the one kind of error in it that
+      strands the user it is written for.
+    */
+    expect(keys?.textContent).toMatch(/Select a piece and press\s+Slots on it, or Enter, to choose what goes in its slots/)
+    expect(keys?.textContent).toMatch(/press Slots on its row in the bill of tiles/)
+    expect(keys?.textContent).not.toMatch(/Right-click a piece/)
+    /*
+      And `Enter`'s two jobs are told apart, because the selection decides which
+      one it does — `onKey`'s `Enter` arm opens the selection's slots and only
+      falls through to `actAt` with nothing selected. Naming the slot route above
+      without this would leave the paragraph asserting both of Enter's meanings
+      unconditionally, two lines apart.
+    */
+    expect(keys?.textContent).toMatch(/with nothing selected Enter places the armed tile/)
+    // `Delete` takes the **selection** and not whatever the cursor is over —
+    // `onKey`'s `Delete` arm is `chosen`, and it is what replaced erase mode.
+    expect(keys?.textContent).toMatch(/Delete removes the selected piece/)
     // And the right button is a pan, which is the interaction the 5 px
     // threshold protects — the sentence used to name only the middle one.
     expect(keys?.textContent).toMatch(/drag with the right or middle button/)

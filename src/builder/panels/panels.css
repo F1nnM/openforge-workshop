@@ -471,6 +471,42 @@
   font-weight: 700;
 }
 
+/* An advisory warning is a `<details>`, and its headline is the summary — see
+   `billView.ts#noteBlocksDownload` for which notes are and are not. The default
+   triangle is replaced by a chevron on the right, so the marker sits where the
+   file rows' carets already are and the headline starts on the same left edge as
+   a blocking note's. */
+details.of-bill-note > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+details.of-bill-note > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.of-bill-note > summary::after {
+  content: '\25B8';
+  flex: none;
+  font-weight: 400;
+  color: var(--acc);
+}
+
+details.of-bill-note[open] > summary::after {
+  content: '\25BE';
+}
+
+/* A sibling of the summary, not a child of it, so it inherits the note's own
+   normal weight and needs no reset. */
+.of-bill-note-why {
+  display: block;
+  margin-top: 6px;
+}
+
 .of-bill-infos {
   font-size: 12px;
   color: var(--mut);
@@ -662,6 +698,16 @@ div.of-bill-open {
   font-family: var(--face-mono);
   font-size: 10.5px;
   color: var(--mut);
+}
+
+/* The two row actions as one group, so the cell they sit beside keeps the whole
+   of the `space-between` gap and the pair never drifts apart as a row's mono
+   coordinate grows. */
+.of-bill-acts {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .of-bill-remove {
@@ -935,11 +981,21 @@ div.of-bill-open {
    §2.4 — architecture-plan.md §13 is why it exists at all (see
    `BackupPanel.tsx`), and the bill column is why it is here.
 
-   It is the last child of `.of-builder-bill`, a fixed-height grid whose `1fr`
-   row is the bill, so it is sized to cost the parts list as little as possible:
-   `sm` controls, one 12.5px sentence, and a report that only exists after a
-   press. The top border separates it from the accessory slots above without
-   adding a second bordered box inside a bordered column.
+   **It is the last child of `.of-bill-foot` now, not of `.of-builder-bill`.**
+   It was a section of its own in that column's grid, and the sidebar cleanup
+   made it two controls and one line in the bill's pinned footer — so it is
+   sized to cost the parts list as little as possible: `sm` controls, one 12.5px
+   sentence, and a report that only exists after a press. The top border
+   separates it from the download action above without adding a second bordered
+   box inside a bordered column.
+
+   **The `max-height` and its scroller went with the move**, and not as a
+   tidy-up: the footer is the `auto` track of `.of-bill`'s three-band grid, so a
+   scroll container in here would be a region inside a region — the thing
+   `slots.css` records deleting the accessory cap to avoid. What made the cap
+   look necessary is bounded anyway: `BackupPanel.tsx#DROPPED_SHOWN` lists six
+   discarded entries and summarises the tail, so the worst report this can render
+   is about ten short lines however damaged the file was.
    ──────────────────────────────────────────────────────────────────────────── */
 
 .of-backup {
@@ -947,7 +1003,7 @@ div.of-bill-open {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  padding: 12px;
+  padding: 12px 0 0;
   border-top: 1px solid var(--line);
   /* The same containing-block rule as `.of-palette`: the clipped file input
      inside the Import label is `position: absolute`, and without a positioned
@@ -955,17 +1011,6 @@ div.of-bill-open {
      `overflow: hidden` up to the root and adds its offset to the document's
      scroll height, on a screen specified to have none. */
   position: relative;
-  /* A badly damaged import file produces six dropped entries plus a tail line,
-     and this column has no page scroll to absorb them. */
-  max-height: 45vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.of-backup-heading {
-  margin: 0;
-  font-size: inherit;
-  font-weight: inherit;
 }
 
 .of-backup-note {

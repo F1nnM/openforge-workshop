@@ -212,6 +212,10 @@ function Harness({
         sheet={index.file.sprite}
         materialOf={index.materialOf}
         download={download}
+        templates={fixtureContext(index.file).templates}
+        onEditSlots={() => undefined}
+        accessories={null}
+        backup={null}
         generated={{ bill: generatedBill, placements: generatedPlacements }}
       />
       {/* An always-enabled trigger, so a refusal can be reached through the hook

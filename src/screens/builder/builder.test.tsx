@@ -109,7 +109,7 @@ vi.mock('@/builder/three', async () => {
       generator drawer's `onPlace` is, one block down: a real `<button>` that
       fires the callback with what the real surface would have resolved. What
       that buys is the **screen's** half of the round trip — `onEditSlots` →
-      `setEditing` → `SlotsPanel` → the dialog — which is the one hop no test in
+      `setEditing` → the dialog — which is the one hop no test in
       `src/builder/three/**` can reach, because the state lifted out of the panel
       landed here.
     */
@@ -315,6 +315,63 @@ describe('the builder screen', () => {
     })
   })
 
+  /**
+   * **The keyboard route into the slot editor, after the pieces list went.**
+   *
+   * That list was the only surface on this screen a user tabbing the page could
+   * open the editor from — the plan's route is `Enter` on the selection, which
+   * is operable but only through a `role="application"` canvas with its own key
+   * map — and it was a second enumeration of the placements the bill already
+   * expands into. So the press is on the bill's own placement row now, and this
+   * is the whole hop the screen owns: the row asks, `editing` answers, the
+   * dialog mounts. Two openers, one dialog, and neither of them holds its
+   * state.
+   */
+  it('opens the slot editor from a bill row, which is the keyboard route', async () => {
+    await renderBuilder()
+    act(() => {
+      // The same shipped recipe the case above resolves through, so the row this
+      // presses is a real file row of a real family with four open slots.
+      placeTemplate({
+        template: TemplateId.parse('s2w-wall-on-tile-corner-low-single-piece'),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: { [SlotName.parse('floor')]: { tile: TileId.parse(FIXTURE_IDS.floor1), pinned: false } },
+      })
+    })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    // The file row, by the file it carries: the lock toggle in the work area is
+    // an `aria-expanded` button too, so `expanded: false` alone is ambiguous at
+    // screen level where it was unique inside the panel.
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(FIXTURE_NAMES.floor1) }))
+    fireEvent.click(screen.getByRole('button', { name: /^Slots of the piece holding/ }))
+
+    const dialog = await screen.findByRole('dialog')
+    // A row names a piece and not a point, so it passes no slot and the editor's
+    // own rule decides: `column`, the first of this recipe's declared parts with
+    // no fill. `floor` is the one that *is* filled, so the rule and this press
+    // cannot agree by accident.
+    expect(within(dialog).getByRole('group', { name: 'Fill the column slot' })).toBeInTheDocument()
+  })
+
+  it('gives the right column to one panel, and lists the pieces once', async () => {
+    const { container } = await renderBuilder()
+
+    // The heading that stood over the second list, asserted absent rather than
+    // merely unrendered: a column that shows the parts list *and* a list of the
+    // pieces behind it is the crowding this row removed, and the bill's
+    // expandable rows are the surviving enumeration.
+    expect(screen.queryByRole('heading', { name: 'Pieces on the plan' })).toBeNull()
+    // And the column holds one child, so nothing else in it can take height from
+    // the parts list. It held three.
+    const column = container.querySelector('.of-builder-bill')
+    expect(column?.children).toHaveLength(1)
+    expect(column?.firstElementChild).toHaveClass('of-bill')
+  })
+
   it('drives the bill from the store, through the whole screen', async () => {
     await renderBuilder()
 
@@ -369,7 +426,7 @@ describe('the builder screen', () => {
    * in this column; row **C8** put the gesture on the piece and lifted the open
    * state here, because two surfaces open one dialog. This is the hop that lift
    * created: the surface reports a placement and a slot, this screen turns them
-   * into `SlotsPanel`'s `editing`, and the editor opens **on the slot the
+   * into this screen's `editing`, and the editor opens **on the slot the
    * pointer was over** rather than on the recipe's first gap.
    *
    * `right wall` is the slot fired, and the assertion is that the editor's card
@@ -652,6 +709,26 @@ describe('the layout does not scroll the page', () => {
     // Three bands — head, scroll, foot — so a fifty-row room cannot push the
     // download button off screen.
     expect(block(panels, '.of-bill')).toContain('grid-template-rows: auto minmax(0, 1fr) auto')
+  })
+
+  /**
+   * **The column is one panel, so nothing in it can take height from the bill.**
+   *
+   * It was a grid whose `1fr` row was the bill and whose *implicit* `auto` rows
+   * were the slots panel and the backup panel — three siblings sharing a
+   * fixed-height column, each capping its own height, and the parts list paying
+   * for all of it. The accessory inventory and the backup line are inside the
+   * bill's own three bands now: the inventory at the foot of the scrolling one,
+   * the line in the footer. The column has one child and one track.
+   */
+  it('gives the whole column one track, for the one panel in it', () => {
+    // One explicit track and no `auto` among them, so nothing can land in an
+    // implicit row beneath the bill and cap its own height there — which is what
+    // the accessory slots and the backup section each did. The DOM half of this
+    // is the case above that counts the column's children.
+    expect(block(layout, '.of-builder-bill')).toMatch(
+      /grid-template-rows:\s*minmax\(0, 1fr\);/,
+    )
   })
 })
 

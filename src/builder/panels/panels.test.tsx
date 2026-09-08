@@ -84,6 +84,7 @@ import {
 } from '@/store'
 
 import { BillPanel } from './BillPanel'
+import { noteBlocksDownload } from './billView'
 import {
   FIXTURE_CATALOG,
   FIXTURE_DESIGNS,
@@ -138,6 +139,7 @@ beforeEach(() => {
   // The RECENT ring is module-level session state (`palette.ts` argues why it is
   // not in the store), so a family armed by one test is still in it for the next.
   forgetRecentFamilies()
+  edited.length = 0
   file = fixtureCatalogFile()
   const engine = createSearchEngine(file)
   index = {
@@ -1186,6 +1188,16 @@ describe('the toolbar', () => {
 /* ----------------------------------------------------------------- the bill */
 
 /**
+ * Every placement whose slot editor the panel asked to open, newest last.
+ *
+ * The panel does not own that dialog — `BuilderScreen` does, because the action
+ * bar over the selected piece opens the same one — so what a `Slots` press can
+ * be asserted on here is the *request*, and this is where it lands. Cleared in
+ * `beforeEach` with the store.
+ */
+const edited: PlacementId[] = []
+
+/**
  * The bill panel over the **real store** — the same three lines the builder
  * screen uses, so a `placeTile` in a test reaches the panel by the production
  * path rather than through a prop.
@@ -1204,6 +1216,19 @@ function BillHarness({ download }: { download?: ArchiveDownload }) {
       sheet={file.sprite}
       materialOf={index.materialOf}
       download={download ?? inertDownload(bill)}
+      templates={fixtureContext(file).templates}
+      onEditSlots={(placement) => {
+        edited.push(placement)
+      }}
+      /*
+        Sentinels rather than the real components: what this panel owns about
+        them is *which band each one lands in* — the accessory inventory inside
+        the scrolling container, the backup line in the pinned footer — and the
+        two real components are asserted in their own files. A node the test can
+        find by name is the whole of the contract.
+      */
+      accessories={<p>accessory sentinel</p>}
+      backup={<p>backup sentinel</p>}
     />
   )
 }
@@ -1517,6 +1542,192 @@ describe('the bill of tiles', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Remove the unprintable piece/ }))
     expect(placementCount()).toBe(0)
+  })
+
+  /**
+   * **The column is this panel now, so the two things under it are inside it.**
+   *
+   * They were siblings in the column's grid, in implicit `auto` rows that took
+   * their height from the parts list. The bands they land in are not
+   * interchangeable: the accessory inventory grows with the plan and belongs
+   * where a fifty-row room already scrolls, and the backup line is the app's
+   * only path to a saved room, which a fifty-row room must not be able to push
+   * off screen.
+   */
+  it('scrolls the accessory inventory with the rows and pins the backup line', () => {
+    place('floor1')
+    render(<BillHarness />)
+
+    expect(screen.getByText('accessory sentinel').closest('.of-bill-scroll')).not.toBeNull()
+    expect(screen.getByText('backup sentinel').closest('.of-bill-foot')).not.toBeNull()
+    expect(screen.getByText('backup sentinel').closest('.of-bill-scroll')).toBeNull()
+  })
+
+  /**
+   * **The route the deleted "Pieces on the plan" list used to be.**
+   *
+   * That list was a second enumeration of the placements this panel already
+   * expands into, and it carried two things the plan cannot: a slot editor in
+   * the **tab order**, where the plan's route is reachable only through a
+   * `role="application"` canvas, and a way to reach a piece the plan does not
+   * draw. So the press moves onto the row that already names the placement, and
+   * the three blocks that can name one all carry it — an ordinary placement, a
+   * faulty slot, and a piece that resolved to nothing at all.
+   */
+  it('opens the slot editor for the piece behind a placement row', () => {
+    let id = '' as PlacementId
+    act(() => {
+      id = placeTemplate(anInstance([FIXTURE_IDS.floor1], { x: 1, z: 2 }))
+    })
+    render(<BillHarness />)
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: /Slots .* at x 1, z 2/ }))
+
+    expect(edited).toEqual([id])
+  })
+
+  it('opens the slot editor from a faulty slot, which is where it is fixed', () => {
+    let id = '' as PlacementId
+    act(() => {
+      // A wall in a slot requiring `shape|floor` — `fill-off-slot`, which prints
+      // and will not fit. The fix is a different fill, so the fault row is the
+      // one place in the panel where the editor is the obvious next press.
+      id = placeTemplate(aStrictInstance(FIXTURE_IDS.wallNoBase, { x: 3, z: 1 }))
+    })
+    render(<BillHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Slots .* floor at x 3, z 1/ }))
+    expect(edited).toEqual([id])
+  })
+
+  it('opens the slot editor on a piece whose every fill has left the archive', () => {
+    let id = '' as PlacementId
+    act(() => {
+      // The case no other surface can reach: the recipe is in this build, so the
+      // piece has slots to fill, but it resolved to no parts at all — so it is
+      // in no file row, and nothing on the plan draws it either.
+      id = placeTemplate(anInstance(['tiles/gone/forever.stl'], { x: 4, z: 4 }))
+    })
+    render(<BillHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Slots .* at x 4, z 4/ }))
+    expect(edited).toEqual([id])
+  })
+
+  it('offers no slot editor for a piece whose recipe this build does not ship', () => {
+    act(() => {
+      placeTemplate({
+        ...anInstance([FIXTURE_IDS.floor1], { x: 4, z: 4 }),
+        template: TemplateId.parse('gone-forever'),
+      })
+    })
+    render(<BillHarness />)
+
+    // Not a disabled button: there are no slots to fill, and a control that can
+    // never be enabled is one more thing in a 302px column to read and dismiss.
+    // Removing the piece is the only move, and that button is beside this.
+    expect(screen.queryByRole('button', { name: /^Slots/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Remove the unprintable piece/ })).toBeInTheDocument()
+  })
+
+  /**
+   * **The panel's warning rule, which used to be "all of it, in full".**
+   *
+   * That was right about the note it was written for and wrong as a rule for
+   * nine. What the download is refused over has to be legible at a glance, and
+   * it stops being legible when three paragraphs of true, non-blocking advice
+   * stand above it in the same column at the same weight. So the split follows
+   * `BillOfTiles.complete`: a note that refuses the pack renders in full, and an
+   * advisory one gives its headline and keeps the reason one press away.
+   */
+  it('keeps an advisory warning to its headline, with the reason behind a disclosure', () => {
+    act(() => {
+      placeTemplate(aStrictInstance(FIXTURE_IDS.wallNoBase, { x: 3, z: 1 }))
+    })
+    render(<BillHarness />)
+
+    const disclosure = screen
+      .getByText(/1 filled slot holds a file it does not admit/)
+      .closest('details')
+    expect(disclosure).not.toBeNull()
+    // Reachable, and not what the column opens with.
+    expect(disclosure).toHaveTextContent(/It will print and it will not fit/)
+  })
+
+  /**
+   * **The caption was an inventory of the archive; now it is the one fact the
+   * total does not already say.**
+   *
+   * Three lines under the button named `LICENSE.txt` and `ATTRIBUTION.csv`,
+   * which are in the zip whatever the caption says and are asserted where they
+   * are written — `download/download.test.ts` reads the real archive. What a
+   * reader cannot get from anywhere else on this panel is why the total is
+   * smaller than the print count implies, and that the files are the originals.
+   * The generated-mesh disclosure is not part of this: it is a licence
+   * statement, not an explainer, and `generated.test.tsx` holds it.
+   */
+  it('says what the zip is in one line, and stops naming its entries', () => {
+    place('floor1')
+    render(<BillHarness />)
+
+    expect(
+      screen.getByText(/One zip, one copy of each file — full-resolution originals\./),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/a file placed twice is downloaded once/)).toBeNull()
+    expect(screen.queryByText('LICENSE.txt')).toBeNull()
+  })
+
+  /**
+   * **The predicate has to match the gate, not the copy that is on screen.**
+   *
+   * `noteBlocksDownload` decides whether a warning renders in full or behind a
+   * disclosure, and it is the download gate that makes that the right split. Two
+   * codes reach `complete: false`, not one: `resolve.ts` emits `slot-unfilled`
+   * per empty declared slot, and for a recipe this build no longer ships it
+   * returns early with `unknown-template` alone — but `bill.ts#holesIn` pushes an
+   * entry for that instance too, so the pack is refused either way. Asserted
+   * against the bill rather than against the constant, because the invariant is
+   * about the two agreeing.
+   */
+  it('calls every note the pack is refused over a blocking one', () => {
+    act(() => {
+      placeTemplate({
+        ...anInstance([FIXTURE_IDS.floor1], { x: 4, z: 4 }),
+        template: TemplateId.parse('gone-forever'),
+      })
+    })
+    const bill = buildBillOfTiles(Object.values(useWorkshopStore.getState().placements), assembly, {
+      ...fixtureContext(file),
+      lock: 'openlock',
+    })
+
+    expect(bill.complete).toBe(false)
+    // Every warning this bill carries is one the panel would render in full — so
+    // nothing that refuses the download can be collapsed, whatever the panel
+    // chooses to filter out before rendering.
+    const collapsible = bill.notes.filter(
+      (note) => note.severity === 'warn' && !noteBlocksDownload(note.code),
+    )
+    expect(collapsible).toEqual([])
+  })
+
+  it('says a retired recipe once, in the block that can act on it', () => {
+    act(() => {
+      placeTemplate({
+        ...anInstance([FIXTURE_IDS.floor1], { x: 4, z: 4 }),
+        template: TemplateId.parse('gone-forever'),
+      })
+    })
+    render(<BillHarness />)
+
+    // `OrphanBlock` names the piece and offers to take it off the grid, which is
+    // the whole of what the roll-up could say and more. `unknown-tile` was
+    // already dropped for this reason; `unknown-template` is the same argument.
+    expect(screen.getByText(/1 placed piece has nothing this build can print/)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/1 placed piece names a recipe this build does not ship/),
+    ).toBeNull()
   })
 
   it('renders the verdict at the 512 MB threshold', () => {

@@ -468,10 +468,12 @@
 
 .of-builder-bill {
   display: grid;
-  /* The panel takes the column and does its own three-band scrolling inside. The
-     accessory slots and, since row A0, the backup section land in implicit
-     `auto` rows beneath it and each caps its own height, so neither can push the
-     bill out of the column. */
+  /* **One child, one track.** The panel takes the whole column and does its own
+     three-band scrolling inside it. This held three children until the sidebar
+     was cut back — the bill in the `1fr`, then the slots panel and the backup
+     section in implicit `auto` rows beneath it — and a fixed-height column split
+     three ways is a parts list paying for two other sections. Both survivors are
+     inside the panel's bands now: `BillPanel.tsx` says which and why. */
   grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;

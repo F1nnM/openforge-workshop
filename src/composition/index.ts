@@ -10,7 +10,7 @@
  *   - `screens/detail/slots/slotPicker.ts` calls `createCompositionIndex`, and
  *     `SlotFills` renders what it returns. That reaches the user twice:
  *     `screens/detail/VariantsTable.tsx` inside the tile drawer, and
- *     `builder/panels/slots/SlotsPanel.tsx` in `BuilderScreen`.
+ *     `builder/panels/slots/AccessorySection.tsx` in the builder's bill column.
  *   - `tools/hygiene/project.test.ts` calls `measureComposition` and
  *     `assertComposition`, because `pipeline/build.ts` deliberately does not
  *     import from here and the corpus checks have to run somewhere.

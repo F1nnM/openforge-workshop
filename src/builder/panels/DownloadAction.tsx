@@ -202,9 +202,16 @@ export function DownloadAction({ download, files, generated = 0 }: DownloadActio
       ) : null}
 
       <p className="of-bill-caption">
-        One zip: every distinct STL once — a file placed twice is downloaded once — plus{' '}
-        <code>LICENSE.txt</code> and <code>ATTRIBUTION.csv</code>. Only original models, never a
-        decimated preview.
+        {/*
+          One line, and it is the half a reader cannot get from anywhere else on
+          the panel: why the total is smaller than the print count implies, and
+          that these are the files themselves rather than the preview meshes.
+          `LICENSE.txt` and `ATTRIBUTION.csv` are the archive's first two entries
+          whatever this says and `download/download.test.ts` reads them out of a
+          real zip — naming them here was an inventory of the file, in a footer
+          whose job is to say what pressing the button costs.
+        */}
+        One zip, one copy of each file &mdash; full-resolution originals.
         {generated === 0 ? null : (
           <>
             {' '}

@@ -395,8 +395,8 @@ export interface RoomSurfaceProps {
    * `builder/panels/slots/` — on the far side of the boundary
    * `builder/panels/boundary.test.ts` keeps. So the surface reports two
    * primitives and knows nothing about what opens: `BuilderScreen` holds the
-   * open state and hands it to `SlotsPanel`, which is also still the *only*
-   * pointer-free way in and stays exactly as it was.
+   * open state and mounts the dialog itself. A `Slots` press on a bill row is
+   * the other opener, and the only pointer-free one.
    *
    * `slot` is the slot whose part the pick landed in, pre-selected in the editor.
    * `edits.ts#planSlotEdit` is the whole of the decision and carries why a
