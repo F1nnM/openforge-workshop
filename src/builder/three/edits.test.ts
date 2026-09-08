@@ -64,6 +64,7 @@ import {
   planGrab,
   planPlacement,
   planRemoval,
+  projectPlacement,
   planSlotEdit,
   planTurn,
   removalOf,
@@ -135,6 +136,82 @@ describe('placing', () => {
     expect(filledSlots(edit.fills)).toEqual([])
     expect(edit.message).toMatch(/no parts chosen/i)
     expect(edit.message).toMatch(/slots/i)
+  })
+
+  /* ---------------------------------------------------- the overlap refusal */
+
+  /**
+   * The refusal, and the two halves of it that have to stay apart.
+   *
+   * `projectPlacement` is the piece the scene *would* draw, built through
+   * `buildPlanScene` itself, so these assertions are about the same geometry the
+   * room reports rather than a second opinion about it. What they pin is which
+   * conflicts stop a click: only the exact ones.
+   */
+  it('refuses a placement an exact conflict blocks, and names what blocked it', () => {
+    const scene = sceneOf(CATALOG, [{ tile: FIXTURE_IDS.floor2, x: 0, z: 0 }])
+    const projection = projectPlacement(
+      CATALOG,
+      createStyleResolver(CATALOG),
+      scene,
+      FIXTURE_TEMPLATE,
+      [0, 0],
+      0,
+      solved().fills,
+    )
+    expect(projection.blocking).toHaveLength(1)
+
+    const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0.5, 0.5], FINE, solved(), projection)
+    expect(edit.kind).toBe('none')
+    // Names the blocker and its cell. `overlap.ts` warns that a block with no
+    // stated cause costs the user "a tile they cannot place and no way to find
+    // out why", and this sentence is what answers that.
+    expect(edit.message).toMatch(/is in the way/)
+    expect(edit.message).toContain('x 0, z 0')
+  })
+
+  it('places when the projection found no exact conflict, and counts what it touched', () => {
+    // An inexact overlap commits — the behaviour every overlap had before the
+    // split — and is counted rather than named, because a refusal is the only
+    // message that stops the user and so the only one that has to name.
+    const scene = sceneOf(CATALOG, [{ tile: FIXTURE_IDS.floor2, x: 0, z: 0 }])
+    const inexact = {
+      piece: undefined,
+      overlaps: scene.pieces,
+      blocking: [],
+    } as const
+
+    const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0.5, 0.5], FINE, solved(), inexact)
+    expect(edit.kind).toBe('place')
+    expect(edit.message).toContain('overlapping 1 piece already there')
+  })
+
+  it('places on bare ground with no projection at all, which is every caller without a catalog', () => {
+    // The parameter is optional for the same reason `fill` is: the landing hero
+    // and the component tests have no catalog to project through, and a caller
+    // that cannot answer the question must not be treated as having answered it
+    // "blocked".
+    const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0, 0], FINE, solved())
+    expect(edit.kind).toBe('place')
+  })
+
+  it('projects nothing for an instance that draws nothing, and blocks nothing either', () => {
+    // Contract C-g: an instance with no filled slots is an ordinary state. It
+    // has no geometry, so it collides with nothing — the honest answer rather
+    // than a defensive branch.
+    const scene = sceneOf(CATALOG, [{ tile: FIXTURE_IDS.floor2, x: 0, z: 0 }])
+    const projection = projectPlacement(
+      CATALOG,
+      createStyleResolver(CATALOG),
+      scene,
+      FIXTURE_TEMPLATE,
+      [0, 0],
+      0,
+      {},
+    )
+    expect(projection.piece).toBeUndefined()
+    expect(projection.overlaps).toEqual([])
+    expect(projection.blocking).toEqual([])
   })
 
   it('discloses the auto-fill rather than reading like a room the user chose', () => {

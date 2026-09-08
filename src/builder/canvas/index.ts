@@ -258,8 +258,18 @@ export {
   sectorSubdivisions,
 } from './sector'
 
-export { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap } from './overlap'
-export type { OverlapCandidate, OverlapSubject, PlanBand, PlanLevel } from './overlap'
+export { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap, subjectsConflict } from './overlap'
+export type {
+  BandSource,
+  BandVerdict,
+  Conflict,
+  ConflictKind,
+  ConflictReason,
+  OverlapCandidate,
+  OverlapSubject,
+  PlanBand,
+  PlanLevel,
+} from './overlap'
 
 export {
   buildPlanScene,
