@@ -112,8 +112,14 @@ function placement(
   x: number,
   z: number,
   rotation: number,
+  /* Spelled `[]` rather than left off, because a decoded placement always carries
+     the field and `toEqual` compares the whole object: a fixture that omitted it
+     would make every round-trip assertion below fail on the difference between
+     *any on every axis* and *absent*, which is a difference `NewTemplateInstance`
+     deliberately does not make. */
+  filters: readonly string[] = [],
 ): NewTemplateInstance {
-  return { template, x, z, rotation, fills: fillsOf(entries) }
+  return { template, x, z, rotation, fills: fillsOf(entries), filters }
 }
 
 /** Every lock system, in the enum's own order. */
@@ -193,6 +199,11 @@ function wire(overrides: Partial<WirePayload> = {}): WirePayload {
     digest: 0,
     templates: [FAMILY],
     slots: ['floor'],
+    /* One entry, the empty set, so every hand-built instance below can index 0
+       and mean *any on every axis* — which is what a room built before the
+       filters existed carries and what most instances carry now. The tests that
+       are about the filter table give their own. */
+    filters: [''],
     instances: [],
     recipes: [],
     generated: [],
@@ -257,10 +268,10 @@ describe('round trip', () => {
     const encoded = await encodeShareFragment(scene, manifest)
     expect(encoded.ok).toBe(true)
     if (!encoded.ok) return
-    // Thirteen payload bytes — nine of header, and the four zero counts that open
-    // the two string tables, the recipe table and the generated column. The link
-    // is still short enough to read out loud.
-    expect(encoded.rawBytes).toBe(13)
+    // Fourteen payload bytes — nine of header, and the five zero counts that open
+    // the three string tables, the recipe table and the generated column. The
+    // link is still short enough to read out loud.
+    expect(encoded.rawBytes).toBe(14)
     expect(encoded.fragment.length).toBeLessThan(32)
     const decoded = await decodeShareFragment(encoded.fragment, manifest)
     expect(decoded.ok).toBe(true)
@@ -278,6 +289,48 @@ describe('round trip', () => {
     if (!decoded.ok) return
     expect(decoded.scene).toEqual(scene)
     expect(decoded.dropped).toEqual([])
+  })
+
+  it('carries each instance’s palette filters, interned as a set', async () => {
+    /* **The filters are not derivable from the fills** — that is the whole reason
+       the store keeps them (`store/schema.ts#TemplateInstance.filters`), and it
+       is the whole reason they have to be on the wire: two of these three
+       instances hold the *same* file in the same slot and differ only in what
+       their editor will offer. */
+    const manifest = manifestOf(8)
+    const arched = ['component|door|arched', 'size|width|2', 'size|depth|2']
+    const scene: SharedScene = {
+      lock: 'openlock',
+      placements: [
+        placement(FAMILY, [['floor', 1]], 0, 0, 0, arched),
+        placement(FAMILY, [['floor', 1]], 1, 0, 0, []),
+        placement(FAMILY, [['floor', 2]], 2, 0, 0, arched),
+      ],
+      generated: [],
+    }
+
+    const encoded = await encodeShareFragment(scene, manifest)
+    expect(encoded.ok).toBe(true)
+    if (!encoded.ok) return
+    const decoded = await decodeShareFragment(encoded.fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene).toEqual(scene)
+    expect(decoded.dropped).toEqual([])
+
+    /* Interned as a **set**: two instances at one position cost one table entry.
+       Measured against the same scene with three distinct positions, which is
+       what a per-instance tag list would have cost every time. */
+    const distinct = await encodeShareFragment(
+      {
+        ...scene,
+        placements: scene.placements.map((one, at) => ({ ...one, filters: [...arched, `x|${String(at)}`] })),
+      },
+      manifest,
+    )
+    expect(distinct.ok).toBe(true)
+    if (!distinct.ok) return
+    expect(encoded.rawBytes).toBeLessThan(distinct.rawBytes)
   })
 
   it('is exact for a position off the half-unit grid', async () => {
@@ -433,7 +486,7 @@ describe('manifest drift', () => {
     const manifest = manifestOf(8)
     const fragment = await fragmentOfPayload(
       wire({
-        instances: [{ template: 0, x: 1, z: 1, rotation: 90, fills: [{ slot: 0, ordinal: 2, pinned: false }] }],
+        instances: [{ template: 0, filters: 0, x: 1, z: 1, rotation: 90, fills: [{ slot: 0, ordinal: 2, pinned: false }] }],
         digest: 0,
       }),
     )
@@ -491,9 +544,9 @@ describe('salvage, at the three levels row A1 made different', () => {
       wire({
         templates: [FAMILY, 'Not A Template'],
         instances: [
-          { template: 1, x: 0, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
-          { template: 1, x: 1, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
-          { template: 0, x: 2, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
+          { template: 1, filters: 0, x: 0, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
+          { template: 1, filters: 0, x: 1, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
+          { template: 0, filters: 0, x: 2, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
         ],
         digest: resolveOrdinals([1], manifest).digest,
       }),
@@ -516,6 +569,7 @@ describe('salvage, at the three levels row A1 made different', () => {
         instances: [
           {
             template: 0,
+            filters: 0,
             x: 0,
             z: 0,
             rotation: 0,
@@ -536,6 +590,43 @@ describe('salvage, at the three levels row A1 made different', () => {
     expect(decoded.dropped).toEqual(['slot 1: not a readable slot name, dropping 1 fill'])
   })
 
+  it('widens an instance whose filter set will not read, keeping the piece', async () => {
+    /* The reachable case is an empty segment: a tag is `min(1)`, and a
+       hand-edited table can carry a trailing separator. Reduced
+       **whole** rather than compacted, which is the reading
+       `migrations.ts#salvageFilters` takes of the same field — a filter list is
+       one choice across the axes, so half of it is a different filter nobody
+       made.
+
+       And the *piece* stays: the filters narrow what an editor offers and decide
+       no geometry, so a room that loses one is the sharer's room with a wider
+       editor, where a dropped placement would be a hole in it. That is the
+       difference from an unreadable template id, which takes the instance with
+       it because a slot name is named against its parts. */
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        filters: ['', ['component|door|arched', ''].join('\u0000')],
+        instances: [
+          { template: 0, filters: 1, x: 0, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
+          { template: 0, filters: 1, x: 1, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
+          { template: 0, filters: 0, x: 2, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
+        ],
+        digest: resolveOrdinals([1, 1, 1], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.placements).toHaveLength(3)
+    expect(decoded.scene.placements.map((one) => one.filters)).toEqual([[], [], []])
+    // Reported once against the table entry with the number of placements it
+    // cost, not once per placement — `readStringTable`'s rule for all three.
+    expect(decoded.dropped).toEqual([
+      'filters 1: not a readable filter list, widening 2 placements to any',
+    ])
+  })
+
   it('keeps the first of two fills naming one slot, and says so', async () => {
     // Unreachable from any encoder — `fills` is a map on both sides — so this is
     // a hand-edited payload contradicting itself, and choosing silently between
@@ -546,6 +637,7 @@ describe('salvage, at the three levels row A1 made different', () => {
         instances: [
           {
             template: 0,
+            filters: 0,
             x: 0,
             z: 0,
             rotation: 0,
@@ -608,7 +700,7 @@ describe('salvage, at the three levels row A1 made different', () => {
     const fragment = await fragmentOfPayload(
       wire({
         lockIndex: 7,
-        instances: [{ template: 0, x: 1, z: 1, rotation: 90, fills: [{ slot: 0, ordinal: 2, pinned: false }] }],
+        instances: [{ template: 0, filters: 0, x: 1, z: 1, rotation: 90, fills: [{ slot: 0, ordinal: 2, pinned: false }] }],
         digest: resolveOrdinals([2], manifest).digest,
       }),
     )

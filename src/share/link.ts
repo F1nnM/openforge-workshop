@@ -235,7 +235,7 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
   }
 
   const dropped: string[] = []
-  const { templates, slots, instances } = collectInstances(scene.placements, manifest, dropped)
+  const { templates, slots, filters, instances } = collectInstances(scene.placements, manifest, dropped)
   const ordinals = fillOrdinals(instances)
 
   if (instances.length > MAX_SHARE_PLACEMENTS) {
@@ -282,6 +282,7 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
     digest,
     templates,
     slots,
+    filters,
     instances,
     recipes,
     generated,
@@ -351,9 +352,10 @@ function collectInstances(
   placements: readonly NewTemplateInstance[],
   manifest: ShareManifest,
   dropped: string[],
-): { templates: string[]; slots: string[]; instances: WireInstance[] } {
+): { templates: string[]; slots: string[]; filters: string[]; instances: WireInstance[] } {
   const templates = stringTable()
   const slots = stringTable()
+  const filters = stringTable()
   const instances: WireInstance[] = []
 
   placements.forEach((instance, index) => {
@@ -377,6 +379,13 @@ function collectInstances(
     }
     instances.push({
       template: templates.intern(instance.template),
+      /* Interned as a **set**, joined in the order the instance holds them — the
+         axis order `slotEditor.ts#filtersWith` and `usePlanTools#armedPosition`
+         both produce, so two instances at one position intern to one entry.
+         Deliberately *not* sorted: the two writers already agree, and sorting
+         here would hide a third writer that did not. `payload.ts` carries why the
+         set is the unit. */
+      filters: filters.intern((instance.filters ?? []).join('\u0000')),
       x: instance.x + 0,
       z: instance.z + 0,
       rotation: normalizeRotation(instance.rotation),
@@ -384,7 +393,7 @@ function collectInstances(
     })
   })
 
-  return { templates: templates.entries, slots: slots.entries, instances }
+  return { templates: templates.entries, slots: slots.entries, filters: filters.entries, instances }
 }
 
 /**
@@ -659,6 +668,14 @@ function assembleInstances(
     (index, count) => `slot ${String(index)}: not a readable slot name, dropping ${plural(count, 'fill')}`,
     dropped,
   )
+  const filters = readStringTable(
+    decoded.filters,
+    useCounts(decoded.instances.map((instance) => instance.filters)),
+    readFilterSet,
+    (index, count) =>
+      `filters ${String(index)}: not a readable filter list, widening ${plural(count, 'placement')} to any`,
+    dropped,
+  )
 
   const placements: NewTemplateInstance[] = []
   decoded.instances.forEach((instance, index) => {
@@ -670,6 +687,13 @@ function assembleInstances(
     }
     placements.push({
       template,
+      /* An entry that would not read reduces the instance to *any* on every
+         axis rather than dropping the piece, and it is reported above. The
+         filters narrow what an editor offers and decide no geometry, so a room
+         that loses them is the sharer's room with a wider editor — where a
+         dropped placement would be a hole in it. `migrations.ts#salvageFilters`
+         takes the same reading of the same field out of storage. */
+      filters: filters.get(instance.filters) ?? [],
       x: instance.x + 0,
       z: instance.z + 0,
       rotation: normalizeRotation(instance.rotation),
@@ -677,6 +701,26 @@ function assembleInstances(
     })
   })
   return placements
+}
+
+/**
+ * One filter-table entry back into a tag list, or `undefined` when it will not
+ * read.
+ *
+ * Reduced **whole**, which is the same reading `migrations.ts#salvageFilters`
+ * takes of the same field: a filter list is one choice across every control axis,
+ * so half of `['component|door|arched', 'size|width|2']` is not a narrower filter
+ * but a different one nobody made. An entry with an empty segment is therefore
+ * refused entirely rather than compacted, and the caller widens the instances
+ * naming it to *any*.
+ *
+ * The empty string is the empty list and is the ordinary case — every instance
+ * placed at *any* on every axis interns to it.
+ */
+function readFilterSet(entry: string): readonly string[] | undefined {
+  if (entry === '') return []
+  const tags = entry.split('\u0000')
+  return tags.some((tag) => tag === '') ? undefined : tags
 }
 
 /**
