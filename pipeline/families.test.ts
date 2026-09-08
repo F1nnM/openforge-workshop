@@ -1263,11 +1263,11 @@ describeCorpus(title, () => {
            ref this module emits is a tag the corpus already carries and nothing
            on `build.ts`'s path imports it.
 
-           `templates.test.ts` pins the same 366,677 B for the same construction
+           `templates.test.ts` pins the same 366,627 B for the same construction
            (a fresh build with an empty ordinal manifest at the payload epoch),
            and `npm run stamp` checks the derivation digest in both directions. */
         const size = measureCatalog(serialiseCatalog(file))
-        expect(size.brotli).toBe(366_677)
+        expect(size.brotli).toBe(366_627)
         expect(size.withinBudget).toBe(true)
         expect(file.tags).toHaveLength(930)
         expect(file.tags.filter((tag) => tag.startsWith('size|run|'))).toHaveLength(0)
@@ -1308,7 +1308,7 @@ describeCorpus(title, () => {
         )
         /* 2,277 B before row D9 moved the artefact this is measured against;
            brotli is not additive over 5.9 MB and this file already says so. */
-        expect(inIndex.brotli - size.brotli).toBe(1796)
+        expect(inIndex.brotli - size.brotli).toBe(1902)
       },
       SLOW_MS,
     )

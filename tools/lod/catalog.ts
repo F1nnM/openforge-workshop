@@ -22,16 +22,13 @@
  *
  * ## `assets.lod` does not exist yet
  *
- * `CatalogAssets` is `{models, sprites, thumbs}` and `z.object` strips unknown
- * keys, so even if `pipeline/version.ts` grew a fourth base today this tool
- * could not read it. The base is therefore *derived* from `assets.models` by
- * swapping its last path segment — which is exactly the relationship the
- * architecture plan §8 states (`/lod/{md5[:6]}/{md5}.glb` beside `/models/`) —
- * and {@link LOD_PREFIX} is the one place the word `lod` appears. Row X4 should
- * add `lod` to `CatalogAssets` and `ASSET_BASES`. It has, so `lodBase` now reads
- * the field instead of inferring it by swapping the last segment of
- * `assets.models` — which is the same value, derived rather than declared. The
- * inference could not tell a deliberate move of the store from a typo.
+ * `CatalogAssets` carries `lod` as a declared field, so {@link lodBase} reads it
+ * rather than inferring it from `assets.models`. The inference it replaced could
+ * not tell a deliberate move of the store from a typo — and the store has since
+ * deliberately moved: the two derivative prefixes are served from this project's
+ * own R2 bucket, because both backfills were blocked on write credentials for a
+ * bucket upstream owns. `lodBase`'s docblock carries what replaced the
+ * co-location check and why.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -184,28 +181,41 @@ export function modelUrl(file: CatalogFile, blob: BlobId): string {
 /**
  * The public base the LOD store is served from.
  *
- * Derived from `assets.models` rather than hardcoded, so the store cannot end up
- * on a different host from the meshes it is derived from.
+ * Read from `assets.lod`, and checked against `assets.thumbs` rather than against
+ * `assets.models`.
+ *
+ * The field is authoritative — but the inference this replaced carried a real
+ * invariant for free, which reading a field does not: a typo in one base sends
+ * every mesh URL to a host nobody uploaded to, and the symptom is 8,353 absences
+ * reported as "the store has not been built yet". So the base is still checked
+ * against a sibling; what changed is which sibling.
+ *
+ * `/models/` and `/sprites/` live on a bucket this project cannot write to, and
+ * `/lod/` and `/thumbs/` on one it can, so "beside the meshes" is no longer true
+ * of a correct index and cannot be the check. The two *derivative* stores do
+ * still travel together — one bucket, one hostname, one backfill credential — so
+ * they vouch for each other: same origin, same parent path, differing only in
+ * the final segment. That segment is checked too, because co-location alone
+ * would accept `…/thumbs` as the LOD base on the grounds that it sits beside
+ * itself.
  */
 export function lodBase(file: CatalogFile): string {
   const declared = new URL(file.assets.lod)
-  const models = new URL(file.assets.models)
+  const thumbs = new URL(file.assets.thumbs)
 
-  // The field is authoritative — but the inference this replaced carried a real
-  // invariant for free, which reading a field does not: the store must sit beside
-  // the meshes it is derived from, same origin and same parent path, differing
-  // only in the final segment. Losing that would let a typo in one field send
-  // every mesh URL to a host nobody uploaded to, and the symptom would be 8,353
-  // absences reported as "the store has not been built yet".
   const parent = (url: URL): string => url.pathname.replace(/\/+$/, '').split('/').slice(0, -1).join('/')
-  if (declared.origin !== models.origin || parent(declared) !== parent(models)) {
+  if (declared.origin !== thumbs.origin || parent(declared) !== parent(thumbs)) {
     throw new Error(
-      `assets.lod (${file.assets.lod}) is not beside assets.models (${file.assets.models}): ` +
-        'the LOD store must share the origin and parent path of the meshes it is derived from',
+      `assets.lod (${file.assets.lod}) is not beside assets.thumbs (${file.assets.thumbs}): ` +
+        'the two derivative stores must share the origin and parent path of the bucket they are written to',
     )
   }
-  if (declared.pathname.replace(/^\/+|\/+$/g, '') === '') {
+  const prefix = declared.pathname.replace(/^\/+|\/+$/g, '')
+  if (prefix === '') {
     throw new Error(`assets.lod (${file.assets.lod}) has no path segment`)
+  }
+  if (prefix.slice(prefix.lastIndexOf('/') + 1) !== 'lod') {
+    throw new Error(`assets.lod (${file.assets.lod}) does not name the LOD store in its last path segment`)
   }
   return file.assets.lod.replace(/\/+$/, '')
 }

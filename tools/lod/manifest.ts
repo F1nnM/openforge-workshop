@@ -334,9 +334,9 @@ function lodNotes(objects: number, meshopt: boolean): string[] {
       'before believing the store is complete.',
     'Objects are content-addressed on the source mesh md5, so the sync is safe to repeat and ' +
       '--size-only is sufficient; a re-exported mesh is a new key, never a rewritten one.',
-    'CatalogAssets has no `lod` base yet, so the public URL above is derived from assets.models. ' +
-      'Row X4 should add `lod` to CatalogAssets and pipeline/version.ts ASSET_BASES; tools/lod/catalog.ts ' +
-      'then reads it instead of deriving it.',
+    'The public URL above is read from CatalogAssets.lod, which is served from this project’s own R2 ' +
+      'bucket rather than upstream’s — so the credentials this sync needs are ours to mint, not ' +
+      'upstream’s to grant.',
     'DECIMATED MESHES ARE PREVIEW-ONLY. architecture-plan.md §8: the download path always serves the ' +
       'original STL. Shipping a decimated mesh to somebody’s printer would be a serious trust failure.',
     'Until the prefix is backfilled the app must treat a 404 on /lod/ as expected and fall back to the ' +

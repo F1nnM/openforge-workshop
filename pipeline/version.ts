@@ -244,6 +244,12 @@ export const PIPELINE_VERSION = 3
  * corner walls from a tagged 2-unit run to their measured 1.5. The same three
  * figures, and the split between them is the same one P3 and B1 each recorded:
  *
+ * (Every figure in this section is what D9 measured, and is left as measured.
+ * The current artefact is 38 B larger and the fresh-build variant 50 B smaller,
+ * because {@link ASSET_BASES} now names two hosts where it named one — brotli
+ * prices two twice-repeated host strings differently from four copies of one.
+ * The prices the tests pin are the current ones; these are the record of D9.)
+ *
  *   1. **The shipped delta is +504 B**, artefact to artefact, pipeline 2's
  *      366,173 B against pipeline 3's 366,677 B, both normalised here.
  *   2. **Isolating the footprint change alone gives +493 B** — this corpus at
@@ -309,13 +315,28 @@ export function atPayloadEpoch(file: CatalogFile): CatalogFile {
  * asserts the reconstruction against every fixture row, because the whole saving
  * turns into an 8,702-way 404 if the convention ever changes.
  *
+ * ## Two origins, and which half is ours
+ *
+ * `models` and `sprites` are upstream OpenForge's bucket, which this project can
+ * read and cannot write. `thumbs` and `lod` are **derivatives this project
+ * produces**, and both backfills were blocked on one write credential for a
+ * bucket somebody else owns (`docs/launch-blockers.md` B2). They are therefore
+ * served from `bucket-openforge-workshop.mfinn.de` — our own R2 bucket, same two
+ * prefixes, same sharded layout — which is a hostname change and nothing more:
+ * `shardedPath` still rebuilds every object URL, and 106.13 GB of source STL
+ * stays where it is rather than being mirrored.
+ *
+ * The split is load-bearing for `tools/lod/catalog.ts`'s `lodBase`, which checks
+ * the LOD base against `thumbs` rather than `models` precisely because these two
+ * travel together and the other two do not.
+ *
  * No trailing slash: consumers join with `/`.
  */
 export const ASSET_BASES: CatalogAssets = {
   models: 'https://objects.openforge.tools/models',
   sprites: 'https://objects.openforge.tools/sprites',
-  thumbs: 'https://objects.openforge.tools/thumbs',
-  lod: 'https://objects.openforge.tools/lod',
+  thumbs: 'https://bucket-openforge-workshop.mfinn.de/thumbs',
+  lod: 'https://bucket-openforge-workshop.mfinn.de/lod',
 }
 
 /**

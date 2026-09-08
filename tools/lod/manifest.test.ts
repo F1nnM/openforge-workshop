@@ -114,7 +114,8 @@ describe('buildLodManifest', () => {
     expect(notes).toContain('B2')
     expect(notes).toContain('Nothing here has been uploaded')
     expect(notes).toContain('PREVIEW-ONLY')
-    expect(notes).toContain('CatalogAssets has no `lod` base yet')
+    expect(notes).toContain('read from CatalogAssets.lod')
+    expect(notes).toContain('ours to mint')
   })
 
   it('warns G2 about the node transform and the decoder', () => {

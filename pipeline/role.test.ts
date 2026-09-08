@@ -245,17 +245,17 @@ describeCorpus(title, () => {
       /* **Row D9 moved both numbers and the delta between them, which is this
          test's own caveat firing.** The corner-run correction touches neither
          `role` nor `form`, and it still took the with-tags artefact from 366,173
-         to 366,677 B and the without-tags one from 365,705 to 365,776 —
-         so the measured price of role+form went 468 -> 901 B on a change that
+         to 366,627 B and the without-tags one from 365,705 to 365,721 —
+         so the measured price of role+form went 468 -> 906 B on changes that
          added no tag. brotli is not additive over 5.9 MB: a "this field costs N
          bytes" figure is a fact about one artefact at one epoch, never a rate,
          and 999 is the same field's price against a different artefact. The
          conclusion is untouched — it is still far under the 865 B the plan
          priced as a *problem*, and 0.2 points of a 512,000 B budget. */
       expect(table).toHaveLength(915)
-      expect(baseline.brotli).toBe(365_776)
-      expect(shipped.brotli).toBe(366_677)
-      expect(shipped.brotli - baseline.brotli).toBe(901)
+      expect(baseline.brotli).toBe(365_721)
+      expect(shipped.brotli).toBe(366_627)
+      expect(shipped.brotli - baseline.brotli).toBe(906)
       expect(shipped.withinBudget).toBe(true)
       // 0.20 points of a 512,000 B budget, against 145,334 B of headroom.
       expect(shipped.brotli / SIZE_BUDGET_BYTES).toBeLessThan(0.72)

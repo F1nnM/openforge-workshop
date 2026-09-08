@@ -76,9 +76,25 @@ describe('aboveGate', () => {
 describe('paths', () => {
   const file = testCatalog({ records: [{ id: 'tiles/a.stl', ord: 0, blob: A }] })
 
-  it('derives the LOD base by swapping the models segment', () => {
+  it('reads the declared LOD base', () => {
     expect(lodBase(file)).toBe('https://objects.example.test/lod')
     expect(lodPrefix(file)).toBe('lod')
+  })
+
+  it('accepts a store on a different origin from the meshes, when its sibling moved too', () => {
+    // The whole point of owning the destination: `/models/` and `/sprites/` stay
+    // on a bucket we cannot write to, while `/lod/` and `/thumbs/` move to one we
+    // can. The two derivative stores travel together, so they still vouch for
+    // each other even though neither sits beside the meshes any more.
+    const split = testCatalog({
+      records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
+      models: 'https://objects.openforge.tools/models',
+      thumbs: 'https://bucket.example.test/thumbs',
+      lod: 'https://bucket.example.test/lod',
+    })
+    expect(lodBase(split)).toBe('https://bucket.example.test/lod')
+    expect(lodPrefix(split)).toBe('lod')
+    expect(lodKey(split, A)).toBe(`lod/aaaaaa/${A}.glb`)
   })
 
   it('shards the key and the URL the same way the bucket does', () => {
@@ -91,11 +107,12 @@ describe('paths', () => {
   it('keeps a nested prefix, so a bucket layout change does not silently flatten', () => {
     // `lodBase` reads `assets.lod` now that the schema carries it, rather than
     // inferring it by swapping the last segment of `assets.models`. A declared
-    // field beats a derived one — but the fixture has to declare both, because
-    // the invariant below is what the inference used to give for free.
+    // field beats a derived one — but the fixture has to declare the sibling too,
+    // because the invariant below is what the inference used to give for free.
     const nested = testCatalog({
       records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
       models: 'https://objects.example.test/assets/v2/models',
+      thumbs: 'https://objects.example.test/assets/v2/thumbs',
       lod: 'https://objects.example.test/assets/v2/lod',
     })
     expect(lodBase(nested)).toBe('https://objects.example.test/assets/v2/lod')
@@ -103,29 +120,50 @@ describe('paths', () => {
     expect(lodKey(nested, A)).toBe(`assets/v2/lod/aaaaaa/${A}.glb`)
   })
 
-  it('refuses a store that is not beside the meshes, which a declared field can be', () => {
+  it('refuses a store on a different origin from its sibling derivative', () => {
     // The failure this catches is quiet and expensive: every mesh URL points at a
     // host nobody uploaded to, and the symptom is 8,353 absences reported as
-    // "the store has not been built yet".
+    // "the store has not been built yet". A declared field cannot catch it alone,
+    // so the two stores we write are checked against each other.
+    // `models` is deliberately co-located with `lod` here, so the invariant this
+    // replaced would have accepted this file. Only the sibling is wrong.
     expect(() =>
       lodBase(
         testCatalog({
           records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
-          models: 'https://objects.example.test/assets/v2/models',
-          lod: 'https://cdn.other.test/assets/v2/lod',
+          models: 'https://cdn.other.test/models',
+          thumbs: 'https://bucket.example.test/thumbs',
+          lod: 'https://cdn.other.test/lod',
         }),
       ),
     ).toThrow(/must share the origin/)
+  })
 
+  it('refuses a store whose parent path differs from its sibling derivative', () => {
     expect(() =>
       lodBase(
         testCatalog({
           records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
-          models: 'https://objects.example.test/assets/v2/models',
-          lod: 'https://objects.example.test/elsewhere/lod',
+          models: 'https://bucket.example.test/elsewhere/models',
+          thumbs: 'https://bucket.example.test/assets/v2/thumbs',
+          lod: 'https://bucket.example.test/elsewhere/lod',
         }),
       ),
     ).toThrow(/must share the origin/)
+  })
+
+  it('refuses a base whose last segment is not the store it claims to be', () => {
+    // Co-location alone would accept `…/thumbs` as the LOD base, since it sits
+    // beside itself. The segment check is what makes the pair meaningful.
+    expect(() =>
+      lodBase(
+        testCatalog({
+          records: [{ id: 'tiles/a.stl', ord: 0, blob: A }],
+          thumbs: 'https://bucket.example.test/thumbs',
+          lod: 'https://bucket.example.test/thumbs',
+        }),
+      ),
+    ).toThrow(/last path segment/)
   })
 
   it('refuses a base with no path segment at all', () => {
