@@ -99,29 +99,24 @@
 
 /* ── The open room ───────────────────────────────────────────────────────── */
 
+/* One row, because there is one in-flow child. The track list was
+   `auto minmax(0, 1fr) auto` — a band above the stage and the readout below it —
+   and both of those are gone; `of-b3d-keys` and `of-b3d-live` are the only other
+   children and both are visually hidden and out of flow. */
 .of-b3d {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   background: var(--bg);
 }
 
 /* The canvas's own positioning context, so the notice and the hint plate sit on
-   the drawing rather than under the readout. `min-height: 0` because a grid item
-   in a `minmax(0, 1fr)` track still needs it to let a canvas shrink. */
+   the drawing. `min-height: 0` because a grid item in a `minmax(0, 1fr)` track
+   still needs it to let a canvas shrink. */
 .of-b3d-stage {
   position: relative;
   min-width: 0;
   min-height: 0;
-}
-
-.of-b3d-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
 }
 
 .of-b3d-canvas,
@@ -234,40 +229,3 @@
   line-height: 1.45;
 }
 
-/* ── The readout ─────────────────────────────────────────────────────────────
-   Instances against draw calls is the whole claim of this row, so it is on
-   screen rather than in a devtools panel. `auto-fit` so it reflows to one column
-   in a narrow stage instead of overflowing it — D6's lesson: a clipped child
-   that escapes its container costs the page a scrollbar. */
-.of-b3d-readout {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 2px 16px;
-  margin: 0;
-  padding: 8px 12px;
-  border-top: 1px solid var(--line);
-  background: var(--bg2);
-}
-
-.of-b3d-readout > div {
-  min-width: 0;
-}
-
-.of-b3d-wide {
-  grid-column: 1 / -1;
-}
-
-.of-b3d-readout dt {
-  color: var(--mut);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.of-b3d-readout dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--ink);
-  font-family: var(--face-mono);
-  font-size: 11.5px;
-}

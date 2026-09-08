@@ -117,7 +117,6 @@ import { VIEW_RADIUS } from '@/three/geometry'
 import type { OutlineRequest } from '@/three/outline'
 import { NO_OUTLINE } from '@/three/outline'
 import { AO_RADIUS, Stage } from '@/three/Stage'
-import { Eyebrow } from '@/ui/primitives'
 
 import type { SurfaceStatus } from './edits'
 import { describeSurface } from './edits'
@@ -125,7 +124,6 @@ import type { FillAuthorities } from './fills'
 import { createPlacementFiller } from './fills'
 import type { Room3D } from './instances'
 import { buildRoom3D, roomBlobs } from './instances'
-import { LOD_ROOM_BUDGET_BYTES, lodObjectBudget } from './lod'
 import { meshoptSupported } from './loadLod'
 import { RoomSurface } from './RoomSurface'
 import { surfaceFit } from './surface'
@@ -368,15 +366,12 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
   return (
     <div className="of-b3d" data-status={roomStatus(room, store.settled)}>
       {/*
-        Row **R4** took the "Back to the plan" button out of this band: it closed
-        `Builder3DPanel`, and there is no plan view left to close it *to*. The
-        band keeps the label alone — `of-b3d-head` is still a `space-between`
-        flex row, so a later control can go back in beside it.
+        No band above the stage. Row R4 had already emptied it down to a label —
+        it lost the "Back to the plan" button when there stopped being a plan to
+        go back to — and a heading that names the thing filling the screen is
+        the kind of chrome a work surface is better without. It was invisible in
+        practice anyway: the toolbar band is drawn over the same 33 px.
       */}
-      <div className="of-b3d-head">
-        <Eyebrow as="span">Build in 3D</Eyebrow>
-      </div>
-
       <div className="of-b3d-stage">
         {/*
           Unconditional. The ground plane *is* the place the first tile goes, so
@@ -424,8 +419,6 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
         />
         <p className="of-b3d-plate of-b3d-hint">{status?.hint ?? 'Pick a tile from the palette to start.'}</p>
       </div>
-
-      <RoomReadout room={room} store={store} scene={scene} waiting={waiting} />
 
       <p className="of-b3d-keys" id={KEY_HELP_ID}>
         Drag to orbit, drag with the right or middle button or with Ctrl to pan across the plan, and scroll to zoom.
@@ -553,127 +546,11 @@ function SurfaceNotice({
   return null
 }
 
-/**
- * The counts, in the DOM rather than on the canvas.
- *
- * Five of them earn their place: `instances` against `groups` is the whole claim
- * of the instancing row (fifty parts, twenty draws), `triangles` is what the
- * frame actually costs, the mesh line is the one that explains an outlined part,
- * the budget line puts resident geometry against its ceiling, and the footprint
- * disagreements are listed because this is the only place in the project where
- * the tagged footprint and the real mesh are both in memory at once.
- *
- * Row **R3**'s sixth line — `Bases`, drawn against outlined against
- * already-on-plan — is **deleted with the population it counted**. A base is a
- * declared slot of a template now, so it is in `Drawn` with every other part;
- * a line reporting it separately would need `instances.ts` to keep a division
- * that no longer exists in the data. Row A4b's replacement is `Templates`, which
- * reports the arity the other lines are now in terms of: how many placements the
- * parts belong to, and how many of those have nothing chosen yet.
- */
-function RoomReadout({
-  room,
-  store,
-  scene,
-  waiting,
-}: {
-  room: Room3D
-  store: LodStoreState
-  scene: PlanScene
-  waiting: number
-}) {
-  const placements = scene.pieces.length + scene.unfilled.length
-  return (
-    <dl className="of-b3d-readout">
-      <div>
-        <dt>Drawn</dt>
-        <dd>
-          {String(room.instances)} {room.instances === 1 ? 'part' : 'parts'} in{' '}
-          {String(room.groups.length)}{' '}
-          {room.groups.length === 1 ? 'instanced mesh' : 'instanced meshes'}
-          {waiting === 0 ? '' : `, ${String(waiting)} outlined`}
-        </dd>
-      </div>
-      {/*
-        The other half of the ratio above, and the line that makes `Drawn`
-        readable: thirty parts in three draws is a different sentence depending on
-        whether it is ten templates or thirty. The unfilled count sits here rather
-        than beside `Drawn` because those instances contribute no part at all —
-        they are placements with nothing in them.
-
-        Since row **C5** that count is an exception rather than the rule: a click
-        carries C2's solve, so a placement lands with its parts and this tail
-        appears only for an instance the archive could fill no slot of. It is kept
-        for exactly that case — a zero here and a non-zero `Drawn` is the reading
-        that says every placement is real geometry.
-      */}
-      {placements === 0 ? null : (
-        <div>
-          <dt>Templates</dt>
-          <dd>
-            {String(placements)} placed
-            {scene.unfilled.length === 0 ? '' : `, ${String(scene.unfilled.length)} with no parts chosen`}
-          </dd>
-        </div>
-      )}
-      <div>
-        <dt>Triangles</dt>
-        <dd>{room.triangles.toLocaleString('en-GB')}</dd>
-      </div>
-      <div>
-        <dt>Meshes</dt>
-        <dd>
-          {/*
-            `geometries.size` rather than arithmetic over the other counters: a
-            failure is neither loaded nor absent, and subtracting one from the
-            other would have quietly reported a failed object as loaded.
-          */}
-          {String(store.geometries.size)} of {String(store.requested)} loaded
-          {store.absent.size === 0 ? '' : `, ${String(store.absent.size)} not in the store`}
-          {store.failed.size === 0 ? '' : `, ${String(store.failed.size)} failed`}
-        </dd>
-      </div>
-      <div>
-        <dt>Budget</dt>
-        <dd>
-          {String(room.objects)} of {String(lodObjectBudget())} meshes
-          {room.decodedBytes === 0
-            ? ''
-            : ` · ${megabytes(room.decodedBytes)} of ${megabytes(LOD_ROOM_BUDGET_BYTES)}`}
-        </dd>
-      </div>
-      {room.disagreements.length === 0 ? null : (
-        <div className="of-b3d-wide">
-          <dt>Mesh differs from its tagged footprint</dt>
-          <dd>
-            {room.disagreements
-              .slice(0, 3)
-              .map((one) => `${one.name} by ${one.worst.toFixed(2)} units`)
-              .join('; ')}
-          </dd>
-        </div>
-      )}
-    </dl>
-  )
-}
-
 /* ------------------------------------------------------------------- helpers */
 
 /** Drawable parts across every catalog piece. The unit `room.instances` is in. */
 function partsDrawn(scene: PlanScene): number {
   return scene.pieces.reduce((sum, piece) => sum + piece.parts.length, 0)
-}
-
-/**
- * `4.8 MB`. One decimal, decimal megabytes.
- *
- * The same spelling as `src/three/gate.ts`'s `formatMegabytes`, which is not
- * imported because that module's copy is about a *file* size and this one is
- * about resident geometry — two different quantities that happen to share a
- * unit, and one of them is quoted in a refusal the user may screenshot.
- */
-function megabytes(bytes: number): string {
-  return `${(bytes / 1_000_000).toFixed(1)} MB`
 }
 
 /** The `edge` of the family with the most instances, for the AO pass. */

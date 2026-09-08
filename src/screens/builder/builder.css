@@ -265,68 +265,20 @@
   }
 }
 
-/* ── The corner plates ───────────────────────────────────────────────────────
-   §2.4's contextual hint (bottom left) and armed-tile name (bottom right), on
-   translucent plates and pointer-transparent so a click near the bottom of the
-   drawing still places a tile.
-
-   This screen draws them, and until row R4 that was a decision rather than the
-   only option: `PlanCanvas` could draw its own, and its armed plate carried the
-   `snap` readout as well, which the contract puts in the toolbar — two of them on
-   screen would have been a designer's bug report. With the plan view deleted the
-   alternative is gone and `chrome={false}` with it. The ~14 lines below are the
-   plate treatment `builder3d.css` also carries for the surface's own two plates;
-   if a third surface ever wants a plate, it belongs in `../../ui/primitives/`.
-   ──────────────────────────────────────────────────────────────────────────── */
-
-.of-build-plate {
-  position: absolute;
-  bottom: 12px;
-  z-index: 1;
-  max-width: 44%;
-  margin: 0;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--bg2) 88%, transparent);
-  color: var(--mut);
-  font-size: 12.5px;
-  line-height: 1.35;
-  pointer-events: none;
-}
-
-.of-build-hint {
-  left: 12px;
-}
-
-.of-build-armed {
-  right: 12px;
-  color: var(--ink);
-  text-align: right;
-}
-
-.of-build-at {
-  display: block;
-  color: var(--mut);
-  font-family: var(--face-mono);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-}
-
 /* ── The bill column ─────────────────────────────────────────────────────────
-   A column rather than the panel directly, because the lock notice sits above
-   it: the preference decides which base is matched under every openforge topper
-   in the bill, so that is where it belongs. The notice renders `null` once
-   answered, and this track then collapses to the panel alone.
+   Still a column rather than the panel directly. It was one because the lock
+   notice sat above the panel; that notice is deleted, but the accessory slots
+   and the backup section below still need the grid, so the track list keeps its
+   shape minus the notice's row.
    ──────────────────────────────────────────────────────────────────────────── */
 
 .of-builder-bill {
   display: grid;
-  /* The notice takes what it needs; the panel takes the rest and does its own
-     three-band scrolling inside. The accessory slots and, since row A0, the
-     backup section land in implicit `auto` rows beneath it and each caps its own
-     height, so neither can push the bill out of the column. */
-  grid-template-rows: auto minmax(0, 1fr);
+  /* The panel takes the column and does its own three-band scrolling inside. The
+     accessory slots and, since row A0, the backup section land in implicit
+     `auto` rows beneath it and each caps its own height, so neither can push the
+     bill out of the column. */
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--bg2);
@@ -336,10 +288,6 @@
 /* The panel's own left border would double this column's. */
 .of-builder-bill > .of-bill {
   border-left: none;
-}
-
-.of-builder-lock {
-  margin: 10px 12px 0;
 }
 
 /* ── Waiting and failing ─────────────────────────────────────────────────────

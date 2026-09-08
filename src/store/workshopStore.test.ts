@@ -28,7 +28,6 @@ import { armTemplateInBuilder, claimPendingArm } from './selection'
 import { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 import { WORKSHOP_EXPORT_KIND, WorkshopExport, exportWorkshop, importWorkshop } from './transfer'
 import {
-  acknowledgeLockSystem,
   clearFill,
   clearPlacements,
   fillSlot,
@@ -519,12 +518,6 @@ describe('lock preference', () => {
     // answered it.
     expect(state().lock).toBe(DEFAULT_LOCK_SYSTEM)
     expect(state().lockChosen).toBe(true)
-  })
-
-  it('lets the user accept the default without restating it', () => {
-    acknowledgeLockSystem()
-    expect(state().lockChosen).toBe(true)
-    expect(state().lock).toBe(DEFAULT_LOCK_SYSTEM)
   })
 
   it('does not itself re-solve a fill, and this is the boundary it holds', () => {

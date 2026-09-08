@@ -56,7 +56,6 @@ export { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } fr
 
 export type { ClearOutcome, FillOutcome, NewTemplateInstance, UnpinOutcome } from './workshopStore'
 export {
-  acknowledgeLockSystem,
   clearFill,
   clearPlacements,
   fillSlot,

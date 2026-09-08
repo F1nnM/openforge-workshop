@@ -85,7 +85,7 @@ import {
   useWorkshopStore,
 } from '@/store'
 import { aTemplateInstance } from '@/store/fixture'
-import { LockNotice, LockToggle, resetLockBuild } from '@/ui/lock-picker'
+import { LockToggle, resetLockBuild } from '@/ui/lock-picker'
 import { resetCatalogIndexCache } from '@/ui/shell'
 
 /* ------------------------------------------------------------------ fixture */
@@ -293,21 +293,6 @@ afterEach(() => {
   resetLockBuild()
   resetWorkshop()
 })
-
-/**
- * Let the memoised lock derivation settle inside `act`.
- *
- * `useLockBuild` resolves on a microtask, so a test that renders the notice or
- * the toggle and asserts something not derived from the index finishes before
- * that `setState` lands — and React then reports an update outside `act`. The
- * warning is noise but it is the kind of noise that hides a real one, so the
- * three tests that do not otherwise await the figures flush here instead.
- */
-async function settle(): Promise<void> {
-  await act(async () => {
-    await Promise.resolve()
-  })
-}
 
 /** The trigger, which is the whole always-visible control. */
 function trigger(): HTMLElement {
@@ -673,91 +658,5 @@ describe('what the disclosure dropped relative to the 300-word screen', () => {
     // The information did not vanish with the line.
     await closeDisclosure()
     expect(trigger()).toHaveAccessibleName(/OpenLOCK, 4 of 5 designs buildable/)
-  })
-})
-
-/* --------------------------------------------------------------- the notice */
-
-describe('the one-time notice', () => {
-  it('states what the current preference can build, measured', async () => {
-    render(<LockNotice />)
-    // The same figure the picker one press away leads with. It used to quote
-    // reachability, which meant the number dropped when you followed the link.
-    await waitFor(() => {
-      expect(screen.getByText(/can build 4 of 5 designs \(80\.0%\)/)).toBeInTheDocument()
-    })
-  })
-
-  it('dismisses without changing the lock system', async () => {
-    render(<LockNotice />)
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /keep openlock/i })).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: /keep openlock/i }))
-
-    expect(lockState().lockChosen).toBe(true)
-    expect(lockState().lock).toBe('openlock')
-    expect(screen.queryByRole('button', { name: /keep openlock/i })).toBeNull()
-  })
-
-  it('is absent once the choice has been made anywhere', async () => {
-    act(() => {
-      setLockSystem('magnetic')
-    })
-    render(<LockNotice />)
-    expect(screen.queryByLabelText('Lock system')).toBeNull()
-    await settle()
-  })
-
-  /**
-   * The action that replaced the `/settings` link.
-   *
-   * Both halves are asserted because they are two different promises: the focus
-   * move is the affordance, and the acknowledgement is what retires the notice.
-   * A version that only acknowledged would leave a first-time reader told a
-   * preference exists and not shown where; a version that only focused would
-   * bring the banner back on the next render.
-   */
-  it('moves focus to the control and dismisses', async () => {
-    render(
-      <>
-        <LockNotice />
-        <LockToggle />
-      </>,
-    )
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /show me the control/i })).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: /show me the control/i }))
-
-    expect(document.activeElement).toBe(trigger())
-    expect(lockState().lockChosen).toBe(true)
-    expect(screen.queryByRole('button', { name: /show me the control/i })).toBeNull()
-    await settle()
-  })
-
-  /**
-   * The `null` branch of `showLockToggle`, exercised rather than asserted.
-   *
-   * `LockNotice`'s own "where it belongs" note invites a host on the download
-   * path, and no such surface mounts a builder stage. Mounted with no control on
-   * the page the button must still be an answer — dismiss, move nothing, throw
-   * nothing. This is what makes that optional chain a guard rather than a
-   * decoration: delete the `?.` and this test throws.
-   */
-  it('dismisses without a control on the page, which is the download path', async () => {
-    render(<LockNotice />)
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /show me the control/i })).toBeInTheDocument()
-    })
-    expect(screen.queryByRole('button', { name: /^Lock system: / })).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: /show me the control/i }))
-
-    expect(lockState().lockChosen).toBe(true)
-    expect(screen.queryByRole('button', { name: /show me the control/i })).toBeNull()
-    await settle()
   })
 })
