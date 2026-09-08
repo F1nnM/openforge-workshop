@@ -106,11 +106,7 @@ export function PieceActionsBar({ piece, onEditSlots, onTurn, onRemove }: PieceA
       }}
     >
       <div className="of-piece-actions-row">
-        <Button
-          size="sm"
-          onClick={onTurn}
-          title={`Turn ${name} — R`}
-        >
+        <Button size="sm" onClick={onTurn} title={`Turn ${name} — R`}>
           <span aria-hidden="true">⟳</span>
           <VisuallyHidden>Turn {name}</VisuallyHidden>
           <kbd className="of-build-key" aria-hidden="true">
@@ -129,21 +125,26 @@ export function PieceActionsBar({ piece, onEditSlots, onTurn, onRemove }: PieceA
           <VisuallyHidden>of {name}</VisuallyHidden>
         </Button>
 
-        <Button
-          size="sm"
-          onClick={onRemove}
-          title={`Remove ${name} — Delete`}
-        >
+        {/*
+          One glyph, and the key named in words.
+
+          It read badly before because it carried **two** delete symbols — a
+          `⌦` icon beside a `⌫` keycap — which are near-identical shapes saying
+          the same thing twice, and neither of them says *which* key. `Del` is
+          the label on the key the user has to find, and it matches how the turn
+          button names `R`: the icon carries the meaning, the chip carries the
+          shortcut, and the two never compete.
+
+          No confirmation, deliberately. The action is one keystroke to reverse —
+          `history.ts`'s ring covers every mutation of the placement map — and
+          undo is the better design than a dialog for a reversible action the
+          user takes often.
+        */}
+        <Button size="sm" onClick={onRemove} title={`Remove ${name} — Delete`}>
           <span aria-hidden="true">⌦</span>
           <VisuallyHidden>Remove {name}</VisuallyHidden>
-          {/*
-            No confirmation, deliberately. The action is one keystroke to
-            reverse — `history.ts`'s ring covers every mutation of the placement
-            map — and undo is the better design than a dialog for a reversible
-            action the user takes often.
-          */}
           <kbd className="of-build-key" aria-hidden="true">
-            ⌫
+            Del
           </kbd>
         </Button>
       </div>

@@ -129,13 +129,11 @@ import {
 import type { SlotEditTarget } from '@/builder/panels/slots'
 import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
-import type { SurfaceStatus } from '@/builder/three'
 // Deep, and not through the barrel: `@/builder/three/index.ts` exports only
 // `Builder3DPanel` and `lod.ts` as values, and its `boundary.test.ts` walks that
 // entry's closure to keep the renderer out of it. `edits.ts` imports no renderer
 // — `@/builder/canvas`, `@/catalog`, `@/store` — so reading one constant from it
 // costs this screen nothing and leaves that rule intact.
-import { ARMED_TURN_STEP_DEG } from '@/builder/three/edits'
 import { GeneratorPanel } from '@/generator/panel'
 import type { GeneratorPlaceHandler } from '@/generator/panel'
 import { buildGeneratedBill } from '@/generator/placement/bill'
@@ -238,20 +236,6 @@ function Builder({ index }: { index: CatalogIndex }) {
      has no opinion about it, and the re-solve below is the write that makes a
      change visible at all. */
   const design = useRoomDesign()
-  /**
-   * The surface's readout — one state, one writer, since row **R4**.
-   *
-   * It was two, `status` from `PlanCanvas` and `surfaceStatus` from the 3D room,
-   * with `surfaceStatus ?? status` deciding which the toolbar and the two corner
-   * plates showed. Two renderers were mounted at once and both published on
-   * every pointer move, so a single state would have thrashed on whichever
-   * render fired last. R4 deleted the plan view, so there is one publisher and
-   * the `??` had nothing left on its right-hand side.
-   *
-   * `null` until the surface has reported once, which is what the fallback
-   * sentence in the hint plate below is for.
-   */
-  const [status, setStatus] = useState<SurfaceStatus | null>(null)
 
   /**
    * Which placed instance's slot editor is open, and on which slot — row **C8**.
@@ -658,19 +642,42 @@ function Builder({ index }: { index: CatalogIndex }) {
 
       <div className="of-builder-stage">
         <div className="of-builder-toolbar-slot">
+                    {/*
+            Row S4. Closed it is a plate in the stage's top-left and costs 656 B
+            gzipped, A/B measured; opened it is a non-modal 442px drawer down the
+            stage's right edge, and the parameter schemas, the sweep tables and the
+            resolver arrive in their own chunk on that press. The OpenSCAD engine
+            is a second boundary further on and loads only when a parameter set
+            resolves to no archived file. Each shape opens on one that does, so
+            the first paint of the drawer compiles nothing.
+
+            It takes `records` because catalog-first resolution is a join against
+            the archive's own base filenames, and the index this screen already
+            holds is the only copy of those: `resolve.ts` records why a shipped
+            reverse index would only restate what the records already say.
+
+            `onPlace` is row S5's seam, wired by row X9. The drawer resolves the
+            recipe and hands over a `RecipePlacement` plus the bytes when the
+            engine has produced any; `placeGenerated` above writes them. `placeAt`
+            is the other half — the drawer has no scene, so it cannot know which
+            cell is free.
+          */}
+          <GeneratorPanel
+            records={index.file.records}
+            assets={index.file.assets}
+            onPlace={placeGenerated}
+            placeAt={(foot) => {
+              // The height as well as the footprint: `freeCellFor` tests the same
+              // vertical interval the scene's own sweep does, so a riser and a
+              // 6 mm base are free in different cells.
+              const [x, z] = freeCellFor(scene, foot.footprint, foot.heightMm)
+              return { x, z }
+            }}
+          />
+
           <PlanToolbar
             tools={tools}
             history={history}
-            status={status}
-            /*
-              The step, not the record — row A4b's answer, taken rather than
-              re-derived. A family's rotation step is the least common multiple
-              of its parts' own steps and row C2 has not chosen the parts, so
-              `ARMED_TURN_STEP_DEG` is the corpus default and `planTurn` already
-              turns an armed family by it. Passing the step keeps the toolbar and
-              the surface turning by one number.
-            */
-            armedStep={tools.selectedTemplate === null ? undefined : ARMED_TURN_STEP_DEG}
             placed={bill.placements}
             onClear={clearPlacements}
           />
@@ -693,7 +700,7 @@ function Builder({ index }: { index: CatalogIndex }) {
             plates. That collision was real and measured before this landed:
             `Place` was 100% unclickable at 1295px.
           */}
-          <LockToggle />
+          <LockToggle className="of-stage-tool" />
           {/*
             Row **D6**, and the second room-wide preference in the band.
 
@@ -718,6 +725,7 @@ function Builder({ index }: { index: CatalogIndex }) {
             so a closed dialog does not wake on every placement.
           */}
           <DesignToggle
+            className="of-stage-tool"
             authorities={{ recipes: designRecipes, index: assembly, composition }}
             placed={bill.placements}
           />
@@ -777,41 +785,8 @@ function Builder({ index }: { index: CatalogIndex }) {
             gesture — it is the only pointer-free way in.
           */
           onEditSlots={editSlots}
-          onStatus={setStatus}
         />
 
-        {/*
-          Row S4. Closed it is a plate in the stage's top-left and costs 656 B
-          gzipped, A/B measured; opened it is a non-modal 442px drawer down the
-          stage's right edge, and the parameter schemas, the sweep tables and the
-          resolver arrive in their own chunk on that press. The OpenSCAD engine
-          is a second boundary further on and loads only when a parameter set
-          resolves to no archived file. Each shape opens on one that does, so
-          the first paint of the drawer compiles nothing.
-
-          It takes `records` because catalog-first resolution is a join against
-          the archive's own base filenames, and the index this screen already
-          holds is the only copy of those: `resolve.ts` records why a shipped
-          reverse index would only restate what the records already say.
-
-          `onPlace` is row S5's seam, wired by row X9. The drawer resolves the
-          recipe and hands over a `RecipePlacement` plus the bytes when the
-          engine has produced any; `placeGenerated` above writes them. `placeAt`
-          is the other half — the drawer has no scene, so it cannot know which
-          cell is free.
-        */}
-        <GeneratorPanel
-          records={index.file.records}
-          assets={index.file.assets}
-          onPlace={placeGenerated}
-          placeAt={(foot) => {
-            // The height as well as the footprint: `freeCellFor` tests the same
-            // vertical interval the scene's own sweep does, so a riser and a
-            // 6 mm base are free in different cells.
-            const [x, z] = freeCellFor(scene, foot.footprint, foot.heightMm)
-            return { x, z }
-          }}
-        />
       </div>
 
       <div className="of-builder-bill">

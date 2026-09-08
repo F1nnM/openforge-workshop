@@ -22,9 +22,9 @@
  * tidy, and it is the reason this is a *label* and not a small toolbar: a control
  * here would be unclickable by construction.
  *
- * That is also why the cancel affordance is **stated rather than offered**. The
- * two ways out are a key and a gesture, both of which work with the pointer
- * wherever it is; a button at the cursor would have to be chased.
+ * That is also why every affordance here is **stated rather than offered**. Turn,
+ * cancel: each is a key or a gesture that works with the pointer wherever it is,
+ * where a button at the cursor would have to be chased.
  */
 import type { ScenePiece } from '@/builder/canvas'
 import { pieceName } from '@/builder/canvas'
@@ -54,7 +54,21 @@ export function ArmedLabel({ name, blocked }: ArmedLabelProps) {
       {blocker === undefined ? null : (
         <span className="of-armed-label-blocked">{pieceName(blocker)} is in the way</span>
       )}
-      <span className="of-armed-label-cancel">
+      {/*
+        **Turn is named here because the toolbar's Rotate button is gone.**
+
+        The two rotates were never the same operation: the bar's turned the
+        *armed ghost* before a placement, and the floating action bar's turns the
+        *selected piece* after one. Dropping the bar's button — the floating one
+        covers the piece — left `R` as the only way to turn a ghost, with nothing
+        on screen saying so. This is where that belongs anyway: the armed state's
+        affordances go on the armed state's own label, at the cursor, rather than
+        in a corner of the viewport.
+      */}
+      <span className="of-armed-label-keys">
+        <kbd className="of-build-key">R</kbd> to turn
+      </span>
+      <span className="of-armed-label-keys">
         <kbd className="of-build-key">Esc</kbd> or right-click to cancel
       </span>
     </div>

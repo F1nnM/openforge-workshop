@@ -56,7 +56,6 @@ import type { AssemblyIndex, BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { usePlanTools } from '@/builder/canvas'
 import type { UndoControls } from '@/builder/canvas/useHistory'
-import type { SurfaceStatus } from '@/builder/three'
 /* The `UndoControls` recorder, from the surface's fixture rather than a second
    copy here: the toolbar and the surface are handed the *same* controls by the
    screen, so a test double that drifted between the two directories would be
@@ -1005,35 +1004,18 @@ describe('the two-sided item', () => {
  */
 const INERT_HISTORY = planHistory()
 
-function ToolbarHarness({ moving, history }: { moving?: string; history?: UndoControls }) {
+/**
+ * The rail's tool items, over a real `usePlanTools` and a real store.
+ *
+ * `moving` survives as a parameter with nothing to feed: the readout it stood in
+ * for is gone, and the test that proves it is gone still has to be able to ask
+ * for a carried piece. It is deliberately not deleted — a harness that could no
+ * longer express the state would make that assertion unfalsifiable.
+ */
+function ToolbarHarness({ history }: { moving?: string; history?: UndoControls }) {
   const tools = usePlanTools()
   const placements = usePlacements()
   const placed = Object.keys(placements).length
-  // The armed **step**, since row A8 — the toolbar takes a number rather than a
-  // record, because what is armed is a family of up to five files and has no
-  // single `rotStep`. `ARMED_TURN_STEP_DEG` is what `BuilderScreen` passes and
-  // what `three/edits.ts#planTurn` turns by; 90 is spelled here so the harness
-  // does not import the surface for one constant.
-  const armedStep = tools.selectedTemplate === null ? undefined : 90
-  // The 3D surface reports its readout through `onStatus`; the toolbar only
-  // reads it. `moving` is the one field this harness needs to stand in for, so
-  // the rest is the empty readout the toolbar already handles. `SurfaceStatus`
-  // since row R4 — it was `PlanStatus`, which the deleted plan canvas declared.
-  const status: SurfaceStatus | null =
-    moving === undefined
-      ? null
-      : {
-          cursor: [0, 0],
-          snap: tools.snap,
-          step: tools.step,
-          activity: tools.activity,
-          hint: '',
-          selectedName: null,
-          refusal: null,
-          moving,
-          placements: placed,
-          conflicts: 0,
-        }
   return (
     <div>
       <button type="button" onClick={() => tools.arm(ONE_SLOT_TEMPLATE_ID)}>
@@ -1041,8 +1023,6 @@ function ToolbarHarness({ moving, history }: { moving?: string; history?: UndoCo
       </button>
       <PlanToolbar
         tools={tools}
-        status={status}
-        armedStep={armedStep}
         placed={placed}
         history={history ?? INERT_HISTORY}
         onClear={() => {
@@ -1058,27 +1038,57 @@ function ToolbarHarness({ moving, history }: { moving?: string; history?: UndoCo
 describe('the toolbar', () => {
   it('offers 0.5 and 1.0 only — never the quarter-unit grid the mock had', () => {
     render(<ToolbarHarness />)
-    const snap = screen.getByRole('button', { name: /^snap/ })
+    /*
+      Queried on the accessible name, which is a sentence now that the rail's
+      visible text is a mono field-and-value pair: `snap` `0.5` reads as a
+      setting to the eye and as *"Snap: half a unit — switch to one unit"* to a
+      screen reader, and neither reading is the other's abbreviation.
 
-    expect(snap).toHaveTextContent('snap 0.5')
+      The visible halves are asserted separately rather than as `'snap 0.5'`,
+      because the space between them is a flex `gap` and not a text node — the
+      two are siblings in the rail's `label … value` grid, which is what makes
+      the values line up down the column. Asserting a string that the DOM does
+      not contain would only pin the old markup.
+    */
+    const snap = screen.getByRole('button', { name: /^Snap:/ })
+    const value = () => snap.querySelector('.of-stage-tool-value')?.textContent
+
+    expect(snap).toHaveTextContent('snap')
+    expect(value()).toBe('0.5')
+
     fireEvent.click(snap)
     expect(screen.getByTestId('snap')).toHaveTextContent('1')
-    expect(snap).toHaveTextContent('snap 1')
+    expect(value()).toBe('1')
+
     fireEvent.click(snap)
     expect(screen.getByTestId('snap')).toHaveTextContent('0.5')
+    expect(value()).toBe('0.5')
+    // Never a quarter, which is the whole point of the test: every dimension in
+    // the catalog is a multiple of 0.5 units, so a 0.25 grid can only produce
+    // placements that cannot physically assemble.
+    expect(snap).not.toHaveTextContent('0.25')
   })
 
-  it('cannot rotate until a tile is armed, then turns it by the tile’s own step', () => {
+  it('no longer carries rotate, which moved to the piece it turns', () => {
+    /*
+      **Two rotates, one operand each, and only one of them belonged here.** This
+      bar's button turned the *armed ghost* before a placement; the floating
+      action bar's turns the *selected piece* after one. The owner asked for the
+      button to go now that the floating one exists, and the ghost's own
+      affordance moved with it: `ArmedLabel` names `R` at the cursor, which is
+      where an armed-state affordance belongs and where a corner button never
+      was. `armedLabel.test.tsx` covers that, `pieceActions.test.tsx` covers the
+      piece.
+
+      Queried rather than reasoned about, so re-adding it fails here.
+    */
     render(<ToolbarHarness />)
-    const rotate = () => screen.getByRole('button', { name: /Rotate/ })
+    expect(screen.queryByRole('button', { name: /Rotate/ })).toBeNull()
 
-    expect(rotate()).toBeDisabled()
+    // And the pending rotation is still reachable — `R` on the surface writes
+    // it, which is what the label now advertises.
     fireEvent.click(screen.getByRole('button', { name: 'arm' }))
-    expect(rotate()).toBeEnabled()
-
-    fireEvent.click(rotate())
-    // `floor1` carries no `rotStep`, so the step is the schema's 90° default.
-    expect(screen.getByTestId('rotation')).toHaveTextContent('90')
+    expect(screen.getByTestId('rotation')).toHaveTextContent('0')
   })
 
   it('cannot clear an empty scene, and clears a placed one', () => {
@@ -1150,12 +1160,26 @@ describe('the toolbar', () => {
     expect(history.calls).toEqual({ undo: 1, redo: 2 })
   })
 
-  it('names the piece in the air, which nothing else on the bar can see', () => {
-    // A piece mid-carry is ephemeral component state inside the surface that no
-    // store write has happened for yet — so the readout is the only place it is
-    // visible, and it is the one editing state undo cannot describe either.
+  it('carries no readout, because the surface already says what it said', () => {
+    /*
+      **Deleted rather than moved, and it was a duplicate before it was
+      deleted.** The mono tail reported three things: the piece in the air, a
+      pending rotation and the overlap count.
+
+      All three have a better home. `describeMoveHint` puts the carried piece on
+      the surface's own hint plate — *"Moving X to (4, 7). Drop to commit"* —
+      which is beside the piece rather than in a corner. The pending rotation is
+      now visible in the drawing itself, because the ghost projects its real
+      parts and is drawn turned. And an overlap can no longer be *created*, so a
+      standing count in the chrome describes only rooms saved before the refusal
+      landed; the hatch and the bill's warning row carry those.
+
+      What that buys the rail is its rhythm: a variable-height text block in a
+      column of single-height buttons was the one thing in it that could not
+      hold a line.
+    */
     render(<ToolbarHarness moving="Cut stone wall 2" />)
-    expect(screen.getByText(/moving Cut stone wall 2/)).toBeInTheDocument()
+    expect(screen.queryByText(/moving Cut stone wall 2/)).toBeNull()
   })
 })
 

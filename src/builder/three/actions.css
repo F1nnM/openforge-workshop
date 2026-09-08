@@ -117,13 +117,19 @@
   color: var(--mut);
 }
 
-.of-armed-label-cancel {
+.of-armed-label-keys {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 10.5px;
   line-height: 1.35;
   color: var(--mut);
+}
+
+/* The first key line carries the air. Two hint lines under a name want to read
+   as a group beneath it, not as three equal rows. */
+.of-armed-label-keys:first-of-type {
+  margin-top: 1px;
 }
 
 @media (prefers-reduced-transparency: reduce) {
