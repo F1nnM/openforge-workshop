@@ -85,16 +85,23 @@ import { compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
 import type { SlotName, TemplateInstance } from '@/store'
 import { clearFill, pinFill, useLockSystem, useRoomDesign } from '@/store'
 import type { BaseGap } from '@/assembly'
+import type { DroppedPin } from '@/template'
 import { slotDoubtSentence } from '@/template'
 import { Button, Chip, Dialog, Eyebrow } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
+import { AxisControl } from '../AxisControl'
+
 import type { EditorSlot } from './slotEditor'
 import {
+  editorAxes,
   filterByDesign,
+  filtersWith,
   handSlotToLock,
   invalidatedBy,
+  reFilterInstance,
   refusalSentence,
+  replacedSentence,
   slotEditorModel,
 } from './slotEditor'
 
@@ -167,6 +174,18 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
   const [openSlot, setOpenSlot] = useState<string | null>(initialSlot ?? null)
   const [design, setDesign] = useState<string | undefined | null>(null)
   const [refused, setRefused] = useState<string | null>(null)
+  /* The pins the last filter change dropped, kept until the next one. Held here
+     rather than derived, because it is a fact about a *press* and not about the
+     instance: once the re-solve has written, the instance carries the new fills
+     and no longer records that anything was replaced. Reporting it is the other
+     half of `reSolveInstance`'s bargain with contract C-k — see
+     `slotEditor.ts#reFilterInstance`. */
+  const [replaced, setReplaced] = useState<readonly DroppedPin[]>([])
+
+  /* The instance's own row's control axes. `template` is stable for the life of
+     the dialog, so this is one table lookup. */
+  const axes = useMemo(() => editorAxes(template), [template])
+  const replacedNote = replacedSentence(recipes, replaced)
 
   // The first slot needing a choice, so the editor opens on the question rather
   // than on the first row — the same rule the guided-assembly screen uses.
@@ -204,6 +223,39 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
           {slotDoubtSentence(doubt)}
         </p>
       ))}
+
+      {/* **Above the slots**, because a filter is a property of the whole piece
+          and every slot below is resolved under it — a control that sat beneath
+          the thing it narrows would read as belonging to the last slot. The same
+          `AxisControl` the palette arms with, so the chips a user pressed to place
+          this instance are the chips they find here. */}
+      {axes.length === 0 ? null : (
+        <div className="of-sloted-axes">
+          {axes.map((axis) => (
+            <AxisControl
+              abbreviate={axis.axis === 'size'}
+              entries={axis.entries}
+              key={axis.axis}
+              label={axis.label}
+              of={template.name}
+              onChoose={(tags) => {
+                setRefused(null)
+                const next = filtersWith(axes, instance.filters, axis.axis, tags)
+                setReplaced(
+                  reFilterInstance(index, recipes, template, instance, next, lock, roomDesign).replaced,
+                )
+              }}
+              position={instance.filters}
+            />
+          ))}
+        </div>
+      )}
+
+      {replacedNote === undefined ? null : (
+        <p className="of-sloted-gap" role="status">
+          {replacedNote}
+        </p>
+      )}
 
       <ul className="of-sloted-slots">
         {model.slots.map((slot) => (

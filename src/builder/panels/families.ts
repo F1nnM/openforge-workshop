@@ -475,12 +475,43 @@ export function familyById(id: string): TemplateFamily | undefined {
  * *"which chip is pressed"* (the panel) differ only in where the tags came from.
  */
 export function positionOf(family: TemplateFamily, tags: readonly string[]): readonly string[] {
+  return positionIn(family.sizes, tags)
+}
+
+/**
+ * The same narrowing over **any** axis's positions rather than over the size
+ * axis — which is what makes it *"which chip is pressed"* for all three.
+ *
+ * Split out of {@link positionOf} because the recipe fold gave an assembly a
+ * component and a height axis, and `PlanTools.armedPosition` joins all three
+ * into one tag list. Neither of the two tests the palette grew separately is
+ * right on that list:
+ *
+ *   - **subset** (`entry.tags.every(…)`) presses two chips of a generated
+ *     family's size axis at once, because `2 wide`'s tags are a subset of
+ *     `2 wide by 2 deep`'s — the nesting `positionOf` exists to resolve;
+ *   - **equal length** (`entry.tags.length === tags.length`) presses *no* size
+ *     chip the moment a component is armed beside it, because the joined list is
+ *     then longer than any one position in it.
+ *
+ * Most-specific-match is right on both, so there is one rule and
+ * `AxisControl.tsx` is its only caller.
+ */
+export function positionIn(
+  positions: readonly SizePosition[],
+  tags: readonly string[],
+): readonly string[] {
   let best: readonly string[] = []
-  for (const position of family.sizes) {
+  for (const position of positions) {
     if (position.tags.length <= best.length) continue
     if (position.tags.every((tag) => tags.includes(tag))) best = position.tags
   }
   return best
+}
+
+/** Whether `entry` is the position {@link positionIn} picked out of its own axis. */
+export function isChosenPosition(entry: SizePosition, best: readonly string[]): boolean {
+  return entry.tags.length === best.length && entry.tags.every((tag) => best.includes(tag))
 }
 
 /**

@@ -252,12 +252,19 @@ function row(name: string): HTMLElement {
   return last
 }
 
-/** The pressed size chip's label, or `'none'`. */
+/**
+ * The pressed size chip's label, or `'none'`.
+ *
+ * The `Size: ` prefix is stripped: every chip of every axis now names its own
+ * axis in its accessible name — `AxisControl` is one component since the slot
+ * editor grew the same three controls — and what these tests are about is
+ * *which position is pressed*.
+ */
 function armedSize(): string {
   const group = screen.queryByRole('group', { name: /^Size for / })
   if (group === null) return 'none'
   const pressed = within(group).getAllByRole('button', { pressed: true })[0]
-  return pressed === undefined ? 'none' : (pressed.getAttribute('aria-label') ?? '')
+  return pressed === undefined ? 'none' : (pressed.getAttribute('aria-label') ?? '').replace(/^Size: /, '')
 }
 
 describe('the palette', () => {
@@ -525,7 +532,7 @@ describe('the palette', () => {
     expect(armedSize()).toBe('any size, 5 tiles')
 
     const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
-    fireEvent.click(within(sizes).getByRole('button', { name: /^1 wide by 1 deep/ }))
+    fireEvent.click(within(sizes).getByRole('button', { name: /^Size: 1 wide by 1 deep/ }))
 
     expect(armedSize()).toBe('1 wide by 1 deep, 2 tiles')
     // The row's own number follows the chosen position, because that is the set
@@ -708,7 +715,7 @@ describe('the palette', () => {
 
     fireEvent.click(row('Floor: Straight'))
     const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
-    fireEvent.click(within(sizes).getByRole('button', { name: /^2 wide by 2 deep/ }))
+    fireEvent.click(within(sizes).getByRole('button', { name: /^Size: 2 wide by 2 deep/ }))
     // Disarm, so the chip has something to restore.
     fireEvent.click(row('Floor: Straight'))
     expect(armedRow()).toBe('none')
@@ -722,7 +729,7 @@ describe('the palette', () => {
     expect(armedSize()).toBe('2 wide by 2 deep, 1 tiles')
     // Two sizes of one family are two arms, which is the point of holding the
     // size at all.
-    fireEvent.click(within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', { name: /^any size/ }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', { name: /^Size: any size/ }))
     expect(
       within(screen.getByRole('group', { name: 'Recent' })).getAllByRole('button'),
     ).toHaveLength(2)
@@ -741,12 +748,53 @@ describe('the palette', () => {
     expect(screen.getByTestId('armed-size')).toHaveTextContent('any')
 
     const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
-    fireEvent.click(within(sizes).getByRole('button', { name: /^2 wide by 2 deep/ }))
+    fireEvent.click(within(sizes).getByRole('button', { name: /^Size: 2 wide by 2 deep/ }))
 
     // The exact `size|` spelling `FillContext.size` takes, so the palette and
     // B4's `GENERATED_FAMILY_SIZES` cannot drift into two vocabularies.
     expect(screen.getByTestId('armed-size')).toHaveTextContent('size|width|2 size|depth|2')
     expect(armedSize()).toBe('2 wide by 2 deep, 1 tiles')
+  })
+
+  it('keeps every axis of an assembly pressed at once', () => {
+    /* **The defect the `AxisControl` lift fixed.** The palette's two controls
+       had grown two different pressed rules, and `PlanTools.armedPosition` joins
+       all three axes into one tag list — so the size control's equal-length test
+       (`entry.tags.length === position.length`) stopped pressing *any* size chip
+       the moment a component was armed beside it. The row looked as though it had
+       forgotten the size the user had just chosen, while the tags it was arming
+       with were right the whole time.
+
+       `families.ts#positionIn` is the one rule now: the most specific position of
+       *this axis* the joined list satisfies. */
+    render(<PaletteHarness />)
+    const modular = 'S2W: Wall on Tile: Wall (Modular)'
+
+    fireEvent.click(row(modular))
+    fireEvent.click(
+      within(screen.getByRole('group', { name: `Size for ${modular}` })).getByRole('button', {
+        name: /^Size: 2 wide by 2 deep/,
+      }),
+    )
+    fireEvent.click(
+      within(screen.getByRole('group', { name: `Component for ${modular}` })).getByRole('button', {
+        name: 'Component: torch',
+      }),
+    )
+
+    const pressed = (axis: string) =>
+      within(screen.getByRole('group', { name: `${axis} for ${modular}` }))
+        .getAllByRole('button', { pressed: true })
+        .map((one) => (one.getAttribute('aria-label') ?? '').replace(/,.*$/, ''))
+
+    expect(pressed('Size')).toEqual(['Size: 2 wide by 2 deep'])
+    expect(pressed('Component')).toEqual(['Component: torch'])
+    // The height axis is untouched and sits on its own `any` position, which is
+    // a real position rather than the absence of one.
+    expect(pressed('Height')).toEqual(['Height: any height'])
+    expect(screen.getByTestId('armed-size')).toHaveTextContent(
+      'component|torch size|width|2 size|depth|2',
+    )
   })
 
   it('drops the armed size when a different family is armed', () => {
@@ -760,7 +808,7 @@ describe('the palette', () => {
     fireEvent.click(row('Floor: Straight'))
     fireEvent.click(
       within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', {
-        name: /^2 wide by 2 deep/,
+        name: /^Size: 2 wide by 2 deep/,
       }),
     )
     fireEvent.click(row('Wall: Straight (Separate Wall)'))

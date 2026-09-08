@@ -158,9 +158,9 @@ import type { PendingArm } from '@/store'
 import { claimPendingArm, usePendingArm } from '@/store'
 import { Chip, Eyebrow } from '@/ui/primitives'
 
-import type { SizePosition, TemplateFamily } from './families'
+import { AxisControl, sizeChipLabel } from './AxisControl'
+import type { TemplateFamily } from './families'
 import {
-  ANY_SIZE_LABEL,
   INSERT_DESIGNS,
   NO_BUILD,
   TEMPLATE_FAMILIES,
@@ -634,20 +634,22 @@ function RowControls({
   return (
     <>
       <AxisControl
-        family={family}
-        axis="component"
-        label="Component"
         entries={family.controls?.component ?? []}
+        label="Component"
+        of={family.name}
+        onChoose={(tags) => {
+          onAxis(family, 'component', tags)
+        }}
         position={position}
-        onAxis={onAxis}
       />
       <AxisControl
-        family={family}
-        axis="height"
-        label="Height"
         entries={family.controls?.height ?? []}
+        label="Height"
+        of={family.name}
+        onChoose={(tags) => {
+          onAxis(family, 'height', tags)
+        }}
         position={position}
-        onAxis={onAxis}
       />
       <SizeControl family={family} size={position} count={count} onAxis={onAxis} />
     </>
@@ -655,61 +657,12 @@ function RowControls({
 }
 
 /**
- * One non-size axis, as labelled chips.
+ * The size axis, which is the only one carrying a candidate count per position.
  *
- * No candidate count, and that is the difference from the size control rather
- * than an omission. `candidateCount` answers *"how many tiles does this row's one
- * slot admit"* and every row with a component axis is a **3-slot** assembly, so
- * there is no one number — the same reason an assembly shows its build system
- * where a single tile shows a count.
+ * The chips themselves are `AxisControl`'s, lifted there when the slot editor
+ * grew the same three controls; what stays here is the count badge and the
+ * sentence a family with **no expressible size** gets instead of a control.
  */
-function AxisControl({
-  family,
-  axis,
-  label,
-  entries,
-  position,
-  onAxis,
-}: {
-  readonly family: TemplateFamily
-  readonly axis: PositionAxis
-  readonly label: string
-  readonly entries: readonly SizePosition[]
-  readonly position: readonly string[]
-  readonly onAxis: (family: TemplateFamily, axis: PositionAxis, tags: readonly string[]) => void
-}) {
-  // One position is nothing to choose, and none is nothing to show.
-  if (entries.length < 2) return null
-  return (
-    <div className="of-pal-sizes" role="group" aria-label={`${label} for ${family.name}`}>
-      {entries.map((entry) => {
-        /* An `any` position carries no tags, so it is chosen exactly when no tag
-           of this axis is armed — which is what makes it a real position rather
-           than the absence of one. */
-        const chosen =
-          entry.tags.length === 0
-            ? !entries.some((other) => other.tags.length > 0 && other.tags.every((tag) => position.includes(tag)))
-            : entry.tags.every((tag) => position.includes(tag))
-        return (
-          <button
-            key={entry.label}
-            type="button"
-            className="of-pal-sizebtn"
-            aria-pressed={chosen}
-            aria-label={`${label}: ${entry.label}`}
-            onClick={() => {
-              onAxis(family, axis, entry.tags)
-            }}
-          >
-            {entry.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-/** The size axis, which is the only one carrying a candidate count per position. */
 function SizeControl({
   family,
   size,
@@ -730,60 +683,21 @@ function SizeControl({
     )
   }
   return (
-    <div className="of-pal-sizes" role="group" aria-label={`Size for ${family.name}`}>
-      {family.sizes.map((entry: SizePosition) => {
-        const chosen = entry.tags.length === size.length && entry.tags.every((tag) => size.includes(tag))
-        const candidates = count(family, entry.tags) ?? 0
-        return (
-          <button
-            key={entry.label}
-            type="button"
-            className="of-pal-sizebtn"
-            aria-pressed={chosen}
-            /* The authored label in full plus the count: the visible text is
-               abbreviated to fit, and a number with no noun beside it says
-               nothing on its own. */
-            aria-label={`${entry.label}, ${countLabel(candidates)} tiles`}
-            onClick={() => {
-              onAxis(family, 'size', entry.tags)
-            }}
-          >
-            {sizeChipLabel(entry.label)}
-            <span className="of-pal-sizecount">{countLabel(candidates)}</span>
-          </button>
-        )
-      })}
-    </div>
+    <AxisControl
+      abbreviate
+      badge={(entry) => {
+        const tiles = countLabel(count(family, entry.tags) ?? 0)
+        return { node: tiles, label: `${tiles} tiles` }
+      }}
+      entries={family.sizes}
+      label="Size"
+      of={family.name}
+      onChoose={(tags) => {
+        onAxis(family, 'size', tags)
+      }}
+      position={size}
+    />
   )
-}
-
-/**
- * A position's label, abbreviated to the width of a chip.
- *
- * *"2 wide by 2 deep"* is authored for a sentence and is 16 characters in a
- * column that fits about 12; `2 x 2` is the same claim. **Lossless, and the
- * distinction it must not lose is B4's own**: 251 positions are a *cell* (a
- * width and a depth) and 48 are a *run* (a width, because the corpus does not
- * tag a wall's depth), so *"2 wide"* stays *"2 wide"* rather than becoming
- * `2 x ?`. `any size` is unchanged. The full label is on the button's
- * `aria-label`.
- *
- * **The run figure was 48 and is measured at 47**, and 24 of those 47 now say
- * *"N wide, any depth"* because they admit records at two to seven depths and sat
- * in the same control as the `(w, d)` position they contain.
- * `pipeline/families.test.ts` carries the biconditional.
- */
-function sizeChipLabel(label: string): string {
-  if (label === ANY_SIZE_LABEL) return label
-  const pair = /^(.+) wide by (.+) deep$/.exec(label)
-  if (pair !== null) return `${pair[1]!} \u00d7 ${pair[2]!}`
-  /* *"2 wide, any depth"* \u2014 a run position that admits records at more than one
-     depth, and 24 of the 47 do. `2 \u00d7 any` keeps the distinction the abbreviation
-     above must not lose, in the same width as `2 \u00d7 2` and beside it: the chip has
-     to say that this position is the *wider* of the two, which plain `2 wide`
-     read as the narrower. */
-  const anyDepth = /^(.+) wide, any depth$/.exec(label)
-  return anyDepth === null ? label : `${anyDepth[1]!} \u00d7 any`
 }
 
 /** What the RECENT strip holds: a family and the size it was armed at. */
