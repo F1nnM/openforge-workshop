@@ -136,7 +136,7 @@ import { fixturesDir } from './fixtures'
  * one: the consumer's location is the app's business, the fact that a build step
  * owns the bytes is this module's.
  */
-export const TEMPLATES_MODULE_PATH = 'src/screens/assemblies/templates.ts'
+export const TEMPLATES_MODULE_PATH = 'src/assembly/templates.ts'
 
 /* ---------------------------------------------------------------- the fixture */
 
@@ -897,7 +897,7 @@ export function printTemplateModule(
     ' * measured at +1,260 B brotli and declined. Every ref the families emit is a tag',
     ' * the corpus already carries, so the index gains 0 B and the tag table stays at 930',
     ' * strings. The reason both live in the bundle is that the recipe list is the one',
-    ' * part of this screen that renders before the index lands.',
+    ' * part of the builder’s palette that renders before the index lands.',
     ' *',
     ` * ${String(entries.length)} templates over ${String(new Set(entries.map((entry) => entry.source)).size)} fixture files, ${String(
       entries.reduce((total, entry) => total + entry.parts.length, 0),
@@ -906,7 +906,7 @@ export function printTemplateModule(
       families.reduce((total, family) => total + family.records, 0),
     )} records, ${String(families.reduce((total, family) => total + family.sizes.length, 0))} size positions.`,
     ' */',
-    "import type { RecipeTemplate } from './assembly'",
+    "import type { RecipeTemplate } from './recipeWalk'",
     '',
     'export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [',
     ...body,

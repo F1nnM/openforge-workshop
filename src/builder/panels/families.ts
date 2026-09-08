@@ -138,8 +138,8 @@
  * because all 41 of its records were bases, and `wall|hex|thick wall` fell from
  * 56 records to 8 because 48 of its 56 were.
  */
-import type { RecipeTemplate } from '@/screens/assemblies'
-import { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
+import type { RecipeTemplate } from '@/assembly'
+import { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from '@/assembly/templates'
 import { TemplateId } from '@/store'
 
 import { axisOf } from './familyKey'

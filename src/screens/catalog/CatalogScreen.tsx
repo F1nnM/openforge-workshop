@@ -1,9 +1,20 @@
 /**
- * `/catalog` — design-contract.md §2.2.
+ * `/` — the catalog, design-contract.md §2.2.
  *
- * Two columns: a 238px facet sidebar and a responsive card grid at
- * `repeat(auto-fill, minmax(215px, 1fr))` with a 16px gap. The search input caps
- * at 520px with a live result count beside it.
+ * A responsive card grid at `repeat(auto-fill, minmax(215px, 1fr))` with a 16px
+ * gap, and a search input capped at 520px with a live result count beside it.
+ *
+ * **The facet sidebar is not in this layout any more, and it is still this
+ * screen's.** §2.2 put a 238px sidebar in a second column; the sidebar row moved
+ * it into the frame's rail, under the wordmark and the nav, because the mockup
+ * draws one column of chrome rather than two. It renders through `<RailSlot>` —
+ * a portal, so this component still owns it, still re-renders it when the URL's
+ * facets change, and does not hand `FacetSidebar` to `AppFrame`. Everything
+ * about the sidebar except *where its DOM lands* is unchanged, including the
+ * skeleton.
+ *
+ * The screen is at `/` because the landing page that was there is deleted;
+ * `src/routes/routeTree.tsx` carries that argument and the four deleted paths.
  *
  * ## What this component owns, and what it delegates
  *
@@ -56,7 +67,7 @@
  * ## It renders a `<section>`, not a `<main>`
  *
  * `AppFrame` owns the document's one `<main>`. The `<h1>` is clipped rather than
- * absent: the header names the app, the nav marks the active tab, and the page
+ * absent: the rail names the app, the nav marks the active tab, and the page
  * still needs a top-level heading for a screen-reader rotor — but the contract's
  * catalog opens on the search field, not on a title, and adding a visible one
  * would push the grid down by a line the design does not have.
@@ -65,6 +76,7 @@ import { getRouteApi } from '@tanstack/react-router'
 import { useMemo } from 'react'
 
 import { TileDrawer } from '@/screens/detail'
+import { RailSlot } from '@/ui/shell'
 
 import { useCatalogIndex } from './catalogIndex'
 import { FacetSidebar } from './FacetSidebar'
@@ -74,7 +86,7 @@ import { TileGrid, TileGridEmpty, TileGridSkeleton } from './TileGrid'
 
 import './catalog.css'
 
-const catalogApi = getRouteApi('/catalog')
+const catalogApi = getRouteApi('/')
 
 export function CatalogScreen() {
   const search = catalogApi.useSearch()
@@ -112,16 +124,22 @@ export function CatalogScreen() {
     <section className="of-catalog" aria-label="Catalog">
       <h1 className="of-sr-only">Catalog</h1>
 
-      {state.status === 'loading' ? <FacetSidebarSkeleton /> : null}
+      {/* Into the frame's rail, under the nav. The two branches are the ones
+          this screen has always had — the error state above returns before
+          either, because a rail full of facet groups over an index that failed
+          to load would offer filters for nothing. */}
+      <RailSlot>
+        {state.status === 'loading' ? <FacetSidebarSkeleton /> : null}
 
-      {state.status === 'ready' && result !== null ? (
-        <FacetSidebar
-          facets={result.facets}
-          total={state.index.engine.size}
-          actions={actions}
-          filtered={filtered}
-        />
-      ) : null}
+        {state.status === 'ready' && result !== null ? (
+          <FacetSidebar
+            facets={result.facets}
+            total={state.index.engine.size}
+            actions={actions}
+            filtered={filtered}
+          />
+        ) : null}
+      </RailSlot>
 
       <div className="of-catalog-results">
         <SearchField

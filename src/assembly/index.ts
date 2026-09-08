@@ -94,3 +94,59 @@ export { resolveInstance, selectVariantForLock } from './resolve'
  */
 export type { BaseGap, BaseMatch, BaseRanking, MatchedBase } from './baseMatch'
 export { MATCH_WEIGHTS, baseGap, matchBase, rankBases } from './baseMatch'
+
+/**
+ * The recipe walk, which arrived here when the screen it was written for was
+ * deleted.
+ *
+ * Row C3 built `/assemblies` — a guided walk through the recipe templates — and
+ * put the walk, the 42 templates and the narrowing measurement in
+ * `src/screens/assemblies/` beside the screen. Six modules under `src/` then
+ * imported *through* a screen directory for the data, which
+ * `src/store/schema.ts` and `src/builder/panels/families.ts` both record as the
+ * awkward part of that arrangement.
+ *
+ * **The screen is gone and the walk is not.** `@/builder/panels/slots` drives
+ * the same `assemblyState` / `resolvePart` pair from the builder's slot editor —
+ * which is where a part is actually filled — so what the guided screen was *for*
+ * moved to where the user already was, the same way `/settings` and `/library`
+ * moved before it. That leaves the walk as what it always was underneath: pure
+ * resolution over a template and a choice, which is this module's whole subject.
+ *
+ * `./recipeWalk.ts` is row C3's `assembly.ts` under a name that does not collide
+ * with `assembly.test.ts`; `./templates.ts` is the generated data, still emitted
+ * by `pipeline/templates.ts` (`TEMPLATES_MODULE_PATH`); `./measure.ts` computes
+ * every narrowing figure the walk's docblock quotes, and `./corpus.test.ts`
+ * checks them against the live archive.
+ *
+ * The templates are re-exported here as well as reachable at
+ * `@/assembly/templates`. Row C3's barrel deliberately did **not** re-export
+ * them, because a value import of that barrel reached the screen component and
+ * its stylesheet — a CSS side effect no bundler can shake. With the screen
+ * deleted there is no side effect left to avoid: `templates.ts` is data and
+ * nothing else. The deep imports that exist stay deep, because the palette wants
+ * two arrays and a table rather than the module.
+ */
+export type {
+  AssemblyChoice,
+  AssemblyOption,
+  AssemblyState,
+  AssemblyStep,
+  RecipeIndex,
+  RecipeTemplate,
+  StepNarrowing,
+  TemplatePart,
+} from './recipeWalk'
+export {
+  STEP_PAGE,
+  assemblyState,
+  assemblyStepKey,
+  createRecipeIndex,
+  deadEndSentence,
+  emptyStepSentence,
+  narrowingSentence,
+  resolvePart,
+  stepCountSentence,
+} from './recipeWalk'
+
+export { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from './templates'

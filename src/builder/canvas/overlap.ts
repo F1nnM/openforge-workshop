@@ -13,10 +13,11 @@
  * about it.
  *
  * A tile-versus-tile AABB test over a real room therefore reports a conflict on
- * every wall in it. Measured on the landing hero's chamber (`src/screens/landing/
- * plan.ts`, 12 floors, 8 walls, 6 fixtures): the walls abut the floors there, so
- * the naive test is quiet — but move any wall half a unit inwards, which the 0.5
- * snap invites and `build|wall on tile` requires, and it fires on all eight.
+ * every wall in it. Measured on the chamber the landing hero drew — 12 floors, 8
+ * walls, 6 fixtures, in the plan the sidebar row deleted along with that screen:
+ * the walls abut the floors there, so the naive test is quiet — but move any wall
+ * half a unit inwards, which the 0.5 snap invites and `build|wall on tile`
+ * requires, and it fires on all eight.
  *
  * ## What this module does instead
  *
@@ -129,9 +130,9 @@
  *
  * Perpendicular walls share the 0.5 × 0.5 square at the corner they meet in —
  * that is what a corner *is*, in plan, at a wall thickness of half a unit. The
- * landing hero's own chamber (`src/screens/landing/plan.ts`) has three such
- * junctions, so a rule without this exemption would light up the drawing the app
- * puts on its front door. The exemption is deliberately narrow: both pieces
+ * chamber measured above has three such junctions, so a rule without this
+ * exemption would have lit up the drawing that app once put on its front door —
+ * and lights up any room a user builds the same shape. The exemption is deliberately narrow: both pieces
  * axis-aligned, both long axes perpendicular, and the shared box no larger than
  * the wall thickness on either side. Two *parallel* walls overlapping by the
  * same half unit are still flagged, because that is a collinear overlap and there

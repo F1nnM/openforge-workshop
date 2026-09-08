@@ -61,7 +61,7 @@ import { describe, expect, it } from 'vitest'
 import type { CatalogFile as CatalogFileType, TileId } from '@/catalog'
 import { CatalogFile, TileId as TileIdSchema, buildAggregateIndex, selectVariant } from '@/catalog'
 import { PRINT_OPTIONS } from '@/assembly'
-import { RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
+import { RECIPE_TEMPLATES } from '@/assembly/templates'
 
 import { LockSystem, SlotName, TemplateId } from './schema'
 

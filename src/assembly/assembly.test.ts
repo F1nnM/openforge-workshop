@@ -66,7 +66,7 @@ import {
   selectVariant,
 } from '@/catalog'
 import { createCompositionIndex, resolveSlotTags } from '@/composition'
-import { RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
+import { RECIPE_TEMPLATES } from '@/assembly/templates'
 import type { LockSystem, PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 
 import type { AssemblyIndex, PrintOption } from './assemblyIndex'

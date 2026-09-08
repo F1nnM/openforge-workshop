@@ -219,7 +219,7 @@ import { VariantsTable } from './VariantsTable'
 
 import './detail.css'
 
-const catalogApi = getRouteApi('/catalog')
+const catalogApi = getRouteApi('/')
 
 export interface TileDrawerProps {
   /**

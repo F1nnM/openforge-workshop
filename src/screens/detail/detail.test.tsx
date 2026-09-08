@@ -5,10 +5,10 @@
  * Two things are worth stating about the harness, because both are deliberate:
  *
  *   1. **A purpose-built route tree, not `createWorkshopRouter()`.** The app's
- *      `/catalog` renders the catalog screen (row 13), which loads and indexes
+ *      `/` renders the catalog screen (row 13), which loads and indexes
  *      the whole catalog; mounting it here would make every assertion below
  *      depend on a screen this PR does not own. The tree used instead is the two
- *      routes the drawer actually touches — `/catalog` with the real
+ *      routes the drawer actually touches — the catalog at `/` with the real
  *      `validateCatalogSearch`, and `/builder` — over the real compact search
  *      codec and a memory history. What is being tested is the drawer against
  *      the *URL contract*, and that contract is `src/search/searchSchema.ts`'s,
@@ -321,7 +321,7 @@ function buildRouter(path: string) {
   const root = createRootRoute({})
   const catalog = createRoute({
     getParentRoute: () => root,
-    path: '/catalog',
+    path: '/',
     validateSearch: validateCatalogSearch,
     component: CatalogStub,
   })
@@ -394,7 +394,7 @@ afterEach(() => {
 
 describe('opening and closing', () => {
   it('opens on the URL param, cold, with no interaction', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     expect(drawer()).toBeInTheDocument()
     expect(titleOf('Cave Floor 1x1')).toBeInTheDocument()
@@ -402,12 +402,12 @@ describe('opening and closing', () => {
   })
 
   it('stays closed when the param is absent', async () => {
-    await renderAt('/catalog')
+    await renderAt('/')
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('closes with Back — one press, and nothing left to go back to', async () => {
-    const router = await renderAt('/catalog')
+    const router = await renderAt('/')
     await open(router, ORD.floor1x1)
     expect(drawer()).toBeInTheDocument()
 
@@ -423,7 +423,7 @@ describe('opening and closing', () => {
   })
 
   it('closes on a backdrop press, through the same path Escape takes', async () => {
-    const router = await renderAt('/catalog')
+    const router = await renderAt('/')
     await open(router, ORD.floor1x1)
 
     const backdrop = document.querySelector('.of-backdrop')
@@ -442,7 +442,7 @@ describe('opening and closing', () => {
   })
 
   it('closes a cold-loaded shared link without trapping the user in the app', async () => {
-    const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    const router = await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     await act(async () => {
       fireEvent.keyDown(drawer(), { key: 'Escape' })
@@ -454,7 +454,7 @@ describe('opening and closing', () => {
   })
 
   it('renders an honest panel for a tile the index does not hold', async () => {
-    await renderAt('/catalog?tile=999999')
+    await renderAt('/?tile=999999')
 
     expect(drawer()).toBeInTheDocument()
     expect(within(drawer()).getByText(/Ordinals are never reissued/)).toBeInTheDocument()
@@ -468,7 +468,7 @@ describe('the variants table', () => {
   const bodyRows = () => within(table()).getAllByRole('row').slice(1)
 
   it('discloses every file of the item, with nothing behind a control', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    await renderAt(`/?tile=${String(ORD.archTopper)}`)
 
     expect(within(drawer()).getByText(/How to print this/)).toBeInTheDocument()
     // Three files, three rows. No accordion, no summary, no "show more".
@@ -488,7 +488,7 @@ describe('the variants table', () => {
   })
 
   it('claims a part count and states that size is a download, not filament', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    await renderAt(`/?tile=${String(ORD.archTopper)}`)
 
     // The topper is two parts; both integrals are one.
     expect(within(table()).getByText('2 parts')).toBeInTheDocument()
@@ -508,7 +508,7 @@ describe('the variants table', () => {
   })
 
   it('names the connection systems by face, and never openforge underneath', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    await renderAt(`/?tile=${String(ORD.archTopper)}`)
 
     // The topper's real joinery is dragonlock on its sides.
     expect(within(table()).getByText('DragonLock')).toBeInTheDocument()
@@ -525,7 +525,7 @@ describe('the variants table', () => {
   })
 
   it('lets the user choose a variant, and swapping replaces so Back still closes', async () => {
-    const router = await renderAt('/catalog')
+    const router = await renderAt('/')
     await open(router, ORD.archTopper)
 
     await act(async () => {
@@ -554,7 +554,7 @@ describe('the variants table', () => {
   })
 
   it('marks the row it is showing, and only that one', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.archTopless)}`)
+    await renderAt(`/?tile=${String(ORD.archTopless)}`)
 
     const current = bodyRows().filter((row) => row.getAttribute('aria-current') === 'true')
     expect(current).toHaveLength(1)
@@ -571,7 +571,7 @@ describe('the variants table', () => {
     // named the item and the preference may decide. With no lock chosen the
     // rank still prefers one part over two and a full top over `topless`, so
     // the drawer shows the plain openlock integral — not the address holder.
-    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    await renderAt(`/?tile=${String(ORD.archTopper)}`)
 
     const current = bodyRows().filter((row) => row.getAttribute('aria-current') === 'true')
     expect(current[0]).toHaveTextContent('cave%arch.2x.openlock.stl')
@@ -588,7 +588,7 @@ describe('the variants table', () => {
     act(() => {
       setLockSystem('dragonlock')
     })
-    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    await renderAt(`/?tile=${String(ORD.archTopper)}`)
 
     const current = bodyRows().filter((row) => row.getAttribute('aria-current') === 'true')
     expect(current[0]).toHaveTextContent('cave%arch.2x.openforge.stl')
@@ -605,7 +605,7 @@ describe('the variants table', () => {
     act(() => {
       setLockSystem('dragonlock')
     })
-    await renderAt(`/catalog?tile=${String(ORD.archTopless)}`)
+    await renderAt(`/?tile=${String(ORD.archTopless)}`)
 
     const current = bodyRows().filter((row) => row.getAttribute('aria-current') === 'true')
     expect(current[0]).toHaveTextContent('cave%arch.2x.openlock.topless.stl')
@@ -616,14 +616,14 @@ describe('the variants table', () => {
   it('leaves the URL alone when the preference moves the shown row', async () => {
     // Rewriting `?tile=` to the preferred file would consume A4's `canonical`
     // signal and freeze a preference into a shareable link.
-    const router = await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    const router = await renderAt(`/?tile=${String(ORD.archTopper)}`)
     expect(openTile(router)).toBe(ORD.archTopper)
   })
 
   /* ------------------------------------------------------- the 55.4% case */
 
   it('states the single way to print a one-file item, without a table', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     expect(within(drawer()).queryByRole('table')).toBeNull()
     expect(within(drawer()).getByText(/nothing to choose/)).toBeInTheDocument()
@@ -636,14 +636,14 @@ describe('the variants table', () => {
 
   it('says so where a file declares no connection system at all', async () => {
     // The `insert`, whose `conn` resolves to nothing on either face.
-    await renderAt(`/catalog?tile=${String(ORD.noSprite)}`)
+    await renderAt(`/?tile=${String(ORD.noSprite)}`)
     expect(within(drawer()).getByText('No connection system declared')).toBeInTheDocument()
   })
 
   /* ---------------------------------------------------------------- slots */
 
   it('lists an accessory slot with the print that carries it, and not the base slot', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    await renderAt(`/?tile=${String(ORD.archTopper)}`)
 
     expect(within(drawer()).getByText('Accessory slots')).toBeInTheDocument()
     expect(within(drawer()).getByText('torch')).toBeInTheDocument()
@@ -664,7 +664,7 @@ describe('the variants table', () => {
   })
 
   it('words a one-file item’s slot in the singular', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.wall)}`)
+    await renderAt(`/?tile=${String(ORD.wall)}`)
 
     // One variant, so the slot is universal by definition — and "on every one
     // of the 1 prints" is not a sentence.
@@ -677,7 +677,7 @@ describe('the variants table', () => {
   })
 
   it('shows no slot section for an item that declares no composition', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
     expect(within(drawer()).queryByText('Accessory slots')).toBeNull()
   })
 })
@@ -686,7 +686,7 @@ describe('the variants table', () => {
 
 describe('focus', () => {
   it('traps focus inside the drawer and restores it on close', async () => {
-    const router = await renderAt('/catalog')
+    const router = await renderAt('/')
     const card = screen.getByRole('button', { name: 'a card' })
     act(() => {
       card.focus()
@@ -731,17 +731,17 @@ describe('the spec grid', () => {
     [ORD.shapeless, 'Curved'],
     [ORD.noSprite, 'Size not specified'],
   ])('renders footprint tier for tile %i as %s', async (ord, expected) => {
-    await renderAt(`/catalog?tile=${String(ord)}`)
+    await renderAt(`/?tile=${String(ord)}`)
     expect(cell('Footprint')).toHaveTextContent(expected)
   })
 
   it('shows a qualitative height where the tags carry one', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.wall)}`)
+    await renderAt(`/?tile=${String(ORD.wall)}`)
     expect(cell('Height')).toHaveTextContent('Low')
   })
 
   it('says so where no height basis exists, rather than printing a number', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
     const height = cell('Height')
     expect(height).toHaveTextContent('Not recorded')
     expect(height).toHaveAttribute('data-empty')
@@ -749,15 +749,15 @@ describe('the spec grid', () => {
   })
 
   it('names the build system and its absence', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
     expect(cell('Build system')).toHaveTextContent('Separate wall')
 
-    await renderAt(`/catalog?tile=${String(ORD.wall)}`)
+    await renderAt(`/?tile=${String(ORD.wall)}`)
     expect(cell('Build system')).toHaveTextContent('Not specified')
   })
 
   it('describes the file as an STL and a decimal size', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
     expect(cell('File')).toHaveTextContent('STL · 1.3 MB')
   })
 })
@@ -766,7 +766,7 @@ describe('the spec grid', () => {
 
 describe('the storage address', () => {
   it('is a real HTTPS link to the archive', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     const link = within(drawer()).getByRole('link', { name: /objects\.openforge\.tools/ })
     const href = link.getAttribute('href') ?? ''
@@ -787,7 +787,7 @@ describe('the actions', () => {
     // placement unit and *"I am going to print this"* now means *"this piece is
     // on my plan"*. The old library toggle is still asserted absent, so nothing
     // can quietly bring a second destination back.
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     const actions = within(drawer())
       .getAllByRole('button')
@@ -806,7 +806,7 @@ describe('the actions', () => {
     // variant on screen into that family's one slot, so the piece on the plan is
     // the piece in the preview well. `placeOnPlan` picks the cell with the
     // plan's own collision predicate.
-    const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    const router = await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     fireEvent.click(within(drawer()).getByRole('button', { name: /Place on the plan/ }))
     // `waitFor`, because the press fetches `./placeOnPlan` and, through it, the
@@ -829,13 +829,13 @@ describe('the actions', () => {
     // quieter copy of "Use in builder →": the library toggle accumulated without
     // leaving the catalog and so does this. Nothing reaches the channel either —
     // placing is not arming.
-    expect(router.state.location.pathname).toBe('/catalog')
+    expect(router.state.location.pathname).toBe('/')
     expect(claimPendingArm()).toBeNull()
     expect(within(drawer()).getByRole('status')).toHaveTextContent(/Placed as Floor: Straight at x /)
   })
 
   it('sends the family that admits the tile, and no query with it', async () => {
-    const router = await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    const router = await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     await act(async () => {
       fireEvent.click(within(drawer()).getByRole('button', { name: /Use in builder/ }))
@@ -868,7 +868,7 @@ describe('the actions', () => {
     // The *family* and not the size: the size travels as the tile's own tags and
     // becomes a position on arrival, so naming one here would mean a third copy
     // of the generator's labels for no gain.
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
     expect(within(drawer()).getByText(/Arms/)).toHaveTextContent(
       'Arms the Floor: Straight family, at this tile’s size.',
     )
@@ -879,7 +879,7 @@ describe('the actions', () => {
     // reachable as a fill for a host tile's accessory slot — which is the grid
     // this same drawer renders. So the action is replaced rather than disabled,
     // and nothing reaches the channel.
-    await renderAt(`/catalog?tile=${String(ORD.shapeless)}`)
+    await renderAt(`/?tile=${String(ORD.shapeless)}`)
 
     expect(within(drawer()).queryByRole('button', { name: /Use in builder/ })).toBeNull()
     expect(within(drawer()).getByText(/Inserts are not placed on their own/)).toBeInTheDocument()
@@ -894,7 +894,7 @@ describe('the actions', () => {
     // role and one form — and reachable after an import that fails to classify
     // one. It must not read as the insert case: that tile has somewhere to go and
     // this one does not.
-    await renderAt(`/catalog?tile=${String(ORD.arc)}`)
+    await renderAt(`/?tile=${String(ORD.arc)}`)
 
     expect(within(drawer()).queryByRole('button', { name: /Use in builder/ })).toBeNull()
     expect(within(drawer()).getByText(/files no template family for this tile/)).toBeInTheDocument()
@@ -908,7 +908,7 @@ describe('the actions', () => {
     // assert, and it is unchanged: the drawer's *display* is still per-variant.
     // What travels is a family, so the two questions have come apart — which was
     // row V1's change to this channel and survives row C1's.
-    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    await renderAt(`/?tile=${String(ORD.archTopper)}`)
     expect(
       within(drawer())
         .getAllByRole('row')
@@ -941,7 +941,7 @@ describe('the actions', () => {
     act(() => {
       setLockSystem(lock)
     })
-    await renderAt(`/catalog?tile=${String(ord)}`)
+    await renderAt(`/?tile=${String(ord)}`)
 
     await act(async () => {
       fireEvent.click(within(drawer()).getByRole('button', { name: /Use in builder/ }))
@@ -959,7 +959,7 @@ describe('the gated 3D panel', () => {
     // Row 21 built `Tile3DPanel` and mounted it nowhere; row X2 put it here, one
     // line under the rotator, exactly as that module's docblock specifies. The
     // floor is 1.3 MB, inside the 24 MiB gate, so the control is offered.
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     const button = within(drawer()).getByRole('button', { name: /View in 3D/ })
     expect(button).toHaveTextContent('1.3 MB')
@@ -973,7 +973,7 @@ describe('the gated 3D panel', () => {
     // The two previews coexist, and the reason is a capability rather than
     // taste: `OrbitControls` has no key bindings, so the rotator's `role="slider"`
     // remains the keyboard route to every angle.
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     const rotator = within(drawer()).getByRole('slider')
     const panel = drawer().querySelector('.of-3d-panel')
@@ -991,7 +991,7 @@ describe('the gated 3D panel', () => {
     // variant, so a link to the address holder that resolves to a different file
     // offers that file's size and not the address holder's. `archTopper` is
     // 2.1 MB and the preference-selected integral is 2.4 MB.
-    await renderAt(`/catalog?tile=${String(ORD.archTopper)}`)
+    await renderAt(`/?tile=${String(ORD.archTopper)}`)
 
     expect(within(drawer()).getByRole('button', { name: /View in 3D/ })).toHaveTextContent('2.4 MB')
   })
@@ -1005,7 +1005,7 @@ describe('the gated 3D panel', () => {
     // states live in `src/three/panel.test.tsx`, the corpus split behind the gate
     // in `src/three/gate.test.ts`, and the promise that none of it reaches the
     // entry chunk in `src/three/boundary.test.ts`, which reads the import graph.
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     expect(drawer().querySelector('canvas')).toBeNull()
   })
@@ -1027,7 +1027,7 @@ describe('the sprite rotator', () => {
   }
 
   it('shows the default frame of the tile’s sheet', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     expect(frame()).toHaveAttribute('data-frame', '0')
     expect(sheet().style.backgroundImage).toContain(
@@ -1054,7 +1054,7 @@ describe('the sprite rotator', () => {
   })
 
   it('rotates with the arrow keys, around the ring and to the poles', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     fireEvent.keyDown(frame(), { key: 'ArrowRight' })
     expect(frame()).toHaveAttribute('aria-valuetext', 'front right')
@@ -1077,7 +1077,7 @@ describe('the sprite rotator', () => {
   })
 
   it('rotates by dragging, one step per 30px', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     fireEvent.pointerDown(frame(), { button: 0, clientX: 100, clientY: 100 })
     fireEvent.pointerMove(window, { clientX: 190, clientY: 100 })
@@ -1098,7 +1098,7 @@ describe('the sprite rotator', () => {
   })
 
   it('reaches any frame from the angle pad', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     fireEvent.click(within(drawer()).getByRole('button', { name: 'bottom' }))
     expect(frame()).toHaveAttribute('aria-valuetext', 'bottom')
@@ -1109,7 +1109,7 @@ describe('the sprite rotator', () => {
   })
 
   it('states the caption as pre-rendered frames, not as a live render', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.floor1x1)}`)
+    await renderAt(`/?tile=${String(ORD.floor1x1)}`)
 
     expect(within(drawer()).getByText(/pre-rendered angles/)).toBeInTheDocument()
     expect(within(drawer()).queryByText(/live render/)).toBeNull()
@@ -1141,7 +1141,7 @@ describe('the sprite rotator', () => {
   })
 
   it('renders the one tile with no sprite sheet, saying which it is', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.noSprite)}`)
+    await renderAt(`/?tile=${String(ORD.noSprite)}`)
 
     expect(within(drawer()).queryByRole('slider')).toBeNull()
     expect(within(drawer()).getByText('No preview rendered')).toBeInTheDocument()
@@ -1159,7 +1159,7 @@ describe('the sprite rotator', () => {
 
 describe('the tags', () => {
   it('shows every tag the record carries', async () => {
-    await renderAt(`/catalog?tile=${String(ORD.wall)}`)
+    await renderAt(`/?tile=${String(ORD.wall)}`)
 
     expect(within(drawer()).getByText('shape|wall|low')).toBeInTheDocument()
     expect(within(drawer()).getByText('texture|cave')).toBeInTheDocument()

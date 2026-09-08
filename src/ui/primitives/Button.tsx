@@ -1,22 +1,22 @@
 /**
  * The app's one button.
  *
- * Three rows had asked for this by the time it was written. `.of-action` in
- * `../../screens/landing/landing.css` and `.of-lib-action` in the library
- * screen's own stylesheet had arrived independently as near-identical 45-line
- * blocks — same radius, same accent fill, same outlined secondary, same
+ * Three rows had asked for this by the time it was written. `.of-action` in the
+ * landing screen's stylesheet and `.of-lib-action` in the library screen's own
+ * had arrived independently as near-identical 45-line blocks — same radius, same accent fill, same outlined secondary, same
  * `filter: brightness(1.12)` hover, same "one pixel less padding on the outlined
  * tone so the border does not make it taller" trick — and the builder's toolbar
  * wanted four more of them. The library's own stylesheet said out loud that
  * extracting this was `ui/primitives/`'s call to make; this is that call. (Row A0
- * has since deleted that screen, which is why only one of the two call sites can
- * still be pointed at.)
+ * deleted the library screen and the sidebar row the landing screen, so neither
+ * of the two original call sites survives — which is the argument for having
+ * extracted it, rather than against.)
  *
  * ## Two tones and three sizes, and nothing else
  *
  * The tones are the contract's: a filled accent primary and an outlined
- * secondary. The sizes are the three the design actually uses — `lg` is the
- * landing hero's, `md` the bill panel's download action, `sm` the builder
+ * secondary. The sizes are the three the design actually uses — `lg` was the
+ * landing hero's, `md` is the bill panel's download action, `sm` the builder
  * toolbar's. Adding a fourth means finding it in
  * design-contract.md first.
  *
@@ -41,7 +41,8 @@
  * `.of-action` and `.of-lib-action` were listed beside `.of-button` in
  * `primitives.css` when this component was extracted, because the *markup*
  * carrying them belonged to other rows. Row X2 opened both screens and swapped
- * all seven call sites — the landing hero's two `Link`s at `size: 'lg'`, the
+ * all seven call sites — the landing hero's two `Link`s at the since-deleted
+ * `size: 'lg'`, the
  * library head's and empty state's two `Link`s, its retry `<button>`, and the
  * backup block's export `<button>` and import `<label>` — so **both aliases have
  * been deleted** and `.of-button` is the only class name for a button in the app.
@@ -64,11 +65,17 @@ export type ButtonTone = 'primary' | 'secondary'
 /**
  * How large.
  *
- *   - `lg` — the landing hero. 15px, 24px of horizontal padding.
- *   - `md` — the default. The library head, the bill panel's download action.
+ *   - `md` — the default. The bill panel's download action, the backup block.
  *   - `sm` — dense chrome: the builder's floating toolbar.
+ *
+ * **There was an `lg`** — 15px at 24px of horizontal padding, the landing hero's
+ * two actions and nothing else. The sidebar row deleted the landing page, which
+ * left the size with no call site; it is deleted rather than kept for a screen
+ * that might want it, because an unused variant is a design decision nobody has
+ * had to make yet. `tools/hygiene/markup.test.ts` counts the call sites this
+ * primitive has, and that count is what would have hidden it.
  */
-export type ButtonSize = 'lg' | 'md' | 'sm'
+export type ButtonSize = 'md' | 'sm'
 
 export interface ButtonStyleProps {
   /* `| undefined` throughout, because `exactOptionalPropertyTypes` is on and

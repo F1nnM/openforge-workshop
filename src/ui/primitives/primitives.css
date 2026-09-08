@@ -258,14 +258,16 @@
 
    The size is three custom properties rather than a full block per size, so a
    surface that needs a size the contract does not name can set them locally
-   without a fourth `data-size` value being invented.
+   without a third `data-size` value being invented. There were three sizes until
+   the sidebar row deleted the landing page: `lg` was that hero's two actions and
+   nothing else, so the variant went with its only call sites.
 
    No focus ring here: ../shell/shell.css sets one for the whole app on
    `:focus-visible`, deliberately so a control added later cannot forget it.
    ──────────────────────────────────────────────────────────────────────────── */
 
 .of-button {
-  /* `md`: the library head's size, and the default. */
+  /* `md`: the default, and the size every live call site asks for. */
   --of-button-py: 10px;
   --of-button-px: 20px;
   --of-button-fs: 14px;
@@ -294,12 +296,6 @@
 
 .of-button:hover {
   text-decoration: none;
-}
-
-.of-button[data-size='lg'] {
-  --of-button-py: 12px;
-  --of-button-px: 24px;
-  --of-button-fs: 15px;
 }
 
 .of-button[data-size='sm'] {

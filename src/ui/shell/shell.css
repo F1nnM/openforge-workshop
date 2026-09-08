@@ -10,20 +10,23 @@
         (`button`/`input` inherit the face, links take the accent, `canvas` is a
         block).
 
-     2. **The 60px sticky header** of design-contract.md §2.0, transcribed from
-        the approved mock (`design/OpenForge-Studio.dc.html`, lines 23–37). The
-        odd-looking numbers — 1.5px, 13px, 1.6px, 10.5px — are the mock's, not
-        approximations of it.
+     2. **The rail** — the app's identity, its navigation, and the slot a
+        screen puts its own sidebar in. It was design-contract.md §2.0's 60px
+        sticky header, transcribed from the approved mock
+        (`design/OpenForge-Studio.dc.html`, lines 23–37), until the sidebar row
+        stood that column on its side against a mockup of the owner's. The
+        odd-looking numbers that survive — 1.5px, 19px, 3px, 9.5px, 2.2px — are
+        the mock's, not approximations of it; the tabs' are the new mockup's.
 
    ## Why hand-written CSS rather than Tailwind utilities
 
    Tailwind is available and the token utilities exist (`bg-bg2`, `text-ink`,
-   `border-line`, `font-mono`). The header is still written out here because it
-   is a fixed transcription of specific measurements: `text-[13px]
-   tracking-[1.6px] uppercase font-semibold shadow-[inset_0_-2px_var(--acc)]`
-   states the same thing while hiding which numbers are load-bearing. Screens
-   are a different case — rows 13–18 lay out grids that Tailwind expresses
-   well — so this file styles the frame and nothing beyond it.
+   `border-line`, `font-mono`). The rail is still written out here because it is
+   a fixed transcription of specific measurements: `text-[11px]
+   tracking-[1.4px] uppercase font-semibold` states the same thing while hiding
+   which numbers are load-bearing. Screens are a different case — the catalog
+   and the builder lay out grids that Tailwind expresses well — so this file
+   styles the frame and nothing beyond it.
 
    ## Why these rules are not in a cascade layer
 
@@ -117,23 +120,32 @@ canvas {
   animation: ofShimmer 1.6s ease-in-out infinite;
 }
 
-/* ── Frame ───────────────────────────────────────────────────────────────── */
+/* ── Frame ───────────────────────────────────────────────────────────────────
+   Two columns: the rail, and the screen. The rail is the mockup's single column
+   — wordmark, nav, then whatever the screen puts in the slot — and it is a
+   scroll container of its own, so a catalog with 38 texture chips in it does not
+   scroll the tile grid and the builder keeps a viewport-height work area.
+
+   `--of-header-h` used to be published here, at 60px, so the builder could size
+   itself against the real header and the catalog's sticky sidebar could offset
+   under it. Both are `100dvh` and `top: 0` now that the chrome is beside the
+   screen rather than above it, which is not a number worth publishing.
+   ──────────────────────────────────────────────────────────────────────────── */
 
 .of-shell {
-  /* Published so row 18's three-column builder can size itself against the
-     real header instead of restating 60px: `height: calc(100dvh - var(--of-header-h))`. */
-  --of-header-h: 60px;
-
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  /* The rail is the mockup's 265px. `minmax(0, 1fr)` and not `1fr`: a grid
+     track's default `min-width: auto` would let the tile grid's own minimum
+     widen the column and push the rail off screen. */
+  grid-template-columns: 265px minmax(0, 1fr);
   min-height: 100dvh;
 }
 
 .of-main {
-  flex: 1;
-  /* A flex child's default `min-height: auto` would let the builder's
+  /* A grid child's default `min-height: auto` would let the builder's
      no-page-scroll layout push the document taller than the viewport. */
   min-height: 0;
+  min-width: 0;
 }
 
 .of-main:focus {
@@ -145,7 +157,7 @@ canvas {
   position: absolute;
   top: 0;
   left: 0;
-  /* Above the header and above an open modal's popup. See the stacking order
+  /* Above the rail and above an open modal's popup. See the stacking order
      documented in ../primitives/primitives.css. */
   z-index: 70;
   padding: 10px 16px;
@@ -165,25 +177,67 @@ canvas {
   outline-offset: -2px;
 }
 
-/* ── Header ──────────────────────────────────────────────────────────────── */
+/* ── The rail ────────────────────────────────────────────────────────────────
+   `position: sticky` with `top: 0` rather than `fixed`: the grid track above
+   already reserves the width, so sticky keeps the rail in flow — which is what
+   makes the narrow-viewport rule at the foot of this file a one-line change of
+   `grid-template-columns` instead of a re-layout.
 
-.of-header {
+   `position: relative` is load-bearing for the same reason it is on the
+   builder's columns: every `VisuallyHidden` span in the nav and in whatever the
+   screen puts in the slot is `position: absolute`, so without a positioned
+   ancestor its containing block is the *initial* containing block, it escapes
+   this element's `overflow` and contributes its offset to the document's scroll
+   height. The builder is specified to have no page scroll at all.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-rail {
   position: sticky;
   top: 0;
   z-index: 40;
   display: flex;
-  align-items: center;
-  gap: 30px;
-  height: var(--of-header-h);
-  padding: 0 26px;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
   background: var(--bg2);
+  border-right: 1px solid var(--line);
+}
+
+.of-rail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: none;
+  padding: 22px 20px 18px;
   border-bottom: 1px solid var(--line);
-  /* `clip`, not `hidden`: it never becomes a scroll container, so the sticky
-     positioning above still resolves against the viewport. This is the backstop
-     that makes a narrow viewport impossible to scroll sideways — the media
-     queries at the bottom of this file are what keep it from ever clipping
-     anything that matters. */
-  overflow-x: clip;
+}
+
+/* The mockup's divider under the logotype block, between identity and
+   navigation. `flex: none` and a fixed height rather than a `border-top` on
+   `.of-nav`: a border adds its own box-model space on top of the head's
+   `gap`, which would widen this one gap without touching any other — a
+   dedicated line keeps every gap in the column equal. */
+.of-rail-divider {
+  flex: none;
+  height: 1px;
+  background: var(--line);
+}
+
+/* The screen's own sidebar, portalled in by `RailSlot`. It takes the rest of
+   the column and scrolls inside itself; the head above it does not move. A
+   screen that contributes nothing leaves this empty, and an empty flex child
+   with no padding of its own is invisible — which is what the not-found
+   boundary and any future screen without a sidebar get. */
+.of-rail-slot {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.of-rail-slot:empty {
+  display: none;
 }
 
 /* ── Wordmark ────────────────────────────────────────────────────────────── */
@@ -247,104 +301,181 @@ canvas {
   color: var(--mut);
 }
 
-/* ── Nav ─────────────────────────────────────────────────────────────────── */
+/* ── Nav ─────────────────────────────────────────────────────────────────────
+   Two tiles in a row, sharing the rail's width. In the header these were text
+   tabs with a 2px accent inset underneath; an inset is a bottom border, which
+   reads as a tab in a strip and as nothing in a column, so the mockup's
+   bordered tiles replace it — the active one filled with the accent wash and
+   bordered in the accent, a state that survives being stacked.
+   ──────────────────────────────────────────────────────────────────────────── */
 
 .of-nav {
-  display: flex;
-  gap: 4px;
-  height: 100%;
-  margin-left: 12px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 10px;
   min-width: 0;
 }
 
 .of-nav-tab {
   display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 7px;
-  padding: 0 14px;
-  font-size: 13px;
+  min-width: 0;
+  padding: 11px 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 1.6px;
+  letter-spacing: 1.4px;
   text-transform: uppercase;
-  white-space: nowrap;
+  text-align: center;
   color: var(--mut);
   text-decoration: none;
-  /* Inset rather than a border so the tab's height — and therefore the
-     header's — does not change when it becomes active. */
-  box-shadow: inset 0 0 var(--acc);
   transition:
     color 120ms ease,
-    box-shadow 120ms ease;
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+/* The label and its count chip, on one line under the glyph. */
+.of-nav-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.of-nav-glyph {
+  flex: none;
+  /* Dimmer than the label until the tile is active or hovered: at 18px in a
+     1.5px stroke the glyph is heavier than 11px uppercase text beside it. */
+  opacity: 0.75;
 }
 
 .of-nav-tab:hover {
   color: var(--ink);
+  border-color: var(--acc);
   text-decoration: none;
 }
 
 /* TanStack Router stamps `data-status="active"` on a matching Link. The
-   matching `aria-current="page"` is set in Header.tsx — this rule is the
-   visual half only. */
+   matching `aria-current="page"` is set in Rail.tsx — this rule is the visual
+   half only. `color-mix` on the accent rather than a new token: the wash is this
+   one state, and a token would invite it to be reused at a different opacity. */
 .of-nav-tab[data-status='active'] {
-  color: var(--ink);
-  box-shadow: inset 0 -2px var(--acc);
+  color: var(--acc);
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 14%, var(--bg2));
 }
 
-/* ── Right-aligned archive stat ──────────────────────────────────────────── */
-
-.of-stat {
-  margin: 0 0 0 auto;
-  font-family: var(--face-mono);
-  font-size: 11px;
-  color: var(--mut);
-  white-space: nowrap;
-  flex: none;
-}
-
-.of-stat-count {
-  color: var(--ink);
+.of-nav-tab[data-status='active'] .of-nav-glyph {
+  opacity: 1;
 }
 
 /* ── Narrow viewports ────────────────────────────────────────────────────────
    The contract's builder is a fixed three-column desktop layout, so there is no
-   mobile nav to design — but the header is on every screen and must survive a
-   phone. Two steps, worst case first: at 320px the mark plus three tightened
-   tabs come to roughly 280px inside a 28px gutter.
+   mobile nav to design — but the rail is on every screen and must survive a
+   phone. One step: below the width at which a 265px rail plus one 215px tile
+   card no longer fit, the two columns become two rows and the rail stops being
+   viewport-tall, so the screen starts under it rather than beside it.
+
+   The rail's own slot is capped rather than left to run the document's full
+   height: stacked, the catalog's four filter groups come to roughly 1,000px and
+   the builder's palette runs to 3,600px, so an uncapped rail would put the first
+   tile a whole screen below the fold and a phone visitor would meet 35 filter
+   controls before ever seeing a tile.
+
+   ## The two custom properties, and the screen that has to subtract them
+
+   Stacked, the rail takes height *from* the screen below it, and one screen
+   cannot absorb that: the builder is specified to have no page scroll, so its
+   work area has to be the viewport minus however tall the rail is. Both terms
+   are therefore published rather than left to be measured — the head's height is
+   fixed here (its content is a wordmark and one row of tiles, both shorter than
+   62px, and `align-items: center` places them) and the cap is the same value the
+   slot uses. `builder.css` subtracts both with a `0px` fallback, which is what
+   makes its one height declaration correct at every width instead of needing a
+   media query of its own.
+
+   Measured before this was published: the builder reserved a hand-counted 132px
+   against a rail that is 404px stacked, which left **273px of page scroll** on a
+   556px-wide viewport — on the one screen in the app that must not have any.
+   Published and subtracted, the same viewport left 0.9px of it, which was this
+   element's own `border-bottom`; see the rule below.
    ──────────────────────────────────────────────────────────────────────────── */
 
-@media (max-width: 900px) {
-  .of-header {
-    gap: 18px;
+@media (max-width: 700px) {
+  .of-shell {
+    /* Read by `screens/builder/builder.css`. Unset above this width, where the
+       rail is a column beside the screen and takes no height from it. */
+    --of-rail-head-h: 62px;
+    --of-rail-slot-max: 42dvh;
+
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  /* The stat is the only thing in the header that is neither navigation nor
-     identity, so it is the first thing to go. */
-  .of-stat {
-    display: none;
+  .of-rail {
+    position: static;
+    height: auto;
+    border-right: none;
+    /* A shadow rather than a border, and that is the difference between the
+       builder's subtraction being exact and being a pixel short: a 1px
+       `border-bottom` here adds 1px to a rail whose height is otherwise exactly
+       the two published properties, and the measurement below caught it as
+       0.9px of page scroll on a screen that must have none. `box-shadow` draws
+       the same hairline and takes no layout space. */
+    border-bottom: none;
+    box-shadow: 0 1px 0 var(--line);
   }
-}
 
-@media (max-width: 620px) {
-  .of-header {
-    gap: 10px;
-    padding: 0 14px;
+  .of-rail-head {
+    /* The wordmark and the nav side by side, which is the one place the rail
+       goes back to being a header. Fixed height, so the builder's subtraction
+       below is exact rather than a guess at what the content comes to. */
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    box-sizing: border-box;
+    height: var(--of-rail-head-h);
+    padding: 12px 14px;
   }
 
-  /* The mark alone still links home and still reads as the wordmark. */
-  .of-wordmark-text {
+  /* A vertical rule reading "identity | navigation" would fit a row layout
+     where the horizontal one does not, but the gap between the two already
+     reads as separation at this width, and this row exists to save height —
+     adding a rule back only to remove the reason for shrinking it seems
+     backwards. */
+  .of-rail-divider {
     display: none;
   }
 
   .of-nav {
-    margin-left: 0;
-    gap: 0;
+    gap: 8px;
   }
 
   .of-nav-tab {
-    gap: 5px;
-    padding: 0 9px;
-    font-size: 12px;
+    /* Back to a text-and-glyph row: two stacked tiles beside the wordmark would
+       take a third of a 360px viewport's height. */
+    flex-direction: row;
+    padding: 8px 10px;
     letter-spacing: 1px;
+  }
+
+  .of-rail-slot {
+    max-height: var(--of-rail-slot-max);
+  }
+}
+
+@media (max-width: 420px) {
+  /* The mark alone still links home and still reads as the wordmark. */
+  .of-wordmark-text {
+    display: none;
   }
 }
 

@@ -30,8 +30,8 @@
 import type { TileId } from '@/catalog'
 import type { CompositionIndex } from '@/composition'
 
-import type { AssemblyChoice, RecipeIndex, RecipeTemplate, TemplatePart } from './assembly'
-import { assemblyState, resolvePart } from './assembly'
+import type { AssemblyChoice, RecipeIndex, RecipeTemplate, TemplatePart } from './recipeWalk'
+import { assemblyState, resolvePart } from './recipeWalk'
 
 /* --------------------------------------------------------------- the readings */
 

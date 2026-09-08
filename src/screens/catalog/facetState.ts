@@ -31,6 +31,14 @@
  * would drop it, so changing a facet would close the drawer. Spreading `prev`
  * also means a param a later PR adds survives every facet click without this
  * file learning about it.
+ *
+ * Each `prev` is annotated `CatalogSearch`, which it did not need to be while
+ * the catalog lived at `/catalog`. A `useNavigate()` with no `to` can also be
+ * navigating `.` or `..`, and from `/` — the catalog's path since the sidebar row
+ * deleted the landing page — `..` is the root route, whose search object is
+ * empty. So the inferred `prev` is a union with `{}` and `prev[key]` stops
+ * type-checking. The annotation says which of the two this actually is; nothing
+ * in this file ever navigates away from the catalog.
  */
 import { getRouteApi } from '@tanstack/react-router'
 import { useMemo } from 'react'
@@ -43,7 +51,7 @@ import { defaultFacetSearch, isDefaultFacetSearch } from '@/search'
  * this module and the route tree import each other. The id is checked against the
  * registered tree, so a renamed route is a compile error here.
  */
-const catalogApi = getRouteApi('/catalog')
+const catalogApi = getRouteApi('/')
 
 /** The multi-select facets. `build` is single-select and has its own action. */
 export type MultiFacetKey = 'kinds' | 'tex' | 'conn'
@@ -91,7 +99,7 @@ export function useFacetActions(): FacetActions {
     () => ({
       toggleValue(key, value) {
         void navigate({
-          search: (prev) => {
+          search: (prev: CatalogSearch) => {
             const current = prev[key]
             const next = current.includes(value)
               ? current.filter((item) => item !== value)
@@ -106,11 +114,11 @@ export function useFacetActions(): FacetActions {
       },
 
       clearValues(key) {
-        void navigate({ search: (prev) => ({ ...prev, [key]: [] }) })
+        void navigate({ search: (prev: CatalogSearch) => ({ ...prev, [key]: [] }) })
       },
 
       setBuild(encoded) {
-        void navigate({ search: (prev) => ({ ...prev, build: encoded }) })
+        void navigate({ search: (prev: CatalogSearch) => ({ ...prev, build: encoded }) })
       },
 
       setQuery(text) {
@@ -118,14 +126,14 @@ export function useFacetActions(): FacetActions {
         // history entry; every later one replaces it.
         const push = query === '' && text !== ''
         void navigate({
-          search: (prev) => ({ ...prev, q: text }),
+          search: (prev: CatalogSearch) => ({ ...prev, q: text }),
           replace: !push,
           resetScroll: push,
         })
       },
 
       clearAll() {
-        void navigate({ search: (prev) => ({ ...prev, ...defaultFacetSearch() }) })
+        void navigate({ search: (prev: CatalogSearch) => ({ ...prev, ...defaultFacetSearch() }) })
       },
     }),
     [navigate, query],

@@ -11,20 +11,24 @@
  *
  * ## Why the no-page-scroll requirement is asserted against the stylesheet
  *
- * design-contract.md §2.4 is explicit that the builder is three columns at the
- * viewport's height with **no page scroll**, and that is the one requirement on
- * this screen that jsdom cannot check: it reports every element as 0 × 0, applies
- * no imported stylesheet and lays nothing out. Asserting it in the DOM would
- * produce a test that passes whatever the CSS says.
+ * design-contract.md §2.4 is explicit that the builder is the viewport's height
+ * with **no page scroll**, and that is the one requirement on this screen that
+ * jsdom cannot check: it reports every element as 0 × 0, applies no imported
+ * stylesheet and lays nothing out. Asserting it in the DOM would produce a test
+ * that passes whatever the CSS says.
  *
- * So the layout invariants are asserted against the text of `builder.css` and
- * `panels.css`, and each one is there because it broke or would break something
+ * So the layout invariants are asserted against the text of `builder.css`,
+ * `panels.css` and — since the palette moved into the frame's rail —
+ * `shell.css`, and each one is there because it broke or would break something
  * real:
  *
- *   - the two fixed track widths and `minmax(0, 1fr)` between them — without the
- *     `0` minimum a long tile name widens the palette's track and pushes the
- *     stage out of the viewport;
- *   - the height in terms of `--of-header-h` rather than a restated `60px`;
+ *   - the fixed bill width and `minmax(0, 1fr)` beside it — without the `0`
+ *     minimum a long tile name widens the stage's track and pushes it out of the
+ *     viewport;
+ *   - the height as `100dvh` less the two properties the rail publishes when it
+ *     stacks, rather than a hand-counted reservation — which is what it was
+ *     first written as, and it left **273px of page scroll on a 556px
+ *     viewport**;
  *   - `overflow: hidden` on the grid;
  *   - **`position: relative` on the grid and on both scroll containers.** This one
  *     is a measured regression: every `VisuallyHidden` span is `position:
@@ -32,11 +36,13 @@
  *     *initial* containing block, it escapes every `overflow: hidden` between it
  *     and the root, and it contributes its offset to the document's scroll
  *     height. Measured in Chromium before the fix: **2,809px of page scroll on a
- *     900px viewport**, on the one screen specified to have none.
+ *     900px viewport**, on the one screen specified to have none. One of those
+ *     two containers is `.of-rail-slot` now, which is why this file reads the
+ *     frame's stylesheet.
  *
  * A browser pass is what actually verified the layout — `window.scrollTo(0, 2000)`
- * leaving `scrollY` at 0 at 1440px, 1000px and 860px wide. These assertions are
- * what stop it silently regressing between browser passes.
+ * leaving `scrollY` at 0 at 1731px and, after the fix above, at 556px. These
+ * assertions are what stop it silently regressing between browser passes.
  */
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { readFileSync } from 'node:fs'
@@ -62,7 +68,7 @@ import {
   setLockSystem,
   useWorkshopStore,
 } from '@/store'
-import { CatalogStatsProvider, resetCatalogIndexCache } from '@/ui/shell'
+import { resetCatalogIndexCache } from '@/ui/shell'
 
 /**
  * The 3D surface, stubbed — and row R2 is what makes this necessary.
@@ -191,11 +197,7 @@ function stubFetch(): void {
 
 async function renderBuilder(path = '/builder') {
   const router = createWorkshopRouter({ history: createMemoryHistory({ initialEntries: [path] }) })
-  const result = render(
-    <CatalogStatsProvider value={null}>
-      <RouterProvider router={router} />
-    </CatalogStatsProvider>,
-  )
+  const result = render(<RouterProvider router={router} />)
 
   await act(async () => {
     await router.load()
@@ -232,7 +234,7 @@ afterEach(() => {
 /* -------------------------------------------------------------- the three columns */
 
 describe('the builder screen', () => {
-  it('replaces the placeholder and renders all three columns', async () => {
+  it('replaces the placeholder and renders the palette, the stage and the bill', async () => {
     await renderBuilder()
 
     expect(screen.getByRole('complementary', { name: 'Palette' })).toBeInTheDocument()
@@ -245,6 +247,27 @@ describe('the builder screen', () => {
     expect(screen.getByTestId('builder-3d')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /pieces placed/ })).toBeInTheDocument()
     expect(screen.queryByText(/Placeholder/)).toBeNull()
+  })
+
+  /**
+   * The palette is in the frame's rail, and it is still this screen's.
+   *
+   * §2.4 gave it the first of three columns; the sidebar row moved it under the
+   * nav in the frame's single column of chrome, through `<RailSlot>`. Asserted
+   * from both ends because a portal that rendered nowhere would leave a builder
+   * with no palette and no error — and because the thing that makes the move
+   * safe is that the component tree did **not** move: the case below this one
+   * writes the palette's query to the URL, and it passes through the same
+   * `tools` object this screen owns.
+   */
+  it('renders the palette in the frame’s rail rather than in its own layout', async () => {
+    const { container } = await renderBuilder()
+
+    const palette = screen.getByRole('complementary', { name: 'Palette' })
+    const slot = container.querySelector('.of-rail .of-rail-slot')
+    expect(slot).not.toBeNull()
+    expect(slot).toContainElement(palette)
+    expect(container.querySelector('.of-builder')).not.toContainElement(palette)
   })
 
   it('has one main landmark and a clipped heading, not a second <main>', async () => {
@@ -533,11 +556,7 @@ describe('the builder screen', () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))))
 
     const router = createWorkshopRouter({ history: createMemoryHistory({ initialEntries: ['/builder'] }) })
-    render(
-      <CatalogStatsProvider value={null}>
-        <RouterProvider router={router} />
-      </CatalogStatsProvider>,
-    )
+    render(<RouterProvider router={router} />)
     await act(async () => {
       await router.load()
     })
@@ -558,15 +577,39 @@ const css = (path: string) => readFileSync(fileURLToPath(new URL(path, import.me
 describe('the layout does not scroll the page', () => {
   const layout = css('./builder.css')
   const panels = css('../../builder/panels/panels.css')
+  const shell = css('../../ui/shell/shell.css')
 
-  it('is three columns at the viewport height, with the header measured rather than restated', () => {
-    expect(layout).toContain('grid-template-columns: 272px minmax(0, 1fr) 302px')
-    expect(layout).toContain('height: calc(100dvh - var(--of-header-h))')
+  /**
+   * Two columns at the viewport height, where it was three under a 60px header.
+   *
+   * The sidebar row moved §2.4's palette column into the frame's rail and
+   * deleted the header, so both of the numbers this case used to assert are
+   * gone: there is no 272px track, and the height is `100dvh` rather than
+   * `calc(100dvh - var(--of-header-h))`. What it still asserts is the property
+   * behind them — the work area is exactly the viewport, computed and not
+   * restated — plus the one measurement that is restated, and only at the width
+   * where the rail stacks above the screen instead of beside it.
+   */
+  it('is two columns at the viewport height, with nothing subtracted from it', () => {
+    expect(layout).toContain('grid-template-columns: minmax(0, 1fr) 302px')
+    // The viewport, less whatever the rail takes from it: nothing while it is a
+    // column beside this screen (both properties unset, both fallbacks `0px`),
+    // and its head plus its capped slot below 700px, where it is a band above.
+    // A hand-counted reservation is what this was first written as, and it left
+    // 273px of page scroll on a 556px viewport.
+    expect(layout).toContain(
+      'height: calc(100dvh - var(--of-rail-head-h, 0px) - var(--of-rail-slot-max, 0px))',
+    )
+    expect(shell).toContain('--of-rail-head-h: 62px')
+    expect(shell).toContain('--of-rail-slot-max: 42dvh')
     // `100vh` on mobile Safari is the *largest* viewport height, so a page sized
-    // to it scrolls by the height of the collapsing toolbar.
-    expect(layout).not.toMatch(/height: calc\(100vh/)
-    // A restated 60px is the thing `--of-header-h` exists to prevent.
-    expect(layout).not.toMatch(/100dvh - 60px/)
+    // to it scrolls by the height of the collapsing toolbar. Matched on the
+    // declaration rather than on the string, because the module note quotes the
+    // contract's own `calc(100vh - 60px)` while recording what replaced it.
+    expect(layout).not.toMatch(/height:\s*(calc\()?100vh/)
+    // The header, and the variable that measured it, are both deleted.
+    expect(layout).not.toContain('--of-header-h: ')
+    expect(shell).not.toContain('--of-header-h: ')
   })
 
   it('clips the grid and gives it a positioning context', () => {
@@ -578,13 +621,32 @@ describe('the layout does not scroll the page', () => {
     expect(builder).toContain('position: relative')
   })
 
-  it('makes both side columns their own scroll containers, each positioned', () => {
-    for (const selector of ['.of-palette', '.of-bill-scroll']) {
-      const rule = block(panels, selector)
+  /**
+   * One scroll container each side of the canvas, and the palette's is the
+   * rail's.
+   *
+   * `.of-palette` used to declare `overflow-y: auto` itself, because it *was* a
+   * column of this screen. It renders in the frame's rail now, so the container
+   * is `.of-rail-slot` — and the `position: relative` that stops clipped
+   * `VisuallyHidden` spans escaping into the document's scroll height has to
+   * hold on whichever element scrolls. That regression was measured at 2,809px
+   * of page scroll on a 900px viewport, so this asserts it on both.
+   */
+  it('makes each side of the canvas its own scroll container, positioned', () => {
+    for (const [source, selector] of [
+      [shell, '.of-rail-slot'],
+      [panels, '.of-bill-scroll'],
+    ] as const) {
+      const rule = block(source, selector)
       expect(rule, selector).toContain('overflow-y: auto')
       expect(rule, selector).toContain('position: relative')
       expect(rule, selector).toContain('min-height: 0')
     }
+
+    // The palette itself keeps the positioning context and gives up the scroll.
+    const palette = block(panels, '.of-palette')
+    expect(palette).toContain('position: relative')
+    expect(palette).not.toContain('overflow-y')
   })
 
   it('keeps the bill’s total and download action out of the scrolling band', () => {

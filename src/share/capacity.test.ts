@@ -39,7 +39,7 @@ import type { DesignId, ManifestOrdinal, TileId } from '@/catalog'
 import { fileDefaults, recipeKey } from '@/generator/panel/recipe'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
 import { generatedBaseId } from '@/generator/placement/scene'
-import { RECIPE_TEMPLATES } from '@/screens/assemblies/templates'
+import { RECIPE_TEMPLATES } from '@/assembly/templates'
 import type { NewTemplateInstance, SlotFill, SlotName, TemplateId } from '@/store'
 
 import { ByteWriter } from './bytes'

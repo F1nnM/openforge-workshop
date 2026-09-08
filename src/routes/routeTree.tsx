@@ -1,13 +1,13 @@
 /**
  * OpenForge Workshop — the route tree.
  *
- * Four routes: landing, catalog and builder — architecture-plan.md §14's v1
- * scope and design-contract.md §2's screen inventory — plus `/assemblies`, which
- * row C3 built and could not mount because this file was not its to edit.
+ * **Two routes: the catalog at `/`, and the builder.** design-contract.md §2's
+ * screen inventory had five and architecture-plan.md §14's v1 scope three; what
+ * is left is the archive and the thing you build out of it.
  *
- * **It was six.** Two routes have been deleted rather than reshaped, and both
- * for the same kind of reason: what the screen was *for* moved somewhere the user
- * already was.
+ * **It was six.** Four routes have been deleted rather than reshaped, and three
+ * of the four for the same kind of reason: what the screen was *for* moved
+ * somewhere the user already was.
  *
  *   - **`/settings`** existed because the lock preference had no home in the
  *     contract's inventory (§2's 40.2-point lock spread gave it one). Row L1
@@ -25,9 +25,34 @@
  *     seven-day `localStorage` eviction. It is now `@/builder/panels`'
  *     `BackupPanel`, at the foot of the builder's bill column, because what the
  *     envelope carries is the room.
- * The mock made all four client-side *state*, which is why nothing in it was
- * linkable — no filtered view, no open tile, no shared build. This module is the
- * fix, and the point of it is that the URL is the app's state.
+ *   - **`/assemblies`** was the entrance to row C3's guided walk through the
+ *     recipe templates. The walk itself is not deleted — `@/builder/panels/slots`
+ *     drives the same `assemblyState` / `resolvePart` pair from the slot editor,
+ *     which is where a part is actually filled — so this is `/settings`'s move
+ *     again, one level down. What was left once the screen went was a directory
+ *     of pure resolution code six other modules already imported *through* a
+ *     screen; it is `src/assembly/recipeWalk.ts` and `src/assembly/templates.ts`
+ *     now, and `@/assembly`'s barrel carries that argument.
+ *   - **`/`, the landing page**, is the one deletion that moved nothing. It was
+ *     a page *about* the archive standing in front of the archive: a hero, four
+ *     live figures, three numbered step cards and a credit line, every one of
+ *     which described what the visitor would find one press further in. The
+ *     catalog took its path, so the front door opens onto the archive itself.
+ *     Nothing was relocated because nothing on it was a tool — the four figures
+ *     were derived from the same index the catalog loads, and the count the
+ *     header carried alongside them went with the header.
+ *
+ * The mock made all four screens client-side *state*, which is why nothing in it
+ * was linkable — no filtered view, no open tile, no shared build. This module is
+ * the fix, and the point of it is that the URL is the app's state.
+ *
+ * **Nothing redirects.** `/catalog` was the catalog's path for the whole of v1
+ * and v2, and every shared facet link and `?tile=` link ever copied out of this
+ * app spelled it, so it is the one deleted path with real traffic behind it. A
+ * redirect would be the only piece of URL compatibility in an app that has none,
+ * and it would have to live in this file forever to be worth anything; the four
+ * deleted paths get the not-found boundary with the rail still on it, which
+ * `routes.test.ts` asserts as four cases.
  *
  * ## Why the tree is code-based, not file-based
  *
@@ -35,9 +60,9 @@
  * `vite.config.ts` and a generated `routeTree.gen.ts` in the repo. That file
  * belongs to PR 1, `package.json` is being edited by PR 4 right now, and the
  * plugin is a dependency this PR was told to stop and ask for. Against that: the
- * tree is four routes and forty lines, and every route's search contract is
+ * tree is two routes and twenty lines, and every route's search contract is
  * visible in one screen. Code-based is not the compromise here — a generated
- * file for four routes would be the compromise.
+ * file for two routes would be the compromise.
  *
  * ## Why the tile detail drawer is search state, not a nested route
  *
@@ -70,22 +95,28 @@
  * named. The route declaration is unchanged by it — the schema, the middleware
  * and the close semantics all still describe a single optional number.
  *
- * ## Why `/` carries no search params
+ * ## Why `/` carries the facet schema now, where it used to carry none
  *
- * There is nothing on the landing page worth linking to but the page itself.
- * Declaring the facet schema there would put filters in the URL that nothing
- * reads. `/library` had no params for the same reason before row A0 deleted it.
+ * It held none while it was the landing page: there was nothing on that screen
+ * worth linking to but the screen itself, and declaring the facets there would
+ * have put filters in the URL that nothing read. `/library` and `/assemblies`
+ * had none for the same reason. The catalog's params come *with* the catalog —
+ * the schema and the strip middleware below are the ones that were on
+ * `/catalog`, unchanged except for the path they hang off — so `/` is now the
+ * one route in this tree whose whole state is in the URL, which is what it means
+ * for the front door to be the archive.
  *
- * ## Which two routes are lazy, and why `/` and `/catalog` are not
+ * ## Which route is lazy, and why the catalog is not
  *
  * Row X9 made `/assemblies` lazy, measured it, and left the other five with its
  * figures as the argument for doing each of them properly. Row X10 was that row,
- * and **two of the five did not survive the measurement.** Row L1 then deleted
- * one of the four it shipped and row A0 a second, so two remain lazy:
- * `/builder` and `/assemblies`. The table below is X10's, kept intact because the
- * deltas are what a future row needs and re-deriving them without the
- * `/settings` and `/library` rows would hide both how the `@/ui/lock-picker`
- * sharing worked and what a lazy screen's own stylesheet is worth.
+ * and **two of the five did not survive the measurement.** Rows L1, A0 and the
+ * sidebar row then deleted three of the four it shipped, so **one** remains
+ * lazy: `/builder`. The table below is X10's, kept intact because the deltas are
+ * what a future row needs and re-deriving them without the `/settings`,
+ * `/library` and `/assemblies` rows would hide how the `@/ui/lock-picker`
+ * sharing worked, what a lazy screen's own stylesheet is worth, and what a route
+ * whose barrel something eager imports is worth (nothing).
  *
  * Method is X9's: A/B `vite build`s of one tree at
  * `SOURCE_DATE_EPOCH=1700000000`, summing **every file `dist/index.html`
@@ -179,7 +210,30 @@
  * shared `lock-picker` 14,528, and X9's `assemblies` 48,464 (5,858 gz). After
  * row L1 there is no `settings` pair and no shared `lock-picker`; the picker is
  * inside `builder`. After row **A0** there is no `library` pair either, so the
- * on-demand set is `builder` (with `download` beside it) and `assemblies`.
+ * on-demand set was `builder` (with `download` beside it) and `assemblies`.
+ *
+ * **The sidebar row deleted `/assemblies` and the landing page, and the two are
+ * opposite kinds of deletion in exactly the terms of this table.**
+ * `/assemblies` was lazy, so it gives back the declaration and the wrapper and
+ * nothing else — the 48,464 B chunk is simply no longer emitted, and the
+ * on-demand set is now `builder` and `download` alone. The landing page was
+ * **eager**, so its 15,902 B (5,138 gz) come off the bundle every visitor
+ * downloads for real, and its stylesheet with them. Neither figure is re-quoted
+ * from an A/B of this file, for A0's reason twice over: the same row moves the
+ * nav into the rail, deletes the header's archive stat, and moves the catalog's
+ * facet sidebar and the builder's palette into a portal, so an A/B of this file
+ * alone would book five unrelated relocations as route-deletion savings.
+ *
+ * **The whole row A/Bs as -11,571 B raw / -758 B gz / +464 B br**, by the method
+ * above at `SOURCE_DATE_EPOCH=1700000000`: `main` preloads **5** files at
+ * 664,073 / 205,403 / 178,972 and this tree **9** at 652,502 / 204,645 /
+ * 179,436. The raw saving is real and the compressed one is almost nothing,
+ * because the four extra preloaded chunks split the compression context — the
+ * same chunk-graph effect the `/settings` row of the table above records,
+ * running against us this time. It is 0.26% of the brotli payload and not worth
+ * chasing a hand-written chunk boundary for; what a future row should take from
+ * it is that **deleting an eager screen returns raw bytes and not necessarily
+ * compressed ones.**
  *
  * **One line of X10's method had gone stale, and the count is the part to
  * distrust.** Its baseline is quoted "over the four preloaded files"; the tree
@@ -199,44 +253,48 @@
  * 205,789 / 180,489 lazy — the same edit is worth **-156,246 raw / -42,485 gz /
  * -33,208 br**, which reproduces the table to within 427 B gzipped.
  *
- * ## Why `/` and `/catalog` stay eager, which is a measurement and not a caution
+ * ## Why the catalog stays eager, which is a measurement and not a caution
  *
  * A lazy route is not a deferral of *some* work on a cold load; it is a
  * round trip in front of **all** of it. Measured against this app's real
  * `AppFrame` with a lazy child whose import is a promise held open: **1.4 s into
- * the pending chunk the document is still empty** — no header, no nav, no
- * skeleton, and `index.html` ships an empty `#root` — **and the header's
+ * the pending chunk the document is still empty** — no rail, no nav, no
+ * skeleton, and `index.html` ships an empty `#root` — **and the
  * `catalog.json` request has not been issued.** Both happen on the tick the
- * chunk lands. In-app navigation is the opposite and is why the four above are
- * free: the screen the user is on **stays painted** for the whole pending
- * window, so a lazy route reached by a nav press costs a transition and nothing
- * visible.
+ * chunk lands. In-app navigation is the opposite and is why `/builder` is free:
+ * the screen the user is on **stays painted** for the whole pending window, so a
+ * lazy route reached by a nav press costs a transition and nothing visible.
  *
- * That splits the six by how they are *arrived at*, not by what they weigh:
+ * That split the six by how they were *arrived at*, not by what they weighed,
+ * and the sidebar row collapsed the two eager ones into one:
  *
- *   - **`/` is the cold load.** The 15,902 B its chunk defers (5,138 gz) are the
- *     bytes of the only thing on the screen, so the "saving" is a deferral of
- *     work that is immediately needed, plus a round trip before the first pixel.
- *     Alone it is also a brotli **regression** (+499 B) and it fragments the
- *     preload set from 4 files to 9.
- *   - **`/catalog` is the cold load users actually get sent.** Every shared
- *     facet link and every `?tile=` link is a cold `/catalog`. On top of the
- *     three shipped above the edit is worth a further **-150,677 raw / -44,289
- *     gz / -37,695 br** — the largest number in this file — because by then
- *     nothing eager imports the barrel any more. It is still declined: it would
- *     put a round trip in front of an empty page **and** in front of the
- *     5,907,360 B (366,768 B brotli at the payload epoch) `catalog.json` that the header requests on
- *     mount and the grid cannot render without.
+ *   - **The landing page was the cold load.** The 15,902 B its chunk deferred
+ *     (5,138 gz) were the bytes of the only thing on the screen, so the "saving"
+ *     was a deferral of work that was immediately needed, plus a round trip
+ *     before the first pixel. Alone it was also a brotli **regression** (+499 B)
+ *     and it fragmented the preload set from 4 files to 9. It is deleted now, and
+ *     the 15,902 B are gone rather than deferred, which is the only way that
+ *     number was ever going to come off.
+ *   - **The catalog is the cold load, and now it is the only one.** Every shared
+ *     facet link and every `?tile=` link was already a cold catalog; since it
+ *     took `/`, so is every visit. On top of the three shipped above, making it
+ *     lazy was worth a further **-150,677 raw / -44,289 gz / -37,695 br** — the
+ *     largest number in this file — because by then nothing eager imported the
+ *     barrel any more. It is still declined, and the deletion of the landing page
+ *     sharpens the reason rather than softening it: a round trip would now sit in
+ *     front of the **first** page of the app **and** in front of the 5,907,360 B
+ *     (366,768 B brotli at the payload epoch) `catalog.json` that the screen
+ *     requests on mount and the grid cannot render without.
  *
  * That 44,289 B is not lost, it is *conditional on the fetch being started
  * early*, and nothing that starts it early is in this file. A hand-written
  * `<link rel="modulepreload">` in `index.html` is not the answer — the chunk
  * name is content-hashed, so the tag would rot on the next build — but
- * `router.preloadRoute({ to: '/catalog' })` on boot in `src/App.tsx`, or
+ * `router.preloadRoute({ to: '/' })` on boot in `src/App.tsx`, or
  * `defaultPreload: 'intent'` in `src/routes/router.ts` (which would also hide
- * the four lazy routes' in-app transition), both start it without blocking the
- * first paint. Reported rather than done: neither file is this row's, and the
- * saving is only real once something proves the fetch overlaps the paint.
+ * `/builder`'s in-app transition), both start it without blocking the first
+ * paint. Reported rather than done: neither file is this row's, and the saving is
+ * only real once something proves the fetch overlaps the paint.
  */
 import { createRootRoute, createRoute, lazyRouteComponent, stripSearchParams } from '@tanstack/react-router'
 
@@ -247,7 +305,6 @@ import {
   validateFacetSearch,
 } from '@/search/searchSchema'
 import { CatalogScreen } from '@/screens/catalog'
-import { Landing } from '@/screens/landing'
 import { AppFrame } from '@/ui/shell'
 
 import { ErrorPlaceholder, NotFoundPlaceholder } from './placeholders'
@@ -258,7 +315,7 @@ import { ErrorPlaceholder, NotFoundPlaceholder } from './placeholders'
  * `notFoundComponent` and `errorComponent` are set here rather than left to the
  * router's defaults so that a bad path and a thrown screen both render
  * something. Both render *inside* `AppFrame` — they are children of this route —
- * so a 404 keeps the header and the user keeps a way out.
+ * so a 404 keeps the rail and the user keeps a way out.
  */
 export const rootRoute = createRootRoute({
   component: AppFrame,
@@ -266,24 +323,18 @@ export const rootRoute = createRootRoute({
   errorComponent: ErrorPlaceholder,
 })
 
-export const landingRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/',
-  component: Landing,
-})
-
 /**
- * The catalog: facets, free text, and the tile whose drawer is open.
+ * The catalog, at `/`: facets, free text, and the tile whose drawer is open.
  *
  * `stripSearchParams(defaultCatalogSearch())` is what keeps the URL honest.
  * TanStack runs `validateSearch` first, so the middleware sees a fully populated
  * search object and deletes every key still equal to its default. Unfiltered is
- * therefore `/catalog`, not `/catalog?q=&kinds=&tex=&build=&conn=&tile=null`,
- * and a link only ever spells out what the user actually chose.
+ * therefore `/`, not `/?q=&kinds=&tex=&build=&conn=&tile=null`, and a link only
+ * ever spells out what the user actually chose.
  */
 export const catalogRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/catalog',
+  path: '/',
   validateSearch: validateCatalogSearch,
   search: { middlewares: [stripSearchParams(defaultCatalogSearch())] },
   component: CatalogScreen,
@@ -308,8 +359,8 @@ export const catalogRoute = createRoute({
  * lazy anyway because the cold builder path is already two lazy chunks deep
  * before it can draw a room (`BuilderRoom` 82,922 and `material` 1,187,797), so
  * one more in front of it is a proportional change rather than a new kind of
- * wait — where on `/` and `/catalog` it would be a new kind of wait, which is
- * exactly why those two stayed eager.
+ * wait — where on the catalog it would be a new kind of wait, which is exactly
+ * why the catalog stayed eager.
  */
 export const builderRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -320,72 +371,13 @@ export const builderRoute = createRoute({
 })
 
 /**
- * `/assemblies` — row C3's guided walk through the 40 recipe templates.
+ * The two, in nav order.
  *
- * **No search params, and the selected recipe is deliberately not one.** C3's own
- * reasoning, checked against `searchSchema.test.ts` and against how the deleted
- * `/settings` route shipped: that route's argument that a link must not freeze a
- * preference applies exactly, and a half-finished pick set is a preference of the
- * worst kind. The
- * choice C3's screen holds is a `Record<stepKey, TileId>` mid-walk — putting it in
- * a URL would mean a shared link that drops the recipient into somebody else's
- * unfinished decisions, and `search: { strict: true }` on the router means it
- * would then ride along into the next link they copied.
- *
- * There is also nothing to *link*. `/` has no params for the same reason — "there
- * is nothing on this screen worth linking to but the screen itself" — and the
- * deleted `/library` had none for it either. What a finished walk produces has no
- * durable home at all since row A0 took the library away; row **C3** gives it
- * one, by making the finished recipe placeable.
- *
- * ## It was the tree's first lazy route, and that was measured rather than chosen
- *
- * Mounted the way the other five are — a static `import` of the screen and
- * `component: AssembliesScreen` — this route puts C3's whole screen, its
- * `assembly.ts`, its `measure.ts` and its 40-template data table into the
- * **eager chunk**, because every screen in this tree is a static import and the
- * app therefore emits one eager bundle holding all of them. Row C3 expected its
- * templates to arrive in a chunk of their own; nothing in this file would have
- * given them one.
- *
- * Three A/B builds of the same tree at a fixed `SOURCE_DATE_EPOCH`, summing the
- * three chunks `index.html` actually preloads (`index`, `catalog`, `vanilla`):
- *
- * | tree | eager raw | eager gz | eager br |
- * | --- | ---: | ---: | ---: |
- * | route not mounted | 737,133 | 232,590 | 200,057 |
- * | mounted with a static import | **785,105** | 238,423 | 203,834 |
- * | mounted with `lazyRouteComponent` | 738,157 | 232,992 | 200,530 |
- *
- * A static mount costs **+47,972 B raw / +5,833 B gzipped** in the bundle every
- * visitor to every page downloads, for a screen reached from one nav tab. The
- * lazy mount costs **+1,024 B raw / +402 B gzipped** — this declaration and the
- * `import()` — and puts the screen in a 48,269 B chunk (4,982 B brotli) that
- * arrives on the press. That is the same trade `Builder3DPanel` and
- * `GeneratorPanel` already make one level down, applied at the route for the
- * first time.
- *
- * `routes.test.ts`'s mounting block still proves the screen renders: TanStack
- * resolves a lazy component during `router.load()`, so the assertion is
- * unchanged and it is still the assertion that would fail if this route resolved
- * and rendered nothing — which is the failure row C3 was actually in, having
- * verified that `dist/` contained none of its files.
- *
- * X9 left the other five to a row of their own. **Row X10 did them and two of
- * them lost**: `/library` and `/builder` are lazy for the same reason this route
- * is, `/` and `/catalog` are not, and the module docblock carries the table and
- * the cold-load measurement that decided it. X10 also made `/settings` lazy; row
- * L1 deleted that route outright, and row A0 deleted `/library`.
+ * X9's `/assemblies` declaration used to sit above this array and carried the
+ * measurement that made it the tree's first lazy route — a static mount of that
+ * screen cost **+47,972 B raw / +5,833 B gzipped** on every page for a screen
+ * reached from one nav tab. The screen is deleted, but the finding is the reason
+ * `/builder` above is written the way it is, so it is kept in the module note
+ * rather than lost with the declaration.
  */
-export const assembliesRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/assemblies',
-  component: lazyRouteComponent(() => import('@/screens/assemblies'), 'AssembliesScreen'),
-})
-
-export const routeTree = rootRoute.addChildren([
-  landingRoute,
-  catalogRoute,
-  builderRoute,
-  assembliesRoute,
-])
+export const routeTree = rootRoute.addChildren([catalogRoute, builderRoute])
