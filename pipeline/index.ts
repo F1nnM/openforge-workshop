@@ -53,7 +53,6 @@ export {
 } from './families'
 export type { FamilySizePosition, GeneratedFamily } from './families'
 export {
-  compressCatalog,
   formatBytes,
   serialiseCatalog,
 } from './emit'

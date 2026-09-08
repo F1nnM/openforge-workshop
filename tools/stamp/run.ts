@@ -33,7 +33,6 @@ import type { BuildResult } from '../../pipeline'
 import {
   buildCatalog,
   buildTimestamp,
-  compressCatalog,
   fixturesDir,
   loadFixtureRows,
   loadManifest,
@@ -104,10 +103,8 @@ export function runStamp(options: StampOptions = {}): StampRun {
     const outDir = options.outDir ?? join(process.cwd(), 'public', 'catalog')
     mkdirSync(outDir, { recursive: true })
     const jsonPath = join(outDir, 'catalog.json')
-    const brPath = join(outDir, 'catalog.json.br')
     writeFileSync(jsonPath, json)
-    writeFileSync(brPath, compressCatalog(json))
-    written.push(jsonPath, brPath)
+    written.push(jsonPath)
   }
 
   const lock = readLock()

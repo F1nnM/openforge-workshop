@@ -16,7 +16,7 @@
  *
  * The import writes three files it is not the only writer of, and all three matter:
  *
- *   - `public/catalog/catalog.json` (+ `.br`) — gitignored, rebuilt in CI.
+ *   - `public/catalog/catalog.json` — gitignored, rebuilt in CI.
  *   - `pipeline/ordinals/manifest.json` — **checked in**. It is the append-only
  *     record of which integer every share link means.
  *   - `src/screens/assemblies/templates.ts` — **checked in, and generated**. The
@@ -49,7 +49,6 @@ import { join } from 'node:path'
 import {
   TEMPLATES_MODULE_PATH,
   buildCatalog,
-  compressCatalog,
   deriveFamilies,
   fixturesDir,
   formatBytes,
@@ -89,7 +88,6 @@ function main(): number {
   if (!dryRun) {
     mkdirSync(OUT_DIR, { recursive: true })
     writeFileSync(join(OUT_DIR, 'catalog.json'), json)
-    writeFileSync(join(OUT_DIR, 'catalog.json.br'), compressCatalog(json))
     writeManifest(result.manifest)
     writeFileSync(join(process.cwd(), TEMPLATES_MODULE_PATH), module)
   }

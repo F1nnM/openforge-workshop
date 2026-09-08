@@ -1,28 +1,44 @@
 /**
- * Serialising the catalog, and producing the precompressed artefact beside it.
+ * Serialising the catalog.
  *
- * ## What used to be here, and why it is gone
+ * ## What used to be here, and why none of it is
  *
- * This module also measured the emitted index and failed the build when it
- * exceeded a 500 KB brotli ceiling — `SizeReport`, `measureCatalog` and
- * `assertWithinBudget`. The ceiling was a product decision and it has been
- * revisited: the app is a 3D tool that already pays for `three`, a mesh fetch
- * and a render, the index is ~366 KB against a budget that was never close to
- * binding, and a longer cold load is explicitly acceptable. Measuring a delta
- * nobody would act on was costing more than it bought — brotli at quality 11
- * over 5.9 MB is ~6.6 s per call, and the tests around it were **61% of the
- * whole suite's running time**.
+ * **The size budget.** This module measured the emitted index and failed the
+ * build when it exceeded a 500 KB brotli ceiling — `SizeReport`,
+ * `measureCatalog` and `assertWithinBudget`. The ceiling was a product decision
+ * and it was revisited: the app is a 3D tool that already pays for `three`, a
+ * mesh fetch and a render, the index is ~366 KB against a budget that was never
+ * close to binding, and a longer cold load is explicitly acceptable. Measuring a
+ * delta nobody would act on cost more than it bought — brotli at quality 11 over
+ * 5.9 MB is ~6.6 s per call, and the tests around it were **61% of the whole
+ * suite's running time**.
  *
- * What is deliberately *not* replaced: nothing checks the artefact's size any
- * more, in the build or in the tests. A pipeline defect that stops interning
- * tags or duplicates every record would ship a much larger file silently. That
- * is an accepted gap rather than an oversight.
+ * **The precompressed artefact.** `compressCatalog` wrote
+ * `public/catalog/catalog.json.br` for "a CDN that serves precompressed files",
+ * and this deploy is not one. `wrangler.jsonc` configures Workers Static Assets
+ * with no Worker script, and static assets do not negotiate to a precompressed
+ * sibling the way `nginx`'s `brotli_static` does — there was no `_headers` rule
+ * and no Worker doing it either. Checked against the live staging deploy rather
+ * than assumed: a request for `/catalog/catalog.json` comes back
+ * `content-encoding: br` at 483,421 B, compressed by Cloudflare on the fly,
+ * while `/catalog/catalog.json.br` sat at its own URL as an uploaded asset
+ * nothing ever fetched.
  *
- * {@link compressCatalog} stays, because it is not a measurement — it writes
- * `catalog.json.br`, which is the artefact a CDN serves.
+ * So the build spent 6.6 s a run producing 366 KB that no client received. The
+ * trade is real but small and it is taken deliberately: Cloudflare's on-the-fly
+ * brotli is a lower quality setting, so visitors now transfer **483 KB instead
+ * of 367 KB** — 117 KB more, on a payload nobody is optimising any more.
+ *
+ * Recovering those 117 KB does not need this function back. Marking the sibling
+ * `Content-Encoding: br` in `public/_headers` and fetching it directly would let
+ * the browser inflate it with no Worker involved; whether Cloudflare passes such
+ * bytes through untouched is the part that would need testing first.
+ *
+ * **Not replaced:** nothing checks the artefact's size any more, in the build or
+ * in the tests. A pipeline defect that stopped interning tags or duplicated
+ * every record would ship a much larger file silently. An accepted gap rather
+ * than an oversight.
  */
-import { brotliCompressSync, constants } from 'node:zlib'
-
 import type { CatalogFile } from '../src/catalog'
 
 /**
@@ -35,22 +51,6 @@ import type { CatalogFile } from '../src/catalog'
  */
 export function serialiseCatalog(file: CatalogFile): string {
   return JSON.stringify(file)
-}
-
-/**
- * The brotli artefact itself, for a CDN that serves precompressed files.
- *
- * Quality 11 with the size hint set, which is what a precompressed asset is
- * built with. This runs once per build, not once per test.
- */
-export function compressCatalog(json: string): Buffer {
-  const bytes = Buffer.from(json, 'utf8')
-  return brotliCompressSync(bytes, {
-    params: {
-      [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY,
-      [constants.BROTLI_PARAM_SIZE_HINT]: bytes.byteLength,
-    },
-  })
 }
 
 /** 1024-based byte formatting for build reports. */
