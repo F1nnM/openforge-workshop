@@ -120,8 +120,21 @@ jobs:
 
       # Fails if a suite that should have run against the corpus was skipped
       # instead — the failure mode this whole job exists to prevent.
+      #
+      # `src/generator` is excluded because the gate above already ran all 13 of
+      # its files, and re-running them is the most expensive duplicate in the
+      # job: **56.5 s of the suite's 450 s**, 46.4 s of it in
+      # `panel/corpus.test.ts`, which brotli-11s the 5.9 MB index twice to price
+      # the recipe map. The two steps' file sets are complements — the gate takes
+      # `src/generator`, this takes everything else — so their union is still
+      # every test, and the count in this step's output drops by exactly the 345
+      # the gate ran (4,070 to 3,725, 181 files to 168).
+      #
+      # Deliberately not solved by dropping the gate instead: the gate exists so
+      # a generator failure is attributable and fails before `Build` and the
+      # facts check, and that is worth more than the ordering it costs.
       - name: Test
-        run: npm test
+        run: npm test -- --exclude 'src/generator/**'
 
       - name: Build
         run: npm run build
