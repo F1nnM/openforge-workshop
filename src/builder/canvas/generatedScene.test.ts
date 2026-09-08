@@ -176,7 +176,7 @@ describe('one conflict sweep over both populations', () => {
     const scene = sceneOf(tiles([['t1', FIXTURE_IDS.floor2, 0, 0, 0]]), bases([['g1', 0, 0]]))
 
     // Both ids, from one sweep. This is the assertion two separate sweeps fail.
-    expect([...scene.conflicts].sort()).toEqual(['g1', 't1'])
+    expect([...scene.conflicts.keys()].sort()).toEqual(['g1', 't1'])
     expect(scene.pieces[0]?.conflict).toBe(true)
     expect(scene.generated[0]?.conflict).toBe(true)
   })
@@ -217,12 +217,12 @@ describe('one conflict sweep over both populations', () => {
     // off the recipe's own parameters.
     const tall = sceneOf(lifted, bases([['g1', 0, 0, 0, { x: 2, y: 2, HEIGHT: 12 }]]))
     expect(tall.generated[0]?.foot.heightMm).toBe(12)
-    expect([...tall.conflicts].sort()).toEqual(['g1', 't1'])
+    expect([...tall.conflicts.keys()].sort()).toEqual(['g1', 't1'])
   })
 
   it('reports two generated bases on the same cells', () => {
     const scene = sceneOf({}, bases([['g1', 0, 0], ['g2', 1, 1]]))
-    expect([...scene.conflicts].sort()).toEqual(['g1', 'g2'])
+    expect([...scene.conflicts.keys()].sort()).toEqual(['g1', 'g2'])
   })
 
   it('includes generated bases in the scene bounds, so an all-generated room has a viewport', () => {

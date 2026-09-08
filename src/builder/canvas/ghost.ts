@@ -84,6 +84,8 @@ export interface PlanGhost {
   /** Whether the drawn box is the shape. Read by the corner-junction exemption. */
   readonly axisAligned: boolean
   readonly band: PlanBand
+  /** Whether {@link band} was measured from the footprint. See `overlap.ts#BandVerdict`. */
+  readonly bandMeasured: boolean
   readonly refusal: Refusal | null
   /** Set when the outline rests on an unmeasured band rule. Does not block placement. */
   readonly caveat: PlanCaveat | null
@@ -148,8 +150,18 @@ function isDuplicate(scene: PlanScene, record: CatalogRecord, anchor: PlanPoint,
  * over-reporting side of the error — a ghost that hatched where the scene then
  * did not would be the worse failure.
  */
-function subjectOf(ghost: Pick<PlanGhost, 'band' | 'box' | 'parts' | 'axisAligned'>): OverlapSubject {
-  return { band: ghost.band, level: null, box: ghost.box, parts: ghost.parts, axisAligned: ghost.axisAligned }
+function subjectOf(
+  ghost: Pick<PlanGhost, 'band' | 'bandMeasured' | 'box' | 'parts' | 'axisAligned' | 'shape'>,
+): OverlapSubject {
+  return {
+    band: ghost.band,
+    bandMeasured: ghost.bandMeasured,
+    level: null,
+    box: ghost.box,
+    parts: ghost.parts,
+    axisAligned: ghost.axisAligned,
+    cover: ghost.shape.cover,
+  }
 }
 
 /**
@@ -185,6 +197,11 @@ export function computeGhost(
       parts: geometry.parts,
       axisAligned: true,
       band: 'area',
+      // A refused ghost has no footprint to measure a band from, so the `area`
+      // above is the module's conservative default rather than a fact. Saying so
+      // keeps anything downstream from refusing a placement on the strength of
+      // a marker that stands for a piece with no outline.
+      bandMeasured: false,
       refusal,
       caveat: null,
       conflict: false,
@@ -200,11 +217,13 @@ export function computeGhost(
   // See `subjectOf` for the `null` level: a ghost fills no slot, so no layout
   // rule can lift it and it is tested against every level.
   const subject: OverlapSubject = {
-    band,
+    band: band.band,
+    bandMeasured: band.measured,
     level: null,
     box: geometry.box,
     parts: geometry.parts,
     axisAligned: geometry.axisAligned,
+    cover: resolved.cover,
   }
 
   return {
@@ -217,10 +236,11 @@ export function computeGhost(
     box: geometry.box,
     parts: geometry.parts,
     axisAligned: geometry.axisAligned,
-    band,
+    band: band.band,
+    bandMeasured: band.measured,
     refusal: null,
     caveat: placementCaveat(record) ?? null,
-    conflict: sceneSubjects(scene).some((candidate) => subjectsConflict(candidate, subject)),
+    conflict: sceneSubjects(scene).some((candidate) => subjectsConflict(candidate, subject) !== null),
     duplicate,
     placeable: !duplicate,
   }
@@ -243,7 +263,7 @@ export function ghostOverlaps(scene: PlanScene, ghost: PlanGhost): readonly Plan
   const subject = subjectOf(ghost)
   const hit = new Set(
     sceneSubjects(scene)
-      .filter((candidate) => subjectsConflict(candidate, subject))
+      .filter((candidate) => subjectsConflict(candidate, subject) !== null)
       .map((candidate) => candidate.id),
   )
   return scene.pieces.filter((piece) => hit.has(piece.id))
