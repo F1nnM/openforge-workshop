@@ -37,7 +37,7 @@ import {
 
 import type { FillContext } from './fill'
 import type { FillWriter, SceneFillContext } from './relock'
-import { reSolveScene } from './relock'
+import { reSolveInstance, reSolveScene } from './relock'
 import type { FillFixtureRecord } from './fixture'
 import { fillFixture } from './fixture'
 
@@ -687,5 +687,127 @@ describe('the scene-scale re-solve', () => {
     for (const instance of scene()) {
       expect(instance.fills[WALL]).toEqual({ tile: DRAGONLOCK_WALL, pinned: true })
     }
+  })
+})
+
+/* ------------------------------------------------------ a filter change (Task 4) */
+
+/**
+ * Two door components and two interfaces, so a filter has something to narrow
+ * and a sibling has something to close.
+ *
+ * The module fixture above carries neither axis, deliberately — every test
+ * before this one is about the lock or the design, and both of those move
+ * *within* a candidate set. A filter change moves the set itself, so it needs a
+ * root the slots actually constrain on: `component` from the parent only
+ * (`siblings: []`), and `interface` from every sibling, which is the pair that
+ * makes `reSolveInstance`'s sibling-free compatibility test observable.
+ */
+const FILTER_RECORDS: readonly FillFixtureRecord[] = [
+  {
+    id: 'tiles/wall.arched',
+    design: 'wall-arched',
+    tags: ['shape|wall', 'component|door|arched', 'interface|flat'],
+  },
+  {
+    id: 'tiles/wall.rect',
+    design: 'wall-rect',
+    tags: ['shape|wall', 'component|door|rect', 'interface|flat'],
+  },
+  { id: 'tiles/floor.curved', design: 'floor-curved', tags: ['shape|floor', 'interface|curved'] },
+  { id: 'tiles/floor.flat', design: 'floor-flat', tags: ['shape|floor', 'interface|flat'] },
+]
+
+const ARCHED = 'tiles/wall.arched' as unknown as TileId
+const RECT = 'tiles/wall.rect' as unknown as TileId
+const CURVED_FLOOR = 'tiles/floor.curved' as unknown as TileId
+
+const FILTERED = TemplateIdSchema.parse('fixture-filtered')
+
+const filteredTemplate: AssemblyTemplate = {
+  id: FILTERED,
+  tags: ['object|tile'],
+  parts: [
+    {
+      name: 'wall',
+      tags: {
+        require: [{ tag: 'shape|wall' }],
+        constrain: [{ tag: 'component', siblings: [] }, { tag: 'interface' }],
+      },
+    },
+    { name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } },
+  ],
+}
+
+function filterHarness(over: Partial<FillContext> = {}): Harness {
+  const file = fillFixture(FILTER_RECORDS)
+  const composition = createCompositionIndex(file, buildAggregateIndex(file))
+  return {
+    index: buildAssemblyIndex(file),
+    context: {
+      composition,
+      templates: (id) => (id === FILTERED ? filteredTemplate : undefined),
+      ...over,
+    },
+  }
+}
+
+function instanceOf(fills: TemplateInstance['fills']): TemplateInstance {
+  const id = placeTemplate({ template: FILTERED, x: 0, z: 0, rotation: 0, fills })
+  const placed = useWorkshopStore.getState().placements[id]
+  if (placed === undefined) throw new Error('the placement did not land')
+  return placed
+}
+
+describe('reSolveInstance', () => {
+  it('keeps a pinned fill the new filters still admit', () => {
+    const { index, context } = filterHarness()
+    const instance = instanceOf({ [WALL]: { tile: ARCHED, pinned: true } })
+
+    const result = reSolveInstance(instance, ['component|door|arched'], index, context)
+
+    expect(result.replaced).toEqual([])
+    expect(result.fills[WALL]).toEqual({ tile: ARCHED, pinned: true })
+  })
+
+  it('drops a pinned fill the new filters do not admit, and reports it', () => {
+    const { index, context } = filterHarness()
+    const instance = instanceOf({ [WALL]: { tile: ARCHED, pinned: true } })
+
+    const result = reSolveInstance(instance, ['component|door|rect'], index, context)
+
+    expect(result.replaced).toEqual([{ slot: WALL, was: ARCHED }])
+    // Replaced rather than emptied, and no longer pinned: the authority over the
+    // slot goes back to the solver, because the choice the user made is gone.
+    expect(result.fills[WALL]).toEqual({ tile: RECT, pinned: false })
+  })
+
+  it('re-solves every auto fill regardless', () => {
+    const { index, context } = filterHarness()
+    // `rect` is admissible under *no* filter at all, so a driver that only
+    // rewrote the fills its filters excluded would leave this one alone.
+    const instance = instanceOf({ [WALL]: { tile: RECT, pinned: false } })
+
+    const result = reSolveInstance(instance, [], index, context)
+
+    expect(result.replaced).toEqual([])
+    expect(result.fills[WALL]).toEqual({ tile: ARCHED, pinned: false })
+  })
+
+  it('tests a pin against the filters alone, not against its siblings', () => {
+    /* The `interface` constrain inherits from every sibling, so the stored
+       `curved` floor would close the `flat` wall the moment a sibling selection
+       entered the compatibility test — and the pin would be dropped by a floor
+       the user never touched. Only the filter change may discard a pin. */
+    const { index, context } = filterHarness()
+    const instance = instanceOf({
+      [WALL]: { tile: ARCHED, pinned: true },
+      [FLOOR]: { tile: CURVED_FLOOR, pinned: false },
+    })
+
+    const result = reSolveInstance(instance, ['component|door|arched'], index, context)
+
+    expect(result.replaced).toEqual([])
+    expect(result.fills[WALL]).toEqual({ tile: ARCHED, pinned: true })
   })
 })

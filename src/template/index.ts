@@ -144,14 +144,16 @@ export type {
 export { SOLVE_QUERIES, solveTemplateFills } from './fill'
 
 export type {
+  DroppedPin,
   FillWriter,
+  InstanceFilterReSolve,
   InstanceReSolve,
   PinLockWarning,
   SceneFillContext,
   SceneReSolve,
   UnfilledReport,
 } from './relock'
-export { reSolveScene } from './relock'
+export { reSolveInstance, reSolveScene } from './relock'
 
 export type { PlacedTemplate, SlotDoubt, SlotDoubtCode, SlotPlacement, SlotVerdict } from './offsets'
 export {

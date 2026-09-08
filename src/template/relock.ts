@@ -151,7 +151,8 @@
  * reachable through a size change.
  */
 import type { CatalogRecord, TileId } from '@/catalog'
-import type { AssemblyIndex, TemplateLookup } from '@/assembly'
+import type { AssemblyIndex, AssemblySlot, TemplateLookup } from '@/assembly'
+import { resolveSlotTags } from '@/composition'
 import type { FillOutcome, LockSystem, PlacementId, SlotFill, SlotName, TemplateInstance } from '@/store'
 import { LockSystem as LockSystemSchema, fillSlot } from '@/store'
 
@@ -487,4 +488,161 @@ export function reSolveScene(
     pinWarnings,
     perInstance,
   }
+}
+
+/* ------------------------------------------------ a filter change, one instance */
+
+/** A pin the new filters do not admit. */
+export interface DroppedPin {
+  readonly slot: SlotName
+  /** The file the user had chosen, so the report can name what it replaced. */
+  readonly was: TileId
+}
+
+/** One instance, re-solved under a new set of palette filters. */
+export interface InstanceFilterReSolve {
+  /**
+   * The instance's whole `fills` map as it should now stand — surviving pins
+   * still `pinned: true`, everything else freshly solved.
+   *
+   * The **whole** map rather than a delta, because a filter change can empty a
+   * slot as readily as it can refill one, and a delta cannot say *nothing goes
+   * here now*. A slot with no entry is a slot with no fill, which is contract
+   * **C-g**'s *needs a choice* rather than an omission.
+   */
+  readonly fills: TemplateInstance['fills']
+  /** Pins dropped because the new filters do not admit them. Reported, never silent. */
+  readonly replaced: readonly DroppedPin[]
+  /**
+   * Candidate queries this cost — the solve's own, plus one per pin tested.
+   *
+   * Priced in the same unit as {@link SceneReSolve.queries} because the pin
+   * probes happen *outside* {@link solveTemplateFills} and its counter, so a
+   * surface reading the solve's number alone would undercount a filter change by
+   * one query per deliberate choice in the instance.
+   */
+  readonly queries: number
+}
+
+/**
+ * Whether one slot admits a tile under `parentTags`, **with no sibling
+ * selections at all**.
+ *
+ * The widest set the filters allow, which is what makes {@link reSolveInstance}'s
+ * compatibility test a function of the filters alone rather than of the order
+ * the slots happen to be walked in. A sibling's fill can narrow a slot through
+ * `constrain`, so passing the siblings here would let a floor the user never
+ * touched decide that a wall they *did* choose is no longer compatible — and the
+ * report would then name the filter change as the reason for a discard the
+ * filters did not cause.
+ */
+function admitsPin(
+  context: SceneFillContext,
+  slot: AssemblySlot,
+  parentTags: readonly string[],
+  tile: TileId,
+): boolean {
+  return context.composition.candidatesFor(resolveSlotTags(slot.tags, parentTags, [])).tiles.includes(tile)
+}
+
+/**
+ * Re-solve one instance under a new set of palette filters, keeping the pins the
+ * new filters still admit.
+ *
+ * ## This is the first solver-driven pin discard, and contract **C-k** is why
+ * that needed an argument
+ *
+ * Everything else in this module honours a pin unconditionally. The module
+ * docblock's fourth gap sets out the reasoning verbatim — *"a driver that
+ * silently deleted a user's fill on a candidate-set change would be contract
+ * **C-k**'s failure with a delete key, so clearing has exactly one caller and it
+ * is the user"* — and `@/store#clearFill` is still uncalled here for exactly
+ * that reason.
+ *
+ * **The reasoning does not extend to a filter change, and the difference is who
+ * is asking.** C-k's failure mode is a *silent* discard on a change made for an
+ * unrelated reason: the user toggles the lock, and a room full of deliberate
+ * choices quietly becomes a room full of solved ones. A filter change is not
+ * that gesture. It is one control on one instance, pressed with the piece on
+ * screen, and its whole meaning is *this instance is a rectangular door now* —
+ * under which a pinned arched door is not a choice to preserve, it is the
+ * previous answer to a question that has just been asked again. Keeping it would
+ * make the control not work, which is C-k's own failure with the polarity
+ * reversed.
+ *
+ * So the pins are the axis this driver may move, and **the reporting is what
+ * carries over unchanged**: every discard is named in
+ * {@link InstanceFilterReSolve.replaced} with the file it replaced, and this
+ * function writes nothing. The surface that has the user in front of it decides
+ * what to say and does the writing — the same division `UnfilledReport.stale`
+ * draws.
+ *
+ * A pin the filters *do* admit is kept, stays `pinned: true`, and is handed to
+ * {@link solveTemplateFills} as a preset, so it is fixed input for its siblings'
+ * resolution exactly as in a lock re-solve. That includes the case where the kept
+ * pin closes a sibling: a pin has always been allowed to do that, and a filter
+ * change is not the moment to start second-guessing it.
+ *
+ * ## What is left untouched
+ *
+ * Fills keyed by a slot **this recipe does not declare** are carried through
+ * unchanged. `store/schema.ts` is explicit that `fills`' keys are not checked
+ * against the template, so such an entry is reachable; rebuilding the map from
+ * the solve's decisions alone would delete it, which is the silent discard this
+ * docblock has just spent four paragraphs declining to make.
+ *
+ * `instance.fills` unchanged and no report when this build ships no template by
+ * that id — there are no declared slots to walk, and rewriting stored fills
+ * against a recipe nobody has would be guessing. {@link SceneReSolve.unknownTemplates}
+ * is the same decision at scene scale.
+ *
+ * One solve, which is the memo's best case measured at 8–9 ms for a whole
+ * 250-instance room, plus one candidate query per pin.
+ */
+export function reSolveInstance(
+  instance: TemplateInstance,
+  filters: readonly string[],
+  index: AssemblyIndex,
+  context: SceneFillContext,
+): InstanceFilterReSolve {
+  const template = context.templates(instance.template)
+  if (template === undefined) return { fills: instance.fills, replaced: [], queries: 0 }
+
+  /* The filters posed as the template's own `parentTags`, which is the one
+     mechanism this whole feature rides on — each slot's `constrain` block
+     collects only the roots that slot asked for. Spelled here as well as inside
+     `fill.ts#candidatesOf` because the pin test resolves a slot directly rather
+     than through the walk; `FillContext.position` is where the argument lives. */
+  const parentTags = filters.length === 0 ? template.tags : [...template.tags, ...filters]
+
+  const declared = new Set(template.parts.map((part) => part.name))
+  const byName = new Map(template.parts.map((part) => [part.name, part]))
+  const replaced: DroppedPin[] = []
+  const preset: Record<string, TileId> = {}
+  let queries = 0
+
+  for (const [slot, pinned] of pinsOf(instance)) {
+    const part = byName.get(slot)
+    if (part === undefined) continue
+    queries += 1
+    if (admitsPin(context, part, parentTags, pinned.tile)) preset[slot] = pinned.tile
+    else replaced.push({ slot, was: pinned.tile })
+  }
+
+  const solved = solveTemplateFills(template, index, { ...context, position: filters }, preset)
+
+  const fills: Record<string, SlotFill> = {}
+  for (const [slot, fill] of Object.entries(instance.fills)) {
+    if (fill !== undefined && !declared.has(slot)) fills[slot] = fill
+  }
+  for (const decision of solved.decisions) {
+    if (decision.tile === undefined) continue
+    /* The brand at a key position, minted by assertion for the reason
+       `reSolveScene` gives above: the name came out of the validated template
+       table, so a parse here could only re-derive what the build checked — and
+       it could throw. */
+    fills[decision.slot] = { tile: decision.tile, pinned: preset[decision.slot] !== undefined }
+  }
+
+  return { fills, replaced, queries: queries + solved.queries }
 }
