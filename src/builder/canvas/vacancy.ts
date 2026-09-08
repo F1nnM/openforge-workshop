@@ -88,7 +88,7 @@ export function freeCellFor(scene: PlanScene, foot: Footprint, heightMm = 0): Pl
       // Asserted rather than derived: this function *chooses* the band, so it
       // knows it, and a cell it hands back must be one the scene will not flag —
       // which means every conflict counts here, exact or not.
-      bandMeasured: true,
+      bandSource: 'kinds',
       level: { elevationMm: 0, heightMm },
       box: geometry.box,
       parts: geometry.parts,

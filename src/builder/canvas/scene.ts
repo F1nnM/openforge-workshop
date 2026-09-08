@@ -124,7 +124,7 @@ import {
   slotGeometry,
   unionBox,
 } from './geometry'
-import type { ConflictKind, OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
+import type { BandSource, ConflictKind, OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
 import { findConflicts, levelAt, planBand } from './overlap'
 
 /**
@@ -171,7 +171,7 @@ export interface PlanPiecePart {
    * qualifies. A conflict against an inferred band is never refused, so this
    * has to survive the trip from `planBand` to `subjectsConflict`.
    */
-  readonly bandMeasured: boolean
+  readonly bandSource: BandSource
   /** Whether the drawn box is the shape. Read by the corner-junction exemption. */
   readonly axisAligned: boolean
   readonly style: PlanStyle
@@ -262,7 +262,7 @@ export interface GeneratedPlanPiece {
    * qualifies. A conflict against an inferred band is never refused, so this
    * has to survive the trip from `planBand` to `subjectsConflict`.
    */
-  readonly bandMeasured: boolean
+  readonly bandSource: BandSource
   readonly axisAligned: boolean
   readonly style: PlanStyle
   readonly conflict: boolean
@@ -450,7 +450,7 @@ function placePart(
     angle: geometry.angle,
     polygons: geometry.parts,
     band: band.band,
-    bandMeasured: band.measured,
+    bandSource: band.source,
     axisAligned: geometry.axisAligned,
     style: style(slot.record),
     caveat: placementCaveat(slot.record) ?? null,
@@ -700,7 +700,7 @@ function subjectsOf(piece: PlanPiece): readonly OverlapCandidate[] {
     // shape is what produced `polygons`, so its accuracy flag is the one that
     // describes them.
     cover: part.shape.cover,
-    bandMeasured: part.bandMeasured,
+    bandSource: part.bandSource,
   }))
 }
 
@@ -723,7 +723,7 @@ function subjectOf(piece: GeneratedPlanPiece): OverlapCandidate {
     parts: piece.polygons,
     axisAligned: piece.axisAligned,
     cover: piece.shape.cover,
-    bandMeasured: piece.bandMeasured,
+    bandSource: piece.bandSource,
   }
 }
 

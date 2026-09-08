@@ -317,11 +317,17 @@ describe('moving a generated base', () => {
     const preview = previewMove({ ...drag, anchor: [4, 0] }, scene)
 
     expect(preview?.piece.kind).toBe('generated')
-    // Dropped onto the catalogued floor: an overlap, committed and announced
-    // rather than prevented — `move.ts`'s rule, unchanged for this population.
+    // Dropped onto the catalogued floor at the same level: refused, which is
+    // what makes this the sharper demonstration of the claim under test. The
+    // preview had to consult the *other* population to know, and a generated
+    // base is the most certain piece either population holds — exact rect
+    // geometry, a real height interval from the recipe, and a band this package
+    // owns — so nothing here is a guess and the refusal is sound.
     expect(preview?.overlaps.map((piece) => piece.id)).toEqual(['t1'])
+    expect(preview?.blocking.map((piece) => piece.id)).toEqual(['t1'])
     expect(preview?.conflict).toBe(true)
-    expect(preview?.committable).toBe(true)
+    expect(preview?.refusal?.code).toBe('overlap')
+    expect(preview?.committable).toBe(false)
   })
 
   it('refuses a move that would make an identical twin, exactly as for a tile', () => {
@@ -343,7 +349,10 @@ describe('moving a generated base', () => {
     const drag = beginMove(scene.generated[0]!, null)
     const preview = previewMove({ ...drag, anchor: [0, 0] }, scene)
 
-    expect(preview?.refusal).toBeNull()
+    // Not `duplicate` — which is the whole claim — but `overlap`, because the
+    // two do land on each other. The identity rule stayed out of it, and that is
+    // what a false twin would have broken.
+    expect(preview?.refusal?.code).toBe('overlap')
     expect(preview?.conflict).toBe(true)
   })
 
@@ -396,11 +405,17 @@ describe('moving a generated base', () => {
     // rotation *and* the anchor to agree.
     const drag = beginMove(scene.generated[0]!, null)
     const preview = previewMove({ ...drag, anchor: [0, 0] }, scene)
-    expect(preview?.refusal).toBeNull()
-    // An overlap, announced and committable — `move.ts`'s rule for two
-    // populations sharing a cell, which is what a base under a tile *is*.
+    // **`overlap`, never `duplicate`** — and the distinction is the whole test.
+    // The move is refused either way now, so a reader could mistake a
+    // regression for a pass if the code were only checked for *some* refusal.
+    // The false twin X9 is about would report `duplicate`, which is a claim
+    // about identity that nothing on screen can express; `overlap` is a claim
+    // about geometry the user can see. Removing `identityOf`'s population
+    // prefixes still flips this assertion, so the test keeps the failure mode
+    // its comment above describes.
+    expect(preview?.refusal?.code).toBe('overlap')
     expect(preview?.conflict).toBe(true)
-    expect(preview?.committable).toBe(true)
+    expect(preview?.committable).toBe(false)
   })
 
   it('carries no concentric note, because a rect has no centre offset', () => {

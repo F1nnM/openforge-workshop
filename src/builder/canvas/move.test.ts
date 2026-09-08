@@ -3,9 +3,16 @@
  *
  * **What these tests prove:** the arithmetic of a drag — that the grab offset is
  * preserved, that every proposal lands on the snap lattice, that rotation is
- * untouched at 45° and 90° steps alike, that an overlap is *reported and
- * allowed* while an identical twin is *refused*, and that the concentric-snap
- * limitation is disclosed on exactly the pieces it applies to.
+ * untouched at 45° and 90° steps alike, that an **exact** overlap and an
+ * identical twin are both *refused* while an **inexact** overlap is *reported
+ * and allowed*, and that the concentric-snap limitation is disclosed on exactly
+ * the pieces it applies to.
+ *
+ * That middle clause used to read *"an overlap is reported and allowed"*, and the
+ * change is the point of the refusal split rather than a loosening of these
+ * tests: which of the two an overlap gets is now decided by whether
+ * `overlap.ts` is sure, so the pair of assertions above it — two floors versus a
+ * floor and a curve — is what pins the line.
  *
  * Since row **A1** they also prove the thing the shape change put at risk: a
  * move re-projects **every part** of a template against the new origin, so a
@@ -249,20 +256,29 @@ describe('rotation survives a move', () => {
 })
 
 describe('a blocked move', () => {
-  it('reports an overlap and allows it — overlap.ts informs, never prevents', () => {
+  it('refuses an overlapping drop, and names what blocked it', () => {
     const scene = sceneOf([
       ['a', FIXTURE_IDS.floor2, 0, 0, 0],
       ['b', FIXTURE_IDS.floor2, 4, 0, 0],
     ])
     // Carry `b` half a unit into `a`. Half a unit and not the whole way: landing
-    // exactly on `a` would be the *twin* case below, which is the one thing a
-    // move refuses, and this test is about the case it allows.
+    // exactly on `a` would be the *twin* case below, and this test is about the
+    // collision rule rather than the identity one.
+    //
+    // Two 2x2 floors are the pair every condition is sound for — exact quads,
+    // both levelled, both bands from a positive `floor` tag — so this is an
+    // `exact` conflict and the drop is refused. It is also `overlap.ts`'s own
+    // first sentence: *"two floors in the same square is a mistake the user
+    // should see."*
     const preview = previewMove(carried(scene, 'b', -3.5, 0), scene)
     expect(preview?.overlaps.map((hit) => hit.id)).toEqual(['a'])
+    expect(preview?.blocking.map((hit) => hit.id)).toEqual(['a'])
     expect(preview?.conflict).toBe(true)
-    expect(preview?.refusal).toBeNull()
-    expect(preview?.committable).toBe(true)
-    expect(describeDrop(preview!)).toContain('overlapping 1 piece already there')
+    expect(preview?.refusal?.code).toBe('overlap')
+    expect(preview?.refusal?.message).toContain('Blocked by')
+    expect(preview?.committable).toBe(false)
+    // The drag is untouched: the piece is still shown where the pointer put it.
+    expect(preview?.anchor).toEqual([0.5, 0])
   })
 
   it('never counts the piece against itself', () => {
@@ -294,6 +310,24 @@ describe('a blocked move', () => {
     const preview = previewMove(carried(scene, 'b', -4, 0), scene)
     expect(preview?.refusal).toBeNull()
     expect(preview?.committable).toBe(true)
+  })
+
+  it('still commits a drop whose only overlap is inexact', () => {
+    // A curve against a floor. The sector's convex parts are a *superset* of the
+    // sector by up to 0.246 mm, so this conflict is `inexact` and must never
+    // refuse — it is the exact case `overlap.ts` built its one-directional error
+    // argument around, and refusing it would take a piece the user can see is
+    // clear and decline to put it down.
+    const scene = sceneOf([
+      ['a', FIXTURE_IDS.floor2, 0, 0, 0],
+      ['b', FIXTURE_IDS.arc, 4, 0, 0],
+    ])
+    const preview = previewMove(carried(scene, 'b', -3.5, 0), scene)
+    expect(preview?.overlaps.map((hit) => hit.id)).toEqual(['a'])
+    expect(preview?.blocking).toEqual([])
+    expect(preview?.refusal).toBeNull()
+    expect(preview?.committable).toBe(true)
+    expect(describeDrop(preview!)).toContain('overlapping 1 piece already there')
   })
 
   it('respects the corner-junction exemption rather than re-deriving it', () => {
@@ -431,8 +465,13 @@ describe('moving a template instance', () => {
       ],
     ])
     const preview = previewMove(carried(scene, 'b', -8, 0), scene)
-    expect(preview?.refusal).toBeNull()
-    expect(preview?.committable).toBe(true)
+    // Refused — but as an *overlap*, which is the claim under test surviving
+    // rather than being overturned: the two are not twins, so `duplicate` does
+    // not fire, and what stops the drop is the collision any two pieces sharing
+    // a cell now have. Both may still exist on the plan; neither may be dropped
+    // on top of the other.
+    expect(preview?.refusal?.code).toBe('overlap')
+    expect(preview?.committable).toBe(false)
   })
 
   it('does not call it a twin when the family differs but the fills match', () => {
@@ -443,8 +482,11 @@ describe('moving a template instance', () => {
     expect(preview?.piece.kind === 'catalog' ? preview.piece.placement.template : undefined).toBe(
       OTHER_FIXTURE_TEMPLATE,
     )
-    expect(preview?.refusal).toBeNull()
-    expect(preview?.committable).toBe(true)
+    // As above: the identity rule declines to call these twins, and the
+    // collision rule then refuses the drop. `duplicate` not firing is the
+    // assertion; `overlap` firing is the new floor under it.
+    expect(preview?.refusal?.code).toBe('overlap')
+    expect(preview?.committable).toBe(false)
   })
 
   it('reports the concentric limit once, however many curves the recipe holds', () => {

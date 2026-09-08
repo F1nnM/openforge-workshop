@@ -142,8 +142,15 @@
  *      drifts (§16). *"A heuristic that warns and is occasionally wrong costs the
  *      user a glance; a heuristic that blocks and is occasionally wrong costs
  *      them a tile they cannot place and no way to find out why."* That sentence
- *      is the whole reason `inferred-band` is a doubt and not a refusal, and why
- *      a refusal names the piece that blocked it.
+ *      is why a refusal names the piece that blocked it, and why
+ *      `unbucketed-band` is a doubt.
+ *
+ *      It is **not** a reason to distrust every `kinds`-derived band, and the
+ *      difference decides whether the gate works at all: a tile tagged `floor`
+ *      *is* a floor, so two of them in one square is the mistake this docblock's
+ *      first sentence promises the user will see. Treating that as doubtful
+ *      would leave the canonical error unrefusable while blocking almost
+ *      nothing. {@link BandSource} draws the line at evidence versus default.
  *   3. Overlapping while arranging is normal — so a *drag* still shows the piece
  *      wherever the pointer takes it, through its neighbours, and only the
  *      **drop** is refused. Nothing about the gesture got narrower; only its
@@ -211,10 +218,11 @@ export type PlanBand = 'area' | 'edge'
  *     not actually touch.
  *   - `unknown-level` — one of the pieces has `level: null`, which this module
  *     reads as *every* level. It may be nowhere near the other in `y`.
- *   - `inferred-band` — one of the bands came from `kinds` rather than from a
- *     measured footprint thickness, and the tag data drifts.
+ *   - `unbucketed-band` — one of the pieces carries no tag that decides its
+ *     band, so its `area` is this module's conservative default rather than a
+ *     fact. A positively tagged band is **not** a doubt; see {@link BandSource}.
  */
-export type ConflictReason = 'curved' | 'unknown-level' | 'inferred-band'
+export type ConflictReason = 'curved' | 'unknown-level' | 'unbucketed-band'
 
 /**
  * Whether a conflict may be acted on as a fact, or only reported.
@@ -317,10 +325,13 @@ function isWallThickness(foot: CatalogRecord['foot']): boolean {
  * module docblock.
  */
 export function planBand(record: Pick<CatalogRecord, 'foot' | 'kinds'>): BandVerdict {
-  if (isWallThickness(record.foot)) return { band: 'edge', measured: true }
+  if (isWallThickness(record.foot)) return { band: 'edge', source: 'footprint' }
   const wall = record.kinds.includes('wall')
   const fills = record.kinds.some((kind) => AREA_KINDS.includes(kind))
-  return { band: wall && !fills ? 'edge' : 'area', measured: false }
+  const band = wall && !fills ? 'edge' : 'area'
+  // A *positive* tag match is evidence; the absence of one is a default. Both
+  // produce a band, and only the second is a guess — see {@link BandSource}.
+  return { band, source: wall || fills ? 'kinds' : 'unbucketed' }
 }
 
 /**
@@ -341,9 +352,31 @@ export function planBand(record: Pick<CatalogRecord, 'foot' | 'kinds'>): BandVer
  */
 export interface BandVerdict {
   readonly band: PlanBand
-  /** True when the band came from the footprint's thickness, not from `kinds`. */
-  readonly measured: boolean
+  readonly source: BandSource
 }
+
+/**
+ * What a band was decided on, in descending order of evidence.
+ *
+ * The distinction that matters is **not** footprint-versus-tags; it is *evidence
+ * versus default*. Two of these three are answers, and the third is a fallback:
+ *
+ *   - `footprint` — the piece has a `wall` shape, which **is** the 0.5-unit
+ *     thickness constant. A measurement.
+ *   - `kinds` — the piece carries a tag that positively decides the question:
+ *     `wall`, or one of {@link AREA_KINDS}. Tag data drifts, but a tile tagged
+ *     `floor` is a floor; the drift the module warns about renames and
+ *     re-buckets tiles, it does not make a `floor` tag mean an edge piece.
+ *   - `unbucketed` — the piece carries **no** deciding tag, and `area` is the
+ *     conservative default the module chose rather than a fact about the piece.
+ *     This is the 11.9% the docblock counts, and the only one of the three that
+ *     makes a conflict unrefusable.
+ *
+ * Getting this cut wrong in the obvious place — treating every `kinds`-derived
+ * band as doubtful — makes *two floors in one square* unrefusable, which is the
+ * one mistake this module's first sentence says the user should see.
+ */
+export type BandSource = 'footprint' | 'kinds' | 'unbucketed'
 
 /**
  * How much vertical space a piece takes, in millimetres.
@@ -414,8 +447,8 @@ export interface OverlapSubject {
    * conflict unrefusable.
    */
   readonly cover: PlanCover
-  /** Whether {@link band} was measured from the footprint — see {@link BandVerdict}. */
-  readonly bandMeasured: boolean
+  /** What {@link band} was decided on. Only `unbucketed` makes a conflict inexact. */
+  readonly bandSource: BandSource
 }
 
 /**
@@ -613,7 +646,7 @@ export function subjectsConflict(a: OverlapSubject, b: OverlapSubject): Conflict
 function conflictDoubt(a: OverlapSubject, b: OverlapSubject): ConflictReason | null {
   if (a.cover === 'outward' || b.cover === 'outward') return 'curved'
   if (a.level === null || b.level === null) return 'unknown-level'
-  if (!a.bandMeasured || !b.bandMeasured) return 'inferred-band'
+  if (a.bandSource === 'unbucketed' || b.bandSource === 'unbucketed') return 'unbucketed-band'
   return null
 }
 

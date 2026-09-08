@@ -72,7 +72,7 @@ import { GRID_UNIT_MM } from '@/catalog'
 import type { PlanStyle } from '@/builder/canvas/catalog'
 import type { Extent, PlanBox, PlanPart, PlanShape } from '@/builder/canvas/geometry'
 import { describeCell, describeFootprint, footprintShape, planGeometry } from '@/builder/canvas/geometry'
-import type { OverlapCandidate, PlanBand } from '@/builder/canvas/overlap'
+import type { BandSource, OverlapCandidate, PlanBand } from '@/builder/canvas/overlap'
 import { planBand } from '@/builder/canvas/overlap'
 import { resolveMaterial } from '@/materials'
 import type { PlacementId } from '@/store'
@@ -163,7 +163,7 @@ export interface GeneratedPiece {
   readonly parts: readonly PlanPart[]
   readonly band: PlanBand
   /** Whether {@link band} was measured from the footprint. See `overlap.ts#BandVerdict`. */
-  readonly bandMeasured: boolean
+  readonly bandSource: BandSource
   readonly axisAligned: boolean
   readonly style: PlanStyle
   /** False when `SQUARE_BASIS` is not the grid's, so the piece will not tile. */
@@ -220,7 +220,7 @@ export function generatedPiece(id: PlacementId, placement: GeneratedPlacement): 
     // geometry, a real height interval from the recipe's own arithmetic, and
     // a band this repo owns — so letting it warn instead of refuse would
     // weaken the gate exactly where the evidence is strongest.
-    bandMeasured: true,
+    bandSource: 'kinds',
     axisAligned: geometry.axisAligned,
     style,
     tiles: foot.tiles,
@@ -250,7 +250,7 @@ export function generatedOverlapCandidate(id: PlacementId, placement: GeneratedP
     parts: piece.parts,
     axisAligned: piece.axisAligned,
     cover: piece.shape.cover,
-    bandMeasured: piece.bandMeasured,
+    bandSource: piece.bandSource,
   }
 }
 

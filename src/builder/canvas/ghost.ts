@@ -39,7 +39,7 @@ import {
   planGeometry,
   snapTo,
 } from './geometry'
-import type { OverlapSubject, PlanBand } from './overlap'
+import type { BandSource, OverlapSubject, PlanBand } from './overlap'
 import { planBand, subjectsConflict } from './overlap'
 import type { PlanPiece, PlanScene } from './scene'
 import { sceneSubjects } from './scene'
@@ -85,7 +85,7 @@ export interface PlanGhost {
   readonly axisAligned: boolean
   readonly band: PlanBand
   /** Whether {@link band} was measured from the footprint. See `overlap.ts#BandVerdict`. */
-  readonly bandMeasured: boolean
+  readonly bandSource: BandSource
   readonly refusal: Refusal | null
   /** Set when the outline rests on an unmeasured band rule. Does not block placement. */
   readonly caveat: PlanCaveat | null
@@ -151,11 +151,11 @@ function isDuplicate(scene: PlanScene, record: CatalogRecord, anchor: PlanPoint,
  * did not would be the worse failure.
  */
 function subjectOf(
-  ghost: Pick<PlanGhost, 'band' | 'bandMeasured' | 'box' | 'parts' | 'axisAligned' | 'shape'>,
+  ghost: Pick<PlanGhost, 'band' | 'bandSource' | 'box' | 'parts' | 'axisAligned' | 'shape'>,
 ): OverlapSubject {
   return {
     band: ghost.band,
-    bandMeasured: ghost.bandMeasured,
+    bandSource: ghost.bandSource,
     level: null,
     box: ghost.box,
     parts: ghost.parts,
@@ -201,7 +201,7 @@ export function computeGhost(
       // above is the module's conservative default rather than a fact. Saying so
       // keeps anything downstream from refusing a placement on the strength of
       // a marker that stands for a piece with no outline.
-      bandMeasured: false,
+      bandSource: 'unbucketed',
       refusal,
       caveat: null,
       conflict: false,
@@ -218,7 +218,7 @@ export function computeGhost(
   // rule can lift it and it is tested against every level.
   const subject: OverlapSubject = {
     band: band.band,
-    bandMeasured: band.measured,
+    bandSource: band.source,
     level: null,
     box: geometry.box,
     parts: geometry.parts,
@@ -237,7 +237,7 @@ export function computeGhost(
     parts: geometry.parts,
     axisAligned: geometry.axisAligned,
     band: band.band,
-    bandMeasured: band.measured,
+    bandSource: band.source,
     refusal: null,
     caveat: placementCaveat(record) ?? null,
     conflict: sceneSubjects(scene).some((candidate) => subjectsConflict(candidate, subject) !== null),

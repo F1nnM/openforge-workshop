@@ -325,7 +325,7 @@ describe('reaching the plan view’s collision', () => {
       parts: overlapping.parts,
       axisAligned: overlapping.axisAligned,
       cover: 'exact' as const,
-      bandMeasured: true,
+      bandSource: 'kinds' as const,
     }
     expect([...findConflicts([generated, catalogue]).keys()].sort()).toEqual([idOf(1), idOf(2)])
 

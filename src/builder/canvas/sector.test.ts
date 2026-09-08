@@ -364,7 +364,7 @@ function subject(foot: ArcFootprint, rotation: number, x: number, z: number): Ov
   const placed = planGeometry(shape, rotation, x, z)
   return {
     band: 'area',
-    bandMeasured: true,
+    bandSource: 'kinds',
     level: levelAt(0),
     box: placed.box,
     parts: placed.parts,

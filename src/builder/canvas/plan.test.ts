@@ -177,7 +177,7 @@ const candidate = (
   // reading `exact`. The doubtful cases are built by overriding these two, so
   // the default has to be the sound one or the split would be untested.
   cover: 'exact',
-  bandMeasured: true,
+  bandSource: 'kinds',
 })
 
 
@@ -251,18 +251,18 @@ describe('bands', () => {
    * heuristic `overlap.ts` warns drifts. Only the first may refuse a placement.
    */
   it('reports a footprint-derived band as measured', () => {
-    expect(planBand(record(FIXTURE_IDS.wall2)).measured).toBe(true)
-    expect(planBand(record(FIXTURE_IDS.column)).measured).toBe(true)
-    expect(planBand(record(FIXTURE_IDS.diag)).measured).toBe(true)
+    expect(planBand(record(FIXTURE_IDS.wall2)).source).toBe('footprint')
+    expect(planBand(record(FIXTURE_IDS.column)).source).toBe('footprint')
+    expect(planBand(record(FIXTURE_IDS.diag)).source).toBe('footprint')
   })
 
   it('reports a kinds-derived band as inferred, including the thick-wall case', () => {
     // The thick wall is the sharpest case: it comes out `edge`, which is the
     // *right* band, and it is still inferred — the answer came from
     // `build|thick wall` in the tag data and not from a 0.5-unit footprint.
-    expect(planBand(record(FIXTURE_IDS.thickWall))).toEqual({ band: 'edge', measured: false })
-    expect(planBand(record(FIXTURE_IDS.floor2)).measured).toBe(false)
-    expect(planBand(record(FIXTURE_IDS.shapeless)).measured).toBe(false)
+    expect(planBand(record(FIXTURE_IDS.thickWall))).toEqual({ band: 'edge', source: 'kinds' })
+    expect(planBand(record(FIXTURE_IDS.floor2)).source).toBe('kinds')
+    expect(planBand(record(FIXTURE_IDS.shapeless)).source).toBe('unbucketed')
   })
 })
 
@@ -299,9 +299,9 @@ describe('how much a conflict is trusted', () => {
   })
 
   it('is inexact when either band came from the kinds heuristic', () => {
-    expect(subjectsConflict(floor('a'), { ...floor('b'), bandMeasured: false })).toEqual({
+    expect(subjectsConflict(floor('a'), { ...floor('b'), bandSource: 'unbucketed' })).toEqual({
       kind: 'inexact',
-      reason: 'inferred-band',
+      reason: 'unbucketed-band',
     })
   })
 
@@ -310,7 +310,7 @@ describe('how much a conflict is trusted', () => {
   })
 
   it('names the strongest doubt when a pair has more than one', () => {
-    const doubtful = { ...floor('b'), cover: 'outward' as const, level: null, bandMeasured: false }
+    const doubtful = { ...floor('b'), cover: 'outward' as const, level: null, bandSource: 'unbucketed' as const }
     expect(subjectsConflict(floor('a'), doubtful)?.reason).toBe('curved')
   })
 
