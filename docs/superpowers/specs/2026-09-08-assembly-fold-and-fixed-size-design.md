@@ -201,11 +201,36 @@ the spec does not try to remove it.
 ### The 47 width-only family positions
 
 `GENERATED_FAMILY_SIZES` has 303 positions, of which **63 admit more than one
-footprint** and **47 name a width with no depth**. Those 47 are replaced by
-their live `(width, depth)` pairs. The `any size` position stays, per the
-decision above. Net effect measured: splitting every family by footprint would
-be 271 assemblies against 303 positions today, so this does not grow the table
-meaningfully.
+footprint** and **47 name a width with no depth**.
+
+**Replacing those 47 with `(width, depth)` pairs is impossible, and this spec's
+first draft was wrong to propose it.** `families.ts#positionFor` already tries a
+`cell` position first and falls back to a width-only `run`. Measured on
+`wall|straight|separate wall`, the fallback fires because a separate wall is
+0.5 deep and **no wall record carries `size|depth|0.5`** — the tag exists in the
+table (other records carry it) but 0 of the 540 records at cell `2x0.5` do, so
+the pair resolves as tags and admits nothing. Walls are tagged by their run
+only. The run is the only expressible position for those records.
+
+The real defect is narrower. Of the 47:
+
+- **23 have a single resolved depth.** The run *is* the size and the label is
+  honest. Untouched.
+- **24 admit several resolved depths** — `floor-straight / 2 wide` covers depths
+  0.5, 1, 2, 3 and 4; `roof-straight / 1 wide` covers seven. These are exactly
+  the 24 that **coexist with a `(w,d)` position at the same width**, so a user
+  reading *"2 wide"* next to *"2 wide by 2 deep"* has no way to know the first
+  one includes the second.
+
+The two sets partition the 47 exactly, and the coexistence and the depth spread
+identify the same 24 independently.
+
+**Fix: relabel those 24 to "N wide, any depth".** Not dropped — dropping them
+would make any record at an inexpressible cell of that width reachable only
+through `any size`, which is a real reachability loss for no gain. Relabelling
+loses nothing and removes the only misleading thing about them. The invariant
+the test asserts is a biconditional: a width-only position's label says
+*"any depth"* **iff** it admits more than one resolved depth.
 
 ### The modular base anchor
 
@@ -268,6 +293,7 @@ full-cell base; the 16 wall and 2 external corner modular recipes are off by
 | every size position has a live `(component, height)` | `src/template/corpus.test.ts` | resolve each |
 | no non-base slot admits a `shape|base` record | `src/assembly/corpus.test.ts` | the 3 known slots go to 0 |
 | the drain-modular base matches its 12 siblings | `pipeline/fold.test.ts` | sibling census, fails in both directions |
+| a width-only position says "any depth" iff it varies in depth | `pipeline/families.test.ts` | biconditional over all 47; 23 honest, 24 relabelled |
 | the S2W base lands on the residual | `src/template/corpus.test.ts` | join the 95 S2W bases to the residual; assert extent equality |
 | `(Single Piece)` is untouched | `src/template/offsets.test.ts` | anchor unchanged for a non-inset fill |
 | the internal corner is a no-op | `src/template/offsets.test.ts` | residual equals cell with no edge slot |
