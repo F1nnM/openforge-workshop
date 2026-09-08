@@ -103,6 +103,7 @@ describeFixtures(title, () => {
       buildCatalog({
         rows: loadFixtureRows(FIXTURES),
         manifest: emptyManifest(),
+        thumbs: new Set(),
         fixturesRef: 'test',
         builtAt: PAYLOAD_TIMESTAMP,
       }).file,
@@ -328,6 +329,7 @@ describeFixtures(title, () => {
       const { file } = buildCatalog({
         rows: loadFixtureRows(FIXTURES),
         manifest: emptyManifest(),
+        thumbs: new Set(),
         fixturesRef: 'test',
         builtAt: PAYLOAD_TIMESTAMP,
       })
