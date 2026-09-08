@@ -708,7 +708,7 @@ describeCorpus('a placement resolves only against the whole template table', () 
       z: 0,
       rotation: 0,
       fills: {},
-      position: [],
+      filters: [],
     }) satisfies TemplateInstance
 
   it('reports a family placement unknown-template against the 40 recipes alone', () => {

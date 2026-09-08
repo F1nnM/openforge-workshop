@@ -159,7 +159,7 @@ function catalogBill(ids: readonly string[]): BillOfTiles {
     z: 0,
     rotation: 0,
     fills: { [FIXTURE_SLOT]: { tile: id as TileId, pinned: false } },
-    position: [],
+    filters: [],
   }))
   return buildBillOfTiles(instances, buildAssemblyIndex(CATALOG), CATALOG_CONTEXT)
 }

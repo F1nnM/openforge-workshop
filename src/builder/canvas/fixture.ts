@@ -663,6 +663,6 @@ export function fixtureInstance(
     fills,
     // *Any* on every axis. The canvas's tests are about geometry and a control
     // position narrows candidates, which is a question one level up.
-    position: [],
+    filters: [],
   }
 }

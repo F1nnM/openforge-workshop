@@ -210,7 +210,7 @@ function instance({ fill, fills, x, z }: { fill?: TileId; fills?: readonly TileI
     ),
     /* *Any* on every axis, which is what these fixtures are about: a position
        narrows the slot lists and each test that cares passes its own. */
-    position: [],
+    filters: [],
   }
 }
 
@@ -339,7 +339,7 @@ function piece(fills: Readonly<Record<string, string>>, x = 0, z = 0): TemplateI
         { tile: tile as TileId, pinned: false },
       ]),
     ),
-    position: [],
+    filters: [],
   }
 }
 
@@ -497,7 +497,7 @@ describe('the instance’s control position narrows the editor', () => {
     ],
   }
 
-  const modelAt = (position: readonly string[]) =>
+  const modelAt = (filters: readonly string[]) =>
     slotEditorModel(
       SLOT_CATALOG,
       ASSEMBLY,
@@ -508,7 +508,7 @@ describe('the instance’s control position narrows the editor', () => {
         z: 0,
         rotation: 0,
         fills: {},
-        position,
+        filters,
       },
       TEXTURED,
     )
@@ -689,7 +689,7 @@ describe('the slot editor', () => {
           [SlotName.parse('floor')]: { tile: PARENT.plainFloor as TileId, pinned: true },
           [SlotName.parse('wall')]: { tile: PARENT.wallTowne as TileId, pinned: true },
         },
-        position: [],
+        filters: [],
       },
     })
     fireEvent.contextMenu(screen.getByRole('button', { name: /Fixture: Wall on Tile/ }))
@@ -715,7 +715,7 @@ describe('the slot editor', () => {
         z: 0,
         rotation: 0,
         fills: { [SlotName.parse('floor')]: { tile: PARENT.pairedGrate as TileId, pinned: true } },
-        position: [],
+        filters: [],
       },
     })
     fireEvent.contextMenu(screen.getByRole('button', { name: /Fixture: Wall on Tile/ }))

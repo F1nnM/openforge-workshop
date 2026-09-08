@@ -141,15 +141,15 @@ function newPlacementId(): PlacementId {
  * interface, so a field added to {@link TemplateInstance} arrives here without an
  * edit.
  *
- * **`position` is optional here and required there**, which is the one departure
+ * **`filters` is optional here and required there**, which is the one departure
  * and it is the schema's own: the field carries a `.default([])`, so an absent
  * one is not a missing value but a stated choice — *any* on every axis. Writing
  * it as `Partial` says that in the type rather than making forty call sites
- * repeat `position: []` to mean nothing. Every other field stays required,
+ * repeat `filters: []` to mean nothing. Every other field stays required,
  * because none of them has a defensible default.
  */
-export type NewTemplateInstance = Omit<TemplateInstance, 'id' | 'position'> &
-  Partial<Pick<TemplateInstance, 'position'>>
+export type NewTemplateInstance = Omit<TemplateInstance, 'id' | 'filters'> &
+  Partial<Pick<TemplateInstance, 'filters'>>
 
 /**
  * Put a **template instance** on the grid and return its key.

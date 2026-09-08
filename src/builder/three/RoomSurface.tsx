@@ -719,7 +719,7 @@ export function RoomSurface({
             z: edit.anchor[1],
             rotation: edit.rotation,
             fills: edit.fills,
-            position: edit.position,
+            filters: edit.filters,
           })
           break
         case 'remove':

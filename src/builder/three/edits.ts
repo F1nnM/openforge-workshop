@@ -136,8 +136,8 @@ export type SurfaceEdit =
       /** Minimum corner, snapped. The marker's own anchor, not a second derivation. */
       readonly anchor: PlanPoint
       readonly rotation: number
-      /** The control position the instance is placed at; `[]` is *any* on every axis. */
-      readonly position: readonly string[]
+      /** The control filters the instance is placed at; `[]` is *any* on every axis. */
+      readonly filters: readonly string[]
       /**
        * The slots this instance is placed with, every one `pinned: false`.
        *
@@ -310,7 +310,7 @@ export function planPlacement(
   at: PlanPoint,
   step: number,
   fill?: PlacementFill,
-  position: readonly string[] = [],
+  filters: readonly string[] = [],
 ): SurfaceEdit {
   if (template === null) {
     return { kind: 'none', message: 'No template is armed. Choose one in the palette first.' }
@@ -323,12 +323,12 @@ export function planPlacement(
     anchor: ghost.anchor,
     rotation: ghost.rotation,
     fills: fill?.fills ?? {},
-    /* The position that narrowed those fills, kept on the instance because the
-       slot editor needs it and the fills cannot supply it: *any component* and
-       *arched door, which happens to be what is filled* are the same map.
+    /* The filters that narrowed those fills, kept on the instance because the
+       slot editor needs them and the fills cannot supply them: *any component*
+       and *arched door, which happens to be what is filled* are the same map.
        Defaulted to none, which is *any* on every axis and what a caller with no
        palette — the landing hero, a component test — honestly means. */
-    position,
+    filters,
     message:
       fill === undefined
         ? `${placed} with no parts chosen yet. Fill its slots to give it something to draw.`

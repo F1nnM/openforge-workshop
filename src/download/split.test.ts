@@ -72,7 +72,7 @@ function place(tileId: string, at: number): TemplateInstance {
     z: 0,
     rotation: 0,
     fills: { [FIXTURE_SLOT]: { tile: tileId as TileId, pinned: false } },
-    position: [],
+    filters: [],
   }
 }
 

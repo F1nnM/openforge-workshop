@@ -126,9 +126,9 @@ describe('placing a template', () => {
        what is filled* produce identical fills. The slot editor needs the
        difference — one offers every wall, the other offers 54. */
     const id = placeTemplate(
-      aTemplateInstance({ position: ['component|door|arched', 'size|width|2', 'size|depth|2'] }),
+      aTemplateInstance({ filters: ['component|door|arched', 'size|width|2', 'size|depth|2'] }),
     )
-    expect(state().placements[id]?.position).toEqual([
+    expect(state().placements[id]?.filters).toEqual([
       'component|door|arched',
       'size|width|2',
       'size|depth|2',
@@ -142,7 +142,7 @@ describe('placing a template', () => {
     // Placed first and read after: `state()` is a snapshot, so calling it in the
     // same expression as the placement reads the state from before it.
     const id = placeTemplate(aTemplateInstance())
-    expect(state().placements[id]?.position).toEqual([])
+    expect(state().placements[id]?.filters).toEqual([])
   })
 
   it('places a template whose fills are empty — contract C-g', () => {
@@ -734,7 +734,7 @@ describe('persistence', () => {
       fills: { [FLOOR]: { tile: A_TILE, pinned: true } },
       // Persisted like every other field. `[]` is *any* on each axis, which is
       // what this instance was placed at.
-      position: [],
+      filters: [],
     })
     expect((payload?.state as WorkshopState).lock).toBe('magnetic')
   })
