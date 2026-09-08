@@ -21,8 +21,10 @@
  *   the same ground the sprite rotator sits on. Clearing to an opaque colour here
  *   would mean maintaining a second copy of the parchment palette in JavaScript
  *   and having it drift.
- * - **`dpr={[1, 2]}`.** Uncapped device pixel ratio on a 3× phone triples the
- *   fragment cost of the AO pass for detail nobody can see at 288 px.
+ * - **`dpr={[2, 2]}`.** The cap stops a 3× phone tripling the fragment cost of
+ *   the AO pass for detail nobody can see at 288 px; the floor stops a 1× monitor
+ *   rendering the room at one sample per pixel. `frame.ts` carries both readings
+ *   and the measurement behind the floor.
  * - **`frameloop="demand"`.** A tile preview is static until someone drags it.
  *   Rendering 60 fps of an unchanging mesh with a two-pass AO stack is a real
  *   battery cost for nothing; drei's `OrbitControls` invalidates on change, and
@@ -136,9 +138,10 @@ import {
   ORBIT_MIN_DISTANCE,
   ORBIT_ROTATE_SPEED,
   VIEW_RADIUS,
+  stageSamples,
 } from './frame'
 import type { OutlineRequest } from './outline'
-import { OUTLINE_EDGE_STRENGTH, OUTLINE_LAYER, OUTLINE_RESOLUTION_SCALE, outlineProxies } from './outline'
+import { OUTLINE_EDGE_STRENGTH, OUTLINE_LAYER, outlineProxies, outlineResolutionScale } from './outline'
 
 /**
  * Occlusion radius, in world units, against `VIEW_RADIUS = 1`.
@@ -362,10 +365,14 @@ export interface StageComposerOptions {
 /**
  * `RenderPass → N8AOPostPass → SMAA`, built once per `<Canvas>`.
  *
- * MSAA is off on the context (`antialias: false`) because a post-processing
+ * MSAA is off on the *context* (`antialias: false`) because a post-processing
  * chain resolves through its own render targets, where the context's multisample
- * buffer does not apply; SMAA as the final pass is the equivalent that works,
- * and it is also the pass that converts to the output colour space.
+ * buffer never participates. It is on the **composer**, which is the render
+ * target the geometry is actually rasterised into — see
+ * {@link STAGE_MSAA_SAMPLES} for why it had to be, and why four. SMAA still runs
+ * last, both because it cleans up the shading edges MSAA cannot see (coverage
+ * sampling antialiases geometry, not a specular or an AO gradient) and because
+ * it is the pass that converts to the output colour space.
  *
  * Who drives it is the caller's business, and that is the whole reason this is a
  * hook: {@link Stage} renders the scene once per invalidation, and
@@ -404,7 +411,12 @@ export function useStageComposer({ outline = false }: StageComposerOptions = {})
     // HalfFloat targets: the AO pass multiplies into the beauty buffer, and an
     // 8-bit intermediate bands visibly in the shallow gradients that are most of
     // a stone tile's surface.
-    const created = new EffectComposer(gl, { frameBufferType: HalfFloatType })
+    const created = new EffectComposer(gl, {
+      frameBufferType: HalfFloatType,
+      // Clamped against what the context can actually do — 0 on WebGL 1, where
+      // there are no multisampled targets to ask for.
+      multisampling: stageSamples(gl.capabilities.maxSamples),
+    })
     created.addPass(new RenderPass(scene, camera))
 
     const initial = gl.getSize(new Vector2())
@@ -416,7 +428,7 @@ export function useStageComposer({ outline = false }: StageComposerOptions = {})
     ao.configuration.intensity = 2.6
     created.addPass(ao)
 
-    const silhouette = outline ? addOutlinePass(created, scene, camera) : null
+    const silhouette = outline ? addOutlinePass(created, scene, camera, gl.getPixelRatio()) : null
 
     created.addPass(new EffectPass(camera, new SMAAEffect()))
     return { composer: created, ao, silhouette }
@@ -552,15 +564,19 @@ interface OutlinePass {
  *   contains the tile the proxy duplicates — equal depths to within float noise
  *   — so the classification of a silhouette's own pixels is noise. One colour
  *   makes that noise invisible instead of a speckled two-tone edge.
- * - **`blur: false`.** {@link OUTLINE_RESOLUTION_SCALE} already softens the edge
+ * - **`blur: false`.** The edge pass's own resolution already softens the band
  *   to about two pixels; a Kawase blur on top is two more half-resolution passes
  *   to spread a cue that is meant to be *"slightly"* there.
+ * - **The resolution scale is derived from the dpr**, not a constant, so the band
+ *   is a fixed width in *device-independent* pixels — `outlineResolutionScale`
+ *   carries why, and it is the same rule `ScreenLine.tsx` applies to the lines
+ *   the renderer draws directly.
  */
-function addOutlinePass(composer: EffectComposer, scene: Scene, camera: Camera): OutlinePass {
+function addOutlinePass(composer: EffectComposer, scene: Scene, camera: Camera, dpr: number): OutlinePass {
   const effect = new OutlineEffect(scene, camera, {
     blendFunction: BlendFunction.ALPHA,
     edgeStrength: OUTLINE_EDGE_STRENGTH,
-    resolutionScale: OUTLINE_RESOLUTION_SCALE,
+    resolutionScale: outlineResolutionScale(dpr),
     xRay: true,
     blur: false,
   })

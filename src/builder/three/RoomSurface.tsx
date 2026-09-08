@@ -216,7 +216,7 @@
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BufferGeometry, Mesh } from 'three'
-import { Matrix4, Raycaster } from 'three'
+import { GridHelper, Matrix4, Raycaster } from 'three'
 
 import type {
   MoveDrag,
@@ -250,6 +250,7 @@ import {
   rotatePlacement,
 } from '@/store'
 import type { OutlineRequest, OutlineSubject } from '@/three/outline'
+import { ScreenLine } from '@/three/ScreenLine'
 
 import type { SurfaceEdit, SurfaceStatus, TemplateGhost } from './edits'
 import type { PlacementFiller } from './fills'
@@ -268,7 +269,7 @@ import {
 import { InstancedTiles } from './InstancedTiles'
 import type { LodInstanceGroup, Room3D } from './instances'
 import type { LodGeometry } from './loadLod'
-import { PLATE_HEIGHT_MM, caretGeometry, plateEdgeGeometry, plateGeometry } from './markers'
+import { PLATE_HEIGHT_MM, caretPositions, plateEdgePositions, plateGeometry } from './markers'
 import { liftMatrix, tileMatrix } from './place'
 import type { SurfaceFit, SurfacePick } from './surface'
 import {
@@ -299,6 +300,21 @@ const ACCENT = '#8f5b21'
 
 /** The grid's lines and its two centre lines. `--mut` and `--line`'s dark end. */
 const GRID_LINE = '#79684d'
+
+/**
+ * Line weights, in **CSS pixels**. See `ScreenLine.tsx` for why the unit is
+ * spelled out and why these are numbers at all.
+ *
+ * They were never chosen before: every one of these lines was a `gl.LINES`
+ * primitive, which WebGL draws one *device* pixel wide, so the weight was
+ * whatever `devicePixelRatio` happened to be — 0.91 CSS px on the display this
+ * was reported from, and 0.5 px once the dpr floor went to 2, at which point the
+ * grid started breaking into dashes. The values here restore the weights that
+ * display used to get and then hold them there on every other display too.
+ */
+const GRID_WIDTH_PX = 1
+const PLATE_OUTLINE_WIDTH_PX = 1.5
+const CARET_WIDTH_PX = 1.5
 const GRID_AXIS = '#8f5b21'
 
 /**
@@ -1471,20 +1487,42 @@ function findPiece(scene: PlanScene, id: PlacementId): ScenePiece | undefined {
 /**
  * The lattice, in millimetres, one inch a division.
  *
- * `GridHelper` rather than a hand-built `LineSegments`, because it is core three
- * — no bundle cost beyond what `Stage` already pulls — and it is one draw call
- * for 388 vertices. Dropped {@link SURFACE_GRID_DROP_MM} below the plan so a
- * floor tile resting on `y = 0` does not z-fight with the line under it.
+ * `GridHelper` still builds it — it is core three, it is the right arithmetic and
+ * it carries the two colours on a vertex attribute — but it is used as a
+ * *source of geometry* rather than mounted. Mounted, it is a `LineSegments`, and
+ * that is one device pixel per line whatever the display: at dpr 2 the grid came
+ * out at half a CSS pixel and broke into dashes, because a half-pixel line cannot
+ * cover a pixel. {@link ScreenLine} draws the same 388 vertices at a width stated
+ * in CSS pixels.
  *
- * The args array is memoised so r3f constructs the helper once: a fresh array
- * every render would rebuild the geometry on every pointer move.
+ * Dropped {@link SURFACE_GRID_DROP_MM} below the plan so a floor tile resting on
+ * `y = 0` does not z-fight with the line under it.
+ *
+ * Both arrays are memoised with no dependencies, so the helper is constructed
+ * and read once: a fresh array every render would rebuild the geometry on every
+ * pointer move.
  */
 function Lattice() {
-  const args = useMemo<[number, number, string, string]>(
-    () => [SURFACE_GRID_UNITS * GRID_UNIT_MM, SURFACE_GRID_UNITS, GRID_AXIS, GRID_LINE],
-    [],
+  const lattice = useMemo(() => {
+    const helper = new GridHelper(SURFACE_GRID_UNITS * GRID_UNIT_MM, SURFACE_GRID_UNITS, GRID_AXIS, GRID_LINE)
+    const positions = new Float32Array(helper.geometry.getAttribute('position').array)
+    const colours = new Float32Array(helper.geometry.getAttribute('color').array)
+    // The helper owns a `LineBasicMaterial` and the geometry we have just copied
+    // out of; neither is used again and neither is r3f's, because neither came
+    // from JSX.
+    helper.geometry.dispose()
+    helper.material.dispose()
+    return { positions, colours }
+  }, [])
+
+  return (
+    <ScreenLine
+      positions={lattice.positions}
+      colors={lattice.colours}
+      widthPx={GRID_WIDTH_PX}
+      position={[0, -SURFACE_GRID_DROP_MM, 0]}
+    />
   )
-  return <gridHelper args={args} position={[0, -SURFACE_GRID_DROP_MM, 0]} />
 }
 
 /**
@@ -1547,14 +1585,9 @@ function PlateOutline({
   colour: string
   heightMm: number
 }) {
-  const geometry = useMemo(() => plateEdgeGeometry(parts, heightMm), [parts, heightMm])
-  useEffect(() => () => { geometry.dispose() }, [geometry])
+  const positions = useMemo(() => plateEdgePositions(parts, heightMm), [parts, heightMm])
 
-  return (
-    <lineSegments geometry={geometry} dispose={null}>
-      <lineBasicMaterial color={colour} transparent opacity={0.9} depthWrite={false} />
-    </lineSegments>
-  )
+  return <ScreenLine positions={positions} colour={colour} widthPx={PLATE_OUTLINE_WIDTH_PX} opacity={0.9} />
 }
 
 /**
@@ -1628,11 +1661,13 @@ function Ghost({
  * crosshair chasing a mouse pointer that already has a ghost is noise.
  */
 function Caret({ at }: { at: PlanPoint }) {
-  const geometry = useMemo(() => caretGeometry(), [])
-  useEffect(() => () => { geometry.dispose() }, [geometry])
+  const positions = useMemo(() => caretPositions(), [])
   return (
-    <lineSegments geometry={geometry} position={[at[0] * GRID_UNIT_MM, PLATE_HEIGHT_MM * 3, at[1] * GRID_UNIT_MM]} dispose={null}>
-      <lineBasicMaterial color={ACCENT} depthWrite={false} />
-    </lineSegments>
+    <ScreenLine
+      positions={positions}
+      colour={ACCENT}
+      widthPx={CARET_WIDTH_PX}
+      position={[at[0] * GRID_UNIT_MM, PLATE_HEIGHT_MM * 3, at[1] * GRID_UNIT_MM]}
+    />
   )
 }

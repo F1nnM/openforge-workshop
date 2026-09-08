@@ -65,13 +65,89 @@ export const ORBIT_MAX_DISTANCE = VIEW_RADIUS * 9
 export const ORBIT_ROTATE_SPEED = 0.9
 
 /**
- * Device pixel-ratio band, `[min, max]`.
+ * Device pixel-ratio band, `[min, max]`. Both ends are 2, and each is a separate
+ * argument.
  *
- * Uncapped dpr on a 3× phone triples the fragment cost of the AO pass for detail
- * nobody can see at 288 px. r3f takes the pair directly as `<Canvas dpr>`; a slot
- * canvas outside a `<Canvas>` clamps with {@link devicePixels}.
+ * **The cap** is the original one and its reason is unchanged: uncapped dpr on a
+ * 3× phone triples the fragment cost of the AO pass for detail nobody can see at
+ * 288 px.
+ *
+ * **The floor** is new, and it is the other half of the same thought. The band
+ * had a ceiling to stop a dense display over-sampling and nothing at all to stop
+ * a sparse one under-sampling — so a 1× monitor rendered the room at exactly CSS
+ * size, with one sample per pixel and a morphological pass to tidy up after it.
+ * Measured on the owner's display, `devicePixelRatio` is **1.1**: a 1164 × 713
+ * canvas backed onto 1280 × 784, and the result reads as pixelated because it
+ * very nearly is. Held at 2 the same canvas backs onto 2327 × 1425 and the
+ * downsample to CSS size is a supersample.
+ *
+ * The two ends meeting is what makes this safe to state plainly: **no device now
+ * renders more than the cap already allowed it to**. A retina screen is where it
+ * always was; what changed is that a cheap monitor is no longer given the worst
+ * image of the lot. Measured over a 671-frame orbit drag at 2×, the frame
+ * interval was 16.7 ms at both the median and p90 — vsync, with the GPU not the
+ * limit — and `frameloop="demand"` means even that is only paid while a pointer
+ * is down.
+ *
+ * A single value would express this better than a pair, and the pair is kept
+ * because it is the shape of the two APIs that consume it: r3f takes it directly
+ * as `<Canvas dpr>`, and a slot canvas outside a `<Canvas>` clamps into it with
+ * {@link devicePixels}.
  */
-export const DPR_BAND: readonly [number, number] = [1, 2]
+export const DPR_BAND: readonly [number, number] = [2, 2]
+
+/**
+ * Samples for the composer's multisampled render target. Requires WebGL 2.
+ *
+ * **The stack had no multisampling at all, and that is what "pixelated" was.**
+ * `STAGE_GL` sets `antialias: false` on the context, correctly — a
+ * post-processing chain resolves through its own render targets and the
+ * context's multisample buffer never participates. What was missing is the other
+ * half of that trade: `EffectComposer`'s own `multisampling`, which defaults to
+ * **0**. So the geometry was rasterised once with no coverage sampling anywhere,
+ * and `SMAAEffect` was left to reconstruct every silhouette in screen space from
+ * a hard-stepped image.
+ *
+ * SMAA is good at that and it is not enough here. A dungeon tile is a box: its
+ * edges are long, near-straight and high-contrast against a light parchment
+ * ground, which is the case morphological AA reconstructs least well — and the
+ * builder's ground grid puts thin diagonal lines across the whole frame. Nor is
+ * device pixel ratio covering for it. Measured on the owner's display,
+ * `devicePixelRatio` is **1.1**: a 1164 × 713 CSS canvas backs onto 1280 × 784,
+ * so {@link DPR_BAND}'s cap of 2 never binds and there is almost no supersampling
+ * to hide a step in.
+ *
+ * **Four**, and the number is a trade rather than a maximum. The reported
+ * `MAX_SAMPLES` is 8 on the machine this was measured on; 4× MSAA resolves the
+ * geometric edges this scene is made of, and going to 8 doubles the target's
+ * memory and resolve bandwidth for a difference that is not visible at these
+ * sizes. It is clamped against the context's real `maxSamples` at the call site,
+ * which is what makes it safe on WebGL 1 — `maxSamples` is 0 there, MSAA is
+ * unavailable, and the chain degrades to exactly what it does today.
+ *
+ * The cost lands where it is cheapest: every canvas in this project is
+ * `frameloop="demand"`, so this is paid per interaction and not sixty times a
+ * second, and MSAA shades once per *pixel* rather than once per sample — so the
+ * N8AO pass, which runs on the resolved buffer, costs exactly what it did.
+ */
+export const STAGE_MSAA_SAMPLES = 4
+
+/**
+ * {@link STAGE_MSAA_SAMPLES}, clamped to what this context can actually do.
+ *
+ * `WebGLCapabilities.maxSamples` is **0 on WebGL 1**, where multisampled render
+ * targets do not exist; asking for four there would set `samples` on a target
+ * that ignores it, which is harmless but is a claim the code would be making
+ * without checking. A function rather than an inline `Math.min` so the WebGL 1
+ * path is a tested behaviour and not a comment — `frame.test.ts`.
+ *
+ * Also clamps *down* to a context that supports fewer than four, which is the
+ * case a `Math.max` would have got backwards.
+ */
+export function stageSamples(maxSamples: number): number {
+  if (!Number.isFinite(maxSamples) || maxSamples <= 0) return 0
+  return Math.min(STAGE_MSAA_SAMPLES, Math.floor(maxSamples))
+}
 
 /**
  * CSS pixels → backing-store pixels, under {@link DPR_BAND}.

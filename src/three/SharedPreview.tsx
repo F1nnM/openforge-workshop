@@ -28,7 +28,7 @@
  * live in this file:
  *
  *   - **The backing store is sized in device pixels** (`frame.ts`'s
- *     `devicePixels`), under the same `[1, 2]` dpr cap `<Canvas dpr>` applies to
+ *     `devicePixels`), under the same `[2, 2]` dpr band `<Canvas dpr>` applies to
  *     the shared buffer. Both ends have to agree or the copy is scaled by the
  *     ratio of two dpr assumptions and every preview is soft.
  *   - **A 2D context can be refused.** `getContext('2d')` returns `null` when the

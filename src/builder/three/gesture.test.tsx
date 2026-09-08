@@ -113,8 +113,19 @@ const invalidate = () => {
   frames += 1
 }
 
+/*
+  `size` is the fourth thing, and it is in **CSS pixels** — which is the whole
+  point of it. `ScreenLine` feeds it to `LineMaterial.resolution`, and that is
+  what makes a line width stated in CSS pixels mean the same thing on every
+  display. A mock without it renders the grid, the plate rings and the caret at
+  `undefined` and throws, which is the right way round: the surface really does
+  depend on this now.
+*/
+const size = { width: 800, height: 600 }
+
 vi.mock('@react-three/fiber', () => ({
-  useThree: (selector: (state: unknown) => unknown) => selector({ camera, gl: { domElement: canvas }, invalidate }),
+  useThree: (selector: (state: unknown) => unknown) =>
+    selector({ camera, gl: { domElement: canvas }, invalidate, size }),
 }))
 
 /**
@@ -144,6 +155,32 @@ let plateBuilds = 0
   asserts that projection against the repository's own GLB.
 */
 vi.mock('./InstancedTiles', () => ({ InstancedTiles: () => null }))
+
+/*
+  `ScreenLine` as a recorder, and the swap is what keeps the D3 guard below
+  meaningful.
+
+  D3's drawing was `<lineSegments><lineBasicMaterial color=…/></lineSegments>`,
+  which reaches jsdom as unknown DOM tags with readable attributes, so the guard
+  against it coming back could read colours straight off the document. The real
+  `ScreenLine` builds its `LineSegments2` and `LineMaterial` imperatively and
+  mounts them through `<primitive object={…}>`, where React stringifies the
+  object and the colour is unreadable — so left alone, that guard would have gone
+  quietly vacuous, which is worse than failing.
+
+  The stub renders the two things the assertions are about as attributes. It also
+  makes the **width** assertable, which the old drawing never was: that width was
+  one device pixel and appeared in no source file, and that is the whole reason
+  this component exists.
+*/
+vi.mock('@/three/ScreenLine', () => ({
+  // A `div` with data attributes rather than an invented tag: r3f declares the
+  // intrinsic elements this file leans on, and `<screenline>` is not one of
+  // them, so a custom tag is a type error rather than a readable stub.
+  ScreenLine: ({ colour, widthPx }: { colour?: string; widthPx: number }) => (
+    <div data-screenline="" data-colour={colour ?? ''} data-width={String(widthPx)} />
+  ),
+}))
 
 vi.mock('./markers', async (importOriginal) => {
   const actual = await importOriginal<typeof Markers>()
@@ -300,12 +337,16 @@ function hover(at: readonly [number, number] = [100, 100], buttons = 0) {
 /**
  * Every line colour in the drawing, in paint order.
  *
- * r3f's elements reach jsdom as unknown DOM tags, so a `<lineBasicMaterial>`'s
- * colour is a readable attribute. Every outline in the surface is one of these:
- * a plate's own contour, the ghost's fallback ring, the caret, and the glow.
+ * Read off the `ScreenLine` stub above. Every outline in the surface is one of
+ * these: a plate's own contour, the ghost's fallback ring, and the caret.
  */
 function lineColours(): string[] {
-  return [...document.querySelectorAll('linebasicmaterial')].map((node) => node.getAttribute('color') ?? '')
+  return [...document.querySelectorAll('[data-screenline]')].map((node) => node.getAttribute('data-colour') ?? '')
+}
+
+/** Every line width in the drawing, in CSS pixels. */
+function lineWidths(): number[] {
+  return [...document.querySelectorAll('[data-screenline]')].map((node) => Number(node.getAttribute('data-width')))
 }
 
 /** How many outlines are drawn in `colour`. */
@@ -628,6 +669,23 @@ describe('the piece under the pointer is outlined by its own silhouette', () => 
     expect(cue(state).count).toBe(2)
     expect(ringsIn(HOVER_GLOW)).toBe(0)
     expect(ringsIn(color.acc)).toBe(0)
+  })
+
+  it('states a width in CSS pixels for every line it draws', () => {
+    // The guard for the class of bug that produced this component. A
+    // `<lineSegments>` is one *device* pixel wide, which is a width nobody chose
+    // and which silently halved when the dpr floor moved — so what must hold is
+    // not a particular number but that every line has a stated, finite width in
+    // a unit that does not move with the display.
+    const state = mount(corner(-1))
+    hover()
+    expect(state.cues.length).toBeGreaterThan(0)
+    const widths = lineWidths()
+    expect(widths.length).toBeGreaterThan(0)
+    for (const width of widths) {
+      expect(Number.isFinite(width)).toBe(true)
+      expect(width).toBeGreaterThan(0)
+    }
   })
 
   it('publishes nothing at all over bare ground', () => {
