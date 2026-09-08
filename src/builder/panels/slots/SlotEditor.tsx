@@ -14,23 +14,24 @@
  * list, a design filter and a **48-card page** of sprites — the widest shipped
  * part offers 428 items and the p90 (part, family) bucket is 36 — so an anchored
  * popover would either clip that grid or cover the drawing it is anchored to.
- * `Dialog` is taken instead for the reason that decides it: the gesture that
- * opens this is a **right click**, and a right click has no keyboard equivalent
- * that every platform agrees on, so the surface it opens has to be reachable and
- * dismissible without a pointer or it is not reachable at all. Base UI's dialog
- * brings the focus trap, the `Escape` close, the backdrop press and the
- * `aria-labelledby` wiring; an anchored popover would have needed all four
- * rebuilt to be equivalent. `SlotsPanel.tsx` gives every piece a real
- * `<button>` as well, so the whole editor is reachable by `Tab` and `Enter`.
+ * `Dialog` is taken instead for the reason that decides it: **both gestures that
+ * open this are on surfaces a pointer-free user reaches differently.** The plan's
+ * is the action bar over the selected piece, operable by `Enter` but only through
+ * a `role="application"` canvas with its own key map; the other is a `Slots`
+ * press on a bill row, which is an ordinary `<button>` in the tab order. So the
+ * surface both of them open has to be reachable and dismissible without a pointer
+ * or it is not reachable at all. Base UI's dialog brings the focus trap, the
+ * `Escape` close, the backdrop press and the `aria-labelledby` wiring; an
+ * anchored popover would have needed all four rebuilt to be equivalent.
  *
  * ## The row it opens on is the row the user pointed at, when there was one
  *
- * Row **C8** put the gesture on the drawing, where a click lands on a *part* and
- * not just on an instance — so {@link SlotEditorProps.initialSlot} arrives with
- * it and the editor opens on that slot. Without one, the rule is unchanged and
- * is the guided-assembly screen's: the first slot still needing a choice, then
- * the first slot. The panel row passes nothing, because a row names a piece and
- * has no point to resolve.
+ * The plan's route resolves a *point* and not just an instance — `edits.ts#
+ * planSlotEdit` reads the part under it — so {@link SlotEditorProps.initialSlot}
+ * arrives with it and the editor opens on that slot. Without one, the rule is
+ * unchanged and is the guided-assembly screen's: the first slot still needing a
+ * choice, then the first slot. A bill row passes nothing, because a row names a
+ * piece and has no point to resolve.
  *
  * ## The design filter is a filter and it is stated in items
  *
@@ -82,7 +83,7 @@ import {
   stepCountSentence,
 } from '@/assembly'
 import { compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
-import type { SlotName, TemplateInstance } from '@/store'
+import type { PlacementId, SlotName, TemplateInstance } from '@/store'
 import { clearFill, pinFill, useLockSystem, useRoomDesign } from '@/store'
 import type { BaseGap } from '@/assembly'
 import type { DroppedPin } from '@/template'
@@ -107,20 +108,48 @@ import {
 
 import './slots.css'
 
+/**
+ * One open slot editor: whose slots, and which row it opens on.
+ *
+ * Deliberately not `@/builder/three`'s `SlotEditGesture`, which is the same two
+ * fields plus a sentence to announce. `builder/panels/boundary.test.ts` is the
+ * line between them and an `import type` across it would be free in bytes and
+ * wrong in meaning — this type would then read as depending on the 3D surface's
+ * vocabulary, when the plan is one of *two* openers and a `Slots` press on a bill
+ * row is the other. `BuilderScreen` converts the surface's two primitives into
+ * this on the way past.
+ *
+ * It lived on the deleted `SlotsPanel` until the sidebar was cut back to the
+ * bill. Its home is the dialog it opens, which is the one thing both openers
+ * have in common.
+ */
+export interface SlotEditTarget {
+  readonly placement: PlacementId
+  /**
+   * The slot to open on, or `undefined` to let the editor choose.
+   *
+   * `undefined` is what a bill row passes, because a row names a piece and not a
+   * point — and the editor's own rule is the better answer there: it opens on
+   * the first slot still needing a choice. The plan's route has a point, so it
+   * names the slot whose part was under it.
+   */
+  readonly slot?: SlotName | undefined
+}
+
 export interface SlotEditorProps {
   readonly catalog: CatalogFile
   readonly index: AssemblyIndex
   /** The instance being edited, read live from the store by the caller. */
   readonly instance: TemplateInstance
-  /** The recipe the instance names. The caller holds the table; see `SlotsPanel`. */
+  /** The recipe the instance names. The caller holds the table; see `BuilderScreen`. */
   readonly template: RecipeTemplate
   /**
    * The slot to open on, when the caller knows which one — row **C8**.
    *
-   * A right click on the drawing lands on a *part*, and `partAt` names the slot
-   * that part fills, so the gesture already says which row the user meant. Only
+   * The plan's route lands on a *part*, and `partAt` names the slot that part
+   * fills, so the gesture already says which row the user meant. Only
    * an initial value: the slot list is still the way to change rows, and the
-   * fall-through below is unchanged when this is absent, which is the panel
+   * fall-through below is unchanged when this is absent, which is the bill
    * row's case.
    *
    * A name that this build's recipe does not carry is not a failure state — the
@@ -146,10 +175,10 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
   const materialOf = useMemo(() => tileMaterials(catalog), [catalog])
   /* Read here rather than passed, and it is one primitive: `handSlotToLock`
      re-solves the instance the moment a pin is released, so the preference is an
-     argument to that call and not a prop this dialog's two parents would both
-     have to thread. `SlotsPanel` takes no `lock` for `planSlots`' own reason — a
-     fill names an exact file — so adding one to its props for this would say the
-     panel depends on the preference when only this press does. */
+     argument to that call and not a prop this dialog's two openers would both
+     have to thread. `planSlots` takes no `lock` for its own reason — a fill
+     names an exact file — so threading one through a caller for this would say
+     the caller depends on the preference when only this press does. */
   const lock = useLockSystem()
   /*
     The room's design, read beside the lock and for the same reason: both are

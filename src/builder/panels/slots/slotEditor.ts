@@ -5,8 +5,9 @@
  * of a template should come up with a right click. It should be filterable by
  * design, and then allow me to choose from all potential matches based on the
  * slot to fill and size and design."* This module answers the second and third
- * clauses; `SlotEditor.tsx` is the control and `SlotsPanel.tsx` owns the
- * gesture.
+ * clauses; `SlotEditor.tsx` is the control, and the two gestures that open it
+ * are the action bar over the selected piece on the plan and a `Slots` press on
+ * a bill row.
  *
  * ## Nothing here is a second copy of the walk
  *
@@ -672,7 +673,7 @@ export function handSlotToLock(
   if (now === undefined) return undefined
   return reSolveScene([now], index, {
     // The one recipe the editor was opened on. A caller holding the whole table
-    // would pass it, but this dialog is opened *on* an instance and `SlotsPanel`
+    // would pass it, but this dialog is opened *on* an instance and the screen
     // has already resolved its family — so the honest lookup is the one that
     // answers for that id and for nothing else, rather than a second copy of the
     // table reaching into a screen from `src/builder/**`.

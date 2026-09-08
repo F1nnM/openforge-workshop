@@ -124,7 +124,7 @@ import {
   slotGeometry,
   unionBox,
 } from './geometry'
-import type { OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
+import type { BandSource, ConflictKind, OverlapCandidate, OverlapSubject, PlanBand } from './overlap'
 import { findConflicts, levelAt, planBand } from './overlap'
 
 /**
@@ -164,6 +164,14 @@ export interface PlanPiecePart {
   /** The part as convex polygons, in world units. Equal to the box's corners for an axis-aligned rect. */
   readonly polygons: readonly PlanPart[]
   readonly band: PlanBand
+  /**
+   * Whether {@link band} was measured from the footprint or inferred from tags.
+   *
+   * `overlap.ts#BandVerdict`'s second half, written here beside the band it
+   * qualifies. A conflict against an inferred band is never refused, so this
+   * has to survive the trip from `planBand` to `subjectsConflict`.
+   */
+  readonly bandSource: BandSource
   /** Whether the drawn box is the shape. Read by the corner-junction exemption. */
   readonly axisAligned: boolean
   readonly style: PlanStyle
@@ -247,6 +255,14 @@ export interface GeneratedPlanPiece {
   /** See {@link PlanPiece.polygons} — row S5's `parts`, under the shared name. */
   readonly polygons: readonly PlanPart[]
   readonly band: PlanBand
+  /**
+   * Whether {@link band} was measured from the footprint or inferred from tags.
+   *
+   * `overlap.ts#BandVerdict`'s second half, written here beside the band it
+   * qualifies. A conflict against an inferred band is never refused, so this
+   * has to survive the trip from `planBand` to `subjectsConflict`.
+   */
+  readonly bandSource: BandSource
   readonly axisAligned: boolean
   readonly style: PlanStyle
   readonly conflict: boolean
@@ -323,8 +339,15 @@ export interface PlanScene {
    * caller outside the builder.
    */
   readonly generated: readonly GeneratedPlanPiece[]
-  /** Over **both** lists and every part: a generated base and a wall can conflict. */
-  readonly conflicts: ReadonlySet<PlacementId>
+  /**
+   * Over **both** lists and every part: a generated base and a wall can conflict.
+   *
+   * A map of id to {@link ConflictKind} rather than a set, because since the
+   * refusal split the two kinds are drawn differently and only one of them
+   * blocks an edit. `Map` keeps `.has` and `.size` working for the readers that
+   * only ever asked *whether*.
+   */
+  readonly conflicts: ReadonlyMap<PlacementId, ConflictKind>
   /** One per fill naming a file this build does not hold. */
   readonly unknown: readonly PlanOmission[]
   /** One per fill whose file has a `none` footprint. */
@@ -413,6 +436,9 @@ function placePart(
   geometry: PlanGeometry,
   style: (record: CatalogRecord) => PlanStyle,
 ): PlanPiecePart {
+  // One call, two fields: the band and where it came from are written together
+  // here so nothing downstream can hold one without the other.
+  const band = planBand(slot.record)
   const bare: Omit<PlanPiecePart, 'label'> = {
     slot: slot.slot,
     fill: slot.fill,
@@ -423,7 +449,8 @@ function placePart(
     box: geometry.box,
     angle: geometry.angle,
     polygons: geometry.parts,
-    band: planBand(slot.record),
+    band: band.band,
+    bandSource: band.source,
     axisAligned: geometry.axisAligned,
     style: style(slot.record),
     caveat: placementCaveat(slot.record) ?? null,
@@ -669,6 +696,11 @@ function subjectsOf(piece: PlanPiece): readonly OverlapCandidate[] {
     box: part.box,
     parts: part.polygons,
     axisAligned: part.axisAligned,
+    // Off the part's own `PlanShape`, not re-derived from `foot.shape`: the
+    // shape is what produced `polygons`, so its accuracy flag is the one that
+    // describes them.
+    cover: part.shape.cover,
+    bandSource: part.bandSource,
   }))
 }
 
@@ -690,6 +722,8 @@ function subjectOf(piece: GeneratedPlanPiece): OverlapCandidate {
     box: piece.box,
     parts: piece.polygons,
     axisAligned: piece.axisAligned,
+    cover: piece.shape.cover,
+    bandSource: piece.bandSource,
   }
 }
 

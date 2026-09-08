@@ -35,11 +35,13 @@
  *     a save file" are the same question one step apart, so they are one column
  *     apart and not one screen apart.
  *
- * It is the column's last child and it is deliberately compact — a heading, one
- * sentence, two controls — because `.of-builder-bill` is a fixed-height grid
+ * It is the column's last child and it is deliberately compact — **two controls
+ * and one line**, no heading — because `.of-builder-bill` is a fixed-height grid
  * whose `1fr` row is the bill, and every pixel this takes is a pixel of parts
- * list. The import report is the one thing that can grow, and it only exists
- * after a press.
+ * list. It was a mono eyebrow over a four-line paragraph until the sidebar was
+ * cut back to the bill, and those four lines said two things a line says: the
+ * store is not durable, and importing replaces. The import report is the one
+ * thing here that can grow, and it only exists after a press.
  *
  * Both controls render whether or not anything is placed, because the visit where
  * import matters most is precisely the one that opens on an empty room after an
@@ -66,7 +68,7 @@ import type { ChangeEvent } from 'react'
 import { useId, useState } from 'react'
 
 import { exportWorkshop, importWorkshop, useWorkshopStore } from '@/store'
-import { Button, Eyebrow, buttonProps } from '@/ui/primitives'
+import { Button, buttonProps } from '@/ui/primitives'
 
 import './panels.css'
 
@@ -79,7 +81,7 @@ type ImportReport =
 const DROPPED_SHOWN = 6
 
 export function BackupPanel() {
-  const headingId = useId()
+  const noteId = useId()
   const [report, setReport] = useState<ImportReport | null>(null)
 
   function onExport(): void {
@@ -127,17 +129,19 @@ export function BackupPanel() {
   }
 
   return (
-    <section className="of-backup" aria-labelledby={headingId}>
-      <h3 className="of-backup-heading" id={headingId}>
-        <Eyebrow>Backup</Eyebrow>
-      </h3>
+    /*
+      `aria-label` and no visible heading, since the sidebar was cut back to the
+      bill: this is a line in that column's footer rather than a section of its
+      own, and a mono eyebrow over two buttons would announce a section where
+      none is left. The landmark itself stays — the import report below has to be
+      findable, and scoped to this strip rather than to the whole column.
 
-      <p className="of-backup-note">
-        Your build lives in this browser, and browsers do clear that storage — Safari after a week
-        without a visit. Keep a JSON copy between sessions. Importing <strong>replaces</strong> what
-        is here.
-      </p>
-
+      `aria-describedby` on the line under the controls, which is what that
+      line's `id` is for: with the heading gone there is nothing else pointing at
+      it, and a screen-reader user should meet "importing replaces what is here"
+      on the way *into* the region rather than after leaving it.
+    */
+    <section className="of-backup" aria-label="Backup" aria-describedby={noteId}>
       <div className="of-backup-actions">
         <Button size="sm" tone="secondary" onClick={onExport}>
           Export JSON
@@ -164,6 +168,19 @@ export function BackupPanel() {
           />
         </label>
       </div>
+
+      {/*
+        The two facts, in one line, under the controls they qualify. It was four
+        lines above them and it said the same two things: the store is not
+        durable, and importing is not a merge. What went is the elaboration —
+        Safari's seven days, and the instruction to keep a copy between sessions
+        — which is worth knowing and is not worth a quarter of a fixed-height
+        column, unprompted, on every visit. `store/transfer.ts` and this file's
+        docblock carry the rest.
+      */}
+      <p className="of-backup-note" id={noteId}>
+        Browsers clear this storage. Import replaces what is here.
+      </p>
 
       {report === null ? null : <ImportOutcome report={report} />}
     </section>

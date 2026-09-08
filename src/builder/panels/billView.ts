@@ -573,6 +573,37 @@ export function noteCopy(note: BillNote): NoteCopy {
   }
 }
 
+/**
+ * Whether the pack is refused over this note, which is what decides how loudly
+ * the panel says it.
+ *
+ * **Two codes, and reading the gate rather than the copy is what found the
+ * second one.** `BillOfTiles.complete` is `unfilled.length === 0`, and
+ * `bill.ts#holesIn` fills that array from two conditions: a declared slot the
+ * instance did not resolve, which `resolve.ts` reports as `slot-unfilled`, and
+ * an instance whose **recipe is not in the build at all** — that arm returns
+ * early with `unknown-template` alone and never reaches the per-slot walk, so
+ * there is no `slot-unfilled` beside it. Both refuse the zip.
+ *
+ * `BillPanel` happens to filter `unknown-template` out before rendering, because
+ * `OrphanBlock` is its better surface, so today the second code changes nothing
+ * on screen. It is here anyway: this function answers *"is the download refused
+ * over this"*, that is a fact about `bill.ts` and not about one panel's filter,
+ * and a predicate that is only correct because of a caller's unrelated choice
+ * fails the moment the caller changes its mind.
+ *
+ * The panel opened with every warning's `detail` in full until the sidebar was
+ * cut back, and that was right about the note it was written for and wrong as a
+ * rule for nine of them. `fill-off-slot`, `lock-unavailable` and
+ * `mixed-build-systems` are each true, each advisory, and each two to four lines
+ * — and three of those above a note that refuses the download is how the refusal
+ * stops being legible. So an advisory note gives its headline and keeps its
+ * reason one press away; these two do not.
+ */
+export function noteBlocksDownload(code: NoteCode): boolean {
+  return code === 'slot-unfilled' || code === 'unknown-template'
+}
+
 /* ------------------------------------------------------------------ verdict */
 
 export interface VerdictCopy {

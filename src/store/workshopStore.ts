@@ -226,6 +226,27 @@ export function removePlacement(id: PlacementId): void {
   })
 }
 
+/**
+ * Put the placement map back to a value it previously held. Undo's one write.
+ *
+ * **A whole-map write, and that is what makes it the only action undo needs.**
+ * Every other action here is a verb — place one, move one, turn one, fill a slot
+ * — and an undo built out of verbs needs an inverse for each of them, forever,
+ * with a silent hole in the history the first time someone adds a verb and
+ * forgets its inverse. `history.ts` holds snapshots instead, so the whole of
+ * undo is *this map, again*, whatever produced it.
+ *
+ * It does **not** touch `generated`. A generated base owns a mesh hold
+ * (`retainGeneratedMeshes`), so restoring that map means reconciling the holds
+ * too, and a restore that dropped one would leak or free a mesh under a piece
+ * still on the plan. Undo therefore covers the catalog placements — which is
+ * every gesture this row added — and the generated map is a row of its own.
+ * `useHistory` subscribes to `placements` alone for the same reason.
+ */
+export function restorePlacements(placements: WorkshopState['placements']): void {
+  useWorkshopStore.setState({ placements })
+}
+
 /** Clear the builder scene, keeping the lock preference. */
 export function clearPlacements(): void {
   useWorkshopStore.setState({ placements: {}, generated: {} })
@@ -557,6 +578,18 @@ export type FiltersOutcome = 'set' | 'unchanged' | 'unknown-placement'
  * Like every other write here it changes no mesh and re-solves nothing: row A2's
  * `planSceneMeshes` is lock-free and reconciles on the placements, so the fills
  * this action writes are the whole route to the drawing, the bill and the pack.
+ *
+ * ## One transaction is also one undo
+ *
+ * `canvas/useHistory.ts` subscribes to `placements` and records on a changed
+ * *identity*, so this action needs nothing at the call site to be undoable — and
+ * because the filters and the fills go in a single `setState`, one `Ctrl+Z`
+ * restores both. Two writes would have been two steps, and the intermediate one
+ * is the state this action exists to make unreachable: an instance claiming to be
+ * an arched door while holding a rectangular one.
+ *
+ * The `'unchanged'` case returns the identical state object, so pressing the chip
+ * an instance is already on records no step either.
  */
 export function setPlacementFilters(
   id: PlacementId,

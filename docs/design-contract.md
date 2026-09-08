@@ -194,9 +194,23 @@ with 52×40 thumbnails. Selected tile is marked with an accent tint and border.
 Empty state offers "Add a starter set".
 
 **Centre — canvas**: full-bleed 3D viewport. A floating toolbar, centred at the top:
-`Place` / `Erase` mode toggle, `⟳ Rotate` (keyboard `R`), `Clear`, and a mono
-`snap {value}` readout. Bottom-left is a contextual hint string; bottom-right shows the
-selected tile name. Both sit on translucent plates and are pointer-transparent.
+`↶ Undo` / `↷ Redo` (keyboard `Ctrl`/`Cmd`+`Z`, `Ctrl`/`Cmd`+`Shift`+`Z`), `⟳ Rotate`
+(keyboard `R`), `Clear`, and a mono `snap {value}` readout. Bottom-left is a contextual
+hint string; bottom-right shows the armed family or the selected piece. Both sit on
+translucent plates and are pointer-transparent.
+
+~~`Place` / `Erase` mode toggle.~~ **Superseded — the builder has no modes.** The mock's
+two-mode toggle, and the `Move` mode added beside it, are replaced by a **persistent
+selection**: the primary button's meaning is a function of what is armed or selected
+rather than of a setting, so `Erase` mode is gone (removing is `Delete` on the selection,
+with undo behind it) and `Move` mode is gone (a drag from a piece moves it, a drag from
+bare ground orbits). `docs/superpowers/specs/2026-09-08-builder-interaction-model-design.md`
+is the whole argument; `src/builder/canvas/usePlanTools.ts` carries the short version.
+
+A **floating action bar** is anchored above the selected piece, carrying its verbs —
+`⟳` turn, `▤ Slots`, `⌦` remove — and expanding to hold that piece's slot editor. This is
+why the right-hand column below stays the bill of tiles permanently: the properties come
+to the work rather than displacing the one view of what the room costs to print.
 
 **Right — bill of tiles**: mono uppercase label, `{n} tiles placed` heading, then one row
 per unique tile (thumbnail, name, summed MB, `×count`), sorted by count descending.
@@ -244,15 +258,52 @@ and a caption stating the demo downloads a manifest while production bundles a z
 | Free-text search | Catalog, Builder palette | Substring over name + tags + set + kind |
 | Add / remove library | Card button, detail drawer | Persisted |
 | Group library by kind | Library | Uses the component facet ordering |
-| Select palette tile | Builder | Sets the active tile and forces `place` mode |
-| Place | Builder canvas | Click on the ground plane; snapped; auto-elevated onto floors |
-| Erase | Builder canvas | Click a placed mesh; raycast up to the record's group |
-| Rotate | Toolbar or `R` | 90° steps; footprint swaps on odd steps |
-| Orbit / pan / zoom | Builder canvas | Drag orbits, shift-drag or middle-drag pans, wheel zooms |
-| Clear build | Toolbar | No confirmation in the mock |
-| Snap size | Prop enum | ¼ / ½ / 1 inch |
-| Download pack | Bill of tiles | Mock emits a JSON manifest; production must emit a zip |
+| Arm a palette family | Builder palette | Arms the family **and its size**; clears any selection |
+| Cancel the arming | `Escape`, or a right-**click** on the plan | Both stated on the label at the cursor |
+| Place | Builder canvas | Click while armed. Refused where it would exactly overlap — see below |
+| Select | Builder canvas | Click a piece while nothing is armed. Or `[` / `]`, which is the keyboard route |
+| Deselect | Builder canvas | Click bare ground, or `Escape` |
+| Move | Builder canvas | Drag from a piece (selects on press, then moves), or arrow keys on the selection |
+| Remove | `Delete` / `Backspace`, or the action bar | Acts on the selection. No confirmation — undo covers it |
+| Rotate | Toolbar, `R`, or the action bar | Turns the ghost while armed, the selection while selected |
+| Edit slots | Action bar `▤ Slots`, `Enter`, or the slots panel row | Opens on the selected piece |
+| Undo / redo | Toolbar, or `Ctrl`/`Cmd`+`Z` / `Ctrl`/`Cmd`+`Shift`+`Z` / `Ctrl`+`Y` | 50 entries, in memory, not persisted |
+| Orbit | Builder canvas | Left-drag from bare ground, or **middle-drag anywhere** |
+| Pan / zoom | Builder canvas | Right-**drag** pans, wheel zooms. A right *click* cancels the arming — the 5 px travel test tells the two apart |
+| Clear build | Toolbar | Undoable |
+| Snap size | `G`, or the toolbar readout | 0.5 / 1 unit. There is no ¼ — see §7 of the architecture plan |
+| Download pack | Bill of tiles | A ZIP built in the browser |
+| Escape | Builder canvas | Disarms the palette, or drops the selection |
 | Escape | Global | Closes the detail drawer |
+
+~~`Select palette tile` forces `place` mode; `Erase` is a mode; `Shift`-drag moves in any
+mode; a right click opens the slot editor.~~ **All superseded.** There are no modes to
+force or escape, so `Shift`-click is left free for its conventional meaning (extend a
+selection) and `Alt`-drag for duplicate, when those arrive. Right-drag is pan and nothing
+else — the slot editor moved to the selection, where it has a real operand.
+
+**The armed state says what it will place and how to stop.** A label rides the
+cursor naming the armed family, and stating both ways out — `Esc` and a
+right-click. Before it, the armed state announced itself only in the two corner
+plates of a full-bleed viewport and *neither of them said how to stop*: `Escape`
+disarmed and always did, and nothing on screen mentioned it. A user who armed a
+family by accident had a ghost following their pointer, no visible way out, and a
+primary button that placed a tile wherever they clicked next.
+
+The label takes no pointer events, which is what makes it a label rather than a
+small toolbar: it sits under the cursor, so anything it swallowed would be
+swallowed on every click.
+
+**Middle-drag orbit is new and it is not a convenience.** With a drag from a piece now
+meaning *move*, a room that fills the viewport would otherwise leave no reachable ground
+to orbit from — the documented failure mode of this genre of tool. Every camera verb now
+has a button that never contends with content.
+
+**Overlapping placements are refused**, where the geometry is exact. `overlap.ts`'s error
+is deliberately one-directional — it over-reports and never misses — so only conflicts it
+is *certain* of block an edit: exact polygons on both sides, both elevations known, and
+neither band a bare default. A conflict it is unsure about is drawn and committed exactly
+as before, and a refusal always names the piece that blocked it.
 
 ---
 

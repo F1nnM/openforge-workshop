@@ -55,7 +55,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AssemblyIndex, BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { usePlanTools } from '@/builder/canvas'
-import type { SurfaceStatus } from '@/builder/three'
+import type { UndoControls } from '@/builder/canvas/useHistory'
+/* The `UndoControls` recorder, from the surface's fixture rather than a second
+   copy here: the toolbar and the surface are handed the *same* controls by the
+   screen, so a test double that drifted between the two directories would be
+   asserting against a shape neither of them takes. It is a test module and
+   reaches no renderer — `panels/boundary.test.ts` walks production entries. */
+import { planHistory } from '@/builder/three/fixture'
 import type { CatalogFile, DesignId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, resolveTags, selectVariant } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
@@ -78,6 +84,7 @@ import {
 } from '@/store'
 
 import { BillPanel } from './BillPanel'
+import { noteBlocksDownload } from './billView'
 import {
   FIXTURE_CATALOG,
   FIXTURE_DESIGNS,
@@ -113,6 +120,15 @@ import { DownloadAction } from './DownloadAction'
  */
 const design = (key: keyof typeof FIXTURE_DESIGNS): DesignId => FIXTURE_DESIGNS[key] as DesignId
 
+/**
+ * A placement id for the selection {@link PaletteHarness} opens with.
+ *
+ * It names nothing in the store on purpose: what the palette does to a selection
+ * is drop it, and dropping it does not require it to resolve. `usePlanTools`
+ * holds a bare id and `selection.ts` is what looks one up against a scene.
+ */
+const SELECTED_PIECE = 'p0' as PlacementId
+
 let file: CatalogFile
 let index: CatalogIndex
 let assembly: AssemblyIndex
@@ -123,6 +139,7 @@ beforeEach(() => {
   // The RECENT ring is module-level session state (`palette.ts` argues why it is
   // not in the store), so a family armed by one test is still in it for the next.
   forgetRecentFamilies()
+  edited.length = 0
   file = fixtureCatalogFile()
   const engine = createSearchEngine(file)
   index = {
@@ -194,9 +211,17 @@ function placementCount(): number {
  * `forgetRecentFamilies()` runs in this file's `beforeEach`: the RECENT ring is
  * module-level session state (`palette.ts` argues why it is not in the store), so
  * a family armed by one test would still be in it for the next.
+ *
+ * **It opens with a piece selected, which is not idle scenery.** The harness used
+ * to open in `erase` so that arming could be shown to force `place`; there are no
+ * modes to force, and what took that assertion's place is the invariant that
+ * replaced them — arming from the palette *clears the selection*, because both
+ * states claim the primary button and `usePlanTools` holds at most one of them.
+ * So the readouts below are `activity` and `selected` rather than `tool`, and
+ * every arming assertion checks the selection went with it.
  */
 function PaletteHarness({ query = '' }: { query?: string }) {
-  const tools = usePlanTools({ tool: 'erase' })
+  const tools = usePlanTools({ selected: SELECTED_PIECE })
   return (
     <div>
       <PalettePanel
@@ -211,7 +236,8 @@ function PaletteHarness({ query = '' }: { query?: string }) {
           rendered by the panel; this is what the 3D surface reads to solve the
           fills, and the two must not diverge. */}
       <p data-testid="armed-size">{tools.armedPosition.join(' ') || 'any'}</p>
-      <p data-testid="tool">{tools.tool}</p>
+      <p data-testid="activity">{tools.activity}</p>
+      <p data-testid="selected-piece">{tools.selected ?? 'none'}</p>
     </div>
   )
 }
@@ -431,7 +457,7 @@ describe('the palette', () => {
     ).toBeInTheDocument()
   })
 
-  it('arms a family, writes it to the tool state and forces place mode', () => {
+  it('arms a family, writes it to the tool state and drops the selection', () => {
     // **Row A8's reduction, undone.** The panel wrote nothing to `PlanTools`
     // because a `DesignId` in `selectedTemplate` would report every placement
     // `unknown-template`; a family id is what the surface places.
@@ -439,14 +465,19 @@ describe('the palette', () => {
 
     expect(armedRow()).toBe('none')
     expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
-    expect(screen.getByTestId('tool')).toHaveTextContent('erase')
+    expect(screen.getByTestId('activity')).toHaveTextContent('selected')
 
     fireEvent.click(row('Wall: Straight (Separate Wall)'))
 
     expect(screen.getByTestId('selected-template')).toHaveTextContent('wall-straight-separate-wall')
     expect(armedRow()).toContain('Wall: Straight (Separate Wall)')
-    // §3: "Sets the active tile and forces place mode."
-    expect(screen.getByTestId('tool')).toHaveTextContent('place')
+    /* §3 said "forces place mode"; there is no mode to force, and this is what
+       the sentence meant all along — a press on a palette row is the user saying
+       the primary button now places, so whatever else was claiming it lets go.
+       Asserted from both ends: the activity is a reading and the id is the fact
+       behind it, and a panel that armed without calling `arm` would keep one. */
+    expect(screen.getByTestId('activity')).toHaveTextContent('armed')
+    expect(screen.getByTestId('selected-piece')).toHaveTextContent('none')
   })
 
   it('disarms when the armed row is pressed again', () => {
@@ -878,7 +909,7 @@ describe('the pre-selection handoff', () => {
     return view
   }
 
-  it('arms the family the drawer sent, at the size it sent, and forces place mode', () => {
+  it('arms the family the drawer sent, at the size it sent, and drops the selection', () => {
     // Exactly what `TileDrawer`'s action does, in its order: post the arm, then
     // navigate — the navigation being this render. It used to post an item and
     // seed the palette's search with its name, because the list was the archive;
@@ -896,8 +927,10 @@ describe('the pre-selection handoff', () => {
     expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
     expect(armedRow()).toContain('Floor: Straight')
     expect(armedSize()).toBe('1 wide by 1 deep, 2 tiles')
-    // The harness opens in `erase`; arming forces `place`, as a click does.
-    expect(screen.getByTestId('tool')).toHaveTextContent('place')
+    // The harness opens with a piece selected; a handoff arms through the same
+    // `arm` a click does, so it drops the selection exactly as a click does.
+    expect(screen.getByTestId('activity')).toHaveTextContent('armed')
+    expect(screen.getByTestId('selected-piece')).toHaveTextContent('none')
   })
 
   it('claims the handoff once, so a re-mount does not re-arm a family the user disarmed', () => {
@@ -912,7 +945,8 @@ describe('the pre-selection handoff', () => {
     first.unmount()
     mountPalette()
     expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
-    expect(screen.getByTestId('tool')).toHaveTextContent('erase')
+    // Nothing armed, so the fresh mount is back on the selection it opened with.
+    expect(screen.getByTestId('activity')).toHaveTextContent('selected')
   })
 
   it('takes the second press when two arrive with no claim between them', () => {
@@ -937,7 +971,9 @@ describe('the pre-selection handoff', () => {
     mountPalette()
 
     expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
-    expect(screen.getByTestId('tool')).toHaveTextContent('erase')
+    // And nothing armed means nothing was dropped either: a handoff the palette
+    // refuses must not take the user's selection with it.
+    expect(screen.getByTestId('activity')).toHaveTextContent('selected')
     // Claimed all the same: a handoff this palette will not act on must not sit
     // in the box waiting to arm the next mount.
     expect(useSelectionStore.getState().pending).toBeNull()
@@ -1096,45 +1132,37 @@ describe('the two-sided item', () => {
 
 /* -------------------------------------------------------------- the toolbar */
 
-function ToolbarHarness({ moving }: { moving?: string }) {
+/**
+ * The undo controls for every toolbar test that is not about undo.
+ *
+ * Both stacks report available, which is what keeps the Rotate / Clear / snap
+ * assertions below reading a bar in its ordinary state rather than one with two
+ * disabled buttons on the left. A test whose subject *is* undo passes its own
+ * recorder, so it can read `calls`.
+ */
+const INERT_HISTORY = planHistory()
+
+/**
+ * The rail's tool items, over a real `usePlanTools` and a real store.
+ *
+ * `moving` survives as a parameter with nothing to feed: the readout it stood in
+ * for is gone, and the test that proves it is gone still has to be able to ask
+ * for a carried piece. It is deliberately not deleted — a harness that could no
+ * longer express the state would make that assertion unfalsifiable.
+ */
+function ToolbarHarness({ history }: { moving?: string; history?: UndoControls }) {
   const tools = usePlanTools()
   const placements = usePlacements()
   const placed = Object.keys(placements).length
-  // The armed **step**, since row A8 — the toolbar takes a number rather than a
-  // record, because what is armed is a family of up to five files and has no
-  // single `rotStep`. `ARMED_TURN_STEP_DEG` is what `BuilderScreen` passes and
-  // what `three/edits.ts#planTurn` turns by; 90 is spelled here so the harness
-  // does not import the surface for one constant.
-  const armedStep = tools.selectedTemplate === null ? undefined : 90
-  // The 3D surface reports its readout through `onStatus`; the toolbar only
-  // reads it. `moving` is the one field this harness needs to stand in for, so
-  // the rest is the empty readout the toolbar already handles. `SurfaceStatus`
-  // since row R4 — it was `PlanStatus`, which the deleted plan canvas declared.
-  const status: SurfaceStatus | null =
-    moving === undefined
-      ? null
-      : {
-          cursor: [0, 0],
-          snap: tools.snap,
-          step: tools.step,
-          tool: tools.tool,
-          hint: '',
-          selectedName: null,
-          refusal: null,
-          moving,
-          placements: placed,
-          conflicts: 0,
-        }
   return (
     <div>
-      <button type="button" onClick={() => tools.setSelectedTemplate(ONE_SLOT_TEMPLATE_ID)}>
+      <button type="button" onClick={() => tools.arm(ONE_SLOT_TEMPLATE_ID)}>
         arm
       </button>
       <PlanToolbar
         tools={tools}
-        status={status}
-        armedStep={armedStep}
         placed={placed}
+        history={history ?? INERT_HISTORY}
         onClear={() => {
           useWorkshopStore.setState({ placements: {} })
         }}
@@ -1148,27 +1176,57 @@ function ToolbarHarness({ moving }: { moving?: string }) {
 describe('the toolbar', () => {
   it('offers 0.5 and 1.0 only — never the quarter-unit grid the mock had', () => {
     render(<ToolbarHarness />)
-    const snap = screen.getByRole('button', { name: /^snap/ })
+    /*
+      Queried on the accessible name, which is a sentence now that the rail's
+      visible text is a mono field-and-value pair: `snap` `0.5` reads as a
+      setting to the eye and as *"Snap: half a unit — switch to one unit"* to a
+      screen reader, and neither reading is the other's abbreviation.
 
-    expect(snap).toHaveTextContent('snap 0.5')
+      The visible halves are asserted separately rather than as `'snap 0.5'`,
+      because the space between them is a flex `gap` and not a text node — the
+      two are siblings in the rail's `label … value` grid, which is what makes
+      the values line up down the column. Asserting a string that the DOM does
+      not contain would only pin the old markup.
+    */
+    const snap = screen.getByRole('button', { name: /^Snap:/ })
+    const value = () => snap.querySelector('.of-stage-tool-value')?.textContent
+
+    expect(snap).toHaveTextContent('snap')
+    expect(value()).toBe('0.5')
+
     fireEvent.click(snap)
     expect(screen.getByTestId('snap')).toHaveTextContent('1')
-    expect(snap).toHaveTextContent('snap 1')
+    expect(value()).toBe('1')
+
     fireEvent.click(snap)
     expect(screen.getByTestId('snap')).toHaveTextContent('0.5')
+    expect(value()).toBe('0.5')
+    // Never a quarter, which is the whole point of the test: every dimension in
+    // the catalog is a multiple of 0.5 units, so a 0.25 grid can only produce
+    // placements that cannot physically assemble.
+    expect(snap).not.toHaveTextContent('0.25')
   })
 
-  it('cannot rotate until a tile is armed, then turns it by the tile’s own step', () => {
+  it('no longer carries rotate, which moved to the piece it turns', () => {
+    /*
+      **Two rotates, one operand each, and only one of them belonged here.** This
+      bar's button turned the *armed ghost* before a placement; the floating
+      action bar's turns the *selected piece* after one. The owner asked for the
+      button to go now that the floating one exists, and the ghost's own
+      affordance moved with it: `ArmedLabel` names `R` at the cursor, which is
+      where an armed-state affordance belongs and where a corner button never
+      was. `armedLabel.test.tsx` covers that, `pieceActions.test.tsx` covers the
+      piece.
+
+      Queried rather than reasoned about, so re-adding it fails here.
+    */
     render(<ToolbarHarness />)
-    const rotate = () => screen.getByRole('button', { name: /Rotate/ })
+    expect(screen.queryByRole('button', { name: /Rotate/ })).toBeNull()
 
-    expect(rotate()).toBeDisabled()
+    // And the pending rotation is still reachable — `R` on the surface writes
+    // it, which is what the label now advertises.
     fireEvent.click(screen.getByRole('button', { name: 'arm' }))
-    expect(rotate()).toBeEnabled()
-
-    fireEvent.click(rotate())
-    // `floor1` carries no `rotStep`, so the step is the schema's 90° default.
-    expect(screen.getByTestId('rotation')).toHaveTextContent('90')
+    expect(screen.getByTestId('rotation')).toHaveTextContent('0')
   })
 
   it('cannot clear an empty scene, and clears a placed one', () => {
@@ -1181,30 +1239,99 @@ describe('the toolbar', () => {
     expect(placementCount()).toBe(0)
   })
 
-  it('switches between place and erase', () => {
+  /**
+   * The two buttons that took the mode toggle's place, and the substitution is
+   * why they are tested here rather than only in `history.test.ts`.
+   *
+   * `Place` / `Erase` / `Move` are **gone**, and so are the two tests that
+   * pressed them — one asserted the toggle swapped `place` for `erase`, the
+   * other that `Move` came up and the other two went down. Both were assertions
+   * about a mode, and there is no mode: what the primary button means is a
+   * reading of what is armed or selected. The reason that is *safe* for the
+   * destructive verb the `Erase` mode used to guard is undo, so undo is what
+   * this bar gained, and these are its tests.
+   */
+  it('offers undo and redo where the three modes were', () => {
     render(<ToolbarHarness />)
-    fireEvent.click(screen.getByRole('button', { name: 'Erase' }))
-    expect(screen.getByRole('button', { name: 'Erase' })).toHaveAttribute('data-pressed')
+
+    expect(screen.getByRole('button', { name: /^Undo/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Redo/ })).toBeInTheDocument()
+    // The names the deleted toggle went by. Queried rather than reasoned about,
+    // so re-adding any of them fails here.
+    for (const mode of ['Place', 'Erase', 'Move']) {
+      expect(screen.queryByRole('button', { name: mode })).toBeNull()
+    }
   })
 
-  it('offers Move as a third mode, and only one mode is ever up', () => {
-    // PR #29 refused a move because a drag on the primary button is already
-    // drag-paint. A mode removes the ambiguity rather than arbitrating it; the
-    // canvas's Shift-drag is the same operation without the mode switch.
-    render(<ToolbarHarness />)
-    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    expect(screen.getByRole('button', { name: 'Move' })).toHaveAttribute('data-pressed')
-    expect(screen.getByRole('button', { name: 'Place' })).not.toHaveAttribute('data-pressed')
-    expect(screen.getByRole('button', { name: 'Erase' })).not.toHaveAttribute('data-pressed')
+  it('disables each button when its own stack is empty', () => {
+    // Independently, and both directions of each: a bar that disabled the pair
+    // together would hide a redo the user has and offer an undo they do not.
+    render(<ToolbarHarness history={planHistory({ canUndo: false })} />)
+    expect(screen.getByRole('button', { name: /^Undo/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Redo/ })).toBeEnabled()
+
+    cleanup()
+    render(<ToolbarHarness history={planHistory({ canRedo: false })} />)
+    expect(screen.getByRole('button', { name: /^Undo/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /^Redo/ })).toBeDisabled()
   })
 
-  it('names the piece in the air, which a Shift-drag move leaves no mode to show', () => {
+  it('says why a disabled button is disabled, rather than only looking dead', () => {
+    // The clipped half of the label. A `disabled` button with no reason on it is
+    // the state a screen-reader user cannot tell from a broken one.
+    render(<ToolbarHarness history={planHistory({ canUndo: false, canRedo: false })} />)
+    expect(screen.getByRole('button', { name: /nothing to undo/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /nothing to redo/i })).toBeInTheDocument()
+  })
+
+  it('calls through to the ring, one call per press', () => {
+    // The wire, and it is worth asserting because the toolbar takes the controls
+    // as a prop precisely so that its buttons and the canvas's Ctrl+Z walk one
+    // ring: a bar that built its own would undo a different history.
+    const history = planHistory()
+    render(<ToolbarHarness history={history} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+
+    expect(history.calls).toEqual({ undo: 1, redo: 2 })
+  })
+
+  it('carries no readout, because the surface already says what it said', () => {
+    /*
+      **Deleted rather than moved, and it was a duplicate before it was
+      deleted.** The mono tail reported three things: the piece in the air, a
+      pending rotation and the overlap count.
+
+      All three have a better home. `describeMoveHint` puts the carried piece on
+      the surface's own hint plate — *"Moving X to (4, 7). Drop to commit"* —
+      which is beside the piece rather than in a corner. The pending rotation is
+      now visible in the drawing itself, because the ghost projects its real
+      parts and is drawn turned. And an overlap can no longer be *created*, so a
+      standing count in the chrome describes only rooms saved before the refusal
+      landed; the hatch and the bill's warning row carry those.
+
+      What that buys the rail is its rhythm: a variable-height text block in a
+      column of single-height buttons was the one thing in it that could not
+      hold a line.
+    */
     render(<ToolbarHarness moving="Cut stone wall 2" />)
-    expect(screen.getByText(/moving Cut stone wall 2/)).toBeInTheDocument()
+    expect(screen.queryByText(/moving Cut stone wall 2/)).toBeNull()
   })
 })
 
 /* ----------------------------------------------------------------- the bill */
+
+/**
+ * Every placement whose slot editor the panel asked to open, newest last.
+ *
+ * The panel does not own that dialog — `BuilderScreen` does, because the action
+ * bar over the selected piece opens the same one — so what a `Slots` press can
+ * be asserted on here is the *request*, and this is where it lands. Cleared in
+ * `beforeEach` with the store.
+ */
+const edited: PlacementId[] = []
 
 /**
  * The bill panel over the **real store** — the same three lines the builder
@@ -1225,6 +1352,19 @@ function BillHarness({ download }: { download?: ArchiveDownload }) {
       sheet={file.sprite}
       materialOf={index.materialOf}
       download={download ?? inertDownload(bill)}
+      templates={fixtureContext(file).templates}
+      onEditSlots={(placement) => {
+        edited.push(placement)
+      }}
+      /*
+        Sentinels rather than the real components: what this panel owns about
+        them is *which band each one lands in* — the accessory inventory inside
+        the scrolling container, the backup line in the pinned footer — and the
+        two real components are asserted in their own files. A node the test can
+        find by name is the whole of the contract.
+      */
+      accessories={<p>accessory sentinel</p>}
+      backup={<p>backup sentinel</p>}
     />
   )
 }
@@ -1538,6 +1678,192 @@ describe('the bill of tiles', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Remove the unprintable piece/ }))
     expect(placementCount()).toBe(0)
+  })
+
+  /**
+   * **The column is this panel now, so the two things under it are inside it.**
+   *
+   * They were siblings in the column's grid, in implicit `auto` rows that took
+   * their height from the parts list. The bands they land in are not
+   * interchangeable: the accessory inventory grows with the plan and belongs
+   * where a fifty-row room already scrolls, and the backup line is the app's
+   * only path to a saved room, which a fifty-row room must not be able to push
+   * off screen.
+   */
+  it('scrolls the accessory inventory with the rows and pins the backup line', () => {
+    place('floor1')
+    render(<BillHarness />)
+
+    expect(screen.getByText('accessory sentinel').closest('.of-bill-scroll')).not.toBeNull()
+    expect(screen.getByText('backup sentinel').closest('.of-bill-foot')).not.toBeNull()
+    expect(screen.getByText('backup sentinel').closest('.of-bill-scroll')).toBeNull()
+  })
+
+  /**
+   * **The route the deleted "Pieces on the plan" list used to be.**
+   *
+   * That list was a second enumeration of the placements this panel already
+   * expands into, and it carried two things the plan cannot: a slot editor in
+   * the **tab order**, where the plan's route is reachable only through a
+   * `role="application"` canvas, and a way to reach a piece the plan does not
+   * draw. So the press moves onto the row that already names the placement, and
+   * the three blocks that can name one all carry it — an ordinary placement, a
+   * faulty slot, and a piece that resolved to nothing at all.
+   */
+  it('opens the slot editor for the piece behind a placement row', () => {
+    let id = '' as PlacementId
+    act(() => {
+      id = placeTemplate(anInstance([FIXTURE_IDS.floor1], { x: 1, z: 2 }))
+    })
+    render(<BillHarness />)
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    fireEvent.click(screen.getByRole('button', { name: /Slots .* at x 1, z 2/ }))
+
+    expect(edited).toEqual([id])
+  })
+
+  it('opens the slot editor from a faulty slot, which is where it is fixed', () => {
+    let id = '' as PlacementId
+    act(() => {
+      // A wall in a slot requiring `shape|floor` — `fill-off-slot`, which prints
+      // and will not fit. The fix is a different fill, so the fault row is the
+      // one place in the panel where the editor is the obvious next press.
+      id = placeTemplate(aStrictInstance(FIXTURE_IDS.wallNoBase, { x: 3, z: 1 }))
+    })
+    render(<BillHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Slots .* floor at x 3, z 1/ }))
+    expect(edited).toEqual([id])
+  })
+
+  it('opens the slot editor on a piece whose every fill has left the archive', () => {
+    let id = '' as PlacementId
+    act(() => {
+      // The case no other surface can reach: the recipe is in this build, so the
+      // piece has slots to fill, but it resolved to no parts at all — so it is
+      // in no file row, and nothing on the plan draws it either.
+      id = placeTemplate(anInstance(['tiles/gone/forever.stl'], { x: 4, z: 4 }))
+    })
+    render(<BillHarness />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Slots .* at x 4, z 4/ }))
+    expect(edited).toEqual([id])
+  })
+
+  it('offers no slot editor for a piece whose recipe this build does not ship', () => {
+    act(() => {
+      placeTemplate({
+        ...anInstance([FIXTURE_IDS.floor1], { x: 4, z: 4 }),
+        template: TemplateId.parse('gone-forever'),
+      })
+    })
+    render(<BillHarness />)
+
+    // Not a disabled button: there are no slots to fill, and a control that can
+    // never be enabled is one more thing in a 302px column to read and dismiss.
+    // Removing the piece is the only move, and that button is beside this.
+    expect(screen.queryByRole('button', { name: /^Slots/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Remove the unprintable piece/ })).toBeInTheDocument()
+  })
+
+  /**
+   * **The panel's warning rule, which used to be "all of it, in full".**
+   *
+   * That was right about the note it was written for and wrong as a rule for
+   * nine. What the download is refused over has to be legible at a glance, and
+   * it stops being legible when three paragraphs of true, non-blocking advice
+   * stand above it in the same column at the same weight. So the split follows
+   * `BillOfTiles.complete`: a note that refuses the pack renders in full, and an
+   * advisory one gives its headline and keeps the reason one press away.
+   */
+  it('keeps an advisory warning to its headline, with the reason behind a disclosure', () => {
+    act(() => {
+      placeTemplate(aStrictInstance(FIXTURE_IDS.wallNoBase, { x: 3, z: 1 }))
+    })
+    render(<BillHarness />)
+
+    const disclosure = screen
+      .getByText(/1 filled slot holds a file it does not admit/)
+      .closest('details')
+    expect(disclosure).not.toBeNull()
+    // Reachable, and not what the column opens with.
+    expect(disclosure).toHaveTextContent(/It will print and it will not fit/)
+  })
+
+  /**
+   * **The caption was an inventory of the archive; now it is the one fact the
+   * total does not already say.**
+   *
+   * Three lines under the button named `LICENSE.txt` and `ATTRIBUTION.csv`,
+   * which are in the zip whatever the caption says and are asserted where they
+   * are written — `download/download.test.ts` reads the real archive. What a
+   * reader cannot get from anywhere else on this panel is why the total is
+   * smaller than the print count implies, and that the files are the originals.
+   * The generated-mesh disclosure is not part of this: it is a licence
+   * statement, not an explainer, and `generated.test.tsx` holds it.
+   */
+  it('says what the zip is in one line, and stops naming its entries', () => {
+    place('floor1')
+    render(<BillHarness />)
+
+    expect(
+      screen.getByText(/One zip, one copy of each file — full-resolution originals\./),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/a file placed twice is downloaded once/)).toBeNull()
+    expect(screen.queryByText('LICENSE.txt')).toBeNull()
+  })
+
+  /**
+   * **The predicate has to match the gate, not the copy that is on screen.**
+   *
+   * `noteBlocksDownload` decides whether a warning renders in full or behind a
+   * disclosure, and it is the download gate that makes that the right split. Two
+   * codes reach `complete: false`, not one: `resolve.ts` emits `slot-unfilled`
+   * per empty declared slot, and for a recipe this build no longer ships it
+   * returns early with `unknown-template` alone — but `bill.ts#holesIn` pushes an
+   * entry for that instance too, so the pack is refused either way. Asserted
+   * against the bill rather than against the constant, because the invariant is
+   * about the two agreeing.
+   */
+  it('calls every note the pack is refused over a blocking one', () => {
+    act(() => {
+      placeTemplate({
+        ...anInstance([FIXTURE_IDS.floor1], { x: 4, z: 4 }),
+        template: TemplateId.parse('gone-forever'),
+      })
+    })
+    const bill = buildBillOfTiles(Object.values(useWorkshopStore.getState().placements), assembly, {
+      ...fixtureContext(file),
+      lock: 'openlock',
+    })
+
+    expect(bill.complete).toBe(false)
+    // Every warning this bill carries is one the panel would render in full — so
+    // nothing that refuses the download can be collapsed, whatever the panel
+    // chooses to filter out before rendering.
+    const collapsible = bill.notes.filter(
+      (note) => note.severity === 'warn' && !noteBlocksDownload(note.code),
+    )
+    expect(collapsible).toEqual([])
+  })
+
+  it('says a retired recipe once, in the block that can act on it', () => {
+    act(() => {
+      placeTemplate({
+        ...anInstance([FIXTURE_IDS.floor1], { x: 4, z: 4 }),
+        template: TemplateId.parse('gone-forever'),
+      })
+    })
+    render(<BillHarness />)
+
+    // `OrphanBlock` names the piece and offers to take it off the grid, which is
+    // the whole of what the roll-up could say and more. `unknown-tile` was
+    // already dropped for this reason; `unknown-template` is the same argument.
+    expect(screen.getByText(/1 placed piece has nothing this build can print/)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/1 placed piece names a recipe this build does not ship/),
+    ).toBeNull()
   })
 
   it('renders the verdict at the 512 MB threshold', () => {

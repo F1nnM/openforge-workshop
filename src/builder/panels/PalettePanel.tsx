@@ -44,7 +44,7 @@
  * placement `unknown-template`.
  *
  * **This row makes it place templates.** The list is the 47 generated families
- * plus the 40 shipped recipes, `arm()` writes `tools.setSelectedTemplate`, and
+ * plus the 40 shipped recipes, `arm()` writes `tools.arm`, and
  * A8's disclaimer is gone with the list it was about. `palette.ts` carries the
  * argument for the shape of the list and `families.ts` for the rows themselves;
  * this file is the control.
@@ -243,23 +243,26 @@ export function PalettePanel({ index, tools, search, onQueryChange }: PalettePan
 
   const arm = useCallback(
     (family: TemplateFamily, position: readonly string[] = []) => {
-      tools.setSelectedTemplate(family.id)
-      /* `setSelectedTemplate` has just cleared every axis, so this writes the
-         one the caller asked for onto a clean position rather than merging into
-         whatever the previous row was armed at. */
-      if (position.length > 0) setAxis('size', position)
+      /* One call, both halves. The family and the size used to be two setters
+         and the RECENT strip had to make them in order; `arm` takes both, so
+         there is no window in which a family is armed at the wrong size — and
+         since it replaces every axis, the position lands on a clean one rather
+         than merging into whatever the previous row was armed at.
+
+         There is no mode to force any more either. The old line here set
+         `place` because arming a family while the eraser was up looked like the
+         palette had ignored the click — arming *is* the placing state now, so
+         the thing that line was working around cannot happen. */
+      tools.arm(family.id, position)
       rememberArm({ template: family.id, size: position })
       setRecent(recentArms())
-      // §3: selecting forces place mode. Arming a family while the eraser is up
-      // otherwise looks like the palette ignored the click.
-      tools.setTool('place')
     },
     [tools],
   )
 
   const disarm = useCallback(() => {
-    // `setSelectedTemplate(null)` clears every axis on its own.
-    tools.setSelectedTemplate(null)
+    // `arm(null)` clears every axis on its own.
+    tools.arm(null)
   }, [tools])
 
   /**

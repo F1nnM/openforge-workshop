@@ -171,7 +171,13 @@
  * source of truth and both are projections of it.
  */
 export { usePlanTools } from './usePlanTools'
-export type { PlanTool, PlanToolDefaults, PlanTools, PositionAxis } from './usePlanTools'
+export type { PlanActivity, PlanToolDefaults, PlanTools, PositionAxis } from './usePlanTools'
+
+export { claimsPress, pressMeaning, resolveSelection, stepSelection } from './selection'
+export type { PressMeaning } from './selection'
+
+export { EMPTY_HISTORY, HISTORY_DEPTH, describeChange, record, redo, undo } from './history'
+export type { History, Placements } from './history'
 
 export {
   BASE_LIFT_MM,
@@ -258,8 +264,18 @@ export {
   sectorSubdivisions,
 } from './sector'
 
-export { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap } from './overlap'
-export type { OverlapCandidate, OverlapSubject, PlanBand, PlanLevel } from './overlap'
+export { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap, subjectsConflict } from './overlap'
+export type {
+  BandSource,
+  BandVerdict,
+  Conflict,
+  ConflictKind,
+  ConflictReason,
+  OverlapCandidate,
+  OverlapSubject,
+  PlanBand,
+  PlanLevel,
+} from './overlap'
 
 export {
   buildPlanScene,

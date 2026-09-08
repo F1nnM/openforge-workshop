@@ -14,7 +14,9 @@ exactly the STL files that build needs — plus generate parametric bases on the
   facet counts run with no server round-trip. Tiles carry tags, footprints, sizes and
   composition configs.
 - **Room builder** — place tiles on a grid, and the app resolves what physically connects
-  to what. The result is a bill of tiles.
+  to what. Select a piece to move, turn, re-part or remove it, with undo behind every
+  edit; a placement that would exactly overlap a neighbour is refused rather than
+  silently hatched, so a room you download can be built. The result is a bill of tiles.
 - **Download** — a bill becomes a ZIP built in the browser by a vendored `client-zip`,
   streamed straight from the asset bucket via `showSaveFilePicker` where the platform has
   it. Browsers without it buffer, and split the archive into several parts above the

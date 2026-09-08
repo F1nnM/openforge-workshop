@@ -2,24 +2,27 @@
  * The floating toolbar — design-contract.md §2.4's centred plate at the top of
  * the canvas.
  *
- * `Place` / `Erase` / `Move`, `⟳ Rotate`, `Clear`, and a mono `snap {value}`
- * readout.
+ * `↶ Undo`, `↷ Redo`, `⟳ Rotate`, `Clear`, and a mono `snap {value}` readout.
  *
- * ## The third mode
+ * ## There is no mode toggle, and undo is what replaced it
  *
- * §2.4's toggle names two modes. `Move` is the third, and it is here because
- * PR #29's objection to a move was a *gesture* objection — on the plan view the
- * primary button was already drag-paint — which a mode answers without
- * arbitrating anything. The surface also takes `Shift` with the primary button as
- * a move in any mode, so this control is the discoverable path rather than the
- * only one; `M` is its shortcut, beside the existing `P` and `E`. (Row **R4**
- * deleted the drag-paint renderer that raised the objection. The mode is the
- * better answer either way, and the 3D surface has no drag-paint at all — its
- * drag is the orbit, which `three/surface.ts` sets out.)
+ * §2.4 specified a `Place` / `Erase` toggle and a `Move` mode was added beside
+ * it. All three are **deleted**. They were the only control here that changed
+ * what the primary button meant, and what the primary button means is now a
+ * function of what is armed or selected — `usePlanTools.ts` carries the whole
+ * argument, and `selection.ts#pressMeaning` is the function.
  *
- * A `Shift`-drag move leaves this toggle showing `Place`, which is why the
- * readout below reports `status.moving`: a piece in the air with no mode to show
- * it would be the one editing state the toolbar could not see.
+ * Undo and redo take their place, and the substitution is not arbitrary.
+ * `Erase` was a mode on a *destructive* verb, which is the one case the mode
+ * literature says not to mode-switch, because a slip destroys work. Removing a
+ * piece is now `Delete` on a deliberately chosen selection, and what makes that
+ * safe rather than merely different is that it can be taken back. The toolbar
+ * gained the control the mode was standing in for.
+ *
+ * The readout below still reports `status.moving`, and now for a better reason
+ * than it had: a piece in the air is ephemeral component state that no store
+ * write has happened for yet, so it is the one editing state nothing else on
+ * this bar can see.
  *
  * ## Snap offers 0.5 and 1.0, and there is no 0.25
  *
@@ -48,134 +51,140 @@
  *
  * ## `role="group"`, not `role="toolbar"`
  *
- * A `toolbar` promises arrow-key movement between its controls with one tab stop.
- * Implementing that around a Base UI `ToggleGroup` — which already owns arrow
- * keys inside itself — would mean two composites fighting over the same keys, and
- * the WAI pattern's own guidance is not to nest them. Four tab stops with a
- * labelled group is the honest markup, and the canvas's own key map (`R`, `P`,
- * `E`, `G`) is the fast path for anyone who wants one.
+ * A `toolbar` promises arrow-key movement between its controls with one tab
+ * stop. The `ToggleGroup` that made nesting two composites the problem is gone,
+ * but the answer is unchanged and for a simpler reason: these are four ordinary
+ * buttons, a labelled group is the honest markup for them, and the canvas's own
+ * key map (`R`, `G`, `Ctrl`+`Z`, `Delete`) is the fast path for anyone who wants
+ * one. Promising arrow keys here would also collide with the arrow keys the
+ * surface uses to nudge a selection.
  */
 import type { PlanTools } from '@/builder/canvas'
 import { formatUnits } from '@/builder/canvas'
-import type { SurfaceStatus } from '@/builder/three'
-import { Button, ToggleGroup, ToggleItem, VisuallyHidden } from '@/ui/primitives'
+import type { UndoControls } from '@/builder/canvas/useHistory'
+import { VisuallyHidden } from '@/ui/primitives'
 
 import './panels.css'
 
 export interface PlanToolbarProps {
   readonly tools: PlanTools
   /**
-   * The work surface's readout. `null` until it has reported once.
+   * Undo and redo, handed in rather than taken with `useHistory()`.
    *
-   * It was `PlanStatus`, which lived in `PlanCanvas.tsx`. Row **R4** deleted that
-   * renderer, and `SurfaceStatus` — declared in `builder/three/edits.ts`, field
-   * for field identical to `PlanStatus` and deliberately so, precisely to survive
-   * this deletion — is the type now. `import type`, so it is erased at build time
-   * and no value edge to `@/builder/three` exists in the bundle; the panels'
-   * `boundary.test.ts` walks value imports only, for the same reason.
+   * The hook keeps its ring in a ref and subscribes to the store, so a second
+   * caller would build a second ring: the toolbar's buttons and the canvas's
+   * `Ctrl`+`Z` would then walk two independent histories of the same room. One
+   * caller, one ring, passed to everything that offers the verb.
    */
-  readonly status: SurfaceStatus | null
-  /**
-   * The rotation step of whatever is armed, in degrees, or `undefined` for
-   * nothing armed.
-   *
-   * The caller's, because the caller is the one that knows what is armed: see
-   * the module note, and `three/edits.ts#ARMED_TURN_STEP_DEG` for the value a
-   * template family takes.
-   */
-  readonly armedStep: number | undefined
+  readonly history: UndoControls
   readonly placed: number
   readonly onClear: () => void
 }
+
+/**
+ * The platform's own modifier, for the chips that name a shortcut.
+ *
+ * **`⌘` was wrong on two of the three platforms this ships to**, and the defect
+ * was only visible in a browser: the key handler in `RoomSurface` accepts
+ * `ctrlKey` *or* `metaKey` precisely so that undo works everywhere, and a chip
+ * that showed `⌘Z` to a Linux or Windows user advertised a key they do not have
+ * while the one they do have went unmentioned.
+ *
+ * `userAgentData.platform` first because `navigator.platform` is deprecated, and
+ * both are guarded: this module renders under jsdom in the panel tests, where
+ * neither is guaranteed. The fallback is `Ctrl`, which is the majority platform
+ * and the safer thing to be wrong about — a Mac user who sees `Ctrl` still finds
+ * the key, where a Linux user who sees `⌘` has nothing to press.
+ *
+ * Computed once at module scope: the platform cannot change while the tab is
+ * open, and a chip is rendered on every toolbar paint.
+ */
+const MOD_KEY: string = (() => {
+  if (typeof navigator === 'undefined') return 'Ctrl'
+  const data: unknown = Reflect.get(navigator, 'userAgentData')
+  const modern: unknown = typeof data === 'object' && data !== null ? Reflect.get(data, 'platform') : undefined
+  const name = typeof modern === 'string' && modern !== '' ? modern : navigator.platform
+  return /mac|iphone|ipad|ipod/i.test(name) ? '⌘' : 'Ctrl'
+})()
 
 /** "half a unit" / "one unit" — the two snap steps, said rather than shown. */
 function stepLabel(step: number): string {
   return step === 1 ? 'one unit' : 'half a unit'
 }
 
-export function PlanToolbar({ tools, status, armedStep, placed, onClear }: PlanToolbarProps) {
-  const step = armedStep
-  const conflicts = status?.conflicts ?? 0
+export function PlanToolbar({ tools, placed, history, onClear }: PlanToolbarProps) {
 
   return (
-    <div className="of-build-toolbar" role="group" aria-label="Builder tools">
-      <ToggleGroup
-        label="Tool"
-        value={tools.tool}
-        onValueChange={(next) => {
-          // Always one mode: Base UI reports `null` when the pressed item is
-          // pressed again, and a builder with neither tool up would swallow every
-          // click on the canvas.
-          if (next !== null) tools.setTool(next)
-        }}
+    <>
+      {/*
+        Undo starts the rail's second group — the verbs that change the scene —
+        so it carries the top margin that separates it from the generator above.
+        The group boundaries do not line up with the component boundaries, and
+        marking the *first item of a group* rather than wrapping each group in a
+        div is what lets them not have to: the rail is one column of siblings
+        from three owners, and a wrapper per owner would reintroduce exactly the
+        grouping container this rail exists without.
+      */}
+      <button
+        type="button"
+        className="of-stage-tool"
+        data-rail-group="start"
+        disabled={!history.canUndo}
+        onClick={history.undo}
       >
-        <ToggleItem value="place">Place</ToggleItem>
-        <ToggleItem value="erase">Erase</ToggleItem>
-        <ToggleItem value="move">Move</ToggleItem>
-      </ToggleGroup>
-
-      <Button
-        size="sm"
-        disabled={step === undefined}
-        onClick={() => {
-          if (step !== undefined) tools.rotate(step)
-        }}
-      >
-        <span aria-hidden="true">⟳</span>
-        <span>Rotate</span>{' '}
-        {/*
-          Every clipped span in this file is preceded by a real space:
-          `dom-accessibility-api` trims each text node before joining, so a
-          leading space inside the string does not separate the words and the
-          button would announce as "Rotatethe armed tile".
-        */}
+        <span aria-hidden="true">↶</span>
+        <span className="of-stage-tool-label">Undo</span>{' '}
         <VisuallyHidden>
-          {step === undefined
-            ? '— nothing is armed yet'
-            : `the armed recipe by ${formatUnits(step)} degrees, shortcut R`}
+          {history.canUndo ? 'the last change' : '— nothing to undo'}
         </VisuallyHidden>
-        <kbd className="of-build-key" aria-hidden="true">
-          R
+        <kbd className="of-stage-tool-key" aria-hidden="true">
+          {MOD_KEY}Z
         </kbd>
-      </Button>
+      </button>
 
-      <Button size="sm" disabled={placed === 0} onClick={onClear}>
-        Clear{' '}
+      <button
+        type="button"
+        className="of-stage-tool"
+        disabled={!history.canRedo}
+        onClick={history.redo}
+      >
+        <span aria-hidden="true">↷</span>
+        <span className="of-stage-tool-label">Redo</span>{' '}
+        <VisuallyHidden>
+          {history.canRedo ? 'the change just undone' : '— nothing to redo'}
+        </VisuallyHidden>
+        <kbd className="of-stage-tool-key" aria-hidden="true">
+          ⇧{MOD_KEY}Z
+        </kbd>
+      </button>
+
+      <button type="button" className="of-stage-tool" disabled={placed === 0} onClick={onClear}>
+        <span aria-hidden="true">⌧</span>
+        <span className="of-stage-tool-label">Clear</span>{' '}
         <VisuallyHidden>
           {placed === 0 ? '— nothing is placed' : `all ${String(placed)} placed tiles`}
         </VisuallyHidden>
-      </Button>
-
-      <Button size="sm" className="of-build-snap" onClick={tools.toggleSnap}>
-        snap {formatUnits(tools.step)}{' '}
-        <VisuallyHidden>{`— switch to ${stepLabel(tools.step === 1 ? 0.5 : 1)}`}</VisuallyHidden>
-      </Button>
+      </button>
 
       {/*
-        The mono status tail. Only ever shows what is true: the piece currently in
-        the air, a pending rotation the user has to be able to see (it applies to
-        the *next* placement, so nothing in the room carries it yet) and the
-        overlap count, which is the surface's own conflict marking counted up.
+        Snap starts the third group: the settings. It is a *state* rather than an
+        action, so it reads as the two toggles below it do — a name on the left
+        and the current value on the right — and not as the verbs above it.
       */}
-      <p className="of-build-readout">
-        {status?.moving == null ? null : (
-          <span>
-            <span aria-hidden="true">✥ </span>
-            moving {status.moving}
-          </span>
-        )}
-        {tools.rotation === 0 ? null : (
-          <span>
-            <span aria-hidden="true">⟳ </span>
-            {formatUnits(tools.rotation)}° <VisuallyHidden>pending rotation</VisuallyHidden>
-          </span>
-        )}
-        {conflicts === 0 ? null : (
-          <span className="of-build-conflicts">
-            {String(conflicts)} overlapping
-          </span>
-        )}
-      </p>
-    </div>
+      <button
+        type="button"
+        className="of-stage-tool"
+        data-rail-group="start"
+        onClick={tools.toggleSnap}
+      >
+        <span className="of-stage-tool-key-label" aria-hidden="true">
+          snap
+        </span>
+        <span className="of-stage-tool-value" aria-hidden="true">
+          {formatUnits(tools.step)}
+        </span>
+        <VisuallyHidden>{`Snap: ${stepLabel(tools.step)} — switch to ${stepLabel(tools.step === 1 ? 0.5 : 1)}`}</VisuallyHidden>
+      </button>
+    </>
   )
 }

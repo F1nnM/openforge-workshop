@@ -75,6 +75,7 @@
 import { Suspense, lazy } from 'react'
 
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
+import type { UndoControls } from '@/builder/canvas/useHistory'
 import type { CatalogAssets } from '@/catalog'
 import type { PlacementId, SlotName } from '@/store'
 
@@ -134,6 +135,14 @@ export interface Builder3DPanelProps {
    */
   readonly onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
   /** The surface's readout, for the toolbar and the corner plates. */
+  /**
+   * Undo and redo, from the screen's single {@link useHistory} call.
+   *
+   * Threaded rather than taken here: the hook holds its ring in a ref, so a
+   * component that called it would own a *second* history of the same room and
+   * the toolbar's buttons would disagree with the canvas's keys.
+   */
+  readonly history: UndoControls
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
@@ -145,6 +154,7 @@ export function Builder3DPanel({
   tools,
   assets,
   fill,
+  history,
   onEditSlots,
   onStatus,
   fetchImpl,
@@ -158,6 +168,7 @@ export function Builder3DPanel({
           tools={tools}
           assets={assets}
           fill={fill}
+          history={history}
           {...(onEditSlots === undefined ? {} : { onEditSlots })}
           {...(onStatus === undefined ? {} : { onStatus })}
           {...(fetchImpl === undefined ? {} : { fetchImpl })}

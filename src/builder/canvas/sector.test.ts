@@ -362,7 +362,19 @@ function subject(foot: ArcFootprint, rotation: number, x: number, z: number): Ov
   const shape = footprintShape(foot)
   if (shape === undefined) throw new Error('an arc has a shape')
   const placed = planGeometry(shape, rotation, x, z)
-  return { band: 'area', level: levelAt(0), box: placed.box, parts: placed.parts, axisAligned: placed.axisAligned }
+  return {
+    band: 'area',
+    bandSource: 'kinds',
+    level: levelAt(0),
+    box: placed.box,
+    parts: placed.parts,
+    axisAligned: placed.axisAligned,
+    // The sector's real cover, which is `outward` — so every conflict this
+    // file reports is `inexact`, and that is the correct answer rather than a
+    // weakness of the fixture: a decomposed sector is exactly the case the
+    // refusal gate must decline to act on.
+    cover: shape.cover,
+  }
 }
 
 /**
@@ -457,11 +469,15 @@ describe('the error direction, on placed pairs', () => {
     // Two 90-degree quarter discs of radius 2, anchored so their straight faces
     // are 0.5 units apart: no contact, and none reported.
     const apart = subjectsConflict(subject(arc(0, 2, 90, 'disc'), 0, 0, 0), subject(arc(0, 2, 90, 'disc'), 0, 2.5, 0))
-    expect(apart).toBe(false)
+    expect(apart).toBeNull()
 
     // Overlapped by a whole unit: reported.
     const over = subjectsConflict(subject(arc(0, 2, 90, 'disc'), 0, 0, 0), subject(arc(0, 2, 90, 'disc'), 0, 1, 0))
-    expect(over).toBe(true)
+    // Reported — and reported as `inexact`, naming the decomposition as the
+    // doubt. That is the whole point of the kind: a curved pair may be
+    // hatched but must never refuse a placement, because the parts tested
+    // are a superset of the sectors by up to `slack`.
+    expect(over).toEqual({ kind: 'inexact', reason: 'curved' })
 
     // And the direction of the residual error, stated as an inequality rather
     // than as an example: the decomposition is a superset, so anything it

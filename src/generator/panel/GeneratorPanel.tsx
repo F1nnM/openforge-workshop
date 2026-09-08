@@ -121,19 +121,29 @@ export function GeneratorPanel({
   }
 
   if (!open) {
+    /*
+      Closed, this is one item in the stage's rail rather than a plate of its
+      own in the corner — so it wears `of-stage-tool` like every other control
+      that acts on the room, and there is no wrapping `of-gen-launch` around it
+      to reintroduce a second plate inside the rail's own column.
+
+      The `square, wall, corner, riser` note is dropped rather than moved. It
+      was a discoverability aid for a lone corner plate, and a second line of
+      copy inside a rail of single-height buttons breaks the one rhythm the rail
+      is built on. The drawer names all four shapes in its first heading, one
+      press away, which is where the answer belongs.
+    */
     return (
-      <div className="of-gen-launch" data-open="false">
-        <button
-          type="button"
-          className="of-gen-toggle"
-          onClick={() => {
-            toggle(true)
-          }}
-        >
-          Generate a base
-          <span className="of-gen-toggle-note">square, wall, corner, riser</span>
-        </button>
-      </div>
+      <button
+        type="button"
+        className="of-stage-tool"
+        onClick={() => {
+          toggle(true)
+        }}
+      >
+        <span aria-hidden="true">✧</span>
+        <span className="of-stage-tool-label">Generate a base</span>
+      </button>
     )
   }
 

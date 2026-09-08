@@ -155,7 +155,7 @@ const { AO_RADIUS_MM, BuilderRoom, MEDIAN_TILE_MM } = await import('./BuilderRoo
 const { AO_RADIUS } = await import('@/three/Stage')
 const { VIEW_RADIUS } = await import('@/three/geometry')
 const { surfaceFit } = await import('./surface')
-const { fixtureAuthorities, planTools, sceneOf } = await import('./fixture')
+const { fixtureAuthorities, planHistory, planTools, sceneOf } = await import('./fixture')
 const { readFileSync } = await import('node:fs')
 const { join } = await import('node:path')
 
@@ -165,6 +165,13 @@ const CATALOG = planCatalogFromFile(fixtureCatalogFile())
    once for the file — eleven records, but `buildAssemblyIndex` is not free and
    nothing here mutates it. */
 const AUTHORITIES = fixtureAuthorities()
+/* The undo controls, likewise required and likewise built once. One recorder for
+   the file because the real screen calls `useHistory` once and hands the same
+   controls to the toolbar and to the surface — two rings over one room would
+   each record every edit and undo a different history of it. Nothing in this
+   file presses undo; the surface's `Ctrl`+`Z` is `gesture.test.tsx`'s subject and
+   the buttons are `panels.test.tsx`'s. */
+const HISTORY = planHistory()
 const ASSETS = { lod: 'https://objects.openforge.tools/lod' }
 
 function scene(ids: readonly string[]) {
@@ -210,6 +217,7 @@ describe('the room with an empty store — today’s real state', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.wall2])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -244,6 +252,7 @@ describe('the room with an empty store — today’s real state', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -266,6 +275,7 @@ describe('the room with an empty store — today’s real state', () => {
         catalog={CATALOG}
         scene={scene([])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={fetchImpl as unknown as typeof fetch}
@@ -299,6 +309,7 @@ describe('the armed family', () => {
         catalog={CATALOG}
         scene={scene([])}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={fetchImpl as unknown as typeof fetch}
@@ -322,6 +333,7 @@ describe('the armed family', () => {
         catalog={CATALOG}
         scene={drawn}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={fetchImpl as unknown as typeof fetch}
@@ -348,6 +360,7 @@ describe('when an object is there and broken', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={broken as unknown as typeof fetch}
@@ -375,6 +388,7 @@ describe('when the browser cannot decode meshopt', () => {
           catalog={CATALOG}
           scene={scene([FIXTURE_IDS.floor1])}
           tools={planTools()}
+          history={HISTORY}
           assets={ASSETS}
         fill={AUTHORITIES}
             fetchImpl={fetchImpl as unknown as typeof fetch}
@@ -401,6 +415,7 @@ describe('the room with a store object', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor1, FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={glbResponder()}
@@ -452,6 +467,7 @@ describe('the room with a store object', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={glbResponder()}
@@ -469,6 +485,7 @@ describe('the room with a store object', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2, FIXTURE_IDS.wall2, FIXTURE_IDS.angled])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={glbResponder()}
@@ -493,6 +510,7 @@ describe('what a click would place — row C5', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -522,6 +540,7 @@ describe('what a click would place — row C5', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools({ selectedTemplate: OTHER_FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -545,6 +564,7 @@ describe('what a click would place — row C5', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -560,6 +580,7 @@ describe('what a click would place — row C5', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2])}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -588,6 +609,7 @@ describe('the keyboard path exists in the document', () => {
         onEditSlots={() => undefined}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
       />,
     )
     await waitFor(() => {
@@ -606,6 +628,7 @@ describe('the keyboard path exists in the document', () => {
         fill={AUTHORITIES}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
       />,
     )
     await waitFor(() => {
@@ -624,6 +647,7 @@ describe('the keyboard path exists in the document', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -637,17 +661,54 @@ describe('the keyboard path exists in the document', () => {
     })
     const keys = document.querySelector('#of-b3d-keys')
     expect(keys?.textContent).toMatch(/Drag to orbit/)
-    expect(keys?.textContent).toMatch(/Arrow keys move the plan cursor/)
-    expect(keys?.textContent).toMatch(/Escape puts it back/)
     /*
-      Row **C8**. The right click is on the drawing now, so the key map has to
-      say so — and it has to say the *other* route in the same breath, because a
-      right click has no keyboard equivalent every platform agrees on and this
-      paragraph is what the canvas's `aria-describedby` points at. The second
-      sentence is the panel's list, named as the pointer-free way in.
+      **The arrows do one of two things and the paragraph has to say which.**
+      `onKey` branches on the selection: with one they nudge the piece, with none
+      they walk the plan cursor. It read as unconditional until the selection
+      model arrived.
     */
-    expect(keys?.textContent).toMatch(/Right-click a piece to choose what goes in its slots/)
-    expect(keys?.textContent).toMatch(/Pieces on the plan list/)
+    expect(keys?.textContent).toMatch(
+      /Arrow keys move the selected piece, or the plan cursor when nothing is selected/,
+    )
+    /*
+      **Three claims left with no binding behind them, deleted rather than
+      restated.** `Shift`+`Enter` picked a tile up to move it and `Escape` put it
+      back, which is what the arrows-nudge-the-selection path replaced — there is
+      no `shiftKey` branch on `Enter` in `onKey` at all — and `P`, `E` and `M`
+      switched the three modes, which `onKey` has no cases for. A key map is the
+      canvas's `aria-describedby`, so a binding named in it that does not exist
+      is worse than one left out: the user it is written for cannot see the
+      drawing to discover the truth.
+    */
+    expect(keys?.textContent).not.toMatch(/Shift and Enter together/)
+    expect(keys?.textContent).not.toMatch(/P, E and M/)
+    // What `Escape` does do, which is two things and neither of them a move.
+    expect(keys?.textContent).toMatch(/Escape drops the selection, or disarms the palette/)
+    /*
+      **Both routes to the editor, and the sentence had gone stale on both.**
+      It named a right click, which the selection model took back for the camera
+      — the secondary button cancels what is armed now and opens nothing — and it
+      sent the keyboard user to a list of the placed pieces beside the drawing,
+      which the sidebar cleanup deleted. So it names the two that exist: the
+      action bar over the selected piece, and a `Slots` press on the bill's own
+      row. This paragraph is what the canvas's `aria-describedby` points at, so a
+      route named here that is not there is the one kind of error in it that
+      strands the user it is written for.
+    */
+    expect(keys?.textContent).toMatch(/Select a piece and press\s+Slots on it, or Enter, to choose what goes in its slots/)
+    expect(keys?.textContent).toMatch(/press Slots on its row in the bill of tiles/)
+    expect(keys?.textContent).not.toMatch(/Right-click a piece/)
+    /*
+      And `Enter`'s two jobs are told apart, because the selection decides which
+      one it does — `onKey`'s `Enter` arm opens the selection's slots and only
+      falls through to `actAt` with nothing selected. Naming the slot route above
+      without this would leave the paragraph asserting both of Enter's meanings
+      unconditionally, two lines apart.
+    */
+    expect(keys?.textContent).toMatch(/with nothing selected Enter places the armed tile/)
+    // `Delete` takes the **selection** and not whatever the cursor is over —
+    // `onKey`'s `Delete` arm is `chosen`, and it is what replaced erase mode.
+    expect(keys?.textContent).toMatch(/Delete removes the selected piece/)
     // And the right button is a pan, which is the interaction the 5 px
     // threshold protects — the sentence used to name only the middle one.
     expect(keys?.textContent).toMatch(/drag with the right or middle button/)

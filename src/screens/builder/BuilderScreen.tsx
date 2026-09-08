@@ -23,9 +23,11 @@
  *
  * ## The four things this screen actually decides
  *
- *   1. **`usePlanTools()` is called once.** Mode, snap, pending rotation and the
- *      palette selection are one object shared by the palette, the toolbar and
- *      the surface — all three write to it. Two hooks would be two builders.
+ *   1. **`usePlanTools()` is called once.** Snap, the pending rotation, the
+ *      armed family and the selection are one object shared by the palette, the
+ *      toolbar and the surface — all three write to it. Two hooks would be two
+ *      builders. `useHistory()` is called once for the same reason and it is a
+ *      sharper one: two rings would each record the other's undos.
  *   2. **The bill is a projection of the store, not a copy.** `usePlacements()`
  *      feeds `buildBillOfTiles`, and the surface reads the same map through the
  *      same scene. Neither holds state of its own, so the room and the parts list
@@ -115,6 +117,7 @@ import {
   templateSlotLayout,
   usePlanTools,
 } from '@/builder/canvas'
+import { useHistory } from '@/builder/canvas/useHistory'
 import {
   BackupPanel,
   BillPanel,
@@ -124,15 +127,13 @@ import {
   useArchiveDownload,
 } from '@/builder/panels'
 import type { SlotEditTarget } from '@/builder/panels/slots'
-import { SlotsPanel } from '@/builder/panels/slots'
+import { AccessorySection, SlotEditor } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
-import type { SurfaceStatus } from '@/builder/three'
 // Deep, and not through the barrel: `@/builder/three/index.ts` exports only
 // `Builder3DPanel` and `lod.ts` as values, and its `boundary.test.ts` walks that
 // entry's closure to keep the renderer out of it. `edits.ts` imports no renderer
 // — `@/builder/canvas`, `@/catalog`, `@/store` — so reading one constant from it
 // costs this screen nothing and leaves that rule intact.
-import { ARMED_TURN_STEP_DEG } from '@/builder/three/edits'
 import { GeneratorPanel } from '@/generator/panel'
 import type { GeneratorPlaceHandler } from '@/generator/panel'
 import { buildGeneratedBill } from '@/generator/placement/bill'
@@ -235,36 +236,21 @@ function Builder({ index }: { index: CatalogIndex }) {
      has no opinion about it, and the re-solve below is the write that makes a
      change visible at all. */
   const design = useRoomDesign()
-  /**
-   * The surface's readout — one state, one writer, since row **R4**.
-   *
-   * It was two, `status` from `PlanCanvas` and `surfaceStatus` from the 3D room,
-   * with `surfaceStatus ?? status` deciding which the toolbar and the two corner
-   * plates showed. Two renderers were mounted at once and both published on
-   * every pointer move, so a single state would have thrashed on whichever
-   * render fired last. R4 deleted the plan view, so there is one publisher and
-   * the `??` had nothing left on its right-hand side.
-   *
-   * `null` until the surface has reported once, which is what the fallback
-   * sentence in the hint plate below is for.
-   */
-  const [status, setStatus] = useState<SurfaceStatus | null>(null)
 
   /**
    * Which placed instance's slot editor is open, and on which slot — row **C8**.
    *
    * **Held here because two surfaces open it and neither can hold the other's
-   * state.** `SlotsPanel` owned it until this row, which was correct while a
-   * piece's row in the bill column was the only way in; the owner asked for the
-   * editor to *"come up with a right click"* on the piece, so the 3D surface now
-   * opens it too, and a `useState` inside the panel is unreachable from inside
-   * `<Builder3DPanel>`. This is the same lift the surface `status` above got for
-   * the same reason, one row earlier.
+   * state**, and since the sidebar was cut back to the bill this component
+   * mounts the dialog as well. The openers are the action bar over the selected
+   * piece on the plan and a `Slots` press on a bill row; the panel that used to
+   * own this state was deleted with the second list of placed pieces it stood
+   * over.
    *
-   * `slot` is what makes the drawing's route better than the panel's rather than
-   * merely equivalent: a right click lands on a *part*, so `partAt` names the
-   * slot the user pointed at and the editor opens on that row. The panel row
-   * passes no slot, because a row names a piece and has no point to resolve.
+   * `slot` is what makes the plan's route better than a row's rather than merely
+   * equivalent: it resolves a *point*, so `partAt` names the slot the user
+   * pointed at and the editor opens on that row. A bill row passes no slot,
+   * because a row names a piece and has no point to resolve.
    */
   const [editing, setEditing] = useState<SlotEditTarget | null>(null)
 
@@ -283,6 +269,15 @@ function Builder({ index }: { index: CatalogIndex }) {
 
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
+  /**
+   * Undo and redo — **called once, here**, for `usePlanTools`' own reason.
+   *
+   * The hook holds its ring in a `useRef` and subscribes to the store, so every
+   * call site is an independent history of the same room. Two would mean the
+   * toolbar's buttons and the canvas's `Ctrl`+`Z` walking different stacks, each
+   * recording the other's undos. One call, threaded to both.
+   */
+  const history = useHistory()
 
   const assembly = useMemo(() => buildAssemblyIndex(index.file), [index])
 
@@ -346,6 +341,7 @@ function Builder({ index }: { index: CatalogIndex }) {
      are about the templates this screen can actually place — if the two ever
      diverge, the control must follow the table the bill and the solver use. */
   const designRecipes = useMemo(() => [...recipes.values()], [recipes])
+
   /**
    * **Row B2's slot conventions, wired.** The one thing the canvas cannot see.
    *
@@ -418,6 +414,33 @@ function Builder({ index }: { index: CatalogIndex }) {
     () => buildBillOfTiles(Object.values(placements), assembly, { templates, composition, lock }),
     [placements, assembly, templates, composition, lock],
   )
+
+  /**
+   * The open target as the two things {@link SlotEditor} takes, or `null`.
+   *
+   * A lookup and not a walk: the dialog needs the *one* instance and the recipe
+   * it names, and both are one map read away. This resolved through `planPieces`
+   * — a summary of every placement, with each one's filled count, pinned count
+   * and list of slots needing a choice — while the deleted pieces list rendered
+   * a row per instance from those figures. With that list gone the dialog was
+   * the last caller, and it uses two of the seven fields, so the derivation went
+   * with the list.
+   *
+   * Not memoised: it is two reads and a `Map.get`, and it is `null` on every
+   * render but the ones where the dialog is open.
+   */
+  const edited =
+    editing === null
+      ? null
+      : (() => {
+          const instance = placements[editing.placement]
+          if (instance === undefined) return null
+          const template = templates(instance.template)
+          // A recipe this build no longer ships has no slots to open on, and a
+          // placement removed from under an open dialog has no instance. Both
+          // close it, which is the same answer the editor's own props require.
+          return template === undefined ? null : { instance, template }
+        })()
 
   /**
    * Row S5's generated bill — the fifth derivation, and the second bill.
@@ -644,18 +667,42 @@ function Builder({ index }: { index: CatalogIndex }) {
 
       <div className="of-builder-stage">
         <div className="of-builder-toolbar-slot">
+                    {/*
+            Row S4. Closed it is a plate in the stage's top-left and costs 656 B
+            gzipped, A/B measured; opened it is a non-modal 442px drawer down the
+            stage's right edge, and the parameter schemas, the sweep tables and the
+            resolver arrive in their own chunk on that press. The OpenSCAD engine
+            is a second boundary further on and loads only when a parameter set
+            resolves to no archived file. Each shape opens on one that does, so
+            the first paint of the drawer compiles nothing.
+
+            It takes `records` because catalog-first resolution is a join against
+            the archive's own base filenames, and the index this screen already
+            holds is the only copy of those: `resolve.ts` records why a shipped
+            reverse index would only restate what the records already say.
+
+            `onPlace` is row S5's seam, wired by row X9. The drawer resolves the
+            recipe and hands over a `RecipePlacement` plus the bytes when the
+            engine has produced any; `placeGenerated` above writes them. `placeAt`
+            is the other half — the drawer has no scene, so it cannot know which
+            cell is free.
+          */}
+          <GeneratorPanel
+            records={index.file.records}
+            assets={index.file.assets}
+            onPlace={placeGenerated}
+            placeAt={(foot) => {
+              // The height as well as the footprint: `freeCellFor` tests the same
+              // vertical interval the scene's own sweep does, so a riser and a
+              // 6 mm base are free in different cells.
+              const [x, z] = freeCellFor(scene, foot.footprint, foot.heightMm)
+              return { x, z }
+            }}
+          />
+
           <PlanToolbar
             tools={tools}
-            status={status}
-            /*
-              The step, not the record — row A4b's answer, taken rather than
-              re-derived. A family's rotation step is the least common multiple
-              of its parts' own steps and row C2 has not chosen the parts, so
-              `ARMED_TURN_STEP_DEG` is the corpus default and `planTurn` already
-              turns an armed family by it. Passing the step keeps the toolbar and
-              the surface turning by one number.
-            */
-            armedStep={tools.selectedTemplate === null ? undefined : ARMED_TURN_STEP_DEG}
+            history={history}
             placed={bill.placements}
             onClear={clearPlacements}
           />
@@ -678,7 +725,7 @@ function Builder({ index }: { index: CatalogIndex }) {
             plates. That collision was real and measured before this landed:
             `Place` was 100% unclickable at 1295px.
           */}
-          <LockToggle />
+          <LockToggle className="of-stage-tool" />
           {/*
             Row **D6**, and the second room-wide preference in the band.
 
@@ -703,6 +750,7 @@ function Builder({ index }: { index: CatalogIndex }) {
             so a closed dialog does not wake on every placement.
           */}
           <DesignToggle
+            className="of-stage-tool"
             authorities={{ recipes: designRecipes, index: assembly, composition }}
             placed={bill.placements}
           />
@@ -734,6 +782,7 @@ function Builder({ index }: { index: CatalogIndex }) {
           catalog={planCatalog}
           scene={scene}
           tools={tools}
+          history={history}
           assets={index.file.assets}
           /*
             Row **C5**: the three authorities the click's fill solve needs, and
@@ -754,95 +803,88 @@ function Builder({ index }: { index: CatalogIndex }) {
           */
           fill={{ index: assembly, templates, composition }}
           /*
-            Row **C8**. The owner's right click, arriving from the piece on the
-            plan: `RoomSurface` resolves the pick to a placement and to the slot
-            whose part it hit, and this screen turns that into the open state
-            `SlotsPanel` renders the editor from. The panel's own row keeps its
-            gesture — it is the only pointer-free way in.
+            The plan's route to the editor, from the action bar over the
+            selected piece: `RoomSurface` resolves the pick to a placement and to
+            the slot whose part it hit, and this screen turns that into the open
+            state the editor below mounts from. A `Slots` press on a bill row is
+            the other opener, and the one a user tabbing the page reaches — this
+            one is operable by `Enter`, but only through a `role="application"`
+            canvas with its own key map.
           */
           onEditSlots={editSlots}
-          onStatus={setStatus}
         />
 
-        {/*
-          Row S4. Closed it is a plate in the stage's top-left and costs 656 B
-          gzipped, A/B measured; opened it is a non-modal 442px drawer down the
-          stage's right edge, and the parameter schemas, the sweep tables and the
-          resolver arrive in their own chunk on that press. The OpenSCAD engine
-          is a second boundary further on and loads only when a parameter set
-          resolves to no archived file. Each shape opens on one that does, so
-          the first paint of the drawer compiles nothing.
-
-          It takes `records` because catalog-first resolution is a join against
-          the archive's own base filenames, and the index this screen already
-          holds is the only copy of those: `resolve.ts` records why a shipped
-          reverse index would only restate what the records already say.
-
-          `onPlace` is row S5's seam, wired by row X9. The drawer resolves the
-          recipe and hands over a `RecipePlacement` plus the bytes when the
-          engine has produced any; `placeGenerated` above writes them. `placeAt`
-          is the other half — the drawer has no scene, so it cannot know which
-          cell is free.
-        */}
-        <GeneratorPanel
-          records={index.file.records}
-          assets={index.file.assets}
-          onPlace={placeGenerated}
-          placeAt={(foot) => {
-            // The height as well as the footprint: `freeCellFor` tests the same
-            // vertical interval the scene's own sweep does, so a riser and a
-            // 6 mm base are free in different cells.
-            const [x, z] = freeCellFor(scene, foot.footprint, foot.heightMm)
-            return { x, z }
-          }}
-        />
       </div>
 
+      {/*
+        **One child, and the column's whole height.** It was three siblings in a
+        grid whose `1fr` row was the bill and whose implicit `auto` rows were the
+        slots panel and the backup panel — so a fixed-height column was shared
+        three ways and the parts list, the one thing a reader came for, paid for
+        both of the others. The two survivors are inside the bill's own three
+        bands now: the accessory inventory at the foot of the scrolling one, the
+        backup line in the footer. See `BillPanel.tsx` for the argument, and
+        `builder.css` for the track that is left.
+      */}
       <div className="of-builder-bill">
         <BillPanel
+          accessories={<AccessorySection catalog={index.file} placements={placements} />}
+          backup={<BackupPanel />}
           bill={bill}
           placements={placements}
           assets={index.file.assets}
           sheet={index.file.sprite}
           materialOf={index.materialOf}
           download={download}
+          templates={templates}
+          /* `editSlots` and not an inline `setEditing({ placement })`: its
+             `slot === undefined` branch produces exactly that, and it is what
+             the 3D panel above is handed — so both openers reach `editing`
+             through one function rather than two spellings of one write. */
+          onEditSlots={editSlots}
           generated={{ bill: generatedBill, placements: generatedPlacements }}
         />
-        {/*
-          Rows C2 and C3, and the third child of a two-row grid on purpose: the
-          bill keeps the `1fr` and this lands in the implicit `auto` row beneath
-          it. Two halves the bill cannot hold — **what is in each placed
-          recipe's slots**, which is where the right-click editor opens from, and
-          what the files in those slots themselves hold, which
-          `buildBillOfTiles` neither counts nor can.
-
-          It takes the same `assembly` index and the same `templates` lookup the
-          bill above is built from, rather than deriving either: `buildAssemblyIndex`
-          is 8,702 records and the table is this screen's, so passing them is
-          what keeps the panel and the bill answering about one room.
-        */}
-        <SlotsPanel
-          assembly={assembly}
-          catalog={index.file}
-          editing={editing}
-          onEdit={setEditing}
-          placements={placements}
-          templates={templates}
-        />
-        {/*
-          Row A0. The app's only backup path, and it was the library screen's
-          until that screen was deleted — architecture-plan.md §13 (Safari evicts
-          `localStorage` after seven days) is why it must exist somewhere, and
-          `BackupPanel.tsx` carries the argument for why that somewhere is the
-          foot of this column rather than the toolbar band or a settings screen
-          that no longer exists.
-
-          The fourth child of a two-row grid, for the reason the third is: the
-          bill keeps the `1fr` and this lands in an implicit `auto` row beneath
-          the slots.
-        */}
-        <BackupPanel />
       </div>
+
+      {/*
+        The editor, mounted by the screen that owns which piece is open.
+
+        It is a modal dialog, so where it sits in the tree decides nothing about
+        where it appears — and both of its openers are elsewhere: the action bar
+        over the selected piece on the plan above, and a `Slots` press on a bill
+        row beside. It hung off the deleted slots panel while that panel was one
+        of the openers, and a panel that is no longer one is the wrong place to
+        mount it from.
+
+        {@link edited} resolves the target to the two things the dialog takes — the instance, live from the store, and the recipe it names — over
+        the same `templates` lookup the bill is built from, so the dialog and the
+        bill cannot disagree about which recipe a placement is. A target naming a
+        recipe this build no longer ships resolves to no template and opens
+        nothing, which is why `OrphanBlock` offers no `Slots` press for one.
+      */}
+      {edited === null ? null : (
+        <SlotEditor
+          catalog={index.file}
+          index={assembly}
+          instance={edited.instance}
+          /*
+            The slot in the key as well as the placement: the editor holds its
+            own *shown row* in state, so a second press on a different part of
+            the **same** piece would otherwise change `initialSlot` and change
+            nothing on screen — the state initialised on the first open would
+            still be the one deciding. Remounting is the right answer rather than
+            a `useEffect` that pushes the prop into state: the user pointed
+            somewhere new, which is a new question, and the design filter and the
+            refusal notice should start clean too.
+          */
+          key={`${edited.instance.id}:${editing?.slot ?? ''}`}
+          onClose={() => {
+            setEditing(null)
+          }}
+          {...(editing?.slot === undefined ? {} : { initialSlot: editing.slot })}
+          template={edited.template}
+        />
+      )}
     </section>
   )
 }

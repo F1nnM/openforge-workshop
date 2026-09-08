@@ -782,7 +782,7 @@ describeCorpus(corpusTitle, () => {
        **A7** owns elevation-aware overlap and both of these; this row stops here
        rather than widening `overlap.ts`. */
     const corner = combinations.find((one) => one.layout === SLOT_CONVENTIONS[1])
-    const bands = new Set([...(corner?.fills.values() ?? [])].map((record) => planBand(record)))
+    const bands = new Set([...(corner?.fills.values() ?? [])].map((record) => planBand(record).band))
     expect(bands.size).toBeGreaterThan(1)
     expect([...bands].sort()).toEqual(['area', 'edge'])
   })

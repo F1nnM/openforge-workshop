@@ -204,29 +204,224 @@
    flex row of its own that wraps. The lock toggle is **not** inside
    `PlanToolbar`: every control in that component writes `PlanTools`, which row
    R4 left driving the 3D surface. A sibling in the slot survived that. */
+/* ── The stage rail ──────────────────────────────────────────────────────────
+   Every control that acts on the room, as one column at the stage's top left.
+
+   It was a centred horizontal plate with the generator in one corner, the lock
+   and design toggles beside it and the snap readout inside it — four owners,
+   three corners and three different button treatments over one drawing. The
+   drawing is the product here; chrome that competes with it for the centre of
+   the viewport is chrome in the wrong place.
+
+   **No wrapper plate.** The column is spacing, not a container: proximity does
+   the grouping, which is what keeps a seven-item rail from reading as a panel
+   bolted over the scene. Each *item* keeps its own hairline plate, and that is
+   not decoration — the rail floats over arbitrary 3D geometry, so a borderless
+   button would be illegible the moment a wall passed behind it.
+
+   **Three groups, by falling frequency.** Create (the generator), edit (undo,
+   redo, clear), configure (snap, lock, design). Tight inside a group, generous
+   between, so the squint test resolves three clusters rather than one list of
+   seven equal things. The boundaries are marked on the *first item of a group*
+   rather than by wrapping each group, because the items come from three
+   different components and a wrapper per component would put back the grouping
+   container this rail exists without. */
 .of-builder-toolbar-slot {
   position: absolute;
   top: 12px;
-  left: 50%;
-  translate: -50% 0;
+  left: 12px;
   z-index: 2;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  /* Wraps into a second column rather than overflowing: the stage is short at
+     small heights and a rail that ran past the bottom would put `Design` behind
+     the hint plate. */
+  flex-flow: column wrap;
   align-items: flex-start;
-  gap: 8px;
-  /* `max-content` and not shrink-to-fit, which is load-bearing rather than
-     equivalent. An absolutely-positioned flex container sizes to its preferred
-     width, and `PlanToolbar`'s own `max-width: 100%` makes that computation
-     cyclic: Chrome returned **673px against a 674.4px content row** at a 1920px
-     viewport, so the lock toggle wrapped to a second line with 256px of unused
-     band beside it. `max-content` asks the direct question and the `max-width`
-     below still clamps it. */
+  align-content: flex-start;
+  gap: 4px;
   width: max-content;
-  /* The band's gutter, given up on both sides. See the stage's note: this is
-     what makes overlap with the two side plates impossible by arithmetic
-     instead of by luck. */
   max-width: calc(100% - 2 * var(--of-stage-gutter));
+  max-height: calc(100% - 24px);
+}
+
+/* The group separations. 12px against the 4px inside a group is a 3:1 contrast,
+   which reads as deliberate cadence rather than as a wider gap. */
+.of-builder-toolbar-slot > [data-rail-group='start'] {
+  margin-top: 12px;
+}
+
+/* The first item never carries one, whichever group happens to lead — the
+   generator is absent from callers that pass no records. */
+.of-builder-toolbar-slot > :first-child {
+  margin-top: 0;
+}
+
+/* ── One item ────────────────────────────────────────────────────────────────
+   The shell every control in the rail wears, whatever component owns it: the
+   generator's trigger, the three verbs, the snap toggle, and the lock and
+   design disclosures. One height, one radius, one border, one ground, one type
+   scale — which is the whole of "visually integrated", and it is why this class
+   is passed *into* the two pickers rather than each keeping its own plate.
+
+   Anatomy is `label … trailing`: the name on the left, and the state or the
+   shortcut pushed right by `margin-left: auto`. The trailing column aligning
+   down the rail is what makes seven separate buttons read as one surface. */
+.of-stage-tool {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 148px;
+  /* **A fixed height, not a minimum**, and the reason is measured: the `kbd`
+     chips on undo and redo are taller than the row's own text line, so with
+     `min-height` those two rows came out 30px against everyone else's 28 — a
+     2px stagger down a column whose whole job is to read as one surface. Every
+     item here is a single line by construction, so a fixed height costs nothing
+     and buys the alignment outright. */
+  height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  /* The plate treatment the toolbar and the corner readouts already share, so
+     the rail joins that family rather than starting a fourth one. */
+  background: color-mix(in srgb, var(--bg2) 92%, transparent);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 6px 18px -12px var(--scrim);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  /* **The rail's one secondary tone**, declared once and read by the field
+     labels, the pickers' figures and the shortcut chips.
+
+     `--mut` is the colour all three arrived with, and measured on this plate it
+     is **3.95:1** — under the 4.5:1 floor for text this size. Mixed 72% toward
+     `--ink` it reads **5.32:1**, which clears the floor while staying visibly
+     subordinate to the 11.24:1 value beside it. A local custom property rather
+     than the mix repeated three times, so the next thing that needs a secondary
+     in here cannot pick a fourth colour by accident. */
+  --of-rail-secondary: color-mix(in srgb, var(--mut) 72%, var(--ink));
+}
+
+/* The two pickers arrive with their own plate metrics — `padding: 7px 10px` and
+   a 6px radius from `lock-picker.css` — and a single class each ties with this
+   one on specificity, so source order decided and the rail came out with two
+   item heights, 28px and 30px. Measured in the built page, not guessed.
+
+   Two classes win it back, and doing it here rather than editing the pickers is
+   deliberate: their own plates are still correct wherever else they are used,
+   and the rail is the context imposing a shape, so the rail is what states it. */
+.of-stage-tool.of-lock-toggle,
+.of-stage-tool.of-design-toggle {
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 5px;
+}
+
+.of-stage-tool:hover:not(:disabled),
+.of-stage-tool[data-popup-open] {
+  border-color: var(--acc);
+}
+
+.of-stage-tool:disabled {
+  /* Legible while clearly inert: 4.5:1 against the plate is the floor for body
+     text, and a disabled control the user cannot read is a control they cannot
+     learn from. `--mut` holds it; opacity would not. */
+  color: var(--mut);
+  cursor: default;
+}
+
+/* The name. Takes the slack so the trailing column lands on one edge. */
+.of-stage-tool-label {
+  flex: 1 1 auto;
+}
+
+/* A setting's name, in the two pickers' own mono-uppercase idiom: `snap`,
+   `lock`, `design` read as fields with values, where `Undo` reads as a verb.
+   Distinct content stays visually distinct inside one shell. */
+.of-stage-tool-key-label,
+.of-stage-tool .of-lock-toggle-key,
+.of-stage-tool .of-design-toggle-key {
+  flex: 1 1 auto;
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  /* Darker than the `--mut` the pickers use in their own context, and the
+     reason is a measurement rather than a preference: read off the built page,
+     `--mut` on this plate is **3.95:1**, under the 4.5:1 floor for text this
+     size. These are labels on *enabled* controls — the disabled verbs above
+     them are a different case and keep `--mut`, where dimming is the point.
+
+     Mixed toward `--ink` rather than swapped for it, so the label stays
+     secondary to the value beside it: the value is the information, and a label
+     at full ink would compete with it. Overridden here rather than in
+     `lock-picker.css` because the rail is the context imposing the change. */
+  color: var(--of-rail-secondary);
+}
+
+/* A setting's current value, right-aligned. */
+.of-stage-tool-value,
+.of-stage-tool .of-lock-toggle-name,
+.of-stage-tool .of-design-toggle-name {
+  margin-left: auto;
+  font-family: var(--face-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* The figure each picker carries beside its value — a buildable share, a parts
+   count. Kept, because it is the number the control exists to move, and held at
+   the rail's secondary tone so the value it qualifies stays the thing the eye
+   lands on. It is *information*, not decoration, which is why it takes the
+   secondary and not `--mut`: at 3.95:1 a figure the user is meant to read was
+   below the contrast floor. */
+.of-stage-tool .of-lock-toggle-share,
+.of-stage-tool .of-design-toggle-parts {
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--of-rail-secondary);
+}
+
+/* A shortcut chip, right-aligned. `--face-mono` at 10px, matching the chips the
+   floating action bar puts on its own verbs, so a key looks like a key wherever
+   the user meets one.
+
+   Sized to sit *inside* the row rather than to set it: `line-height: 1.2` and no
+   vertical padding put it at 14px against the row's 18px content box, which is
+   what stops a chip from being the thing that decides how tall a button is. */
+.of-stage-tool-key {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg3);
+  color: var(--of-rail-secondary);
+  font-family: var(--face-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* The pickers' `(i)`. It says "there is more behind this press", which the
+   trigger's accessible name says in words — so it is the quietest mark in the
+   rail rather than a second value competing with the first. */
+.of-stage-tool .of-lock-toggle-info,
+.of-stage-tool .of-design-toggle-info {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  color: var(--mut);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .of-stage-tool {
+    backdrop-filter: none;
+    background: var(--bg2);
+  }
 }
 
 /* Row **D6** put a *third* control in this band — the room design toggle, beside
@@ -260,7 +455,6 @@
    Verified across 820-1920px: 0 dead columns at every width sampled. */
 @container (max-width: 600px) {
   .of-builder-toolbar-slot {
-    top: 92px;
     max-width: calc(100% - 24px);
   }
 }
@@ -274,10 +468,12 @@
 
 .of-builder-bill {
   display: grid;
-  /* The panel takes the column and does its own three-band scrolling inside. The
-     accessory slots and, since row A0, the backup section land in implicit
-     `auto` rows beneath it and each caps its own height, so neither can push the
-     bill out of the column. */
+  /* **One child, one track.** The panel takes the whole column and does its own
+     three-band scrolling inside it. This held three children until the sidebar
+     was cut back — the bill in the `1fr`, then the slots panel and the backup
+     section in implicit `auto` rows beneath it — and a fixed-height column split
+     three ways is a parts list paying for two other sections. Both survivors are
+     inside the panel's bands now: `BillPanel.tsx` says which and why. */
   grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;

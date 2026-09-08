@@ -4,7 +4,33 @@
  *
  * A mono eyebrow, `{n} pieces placed` over the parts and files those pieces cost,
  * one row per unique file with its thumbnail, name, size and count, then a footer
- * with the unique-model count, the total and the download action.
+ * with the unique-model count, the total, the download action and the backup
+ * line.
+ *
+ * ## It is the whole column, and that is a recent change
+ *
+ * It had two siblings in `.of-builder-bill`'s grid: a panel listing every piece
+ * on the plan with its slot counts, and the JSON backup section. Three sections
+ * in a fixed-height column, each capping its own height, and the parts list — the
+ * one thing a reader opens this column for — paid for both. The pieces list is
+ * **deleted**: it was a second enumeration of the placements the rows below
+ * already expand into. The other two are inside this panel's own three bands,
+ * passed in as {@link BillPanelProps.accessories} and {@link
+ * BillPanelProps.backup} so this file keeps one subject.
+ *
+ * **Two things only that list could do, and the rows below do both now**, each
+ * through a `Slots` press ({@link SlotsButton}). The plan's own route to the slot
+ * editor is the action bar over the selected piece:
+ *
+ *   1. **It is reachable by `Tab`.** The plan's route is keyboard-operable —
+ *      `Enter` on the selection — but only *through the canvas*, which is a
+ *      `role="application"` with its own key map. A user navigating the page by
+ *      tab needs a real `<button>` per piece, and every placement row is one.
+ *   2. **It reaches a piece the plan does not draw.** A gesture on the plan can
+ *      only select what is drawn, and an instance whose every slot is empty or
+ *      retired resolves to no parts — `RoomSurface` walks `scene.pieces`, not
+ *      `PlanScene.unfilled` — so it occupies no pixels and cannot be selected at
+ *      all. {@link OrphanBlock} is the only surface in the app that can open it.
  *
  * ## It is a warning surface, not a footnote
  *
@@ -21,11 +47,20 @@
  *      of leaving the md5 dedupe out: 200 solver-filled instances of the shipped
  *      recipes are the same 36 files and the same 366,230,378 B as 50.
  *      `assembly/bill.ts#DOWNLOAD_LARGE_BYTES` carries the measurements.
- *   2. **Every warning note is on screen**, rendered in full, above the rows,
- *      with the detail visible — not behind a disclosure and not summarised as
- *      "some warnings". The loudest of them is now `slot-unfilled`: every slot
- *      of every recipe in the build is required, so an empty one is a hole in
- *      the print and it is the one thing that refuses the download.
+ *   2. **What refuses the download is on screen in full**, above the rows, with
+ *      the detail visible — not behind a disclosure and not summarised as "some
+ *      warnings". That is `slot-unfilled`: every slot of every recipe in the
+ *      build is required, so an empty one is a hole in the print, and
+ *      `BillOfTiles.complete` is exactly its population.
+ *
+ *      **Every warning used to be rendered that way**, and that was right about
+ *      the note it was written for and wrong as a rule for nine. `fill-off-slot`,
+ *      `lock-unavailable` and `mixed-build-systems` are each true, each
+ *      advisory, and each two to four lines — and three of those above the
+ *      refusal at the same weight is how the refusal stops being legible. So an
+ *      advisory warning gives its headline and keeps its reason one press away;
+ *      `billView.ts#noteBlocksDownload` is the split, and it reads the gate
+ *      rather than a judgement about tone. {@link WarningNote} renders both.
  *
  * **Two claims stood here and row A3 removed the facts behind both**, and what
  * row C4 put in their place is not a replacement in kind. The `base · added`
@@ -42,40 +77,50 @@
  * deleted `base · added` mark is genuinely replaced by is provenance: a `×2` on a
  * row now names the two slots that asked, from `BillLine.slots`.
  *
- * The `info` notes are quieter but still present, in a `<details>`: they are
- * true, and `build-unspecified` alone fires on a quarter of what the recipes
- * admit, so giving them the same weight as an empty slot would make the empty
- * slot unreadable. That is the one place this panel trades prominence for
- * legibility, and it does it in the direction that keeps the warnings loud.
+ * The `info` notes are quieter still and rolled up behind one `<details>`
+ * together: they are true, and `build-unspecified` alone fires on a quarter of
+ * what the recipes admit, so giving them the same weight as an empty slot would
+ * make the empty slot unreadable.
  *
  * ## It is also the accessible inventory of the scene
  *
  * Row 17 was explicit that the canvas is one tab stop, has no move operation and
  * draws something that is not linearly readable. This panel closes the last of
  * that: every row expands into the placements behind it, each with its grid
- * position, its angle, and a Remove button. So a keyboard-only or screen-reader
- * user can enumerate a room and take a tile out of it without ever touching the
- * drawing. `billView.ts#billInventory` is the join that makes it possible, and
+ * position, its angle, a `Slots` button and a Remove button. So a keyboard-only
+ * or screen-reader user can enumerate a room, change what is in a piece's slots
+ * and take a tile out of it without ever touching the drawing — and since the
+ * pieces list went, this is the *only* surface that can do the middle one
+ * without a pointer. `billView.ts#billInventory` is the join that makes it possible, and
  * instances the bill cannot describe at all — a retired recipe, or a recipe whose
  * every fill has left the archive — get their own removable block rather than
  * being silently absent. An instance now expands under **every** file it
  * resolved to rather than under one, because a five-slot corner is five rows.
  */
+import type { ReactNode } from 'react'
 import { useId, useState } from 'react'
 
-import type { BillLine, BillOfTiles } from '@/assembly'
+import type { BillLine, BillOfTiles, TemplateLookup } from '@/assembly'
 import type { CatalogAssets, CatalogRecord, SpriteSheet } from '@/catalog'
 import type { GeneratedBill } from '@/generator/placement/bill'
 import type { MaterialId } from '@/materials'
 import { describeCell, formatUnits } from '@/builder/canvas'
 import { countLabel, fileSizeLabel, sizeLabel, totalBytesLabel } from '@/screens/catalog'
-import type { TemplateInstance, WorkshopState } from '@/store'
+import type { PlacementId, TemplateInstance, WorkshopState } from '@/store'
 import { removePlacement } from '@/store'
 import { Eyebrow, VisuallyHidden } from '@/ui/primitives'
 import { TileThumb } from '@/ui/thumb'
 
 import type { BillPlacement, BillRow, SlotFault } from './billView'
-import { billInventory, noteCopy, slotFaultCopy, slotFaults, slotsAsking, verdictCopy } from './billView'
+import {
+  billInventory,
+  noteBlocksDownload,
+  noteCopy,
+  slotFaultCopy,
+  slotFaults,
+  slotsAsking,
+  verdictCopy,
+} from './billView'
 import { DownloadAction } from './DownloadAction'
 import { GeneratedBillSection } from './GeneratedBillSection'
 import type { ArchiveDownload } from './useArchiveDownload'
@@ -106,6 +151,58 @@ export interface BillPanelProps {
   readonly materialOf: (record: CatalogRecord) => MaterialId
   readonly download: ArchiveDownload
   /**
+   * The template table this build ships — the same lookup the bill was built
+   * from, passed for one question: **does this placement's recipe still exist**.
+   *
+   * Only {@link OrphanBlock} asks it, and only because that block covers two
+   * causes with one consequence. A piece in a file row or a fault row resolved
+   * to at least one part, so its recipe was found by definition; a piece that
+   * resolved to nothing either names a recipe this build dropped — no slots, so
+   * nothing to edit — or holds only files that have left the archive, which is
+   * the one state in the app that is invisible on the plan and fixable only from
+   * here.
+   */
+  readonly templates: TemplateLookup
+  /**
+   * Open the slot editor on a placement.
+   *
+   * The panel does not own that dialog: the same one opens from the action bar
+   * over the selected piece on the plan, so `BuilderScreen` holds which piece is
+   * open and this is the request. It replaces the deleted "Pieces on the plan"
+   * list, which was a second enumeration of the placements the rows below
+   * already expand into and whose two irreplaceable properties these rows now
+   * carry — see the module note: a real `<button>` per piece for a user tabbing
+   * the page, and a way to reach a piece the plan does not draw.
+   */
+  readonly onEditSlots: (placement: PlacementId) => void
+  /**
+   * The accessory inventory, rendered at the foot of the scrolling band.
+   *
+   * A node and not a set of props, because what it needs — the catalog file and
+   * the placements — this panel has no other use for, and because it answers a
+   * question one level below the bill's: an accessory is a slot of a *file*, so
+   * nothing in `buildBillOfTiles` counts one. It is passed rather than mounted
+   * here so this file keeps one subject; `slots/AccessorySection.tsx` is the
+   * component and it renders `null` for the 88.5% of plans that open nothing.
+   *
+   * It was a sibling of this panel in the column's grid until the sidebar was
+   * cut back, in an implicit `auto` row that took its height from the parts
+   * list. Inside the scroll container it takes none: it is what a reader reaches
+   * after the files, which is also the order the two questions come in.
+   */
+  readonly accessories: ReactNode
+  /**
+   * The JSON export/import line, rendered in the footer under the download.
+   *
+   * Here for the reason `BackupPanel.tsx` gives at length: what the envelope
+   * carries *is* this room, so "take this room away as files" and "take this
+   * room away as a save file" are one question a step apart. A node for
+   * {@link accessories}' reason — it reads and writes the store itself and needs
+   * nothing from this panel — and in the footer rather than below the column so
+   * a fifty-row room cannot push the only backup path in the app off screen.
+   */
+  readonly backup: ReactNode
+  /**
    * Row S5's generated bill, and the store map behind it. Absent means none.
    *
    * `billView.ts` needs nothing for this and gets nothing: a generated
@@ -116,15 +213,33 @@ export interface BillPanelProps {
   readonly generated?: { readonly bill: GeneratedBill; readonly placements: WorkshopState['generated'] }
 }
 
-export function BillPanel({ bill, placements, assets, sheet, materialOf, download, generated }: BillPanelProps) {
+export function BillPanel({
+  bill,
+  placements,
+  assets,
+  sheet,
+  materialOf,
+  download,
+  templates,
+  onEditSlots,
+  accessories,
+  backup,
+  generated,
+}: BillPanelProps) {
   const headingId = useId()
   const { rows, orphans } = billInventory(bill, placements)
   const verdict = verdictCopy(bill.download)
-  // `unknown-tile` is deliberately dropped from this list: `OrphanBlock` below is
-  // that note's rendering, and it is the better one — it names the retired ids and
-  // offers to take them off the grid. Two paragraphs saying the same sentence, one
-  // of them actionable, is worse than one.
-  const warnings = bill.notes.filter((note) => note.severity === 'warn' && note.code !== 'unknown-tile')
+  // **Two codes are dropped from this list, and both for one reason:
+  // `OrphanBlock` below is their better rendering.** It names the pieces and
+  // offers to take them off the grid, where the roll-up can only count them —
+  // and `unknown-template`'s detail ("take it off the grid and place the recipe
+  // you want in its place") is the block's own button written as a paragraph.
+  // Two surfaces saying the same sentence, one of them actionable, is worse than
+  // one.
+  const warnings = bill.notes.filter(
+    (note) =>
+      note.severity === 'warn' && note.code !== 'unknown-tile' && note.code !== 'unknown-template',
+  )
   const infos = bill.notes.filter((note) => note.severity === 'info')
   // Row C4's surface, minus the instances `OrphanBlock` below already owns —
   // which is every instance that resolved to no parts at all, whether because
@@ -177,18 +292,15 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
           </p>
         )}
 
-        {warnings.map((note) => {
-          const copy = noteCopy(note)
-          return (
-            <p className="of-bill-note" data-tone="warn" key={note.code}>
-              <strong className="of-bill-note-head">{copy.headline}.</strong> {copy.detail}
-            </p>
-          )
-        })}
+        {warnings.map((note) => (
+          <WarningNote key={note.code} note={note} />
+        ))}
 
-        {faults.length > 0 ? <SlotFaultBlock faults={faults} /> : null}
+        {faults.length > 0 ? <SlotFaultBlock faults={faults} onEditSlots={onEditSlots} /> : null}
 
-        {orphans.length > 0 ? <OrphanBlock orphans={orphans} /> : null}
+        {orphans.length > 0 ? (
+          <OrphanBlock onEditSlots={onEditSlots} orphans={orphans} templates={templates} />
+        ) : null}
 
         {rows.length === 0 ? (
           <p className="of-bill-empty">
@@ -204,6 +316,7 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
                 assets={assets}
                 sheet={sheet}
                 material={materialOf(row.line.tile)}
+                onEditSlots={onEditSlots}
               />
             ))}
           </ul>
@@ -212,6 +325,8 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
         {generated === undefined ? null : (
           <GeneratedBillSection bill={generated.bill} placements={generated.placements} />
         )}
+
+        {accessories}
 
         {infos.length === 0 ? null : (
           <details className="of-bill-infos">
@@ -251,8 +366,70 @@ export function BillPanel({ bill, placements, assets, sheet, materialOf, downloa
           files={bill.files}
           generated={generated?.bill.recipes ?? 0}
         />
+        {backup}
       </footer>
     </aside>
+  )
+}
+
+/* ------------------------------------------------------------------- notes */
+
+/**
+ * One rolled-up warning: its headline always, its reason where it is worth the
+ * column.
+ *
+ * {@link noteBlocksDownload} is the split and it is the download gate rather
+ * than a judgement about tone — see that function for why the panel stopped
+ * rendering all nine in full. A `<details>` and not a hover or a tooltip: the
+ * reason is two to four lines of prose, which no popup at this width can hold,
+ * and a disclosure is the one control that is the same press on a phone, a
+ * mouse and a keyboard.
+ */
+function WarningNote({ note }: { note: BillOfTiles['notes'][number] }) {
+  const copy = noteCopy(note)
+  if (noteBlocksDownload(note.code)) {
+    return (
+      <p className="of-bill-note" data-tone="warn">
+        <strong className="of-bill-note-head">{copy.headline}.</strong> {copy.detail}
+      </p>
+    )
+  }
+  return (
+    <details className="of-bill-note" data-tone="warn">
+      <summary className="of-bill-note-head">{copy.headline}</summary>
+      <span className="of-bill-note-why">{copy.detail}</span>
+    </details>
+  )
+}
+
+/**
+ * Open the slot editor on the piece this row names.
+ *
+ * The same control on all three row kinds — a placement under a file row, a
+ * faulty slot, and a piece that resolved to nothing — because all three name one
+ * instance and the editor takes one. `Slots` alone is the visible text, so it
+ * sits beside `Remove` at the same weight in a 302px column; what it is the
+ * slots *of* is the clipped half, exactly as `Remove` states what it removes.
+ */
+function SlotsButton({
+  onEditSlots,
+  placement,
+  subject,
+}: {
+  onEditSlots: (placement: PlacementId) => void
+  placement: PlacementId
+  subject: string
+}) {
+  return (
+    <button
+      type="button"
+      className="of-bill-remove"
+      onClick={() => {
+        onEditSlots(placement)
+      }}
+    >
+      Slots <VisuallyHidden>{subject}</VisuallyHidden>
+    </button>
   )
 }
 
@@ -272,11 +449,13 @@ function BillRowView({
   assets,
   sheet,
   material,
+  onEditSlots,
 }: {
   row: BillRow
   assets: CatalogAssets
   sheet: SpriteSheet
   material: MaterialId
+  onEditSlots: (placement: PlacementId) => void
 }) {
   const listId = useId()
   const [open, setOpen] = useState(false)
@@ -338,7 +517,13 @@ function BillRowView({
       {open && placements.length > 0 ? (
         <ul className="of-bill-places" id={listId} role="list">
           {placements.map((entry) => (
-            <PlacementRow key={entry.id} entry={entry} line={line} name={line.tile.name} />
+            <PlacementRow
+              key={entry.id}
+              entry={entry}
+              line={line}
+              name={line.tile.name}
+              onEditSlots={onEditSlots}
+            />
           ))}
         </ul>
       ) : null}
@@ -353,7 +538,17 @@ function BillRowView({
  * coordinate, so the panel and the canvas's live region say the same words about
  * the same tile.
  */
-function PlacementRow({ entry, line, name }: { entry: BillPlacement; line: BillLine; name: string }) {
+function PlacementRow({
+  entry,
+  line,
+  name,
+  onEditSlots,
+}: {
+  entry: BillPlacement
+  line: BillLine
+  name: string
+  onEditSlots: (placement: PlacementId) => void
+}) {
   // **Row C4: `BillLine.slots`' first consumer.** A quantity above one is
   // legitimate under templates (contract C-c) — two slots of one instance can
   // resolve to the same md5 — and before this the row said `×2` with one
@@ -367,23 +562,36 @@ function PlacementRow({ entry, line, name }: { entry: BillPlacement; line: BillL
         {entry.instance.rotation === 0 ? '' : ` · ${formatUnits(entry.instance.rotation)}°`}
         {asking.length > 1 ? ` · ${asking.join(' + ')}` : ''}
       </span>
-      <button
-        type="button"
-        className="of-bill-remove"
-        onClick={() => {
-          removePlacement(entry.id)
-        }}
-      >
-        Remove{' '}
+      <span className="of-bill-acts">
         {/*
-          Removing takes the **whole instance** off the grid, not this one part
-          of it, and the clipped text says so: a recipe is placed and rotated as
-          one unit (§1), so there is no store action that removes one slot's file
-          and nothing on this row could be pointed at one. Row C3's slot editor
-          is where a single fill is cleared.
+          Row-level and not one control per file, for `Remove`'s reason inverted:
+          the editor takes a **piece** and offers every slot of it, and the row
+          already names one. It is the deleted panel's keyboard route, which was
+          that panel's one irreplaceable property — see {@link SlotsButton}.
         */}
-        <VisuallyHidden>{`the piece holding ${name} at ${describeCell(entry.instance.x, entry.instance.z)}`}</VisuallyHidden>
-      </button>
+        <SlotsButton
+          onEditSlots={onEditSlots}
+          placement={entry.id}
+          subject={`of the piece holding ${name} at ${describeCell(entry.instance.x, entry.instance.z)}`}
+        />
+        <button
+          type="button"
+          className="of-bill-remove"
+          onClick={() => {
+            removePlacement(entry.id)
+          }}
+        >
+          Remove{' '}
+          {/*
+            Removing takes the **whole instance** off the grid, not this one part
+            of it, and the clipped text says so: a recipe is placed and rotated
+            as one unit (§1), so there is no store action that removes one slot's
+            file and nothing on this row could be pointed at one. The slot editor
+            beside it is where a single fill is cleared.
+          */}
+          <VisuallyHidden>{`the piece holding ${name} at ${describeCell(entry.instance.x, entry.instance.z)}`}</VisuallyHidden>
+        </button>
+      </span>
     </li>
   )
 }
@@ -416,7 +624,13 @@ function PlacementRow({ entry, line, name }: { entry: BillPlacement; line: BillL
  * contribute five entries here, so a count of entries is never a count of things
  * on the grid.
  */
-function SlotFaultBlock({ faults }: { faults: readonly SlotFault[] }) {
+function SlotFaultBlock({
+  faults,
+  onEditSlots,
+}: {
+  faults: readonly SlotFault[]
+  onEditSlots: (placement: PlacementId) => void
+}) {
   const blocking = faults.filter((fault) => fault.blocksDownload).length
   return (
     <div className="of-bill-note" data-tone="warn">
@@ -430,7 +644,11 @@ function SlotFaultBlock({ faults }: { faults: readonly SlotFault[] }) {
           : `${countLabel(blocking)} of them ${blocking === 1 ? 'refuses' : 'refuse'} the download; the rest will print and will not fit.`}
       <ul className="of-bill-faults" role="list">
         {faults.map((fault) => (
-          <SlotFaultRow key={`${fault.placement}/${fault.slot ?? ''}`} fault={fault} />
+          <SlotFaultRow
+            key={`${fault.placement}/${fault.slot ?? ''}`}
+            fault={fault}
+            onEditSlots={onEditSlots}
+          />
         ))}
       </ul>
     </div>
@@ -449,7 +667,13 @@ function SlotFaultBlock({ faults }: { faults: readonly SlotFault[] }) {
  * fill is re-chosen in place, and the two surfaces are complementary — this one
  * says a slot is wrong from a panel that lists the whole scene, that one fixes it.
  */
-function SlotFaultRow({ fault }: { fault: SlotFault }) {
+function SlotFaultRow({
+  fault,
+  onEditSlots,
+}: {
+  fault: SlotFault
+  onEditSlots: (placement: PlacementId) => void
+}) {
   const copy = slotFaultCopy(fault)
   const at = describeCell(fault.instance.x, fault.instance.z)
   return (
@@ -458,16 +682,28 @@ function SlotFaultRow({ fault }: { fault: SlotFault }) {
         <span className="of-bill-at">
           {copy.subject} · {at}
         </span>
-        <button
-          type="button"
-          className="of-bill-remove"
-          onClick={() => {
-            removePlacement(fault.placement)
-          }}
-        >
-          Remove{' '}
-          <VisuallyHidden>{`the piece with the faulty ${fault.slot ?? 'recipe'} at ${at}`}</VisuallyHidden>
-        </button>
+        <span className="of-bill-acts">
+          {/* The editor is the *fix* for every one of the three faults — an
+              empty slot, a retired fill and a fill the slot does not admit are
+              all answered by choosing a file — so this row is the one place in
+              the panel where it is the obvious next press rather than an
+              alternative to removing the piece. */}
+          <SlotsButton
+            onEditSlots={onEditSlots}
+            placement={fault.placement}
+            subject={`of the piece with the faulty ${fault.slot ?? 'recipe'} at ${at}`}
+          />
+          <button
+            type="button"
+            className="of-bill-remove"
+            onClick={() => {
+              removePlacement(fault.placement)
+            }}
+          >
+            Remove{' '}
+            <VisuallyHidden>{`the piece with the faulty ${fault.slot ?? 'recipe'} at ${at}`}</VisuallyHidden>
+          </button>
+        </span>
       </span>
       <span className="of-bill-fault-why">{copy.reason}</span>
     </li>
@@ -493,7 +729,15 @@ function SlotFaultRow({ fault }: { fault: SlotFault }) {
  * An instance with *some* resolved parts is not here: it is a row above with a
  * hole in it, and `slot-unfilled` is the note that says so.
  */
-function OrphanBlock({ orphans }: { orphans: readonly BillPlacement[] }) {
+function OrphanBlock({
+  onEditSlots,
+  orphans,
+  templates,
+}: {
+  onEditSlots: (placement: PlacementId) => void
+  orphans: readonly BillPlacement[]
+  templates: TemplateLookup
+}) {
   return (
     <div className="of-bill-note" data-tone="warn">
       <strong className="of-bill-note-head">
@@ -511,16 +755,35 @@ function OrphanBlock({ orphans }: { orphans: readonly BillPlacement[] }) {
                 the file path this once rendered was 39 to 183 characters in a
                 302px column. */}
             <span className="of-bill-at">{entry.instance.template}</span>
-            <button
-              type="button"
-              className="of-bill-remove"
-              onClick={() => {
-                removePlacement(entry.id)
-              }}
-            >
-              Remove{' '}
-              <VisuallyHidden>{`the unprintable piece at ${describeCell(entry.instance.x, entry.instance.z)}`}</VisuallyHidden>
-            </button>
+            {/*
+              **The one row in the panel where this control is conditional, and
+              the condition is which of the block's two causes this piece is.**
+              A recipe this build dropped has no slots, so there is nothing for
+              an editor to open on and a disabled button would be one more thing
+              to read and dismiss in a 302px column. A piece whose every fill has
+              left the archive still has its recipe and all of its slots — and it
+              is drawn nowhere on the plan, so before this there was no way to
+              reach it at all once the pieces list went.
+            */}
+            <span className="of-bill-acts">
+              {templates(entry.instance.template) === undefined ? null : (
+                <SlotsButton
+                  onEditSlots={onEditSlots}
+                  placement={entry.id}
+                  subject={`of the piece at ${describeCell(entry.instance.x, entry.instance.z)}`}
+                />
+              )}
+              <button
+                type="button"
+                className="of-bill-remove"
+                onClick={() => {
+                  removePlacement(entry.id)
+                }}
+              >
+                Remove{' '}
+                <VisuallyHidden>{`the unprintable piece at ${describeCell(entry.instance.x, entry.instance.z)}`}</VisuallyHidden>
+              </button>
+            </span>
           </li>
         ))}
       </ul>

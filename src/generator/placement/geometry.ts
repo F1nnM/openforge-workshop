@@ -72,7 +72,7 @@ import { GRID_UNIT_MM } from '@/catalog'
 import type { PlanStyle } from '@/builder/canvas/catalog'
 import type { Extent, PlanBox, PlanPart, PlanShape } from '@/builder/canvas/geometry'
 import { describeCell, describeFootprint, footprintShape, planGeometry } from '@/builder/canvas/geometry'
-import type { OverlapCandidate, PlanBand } from '@/builder/canvas/overlap'
+import type { BandSource, OverlapCandidate, PlanBand } from '@/builder/canvas/overlap'
 import { planBand } from '@/builder/canvas/overlap'
 import { resolveMaterial } from '@/materials'
 import type { PlacementId } from '@/store'
@@ -162,6 +162,8 @@ export interface GeneratedPiece {
   readonly angle: number
   readonly parts: readonly PlanPart[]
   readonly band: PlanBand
+  /** Whether {@link band} was measured from the footprint. See `overlap.ts#BandVerdict`. */
+  readonly bandSource: BandSource
   readonly axisAligned: boolean
   readonly style: PlanStyle
   /** False when `SQUARE_BASIS` is not the grid's, so the piece will not tile. */
@@ -195,6 +197,7 @@ export function generatedPiece(id: PlacementId, placement: GeneratedPlacement): 
   const geometry = planGeometry(shape, placement.rotation, placement.x, placement.z)
   const kinds = GENERATED_SHAPES[placement.recipe.entry].kinds
   const style = generatedStyle(placement)
+  const band = planBand({ foot: foot.gridFootprint, kinds: [...kinds] })
 
   return {
     id,
@@ -205,7 +208,19 @@ export function generatedPiece(id: PlacementId, placement: GeneratedPlacement): 
     box: geometry.box,
     angle: geometry.angle,
     parts: geometry.parts,
-    band: planBand({ foot: foot.gridFootprint, kinds: [...kinds] }),
+    band: band.band,
+    // Asserted `true`, against `planBand`'s own `measured: false`, and the
+    // override is the point rather than a fudge. `planBand` cannot know its
+    // caller, so it reports any `kinds`-derived band as inferred — and
+    // `overlap.ts`'s reason for distrusting one is that *catalog tag data
+    // drifts*. These kinds are not catalog tag data: they are
+    // `GENERATED_SHAPES[entry].kinds`, a constant in this package that the
+    // generator sets itself and no import can move. A generated base is in
+    // fact the *most* certain piece in either population — exact rect
+    // geometry, a real height interval from the recipe's own arithmetic, and
+    // a band this repo owns — so letting it warn instead of refuse would
+    // weaken the gate exactly where the evidence is strongest.
+    bandSource: 'kinds',
     axisAligned: geometry.axisAligned,
     style,
     tiles: foot.tiles,
@@ -234,6 +249,8 @@ export function generatedOverlapCandidate(id: PlacementId, placement: GeneratedP
     box: piece.box,
     parts: piece.parts,
     axisAligned: piece.axisAligned,
+    cover: piece.shape.cover,
+    bandSource: piece.bandSource,
   }
 }
 
