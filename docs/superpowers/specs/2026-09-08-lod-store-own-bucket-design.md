@@ -154,8 +154,10 @@ vite's default (`vite.config.ts` sets no `server.port`).
 The workers.dev wildcard covers PR preview aliases
 (`pr-<n>-openforge-workshop-staging.young-king-75dd.workers.dev`). R2 follows S3 CORS
 semantics, which permit one `*`, but Cloudflare does not document it — so it is set and
-then verified with a real preflight. **If it is rejected, previews fall back to
-in-browser conversion, which is today's behaviour**, so it blocks nothing.
+then verified with a real preflight. **Verified working 2026-09-08**: a preflight from
+`https://pr-145-openforge-workshop-staging.young-king-75dd.workers.dev` is echoed back,
+and `https://evil.example.com` is refused. Previews get LOD directly; the fallback is not
+needed for them after all.
 
 Exposing `ETag` closes **B5**, with a precise caveat: B5 was downgraded because 58.5% of
 source STLs exceed R2's 8 MiB part size and receive a multipart digest rather than an
@@ -189,8 +191,12 @@ domain, CORS, cache rule, transform rule — is API work.
 ## Sequence
 
 **Phase 1 — land the code change against an empty bucket.** TDD the restated invariant,
-change the two bases, `npm run stamp`, then `npm test && npm run lint && npm run
-typecheck`. At the end of this phase the app points at a bucket holding nothing, every LOD
+change the two bases, `npm run stamp`, then `npx tsx tools/stamp/cli.ts --relock` and
+commit `tools/stamp/derivation.lock.json` — the lock refuses an asset-base change until it
+is re-locked deliberately, which is the mechanism working, not a failure. Then
+`npm test && npm run lint && npm run typecheck`. Expect the payload byte prices to move
+and need re-pinning: `ASSET_BASES` names two hosts where it named one, and brotli prices
+two twice-repeated host strings differently from four copies of one. At the end of this phase the app points at a bucket holding nothing, every LOD
 request 404s, and behaviour is identical to today — because absence is the expected state
 (`LOD_ABSENT_IS_EXPECTED`) and `src/mesh/` answers it by converting in the browser. There
 is no cutover moment.
