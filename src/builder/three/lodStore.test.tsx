@@ -1,170 +1,289 @@
 // @vitest-environment jsdom
 /**
- * The mesh store's one new behaviour, and the reason it is not a vacuous guard.
+ * The mesh store's one hard behaviour: **the room survives an edit**.
  *
- * Row R2 added an `epoch` to `useLodStore` and the third test below is why. The
- * hook reads the converted cache **once per blob** and reports a miss as
- * `absent`; it does not subscribe, and while the 3D view sat behind a press that
- * was right — the user placed tiles first and pressed afterwards, so a
- * conversion begun at add-to-library had normally finished, and the press
- * remounted the hook anyway.
+ * Every address this hook loads is derived from the scene, so placing a tile
+ * adds one and deleting the last copy of one removes it. The hook used to be a
+ * single effect keyed on that set, which meant every edit tore the effect down —
+ * disposing every geometry the room held and republishing an empty map — and
+ * built it again from nothing. On screen that was the whole room flashing away
+ * and coming back on each placement and each delete, which is what sent someone
+ * looking.
  *
- * R2 opens the surface with the screen, so a conversion can now complete after
- * the hook has already recorded the blob as absent. The effect's other
- * dependencies are the sorted blob list and the asset base, and neither changes
- * when a worker finishes — and `wanted` is a **set**, so placing a second copy
- * of an already-armed tile changes nothing either. Without a nudge the mesh
- * never appears.
+ * So the first test here is not a unit test of a helper; it is that symptom,
+ * written down. It records **every state the hook publishes** across a set
+ * change and fails if any one of them has dropped an address that was already
+ * loaded. That assertion fails on the old shape at the first published state and
+ * passes on the reconciling one, which is the only reason to have it.
  *
- * The three tests are the absence, the arrival, and **the arrival withheld when
- * the epoch does not move**. That last one is what makes this a guard capable of
- * failing: it fails the day someone drops `epoch` from the dependency array, and
- * it also fails if the hook is ever made to re-read on its own, at which point
- * the epoch has become dead weight and should go. The same A/B was run in a real
- * Chrome against the built app — `useLodStore`'s own docblock carries the two
- * readouts.
+ * The rest guard the parts of "reconcile" that could each silently become
+ * "restart" again: that a new address costs exactly one new request and not a
+ * whole room's worth, that an address leaving the set is disposed rather than
+ * leaked, that a terminal answer is not re-asked on the next edit, and that the
+ * one thing which *does* still invalidate everything — a change of source — is
+ * still wired.
+ *
+ * The bytes are the real fixture, `fixtures/wall-8180da93.plain.glb` — the
+ * uncompressed twin of the store's own object, so this file exercises the actual
+ * `GLTFLoader` path without needing the meshopt decoder's WASM under jsdom.
+ * `contract.test.ts` is where the format itself is checked; here it is only a
+ * body that parses.
  */
-import { renderHook, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { render, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { BlobId } from '@/catalog'
-import type { MeshCache, MeshRecord } from '@/mesh'
-import { MESH_CACHE_VERSION } from '@/mesh'
 
+import type { LodGeometry } from './loadLod'
 import { useLodStore } from './useLodStore'
 
-const BLOB = '8180da93549154744c37f8370a82738f' as BlobId
-const ASSETS = { lod: 'https://objects.openforge.tools/lod' }
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
+const GLB = readFileSync(join(FIXTURES, 'wall-8180da93.plain.glb'))
 
-/** `/lod/` is empty — blocker B2 — so every object 404s, as it does in the app. */
-const notFound: typeof fetch = () => Promise.resolve(new Response(null, { status: 404 }))
+const A = '8180da93549154744c37f8370a82738f' as BlobId
+const B = 'a6881f5ce657e9bb6d514a3d27fa88d8' as BlobId
+const C = 'f1e2ff0bc747302d95adc5c0cf694678' as BlobId
 
-/** A record shaped the way `src/mesh/convert.ts` writes one. */
-function record(blob: BlobId, triangles = 8): MeshRecord {
-  const vertices = triangles + 2
-  const positions = new Float32Array(vertices * 3)
-  for (let vertex = 0; vertex < vertices; vertex += 1) {
-    positions[vertex * 3] = (vertex / (vertices - 1)) * 25.4
-    positions[vertex * 3 + 1] = (vertex % 2) * 12.7
-    positions[vertex * 3 + 2] = (vertex % 3) * 2
-  }
-  const indices = new Uint16Array(triangles * 3)
-  for (let triangle = 0; triangle < triangles; triangle += 1) {
-    indices[triangle * 3] = triangle
-    indices[triangle * 3 + 1] = triangle + 1
-    indices[triangle * 3 + 2] = triangle + 2
-  }
-  return {
-    blob,
-    version: MESH_CACHE_VERSION,
-    positions,
-    indices,
-    triangles,
-    vertices,
-    sourceTriangles: triangles * 40,
-    sourceBytes: 5_984,
-    weldRatio: 0.1667,
-    passThrough: false,
-    areaError: 0.005,
-    extentError: 0.01,
-    convertMs: 130,
-    storedAt: 1_000,
-    usedAt: 1_000,
-  }
+const ASSETS = { lod: 'https://bucket-openforge-workshop.mfinn.de/lod' }
+const OTHER_ASSETS = { lod: 'https://objects.openforge.tools/lod' }
+
+/** The md5 out of a `/lod/{shard}/{md5}.glb` URL. */
+function blobOf(url: string): string {
+  return url.slice(url.lastIndexOf('/') + 1, -'.glb'.length)
+}
+
+interface Store {
+  readonly fetchImpl: typeof fetch
+  /** Every address requested, in order, including repeats. */
+  readonly asked: string[]
 }
 
 /**
- * A cache whose contents change under the hook — which is the whole situation
- * being tested.
+ * A `/lod/` that answers with the fixture, except for the addresses named.
+ *
+ * `asked` is the whole point of several tests below: a reconciling store asks
+ * for an address once, and a restarting one asks again on every edit.
  */
-function mutableCache(): { cache: Promise<MeshCache>; add: (one: MeshRecord) => void } {
-  const rows = new Map<string, MeshRecord>()
-  const cache: MeshCache = {
-    get: (blob) => Promise.resolve(rows.get(blob)),
-    have: (blobs) => Promise.resolve(new Set(blobs.filter((blob) => rows.has(blob)))),
-    put: () => Promise.resolve(),
-    stats: () => Promise.resolve({ count: rows.size, bytes: 0, budget: 0 }),
-    clear: () => Promise.resolve(),
-    close: () => undefined,
+function store(status: Readonly<Record<string, number>> = {}): Store {
+  const asked: string[] = []
+  const fetchImpl: typeof fetch = (input) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const blob = blobOf(url)
+    asked.push(blob)
+    const code = status[blob]
+    if (code !== undefined) return Promise.resolve(new Response(null, { status: code }))
+    return Promise.resolve(
+      new Response(GLB.buffer.slice(GLB.byteOffset, GLB.byteOffset + GLB.byteLength), {
+        status: 200,
+        headers: { 'content-type': 'model/gltf-binary' },
+      }),
+    )
   }
+  return { fetchImpl, asked }
+}
+
+interface Probe {
+  /** Every state the hook has published, oldest first. */
+  readonly states: { geometries: ReadonlyMap<string, LodGeometry>; settled: boolean; pending: number }[]
+  readonly latest: () => Probe['states'][number]
+  readonly show: (blobs: readonly BlobId[], assets?: { lod: string }) => void
+  readonly unmount: () => void
+}
+
+/**
+ * Mount the hook so the caller can change its address set the way an edit does.
+ *
+ * A component rather than `renderHook` because the assertion is about the
+ * *sequence* of published states and not only the last one — `renderHook` keeps
+ * only `result.current`.
+ */
+function mount(blobs: readonly BlobId[], fetchImpl: typeof fetch): Probe {
+  const states: Probe['states'] = []
+
+  function Room({ blobs: want, assets }: { blobs: readonly BlobId[]; assets: { lod: string } }) {
+    const state = useLodStore({ blobs: want, assets, enabled: true, fetchImpl })
+    states.push({ geometries: state.geometries, settled: state.settled, pending: state.pending })
+    return null
+  }
+
+  const view = render(<Room blobs={blobs} assets={ASSETS} />)
   return {
-    cache: Promise.resolve(cache),
-    add: (one) => {
-      rows.set(one.blob, one)
+    states,
+    latest: () => {
+      const last = states.at(-1)
+      if (last === undefined) throw new Error('the hook published nothing')
+      return last
+    },
+    show: (want, assets = ASSETS) => {
+      view.rerender(<Room blobs={want} assets={assets} />)
+    },
+    unmount: () => {
+      view.unmount()
     },
   }
 }
 
-describe('the converted cache, read while it is still filling', () => {
-  it('reports a blob neither store has as absent', async () => {
-    const { cache } = mutableCache()
-    const { result } = renderHook(() =>
-      useLodStore({ blobs: [BLOB], assets: ASSETS, enabled: true, fetchImpl: notFound, cache }),
-    )
-    await waitFor(() => {
-      expect(result.current.settled).toBe(true)
-    })
-    expect(result.current.absent.has(BLOB)).toBe(true)
-    expect(result.current.geometries.size).toBe(0)
-    // An absence, not a failure: one is blocker B2 and a library the user has
-    // not added to, the other is worth a retry.
-    expect(result.current.failed.size).toBe(0)
+/** Resolves when the wanted addresses have all landed and nothing is in flight. */
+async function loaded(probe: Probe, ...blobs: readonly BlobId[]): Promise<void> {
+  await waitFor(() => {
+    const state = probe.latest()
+    expect(state.settled).toBe(true)
+    expect([...state.geometries.keys()].sort()).toEqual([...blobs].sort())
+  })
+}
+
+/** Whether a geometry has been released. `dispose()` is an event, not a flag. */
+function watchDisposal(lod: LodGeometry): () => boolean {
+  let disposed = false
+  lod.geometry.addEventListener('dispose', () => {
+    disposed = true
+  })
+  return () => disposed
+}
+
+describe('an edit to the room', () => {
+  it('never publishes a state that has dropped an already-loaded mesh', async () => {
+    const { fetchImpl } = store()
+    const probe = mount([A], fetchImpl)
+    await loaded(probe, A)
+
+    const held = probe.latest().geometries.get(A)
+    const from = probe.states.length
+
+    // The user places a tile whose file the room has not needed before.
+    probe.show([A, B])
+    await loaded(probe, A, B)
+
+    // The symptom, stated: not one frame of the room without the tiles it
+    // already had.
+    const without = probe.states.slice(from).filter((state) => !state.geometries.has(A))
+    expect(without).toEqual([])
+
+    // And the same object throughout, so `InstancedTiles` is not even rebuilt:
+    // `args={[group.lod.geometry, …]}` compares by identity.
+    expect(probe.latest().geometries.get(A)).toBe(held)
   })
 
-  it('picks the mesh up when the epoch says a conversion landed', async () => {
-    const { cache, add } = mutableCache()
-    const { result, rerender } = renderHook(
-      ({ epoch }: { epoch: number }) =>
-        useLodStore({ blobs: [BLOB], assets: ASSETS, enabled: true, fetchImpl: notFound, cache, epoch }),
-      { initialProps: { epoch: 0 } },
-    )
-    await waitFor(() => {
-      expect(result.current.absent.has(BLOB)).toBe(true)
-    })
+  it('costs exactly one request per new address, not a room’s worth', async () => {
+    const { fetchImpl, asked } = store()
+    const probe = mount([A, B], fetchImpl)
+    await loaded(probe, A, B)
+    expect(asked.length).toBe(2)
 
-    // The worker finishes and writes the record — which is exactly the moment
-    // `useMeshQueue`'s `ready` count goes up in `BuilderRoom`.
-    add(record(BLOB))
-    rerender({ epoch: 1 })
+    probe.show([A, B, C])
+    await loaded(probe, A, B, C)
 
-    await waitFor(() => {
-      expect(result.current.geometries.size).toBe(1)
-    })
-    const lod = result.current.geometries.get(BLOB)
-    expect(lod?.source).toBe('converted')
-    // Millimetres, in the store's Z-up axes — R1's contract, taken as given by
-    // this row beyond checking that it is what arrives.
-    expect(lod?.bounds.max.x).toBeCloseTo(25.4, 6)
-    expect(result.current.absent.size).toBe(0)
+    expect(asked).toEqual([A, B, C])
   })
 
-  it('does not pick it up while the epoch stands still', async () => {
-    // The assertion that makes the epoch a real dependency rather than a
-    // decoration. Same cache, same write, no bump — and a re-render on its own
-    // is not enough, because the effect's other dependencies have not moved.
-    const { cache, add } = mutableCache()
-    const { result, rerender } = renderHook(
-      ({ epoch }: { epoch: number }) =>
-        useLodStore({ blobs: [BLOB], assets: ASSETS, enabled: true, fetchImpl: notFound, cache, epoch }),
-      { initialProps: { epoch: 0 } },
-    )
-    await waitFor(() => {
-      expect(result.current.absent.has(BLOB)).toBe(true)
-    })
+  it('disposes the mesh whose last placement was deleted', async () => {
+    const { fetchImpl } = store()
+    const probe = mount([A, B], fetchImpl)
+    await loaded(probe, A, B)
 
-    add(record(BLOB))
-    rerender({ epoch: 0 })
-    rerender({ epoch: 0 })
-    await waitFor(() => {
-      expect(result.current.settled).toBe(true)
-    })
-    expect(result.current.geometries.size).toBe(0)
-    expect(result.current.absent.has(BLOB)).toBe(true)
+    const dropped = probe.latest().geometries.get(B)
+    const kept = probe.latest().geometries.get(A)
+    if (dropped === undefined || kept === undefined) throw new Error('both should be loaded')
+    const wasDisposed = watchDisposal(dropped)
+    const keptDisposed = watchDisposal(kept)
 
-    // And it is genuinely the epoch that frees it, not time passing.
-    rerender({ epoch: 1 })
+    probe.show([A])
+    await loaded(probe, A)
+
+    expect(wasDisposed()).toBe(true)
+    expect(keptDisposed()).toBe(false)
+    expect(probe.latest().geometries.get(A)).toBe(kept)
+  })
+
+  it('does not re-ask for an absence on the next edit', async () => {
+    // An absence is terminal — see the hook's note on why nothing is retried on
+    // a timer — and an edit is not a retry. A restarting effect would ask again
+    // for every address in the set, so this is the same guard as the count above
+    // read from the other side.
+    const { fetchImpl, asked } = store({ [B]: 404 })
+    const probe = mount([A, B], fetchImpl)
     await waitFor(() => {
-      expect(result.current.geometries.size).toBe(1)
+      expect(probe.latest().settled).toBe(true)
     })
+    expect(probe.latest().geometries.has(B)).toBe(false)
+    expect(asked).toEqual([A, B])
+
+    probe.show([A, B, C])
+    await loaded(probe, A, C)
+
+    expect(asked).toEqual([A, B, C])
+  })
+
+  it('keeps the room while an address is still in flight', async () => {
+    // The window the old shape was worst in: an edit during a load republished
+    // an empty map *and* restarted the loads it had already paid for.
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = () => {
+        resolve()
+      }
+    })
+    const backing = store()
+    const slow: typeof fetch = async (input, init) => {
+      if (blobOf(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url) === C) {
+        await held
+      }
+      return backing.fetchImpl(input, init)
+    }
+
+    const probe = mount([A], slow)
+    await loaded(probe, A)
+
+    probe.show([A, C])
+    await waitFor(() => {
+      expect(probe.latest().pending).toBe(1)
+    })
+    expect(probe.latest().geometries.has(A)).toBe(true)
+
+    probe.show([A, B, C])
+    await waitFor(() => {
+      expect(probe.latest().geometries.has(B)).toBe(true)
+    })
+    expect(probe.latest().geometries.has(A)).toBe(true)
+
+    release()
+    await loaded(probe, A, B, C)
+    // C was fetched once despite two edits landing on top of its request.
+    expect(backing.asked.filter((blob) => blob === C).length).toBe(1)
+  })
+})
+
+describe('what still invalidates everything', () => {
+  it('releases and re-reads when the store base changes', async () => {
+    const { fetchImpl, asked } = store()
+    const probe = mount([A], fetchImpl)
+    await loaded(probe, A)
+    const first = probe.latest().geometries.get(A)
+    if (first === undefined) throw new Error('A should be loaded')
+    const wasDisposed = watchDisposal(first)
+
+    probe.show([A], OTHER_ASSETS)
+    await waitFor(() => {
+      expect(probe.latest().geometries.get(A)).not.toBe(first)
+    })
+    await loaded(probe, A)
+
+    expect(wasDisposed()).toBe(true)
+    expect(asked).toEqual([A, A])
+  })
+
+  it('disposes everything on unmount, because nothing caches across mounts', async () => {
+    const { fetchImpl } = store()
+    const probe = mount([A, B], fetchImpl)
+    await loaded(probe, A, B)
+    const watches = [...probe.latest().geometries.values()].map(watchDisposal)
+
+    probe.unmount()
+
+    expect(watches.map((disposed) => disposed())).toEqual([true, true])
   })
 })

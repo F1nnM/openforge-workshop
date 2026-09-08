@@ -525,7 +525,7 @@ export function RoomSurface({
    * `scene.pieces` alone. Either way the ground is occupied and must look it.
    *
    * Flattened to parts rather than left as pieces because a three-part template
-   * with one converted file is **one mesh and two plates**, and a plate drawn per
+   * with one loaded file is **one mesh and two plates**, and a plate drawn per
    * *piece* would have to choose one of the three outlines to be — which is
    * exactly the single-primitive assumption A1 broke. Each plate takes its own
    * part's tint, elevation and outline, so a wall waiting for a mesh appears at
@@ -1296,7 +1296,7 @@ export function RoomSurface({
    * complained.
    *
    * A part with no mesh contributes a translucent plate rather than nothing, so
-   * a template halfway through converting still shows its full outline while it
+   * a template halfway through loading still shows its full outline while it
    * is carried.
    */
   const movingParts = useMemo<readonly MovingPart[]>(() => {

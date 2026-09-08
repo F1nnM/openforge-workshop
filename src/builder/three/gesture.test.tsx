@@ -344,7 +344,6 @@ function lodFixture(blob: string): LodGeometry {
   geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 25.4, 0, 0, 0, 12.7, 63.5]), 3))
   return {
     blob: blob as BlobId,
-    source: 'lod',
     geometry,
     bounds: new Box3(new Vector3(0, 0, 0), new Vector3(25.4, 12.7, 63.5)),
     triangles: 1,

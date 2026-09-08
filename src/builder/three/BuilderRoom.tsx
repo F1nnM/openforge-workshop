@@ -111,8 +111,6 @@ import { useAnnouncer } from '@/builder/canvas/hooks'
 import type { CatalogAssets, CatalogRecord } from '@/catalog'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
-import type { MeshTask } from '@/mesh'
-import { meshQueue, useMeshQueue } from '@/mesh'
 import type { PlacementId, SlotName } from '@/store'
 import { useLockSystem, useRoomDesign } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
@@ -181,15 +179,17 @@ export interface BuilderRoomProps {
   /** The shared tool state — `PlanToolbar` and the palette write the same object. */
   readonly tools: PlanTools
   /**
-   * `models` as well as `lod`, and the second one is row R2's addition.
+   * `lod` alone, which is the whole of what this surface fetches.
    *
-   * `lod` is where a published preview mesh would come from. `models` is what
-   * `@/mesh`'s conversion queue is keyed on, and this component subscribes to
-   * that queue so a mesh that finishes converting *after* the surface has
-   * mounted actually appears — see `converted` below. Every call site already
-   * passes the whole `catalogFile.assets`, so nothing changed but the type.
+   * It carried `models` too while the room had a second mesh source: `@/mesh`'s
+   * in-browser conversion of the source STL was keyed on that base, and this
+   * component subscribed to its queue so a mesh that finished converting after
+   * the surface had mounted actually appeared. `/lod/` is backfilled, that
+   * fallback is deleted, and the archive base is no longer this component's
+   * business. Call sites pass the whole `catalogFile.assets`, so nothing changed
+   * but the type.
    */
-  readonly assets: Pick<CatalogAssets, 'lod' | 'models'>
+  readonly assets: Pick<CatalogAssets, 'lod'>
   /**
    * The three authorities row **C5**'s fill solve needs, and not one more.
    *
@@ -289,7 +289,7 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
    * that fetched from a second one would report *"not in the store"* about a blob
    * it had never asked for, which is a sentence the app also shows legitimately
    * and so an invisible failure. `instances.ts` states the derivation as contract
-   * **C-d** and relates it to what `@/mesh`'s warming pass converts.
+   * **C-d**.
    *
    * **The armed item is no longer in it, and that follows from what "armed"
    * means now.** Row R2 added the armed tile's own blob here so the first ghost
@@ -319,64 +319,10 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
   */
   const decodable = meshoptSupported()
 
-  /**
-   * How many conversions the queue has finished, as a nudge for the mesh store.
-   *
-   * **The surface being open on arrival made this necessary.** `useLodStore`
-   * reads the converted cache once per blob and reports a miss as absent; it
-   * does not subscribe, and its `epoch` docblock carries the measurement — with
-   * the nudge removed, add-to-library then arm then place leaves the room
-   * reporting three outlined tiles indefinitely in a real Chrome.
-   *
-   * The queue is `@/mesh`'s own singleton per `models` base — the same one an
-   * add-to-library action reaches for — and `useMeshQueue` is its
-   * `useSyncExternalStore` subscription, so this counts the real thing rather
-   * than polling on a timer. Constructing it is free: `createMeshConverter`
-   * spawns its worker on the first conversion, not here.
-   *
-   * `ready` and not "terminal": `missing`, `failed` and `uncached` are terminal
-   * too, and re-reading the cache for one of those would find exactly what it
-   * found before. Only a completed conversion changes the answer.
-   */
-  const queue = useMemo(() => meshQueue({ models: assets.models }), [assets.models])
-  const meshes = useMeshQueue(queue)
-  const converted = useMemo(
-    () => [...meshes.tasks.values()].filter((task) => task.state === 'ready').length,
-    [meshes.tasks],
-  )
-
-  /**
-   * Conversions that ended somewhere other than the cache — row **R3**.
-   *
-   * **A gap this row found in a browser rather than in a test.** `@/mesh`'s queue
-   * names four terminal states and three of them are not `ready`: `missing` (the
-   * source STL 404s, so the index and the archive disagree), `failed` (the
-   * conversion itself refused) and `uncached` (converted, and the browser would
-   * not store it — so it re-downloads every reload). Until this row nothing was
-   * ever queued, so none of them had a call site; the moment `warm.ts` wired the
-   * conversion, one of them started firing and the *only* thing on screen was an
-   * outlined tile with the same sentence as a tile nobody had converted yet.
-   *
-   * Those are different states with different answers, and R1's own docblock
-   * says so state by state. Read off the tasks rather than off
-   * `MeshQueueState.failed`, which carries blobs and no reasons — and includes
-   * `uncached` here, which `failed` deliberately does not, because a conversion
-   * the browser refused to keep is exactly the failure that otherwise reports as
-   * success.
-   */
-  const stalled = useMemo(
-    () =>
-      [...meshes.tasks.values()].filter(
-        (task) => task.state === 'missing' || task.state === 'failed' || task.state === 'uncached',
-      ),
-    [meshes.tasks],
-  )
-
   const store = useLodStore({
     blobs,
     assets,
     enabled: decodable,
-    epoch: converted,
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   })
 
@@ -407,7 +353,7 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
    * count.
    *
    * Parts and not placements since row A4b, for `RoomSurface`'s reason: a plate
-   * is drawn per part, so a three-part template with one converted file is two
+   * is drawn per part, so a three-part template with one loaded file is two
    * plates, and a count of placements would say *"1 outlined"* about two
    * outlines. `RoomSurface` builds the same list to draw from; this is the number
    * the notice and the readout quote, so the two are computed the same way.
@@ -472,8 +418,6 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
         <SurfaceNotice
           room={room}
           store={store}
-          converting={meshes.eagerPending + meshes.backgroundPending}
-          stalled={stalled}
           waiting={waiting}
           unfilled={scene.unfilled.length}
           total={partsDrawn(scene) + scene.generated.length}
@@ -526,24 +470,23 @@ function roomStatus(room: Room3D, settled: boolean): string {
  *
  * Ordered by what a user can act on. A failure is worth a retry and an absence
  * is not, so a failure is named first and separately; a load in flight is
- * transient and says so; and a converted-cache miss is a statement about the
- * user's own library rather than about the app.
+ * transient and says so; and an object the store does not hold is last, because
+ * it is the only one of the three that nothing here or in the browser can move.
+ *
+ * The two conversion plates that used to lead this list — *"converting N
+ * meshes…"* and the three terminal states a conversion could reach other than
+ * the cache — are gone with `src/mesh/`. They described work this app no longer
+ * does.
  */
 function SurfaceNotice({
   room,
   store,
-  converting,
-  stalled,
   waiting,
   unfilled,
   total,
 }: {
   room: Room3D
   store: LodStoreState
-  /** Meshes `@/mesh`'s queue is still fetching or decimating. */
-  converting: number
-  /** Conversions that reached a terminal state other than the cache. */
-  stalled: readonly MeshTask[]
   /** Drawn parts plated because no mesh has arrived for them. Row A4b. */
   waiting: number
   /** Instances with no filled slot at all — `PlanScene.unfilled`. Row A4b. */
@@ -552,60 +495,6 @@ function SurfaceNotice({
   total: number
 }) {
   if (room.refusal !== null) return null
-
-  /*
-     The conversion, ahead of the absence it causes.
-
-     R1 measured an aggregate at a **16.7 MB median, 1.9 s at 9 MB/s**, and a p95
-     of 92.8 MB. That is long enough that a plate with no explanation reads as a
-     failure, and it is a different sentence from "no mesh in the store": one is
-     a wait and the other is a state. Read off `@/mesh`'s own queue rather than
-     inferred from the absences, so it says the true thing about work in progress
-     instead of guessing from what is missing.
-  */
-  if (converting > 0) {
-    return (
-      <p className="of-b3d-plate of-b3d-loading" role="status">
-        Converting {String(converting)} {converting === 1 ? 'mesh' : 'meshes'}… the tiles are drawn as outlines
-        until {converting === 1 ? 'it lands' : 'they land'}.
-      </p>
-    )
-  }
-
-  /*
-     A conversion that ended somewhere other than the cache, ahead of the
-     absence it causes and ahead of `/lod/`'s own failures.
-
-     **Found in a browser, not in a test.** Before this row nothing was ever
-     queued, so R1's three non-`ready` terminal states had no call site and no
-     UI; the moment `warm.ts` wired the conversion, a real archive mesh landed in
-     one of them and the only thing on screen was the same "no mesh in the store
-     yet" sentence a tile that had never been asked for gets. That sentence is
-     false about a conversion that has already finished and failed, and it is
-     false in the direction that makes a user wait for something that is not
-     coming.
-
-     The three are named separately because R1's own docblock gives them three
-     different answers: `missing` is the index and the archive disagreeing and
-     nothing local will fix it, `failed` is worth a retry, and `uncached` draws
-     this session and silently re-downloads on every reload.
-  */
-  if (stalled.length > 0) {
-    const first = stalled[0]
-    const missing = stalled.filter((task) => task.state === 'missing').length
-    const uncached = stalled.filter((task) => task.state === 'uncached').length
-    return (
-      <p className="of-b3d-plate of-b3d-alert" role="alert">
-        {stalled.length === 1 ? 'One mesh' : `${String(stalled.length)} meshes`} could not be converted, so{' '}
-        {stalled.length === 1 ? 'that piece is' : 'those pieces are'} drawn as an outline.{' '}
-        {missing === stalled.length
-          ? 'The source file is not in the archive; the index and the archive disagree about it.'
-          : uncached === stalled.length
-            ? 'They converted, but this browser would not store them, so they are re-downloaded every reload.'
-            : (first?.error ?? '')}
-      </p>
-    )
-  }
 
   if (store.failed.size > 0) {
     return (
@@ -628,9 +517,9 @@ function SurfaceNotice({
   if (waiting > 0) {
     return (
       <p className="of-b3d-plate" role="status">
-        {String(waiting)} of {String(total)} placed {total === 1 ? 'part has' : 'parts have'} no mesh in the store
-        yet, so {waiting === 1 ? 'it is' : 'they are'} drawn as a marked outline. The outline is the tagged footprint
-        and the part is really there.
+        {String(waiting)} of {String(total)} placed {total === 1 ? 'part has' : 'parts have'} no mesh in the store,
+        so {waiting === 1 ? 'it is' : 'they are'} drawn as a marked outline. The outline is the tagged footprint and
+        the part is really there.
       </p>
     )
   }

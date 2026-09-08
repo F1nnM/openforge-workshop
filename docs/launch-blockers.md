@@ -39,6 +39,16 @@ because this was going to be assumed rather than checked.
 
 **Gates: X1, and G1's LOD upload.**
 
+**The token exists and the LOD half has run.** `/lod/` serves a meshopt GLB for every one
+of the archive's 8,353 distinct meshes, from
+`https://bucket-openforge-workshop.mfinn.de/lod/{md5[:6]}/{md5}.glb`. That is what let
+`src/mesh/` go: the builder used to convert the source STL in the browser and cache it in
+IndexedDB because this prefix answered 404 for everything, and a fallback that can no
+longer fire is deleted rather than left dormant.
+
+**The thumbnail half has not.** Every record in the emitted index still carries
+`thumb: false`, so X1 and the two commands at the end of this section are still ahead.
+
 An **R2 API token scoped to Object Read & Write on this bucket only**. Not an account-wide
 token: the backfill writes two prefixes, `/thumbs/` and `/lod/`, and nothing else needs
 write access ever.

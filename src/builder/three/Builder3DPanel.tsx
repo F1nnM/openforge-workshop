@@ -99,11 +99,12 @@ export interface Builder3DPanelProps {
   /** The shared tool state — the palette and `PlanToolbar` write the same object. */
   readonly tools: PlanTools
   /**
-   * `lod` and `models`. The room subscribes to `@/mesh`'s conversion queue,
-   * which is keyed on the `models` base — see `BuilderRoom`'s note. A type
-   * change only: every call site already passes the whole `catalogFile.assets`.
+   * `lod` alone. The room carried `models` too while it had a second mesh source
+   * — `@/mesh`'s in-browser conversion, keyed on the archive base — and that is
+   * deleted now `/lod/` is backfilled. See `BuilderRoom`'s note. A type change
+   * only: every call site already passes the whole `catalogFile.assets`.
    */
-  readonly assets: Pick<CatalogAssets, 'lod' | 'models'>
+  readonly assets: Pick<CatalogAssets, 'lod'>
   /**
    * The assembly index, the template lookup and the composition index — row
    * **C5**'s fill solve, which turns the armed family into the files that fill
