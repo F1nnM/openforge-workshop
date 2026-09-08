@@ -36,8 +36,10 @@ import {
   fixturesDir,
   loadFixtureRows,
   loadManifest,
+  readThumbInventory,
   resolveFixturesRef,
   serialiseCatalog,
+  thumbBlobs,
 } from '../../pipeline'
 import { meshTargets } from '../lod/catalog'
 import { measureTargets } from '../measure/catalog'
@@ -94,6 +96,18 @@ export function runStamp(options: StampOptions = {}): StampRun {
     manifest: previous,
     fixturesRef,
     builtAt: options.builtAt ?? buildTimestamp(),
+    // The committed inventory, joined — because **this** is the index CI ships.
+    // `deploy.yml` and `pr-preview.yml` run `npm run stamp` and nothing else, and
+    // it overwrites `public/catalog/catalog.json`. Omitting this made `thumb`
+    // false in every deployed build regardless of what `npm run import:catalog`
+    // had just written locally: the objects sat in the bucket, the grid went on
+    // cropping sprite sheets, and no check failed, because `build.ts` documents
+    // absence as the safe default and it is — for a bucket that is empty.
+    //
+    // `lock.ts` deliberately does the opposite with `thumbs: new Set()`, and both
+    // are right: the lock digests a derivation, and a bucket's contents are not
+    // one. This function writes the artefact.
+    thumbs: thumbBlobs(readThumbInventory()),
   })
   const file = built.file
   const json = serialiseCatalog(file)

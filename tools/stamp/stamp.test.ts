@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { CatalogFile, ManifestOrdinal } from '../../src/catalog'
-import { emptyManifest, fixturesDir } from '../../pipeline'
+import { emptyManifest, fixturesDir, readThumbInventory, thumbBlobs } from '../../pipeline'
 import { MANIFEST_VERSION as LOD_MANIFEST_VERSION } from '../lod/manifest'
 import { MEASURE_SIDECAR_VERSION } from '../measure/sidecar'
 import { blobOf, testCatalog } from '../measure/fixtures/catalog'
@@ -209,6 +209,24 @@ describeCorpus(title, () => {
 
   it('passes the gate on this tree', () => {
     expect(run.report.failures).toEqual([])
+  })
+
+  it('emits the thumb flag from the committed inventory, because this is the index CI ships', () => {
+    // `npm run stamp` is what `deploy.yml` and `pr-preview.yml` run, and it
+    // *overwrites* `public/catalog/catalog.json`. So if this build does not join
+    // the inventory, `thumb` is false in every deployed index no matter what
+    // `npm run import:catalog` wrote a moment earlier — the backfill lands in the
+    // bucket and the grid keeps cropping sprite sheets, with nothing failing.
+    //
+    // The lock's build stays thumbless on purpose (`lock.ts`: "a backfill is not
+    // a derivation"). This one is the artefact, not the digest.
+    const present = thumbBlobs(readThumbInventory())
+    const withThumb = run.file.records.filter((record) => record.thumb)
+    expect(present.size).toBeGreaterThan(0)
+    expect(withThumb.length).toBeGreaterThan(0)
+    for (const record of run.file.records) {
+      expect(record.thumb, record.blob).toBe(present.has(record.blob))
+    }
   })
 
   it('finds the sidecar restamped and materially complete, not stale', () => {
