@@ -480,7 +480,21 @@ export function RoomSurface({
 
   const [cursor, setCursor] = useState<PlanPoint | null>(null)
   const [drag, setDrag] = useState<MoveDrag | null>(null)
-  const [focused, setFocused] = useState(false)
+  /**
+   * Whether the plan cursor was last moved by the **keyboard**.
+   *
+   * This was `focused`, tracking whether the canvas held focus, and the swap is
+   * forced by the key map moving off the canvas: with shortcuts working from
+   * anywhere on the screen, a caret that appeared only while the canvas had
+   * focus would be absent for the arrow keys that move it — the one cursor whose
+   * *only* visible mark it is.
+   *
+   * Set by the two keyboard cursor writers and cleared by a pointer move, which
+   * is exactly `Caret`'s own argument for existing: *"a crosshair chasing a
+   * mouse pointer that already has a ghost is noise"*. So it is drawn when the
+   * cursor is a keyboard cursor, and not merely when a cursor exists.
+   */
+  const [keyCursor, setKeyCursor] = useState(false)
   /**
    * Whether a button is held *while the pointer moves* — an orbit, a pan, or a
    * carry. Row D3, and it exists to keep the hover glow off the camera.
@@ -1083,10 +1097,6 @@ export function RoomSurface({
     }
 
     const onMove = (event: PointerEvent) => {
-      // Reaching for the mouse ends `R`'s stickiness, exactly as a cursor move
-      // does: the sticky target exists so repeated `R` keeps turning the same
-      // piece, and pointing somewhere else is the user saying otherwise.
-      sticky.current = null
       // A held button means the camera, here: left orbits and right pans. So the
       // hover glow goes out for the duration, because a cue that hops from piece
       // to piece while the view swings under a stationary hand is worse than no
@@ -1099,6 +1109,7 @@ export function RoomSurface({
         return
       }
       setCursor(pick.point)
+      setKeyCursor(false)
       const held = latest.current.drag
       if (held !== null && press.current?.claimed === true) {
         // A pointer drag is not announced step by step: the outline is following
@@ -1195,16 +1206,6 @@ export function RoomSurface({
 
   /* ------------------------------------------------------------- the keyboard */
 
-  /**
-   * The placement `R` is currently turning.
-   *
-   * Sticky until the pointer or the cursor moves, because turning a piece can
-   * move it out from under the point that was clicked — a 2 × 0.5 wall turned
-   * 60° no longer covers it — and the next press would then silently turn the
-   * *ghost*. `PlanCanvas` learned this; the behaviour has to match or `R` means
-   * two different things in the two views.
-   */
-  const sticky = useRef<PlacementId | null>(null)
   const navIndex = useRef(-1)
 
   /**
@@ -1226,8 +1227,8 @@ export function RoomSurface({
       const { tools: state } = latest.current
       const [x, z] = cursorRef.current ?? [0, 0]
       const next: PlanPoint = [snapTo(x + dx, state.step), snapTo(z + dz, state.step)]
-      sticky.current = null
       setCursor(next)
+      setKeyCursor(true)
       const piece = pieceAt(latest.current.scene, next)
       latest.current.say(
         `${describeCell(next[0], next[1])} — ${piece === undefined ? 'empty' : piece.label}${piece?.conflict === true ? ', overlapping' : ''}`,
@@ -1309,6 +1310,7 @@ export function RoomSurface({
       navIndex.current = (navIndex.current + direction + order.length) % order.length
       const piece = order[navIndex.current] as ScenePiece
       setCursor([piece.box.x + piece.box.w / 2, piece.box.z + piece.box.d / 2])
+      setKeyCursor(true)
       // **Selects, not merely announces**, and that is what makes this the
       // primary keyboard route rather than a readout. Every verb acts on the
       // selection, so stepping onto a piece has to *be* selecting it or a
@@ -1471,26 +1473,61 @@ export function RoomSurface({
     }
 
     const onFocus = () => {
-      setFocused(true)
       // Put the keyboard cursor somewhere visible if it has nowhere yet, so
-      // focus has an **in-scene** cue rather than only a ring around the
-      // viewport. A `role="application"` tab stop has to show that it holds the
-      // keys, and the caret says it where the user is looking; `builder3d.css`
-      // carries why the ring itself is as quiet as it is.
+      // tabbing to the surface has an **in-scene** cue rather than only a ring
+      // around the viewport. A `role="application"` tab stop has to show that it
+      // holds the keys, and the caret says it where the user is looking;
+      // `builder3d.css` carries why the ring itself is as quiet as it is.
       if (cursorRef.current === null) {
         setCursor([0, 0])
+        setKeyCursor(true)
         invalidate()
       }
     }
-    const onBlur = () => { setFocused(false) }
 
-    canvas.addEventListener('keydown', onKey)
+    /*
+      **The key map listens on the window, not on the canvas, and that is a bug
+      fix rather than a widening.**
+
+      It was on the `<canvas>`, which is a `tabIndex = 0` element — so every
+      shortcut needed the canvas to hold focus. Nothing on this screen keeps it
+      there: arming a family means clicking a *palette row*, which is a
+      `<button>` and takes focus, so `R` and `Escape` reached the palette and did
+      nothing. Pressing `Undo` on the rail broke `Ctrl`+`Z` the same way. The
+      class is *any* chrome interaction, and fixing it per control — a
+      `preventDefault` on every button — is both whack-a-mole and wrong for a
+      keyboard user who has to be able to Tab to those buttons.
+
+      What made it survivable until now was the toolbar's `Rotate`, which turned
+      the armed ghost on a click and needed no focus at all. That button is gone,
+      so the key is the only route and it has to work from anywhere.
+
+      Two guards keep it from being a land grab:
+
+        - **Never while typing.** A form field or a `contenteditable` owns its own
+          keys — the palette's search box is one, and `r` in it must type an `r`.
+        - **Never while a dialog is open.** The slot editor and the two pickers
+          are modals: `Escape` there belongs to the dialog, and a shortcut firing
+          behind one would edit a room the user cannot see. Suspending the whole
+          map while any dialog is up is the correct modal behaviour and needs no
+          per-key exceptions.
+    */
+    const typingIn = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false
+      if (target.isContentEditable) return true
+      return ['input', 'textarea', 'select'].includes(target.tagName.toLowerCase())
+    }
+    const guarded = (event: KeyboardEvent) => {
+      if (typingIn(event.target)) return
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]') !== null) return
+      onKey(event)
+    }
+
     canvas.addEventListener('focus', onFocus)
-    canvas.addEventListener('blur', onBlur)
+    window.addEventListener('keydown', guarded)
     return () => {
-      canvas.removeEventListener('keydown', onKey)
       canvas.removeEventListener('focus', onFocus)
-      canvas.removeEventListener('blur', onBlur)
+      window.removeEventListener('keydown', guarded)
     }
   }, [actAt, gl, keyHelpId, moveCursor, nudge, stepToPiece])
 
@@ -1562,7 +1599,13 @@ export function RoomSurface({
   // this component draws is derived from state the renderer knows nothing about.
   useEffect(() => {
     invalidate()
-  }, [invalidate, ghost, moving, plated, room, focused])
+    // `keyCursor` is deliberately **not** a dependency, where `focused` used to
+    // be. Every writer of it already asks for a frame — `moveCursor`,
+    // `stepToPiece`, `onMove` and `onFocus` all call `invalidate` themselves —
+    // so listing it here bought a *second* frame on the press that first shows
+    // the caret. Measured by the frame-economy test below it: one arrow key went
+    // from 1 invalidation to 2.
+  }, [invalidate, ghost, moving, plated, room])
 
   /* --------------------------------------------------------------- the drawing */
 
@@ -1812,7 +1855,7 @@ export function RoomSurface({
         />
       ))}
 
-      {focused && cursor !== null ? <Caret at={cursor} colour={ACCENT} /> : null}
+      {keyCursor && cursor !== null ? <Caret at={cursor} colour={ACCENT} /> : null}
     </group>
   )
 }
