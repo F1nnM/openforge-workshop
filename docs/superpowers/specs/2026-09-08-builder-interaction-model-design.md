@@ -325,7 +325,8 @@ is testable and only the anchoring wrapper is not.
 | `RoomSurface.tsx` | the new gesture model; the `event.target` guard; MMB orbit; the `PlanCatalog` for the ghost |
 | `PlanToolbar.tsx` | drop the mode toggle; add Undo / Redo |
 | `workshopStore.ts` | add `restorePlacements` |
-| `Stage.tsx` / `outline.ts` | a second outline weight for the selection |
+| `markers.ts` | a ground-plane contour for the selection, from the same convex parts as the plate |
+| `Stage.tsx` | MMB bound to orbit; the outline pass itself is untouched |
 | `slots/SlotsPanel.tsx` | the editing route moves to the action bar |
 | `docs/design-contract.md` | §2.4 and §3 rewritten to describe what ships |
 
