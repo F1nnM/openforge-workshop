@@ -129,8 +129,8 @@
  * predecessors applies here too: **the deltas are the usable part of this table
  * and the absolutes are not.** (`gzip -9`; brotli is
  * `BROTLI_PARAM_QUALITY: 11`, node's `zlib`, because the box has no `brotli`
- * binary. Brotli is the number that matters — `public/catalog/` ships a
- * precompressed `.br`.)
+ * binary. Brotli is the number that matters — Cloudflare serves these assets
+ * brotli-encoded.)
  *
  * Each route made lazy **on its own**, against that baseline:
  *
