@@ -1,6 +1,6 @@
 /*
   Cross-Origin-Opener-Policy: unsafe-none
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob: https://objects.openforge.tools; connect-src 'self' https://objects.openforge.tools; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob: https://objects.openforge.tools https://bucket-openforge-workshop.mfinn.de; connect-src 'self' https://objects.openforge.tools https://bucket-openforge-workshop.mfinn.de; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
