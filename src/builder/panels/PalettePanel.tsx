@@ -654,11 +654,23 @@ function SizeControl({
  * tag a wall's depth), so *"2 wide"* stays *"2 wide"* rather than becoming
  * `2 x ?`. `any size` is unchanged. The full label is on the button's
  * `aria-label`.
+ *
+ * **The run figure was 48 and is measured at 47**, and 24 of those 47 now say
+ * *"N wide, any depth"* because they admit records at two to seven depths and sat
+ * in the same control as the `(w, d)` position they contain.
+ * `pipeline/families.test.ts` carries the biconditional.
  */
 function sizeChipLabel(label: string): string {
   if (label === ANY_SIZE_LABEL) return label
   const pair = /^(.+) wide by (.+) deep$/.exec(label)
-  return pair === null ? label : `${pair[1]!} \u00d7 ${pair[2]!}`
+  if (pair !== null) return `${pair[1]!} \u00d7 ${pair[2]!}`
+  /* *"2 wide, any depth"* \u2014 a run position that admits records at more than one
+     depth, and 24 of the 47 do. `2 \u00d7 any` keeps the distinction the abbreviation
+     above must not lose, in the same width as `2 \u00d7 2` and beside it: the chip has
+     to say that this position is the *wider* of the two, which plain `2 wide`
+     read as the narrower. */
+  const anyDepth = /^(.+) wide, any depth$/.exec(label)
+  return anyDepth === null ? label : `${anyDepth[1]!} \u00d7 any`
 }
 
 /** What the RECENT strip holds: a family and the size it was armed at. */
