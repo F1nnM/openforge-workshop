@@ -37,7 +37,7 @@ import { fillFixture } from '@/template/fixture'
 import type { TemplateId } from '@/store'
 
 import type { PlacementFiller } from './fills'
-import { createPlacementFiller, describePlacementFill, sizeContextFor } from './fills'
+import { createPlacementFiller, describePlacementFill, positionContextFor } from './fills'
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -120,11 +120,27 @@ const SIZED_RECORDS: readonly FillFixtureRecord[] = [
 const FLOOR_FAMILY = 'floor-family' as TemplateId
 const WALL_RECIPE = 'wall-on-tile' as TemplateId
 
-/** B4's shape: **one** part, no convention, so the size applies family-wide. */
+/**
+ * B4's shape: **one** part and no convention, so the position takes the
+ * `parentTags` route rather than becoming a cell.
+ *
+ * It declares `families.ts#CONSTRAIN_SIZE` because every generated family does,
+ * and because that block is what collects the position: a one-slot family
+ * without it would be narrowed by nothing. There is no sibling to inherit from
+ * either way, so the default sibling behaviour is moot here.
+ */
 const FLOOR_ONLY: AssemblyTemplate = {
   id: FLOOR_FAMILY,
   tags: ['object|tile'],
-  parts: [{ name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } }],
+  parts: [
+    {
+      name: 'floor',
+      tags: {
+        require: [{ tag: 'shape|floor' }],
+        constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+      },
+    },
+  ],
 }
 
 /** B2's `WALL_ON_TILE` part-name set, so the same size arrives as a **cell**. */
@@ -204,14 +220,30 @@ describe('the armed size decides what lands', () => {
   it('reads the size as a cell only where there is a layout to read it against', () => {
     // The branch, stated directly, because the two paths are the difference
     // between narrowing three slots correctly and emptying two of them.
-    expect(sizeContextFor(WALL_ON_TILE, TWO_BY_TWO)).toEqual({ cell: { w: 2, d: 2 } })
-    expect(sizeContextFor(FLOOR_ONLY, TWO_BY_TWO)).toEqual({ size: TWO_BY_TWO })
+    expect(positionContextFor(WALL_ON_TILE, TWO_BY_TWO)).toEqual({ cell: { w: 2, d: 2 } })
+    expect(positionContextFor(FLOOR_ONLY, TWO_BY_TWO)).toEqual({ position: TWO_BY_TWO })
   })
 
-  it('keeps a one-axis position family-wide, because a cell needs both spans', () => {
-    // C1's *"2 wide"* position. Inventing the depth would place a size nobody
-    // chose, so it stays an exact ref on every slot.
-    expect(sizeContextFor(WALL_ON_TILE, ['size|width|2'])).toEqual({ size: ['size|width|2'] })
+  it('keeps a one-axis position on the parentTags route, because a cell needs both spans', () => {
+    // The *"2 wide"* position. Inventing the depth would place a size nobody
+    // chose, so the whole position rides as parent tags instead.
+    expect(positionContextFor(WALL_ON_TILE, ['size|width|2'])).toEqual({ position: ['size|width|2'] })
+  })
+
+  it('sends a non-size axis down the parentTags route even beside a cell', () => {
+    /* The split the recipe fold needs. A component cannot become a cell and must
+       never be a require of every slot: the merged wall slot constrains
+       `component` and collects it, while the floor and base beside it — which
+       carry no `component|` tag at all — are left alone. So a size-plus-component
+       position resolves to *both* fields, one per route. */
+    expect(positionContextFor(WALL_ON_TILE, [...TWO_BY_TWO, 'component|door|arched'])).toEqual({
+      cell: { w: 2, d: 2 },
+      position: ['component|door|arched'],
+    })
+    // With no layout there is no cell, so the whole position goes as parent tags.
+    expect(positionContextFor(FLOOR_ONLY, [...TWO_BY_TWO, 'component|door|arched'])).toEqual({
+      position: [...TWO_BY_TWO, 'component|door|arched'],
+    })
   })
 })
 

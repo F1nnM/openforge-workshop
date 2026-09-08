@@ -16,7 +16,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { TileId } from '@/catalog'
+import type { CatalogRecord, TileId } from '@/catalog'
+import { resolveTags } from '@/catalog'
 import type { PlacementId, SlotName, TemplateId, WorkshopState } from '@/store'
 
 import {
@@ -611,6 +612,45 @@ describe('the band, and why row A7 could not delete it — re-measured under row
     expect(scene.conflicts.size).toBe(0)
   })
 
+  it('does not lift a fill that brings its own base, because it is already on the ground', () => {
+    /* **The defect the project owner photographed on a modular corner**: a wall
+       with an integrated base, floating by exactly one base thickness.
+       `liftOf` reads the **resting** slot — *is the base filled* — which is right
+       for a `topper`, authored to clip onto a base. It never asks what the
+       *standing* slot holds, and for an `integral` fill the answer decides
+       everything: that piece is one unit from the ground up, `tileMatrix`
+       normalises its lowest point to `y = 0`, and the lift then raises it by the
+       base thickness it already contains.
+
+       The floor beside it is still lifted, which is the half that must not
+       change: a modular tile really is an s2w base with a floor on top and a
+       self-based wall standing on the ground beside them. */
+    const scene = buildPlanScene(
+      familyOf(OTHER_FIXTURE_TEMPLATE, [
+        [
+          'piece',
+          [
+            [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.wall, FIXTURE_IDS.integralWall],
+          ],
+          0,
+          0,
+          0,
+        ],
+      ]),
+      wired,
+      wiredStyle,
+    )
+    const parts = scene.pieces.flatMap((piece) => piece.parts)
+    const elevationOf = (slot: SlotName) => parts.find((part) => part.slot === slot)?.layout.elevationMm
+
+    expect(elevationOf(FIXTURE_SLOTS.wall)).toBe(0)
+    // And nothing else moves: the base is the ground and the floor stands on it.
+    expect(elevationOf(FIXTURE_SLOTS.base)).toBe(0)
+    expect(elevationOf(FIXTURE_SLOTS.floor)).toBe(BASE_LIFT_MM)
+  })
+
   it('does not retire, because a wall and a floor come out at the same height', () => {
     /*
       **The measurement row C6 owes A7, and it says the band stays.** A7 pinned
@@ -700,6 +740,13 @@ describe('the band, and why row A7 could not delete it — re-measured under row
  */
 describe('the wired slot layout', () => {
   const layout = templateSlotLayout(fixtureTemplateParts)
+  /* The tag reader `planCatalogFromFile` hands the rule in production, built
+     here off the same fixture file. No fixture record is an `shape|base|s2w`
+     base, so nothing in this block is inset and every position below is the
+     answer it was before the parameter existed — which is the point of reading
+     the real tags rather than stubbing them: a fixture that gained an s2w base
+     would change these numbers rather than quietly not. */
+  const fixtureTags = (fill: CatalogRecord): readonly string[] => resolveTags(file, fill)
   /**
    * The five records of a filled 2 x 2 corner, as the rule receives them.
    *
@@ -717,7 +764,7 @@ describe('the wired slot layout', () => {
     [FIXTURE_SLOTS.leftWall, record(FIXTURE_IDS.cornerWall)],
     [FIXTURE_SLOTS.column, record(FIXTURE_IDS.column)],
   ])
-  const answerAt = (slot: SlotName, fills = CORNER) => layout(FIXTURE_TEMPLATE, slot, fills)
+  const answerAt = (slot: SlotName, fills = CORNER) => layout(FIXTURE_TEMPLATE, slot, fills, fixtureTags)
   /** The rule's answer, asserted to be a position rather than a refusal. */
   const positionOf = (answer: SlotLayoutAnswer, where: string): SlotLayout => {
     if (!isSlotLayout(answer)) throw new Error(`${where} was refused: ${answer.refused}`)
@@ -763,11 +810,18 @@ describe('the wired slot layout', () => {
       cell: FIXTURE_CELL,
       residual: { w: 1.5, d: 1.5 },
     })
+    /* **The column is `layer: 'integral'`, so it collects no lift.** It read
+       `BASE_LIFT_MM` here and that was the same defect the project owner
+       photographed on a wall: a piece that brings its own base, raised by the
+       base it already contains. Both populations are real in this slot — the
+       archive's modular corners offer 25 integral columns and their single-piece
+       siblings 12 toppers — so the number has to come from the *fill*, which is
+       what `catalog.ts#bringsOwnBase` now asks. */
     expect(at(FIXTURE_SLOTS.column)).toEqual({
       dx: 0,
       dz: 0,
       rotation: 0,
-      elevationMm: BASE_LIFT_MM,
+      elevationMm: 0,
       cell: FIXTURE_CELL,
     })
     expect(at(FIXTURE_SLOTS.rightWall)).toEqual({
@@ -800,7 +854,7 @@ describe('the wired slot layout', () => {
       [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
       [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.diag)],
     ])
-    const answer = layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, diagonal)
+    const answer = layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, diagonal, fixtureTags)
     expect(isSlotLayout(answer)).toBe(false)
     expect(isSlotLayout(answer) ? '' : answer.refused).toBe(
       'The wall part has no straight run, so it does not lie along an edge of this cell.',
@@ -857,7 +911,7 @@ describe('the wired slot layout', () => {
     // B4's 51 generated families: C2 measured 0 of 51 with a part-name set
     // `rules.ts` has a convention for, and a one-slot family needs none.
     const bare = new Map([[FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)]])
-    expect(layout('shape-base' as TemplateId, FIXTURE_SLOTS.floor, bare)).toEqual({
+    expect(layout('shape-base' as TemplateId, FIXTURE_SLOTS.floor, bare, fixtureTags)).toEqual({
       dx: 0,
       dz: 0,
       rotation: 0,
@@ -873,12 +927,12 @@ describe('the wired slot layout', () => {
       [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.floor2)],
       [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.wall2)],
     ])
-    const wallLayout = positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase), 'wall')
+    const wallLayout = positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase, fixtureTags), 'wall')
     expect(wallLayout.elevationMm).toBe(0)
     // And with a base in the map it is one base up.
     noBase.set(FIXTURE_SLOTS.base, record(FIXTURE_IDS.floor2))
     expect(
-      positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase), 'wall').elevationMm,
+      positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, noBase, fixtureTags), 'wall').elevationMm,
     ).toBe(BASE_LIFT_MM)
   })
 
@@ -890,8 +944,8 @@ describe('the wired slot layout', () => {
       [FIXTURE_SLOTS.floor, record(FIXTURE_IDS.angled)],
       [FIXTURE_SLOTS.wall, record(FIXTURE_IDS.wall2)],
     ])
-    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, small), 'wall').cell).toEqual({ w: 2, d: 1 })
-    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.base, small), 'base').cell).toEqual({ w: 2, d: 1 })
+    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.wall, small, fixtureTags), 'wall').cell).toEqual({ w: 2, d: 1 })
+    expect(positionOf(layout(OTHER_FIXTURE_TEMPLATE, FIXTURE_SLOTS.base, small, fixtureTags), 'base').cell).toEqual({ w: 2, d: 1 })
   })
 
   it('never snaps an offset, and never lands off the 0.25 lattice either', () => {

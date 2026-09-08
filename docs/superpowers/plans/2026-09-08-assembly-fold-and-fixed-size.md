@@ -1,0 +1,1192 @@
+# Assembly Fold and Fixed Size Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Fold the 40 upstream recipe templates into 10 derived templates with component/height/size controls, make every assembly placement a fixed size, and draw the modular S2W base in the box its mesh actually occupies.
+
+**Architecture:** Upstream fixtures stay read-only. A new pure `pipeline/fold.ts` derives the 10 from the 40 as the existing loader parses them, and the existing emitter writes both into `src/assembly/templates.ts`. Control positions reach a slot through `parentTags`, where each slot's own `constrain` block collects only the roots that apply to it — not as blanket requires, which `FillContext.size`'s own docblock says is unsafe for a multi-slot template. The base anchor becomes a function of the resolved fill rather than of the recipe.
+
+**Tech Stack:** TypeScript (strict, composite projects), Vitest, Zod, React 19, three.js. No new dependencies.
+
+**Spec:** `docs/superpowers/specs/2026-09-08-assembly-fold-and-fixed-size-design.md`
+
+## Global Constraints
+
+- **Upstream is read-only.** Never edit `/home/finn/Repos/openforge-catalog/openforge/db/fixtures/blueprints/*.yaml`. Every change is a derivative generated in this repo.
+- **No backwards compatibility.** `CLAUDE.md`: update every dependent rather than preserving old behaviour. Template ids may change.
+- **`src/assembly/templates.ts` is generated.** Never hand-edit it. Regenerate with `npm run import:catalog` and let `pipeline/templates.test.ts` assert the committed bytes.
+- **The 20-file byte round-trip is untouchable.** Do not modify `loadTemplateFixtures`, `readTemplateFile`, `printFixture`, or `TemplateEntry`.
+- **Corpus artefact.** Tests needing the archive read `public/catalog/catalog.json`. If absent, regenerate it from the committed brotli: `node -e "const{brotliDecompressSync}=require('node:zlib'),fs=require('node:fs');fs.writeFileSync('public/catalog/catalog.json',brotliDecompressSync(fs.readFileSync('public/catalog/catalog.json.br')))"`
+- **Per-file checks after touching any `.ts`/`.tsx`:** `npm run lint -- --fix <file>`, `npm run typecheck`, `npx vitest run --changed`.
+- **Before the PR:** `npm test`, `npm run lint`, `npm run typecheck`. Baseline is 170 files / 3941 tests green.
+- **Tag matching is exact, never prefix.** `shape|wall` does not match `shape|wall|low`.
+- **`filterSpecificTags` keeps the most general match.** A template must not carry a `shape|` tag whose descendant a position needs to supply.
+- **No NUL bytes in source.** Write `\u0000` as an escape; `tools/hygiene/source.test.ts` fails the build on the literal byte.
+
+## File Structure
+
+| file | responsibility |
+| --- | --- |
+| `pipeline/fold.ts` | **new.** Pure derivation of the 10 templates + control domains from the parsed 40. No I/O. |
+| `pipeline/fold.test.ts` | **new.** Fixture-level proof the fold uses only the four declared operations. |
+| `pipeline/templates.ts` | emitter gains the two new exports; reader untouched. |
+| `pipeline/families.ts` | width-only position labels. |
+| `src/assembly/templates.ts` | **generated.** Gains `ASSEMBLY_TEMPLATES`, `ASSEMBLY_CONTROLS`. |
+| `src/template/rules.ts` | `isInsetFill` predicate. |
+| `src/template/offsets.ts` | `placeTemplateSlots` takes `insetParts`. |
+| `src/template/fill.ts` | `FillContext.size` → `FillContext.position`, routed through `parentTags`. |
+| `src/builder/canvas/catalog.ts` | inject a tag decoder; pass `insetParts`. |
+| `src/builder/three/fills.ts` | pass `insetParts`; armed position plumbing. |
+| `src/builder/panels/slots/slotEditor.ts` | pass `insetParts`. |
+| `src/builder/panels/families.ts` | `TemplateFamily.controls` for assemblies. |
+| `src/builder/panels/PalettePanel.tsx` | three controls; assemblies require a size. |
+| `src/builder/canvas/usePlanTools.ts` | `armedSize` → `armedPosition` across three axes. |
+
+---
+
+### Task 1: `isInsetFill` — which fills are authored short of their cell
+
+**Files:**
+- Modify: `src/template/rules.ts` (add predicate near `SlotAnchor`, ~line 187)
+- Test: `src/template/rules.test.ts`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `export function isInsetFill(tags: readonly string[]): boolean`
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `src/template/rules.test.ts`:
+
+```ts
+describe('isInsetFill', () => {
+  it('is true for an s2w base, which is authored 0.5 short per walled axis', () => {
+    expect(isInsetFill(['shape|base', 'shape|base|square', 'shape|base|s2w', 'build|s2w'])).toBe(true)
+  })
+
+  it('is false for a plain base, whose mesh is exactly its tagged cell', () => {
+    expect(isInsetFill(['shape|base', 'shape|base|square'])).toBe(false)
+  })
+
+  it('is false for a non-base carrying build|s2w — only the base is mis-anchored', () => {
+    expect(isInsetFill(['shape|floor', 'shape|floor|s2w', 'build|s2w'])).toBe(false)
+  })
+
+  it('needs no internal-corner case: that base is full-cell and its residual is its cell', () => {
+    // Tagged the same way as the other 95; the no-op comes from the layout
+    // having no `edge` slot, not from this predicate.
+    expect(isInsetFill(['shape|base', 'shape|base|s2w', 'shape|base|internal_corner'])).toBe(true)
+  })
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run src/template/rules.test.ts -t isInsetFill`
+Expected: FAIL — `isInsetFill is not a function`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add to `src/template/rules.ts`, and import it into the test file's existing import block:
+
+```ts
+/**
+ * Whether a fill is authored **short of the cell its tag names**, so its box is
+ * the layout's `residual` rather than its own tagged extent.
+ *
+ * One population: the 95 `shape|base|s2w` bases. Measured from the live LOD
+ * meshes, an s2w base is 0.5 short on every axis a wall stands on —
+ * `base+s2w+square+wall.2x2` is 2.000 x 1.500, `+corner.2x2` is 1.500 x 1.500 —
+ * which is the identical authoring convention {@link SlotAnchor}'s docblock
+ * records for the s2w *floor*, and the reason that floor is `residual`. The base
+ * was left on `cell` and `place.ts` centred it, leaving it 0.25 units out.
+ *
+ * **This is a property of the fill and not of the recipe, and that is load
+ * bearing.** `Corner (Any, Modular)` and `…wall-drain-modular` both omit
+ * `build|s2w` from their base slot, so each admits both kinds — 257 non-s2w
+ * `shape|base|wall` records exist alongside the 48 s2w ones — and a static
+ * per-recipe anchor is provably wrong for one fill of those two templates.
+ *
+ * **No internal-corner exception.** An internal corner has no `edge` slot, so
+ * `residualBox` returns exactly its cell and the switch is a no-op. That agrees
+ * with the mesh: `base+square+s2w+internal_corner.2x2` measures a full 2.000 x
+ * 2.000, unlike its wall and corner siblings.
+ *
+ * Keyed on `shape|base|s2w` rather than on `layer === 'base' && build|s2w`
+ * because the two are coextensive on all 95 records and this needs only tags.
+ */
+export function isInsetFill(tags: readonly string[]): boolean {
+  return tags.includes('shape|base|s2w')
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run src/template/rules.test.ts -t isInsetFill`
+Expected: PASS (4 tests).
+
+- [ ] **Step 5: Check and commit**
+
+```bash
+npm run lint -- --fix src/template/rules.ts src/template/rules.test.ts
+npm run typecheck
+git add src/template/rules.ts src/template/rules.test.ts
+git commit -m "feat: name the fills authored short of the cell they are tagged for"
+```
+
+---
+
+### Task 2: `placeTemplateSlots` honours `insetParts`
+
+**Files:**
+- Modify: `src/template/offsets.ts:604-690` (`placeTemplateSlots`)
+- Test: `src/template/offsets.test.ts`
+
+**Interfaces:**
+- Consumes: `isInsetFill` from Task 1 (not called here — `offsets.ts` never sees a record).
+- Produces: `placeTemplateSlots(layout: TemplateLayout, feet: ReadonlyMap<SlotName, Footprint>, insetParts?: ReadonlySet<SlotName>): PlacedTemplate`
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `src/template/offsets.test.ts`. `WALL_ON_TILE` is already imported there; add `feet` helpers in the file's existing style:
+
+```ts
+describe('placeTemplateSlots with insetParts', () => {
+  /* A 2x2 wall-on-tile: a 2-long, 0.5-deep wall on face 0, a 2x2 floor and a
+     2x2 base. The floor is `residual` already; the base is `cell`. */
+  const feet = new Map<SlotName, Footprint>([
+    ['wall', { shape: 'wall', length: 2 }],
+    ['floor', { shape: 'rect', w: 2, d: 2 }],
+    ['base', { shape: 'rect', w: 2, d: 2 }],
+  ] as [SlotName, Footprint][])
+
+  it('leaves a plain base on the cell anchor with no residual extent', () => {
+    const placed = placeTemplateSlots(WALL_ON_TILE, feet)
+    const base = placed.slots.find((s) => s.part === 'base')
+    expect(base?.anchor).toBe('cell')
+    expect(base?.residual).toBeUndefined()
+  })
+
+  it('puts an inset base on the residual — the same box the floor already gets', () => {
+    const placed = placeTemplateSlots(WALL_ON_TILE, feet, new Set(['base'] as SlotName[]))
+    const base = placed.slots.find((s) => s.part === 'base')
+    const floor = placed.slots.find((s) => s.part === 'floor')
+    expect(base?.anchor).toBe('residual')
+    // 2x2 cell less a 0.5 wall on one face. The measured mesh is 2.000 x 1.500.
+    expect(base?.residual).toEqual({ w: 2, d: 1.5 })
+    expect(base?.offset).toEqual(floor?.offset)
+    expect(base?.residual).toEqual(floor?.residual)
+  })
+
+  it('is a no-op where the layout has no edge slot, because the residual is the cell', () => {
+    const iso = new Map<SlotName, Footprint>([
+      ['column', { shape: 'rect', w: 0.5, d: 0.5 }],
+      ['floor', { shape: 'rect', w: 2, d: 2 }],
+      ['base', { shape: 'rect', w: 2, d: 2 }],
+    ] as [SlotName, Footprint][])
+    const plain = placeTemplateSlots(INTERNAL_CORNER, iso)
+    const inset = placeTemplateSlots(INTERNAL_CORNER, iso, new Set(['base'] as SlotName[]))
+    const one = plain.slots.find((s) => s.part === 'base')
+    const two = inset.slots.find((s) => s.part === 'base')
+    expect(two?.offset).toEqual(one?.offset)
+    expect(two?.residual).toEqual({ w: 2, d: 2 })
+  })
+
+  it('does not touch an edge or corner rule even when named', () => {
+    const placed = placeTemplateSlots(WALL_ON_TILE, feet, new Set(['wall'] as SlotName[]))
+    expect(placed.slots.find((s) => s.part === 'wall')?.anchor).toBe('edge')
+  })
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run src/template/offsets.test.ts -t insetParts`
+Expected: FAIL — the base reports `anchor: 'cell'` and `residual: undefined` in the second test.
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `src/template/offsets.ts`, add above `placeTemplateSlots`:
+
+```ts
+/**
+ * The anchor a rule takes for **this** fill.
+ *
+ * `cell` and `residual` differ only by what the `edge` slots take off the cell,
+ * so a slot whose fill is authored to the residual is already describable by the
+ * anchor beside it — see `rules.ts#isInsetFill` for the meshes. Only a `cell`
+ * rule can move: an `edge` or `corner` rule is anchored to a face, and a fill
+ * being inset says nothing about which face.
+ */
+function effectiveAnchor(rule: SlotRule, insetParts: ReadonlySet<SlotName>): SlotAnchor {
+  return rule.anchor === 'cell' && insetParts.has(rule.part) ? 'residual' : rule.anchor
+}
+```
+
+Change the signature and body. Note `slotOffset` and the `residual` spread must both read the effective anchor, and `edgeInsets` must **not** — it reads `rule.anchor === 'edge'` and an inset base is never an edge:
+
+```ts
+export function placeTemplateSlots(
+  layout: TemplateLayout,
+  feet: ReadonlyMap<SlotName, Footprint>,
+  insetParts: ReadonlySet<SlotName> = new Set(),
+): PlacedTemplate {
+```
+
+Inside the loop, replace the two reads of `rule.anchor` that decide position and extent. The `if (rule.anchor === 'edge')` over-run block above is unchanged. Compute once after the `cell === undefined` guard:
+
+```ts
+    const anchor = effectiveAnchor(rule, insetParts)
+```
+
+then use it in the pushed placement, passing a rule whose anchor is the effective one to `slotOffset`:
+
+```ts
+    slots.push({
+      part: rule.part,
+      anchor,
+      side: rule.side,
+      offset: slotOffset({ ...rule, anchor }, cell, part, reserved, insets),
+      yaw: slotYaw(rule),
+      restsOn: rule.restsOn,
+      ...(anchor === 'residual' && residual !== undefined ? { residual: residual.extent } : {}),
+    })
+```
+
+Extend `placeTemplateSlots`' docblock with a paragraph naming the third parameter and why it is a `Set<SlotName>` rather than records: `offsets.ts` takes footprints only, so the record-to-boolean decision stays with the callers that already hold fills.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run src/template/offsets.test.ts`
+Expected: PASS — the 4 new tests plus every existing one, since `insetParts` defaults to empty.
+
+- [ ] **Step 5: Check and commit**
+
+```bash
+npm run lint -- --fix src/template/offsets.ts src/template/offsets.test.ts
+npm run typecheck
+npx vitest run src/template
+git add src/template/offsets.ts src/template/offsets.test.ts
+git commit -m "feat: let a slot take the residual anchor when its fill is inset"
+```
+
+---
+
+### Task 3: Wire the anchor at the three callers, and measure it on the corpus
+
+**Files:**
+- Modify: `src/builder/canvas/catalog.ts:290-302` (`templateSlotLayout`), and `planCatalogFromFile` where it is constructed
+- Modify: `src/builder/three/fills.ts:286`
+- Modify: `src/builder/panels/slots/slotEditor.ts:291`
+- Test: `src/template/corpus.test.ts`
+
+**Interfaces:**
+- Consumes: `isInsetFill` (Task 1), `placeTemplateSlots(..., insetParts)` (Task 2).
+- Produces: `templateSlotLayout(parts, tagsOf)` — a second injected reader `tagsOf: (record: CatalogRecord) => readonly string[]`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to the `describeCorpus` block in `src/template/corpus.test.ts`:
+
+```ts
+it('puts all 95 s2w bases on the residual, and the residual is the mesh', () => {
+  const { index } = ready()
+  const tagsOf = (record: CatalogRecord): readonly string[] => record.tags.map((i) => catalog!.tags[i])
+  const bases = catalog!.records.filter((r) => isInsetFill(tagsOf(r)))
+  expect(bases).toHaveLength(95)
+
+  /* A 2x2 wall-on-tile with a 0.5-deep wall. The residual is what the LOD mesh
+     measures: 2.000 x 1.500 for a wall base, and the `cell` anchor's 2 x 2 is
+     what put a quarter unit of it under the wall. */
+  const feet = new Map<SlotName, Footprint>([
+    ['wall', { shape: 'wall', length: 2 }],
+    ['floor', { shape: 'rect', w: 2, d: 2 }],
+    ['base', { shape: 'rect', w: 2, d: 2 }],
+  ] as [SlotName, Footprint][])
+  const placed = placeTemplateSlots(WALL_ON_TILE, feet, new Set(['base'] as SlotName[]))
+  expect(placed.slots.find((s) => s.part === 'base')?.residual).toEqual({ w: 2, d: 1.5 })
+
+  /* And the population the fix must not touch: every measured non-s2w rect base
+     is exactly its tagged cell, so `cell` stays right for all of them. */
+  const sidecar = JSON.parse(readFileSync('tools/measure/measurements.json', 'utf8')) as {
+    measurements: Record<string, { status: string; extent: { sizeUnits: [number, number, number] } }>
+  }
+  let checked = 0
+  for (const record of catalog!.records) {
+    if (record.layer !== 'base' || record.foot?.shape !== 'rect') continue
+    if (isInsetFill(tagsOf(record))) continue
+    const measured = sidecar.measurements[record.blob]
+    if (measured === undefined || measured.status !== 'measured') continue
+    checked += 1
+    expect(Math.abs(measured.extent.sizeUnits[0] - record.foot.w)).toBeLessThan(0.02)
+    expect(Math.abs(measured.extent.sizeUnits[1] - record.foot.d)).toBeLessThan(0.02)
+  }
+  // The sidecar holds 120 of them and 0 of the 95 s2w bases.
+  expect(checked).toBe(120)
+  expect(bases.filter((r) => sidecar.measurements[r.blob] !== undefined)).toEqual([])
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run src/template/corpus.test.ts -t "s2w bases on the residual"`
+Expected: FAIL — `isInsetFill` is not imported, then the `residual` assertion fails until Task 2 is in (it is; this step verifies the corpus figures 95 / 120 / 0).
+
+- [ ] **Step 3: Write minimal implementation**
+
+Import `isInsetFill` and `CatalogRecord` in the test. Then wire the three callers.
+
+`src/builder/canvas/catalog.ts` — take the decoder as a second injected reader, matching the module's existing pattern for `parts`:
+
+```ts
+export function templateSlotLayout(
+  parts: (template: TemplateId) => readonly PartName[] | undefined,
+  tagsOf: (record: CatalogRecord) => readonly string[],
+): SlotLayoutRule {
+  return (template, slot, fills) => {
+    // …unchanged up to the placement…
+    const insetParts = new Set<SlotName>()
+    for (const [name, record] of fills) if (isInsetFill(tagsOf(record))) insetParts.add(name)
+    const placed = placeTemplateSlots(layout, footprintsOf(fills), insetParts)
+```
+
+In `planCatalogFromFile`, supply the decoder from the `CatalogFile` it already holds:
+
+```ts
+const tagsOf = (record: CatalogRecord): readonly string[] => record.tags.map((index) => file.tags[index])
+```
+
+`src/builder/three/fills.ts:286` and `src/builder/panels/slots/slotEditor.ts:291` — both already hold the fills; build the same set and pass it. In `fills.ts` only `.doubts` is read, so the set changes nothing there today; pass it anyway so the three call sites cannot drift.
+
+Rewrite the `SizeControl`-adjacent claim in `catalog.ts`'s `BASE_LIFT_MM` docblock only if it states the base is `cell`-anchored; leave the elevation reasoning alone.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run src/template src/builder/canvas src/builder/three src/builder/panels`
+Expected: PASS. Existing `catalog.test.ts` callers of `templateSlotLayout` need the second argument — update them to pass `() => []`, which means "no fill is inset" and preserves their current expectations.
+
+- [ ] **Step 5: Check and commit**
+
+```bash
+npm run lint -- --fix src/builder/canvas/catalog.ts src/builder/three/fills.ts src/builder/panels/slots/slotEditor.ts src/template/corpus.test.ts
+npm run typecheck
+git add -A src/builder src/template
+git commit -m "fix: draw the modular s2w base in the box its mesh occupies
+
+An s2w base is authored 0.5 short on every walled axis, the same convention the
+s2w floor already has a residual anchor for. The base was left on cell and got
+centred, putting it a quarter unit under the wall on one edge and short of the
+floor on the other — 18 of the 40 recipes, all of them modular.
+
+The anchor is decided from the resolved fill rather than the recipe, because two
+templates admit both an s2w and a plain base in the same slot."
+```
+
+---
+
+### Task 4: A control position reaches a slot through `parentTags`
+
+**Files:**
+- Modify: `src/template/fill.ts:182-282` (`FillContext`), `545-590` (`candidatesOf`, `sizeRefsFor`)
+- Test: `src/template/fill.test.ts`, `src/template/corpus.test.ts`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `FillContext.position?: readonly string[]` replacing `FillContext.size`. Semantics: appended to `parentTags`, **not** to every slot's `require`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `src/template/fill.test.ts`:
+
+```ts
+describe('FillContext.position', () => {
+  it('reaches only the slots whose constrain collects that root', () => {
+    /* Two slots: one constrains `component`, one does not. A component position
+       must narrow the first and leave the second alone — the blanket `require`
+       the old `size` field used would have emptied the second. */
+    const template: AssemblyTemplate = {
+      id: 'probe',
+      name: 'probe',
+      tags: [],
+      parts: [
+        { name: 'wall', tags: { require: [{ tag: 'role|wall' }], constrain: [{ tag: 'component' }] }, fulfills: [] },
+        { name: 'floor', tags: { require: [{ tag: 'shape|floor' }] }, fulfills: [] },
+      ],
+    }
+    const wall = candidateRefsFor(template, 'wall', ['component|door|arched'])
+    const floor = candidateRefsFor(template, 'floor', ['component|door|arched'])
+    expect(wall.require).toContain('component|door|arched')
+    expect(floor.require).not.toContain('component|door|arched')
+  })
+
+  it('narrows a size the same way the old family-wide field did', () => {
+    // A one-slot family constrains both size roots, so parentTags and a blanket
+    // require are the same answer — which is what keeps the 47 families intact.
+    const family: AssemblyTemplate = {
+      id: 'probe',
+      name: 'probe',
+      tags: [],
+      parts: [
+        {
+          name: 'wall',
+          tags: { require: [{ tag: 'role|wall' }], constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }] },
+          fulfills: [],
+        },
+      ],
+    }
+    expect(candidateRefsFor(family, 'wall', ['size|width|2']).require).toContain('size|width|2')
+  })
+})
+```
+
+Add the helper beside it, exercising the real path rather than reimplementing it:
+
+```ts
+/** The refs one slot resolves to under a position, via the real solver path. */
+function candidateRefsFor(template: AssemblyTemplate, slot: string, position: readonly string[]) {
+  const captured: { require: readonly string[]; deny: readonly string[] }[] = []
+  const composition = {
+    ...stubComposition(),
+    candidatesFor: (refs: { require: readonly string[]; deny: readonly string[] }) => {
+      captured.push(refs)
+      return { tiles: [], refs: [], unknownRefs: [] }
+    },
+  }
+  solveTemplateFills(template, stubIndex(), { composition, position })
+  return captured[template.parts.findIndex((p) => p.name === slot)]
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run src/template/fill.test.ts -t "FillContext.position"`
+Expected: FAIL — `position` is not a field; the component tag lands on both slots via `size`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Rename the field and change where it enters. In `FillContext`, replace `size` with:
+
+```ts
+  /**
+   * The armed **control position** — the tags a placed instance carries as its
+   * own `parentTags`, from every axis at once: size, and since the fold also
+   * component and height.
+   *
+   * ## Why this is `parentTags` and not a require, which is what it used to be
+   *
+   * This field was `size`, and it appended its refs to the `require` of **every
+   * slot**. Its own docblock said why that was safe and named the condition
+   * exactly: *"Family-wide is correct only because the family has one slot.
+   * Applying one ref list to every slot of a multi-slot recipe would require the
+   * wall and the floor to carry the same size tags."*
+   *
+   * The fold makes the assemblies precisely that case. A `component|door|arched`
+   * position required of every slot would empty the `floor` and `base` slots,
+   * which carry no `component|` tag at all.
+   *
+   * So a position joins `parentTags`, where each slot's own `constrain` block
+   * collects only the roots that apply to it. The merged wall slot constrains
+   * `component`, `interface`, `shape|wall` and `size|width`; the floor and base
+   * constrain `size|width` and `size|depth`. One position therefore narrows the
+   * wall by its component and all three by their size, with no per-slot table
+   * and no new resolution code — the mechanism `templates.ts`' docblock always
+   * described.
+   *
+   * **The 47 one-slot families are unaffected**, and that is asserted rather
+   * than argued: their slot constrains both size roots, so collecting a
+   * `size|width|2` from the parent and requiring it directly are the same refs.
+   * `corpus.test.ts` compares the candidate sets across the switch.
+   *
+   * Distinct from {@link cell}, which stays a direct per-slot require: it is
+   * derived from B2's anchor rather than chosen by a user, and B3 measured that
+   * an `edge` slot wants a run where a `cell` slot wants a congruence.
+   */
+  readonly position?: readonly string[] | undefined
+```
+
+In `candidatesOf`, fold the position into `parentTags` and drop it from `sizeRefsFor`:
+
+```ts
+function candidatesOf(walk: Walk, slot: AssemblySlot, override?: readonly SiblingSelection[]): SlotCandidates {
+  const parentTags =
+    walk.context.position === undefined || walk.context.position.length === 0
+      ? walk.template.tags
+      : [...walk.template.tags, ...walk.context.position]
+  const resolved = resolveSlotTags(slot.tags, parentTags, override ?? siblingsOf(walk, slot.name))
+  const size = sizeRefsFor(walk, slot.name)
+  // …unchanged…
+}
+```
+
+In `sizeRefsFor`, start from an empty `require` (the position no longer enters here) and keep the `cell` derivation:
+
+```ts
+  const require: string[] = []
+```
+
+Update the docblock's four-causes list to drop the `size` cause.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run src/template/fill.test.ts`
+Expected: PASS. Then update every caller of `size:` on a `FillContext` — `src/builder/three/fills.ts`, `src/builder/three/edits.ts`, `src/builder/panels/slots/slotEditor.ts`, `src/builder/panels/palette.ts`, `src/builder/panels/billView.ts`, `src/builder/canvas/geometry.ts`, `src/screens/catalog/corpus.test.ts`, `src/template/corpus.test.ts`, `src/template/fill.test.ts`, `src/builder/three/fills.test.ts` — to `position:`.
+
+- [ ] **Step 5: Add the equivalence assertion**
+
+Add to `src/template/corpus.test.ts`:
+
+```ts
+it('leaves all 47 families identical under the parentTags route', () => {
+  const { index, context: ctx } = ready()
+  for (const family of GENERATED_FAMILIES) {
+    for (const option of GENERATED_FAMILY_SIZES[family.id] ?? []) {
+      const viaPosition = solveTemplateFills(family, index, { ...ctx, position: option.tags })
+      // The slot constrains both size roots, so the parent route and a direct
+      // require resolve to the same refs — and therefore the same fill.
+      const direct = solveTemplateFills(
+        { ...family, parts: [{ ...family.parts[0], tags: { ...family.parts[0].tags, require: [...(family.parts[0].tags.require ?? []), ...option.tags.map((tag) => ({ tag }))] } }] },
+        index,
+        ctx,
+      )
+      expect(viaPosition.decisions[0]?.tile).toBe(direct.decisions[0]?.tile)
+    }
+  }
+})
+```
+
+Run: `npx vitest run src/template/corpus.test.ts`
+Expected: PASS over all 303 positions.
+
+- [ ] **Step 6: Check and commit**
+
+```bash
+npm run lint -- --fix src/template/fill.ts src/template/fill.test.ts src/template/corpus.test.ts
+npm run typecheck
+npm test
+git add -A src
+git commit -m "refactor: a control position narrows a slot through its own constrain block
+
+FillContext.size required its refs of every slot, which its docblock said was
+sound only because a family has one slot. The folded assemblies have three, and
+a component position required of a floor slot empties it.
+
+A position now joins parentTags and each slot collects the roots it constrains.
+The 47 families resolve identically, asserted across all 303 positions."
+```
+
+---
+
+### Task 5: `pipeline/fold.ts` — derive the 10 from the 40
+
+**Files:**
+- Create: `pipeline/fold.ts`
+- Create: `pipeline/fold.test.ts`
+
+**Interfaces:**
+- Consumes: `TemplateFixture` from `pipeline/templates.ts`, `FamilySizePosition` from `pipeline/families.ts`.
+- Produces:
+
+```ts
+export interface ControlPosition { readonly label: string; readonly tags: readonly string[] }
+export interface AssemblyControls {
+  readonly component: readonly ControlPosition[]
+  readonly height: readonly ControlPosition[]
+  readonly size: readonly ControlPosition[]
+}
+export interface FoldedAssembly {
+  readonly id: string
+  readonly name: string
+  readonly source: string
+  readonly tags: readonly string[]
+  readonly parts: readonly PartSlot[]
+  readonly controls: AssemblyControls
+  /** Ids of the fixtures this replaces. Provenance, and what the losslessness test walks. */
+  readonly replaces: readonly string[]
+}
+export function foldRecipes(fixtures: readonly TemplateFixture[]): readonly FoldedAssembly[]
+export const FOLD_OPERATIONS: readonly string[]
+```
+
+The `size` domain is left `[]` by `foldRecipes` — it needs the corpus, and Task 6 fills it via `deriveAssemblySizes`. Keep `foldRecipes` corpus-free so `fold.test.ts` runs on fixtures alone.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `pipeline/fold.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+
+import { FOLD_OPERATIONS, foldRecipes } from './fold'
+import { loadTemplateFixtures, templateFixturesDir } from './templates'
+
+const fixtures = loadTemplateFixtures(templateFixturesDir())
+
+describe('foldRecipes', () => {
+  it('reads the 40 and returns 10', () => {
+    expect(fixtures).toHaveLength(40)
+    expect(foldRecipes(fixtures)).toHaveLength(10)
+  })
+
+  it('replaces every one of the 40 exactly once', () => {
+    const replaced = foldRecipes(fixtures).flatMap((a) => a.replaces)
+    expect(replaced).toHaveLength(40)
+    expect(new Set(replaced).size).toBe(40)
+  })
+
+  it('folds the 32 wall recipes into two, one per build', () => {
+    const walls = foldRecipes(fixtures).filter((a) => a.id.includes('-wall-'))
+    expect(walls.map((a) => a.replaces.length).sort((a, b) => a - b)).toEqual([16, 16])
+  })
+
+  it('offers arched and rectangular doors as two positions of one template', () => {
+    const wall = foldRecipes(fixtures).find((a) => a.id === 's2w-wall-on-tile-wall-single-piece')
+    const tags = wall!.controls.component.flatMap((p) => p.tags)
+    expect(tags).toContain('component|door|arched')
+    expect(tags).toContain('component|door|rectangular')
+    // 14 components plus an `any` position carrying no tag.
+    expect(wall!.controls.component).toHaveLength(15)
+    expect(wall!.controls.component[0]).toEqual({ label: 'any component', tags: [] })
+  })
+
+  it('gives the wall a height axis, because shape|wall is disjoint from its low qualifier', () => {
+    const wall = foldRecipes(fixtures).find((a) => a.id === 's2w-wall-on-tile-wall-single-piece')
+    expect(wall!.controls.height).toEqual([
+      { label: 'any height', tags: [] },
+      { label: 'full', tags: ['shape|wall'] },
+      { label: 'low', tags: ['shape|wall|low'] },
+    ])
+  })
+
+  it('carries no shape| tag of its own, or the height position would be masked', () => {
+    // `filterSpecificTags` keeps the most general match, so a `shape|wall`
+    // template tag would beat a `shape|wall|low` position.
+    for (const folded of foldRecipes(fixtures)) {
+      if (folded.controls.height.length === 0) continue
+      expect(folded.tags.filter((t) => t.startsWith('shape|'))).toEqual([])
+    }
+  })
+
+  it('keeps the corners as low/full pairs, because their low tag is not disjoint', () => {
+    const corners = foldRecipes(fixtures).filter((a) => a.id.includes('corner'))
+    expect(corners).toHaveLength(8)
+    expect(corners.every((a) => a.controls.height.length === 0)).toBe(true)
+  })
+
+  it('denies shape|base on every modular wall slot', () => {
+    for (const folded of foldRecipes(fixtures)) {
+      if (!folded.id.endsWith('-modular')) continue
+      for (const part of folded.parts) {
+        if (part.name === 'base' || part.name === 'floor') continue
+        expect((part.tags.deny ?? []).map((r) => r.tag)).toContain('shape|base')
+      }
+    }
+  })
+
+  it('gives the drain base the build|s2w its 12 siblings carry', () => {
+    /* A census inside the fixtures, so upstream fixing the data fails here
+       loudly rather than passing over corrected input for ever. */
+    const modularWallBases = fixtures.filter(
+      (f) => f.name.includes('Wall:') && f.name.includes('(Modular)'),
+    )
+    const withS2w = modularWallBases.filter((f) =>
+      (f.parts.find((p) => p.name === 'base')?.tags.require ?? []).some((r) => r.tag === 'build|s2w'),
+    )
+    expect(modularWallBases).toHaveLength(16)
+    expect(withS2w).toHaveLength(15)
+    const odd = modularWallBases.filter((f) => !withS2w.includes(f))
+    expect(odd.map((f) => f.source)).toEqual(['blueprints.s2w.wall.drain.yaml'])
+
+    const wall = foldRecipes(fixtures).find((a) => a.id === 's2w-wall-on-tile-wall-modular')
+    const base = wall!.parts.find((p) => p.name === 'base')
+    expect((base!.tags.require ?? []).map((r) => r.tag)).toContain('build|s2w')
+  })
+
+  it('uses only the four declared operations', () => {
+    expect(FOLD_OPERATIONS).toEqual([
+      'drop a component| require and record it as a component position',
+      'drop a shape|wall-rooted require and record it as a height position',
+      'swap shape|wall for role|wall and add the collecting constrain entries',
+      'add a deny or require justified by a sibling census',
+    ])
+  })
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run pipeline/fold.test.ts`
+Expected: FAIL — `Cannot find module './fold'`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `pipeline/fold.ts`. Structure it as small named functions, one per operation, so `fold.test.ts` can name what it asserts. Group the 40 by `(convention, build, height)` where `convention` is the part-name set (`partNameKey` from `src/template/rules.ts`), `build` is `single_piece` or `modular` from the fixture's own `build|s2w|*` tag, and `height` is `low` / `full` for the corners only.
+
+For a wall group, build the merged template:
+
+```ts
+const MERGED_WALL_CONSTRAIN: readonly ConstrainRef[] = [
+  { tag: 'size|width' },
+  { tag: 'component' },
+  { tag: 'interface' },
+  { tag: 'shape|wall' },
+]
+```
+
+The wall slot's `require` is the intersection of the group's wall-slot requires, less every `component|`, `interface|` and `shape|wall`-rooted tag, plus `role|wall`. Its `deny` is the union of the group's denies plus `shape|base`. `floor` and `base` are the group's own, unchanged except the drain repair. Assert the intersection is non-empty and that every dropped tag is recovered by a position — a `throw` in the emitter's spirit, not a silent skip.
+
+The component domain is `{ label: 'any component', tags: [] }` followed by one position per distinct dropped `component|` tag, ascending, labelled from the fixture name's own words (`Arched Door` → `arched door`). `secret_door` carries its second tag: `tags: ['component|secret_door', 'interface|secret_door|bottom']`.
+
+Ids come from `templateSlug` over the merged name, e.g. `S2W: Wall on Tile: Wall (Single Piece)` → `s2w-wall-on-tile-wall-single-piece`.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run pipeline/fold.test.ts`
+Expected: PASS (11 tests).
+
+- [ ] **Step 5: Check and commit**
+
+```bash
+npm run lint -- --fix pipeline/fold.ts pipeline/fold.test.ts
+npm run typecheck
+git add pipeline/fold.ts pipeline/fold.test.ts
+git commit -m "feat: derive ten assemblies from the forty upstream recipes
+
+Thirty-two of the forty differ only by one component require on one slot, and
+each is a file-exact subset of its (Any) sibling. The fold makes the component a
+position and keys the merged wall slot on role|wall, which also reaches the 527
+low walls that a shape|wall require cannot.
+
+The corners keep their low/full pairs: shape|column overlaps its |low qualifier
+where shape|wall does not, and a deny cannot travel through parentTags."
+```
+
+---
+
+### Task 6: Size domains, and emit the derived table
+
+**Files:**
+- Modify: `pipeline/fold.ts` (add `deriveAssemblySizes`)
+- Modify: `pipeline/templates.ts:801-910` (`printTemplateModule`)
+- Modify: `pipeline/index.ts` (exports)
+- Modify: `scripts/import-catalog.ts` (pass the fold through)
+- Modify: `pipeline/templates.test.ts`
+- Regenerate: `src/assembly/templates.ts`
+
+**Interfaces:**
+- Consumes: `foldRecipes` (Task 5), `positionFor`/`sizeControlFor` patterns from `pipeline/families.ts`.
+- Produces: `deriveAssemblySizes(folded, file): readonly FoldedAssembly[]`, and the two new module exports `ASSEMBLY_TEMPLATES` / `ASSEMBLY_CONTROLS`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `pipeline/templates.test.ts`:
+
+```ts
+it('emits the derived assemblies and their controls', () => {
+  const emitted = printTemplateModule(fixtures, families, folded)
+  expect(emitted).toContain('export const ASSEMBLY_TEMPLATES')
+  expect(emitted).toContain('export const ASSEMBLY_CONTROLS')
+  expect(readFileSync(TEMPLATES_MODULE_PATH, 'utf8')).toBe(emitted)
+})
+
+it('gives every assembly a size domain with no any-size position', () => {
+  for (const assembly of folded) {
+    expect(assembly.controls.size.length).toBeGreaterThan(0)
+    expect(assembly.controls.size.some((p) => p.tags.length === 0)).toBe(false)
+    // Every position names a width and a depth, or size does not pin.
+    for (const position of assembly.controls.size) {
+      expect(position.tags.filter((t) => t.startsWith('size|width|'))).toHaveLength(1)
+      expect(position.tags.filter((t) => t.startsWith('size|depth|'))).toHaveLength(1)
+    }
+  }
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run pipeline/templates.test.ts`
+Expected: FAIL — `printTemplateModule` takes two arguments.
+
+- [ ] **Step 3: Write the implementation**
+
+`deriveAssemblySizes(folded, file)`: for each assembly, enumerate candidate `(w, d)` pairs from the resolved grid sizes of the **cell slot's** candidates (`layout.cell`, which is `floor` on all three conventions), keep a pair when *every* slot resolves at least one candidate under it **and** the cell slot pins exactly one footprint, and label it `"${w} wide by ${d} deep"` using `families.ts#formatUnits`. Order ascending by width then depth. Throw if any assembly ends with an empty domain — an assembly with no size is unplaceable under the "no any-size" decision, and that must fail the import rather than ship.
+
+`printTemplateModule(entries, families, folded)`: append two blocks reusing `printModulePart` and `quote`. Emit `ASSEMBLY_CONTROLS` as one entry per id with the three arrays. Extend the generated docblock to say what the derived half is, that `RECIPE_TEMPLATES` remains the faithful 40, and that the losslessness test is what licenses the derivation.
+
+Export `foldRecipes`, `deriveAssemblySizes` and the types from `pipeline/index.ts`. Thread the fold through `scripts/import-catalog.ts`.
+
+- [ ] **Step 4: Regenerate and verify**
+
+```bash
+npm run import:catalog
+npx vitest run pipeline/templates.test.ts pipeline/fold.test.ts
+```
+Expected: PASS, and `git diff --stat src/assembly/templates.ts` shows the two new exports.
+
+- [ ] **Step 5: Check and commit**
+
+```bash
+npm run lint -- --fix pipeline/fold.ts pipeline/templates.ts pipeline/index.ts scripts/import-catalog.ts pipeline/templates.test.ts
+npm run typecheck
+git add -A pipeline scripts src/assembly/templates.ts
+git commit -m "feat: emit the derived assemblies with a size domain that pins a footprint
+
+Every assembly position names a width and a depth, and no assembly carries an
+any-size position: a placement is sized. A pair is emitted only where every slot
+resolves and the cell slot pins one footprint, and an assembly that ends with an
+empty domain fails the import rather than shipping unplaceable."
+```
+
+---
+
+### Task 7: Prove the fold is lossless
+
+**Files:**
+- Modify: `src/assembly/corpus.test.ts`
+
+**Interfaces:**
+- Consumes: `ASSEMBLY_TEMPLATES`, `ASSEMBLY_CONTROLS`, `RECIPE_TEMPLATES`, `resolvePart`.
+- Produces: nothing.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `src/assembly/corpus.test.ts`'s `describeCorpus` block:
+
+```ts
+it('reproduces every one of the 40 recipes exactly, slot by slot', () => {
+  /* The claim that licenses the derivation. For each of the 40 and each of its
+     slots, the candidate **set** — not the count — must be exactly what the
+     derived template gives at the matching control position. */
+  const derived = new Map(ASSEMBLY_TEMPLATES.map((a) => [a.id, a]))
+  const mismatches: string[] = []
+
+  for (const original of RECIPE_TEMPLATES) {
+    const target = derived.get(foldTargetOf(original.id))
+    if (target === undefined) {
+      mismatches.push(`${original.id}: no derived template`)
+      continue
+    }
+    const position = positionReproducing(original, target)
+    const posed = { ...target, tags: [...target.tags, ...position] }
+    for (const part of original.parts) {
+      const want = new Set(resolvePart(recipes.composition, original, part, {}).tiles as unknown as string[])
+      const twin = posed.parts.find((p) => p.name === part.name)
+      const got = new Set(
+        twin === undefined ? [] : (resolvePart(recipes.composition, posed, twin, {}).tiles as unknown as string[]),
+      )
+      /* Two exceptions, each a fix this PR makes deliberately and each asserted
+         as a *direction* rather than waived: the modular wall slots lose their
+         integrated-base records, and role|wall drops the column and foundation
+         records that leaked into the two (Any) slots. Nothing else may differ. */
+      const lost = [...want].filter((id) => !got.has(id))
+      const gained = [...got].filter((id) => !want.has(id))
+      const allowed = lost.every((id) => isIntegratedBase(id) || isNotRoleWall(id))
+      if (!allowed || gained.length > 0) {
+        mismatches.push(`${original.id}/${part.name}: -${String(lost.length)} +${String(gained.length)}`)
+      }
+    }
+  }
+
+  expect(mismatches).toEqual([])
+})
+
+it('admits no shape|base record in any non-base slot', () => {
+  // Row D1's deny, which the 40 never got. Was 3 slots: 278, 144 and 144.
+  const offenders: string[] = []
+  for (const assembly of ASSEMBLY_TEMPLATES) {
+    for (const part of assembly.parts) {
+      if (part.name === 'base') continue
+      const tiles = resolvePart(recipes.composition, assembly, part, {}).tiles
+      const bad = tiles.filter((id) => isIntegratedBase(id as unknown as string)).length
+      if (bad > 0) offenders.push(`${assembly.id}/${part.name}: ${String(bad)}`)
+    }
+  }
+  expect(offenders).toEqual([])
+})
+```
+
+Write `foldTargetOf`, `positionReproducing`, `isIntegratedBase` and `isNotRoleWall` as local helpers in the test file. `positionReproducing` reads the original's dropped `component|`/`shape|wall` requires straight off `RECIPE_TEMPLATES` and returns them as the parent tags — so the test derives the position from the fixture rather than trusting the fold's own table.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run src/assembly/corpus.test.ts -t "reproduces every one of the 40"`
+Expected: FAIL initially — this is the test that finds real fold bugs. Fix `pipeline/fold.ts` until it passes; do not weaken the assertion.
+
+- [ ] **Step 3: Fix the fold until it passes**
+
+Iterate on `pipeline/fold.ts`, regenerating with `npm run import:catalog` after each change.
+
+- [ ] **Step 4: Verify**
+
+Run: `npx vitest run src/assembly pipeline`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint -- --fix src/assembly/corpus.test.ts
+npm run typecheck
+git add -A src pipeline
+git commit -m "test: prove the fold reproduces all 40 recipes slot by slot
+
+Candidate set equality against the live archive, not counts. The only permitted
+differences are the two this PR makes on purpose: the modular wall slots lose
+their integrated-base records, and role|wall drops the columns and foundations
+that leaked into the two (Any) slots."
+```
+
+---
+
+### Task 8: Say "any depth" where a width-only position varies in depth
+
+**Files:**
+- Modify: `pipeline/families.ts:680-708` (`positionFor`)
+- Modify: `pipeline/families.test.ts`
+- Modify: `src/builder/panels/PalettePanel.tsx` (`sizeChipLabel`)
+- Regenerate: `src/assembly/templates.ts`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: run positions labelled `"${w} wide, any depth"` when they span several depths.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `pipeline/families.test.ts`:
+
+```ts
+it('says "any depth" exactly when a width-only position spans several depths', () => {
+  /* A biconditional over all 47 run positions. 23 have one resolved depth and
+     are honest as they are; 24 coexist with a (w,d) position at the same width
+     and cover 2 to 7 depths, so "2 wide" reads as narrower than it is. */
+  const families = deriveFamilies(file)
+  let honest = 0
+  let relabelled = 0
+  for (const family of families) {
+    for (const position of family.sizes) {
+      if (position.tags.length !== 1 || !position.tags[0].startsWith('size|width|')) continue
+      const depths = depthsAdmittedBy(file, family, position)
+      if (depths.size > 1) {
+        expect(position.label).toMatch(/, any depth$/)
+        relabelled += 1
+      } else {
+        expect(position.label).not.toMatch(/any depth/)
+        honest += 1
+      }
+    }
+  }
+  expect(honest).toBe(23)
+  expect(relabelled).toBe(24)
+})
+```
+
+Write `depthsAdmittedBy` as a local helper using `resolveGridSize` over the records the family's slot admits under the position's tags.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run pipeline/families.test.ts -t "any depth"`
+Expected: FAIL — all 47 are labelled `"N wide"`, so the 24 fail the `toMatch`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `positionFor`, the `run` branch takes the bucket's siblings into account. It currently sees one cell's records; give it the full record set so it can count depths:
+
+```ts
+  const run: SizePredicate = { kind: 'run', run: w }
+  const runRefs = sizeRefs(run).require
+  if (runRefs.every((ref) => has(ref)) && admits(runRefs)) {
+    const depths = new Set<number>()
+    for (const record of all) {
+      if (!runRefs.every((ref) => tagsOf(record).includes(ref))) continue
+      const size = resolveGridSize(record.foot, tagsOf(record))
+      if (size !== undefined) depths.add(size.d)
+    }
+    /* A run position is the only expressible answer for a wall — the corpus tags
+       no `size|depth|0.5`, so cell `2x0.5` resolves as tags and admits none of
+       its 540 records. On 23 of the 47 it also names one depth and is exact. On
+       the other 24 a `(w,d)` position exists at the same width, so *"2 wide"*
+       and *"2 wide by 2 deep"* sit side by side with no way to tell that the
+       first contains the second. It is not dropped: any record at an
+       inexpressible cell of that width would then reach nothing but `any size`.
+       It says what it admits instead. */
+    const label = depths.size > 1 ? `${formatUnits(w)} wide, any depth` : `${formatUnits(w)} wide`
+    return { label, tags: runRefs }
+  }
+```
+
+Thread the family's full record list into `positionFor` as `all` from `sizeControlFor`.
+
+In `PalettePanel.tsx#sizeChipLabel`, abbreviate the new label for a 272px column and update the docblock's "48 are a run" figure to the measured 47:
+
+```ts
+  const anyDepth = /^(.+) wide, any depth$/.exec(label)
+  if (anyDepth) return `${anyDepth[1]} x any`
+```
+
+- [ ] **Step 4: Regenerate and verify**
+
+```bash
+npm run import:catalog
+npx vitest run pipeline/families.test.ts src/builder/panels
+```
+Expected: PASS. `git diff src/assembly/templates.ts` shows 24 changed labels.
+
+- [ ] **Step 5: Check and commit**
+
+```bash
+npm run lint -- --fix pipeline/families.ts pipeline/families.test.ts src/builder/panels/PalettePanel.tsx
+npm run typecheck
+git add -A pipeline src
+git commit -m "fix: a width-only size position says when it admits several depths
+
+24 of the 47 run positions coexist with a (w,d) position at the same width and
+cover 2 to 7 depths, so '2 wide' looks narrower than '2 wide by 2 deep' while
+containing it. They now say 'any depth'; the other 23 resolve one depth and are
+unchanged. Dropping them was rejected — a record at an inexpressible cell of
+that width would reach nothing but any size."
+```
+
+---
+
+### Task 9: The palette lists the 10 and controls them
+
+**Files:**
+- Modify: `src/builder/panels/families.ts:142-380`
+- Modify: `src/builder/panels/PalettePanel.tsx:580-660`
+- Modify: `src/builder/canvas/usePlanTools.ts:85-170`
+- Modify: `src/builder/three/RoomSurface.tsx`, `src/builder/three/fills.ts`, `src/builder/three/fixture.ts`
+- Test: `src/builder/panels/panels.test.tsx`, `src/builder/canvas/planTools.test.tsx`
+
+**Interfaces:**
+- Consumes: `ASSEMBLY_TEMPLATES`, `ASSEMBLY_CONTROLS` (Task 6); `FillContext.position` (Task 4).
+- Produces: `TemplateFamily.controls: AssemblyControls | undefined`; `PlanTools.armedPosition: readonly string[]` replacing `armedSize`, and `setArmedPosition(axis, tags)`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `src/builder/panels/panels.test.tsx`:
+
+```ts
+it('lists 10 assemblies and 47 single tiles', () => {
+  expect(TEMPLATE_FAMILIES.filter((f) => f.kind === 'recipe')).toHaveLength(10)
+  expect(TEMPLATE_FAMILIES.filter((f) => f.kind === 'family')).toHaveLength(47)
+})
+
+it('gives an assembly three controls and no any-size position', () => {
+  const wall = TEMPLATE_FAMILIES.find((f) => f.id === 's2w-wall-on-tile-wall-single-piece')
+  expect(wall?.controls?.component.length).toBe(15)
+  expect(wall?.controls?.height.length).toBe(3)
+  expect(wall?.controls?.size.every((p) => p.tags.length === 2)).toBe(true)
+})
+
+it('arms one axis without clearing the others', () => {
+  const { result } = renderHook(() => usePlanTools())
+  act(() => { result.current.setArmedPosition('size', ['size|width|2', 'size|depth|2']) })
+  act(() => { result.current.setArmedPosition('component', ['component|door|arched']) })
+  expect(result.current.armedPosition).toEqual(
+    expect.arrayContaining(['size|width|2', 'size|depth|2', 'component|door|arched']),
+  )
+})
+
+it('clears every axis when the armed template changes', () => {
+  const { result } = renderHook(() => usePlanTools())
+  act(() => { result.current.setArmedPosition('component', ['component|door|arched']) })
+  act(() => { result.current.setSelectedTemplate(TemplateId.parse('s2w-wall-on-tile-wall-modular')) })
+  expect(result.current.armedPosition).toEqual([])
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run src/builder/panels/panels.test.tsx src/builder/canvas/planTools.test.tsx`
+Expected: FAIL — 40 recipes listed, no `controls`, no `setArmedPosition`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+`families.ts`: import `ASSEMBLY_TEMPLATES`/`ASSEMBLY_CONTROLS` instead of `RECIPE_TEMPLATES`, add `readonly controls: AssemblyControls | undefined` to `TemplateFamily`, set it from the table for a `recipe` and leave it `undefined` for a `family`. Update the module docblock: the count moves from 87 to 57, the "an assembly has no size control" claim is now false and must be rewritten to say why it is true — the merged slots carry `constrain` entries that collect a position, which the fixtures' hard-coded `size|width|2` did not.
+
+`usePlanTools`: replace `armedSize`/`setArmedSize` with a per-axis record and a derived flat list:
+
+```ts
+  const [armed, setArmed] = useState<Readonly<Record<PositionAxis, readonly string[]>>>(EMPTY_AXES)
+  const armedPosition = useMemo(() => [...armed.component, ...armed.height, ...armed.size], [armed])
+  const setArmedPosition = useCallback((axis: PositionAxis, tags: readonly string[]) => {
+    setArmed((prev) => ({ ...prev, [axis]: tags }))
+  }, [])
+```
+
+Keep the existing reset-on-arm behaviour and its reasoning, widened to all three axes: carrying a component over to a template whose candidates carry no such tag leaves the solver a slot nothing matches.
+
+`PalettePanel.tsx`: generalise `SizeControl` into one `PositionControl` rendered once per axis, replacing the assembly-has-no-control branch. Rewrite that docblock — its reasoning is now inverted. An assembly's size control has no `any size` chip, so pre-arm the first position when a recipe is armed, or the placement has no size at all.
+
+Update `RoomSurface.tsx`, `fills.ts` and `fixture.ts` to pass `armedPosition` into `FillContext.position`.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `npx vitest run src/builder`
+Expected: PASS.
+
+- [ ] **Step 5: Full suite and commit**
+
+```bash
+npm run lint -- --fix src/builder/panels/families.ts src/builder/panels/PalettePanel.tsx src/builder/canvas/usePlanTools.ts src/builder/three/RoomSurface.tsx src/builder/three/fills.ts src/builder/three/fixture.ts
+npm run typecheck
+npm test
+git add -A src
+git commit -m "feat: the palette lists ten assemblies and controls them
+
+Component, height and size are controls on the row rather than 32 pre-baked
+rows. An assembly's size control has no any-size chip and the first position is
+pre-armed, so every assembly placement is sized."
+```
+
+---
+
+### Task 10: Final verification and PR
+
+- [ ] **Step 1: Full suite**
+
+```bash
+npm test 2>&1 | tail -20
+npm run lint
+npm run typecheck
+```
+Expected: all green. Compare the test count against the 3941 baseline and account for the difference.
+
+- [ ] **Step 2: Confirm upstream is untouched**
+
+```bash
+git -C /home/finn/Repos/openforge-catalog status --porcelain openforge/db/fixtures/blueprints/
+```
+Expected: empty.
+
+- [ ] **Step 3: Confirm the generated module is not hand-edited**
+
+```bash
+npm run import:catalog && git diff --exit-code src/assembly/templates.ts && echo "generated bytes match"
+```
+
+- [ ] **Step 4: Open the PR against main**
+
+```bash
+git push -u origin worktree-assembly-fold-and-fixed-size
+gh pr create --base main --title "feat: fold the recipe templates, fix their size, and place the modular base" --body "<the summary>"
+```
+
+## Self-Review
+
+**Spec coverage:**
+
+| spec section | task |
+| --- | --- |
+| fold the 40 → 10 | 5, 6 |
+| losslessness proof | 7 |
+| assembly size domains, no any-size | 6, 9 |
+| positions via parentTags | 4 |
+| width-only relabel | 8 |
+| `deny shape|base` on modular wall slots | 5, 7 |
+| drain-modular `build|s2w` | 5 |
+| modular base anchor from the fill | 1, 2, 3 |
+| provenance: round-trip untouched, byte-assert extended | 6 (Global Constraints) |
+| template ids change | 10 (PR body) |
+
+**Placeholder scan:** the only prose-level step is Task 5 Step 3, which describes the fold's grouping in words plus the exact constant and rules rather than a full listing — the 40-fixture shape makes a literal transcription longer than the file. Every assertion it must satisfy is written out in Task 5 Step 1 and Task 7, which is what makes it executable. Task 10 Step 4's `<the summary>` is deliberately the author's to write.
+
+**Type consistency:** `ControlPosition`/`AssemblyControls` are declared once in Task 5 and reused in 6, 9. `insetParts: ReadonlySet<SlotName>` matches across Tasks 2 and 3. `FillContext.position` is named identically in Tasks 4 and 9. `setArmedPosition(axis, tags)` appears only in Task 9. `SizePosition` in `panels/families.ts` is superseded by `ControlPosition` — Task 9 must delete the local duplicate rather than leave two names for one shape.

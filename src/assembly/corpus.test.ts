@@ -41,9 +41,10 @@ import { describe, expect, it } from 'vitest'
 
 import { CatalogFile } from '@/catalog'
 
-import { STEP_PAGE, assemblyState, createRecipeIndex } from './recipeWalk'
+import type { RecipeTemplate } from './recipeWalk'
+import { STEP_PAGE, assemblyState, createRecipeIndex, resolvePart } from './recipeWalk'
 import { assertTemplates, measureTemplates } from './measure'
-import { RECIPE_TEMPLATES } from './templates'
+import { ASSEMBLY_TEMPLATES, RECIPE_TEMPLATES } from './templates'
 
 /* ----------------------------------------------------------------- the corpus */
 
@@ -309,4 +310,234 @@ describeCorpus(corpusTitle, () => {
       assertTemplates(report as never)
     }).not.toThrow()
   })
+
+  /* ------------------------------------------------------- the fold, losslessly */
+
+  /**
+   * The derived assembly one fixture folded into.
+   *
+   * Matched on what the emitted data itself carries — the part-name set, the
+   * build, and whether the name says `: Low` — rather than on a `replaces` list,
+   * so this block still needs nothing but `catalog.json`. There is exactly one
+   * candidate for every fixture and the test asserts that rather than taking the
+   * first.
+   */
+  const derivedFor = (fixture: RecipeTemplate): RecipeTemplate => {
+    const parts = [...fixture.parts.map((part) => part.name)].sort().join(',')
+    const build = fixture.tags.find((tag) => tag.startsWith('build|s2w|'))
+    const low = fixture.name.includes(': Low (')
+    const found = ASSEMBLY_TEMPLATES.filter(
+      (assembly) =>
+        [...assembly.parts.map((part) => part.name)].sort().join(',') === parts &&
+        assembly.tags.includes(build ?? '') &&
+        assembly.name.includes(': Low (') === low,
+    )
+    expect(found, `${fixture.name} folded into ${String(found.length)} assemblies`).toHaveLength(1)
+    return found[0] as RecipeTemplate
+  }
+
+  /**
+   * The control position that reproduces one fixture: whatever its wall slot
+   * requires beyond what the merged slot requires.
+   *
+   * Read off `RECIPE_TEMPLATES` and `ASSEMBLY_TEMPLATES` and not out of
+   * `ASSEMBLY_CONTROLS`, deliberately. The point is to reconstruct the fixture
+   * from the *derived template plus a position*, so taking the position from the
+   * fold's own table would let a fold that dropped a tag agree with itself.
+   */
+  const positionFor = (fixture: RecipeTemplate, derived: RecipeTemplate): readonly string[] => {
+    const wall = fixture.parts.find((part) => part.name === 'wall')
+    const merged = derived.parts.find((part) => part.name === 'wall')
+    if (wall === undefined || merged === undefined) return []
+    const mergedRequire = new Set((merged.tags.require ?? []).map((ref) => ref.tag))
+    return (wall.tags.require ?? []).map((ref) => ref.tag).filter((tag) => !mergedRequire.has(tag))
+  }
+
+  it('reproduces every one of the 40 recipes slot by slot, as candidate sets', () => {
+    /* **The assertion that licenses the fold**, and the reason
+       `RECIPE_TEMPLATES` is still in the bundle beside the 10.
+       `pipeline/fold.test.ts` proves the derivation only *did* the four things it
+       declares; this proves those four things *cost nothing* — for each of the 40
+       and each of its slots, the derived template at the matching position admits
+       exactly the same files.
+
+       Sets and not counts: two different candidate sets can be the same size,
+       and it is the file a user gets. */
+    const index = recipes?.composition
+    if (index === undefined) throw new Error('no catalog')
+    const byId = new Map(
+      CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8'))).records.map((record) => [
+        record.id as unknown as string,
+        record,
+      ]),
+    )
+    const tagId = new Map(
+      CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8'))).tags.map((tag, id) => [tag, id]),
+    )
+    const carries = (id: string, tag: string): boolean => {
+      const record = byId.get(id)
+      const index = tagId.get(tag)
+      return index !== undefined && record !== undefined && new Set<number>(record.tags).has(index)
+    }
+
+    const mismatches: string[] = []
+    const delta = { integratedBase: 0, notRoleWall: 0, notS2wBase: 0, lowSecretDoor: 0, topperInModular: 0 }
+
+    for (const fixture of fixtures) {
+      const derived = derivedFor(fixture)
+      const posed: RecipeTemplate = { ...derived, tags: [...derived.tags, ...positionFor(fixture, derived)] }
+
+      for (const part of fixture.parts) {
+        const want = new Set(resolvePart(index, fixture, part, {}).tiles)
+        const twin = posed.parts.find((one) => one.name === part.name)
+        const got = new Set(
+          twin === undefined ? [] : (resolvePart(index, posed, twin, {}).tiles),
+        )
+
+        const lost = [...want].filter((id) => !got.has(id))
+        const gained = [...got].filter((id) => !want.has(id))
+        const isWall = part.name === 'wall' || part.name === 'right wall' || part.name === 'left wall'
+
+        /* **Four declared deltas and nothing else.** Each is a change this row
+           makes on purpose, and each is recognised by the *population* it moves
+           rather than waived by slot name, so a fold that dropped an unrelated
+           record still fails here.
+
+           Lost:
+             - a wall slot's records carrying `shape|base` — walls with an
+               integrated base, which the assembly would stand on a second base.
+               Row D1 denied these on all 47 families; the recipes were left out.
+             - a wall slot's records lacking `role|wall` — the columns and
+               foundations that leak into the two `(Any)` slots through a bare
+               `shape|wall` require.
+             - the drain's modular **base** records lacking `build|s2w`. Its base
+               slot omitted that require where all 15 siblings carry it, so it
+               could resolve a base that is not an s2w base at all: 305
+               candidates over 10 footprints against their 48 over 4.
+             - a **modular** wall or column's `topper` records — the ones carrying
+               `connection|openforge`. A modular tile's s2w base is authored 0.5
+               short on every walled axis, so it does not extend under the wall
+               and what stands there must bring its own base. A topper has nothing
+               beneath it, which the project owner photographed: *"the left,
+               shorter wall has no integrated base … the base is missing."* The
+               largest instance is the merged modular wall at 691 of 1,451.
+
+           Gained:
+             - low-wall records carrying `component|secret_door`. The low-wall
+               fixture is the only member with a `component|` deny of its own, and
+               the fold intersects denies rather than unioning them — unioned, a
+               secret door would be refused at *every* height. So the (low,
+               secret door) combination becomes reachable, which is a widening and
+               the only one. */
+        const explainedLoss = lost.filter((id) => {
+          if (isWall && carries(id, 'shape|base')) {
+            delta.integratedBase += 1
+            return true
+          }
+          if (isWall && !carries(id, 'role|wall')) {
+            delta.notRoleWall += 1
+            return true
+          }
+          if (part.name === 'base' && !carries(id, 'build|s2w')) {
+            delta.notS2wBase += 1
+            return true
+          }
+          /* A modular wall or column must bring its own base. `column` joins the
+             two wall names here and nowhere above, because the integrated-base
+             and role|wall deltas are about walls while this one is about anything
+             that stands in the strip the s2w base gives up. */
+          const stands = isWall || part.name === 'column'
+          if (
+            stands &&
+            fixture.tags.includes('build|s2w|modular') &&
+            carries(id, 'connection|openforge')
+          ) {
+            delta.topperInModular += 1
+            return true
+          }
+          return false
+        })
+        const explainedGain = gained.filter((id) => {
+          if (isWall && carries(id, 'shape|wall|low') && carries(id, 'component|secret_door')) {
+            delta.lowSecretDoor += 1
+            return true
+          }
+          return false
+        })
+
+        if (explainedLoss.length !== lost.length || explainedGain.length !== gained.length) {
+          const badLoss = lost.filter((id) => !explainedLoss.includes(id))
+          const badGain = gained.filter((id) => !explainedGain.includes(id))
+          mismatches.push(
+            `${fixture.id}/${part.name}: ${String(badLoss.length)} unexplained losses, ` +
+              `${String(badGain.length)} unexplained gains` +
+              `${badLoss[0] === undefined ? '' : ` — lost e.g. ${badLoss[0]}`}` +
+              `${badGain[0] === undefined ? '' : ` — gained e.g. ${badGain[0]}`}`,
+          )
+        }
+      }
+    }
+
+    expect(mismatches).toEqual([])
+    /* Every allowance above actually fires, so none of them is a blanket waiver
+       standing open for a future defect to walk through. */
+    for (const [reason, count] of Object.entries(delta)) {
+      expect(count, `${reason} never fired, so its allowance is unused`).toBeGreaterThan(0)
+    }
+    process.stdout.write(
+      `\n[fold] 40 recipes reproduced by the 10 — dropped ${String(delta.integratedBase)} integrated-base, ` +
+        `${String(delta.notRoleWall)} non-role|wall, ${String(delta.notS2wBase)} non-s2w base and ` +
+        `${String(delta.topperInModular)} self-baseless modular candidates; reached ` +
+        `${String(delta.lowSecretDoor)} low secret doors the fixtures denied\n`,
+    )
+  }, SLOW_MS)
+
+  it('admits no integrated-base record in any non-base slot of the 10', () => {
+    /* Row D1's deny, arrived at last. It was 3 slots and 566 candidates: the wall
+       of `Wall (Any, Modular)` at 278, and both wall slots of
+       `Corner (Any, Modular)` at 144 each. */
+    const index = recipes?.composition
+    if (index === undefined) throw new Error('no catalog')
+    const file = CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8')))
+    const byId = new Map(file.records.map((record) => [record.id as unknown as string, record]))
+    const baseTag = file.tags.indexOf('shape|base')
+
+    const offenders: string[] = []
+    for (const assembly of ASSEMBLY_TEMPLATES) {
+      for (const part of assembly.parts) {
+        if (part.name === 'base') continue
+        const bad = resolvePart(index, assembly, part, {}).tiles.filter((id) => {
+          const record = byId.get(id)
+          return record !== undefined && new Set<number>(record.tags).has(baseTag)
+        })
+        if (bad.length > 0) offenders.push(`${assembly.id}/${part.name}: ${String(bad.length)}`)
+      }
+    }
+    expect(offenders).toEqual([])
+  }, SLOW_MS)
+
+  it('reaches the 527 low walls the (Any) recipes could not see', () => {
+    /* The coverage half of the same change. `Wall (Any)`'s only shape require was
+       `shape|wall`, and `shape|wall|low` is disjoint from it — 0 of 527 records
+       carry both — so every low wall was outside a row whose name said *any*.
+       Keyed on `role|wall`, the height axis reaches them. */
+    const index = recipes?.composition
+    if (index === undefined) throw new Error('no catalog')
+    const wall = ASSEMBLY_TEMPLATES.find((one) => one.id === 's2w-wall-on-tile-wall-modular')
+    if (wall === undefined) throw new Error('no modular wall assembly')
+    const slot = wall.parts.find((part) => part.name === 'wall')
+    if (slot === undefined) throw new Error('no wall slot')
+
+    const at = (height: string | undefined): number =>
+      resolvePart(index, { ...wall, tags: height === undefined ? wall.tags : [...wall.tags, height] }, slot, {})
+        .tiles.length
+
+    const low = at('shape|wall|low')
+    const full = at('shape|wall')
+    expect(low).toBeGreaterThan(0)
+    expect(full).toBeGreaterThan(0)
+    // Any height reaches both, which the old row could not: it is at least their
+    // sum, since the two shape tags never co-occur.
+    expect(at(undefined)).toBeGreaterThanOrEqual(low + full)
+  }, SLOW_MS)
 })

@@ -53,6 +53,9 @@ import { buildCatalog } from './build'
 import { serialiseCatalog } from './emit'
 import { deriveFamilies } from './families'
 import type { GeneratedFamily } from './families'
+import { foldRecipes } from './fold'
+import type { FoldedAssembly } from './fold'
+import { deriveAssemblySizes } from './sizes'
 import { FixtureRow, fixtureFingerprint, fixturesDir, loadFixtureRows } from './fixtures'
 import { emptyManifest } from './ordinals'
 import type { TemplateFixture } from './templates'
@@ -86,29 +89,49 @@ describeFixtures(title, () => {
   const entries: readonly TemplateFixture[] = hasFixtures ? loadTemplateFixtures(FIXTURES) : []
   const parts = entries.flatMap((entry) => entry.parts)
   const constrain = parts.flatMap((part) => part.tags.constrain ?? [])
-  /* Row E3's third source. A pure function of `entries`, so it needs no corpus
-
   /**
-   * Row B4's families, built once and lazily.
+   * The corpus, built once and lazily — and the two things derived from it.
    *
-   * The emitted module has two sources now, so the byte-identity assertion below
-   * needs both — and the second one is a function of the *built corpus* rather
-   * than of the fixtures directory, which is what makes its 0 B structural. Built
-   * on first use so the two-thirds of this file that only reads YAML still runs
-   * without paying for a corpus build.
+   * The emitted module has **three** sources now, and two of them are functions
+   * of the *built corpus* rather than of the fixtures directory: the families,
+   * and the assemblies' size domains. Built on first use so the two-thirds of
+   * this file that only reads YAML still runs without paying for a corpus build.
+   *
+   * (The comment that used to open here was row E3's, describing a third fixture
+   * source that has since been withdrawn. Its `/*` was never closed, so it
+   * swallowed this docblock's opening — harmless to `tsc`, invisible in a diff,
+   * and worth closing now that a real third source has arrived.)
    */
+  let cachedCorpus: ReturnType<typeof buildCatalog>['file'] | undefined
+  const corpus = (): ReturnType<typeof buildCatalog>['file'] => {
+    cachedCorpus ??= buildCatalog({
+      rows: loadFixtureRows(FIXTURES),
+      manifest: emptyManifest(),
+      thumbs: new Set(),
+      fixturesRef: 'test',
+      builtAt: PAYLOAD_TIMESTAMP,
+    }).file
+    return cachedCorpus
+  }
+
   let cachedFamilies: readonly GeneratedFamily[] | undefined
   const families = (): readonly GeneratedFamily[] => {
-    cachedFamilies ??= deriveFamilies(
-      buildCatalog({
-        rows: loadFixtureRows(FIXTURES),
-        manifest: emptyManifest(),
-        thumbs: new Set(),
-        fixturesRef: 'test',
-        builtAt: PAYLOAD_TIMESTAMP,
-      }).file,
-    )
+    cachedFamilies ??= deriveFamilies(corpus())
     return cachedFamilies
+  }
+
+  /**
+   * The 10 folded assemblies with their size domains, over the same built corpus.
+   *
+   * A third argument to the emitter and a third thing built on first use, for
+   * exactly the reason the families are: the fold is pure over the YAML, but its
+   * *size domains* are a function of the corpus, so a byte-identity assertion
+   * that passed `[]` here would quietly narrow itself back to the 40 and the 47.
+   */
+  let cachedAssemblies: readonly FoldedAssembly[] | undefined
+  const assemblies = (): readonly FoldedAssembly[] => {
+    cachedAssemblies ??= deriveAssemblySizes(foldRecipes(entries), corpus())
+    return cachedAssemblies
   }
 
   /* ------------------------------------------------------------ the two halves */
@@ -291,7 +314,7 @@ describeFixtures(title, () => {
       }
       expect(() => templateConvention(invented)).toThrow(/blueprints\.s2w\.invented\.yaml/)
       expect(() => templateConvention(invented)).toThrow(/no slot convention covers/)
-      expect(() => printTemplateModule([...entries, invented], [])).toThrow(/no slot convention covers/)
+      expect(() => printTemplateModule([...entries, invented], [], [])).toThrow(/no slot convention covers/)
     })
 
     it('keys on the part-name set, which the fixtures’ own shape tags cannot do', () => {
@@ -554,27 +577,54 @@ describeFixtures(title, () => {
            defect and does not repair it, so the generated module is still
            provably the fixtures' content. A normalisation would show up here.
 
-           **Both arms take the real emitter call, families included, and that
-           is load-bearing since row B4.** The module has two sources now, so
-           the tally below is a claim about the *whole* file rather than about
-           its fixture half: a generated family whose tags spelled
-           `shape|corner` would break it, and none does — the 47 emit only
-           `role|`, `form|`, `build|` and `shape|base`. Passing `[]` here would
-           still compile and would quietly narrow the assertion back to the 40,
+           **Both arms take the real emitter call, families and assemblies
+           included, and that is load-bearing since row B4.** Passing `[]` for
+           either would still compile and would quietly narrow the assertion,
            which is why this test pays for the corpus build. The byte-identity
            test below is the other half: it proves the committed file *is* this
-           emitter's output, so the two arms are one artefact reached two ways. */
+           emitter's output, so the two arms are one artefact reached two ways.
+
+           **The tally is taken per export, and the recipe fold is why.** It used
+           to count over the whole file, on the strength of the families emitting
+           no `shape|corner` of their own — still true, they emit only `role|`,
+           `form|`, `build|` and `shape|base`. But the four internal corners are
+           now in the file **twice**: once as fixtures, and once as assemblies,
+           which for a corner is a rename carrying the fixture's tags byte for
+           byte (`fold.test.ts` asserts exactly that). A whole-file count would
+           read 8 and say nothing about where they came from. Counting the
+           fixture region keeps this a claim about the fixtures, and counting the
+           assembly region states the doubling rather than absorbing it. */
         const occurrences = (text: string, needle: string): number => text.split(needle).length - 1
+        const between = (text: string, from: string, to: string): string => {
+          const start = text.indexOf(from)
+          const end = text.indexOf(to)
+          expect(start, from).toBeGreaterThan(-1)
+          expect(end, to).toBeGreaterThan(start)
+          return text.slice(start, end)
+        }
         for (const text of [
-          printTemplateModule(entries, families()),
+          printTemplateModule(entries, families(), assemblies()),
           readFileSync(TEMPLATES_MODULE_PATH, 'utf8'),
         ]) {
           expect(text).toContain("name: 'S2W: Wall on Tile: Internal Corner: Low (Modular)'")
           // The fixtures' own tally survives into the module: four `shape|corner`,
           // one `shape|internal_corner|low`. A normalisation would read 2 and 2.
-          expect(occurrences(text, "'shape|corner'")).toBe(4)
-          expect(occurrences(text, "'shape|internal_corner|low'")).toBe(1)
-          expect(occurrences(text, "'shape|internal_corner'")).toBe(1)
+          const fixtureHalf = between(text, 'export const RECIPE_TEMPLATES', 'export const GENERATED_FAMILIES')
+          expect(occurrences(fixtureHalf, "'shape|corner'")).toBe(4)
+          expect(occurrences(fixtureHalf, "'shape|internal_corner|low'")).toBe(1)
+          expect(occurrences(fixtureHalf, "'shape|internal_corner'")).toBe(1)
+
+          /* And the assemblies carry it through unaltered, because the corners
+             are renamed and not rewritten. Equal counts are the assertion: the
+             fold must neither repair the defect nor introduce a fifth. */
+          const assemblyHalf = between(text, 'export const ASSEMBLY_TEMPLATES', 'export const ASSEMBLY_CONTROLS')
+          expect(occurrences(assemblyHalf, "'shape|corner'")).toBe(4)
+          expect(occurrences(assemblyHalf, "'shape|internal_corner|low'")).toBe(1)
+          expect(occurrences(assemblyHalf, "'shape|internal_corner'")).toBe(1)
+          // The families still emit none of it, which is what the old whole-file
+          // count was really testing on their behalf.
+          const familyHalf = between(text, 'export const GENERATED_FAMILIES', 'export const GENERATED_FAMILY_SIZES')
+          expect(occurrences(familyHalf, "'shape|corner'")).toBe(0)
         }
       },
       SLOW_MS,
@@ -587,7 +637,7 @@ describeFixtures(title, () => {
     'has the committed module byte-identical to the emitter’s output',
     () => {
       expect(
-        printTemplateModule(entries, families()),
+        printTemplateModule(entries, families(), assemblies()),
         `${TEMPLATES_MODULE_PATH} is out of date or hand-edited. ${REFRESH}`,
       ).toBe(readFileSync(TEMPLATES_MODULE_PATH, 'utf8'))
     },
@@ -615,8 +665,8 @@ describeFixtures(title, () => {
         expect(from).toBeGreaterThan(-1)
         return to < 0 ? text.slice(from) : text.slice(from, to)
       }
-      const withFamilies = printTemplateModule(entries, families())
-      expect(region(withFamilies)).toBe(region(printTemplateModule(entries, [])))
+      const withFamilies = printTemplateModule(entries, families(), assemblies())
+      expect(region(withFamilies)).toBe(region(printTemplateModule(entries, [], [])))
       expect(region(withFamilies)).toBe(region(readFileSync(TEMPLATES_MODULE_PATH, 'utf8')))
 
       /* And the other half of the same claim, from the family side: the only
@@ -646,8 +696,8 @@ describeFixtures(title, () => {
         { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
       ],
     }
-    expect(() => printTemplateModule([...entries, invented], [])).toThrow(/no slot convention covers/)
-    expect(() => printTemplateModule([...entries, invented], [])).toThrow(/Wall on Tile: Ceiling/)
+    expect(() => printTemplateModule([...entries, invented], [], [])).toThrow(/no slot convention covers/)
+    expect(() => printTemplateModule([...entries, invented], [], [])).toThrow(/Wall on Tile: Ceiling/)
   })
 
   it('slugs the 40 names to 40 distinct ids, and refuses to emit a collision', () => {
@@ -660,7 +710,7 @@ describeFixtures(title, () => {
     // duplicate key the screen would render as a disappearing card.
     const [first] = entries
     if (first === undefined) throw new Error('no templates to build the collision from')
-    expect(() => printTemplateModule([first, { ...first, name: `${first.name}!` }], [])).toThrow(/slug to/)
+    expect(() => printTemplateModule([first, { ...first, name: `${first.name}!` }], [], [])).toThrow(/slug to/)
   })
 
   /* ------------------------------------------------------------------ the census */

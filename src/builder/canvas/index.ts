@@ -171,7 +171,7 @@
  * source of truth and both are projections of it.
  */
 export { usePlanTools } from './usePlanTools'
-export type { PlanActivity, PlanToolDefaults, PlanTools } from './usePlanTools'
+export type { PlanActivity, PlanToolDefaults, PlanTools, PositionAxis } from './usePlanTools'
 
 export { claimsPress, pressMeaning, resolveSelection, stepSelection } from './selection'
 export type { PressMeaning } from './selection'

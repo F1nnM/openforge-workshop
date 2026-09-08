@@ -47,7 +47,7 @@ import { SHARE_URL_BUDGET, buildShareUrl, decodeShareFragment, encodeShareFragme
 import type { ShareManifest } from './manifest'
 import { buildShareManifest, resolveOrdinals } from './manifest'
 import type { WirePayload } from './payload'
-import { encodePayload } from './payload'
+import { SHARE_FORMAT_VERSION, encodePayload } from './payload'
 import type { SharedScene } from './scene'
 import { deflateRaw, toBase64Url } from './transport'
 
@@ -145,6 +145,28 @@ function fillsFor(parts: readonly { readonly name: string }[], file: (name: stri
 const ROOM_WIDTH = 40
 
 /**
+ * The filter positions the two shapes are built at.
+ *
+ * A room is built at **one** position — a wall run placed as arched doors at one
+ * size — because that is what the palette makes easy: the chips stay where they
+ * were set until the family changes. The scattered build cycles all four, so the
+ * filter table there holds an entry per instance and prices the shape where
+ * interning cannot help, which is the same story the template and slot tables
+ * tell.
+ *
+ * Real tags, from `ASSEMBLY_CONTROLS`' own vocabulary, because what the table
+ * costs is the *length* of a tag list and an invented `f1` would measure nothing.
+ */
+const ROOM_FILTERS: readonly string[] = ['component|door|arched', 'size|width|2', 'size|depth|2']
+
+const SCATTERED_FILTERS: readonly (readonly string[])[] = [
+  [],
+  ['component|torch', 'shape|wall'],
+  ['component|secret_door', 'interface|secret_door|bottom', 'shape|wall|low'],
+  ['component|window|square', 'size|width|4', 'size|depth|2'],
+]
+
+/**
  * A room-shaped build of `count` instances.
  *
  * A **fixed-width strip rather than a square**, and that is a fix rather than a
@@ -176,6 +198,7 @@ function room(count: number): NewTemplateInstance[] {
       // One pinned fill every few instances: a room somebody has adjusted, not a
       // bitset of all zeros, which would measure the easiest possible case.
       fills: fillsFor(family.parts, (name) => ROOM_FILES[name] ?? 1234, feature),
+      filters: ROOM_FILTERS,
     }
   })
 }
@@ -223,6 +246,7 @@ function scattered(count: number): NewTemplateInstance[] {
       z: Math.round(random() * 240 - 120) / 2 + 0,
       rotation: (step * turns) % 360,
       fills,
+      filters: SCATTERED_FILTERS[instances.length % SCATTERED_FILTERS.length] ?? [],
     })
   }
   return instances
@@ -284,6 +308,7 @@ async function urlLengthOf(bytes: Uint8Array): Promise<number> {
 function wireOf(scene: SharedScene): WirePayload {
   const templates: string[] = []
   const slots: string[] = []
+  const filters: string[] = []
   const intern = (table: string[], value: string): number => {
     const found = table.indexOf(value)
     if (found !== -1) return found
@@ -293,6 +318,8 @@ function wireOf(scene: SharedScene): WirePayload {
 
   const instances = scene.placements.map((instance) => ({
     template: intern(templates, instance.template),
+    // The set, `NUL`-joined, exactly as `link.ts#collectInstances` interns it.
+    filters: intern(filters, (instance.filters ?? []).join('\u0000')),
     x: instance.x,
     z: instance.z,
     rotation: instance.rotation,
@@ -315,6 +342,7 @@ function wireOf(scene: SharedScene): WirePayload {
     digest: resolveOrdinals(ordinals, MANIFEST).digest,
     templates,
     slots,
+    filters,
     instances,
     recipes: [],
     generated: [],
@@ -345,7 +373,7 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
   const fills = payload.instances.flatMap((instance) => instance.fills)
 
   // The shipped header, byte for byte, so only the body layout differs.
-  writer.u8(4)
+  writer.u8(SHARE_FORMAT_VERSION)
   writer.u8(0)
   writer.uvar(payload.manifestVersion)
   writer.u8(payload.lockIndex)
@@ -357,12 +385,15 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
 
   const templateOf = (index: number): string => payload.templates[index] ?? ''
   const slotOf = (index: number): string => payload.slots[index] ?? ''
+  const filtersOf = (index: number): string => payload.filters[index] ?? ''
 
   if (layout.tables) {
     writer.uvar(payload.templates.length)
     for (const entry of payload.templates) writer.utf8(entry)
     writer.uvar(payload.slots.length)
     for (const entry of payload.slots) writer.utf8(entry)
+    writer.uvar(payload.filters.length)
+    for (const entry of payload.filters) writer.utf8(entry)
   }
 
   const writeTemplate = (index: number): void => {
@@ -373,9 +404,17 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
     if (layout.tables) writer.uvar(index)
     else writer.utf8(slotOf(index))
   }
+  /* The filter *set*, inline as its own joined string when the tables are off —
+     which is what the `tables` row is measuring: the third table is interning a
+     value a room repeats, exactly like the other two. */
+  const writeFilters = (index: number): void => {
+    if (layout.tables) writer.uvar(index)
+    else writer.utf8(filtersOf(index))
+  }
 
   if (layout.columnar) {
     for (const instance of payload.instances) writeTemplate(instance.template)
+    for (const instance of payload.instances) writeFilters(instance.filters)
     for (const instance of payload.instances) writer.zigzag(instance.x * 2)
     for (const instance of payload.instances) writer.zigzag(instance.z * 2)
     for (const instance of payload.instances) writer.uvar(instance.rotation * 4)
@@ -386,6 +425,7 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
   } else {
     for (const instance of payload.instances) {
       writeTemplate(instance.template)
+      writeFilters(instance.filters)
       writer.zigzag(instance.x * 2)
       writer.zigzag(instance.z * 2)
       writer.uvar(instance.rotation * 4)

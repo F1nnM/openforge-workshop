@@ -56,6 +56,19 @@ const TEMPLATES: readonly string[] = [
 ]
 const SLOTS: readonly string[] = ['base', 'column', 'floor', 'left wall', 'right wall', 'wall']
 
+/**
+ * Two filter sets and the empty one, `NUL`-joined as the wire carries them.
+ *
+ * Entry 0 is *any on every axis* and is the ordinary case; the other two are a
+ * real component position of the folded wall assembly, one of them with its size
+ * as well, so the table holds one short entry and one long one.
+ */
+const FILTERS: readonly string[] = [
+  '',
+  'component|door|arched',
+  ['component|door|arched', 'size|width|2', 'size|depth|2'].join('\u0000'),
+]
+
 function payload(instances: readonly WireInstance[], overrides: Partial<WirePayload> = {}): WirePayload {
   return {
     manifestVersion: 1,
@@ -63,6 +76,7 @@ function payload(instances: readonly WireInstance[], overrides: Partial<WirePayl
     digest: 0xdeadbeef,
     templates: TEMPLATES,
     slots: SLOTS,
+    filters: FILTERS,
     instances,
     recipes: [],
     generated: [],
@@ -74,6 +88,9 @@ function payload(instances: readonly WireInstance[], overrides: Partial<WirePayl
 function instance(arity: number, ordinal: number, x: number, z: number, rotation: number): WireInstance {
   return {
     template: arity === 5 ? 1 : 0,
+    // Cycled over the three entries, so the filter column is neither constant
+    // nor one-to-one with the template column.
+    filters: ordinal % 3,
     x,
     z,
     rotation,
@@ -156,11 +173,11 @@ describe('payload round trip', () => {
   })
 
   it('is exact for an empty scene', () => {
-    const empty = payload([], { templates: [], slots: [] })
+    const empty = payload([], { templates: [], slots: [], filters: [] })
     expect(decodePayload(encodePayload(empty))).toEqual(empty)
-    // Nine bytes of header, then the four zero counts that open the two string
+    // Nine bytes of header, then the five zero counts that open the three string
     // tables, the recipe table and the generated column.
-    expect(encodePayload(empty).length).toBe(13)
+    expect(encodePayload(empty).length).toBe(14)
   })
 
   it('carries a table entry no instance names', () => {
@@ -175,7 +192,7 @@ describe('payload round trip', () => {
     // template with no candidate for *any* part is the same statement, and the
     // format has to be able to say it — the fill count column reads zero and the
     // bitset is empty.
-    const source = payload([{ template: 0, x: 2, z: 3, rotation: 90, fills: [] }])
+    const source = payload([{ template: 0, filters: 0, x: 2, z: 3, rotation: 90, fills: [] }])
     expect(decodePayload(encodePayload(source))).toEqual(source)
   })
 
@@ -220,7 +237,7 @@ describe('payload round trip', () => {
         ordinal: index,
         pinned: index % 5 === 1 || index % 7 === 3,
       }))
-      const source = payload([{ template: 0, x: 0, z: 0, rotation: 0, fills }])
+      const source = payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }])
       expect(decodePayload(encodePayload(source)).instances[0]?.fills).toEqual(fills)
     }
   })
@@ -291,7 +308,7 @@ describe('payload refuses input it cannot represent', () => {
 
   it('rejects a negative ordinal', () => {
     const fills = [{ slot: 0, ordinal: -1, pinned: false }]
-    expect(() => encodePayload(payload([{ template: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
+    expect(() => encodePayload(payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
       MalformedPayloadError,
     )
   })
@@ -300,10 +317,10 @@ describe('payload refuses input it cannot represent', () => {
     // Both directions of the same mistake, and they are the reason the encoder
     // checks at all: the tables are built by `link.ts` from the same scene, so a
     // stale index here is a bug in the caller and not user data.
-    const bad = { template: TEMPLATES.length, x: 0, z: 0, rotation: 0, fills: [] }
+    const bad = { template: TEMPLATES.length, filters: 0, x: 0, z: 0, rotation: 0, fills: [] }
     expect(() => encodePayload(payload([bad]))).toThrow(MalformedPayloadError)
     const fills = [{ slot: SLOTS.length, ordinal: 1, pinned: false }]
-    expect(() => encodePayload(payload([{ template: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
+    expect(() => encodePayload(payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
       MalformedPayloadError,
     )
   })
@@ -378,6 +395,12 @@ describe('payload decode is total under corruption', () => {
     writer.utf8('family')
     writer.uvar(1)
     writer.utf8('floor')
+    // The filter table: one entry, the empty set, which is what both instances
+    // below index.
+    writer.uvar(1)
+    writer.utf8('')
+    writer.uvar(0)
+    writer.uvar(0)
     writer.uvar(0)
     writer.uvar(0)
     writer.zigzag(0)

@@ -125,6 +125,25 @@ describe('placing', () => {
     expect(filledSlots(edit.fills)).toEqual(['floor'])
   })
 
+  it('carries the armed control filters onto the placement', () => {
+    /* The position is what narrowed the fills, and a placed instance keeps it
+       because the slot editor needs it: an instance placed as an arched door
+       should offer 54 walls in its wall slot rather than 1,451. It is not
+       recoverable from the fills — *any component* and *arched door, which
+       happens to be what is filled* produce the same map — so it travels
+       alongside them or not at all. */
+    const filters = ['component|door|arched', 'size|width|2', 'size|depth|2']
+    const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0, 0], FINE, solved(), undefined, filters)
+    expect(edit.kind).toBe('place')
+    if (edit.kind !== 'place') return
+    expect(edit.filters).toEqual(filters)
+  })
+
+  it('places with no filters when nothing was armed, which is *any* on every axis', () => {
+    const edit = planPlacement(FIXTURE_TEMPLATE, 0, [0, 0], FINE, solved())
+    expect(edit.kind === 'place' ? edit.filters : undefined).toEqual([])
+  })
+
   it('places with no fills when the caller has no catalog, which is contract C-g', () => {
     // §3.2 places a template with no candidate for a part *"anyway"*, and the
     // store accepts it — `placeTemplate` has deliberately no completeness

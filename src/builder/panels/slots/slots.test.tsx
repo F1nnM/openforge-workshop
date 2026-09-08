@@ -65,6 +65,7 @@ import { AccessorySection } from './AccessorySection'
 import { planSlots } from './planSlots'
 import type { SlotEditTarget } from './SlotEditor'
 import { SlotEditor } from './SlotEditor'
+import { slotEditorModel } from './slotEditor'
 
 /** Built once: it is a pure function of the fixture and scans every record. */
 const ASSEMBLY = buildAssemblyIndex(SLOT_CATALOG)
@@ -127,8 +128,37 @@ const MITRE_TEMPLATE: RecipeTemplate = {
   ],
 }
 
+/**
+ * A one-slot recipe carrying a **real assembly's id**, so `families.ts` has a row
+ * for it and its three control axes exist.
+ *
+ * The id is the one fact this fixture borrows: `editorAxes` reads the domain off
+ * `ASSEMBLY_CONTROLS` — deliberately, so the palette and the editor cannot offer
+ * different chips for the same piece — and an invented id has no row and
+ * therefore no axes. The *parts* are this file's own, and the slot is shaped so
+ * two of that assembly's real component positions reach the fixture's records:
+ * `constrain: [component]` collects the filter, and `texture|dungeon_stone`
+ * admits the stone torches, tops and grates alike until one does.
+ */
+const FILTERED_TEMPLATE: RecipeTemplate = {
+  id: 's2w-wall-on-tile-wall-modular',
+  name: 'S2W: Wall on Tile: Wall (Modular)',
+  source: 'fixture',
+  tags: ['object|tile'],
+  parts: [
+    {
+      name: 'insert',
+      tags: {
+        require: [{ tag: 'texture|dungeon_stone' }],
+        constrain: [{ tag: 'component', siblings: [] }],
+      },
+      fulfills: [],
+    },
+  ],
+}
+
 const TEMPLATES = (id: string): RecipeTemplate | undefined =>
-  [EDITOR_TEMPLATE, MITRE_TEMPLATE].find((one) => one.id === id)
+  [EDITOR_TEMPLATE, MITRE_TEMPLATE, FILTERED_TEMPLATE].find((one) => one.id === id)
 
 /** The accessory inventory over a plan, which is all this section is now. */
 function accessories(placements: Record<string, TemplateInstance>) {
@@ -218,6 +248,9 @@ function instance({ fill, fills, x, z }: { fill?: TileId; fills?: readonly TileI
     fills: Object.fromEntries(
       tiles.map((tile, at) => [SlotName.parse(`slot${String(at)}`), { tile, pinned: false }]),
     ),
+    /* *Any* on every axis, which is what these fixtures are about: a position
+       narrows the slot lists and each test that cares passes its own. */
+    filters: [],
   }
 }
 
@@ -346,6 +379,7 @@ function piece(fills: Readonly<Record<string, string>>, x = 0, z = 0): TemplateI
         { tile: tile as TileId, pinned: false },
       ]),
     ),
+    filters: [],
   }
 }
 
@@ -424,6 +458,191 @@ describe('AccessorySection', () => {
 /** A card in the editor's grid, by the item it stands for. */
 const card = (name: string | RegExp) =>
   within(screen.getByRole('group', { name: /^Fill the/ })).getByRole('button', { name })
+
+describe('the instance’s control position narrows the editor', () => {
+  /**
+   * A one-slot recipe whose slot **constrains `texture`**, so a position can
+   * reach it.
+   *
+   * Purpose-built rather than reusing {@link EDITOR_TEMPLATE}: that one's `top`
+   * slot declares no `constrain` at all, which is the correct shape for what it
+   * tests and exactly the shape a position cannot narrow. A position is offered
+   * to every slot and collected only by the ones that asked — that is the whole
+   * mechanism — so a fixture without a `constrain` block would test nothing here
+   * and adding one to it would move the assertions of five other tests.
+   */
+  const TEXTURED: RecipeTemplate = {
+    id: 'fixture-textured-top',
+    name: 'Fixture: Textured Top',
+    source: 'fixture',
+    tags: ['object|tile'],
+    parts: [
+      {
+        name: 'top',
+        tags: { require: [{ tag: 'component|top' }], constrain: [{ tag: 'texture', siblings: [] }] },
+        fulfills: [],
+      },
+    ],
+  }
+
+  const modelAt = (filters: readonly string[]) =>
+    slotEditorModel(
+      SLOT_CATALOG,
+      ASSEMBLY,
+      {
+        id: KEY,
+        template: TemplateId.parse(TEXTURED.id),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: {},
+        filters,
+      },
+      TEXTURED,
+    )
+
+  it('offers every texture when the instance was placed at no position', () => {
+    // `[]` is *any*: the `constrain` collects nothing and the slot admits what
+    // its own `require` does.
+    const designs = modelAt([]).slots[0]?.designs ?? []
+    expect(designs.length).toBeGreaterThan(1)
+  })
+
+  it('offers only the position’s texture when the instance carries one', () => {
+    /* **The point of storing the position.** The instance was placed as a towne
+       piece, so its editor offers towne tops — not every top in the archive and
+       then a surprise when the user picks one the placement never meant. */
+    const designs = modelAt(['texture|towne']).slots[0]?.designs ?? []
+    expect(designs.length).toBeGreaterThan(0)
+    expect(designs.length).toBeLessThan((modelAt([]).slots[0]?.designs ?? []).length)
+    for (const bucket of designs) expect(bucket.family).toBe('towne')
+  })
+})
+
+describe('the filter chips above the slots', () => {
+  const INSERT = SlotName.parse('insert')
+  const TORCH_STONE = FILL.torchStone as TileId
+
+  /** One placed instance of {@link FILTERED_TEMPLATE}, at a filter position. */
+  function filtered(
+    fills: TemplateInstance['fills'] = {},
+    filters: readonly string[] = [],
+  ): Record<string, TemplateInstance> {
+    return {
+      a: {
+        id: KEY,
+        template: TemplateId.parse(FILTERED_TEMPLATE.id),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills,
+        filters,
+      },
+    }
+  }
+
+  /**
+   * The editor, open on that instance — **in the store**, because the presses
+   * below write there.
+   *
+   * The host holds its placements as a prop, so the dialog's own copy stays at
+   * the position it opened on until the owner re-reads; every assertion here is
+   * therefore about the store or about the dialog's own state, which is what
+   * those two presses actually move.
+   */
+  function open(placements: Record<string, TemplateInstance>): HTMLElement {
+    useWorkshopStore.setState({ placements })
+    editor(useWorkshopStore.getState().placements, { placement: KEY })
+    return screen.getByRole('dialog')
+  }
+
+  const chip = (dialog: HTMLElement, name: string) =>
+    within(dialog).getByRole('button', { name })
+
+  const stored = () => useWorkshopStore.getState().placements[KEY]
+
+  it('mounts one group per axis, above the slot list', () => {
+    /* **The placement the owner asked for**: *"It should be placed above the
+       actual slots."* Asserted as document order rather than as presence,
+       because a control mounted below the slots it narrows would pass every
+       other assertion in this block. */
+    const dialog = open(filtered())
+
+    const component = within(dialog).getByRole('group', { name: /^Component for / })
+    const slots = dialog.querySelector('.of-sloted-slots')
+
+    expect(within(dialog).getByRole('group', { name: /^Height for / })).toBeInTheDocument()
+    expect(within(dialog).getByRole('group', { name: /^Size for / })).toBeInTheDocument()
+    expect(slots).not.toBeNull()
+    expect(
+      component.compareDocumentPosition(slots!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeGreaterThan(0)
+  })
+
+  it('presses the chip the instance was placed at', () => {
+    // The stored filters *are* the control's state — that is the whole point of
+    // storing them, and `AxisControl`'s pressed rule is `positionIn`'s.
+    const dialog = open(filtered({}, ['component|torch']))
+    expect(chip(dialog, 'Component: torch')).toHaveAttribute('aria-pressed', 'true')
+    expect(chip(dialog, 'Component: grate')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('writes the pressed position onto the instance and re-solves it', () => {
+    const dialog = open(filtered())
+    expect(stored()?.filters).toEqual([])
+
+    fireEvent.click(chip(dialog, 'Component: torch'))
+
+    expect(stored()?.filters).toEqual(['component|torch'])
+    // Re-solved, not merely re-labelled: the slot now holds a torch, which is
+    // the only thing the new filter admits.
+    expect(stored()?.fills[INSERT]?.tile).toBe(TORCH_STONE)
+  })
+
+  it('keeps the other axes where they are', () => {
+    /* `filtersWith` rebuilds the whole list from the axes, so a component press
+       must not clear a height the user set first — the same rule
+       `usePlanTools#setArmedPosition` keeps for the palette, and the reason the
+       hook holds three lists rather than one. */
+    const dialog = open(filtered({}, ['shape|wall']))
+
+    fireEvent.click(chip(dialog, 'Component: torch'))
+
+    expect(stored()?.filters).toEqual(['component|torch', 'shape|wall'])
+  })
+
+  it('drops a pin the new position does not admit, and says so', () => {
+    /* **Contract C-k's other half.** `reSolveInstance` may discard a pin on a
+       filter change and this is the surface that must not swallow the report:
+       the stone top is a deliberate choice, `component|torch` does not admit it,
+       and the dialog names both the piece and the slot. */
+    const dialog = open(filtered({ [INSERT]: { tile: FILL.topWall as TileId, pinned: true } }))
+
+    fireEvent.click(chip(dialog, 'Component: torch'))
+
+    expect(within(dialog).getByRole('status').textContent).toContain(
+      'Dungeon Stone Secret Door Top in the insert slot',
+    )
+    expect(stored()?.fills[INSERT]).toEqual({ tile: TORCH_STONE, pinned: false })
+  })
+
+  it('keeps a pin the new position still admits', () => {
+    // The pin is a stone torch and the new position is *torch*, so the choice
+    // survives with its bit — nothing is reported and nothing is rewritten.
+    const dialog = open(filtered({ [INSERT]: { tile: TORCH_STONE, pinned: true } }))
+
+    fireEvent.click(chip(dialog, 'Component: torch'))
+
+    // `queryAll`, because `needsChoice` is a `status` in this dialog too — what
+    // must not be there is the *report*, not every live region.
+    expect(
+      within(dialog)
+        .queryAllByRole('status')
+        .some((one) => (one.textContent ?? '').includes('no longer available')),
+    ).toBe(false)
+    expect(stored()?.fills[INSERT]).toEqual({ tile: TORCH_STONE, pinned: true })
+  })
+})
 
 describe('the slot editor', () => {
   /**
@@ -578,6 +797,7 @@ describe('the slot editor', () => {
           [SlotName.parse('floor')]: { tile: PARENT.plainFloor as TileId, pinned: true },
           [SlotName.parse('wall')]: { tile: PARENT.wallTowne as TileId, pinned: true },
         },
+        filters: [],
       },
       },
       { placement: KEY },
@@ -605,6 +825,7 @@ describe('the slot editor', () => {
         z: 0,
         rotation: 0,
         fills: { [SlotName.parse('floor')]: { tile: PARENT.pairedGrate as TileId, pinned: true } },
+        filters: [],
       },
       },
       { placement: KEY },

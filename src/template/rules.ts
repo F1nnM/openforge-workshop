@@ -187,6 +187,45 @@ export type SlotName = string
 export type SlotAnchor = 'cell' | 'edge' | 'corner' | 'residual'
 
 /**
+ * Whether a fill is authored **short of the cell its tag names**, so its box is
+ * the layout's `residual` rather than its own tagged extent.
+ *
+ * One population: the 95 `shape|base|s2w` bases. Measured from the live `/lod/`
+ * meshes, an s2w base is 0.5 short on every axis a wall stands on —
+ * `base+s2w+square+wall.2x2` measures 2.000 x 1.500, `+wall.4x2` 4.000 x 1.500
+ * and `+corner.2x2` 1.500 x 1.500, every one of them authored in place from the
+ * origin corner. That is the identical convention {@link SlotAnchor}'s docblock
+ * records for the s2w *floor*, and the reason that floor is `residual`. The base
+ * was left on `cell`, so `place.ts` centred a 1.5-deep slab in a 2-deep box and
+ * left it a quarter unit under the wall on one edge and a quarter unit short of
+ * the floor on the other. 18 of the 40 recipes, all of them `(Modular)`.
+ *
+ * **It is a property of the fill and not of the recipe, and that is load
+ * bearing.** `Corner (Any, Modular)` and the drain's modular recipe both omit
+ * `build|s2w` from their base slot, so each admits both kinds — 257 non-s2w
+ * `shape|base|wall` records sit alongside the 48 s2w ones — and a static
+ * per-recipe anchor is provably wrong for one fill of those two templates.
+ *
+ * **No internal-corner exception, and none is needed.** An internal corner has
+ * no `edge` slot, so `offsets.ts#residualBox` returns exactly its cell and the
+ * switch is a no-op. That agrees with the mesh rather than working around it:
+ * `base+square+s2w+internal_corner.2x2` measures a full 2.000 x 2.000, unlike
+ * its wall and corner siblings, because it has no wall strip to give up.
+ *
+ * Keyed on `shape|base|s2w` rather than on `layer === 'base'` plus `build|s2w`
+ * because the two select the same 95 records and this needs only tags — which is
+ * what lets `offsets.ts` stay free of `CatalogRecord`.
+ *
+ * The complementary population is measured too: of the 120 non-s2w rect bases
+ * the dev-tool sidecar covers, **120** measure their tagged cell to within 0.011
+ * units, so `cell` stays right for every one of them. The sidecar covers **0**
+ * of the 95, which is why the figures above come from `/lod/`.
+ */
+export function isInsetFill(tags: readonly string[]): boolean {
+  return tags.includes('shape|base|s2w')
+}
+
+/**
  * Which quarter-turn of the template's reference face a slot is anchored to.
  *
  * `0` is the reference face `-z` — the plan's "north", and the face

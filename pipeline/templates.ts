@@ -114,6 +114,7 @@ import { conventionFor } from '../src/template/rules'
 
 import type { GeneratedFamily } from './families'
 import { fixturesDir } from './fixtures'
+import type { ControlPosition, FoldedAssembly } from './fold'
 
 /**
  * Where the generated module is written and read back.
@@ -801,14 +802,31 @@ function printModulePart(part: PartSlot): string[] {
 export function printTemplateModule(
   entries: readonly TemplateFixture[],
   families: readonly GeneratedFamily[],
+  assemblies: readonly FoldedAssembly[],
 ): string {
-  const seen = new Set<string>()
+  /**
+   * Two id namespaces, because there are now two kinds of list in this file.
+   *
+   * `fixtureIds` guards the 40 against each other: two fixture names slugging to
+   * one id would make `RECIPE_TEMPLATES` lose an entry silently, which is the
+   * check this set has always been.
+   *
+   * `placeableIds` guards what the palette actually lists —
+   * `ASSEMBLY_TEMPLATES` and `GENERATED_FAMILIES` — and the two sets are
+   * deliberately **not** one. Eight of the ten assemblies keep the id of the
+   * fixture they were renamed from, because only the full-height corners get a
+   * new name and the `: Low` pairs keep theirs. Sharing an id with a fixture is
+   * not a collision: the fixtures are no longer a palette list, and an id that
+   * survives the fold is a share link that survives it too.
+   */
+  const fixtureIds = new Set<string>()
+  const placeableIds = new Set<string>()
   const body: string[] = []
 
   const emit = (entry: TemplateFixture): void => {
     const id = templateSlug(entry.name)
-    if (seen.has(id)) throw new Error(`two templates slug to ${id}`)
-    seen.add(id)
+    if (fixtureIds.has(id)) throw new Error(`two templates slug to ${id}`)
+    fixtureIds.add(id)
     /* Row B2's gate, run here because this is what `npm run import:catalog`
        calls. It emits nothing — the conventions ship in the bundle and the index
        gains 0 B — so the bytes below are unchanged by it, and a fixture with an
@@ -831,8 +849,8 @@ export function printTemplateModule(
 
   const familyBody: string[] = []
   for (const family of families) {
-    if (seen.has(family.id)) throw new Error(`two templates slug to ${family.id}`)
-    seen.add(family.id)
+    if (placeableIds.has(family.id)) throw new Error(`two placeable templates slug to ${family.id}`)
+    placeableIds.add(family.id)
     familyBody.push(
       '  {',
       `    id: ${quote(family.id)},`,
@@ -855,19 +873,65 @@ export function printTemplateModule(
         .join(', ')}],`,
   )
 
+  const assemblyBody: string[] = []
+  for (const assembly of assemblies) {
+    if (placeableIds.has(assembly.id)) throw new Error(`two placeable templates slug to ${assembly.id}`)
+    placeableIds.add(assembly.id)
+    assemblyBody.push(
+      '  {',
+      `    id: ${quote(assembly.id)},`,
+      `    name: ${quote(assembly.name)},`,
+      `    source: ${quote(assembly.source)},`,
+      `    tags: [${assembly.tags.map(quote).join(', ')}],`,
+      '    parts: [',
+      ...assembly.parts.flatMap(printModulePart),
+      '    ],',
+      '  },',
+    )
+  }
+
+  const printAxis = (positions: readonly ControlPosition[]): string =>
+    `[${positions
+      .map((position) => `{ label: ${quote(position.label)}, tags: [${position.tags.map(quote).join(', ')}] }`)
+      .join(', ')}]`
+
+  const controlBody = assemblies.flatMap((assembly) => [
+    `  ${quote(assembly.id)}: {`,
+    `    component: ${printAxis(assembly.controls.component)},`,
+    `    height: ${printAxis(assembly.controls.height)},`,
+    `    size: ${printAxis(assembly.controls.size)},`,
+    '  },',
+  ])
+
   return `${[
     '/**',
-    ` * The ${String(entries.length)} recipe templates and the ${String(families.length)} generated families, as data.`,
+    ` * The ${String(assemblies.length)} assemblies, the ${String(entries.length)} recipe templates they are folded from, and the ${String(families.length)} generated families, as data.`,
     ' *',
     ' * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`',
-    ' * fixtures beside the JSON, `pipeline/families.ts` derives the families',
-    ' * from the built corpus, and this file is what the two emit;',
+    ' * fixtures beside the JSON, `pipeline/fold.ts` folds them, `pipeline/sizes.ts`',
+    ' * derives their size domains and `pipeline/families.ts` derives the families',
+    ' * from the built corpus; this file is what they emit.',
     ' * `npm run import:catalog` writes it and `pipeline/templates.test.ts` asserts the',
     ' * committed bytes are exactly what the emitter returns, so an edit here fails the',
     ' * suite rather than drifting quietly.',
     ' *',
+    ' * ## What the palette lists, and what is kept beside it',
+    ' *',
+    ` * \`ASSEMBLY_TEMPLATES\` is the ${String(assemblies.length)} the palette lists, derived from the ${String(entries.length)}:`,
+    ' * 32 of the fixtures differ only by one `component|` require on one slot, so the',
+    ' * component is a **control** rather than 14 templates. `ASSEMBLY_CONTROLS` holds',
+    ' * the three axes per assembly — component, height and size — and a position’s tags',
+    ' * join a placed instance’s `parentTags`, where each slot’s own `constrain` block',
+    ' * collects only the roots that slot asked for. No assembly carries an `any size`',
+    ' * position: a placement is sized.',
+    ' *',
     ` * \`RECIPE_TEMPLATES\` is the ${String(entries.length)} read from the fixtures and nothing else — all`,
-    ' * of them `S2W: Wall on Tile`, reaching 35.4% of the corpus.',
+    ' * of them `S2W: Wall on Tile`, reaching 35.4% of the corpus. It is **kept**',
+    ' * rather than replaced, and not for compatibility: `src/assembly/corpus.test.ts`',
+    ' * walks all 40 against the 10 and asserts candidate-**set** equality slot by slot,',
+    ' * which is what licenses the fold. Without the fixtures in the bundle that test',
+    ' * would have nothing to compare against.',
+    ' *',
     ' * `GENERATED_FAMILIES` is one',
     ' * family per `(role, form, build)` key the emitted tags already carry, each with',
     ' * one required slot denying `shape|base`, plus the bare-base family no such key',
@@ -890,8 +954,47 @@ export function printTemplateModule(
     ` * ${String(families.length)} generated families over ${String(
       families.reduce((total, family) => total + family.records, 0),
     )} records, ${String(families.reduce((total, family) => total + family.sizes.length, 0))} size positions.`,
+    ` * ${String(assemblies.length)} assemblies over ${String(
+      assemblies.reduce((total, assembly) => total + assembly.parts.length, 0),
+    )} parts, with ${String(
+      assemblies.reduce(
+        (total, assembly) =>
+          total +
+          assembly.controls.component.length +
+          assembly.controls.height.length +
+          assembly.controls.size.length,
+        0,
+      ),
+    )} control positions between them.`,
     ' */',
     "import type { RecipeTemplate } from './recipeWalk'",
+    '',
+    '/** One position of one control axis. `tags` is empty on an `any` position. */',
+    'export interface ControlPosition {',
+    '  readonly label: string',
+    '  readonly tags: readonly string[]',
+    '}',
+    '',
+    '/**',
+    ' * The three axes of one assembly’s controls.',
+    ' *',
+    ' * An empty axis means **no control**: the eight corners have no `height`',
+    ' * because their low/full split is two templates rather than a position, and a',
+    ' * one-position axis is a control that cannot be operated.',
+    ' */',
+    'export interface AssemblyControls {',
+    '  readonly component: readonly ControlPosition[]',
+    '  readonly height: readonly ControlPosition[]',
+    '  readonly size: readonly ControlPosition[]',
+    '}',
+    '',
+    'export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [',
+    ...assemblyBody,
+    ']',
+    '',
+    'export const ASSEMBLY_CONTROLS: Readonly<Record<string, AssemblyControls>> = {',
+    ...controlBody,
+    '}',
     '',
     'export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [',
     ...body,

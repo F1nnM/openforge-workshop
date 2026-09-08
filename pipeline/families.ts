@@ -676,11 +676,35 @@ function cellKey(w: number, d: number): string {
  * whose width is untagged.
  *
  * `sizeRefs`'s `deny` is deliberately not read. See the module note.
+ *
+ * ## A `run` position says when it admits more than one depth
+ *
+ * A run names a width and no depth, so it can admit records at several cells of
+ * that width — and measured over the 47 domains, **24 of the 47 run positions do**,
+ * covering two to seven depths each. `floor|straight`'s *"2 wide"* takes depths
+ * 0.5, 1, 2, 3 and 4, and it sits in the same control as *"2 wide by 2 deep"*
+ * with nothing to tell a reader that the first contains the second. Those 24 are
+ * exactly the runs that **coexist with a cell position at the same width**; the
+ * other 23 resolve a single depth and are exact.
+ *
+ * They are relabelled and **not dropped**. Dropping them would make any record
+ * at an inexpressible cell of that width reachable only through `ANY_SIZE`, which
+ * is a real reachability loss for no gain; and the run is often the *only*
+ * expressible position, because a separate wall is 0.5 deep and **no wall record
+ * carries `size|depth|0.5`** — the tag exists in the table, 0 of the 540 records
+ * at cell `2x0.5` carry it, so the pair resolves and admits nothing. Walls are
+ * tagged by their run alone.
+ *
+ * `all` is therefore the family's whole record set and not just `atCell`: the
+ * question *"how many depths does this run admit"* is about every record the
+ * width tag reaches, which is a different population from the one cell being
+ * spelled.
  */
 function positionFor(
   w: number,
   d: number,
   atCell: readonly CatalogRecord[],
+  all: readonly CatalogRecord[],
   tagsOf: (record: CatalogRecord) => readonly string[],
   has: (tag: string) => boolean,
 ): FamilySizePosition | undefined {
@@ -701,7 +725,14 @@ function positionFor(
      ref this module does not use. */
   const runRefs = sizeRefs(run).require
   if (runRefs.every((ref) => has(ref)) && admits(runRefs)) {
-    return { label: `${formatUnits(w)} wide`, tags: runRefs }
+    const depths = new Set<number>()
+    for (const record of all) {
+      if (!runRefs.every((ref) => tagsOf(record).includes(ref))) continue
+      const size = resolveGridSize(record.foot, tagsOf(record))
+      if (size !== undefined) depths.add(size.d)
+    }
+    const label = depths.size > 1 ? `${formatUnits(w)} wide, any depth` : `${formatUnits(w)} wide`
+    return { label, tags: runRefs }
   }
 
   return undefined
@@ -737,7 +768,7 @@ function sizeControlFor(
   const seen = new Set<string>()
   const inexpressibleCells: string[] = []
   for (const [key, bucket] of ordered) {
-    const position = positionFor(bucket.w, bucket.d, bucket.records, tagsOf, has)
+    const position = positionFor(bucket.w, bucket.d, bucket.records, records, tagsOf, has)
     if (position === undefined) {
       inexpressibleCells.push(key)
       continue
@@ -945,5 +976,11 @@ export function familyLayout(family: GeneratedFamily): TemplateLayout {
  * weighing the artefact — `npm run stamp` reports `content` unchanged with
  * `PIPELINE_VERSION` standing still, and `families.test.ts` asserts that none of
  * the family model's vocabulary appears in the emitted bytes.
+ *
+ * **44,450 B before the width-only relabel.** 24 of the 47 run positions gained
+ * `, any depth` — 11 bytes each, 264 in total — because a position admitting two
+ * to seven depths read as narrower than the `(w, d)` position beside it that it
+ * contains. Re-measured rather than adjusted by arithmetic, and the test
+ * recomputes it from the emitter either way.
  */
-export const FAMILY_TABLE_BYTES = 44_450
+export const FAMILY_TABLE_BYTES = 44_714

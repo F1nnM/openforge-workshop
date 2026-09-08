@@ -82,17 +82,22 @@ import { assemblyState, createRecipeIndex, resolvePart } from '@/assembly'
    and its sprite rotator into the builder's chunk to format one string. */
 import { textureSetLabel } from '@/screens/detail/labels'
 import { compositionIndexFor } from '@/screens/detail/slots'
+import type { PositionAxis } from '@/builder/canvas'
 import type { LockSystem, PlacementId, SlotFill, SlotName, TemplateInstance } from '@/store'
-import { unpinFill, useWorkshopStore } from '@/store'
-import type { SceneReSolve, SlotDoubt, SlotVerdict } from '@/template'
+import { setPlacementFilters, unpinFill, useWorkshopStore } from '@/store'
+import type { DroppedPin, InstanceFilterReSolve, SceneReSolve, SlotDoubt, SlotVerdict } from '@/template'
 import {
   cornerSpanOf,
   layoutFor,
   placeTemplateSlots,
+  reSolveInstance,
   reSolveScene,
   sizeSentence,
   slotSizePredicate,
 } from '@/template'
+
+import type { SizePosition } from '../families'
+import { familyById, positionIn } from '../families'
 
 /* ------------------------------------------------------------------ the filter */
 
@@ -289,6 +294,12 @@ function layoutOf(
     const record = fill === undefined ? undefined : index.byId.get(fill.tile)
     if (record !== undefined) feet.set(slot as SlotName, record.foot)
   }
+  /* No `insetParts`, deliberately. What this reads off the placement is `cell`
+     and the doubts, and it derives its size predicates from `layout.slots` — the
+     *declared* rules — rather than from the placed ones. The inset anchor changes
+     an `offset` and a `residual` and neither is read here, so the empty default
+     is the whole answer. Whether an inset base should also narrow its own size
+     predicate is B3's question and not this row's. */
   const placed = placeTemplateSlots(layout, feet)
   const span = cornerSpanOf(layout)
   const sides = new Map<string, ReturnType<typeof slotSizePredicate>>()
@@ -315,7 +326,17 @@ export function slotEditorModel(
   recipes: RecipeIndex = createRecipeIndex(catalog, compositionIndexFor(catalog)),
 ): SlotEditorModel {
   const choice = choiceOf(instance)
-  const state = assemblyState(recipes, template, choice)
+  /* **The instance's control filters, posed onto the template's own tags.**
+     `assemblyState` reads `template.tags` as the `parentTags` a `constrain` block
+     collects, so adding the position here is the whole of filtering this editor —
+     no per-slot table and no second resolver. An instance placed as an arched
+     door offers 54 walls in its wall slot rather than 1,451.
+     `[]` poses nothing, which is *any* on every axis. */
+  const posed =
+    instance.filters.length === 0
+      ? template
+      : { ...template, tags: [...template.tags, ...instance.filters] }
+  const state = assemblyState(recipes, posed, choice)
   const geometry = layoutOf(template, instance, index)
 
   const slots = state.steps.map((step): EditorSlot => {
@@ -432,6 +453,142 @@ export function refusalSentence(
   return (
     `${name} cannot go in the ${slot} slot: it would leave ${named} outside what that slot admits. ` +
     'Change that slot first — nothing here will rewrite a choice you have already made.'
+  )
+}
+
+/* --------------------------------------------------------------- the filters */
+
+/** One control axis of the instance's own row, as the editor mounts it. */
+export interface EditorAxis {
+  readonly axis: PositionAxis
+  /** `Component`, `Height`, `Size` — `AxisControl`'s group and chip prefix. */
+  readonly label: string
+  readonly entries: readonly SizePosition[]
+}
+
+/**
+ * The instance's row's three axes, in `usePlanTools#armedPosition`'s own order.
+ *
+ * Read off `families.ts` and not off the template, because the domain of an axis
+ * is a *derived table* — `ASSEMBLY_CONTROLS` for an assembly, and
+ * `GENERATED_FAMILY_SIZES` reduced by `sizesFor` for a single-tile family — and
+ * the palette reads the same two. A second derivation here is how the palette and
+ * the editor would come to offer different chips for the same piece.
+ *
+ * Empty for a template this build does not ship a row for, which is the same
+ * answer as *no axis has anything to choose*: {@link AxisControl} renders nothing
+ * for an axis under two positions, so both cases are one code path.
+ *
+ * The order matters and is the hook's: `component`, `height`, `size`. It is what
+ * makes {@link filtersWith} produce the same tag order the palette arms, so an
+ * instance re-filtered in the editor and one placed from the palette at the same
+ * position hold the *identical* list — which is what lets the share codec key on
+ * the set (row F1) and what keeps `three/fills.ts`' memo from holding two entries
+ * for one position.
+ */
+export function editorAxes(template: RecipeTemplate): readonly EditorAxis[] {
+  const family = familyById(template.id)
+  if (family === undefined) return []
+  return [
+    { axis: 'component', label: 'Component', entries: family.controls?.component ?? [] },
+    { axis: 'height', label: 'Height', entries: family.controls?.height ?? [] },
+    { axis: 'size', label: 'Size', entries: family.sizes },
+  ]
+}
+
+/**
+ * The filter list one axis change produces: that axis at `tags`, every other
+ * axis where it already was.
+ *
+ * Rebuilt from the axes rather than patched, and that is what keeps it sound.
+ * Removing "the old tags of this axis" from the stored list means knowing which
+ * of them belonged to this axis, and a filter list is flat — so a patch would
+ * either leave a stale `size|depth|2` behind when moving from a cell position to
+ * a run one, or strip a tag another axis also happens to carry. Reading each
+ * axis's *current position* through `positionIn` asks the domain instead, which
+ * is the same question {@link AxisControl} asks to decide which chip is pressed;
+ * the two cannot disagree about what is armed.
+ *
+ * An axis the row does not have contributes nothing, and an axis sitting on its
+ * `any` position contributes nothing — which is the same thing, correctly.
+ */
+export function filtersWith(
+  axes: readonly EditorAxis[],
+  filters: readonly string[],
+  changed: PositionAxis,
+  tags: readonly string[],
+): readonly string[] {
+  return axes.flatMap((axis) => (axis.axis === changed ? tags : positionIn(axis.entries, filters)))
+}
+
+/**
+ * Re-filter one placed instance: re-solve it, then write the filters and the
+ * fills together.
+ *
+ * The editor's half of `relock.ts#reSolveInstance`, and the division is that
+ * function's own — it decides and reports, this writes. The write is
+ * `@/store#setPlacementFilters`, one transaction, because a filter change can
+ * move every slot at once and can replace a pin, which is the one thing
+ * {@link import('@/store').fillSlot} refuses by design.
+ *
+ * Returns what the re-solve dropped so the dialog can say so, which is the whole
+ * reason this is not fire-and-forget. A driver that reported a discarded choice
+ * to a caller that swallowed it would be contract **C-k**'s failure with one
+ * more step in it.
+ *
+ * `lock` and `design` are passed rather than read, for the reason
+ * {@link handSlotToLock} gives at length: this module is pure functions over an
+ * instance, and a re-solve that ignored the room's own preferences would refill
+ * every unpinned slot in a different design from the one the room is in.
+ */
+export function reFilterInstance(
+  index: AssemblyIndex,
+  recipes: RecipeIndex,
+  template: RecipeTemplate,
+  instance: TemplateInstance,
+  filters: readonly string[],
+  lock: LockSystem,
+  design: string | undefined,
+): InstanceFilterReSolve {
+  const result = reSolveInstance(instance, filters, index, {
+    // The one recipe this dialog was opened on — `handSlotToLock`'s lookup and
+    // its reason.
+    templates: (id) => (id === instance.template ? template : undefined),
+    composition: recipes.composition,
+    lock,
+    ...(design === undefined ? {} : { family: design }),
+  })
+  setPlacementFilters(instance.id, filters, result.fills)
+  return result
+}
+
+/**
+ * The dropped pins as one sentence, or `undefined` when nothing was dropped.
+ *
+ * Names the **item** and the slot, the way {@link refusalSentence} does, because
+ * a `TileId` is a path and the thing the user chose was a piece. It says what
+ * replaced the choice rather than only that something did: the new fill is
+ * already on screen in the slot list, so a sentence that only announced a loss
+ * would send the user looking for a change they can see.
+ */
+export function replacedSentence(
+  recipes: RecipeIndex,
+  replaced: readonly DroppedPin[],
+): string | undefined {
+  if (replaced.length === 0) return undefined
+  const named = replaced
+    .map((one) => {
+      const variant = recipes.composition.aggregates.byTile.get(one.was)
+      const aggregate =
+        variant === undefined ? undefined : recipes.composition.aggregates.byDesign.get(variant.design)
+      // The file's own id when the index has retired the item behind it — the
+      // same fallback `invalidatedBy` takes, and for the same reason.
+      return `${aggregate?.name ?? one.was} in the ${one.slot} slot`
+    })
+    .join(' and ')
+  return (
+    `${replaced.length === 1 ? 'One choice you had made is' : `${String(replaced.length)} choices you had made are`} ` +
+    `no longer available at this filter: ${named}. The slot has been solved again.`
   )
 }
 

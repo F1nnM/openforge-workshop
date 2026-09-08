@@ -129,6 +129,24 @@
   line-height: 1.45;
 }
 
+/* ── The filter axes ────────────────────────────────────────────────────────── */
+
+/* `AxisControl`'s own chips, one group per axis, stacked. The component's
+   `.of-pal-sizes` carries the palette column's 6px side inset so its groups line
+   up with a row's label; this dialog has its own padding, so the inset is taken
+   back here rather than made a prop — it is a fact about where the control is
+   mounted and not about what it does. */
+.of-sloted-axes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0 0;
+}
+
+.of-sloted-axes > * {
+  padding-inline: 0;
+}
+
 /* ── The slot list ──────────────────────────────────────────────────────────── */
 
 .of-sloted-slots {

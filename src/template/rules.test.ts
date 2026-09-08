@@ -39,6 +39,7 @@ import {
   SLOT_CONVENTIONS,
   WALL_ON_TILE,
   conventionFor,
+  isInsetFill,
   layoutFor,
   partNameKey,
   ruleFor,
@@ -329,5 +330,25 @@ describe('the corner conventions, where the sides are not free', () => {
       ].filter(([a, b]) => sides.has(a as SlotSide) && sides.has(b as SlotSide)).length
     }
     expect(SLOT_CONVENTIONS.map(opposedPairs)).toEqual([0, 0, 0])
+  })
+})
+
+describe('isInsetFill', () => {
+  it('is true for an s2w base, which is authored 0.5 short per walled axis', () => {
+    expect(isInsetFill(['shape|base', 'shape|base|square', 'shape|base|s2w', 'build|s2w'])).toBe(true)
+  })
+
+  it('is false for a plain base, whose mesh is exactly its tagged cell', () => {
+    expect(isInsetFill(['shape|base', 'shape|base|square'])).toBe(false)
+  })
+
+  it('is false for a non-base carrying build|s2w — only the base is mis-anchored', () => {
+    expect(isInsetFill(['shape|floor', 'shape|floor|s2w', 'build|s2w'])).toBe(false)
+  })
+
+  it('needs no internal-corner case: that base is full-cell and its residual is its cell', () => {
+    /* Tagged the same way as the other 94, and the no-op comes from the layout
+       having no `edge` slot rather than from this predicate. */
+    expect(isInsetFill(['shape|base', 'shape|base|s2w', 'shape|base|internal_corner'])).toBe(true)
   })
 })

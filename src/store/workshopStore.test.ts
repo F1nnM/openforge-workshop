@@ -41,6 +41,7 @@ import {
   selectPlacementCount,
   selectRoomDesign,
   setLockSystem,
+  setPlacementFilters,
   setRoomDesign,
   unpinFill,
   useWorkshopStore,
@@ -118,6 +119,31 @@ describe('placing a template', () => {
     for (const [key, instance] of Object.entries(state().placements)) {
       expect(instance.id).toBe(key)
     }
+  })
+
+  it('keeps the control position it was placed at', () => {
+    /* The position is **not** recoverable from the fills, which is the whole
+       reason it is stored: *any component* and *arched door, which happens to be
+       what is filled* produce identical fills. The slot editor needs the
+       difference — one offers every wall, the other offers 54. */
+    const id = placeTemplate(
+      aTemplateInstance({ filters: ['component|door|arched', 'size|width|2', 'size|depth|2'] }),
+    )
+    expect(state().placements[id]?.filters).toEqual([
+      'component|door|arched',
+      'size|width|2',
+      'size|depth|2',
+    ])
+  })
+
+  it('defaults the position to none, which is a real choice and not an absence', () => {
+    // `[]` is *any* on every axis: with no tags the slots' `constrain` blocks
+    // collect nothing and the instance admits whatever its recipe does. Every
+    // instance placed before this field existed was in exactly that state.
+    // Placed first and read after: `state()` is a snapshot, so calling it in the
+    // same expression as the placement reads the state from before it.
+    const id = placeTemplate(aTemplateInstance())
+    expect(state().placements[id]?.filters).toEqual([])
   })
 
   it('places a template whose fills are empty — contract C-g', () => {
@@ -487,6 +513,75 @@ describe('clearing and unpinning a fill', () => {
   })
 })
 
+/* ------------------------------------------------------------------- filters */
+
+describe('re-arming a placed instance', () => {
+  it('writes the filters and the fills in one transaction', () => {
+    /* The reason the action takes a whole map: a filter change moves the
+       candidate *set*, so a room that had the filters written before the fills
+       would show, for one render, an instance claiming to be one thing and
+       holding another. */
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    const before = state().placements[id]
+
+    expect(
+      setPlacementFilters(id, ['component|door|arched'], {
+        [FLOOR]: { tile: ANOTHER_TILE, pinned: false },
+      }),
+    ).toBe('set')
+
+    const now = state().placements[id]
+    expect(now?.filters).toEqual(['component|door|arched'])
+    // Replaced wholesale, not merged: the four other slots of `aFullFillMap` are
+    // gone, because a filter change can empty a slot and a merge cannot say so.
+    expect([...filledSlots(now?.fills ?? {})]).toEqual([FLOOR])
+    expect(before?.filters).toEqual([])
+  })
+
+  it('replaces a fill the user pinned, which no other write here may do', () => {
+    /* Contract **C-k**'s one exception, and it is an exception about the
+       *caller*: `template/relock.ts#reSolveInstance` decides which pins the new
+       filters still admit and reports every one it drops, so this action's guard
+       is deliberately absent rather than forgotten. `fillSlot` in the same
+       situation returns `'kept-pinned'` and writes nothing. */
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    pinFill(id, FLOOR, A_TILE)
+    expect(fillSlot(id, FLOOR, ANOTHER_TILE)).toBe('kept-pinned')
+
+    expect(
+      setPlacementFilters(id, ['component|torch'], { [FLOOR]: { tile: ANOTHER_TILE, pinned: false } }),
+    ).toBe('set')
+    expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: ANOTHER_TILE, pinned: false })
+  })
+
+  it('is unchanged when the position and every fill are already there, and wakes no subscriber', () => {
+    // Pressing the chip an instance is already on is the common case, and this
+    // action writes the whole map on every press — so the identity check matters
+    // more here than it does for one slot.
+    const id = placeTemplate(aTemplateInstance({ fills: aFullFillMap(), filters: ['shape|wall'] }))
+    const before = state().placements
+    const held = state().placements[id]?.fills ?? {}
+
+    expect(setPlacementFilters(id, ['shape|wall'], held)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('reports an unknown placement rather than writing', () => {
+    const gone = 'not-on-the-grid' as PlacementId
+    expect(setPlacementFilters(gone, ['shape|wall'], {})).toBe('unknown-placement')
+    expect(selectPlacementCount(state())).toBe(0)
+  })
+
+  it('parses on the way in, so a malformed tag fails at the call that made it', () => {
+    // `placeTemplate`'s reason: a bad value should fail where the stack still
+    // names the culprit, not at a hydration months later where it reads as
+    // storage corruption.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    expect(() => setPlacementFilters(id, [''], {})).toThrow()
+    expect(state().placements[id]?.filters).toEqual([])
+  })
+})
+
 /* --------------------------------------------------------------------- locks */
 
 describe('lock preference', () => {
@@ -707,6 +802,9 @@ describe('persistence', () => {
       z: -1,
       rotation: 90,
       fills: { [FLOOR]: { tile: A_TILE, pinned: true } },
+      // Persisted like every other field. `[]` is *any* on each axis, which is
+      // what this instance was placed at.
+      filters: [],
     })
     expect((payload?.state as WorkshopState).lock).toBe('magnetic')
   })

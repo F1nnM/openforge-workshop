@@ -37,14 +37,15 @@
  * persists, and it already lives in the store.
  *
  * It is a hook rather than canvas-internal state because three components share
- * it and none of them owns the others: the palette arms a family **and its
- * size**, the toolbar writes the snap and triggers a rotation, and the surface
- * reads all of it and writes the selection and the rotation back from its
- * pointer and keyboard. So the screen calls this once and passes it down.
+ * it and none of them owns the others: the palette arms a family **and every
+ * axis of its control position**, the toolbar writes the snap and triggers a
+ * rotation, and the surface reads all of it and writes the selection and the
+ * rotation back from its pointer and keyboard. So the screen calls this once and
+ * passes it down.
  *
  * ```tsx
  * const tools = usePlanTools()
- * <Palette tools={tools} />   // calls arm(template, size)
+ * <Palette tools={tools} />   // calls arm(template) and setArmedPosition(axis, tags)
  * <Toolbar tools={tools} onClear={clearPlacements} />
  * <Builder3DPanel catalog={catalog} scene={scene} tools={tools} />
  * ```
@@ -103,11 +104,23 @@ export interface PlanTools {
    */
   readonly selectedTemplate: TemplateId | null
   /**
-   * The armed family's **size**, as the size position's own `size|` tags.
+   * The armed row's **control position**: every axis's tags, concatenated.
    *
    * `['size|width|2', 'size|depth|2']` for *2 wide by 2 deep*, and `[]` for the
    * palette's `any size` — which is a real position and not an absence: with no
    * tags the `constrain` collects nothing and the family admits every size.
+   *
+   * **It was `armedSize` and carried only size.** The recipe fold gave an
+   * assembly three axes — component, height and size — because 32 of the 40
+   * fixtures differed by one `component|` require on one slot. All three arrive
+   * here as one flat list, which is the right shape for exactly one reason: the
+   * list becomes `parentTags`, and it is each **slot's own `constrain` block**
+   * that decides which roots reach it. So a `component|door|arched` narrows a
+   * merged wall slot and leaves the floor and base beside it untouched, with no
+   * per-axis routing anywhere on this path.
+   *
+   * The axes are kept apart in the hook's state and joined on read, so choosing
+   * a component does not clear a size — see {@link PlanTools.setArmedPosition}.
    *
    * **Here rather than in the palette, because the click is what consumes it.**
    * Row C1 built the size control and held the position in `PalettePanel`'s own
@@ -119,15 +132,15 @@ export interface PlanTools {
    * is that route: the palette writes it, the surface reads it, and neither holds
    * a copy of the other's.
    *
-   * The spelling is `size|width|<n>` / `size|depth|<n>`, exactly
-   * `GENERATED_FAMILY_SIZES` and `size.ts#sizeRefs`, because it is handed
-   * straight to `FillContext.size` and the two paths must not drift into two
-   * vocabularies.
+   * The spelling is the tables' own — `size|width|<n>` / `size|depth|<n>` from
+   * `GENERATED_FAMILY_SIZES` and `ASSEMBLY_CONTROLS`, and `component|…` /
+   * `shape|wall…` from the latter — because it is handed straight to
+   * `FillContext.position` and the paths must not drift into two vocabularies.
    *
    * Ephemeral like everything else here: it is a property of what is *armed*,
    * not of the room, so it is not in the store and a reload arms nothing.
    */
-  readonly armedSize: readonly string[]
+  readonly armedPosition: readonly string[]
   /**
    * The placement the verbs act on, or `null`.
    *
@@ -174,7 +187,7 @@ export interface PlanTools {
   setRotation: (rotation: number) => void
   /**
    * Arm a template family, or disarm with `null`. Resets the pending rotation
-   * and the armed size, and **clears the selection**.
+   * and **every axis** of the armed position, and **clears the selection**.
    *
    * ## Why the exclusivity is structural
    *
@@ -192,24 +205,54 @@ export interface PlanTools {
    * The flow this appears to cost is not real. `R` while armed turns the
    * **ghost**, so the next placement lands already turned, which is what a
    * builder wants; correcting an already-placed piece is `Escape` and a click.
+   *
+   * `position` is taken as the **`size`** axis, which is the only one a caller
+   * ever pre-arms: the RECENT strip remembers a family at a size, and neither the
+   * pending-arm channel nor a test default carries a component or a height.
    */
-  arm: (template: TemplateId | null, size?: readonly string[]) => void
+  arm: (template: TemplateId | null, position?: readonly string[]) => void
   /**
-   * Choose the armed family's size position.
+   * Choose one axis of the armed row's control position.
    *
    * Separate from {@link arm} because the two gestures are separate: §3.1's
-   * control sits *inside* the armed row, so a user sizes a family they have
-   * already armed, and C1's palette also arms a family *at* a size from the
-   * RECENT strip. That second case is `arm(template, size)` in one call, which is
-   * why arming resets the size rather than preserving it.
+   * controls sit *inside* the armed row, so a user sizes a family they have
+   * already armed, and the palette also arms a family *at* a size from the
+   * RECENT strip. That second case is `arm(template, position)` in one call,
+   * which is why arming resets rather than preserves.
+   *
+   * **Per axis rather than one list**, since the recipe fold gave an assembly
+   * three of them. Choosing a component must not clear the size a user set two
+   * clicks earlier, and a single setter taking the whole position would make
+   * every control responsible for re-sending the other two.
    */
-  setArmedSize: (size: readonly string[]) => void
+  setArmedPosition: (axis: PositionAxis, tags: readonly string[]) => void
+}
+
+/**
+ * The axes a row's controls can offer.
+ *
+ * `size` is the only one a generated family has; an assembly may have all three.
+ * Named as a closed union rather than a `string` so a panel cannot invent a
+ * fourth axis that nothing collects — the tags of each are gathered into one
+ * `parentTags` list and it is the slots' own `constrain` blocks that decide what
+ * applies, so an unknown axis would silently narrow nothing.
+ */
+export type PositionAxis = 'component' | 'height' | 'size'
+
+/** Every axis's tags, kept apart. See {@link PlanTools.armedPosition}. */
+type Positions = Readonly<Record<PositionAxis, readonly string[]>>
+
+const NO_POSITION: Positions = {
+  component: [],
+  height: [],
+  size: [],
 }
 
 export interface PlanToolDefaults {
   readonly snap?: SnapMode
   readonly selectedTemplate?: TemplateId | null
-  readonly armedSize?: readonly string[]
+  /** A whole position, taken as the `size` axis — the only one a caller ever pre-arms. */
+  readonly armedPosition?: readonly string[]
   readonly selected?: PlacementId | null
 }
 
@@ -220,26 +263,47 @@ export interface PlanToolDefaults {
  * property of this object rather than of the code that writes it. Two `useState`
  * calls could hold both, and the reader that then asked "armed *and* selected?"
  * would be asking a real question about a real state. One object cannot.
+ *
+ * The position is **three lists and not one**, for {@link PlanTools.setArmedPosition}'s
+ * reason: choosing a component must not clear a size. They are joined on read.
  */
 interface Armament {
   readonly template: TemplateId | null
-  readonly size: readonly string[]
+  readonly position: Positions
   readonly selected: PlacementId | null
 }
 
 export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
   const [snap, setSnap] = useState<SnapMode>(defaults.snap ?? 'fine')
   const [rotation, setRotation] = useState(0)
-  const [armament, setArmament] = useState<Armament>(() =>
+  const [armament, setArmament] = useState<Armament>(() => {
+    const position = positionOf(defaults.armedPosition)
     // A default naming both is a caller error rather than a state to resolve, so
     // arming wins and the selection is dropped — the same precedence `arm` has.
-    defaults.selectedTemplate != null
-      ? { template: defaults.selectedTemplate, size: defaults.armedSize ?? [], selected: null }
-      : { template: null, size: defaults.armedSize ?? [], selected: defaults.selected ?? null },
+    return defaults.selectedTemplate != null
+      ? { template: defaults.selectedTemplate, position, selected: null }
+      : { template: null, position, selected: defaults.selected ?? null }
+  })
+  /* Joined on read, in a fixed axis order so two identical choices produce one
+     string — `three/fills.ts#memoKey` sorts the tags anyway, and a stable order
+     here keeps the array reference stable for the `useMemo` below. */
+  const armedPosition = useMemo(
+    () => [...armament.position.component, ...armament.position.height, ...armament.position.size],
+    [armament],
   )
 
-  const arm = useCallback((template: TemplateId | null, size: readonly string[] = []) => {
-    setArmament({ template, size, selected: null })
+  const arm = useCallback((template: TemplateId | null, position: readonly string[] = []) => {
+    /* Every axis goes with the family, for the same reason the angle does and
+       more sharply: the domains differ per row — `GENERATED_FAMILY_SIZES` is 303
+       positions over 47 families, 7 with no expressible domain at all, and
+       `ASSEMBLY_CONTROLS` adds a component axis that only the two wall assemblies
+       have. Carrying `2 x 2` over to a family whose candidates carry no
+       `size|width|2` would leave the solver a slot nothing matches, classified
+       `no-candidate` (C2's note: *nothing in the archive is this size*), for a
+       size the user chose for a different row — and carrying an *arched door*
+       onto a corner would do it for a component that row cannot express. So the
+       axes are replaced rather than merged, and `position` seeds the size. */
+    setArmament({ template, position: positionOf(position), selected: null })
     // A pending angle is only meaningful against the armed thing's own step:
     // carrying 45° over to a family that turns in 90° increments would arm an
     // angle it can never reach again, and the user would have no way back to 0
@@ -255,19 +319,11 @@ export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
     // placement, and a selection turns by its own step through `planTurn`, so
     // there is nothing here for a reset to protect — and `arm` resets on the way
     // back in, which is where the reset is actually load bearing.
-    setArmament({ template: null, size: [], selected: id })
+    setArmament({ template: null, position: NO_POSITION, selected: id })
   }, [])
 
-  // The size goes with the family for the same reason the angle does, and more
-  // sharply: a position is a list of `size|` tags, and B4's domains differ per
-  // family — `GENERATED_FAMILY_SIZES` is 350 options over 51 families, 8 of
-  // which have no expressible domain at all. Carrying `2 x 2` over to a family
-  // whose candidates carry no `size|width|2` would leave the solver with a slot
-  // nothing matches, classified `no-candidate` (C2's note for C1: *nothing in
-  // the archive is this size*), for a size the user chose for a different row.
-  // Hence `arm` resetting it, and hence this setter never touching the family.
-  const setArmedSize = useCallback((size: readonly string[]) => {
-    setArmament((current) => ({ ...current, size }))
+  const setArmedPosition = useCallback((axis: PositionAxis, tags: readonly string[]) => {
+    setArmament((current) => ({ ...current, position: { ...current.position, [axis]: tags } }))
   }, [])
 
   const rotate = useCallback((step: number, direction: 1 | -1 = 1) => {
@@ -287,7 +343,7 @@ export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
       step: SNAP_STEP[snap],
       rotation,
       selectedTemplate: armament.template,
-      armedSize: armament.size,
+      armedPosition,
       selected: armament.selected,
       arm,
       select,
@@ -295,7 +351,23 @@ export function usePlanTools(defaults: PlanToolDefaults = {}): PlanTools {
       toggleSnap,
       rotate,
       setRotation,
-      setArmedSize,
+      setArmedPosition,
     }
-  }, [snap, rotation, armament, arm, select, toggleSnap, rotate, setArmedSize])
+  }, [snap, rotation, armament, armedPosition, arm, select, toggleSnap, rotate, setArmedPosition])
+}
+
+/**
+ * A pre-armed position as the three axes, which is the `size` one and nothing
+ * else.
+ *
+ * The two callers that pre-arm — the RECENT strip through `arm(template, tags)`
+ * and a test default — both carry a *size* position, because that is what a
+ * `PendingArm` can express and what the strip remembers. A component or a height
+ * would have to be resolved against the row's own domain, which is the palette's
+ * job and not this hook's.
+ */
+function positionOf(position: readonly string[] | undefined): Positions {
+  return position === undefined || position.length === 0
+    ? NO_POSITION
+    : { ...NO_POSITION, size: position }
 }

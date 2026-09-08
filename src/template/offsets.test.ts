@@ -1316,3 +1316,77 @@ describe('the offsets, placed by the canvas', () => {
     }
   })
 })
+
+/* ------------------------------------------------------------- inset fills */
+
+/**
+ * The third parameter, and the one defect it exists for.
+ *
+ * `rules.ts#isInsetFill` names the population — the 95 s2w bases, authored 0.5
+ * short on every walled axis — and this block is what that predicate buys: the
+ * base takes the box the floor beside it already takes, on the fill's say-so
+ * rather than the recipe's.
+ */
+describe('placeTemplateSlots with insetParts', () => {
+  const insetBase = new Set<SlotName>(['base'])
+
+  it('leaves a plain base on the cell anchor with no residual extent', () => {
+    const base = placeTemplateSlots(WALL_ON_TILE, WALL_2X2).slots.find((slot) => slot.part === 'base')
+    expect(base?.anchor).toBe('cell')
+    expect(base?.residual).toBeUndefined()
+  })
+
+  it('puts an inset base on the residual — the same box the floor already gets', () => {
+    const placed = placeTemplateSlots(WALL_ON_TILE, WALL_2X2, insetBase)
+    const base = placed.slots.find((slot) => slot.part === 'base')
+    const floor = placed.slots.find((slot) => slot.part === 'floor')
+    expect(base?.anchor).toBe('residual')
+    /* 2 x 2 less a 0.5-deep wall on face 0. The measured mesh of
+       `plain#base+s2w+square+wall.2x2` is 2.000 x 1.500. */
+    expect(base?.residual).toEqual({ w: 2, d: 1.5 })
+    expect(base?.offset).toEqual(floor?.offset)
+    expect(base?.residual).toEqual(floor?.residual)
+  })
+
+  it('takes both faces off an external corner, which is what its mesh measures', () => {
+    const base = placeTemplateSlots(EXTERNAL_CORNER, CORNER_2X2, insetBase).slots.find(
+      (slot) => slot.part === 'base',
+    )
+    /* `plain#base+s2w+square+corner.2x2` measures 1.500 x 1.500 — two adjacent
+       faces given up rather than one. */
+    expect(base?.residual).toEqual({ w: 1.5, d: 1.5 })
+  })
+
+  it('is a no-op where the layout has no edge slot, because the residual is the cell', () => {
+    const feet = feetOf([
+      ['base', rect(2, 2)],
+      ['floor', rect(2, 2)],
+      ['column', column],
+    ])
+    const plain = placeTemplateSlots(INTERNAL_CORNER, feet).slots.find((slot) => slot.part === 'base')
+    const inset = placeTemplateSlots(INTERNAL_CORNER, feet, insetBase).slots.find((slot) => slot.part === 'base')
+    /* And the mesh agrees: `plain#base+square+s2w+internal_corner.2x2` is a full
+       2.000 x 2.000, because it has no wall strip to give up. */
+    expect(inset?.offset).toEqual(plain?.offset)
+    expect(inset?.residual).toEqual({ w: 2, d: 2 })
+  })
+
+  it('does not move an edge or corner rule even when its part is named', () => {
+    /* Only a `cell` rule can move. An `edge` rule is anchored to a face, and a
+       fill being inset says nothing about which face it gave up. */
+    const placed = placeTemplateSlots(EXTERNAL_CORNER, CORNER_2X2, new Set<SlotName>(['right wall', 'column']))
+    expect(placed.slots.find((slot) => slot.part === 'right wall')?.anchor).toBe('edge')
+    expect(placed.slots.find((slot) => slot.part === 'column')?.anchor).toBe('corner')
+  })
+
+  it('does not let an inset base change what the walls take off the cell', () => {
+    /* `edgeInsets` reads `rule.anchor`, not the effective one, and it must: the
+       residual is defined *by* the edge slots, so an inset base that fed back
+       into the insets would shrink the box it is being fitted to. */
+    const plain = placeTemplateSlots(WALL_ON_TILE, WALL_2X2)
+    const inset = placeTemplateSlots(WALL_ON_TILE, WALL_2X2, insetBase)
+    const wallOf = (placed: typeof plain) => placed.slots.find((slot) => slot.part === 'wall')
+    expect(wallOf(inset)?.offset).toEqual(wallOf(plain)?.offset)
+    expect(inset.cell).toEqual(plain.cell)
+  })
+})

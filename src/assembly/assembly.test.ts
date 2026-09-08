@@ -727,6 +727,9 @@ function instanceOf(
     fills: Object.fromEntries(
       Object.entries(fills).map(([slot, tile]) => [slot, { tile: tile as TileId, pinned: false }]),
     ),
+    // *Any* on every axis, which is what these fixtures mean: they are about the
+    // fills and say nothing about a control position.
+    filters: [],
   }
 }
 
@@ -2136,6 +2139,7 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
       fills: Object.fromEntries(
         Object.entries(fills).map(([slot, tile]) => [slot, { tile: tile as TileId, pinned: false }]),
       ),
+      filters: [],
     }
   }
 
@@ -2170,6 +2174,7 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
       z: Math.floor(at / 10),
       rotation: 0,
       fills,
+      filters: [],
     }
   }
 
@@ -2518,6 +2523,7 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
     z: 0,
     rotation: 0,
     fills: { [ONE_SLOT_NAME]: { tile: record.id, pinned: false } },
+    filters: [],
   })
 
   it('collapses a shared-md5 pair to one line while naming both tiles', () => {

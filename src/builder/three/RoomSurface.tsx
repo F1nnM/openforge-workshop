@@ -624,11 +624,11 @@ export function RoomSurface({
    */
   const armedGhost = useMemo(() => {
     if (armed === null || ghost === null) return null
-    const solved = fill(armed, tools.armedSize)
+    const solved = fill(armed, tools.armedPosition)
     return projectPlacement(catalog, style, scene, armed, ghost.anchor, tools.rotation, solved.fills)
     // `ghost.anchor` and not `cursor`: see the docblock. `ghost` is itself
     // memoised on the cursor, so this depends on the snapped value through it.
-  }, [armed, ghost, fill, tools.armedSize, tools.rotation, catalog, style, scene])
+  }, [armed, ghost, fill, tools.armedPosition, tools.rotation, catalog, style, scene])
 
   /**
    * Everything with no mesh, as one flat list of plates — **per part**.
@@ -845,6 +845,7 @@ export function RoomSurface({
             z: edit.anchor[1],
             rotation: edit.rotation,
             fills: edit.fills,
+            filters: edit.filters,
           })
           break
         case 'remove':
@@ -963,7 +964,7 @@ export function RoomSurface({
         if (piece !== null) latest.current.say(`${pieceName(piece)} selected.`)
         return
       }
-      const solved = family === null ? undefined : solve(family, state.armedSize)
+      const solved = family === null ? undefined : solve(family, state.armedPosition)
       // The projection is the whole of the refusal, and it is computed here
       // rather than inside `planPlacement` for that module's own reason: it is
       // pure, and projecting needs a catalog and a style resolver. So the
@@ -980,7 +981,7 @@ export function RoomSurface({
               state.rotation,
               solved?.fills ?? {},
             )
-      run(planPlacement(family, state.rotation, at, state.step, solved, projection))
+      run(planPlacement(family, state.rotation, at, state.step, solved, projection, state.armedPosition))
     },
     [],
   )

@@ -1,5 +1,5 @@
 /**
- * The columnar wire format: a header, two string tables, then one column per field.
+ * The columnar wire format: a header, three string tables, then one column per field.
  *
  * This module is deliberately ignorant of the catalog, the manifest and the
  * store. It maps a {@link WirePayload} — small numbers and opaque strings — to
@@ -25,18 +25,19 @@
  *
  * Measured by `capacity.test.ts`, which prints this table on every run —
  * template instances that fit inside a 2,000-character URL. **Every figure was
- * re-measured for row A5 and none of the pre-A1 ones carry over**: a placement
- * was one ordinal on a cell, so the old numbers are about a different subject
- * rather than a tuned version of this one, and none of them is restated here.
+ * re-measured for the filter column and none of the pre-A1 ones carry over**: a
+ * placement was one ordinal on a cell, so the old numbers are about a different
+ * subject rather than a tuned version of this one, and none of them is restated
+ * here.
  *
  * | layout                      | room-shaped build | scattered build |
  * | --------------------------- | ----------------: | --------------: |
  * | naive JSON array of objects |               261 |              45 |
  * | columnar JSON               |             3,897 |              70 |
- * | row-major varint            |               607 |              67 |
- * | ids inline, no tables       |             2,340 |              88 |
- * | pinned as a byte per fill   |             6,841 |              84 |
- * | **columnar varint (this)**  |         **7,358** |          **88** |
+ * | row-major varint            |               571 |              60 |
+ * | ids inline, no tables       |             1,683 |              80 |
+ * | pinned as a byte per fill   |             6,483 |              78 |
+ * | **columnar varint (this)**  |         **6,956** |          **81** |
  *
  * The middle rows are there to separate the effects, because they are not the
  * same size. **Layout** is what carries the room build: columnar JSON reaches
@@ -44,12 +45,22 @@
  * same characters. **Representation** is what carries the scattered build: it is
  * essentially incompressible — `deflate-raw` returns *more* bytes than it was
  * given below about a hundred placements — so no layout helps, and the varint
- * packing lifts it from 45 to 67. Columnar varint takes both, and is the only one
+ * packing lifts it from 45 to 60. Columnar varint takes both, and is the only one
  * of the six that is last on neither shape.
  *
- * The spread between the two shapes is 88 to 7,358, a factor of 84, which is why
+ * The spread between the two shapes is 81 to 6,956, a factor of 86, which is why
  * `link.ts` gates on the measured URL rather than on a count: any instance-count
  * threshold is wrong by nearly two orders of magnitude at one end or the other.
+ *
+ * **What the filters cost, which is the reason those figures moved**: 7,358 to
+ * **6,956** on the room shape (−5.5%) and 88 to **81** on the scattered one
+ * (−8.0%), both re-measured rather than adjusted. The room pays almost nothing
+ * per instance — its whole build is one filter position, so the column is a run
+ * of one repeated index and the table holds a single 47-byte entry — and the
+ * scattered shape pays a table entry per instance, which is the shape where no
+ * table has ever helped (see below). Both are the price of a distinction that is
+ * **not recoverable from the fills**, so the alternative is not a smaller link
+ * but a link that opens a different room.
  *
  * Delta-coding the columns was measured during design and **rejected**: it gains
  * on the room build, which is already past any URL length that matters, and costs
@@ -70,7 +81,10 @@
  *   template table                  count x (uvar byte length, UTF-8 bytes)
  *   uvar    slot table count        distinct slot names in the scene
  *   slot table                      count x (uvar byte length, UTF-8 bytes)
+ *   uvar    filter table count      distinct filter *sets* in the scene
+ *   filter table                    count x (uvar byte length, UTF-8 bytes)
  *   template column                 count x uvar (index into the template table)
+ *   filter column                   count x uvar (index into the filter table)
  *   x column                        count x zigzag(x * 2)   or   count x f64
  *   z column                        count x zigzag(z * 2)   or   count x f64
  *   rotation column                 count x uvar(rot * 4)   or   count x f64
@@ -105,11 +119,13 @@
  * It travels **once per distinct value**, for the reason the recipe table already
  * existed: a room is a handful of families repeated, so a table plus a one-byte
  * index per instance replaces 41 characters per instance. Measured on the room
- * shape, writing the two identities inline instead of interning them takes 7,358
- * instances down to 2,340 — a factor of 3.1, and the largest single win this row
- * had available.
+ * shape, writing the three identities inline instead of interning them takes
+ * 6,956 instances down to 1,683 — a factor of 4.1, and the largest single win
+ * available here. It grew from 3.1x when the filter set joined the tables, which
+ * is the same argument arriving a third time: a room repeats its filter position
+ * exactly as it repeats its family.
  *
- * **On the scattered shape the tables are worth nothing at all: 88 either way.**
+ * **On the scattered shape the tables are worth almost nothing: 81 against 80.**
  * That is not a disappointment, it is the shape's definition — every instance
  * names a different family there, so a 40-entry table plus 88 indices and 88
  * inline strings carry the same information, and deflate reduces the repeated
@@ -119,6 +135,33 @@
  *
  * The slot table is the same shape of saving on a smaller string: 6 distinct part
  * names carry all 128 parts of the 40 templates.
+ *
+ * ## The filter table interns a **set**, not a tag
+ *
+ * One entry per distinct filter *list*, `NUL`-joined, rather than a tag table and
+ * a count-plus-indices run per instance. Three reasons, in the order they weigh:
+ *
+ *   1. **A filter list is one choice.** It is the position of every control axis
+ *      at once, and the surfaces treat it as indivisible — `migrations.ts`'s
+ *      salvager reduces a malformed list *whole* for the same reason, and half of
+ *      `['component|door|arched', 'size|width|2']` is not a narrower filter, it
+ *      is a different one nobody chose.
+ *   2. **A room repeats the set, not the tags.** A wall run placed as arched
+ *      doors is ninety instances of one list, so the set table costs one entry
+ *      and one index byte each where a tag run would cost a count plus two to
+ *      three indices per instance.
+ *   3. It is `writeTable`'s fourth use, unchanged, beside the template, slot and
+ *      recipe tables.
+ *
+ * The empty list is an ordinary entry, so an instance placed at *any* on every
+ * axis costs one index byte and the table costs two — and a room where nothing
+ * carries a filter has an all-zero column, which is the shape deflate is best at.
+ * `capacity.test.ts` measures what that is actually worth.
+ *
+ * `NUL` because a tag cannot contain one and every printable delimiter can appear
+ * in real tag data; it is the same argument every key in this repo makes, and it
+ * is written as the escape and never as the byte —
+ * `tools/hygiene/source.test.ts` fails the build on the byte.
  *
  * ## Why `pinned` is a bitset and not a byte per fill
  *
@@ -259,9 +302,22 @@ import { ByteReader, ByteWriter, MalformedPayloadError } from './bytes'
  * The population is still empty, and `tools/hygiene/project.test.ts` is what
  * keeps it so: no module under `src/` outside `src/share` imports the codec, so
  * nothing in this repo has ever written a link of any version. Row X10 checked
- * that for the 1 -> 2 bump, V4 for 2 -> 3, and it holds for 3 -> 4.
+ * that for the 1 -> 2 bump, V4 for 2 -> 3, and it holds for 3 -> 4 and 4 -> 5.
+ *
+ * **5 — an instance carries its palette filters.** A third string table after the
+ * slot table and a sixth per-instance column after the template one. A v4 reader
+ * meeting a v5 payload would read the filter table's length prefix as its
+ * template column, so this is the version byte's original job again.
+ *
+ * The filters are **not derivable from the fills** — that is the whole reason
+ * they are stored (`store/schema.ts#TemplateInstance.filters`) — so a v4 link
+ * could not be read as v5 by defaulting them either: *any component* and *arched
+ * door, which happens to be what is filled* produce identical payloads, and
+ * guessing the narrower of the two would put a room on screen whose editor
+ * offered 54 walls where the sharer's offered 1,451. `[]` would be the honest
+ * guess and is exactly what the missing column cannot be distinguished from.
  */
-export const SHARE_FORMAT_VERSION = 4
+export const SHARE_FORMAT_VERSION = 5
 
 /**
  * Ceiling on the declared instance count.
@@ -398,6 +454,16 @@ export interface WireFill {
  */
 export interface WireInstance {
   readonly template: number
+  /**
+   * Index into {@link WirePayload.filters} — the instance's whole filter list,
+   * interned as one set.
+   *
+   * A separate field from {@link template} and not folded into it, for the reason
+   * {@link WireGenerated} gives about its own index: the two address different
+   * tables, and a codec that let them be assigned to each other would make a
+   * table mix-up a silent wrong room.
+   */
+  readonly filters: number
   readonly x: number
   readonly z: number
   readonly rotation: number
@@ -444,6 +510,15 @@ export interface WirePayload {
   readonly templates: readonly string[]
   /** The distinct slot names in the scene. {@link WireFill.slot} indexes this. */
   readonly slots: readonly string[]
+  /**
+   * The distinct filter **sets** in the scene, each a `NUL`-joined tag list.
+   * {@link WireInstance.filters} indexes this.
+   *
+   * Opaque here like the other three tables: this module neither splits nor
+   * validates an entry, and `link.ts` is what turns one back into a tag list and
+   * reports the ones it cannot read.
+   */
+  readonly filters: readonly string[]
   readonly instances: readonly WireInstance[]
   /** The distinct generated bases in the scene, as canonical JSON documents. */
   readonly recipes: readonly string[]
@@ -578,8 +653,10 @@ export function encodePayload(payload: WirePayload): Uint8Array {
 
   writeTable(writer, payload.templates)
   writeTable(writer, payload.slots)
+  writeTable(writer, payload.filters)
 
   for (const instance of payload.instances) writer.uvar(instance.template)
+  for (const instance of payload.instances) writer.uvar(instance.filters)
   writeColumn(writer, xs, COORD_SCALE, true, xExact)
   writeColumn(writer, zs, COORD_SCALE, true, zExact)
   writeColumn(writer, rotations, ROT_SCALE, false, rotExact)
@@ -623,10 +700,10 @@ function refuseUnrepresentable(payload: WirePayload, fills: readonly WireFill[])
   if (!Number.isInteger(payload.lockIndex) || payload.lockIndex < 0 || payload.lockIndex > 0xff) {
     throw new MalformedPayloadError(`lock index ${String(payload.lockIndex)} does not fit one byte`)
   }
-  if (payload.templates.length > MAX_SHARE_TABLE || payload.slots.length > MAX_SHARE_TABLE) {
+  const widest = Math.max(payload.templates.length, payload.slots.length, payload.filters.length)
+  if (widest > MAX_SHARE_TABLE) {
     throw new MalformedPayloadError(
-      `a table of ${String(Math.max(payload.templates.length, payload.slots.length))} entries exceeds the ` +
-        `${String(MAX_SHARE_TABLE)} the format carries`,
+      `a table of ${String(widest)} entries exceeds the ${String(MAX_SHARE_TABLE)} the format carries`,
     )
   }
   if (payload.generated.length > MAX_SHARE_GENERATED) {
@@ -643,6 +720,11 @@ function refuseUnrepresentable(payload: WirePayload, fills: readonly WireFill[])
     if (!indexes(instance.template, payload.templates.length)) {
       throw new MalformedPayloadError(
         `instance names template ${String(instance.template)} of ${String(payload.templates.length)}`,
+      )
+    }
+    if (!indexes(instance.filters, payload.filters.length)) {
+      throw new MalformedPayloadError(
+        `instance names filters ${String(instance.filters)} of ${String(payload.filters.length)}`,
       )
     }
   }
@@ -711,12 +793,12 @@ export function decodePayload(bytes: Uint8Array): WirePayload {
       `payload claims ${String(count)} instances, above the ${String(MAX_SHARE_PLACEMENTS)} limit`,
     )
   }
-  // Five columns, at least one byte per value in the cheapest encoding — the four
+  // Six columns, at least one byte per value in the cheapest encoding — the five
   // an instance always has, plus its fill count. The digest, the tables and the
   // generated half only add to what is left, so a count that cannot fit in the
   // remaining bytes is a corrupt header, and saying so beats allocating for it
   // and failing later with "truncated".
-  if (count * 5 > reader.remaining) {
+  if (count * 6 > reader.remaining) {
     throw new MalformedPayloadError(
       `payload claims ${String(count)} instances but holds ${String(reader.remaining)} more bytes`,
     )
@@ -726,9 +808,12 @@ export function decodePayload(bytes: Uint8Array): WirePayload {
 
   const templates = readTable(reader, 'templates')
   const slots = readTable(reader, 'slot names')
+  const filters = readTable(reader, 'filter sets')
 
   const templateIndices: number[] = []
   for (let i = 0; i < count; i += 1) templateIndices.push(reader.uvar())
+  const filterIndices: number[] = []
+  for (let i = 0; i < count; i += 1) filterIndices.push(reader.uvar())
   const xs = readColumn(reader, count, COORD_SCALE, true, (flags & FLAG_X_EXACT) !== 0)
   const zs = readColumn(reader, count, COORD_SCALE, true, (flags & FLAG_Z_EXACT) !== 0)
   const rotations = readColumn(reader, count, ROT_SCALE, false, (flags & FLAG_ROT_EXACT) !== 0)
@@ -765,13 +850,18 @@ export function decodePayload(bytes: Uint8Array): WirePayload {
     throw new MalformedPayloadError('payload has trailing bytes after the last column')
   }
 
-  const instances = assembleInstances({ count, templateIndices, xs, zs, rotations }, fillCounts, {
-    slotIndices,
-    ordinals,
-    pinned,
-    slots: slots.length,
-    templates: templates.length,
-  })
+  const instances = assembleInstances(
+    { count, templateIndices, filterIndices, xs, zs, rotations },
+    fillCounts,
+    {
+      slotIndices,
+      ordinals,
+      pinned,
+      slots: slots.length,
+      templates: templates.length,
+      filters: filters.length,
+    },
+  )
 
   const generated: WireGenerated[] = []
   for (let i = 0; i < genCount; i += 1) {
@@ -784,7 +874,7 @@ export function decodePayload(bytes: Uint8Array): WirePayload {
     generated.push({ recipe, x: genXs[i] ?? 0, z: genZs[i] ?? 0, rotation: genRotations[i] ?? 0 })
   }
 
-  return { manifestVersion, lockIndex, digest, templates, slots, instances, recipes, generated }
+  return { manifestVersion, lockIndex, digest, templates, slots, filters, instances, recipes, generated }
 }
 
 /**
@@ -803,6 +893,7 @@ function assembleInstances(
   columns: {
     count: number
     templateIndices: readonly number[]
+    filterIndices: readonly number[]
     xs: readonly number[]
     zs: readonly number[]
     rotations: readonly number[]
@@ -814,6 +905,7 @@ function assembleInstances(
     pinned: readonly boolean[]
     slots: number
     templates: number
+    filters: number
   },
 ): WireInstance[] {
   const instances: WireInstance[] = []
@@ -836,8 +928,15 @@ function assembleInstances(
         `instance ${String(i)} names template ${String(template)} of ${String(flat.templates)}`,
       )
     }
+    const filters = columns.filterIndices[i] ?? 0
+    if (!indexes(filters, flat.filters)) {
+      throw new MalformedPayloadError(
+        `instance ${String(i)} names filters ${String(filters)} of ${String(flat.filters)}`,
+      )
+    }
     instances.push({
       template,
+      filters,
       x: columns.xs[i] ?? 0,
       z: columns.zs[i] ?? 0,
       rotation: columns.rotations[i] ?? 0,

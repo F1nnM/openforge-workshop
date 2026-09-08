@@ -55,6 +55,12 @@ const TAGS = [
   'shape|angled|right',
   'shape|corner',
   'shape|corner|right',
+  'build|separate wall',
+  /* The tag `facets.ts#classifyLayer` reads to call a record a `topper` — a piece
+     that clips **onto** a base rather than being one. Measured over the archive:
+     0 of the 4,363 toppers lack it and 0 of the 2,091 integrals carry it, so it
+     is the discriminator and not a correlate. */
+  'connection|openforge',
 ]
 
 const tag = (name: string): number => {
@@ -96,9 +102,19 @@ export const FIXTURE_CATALOG = {
       name: 'Dungeon stone floor 1×1',
       kinds: ['floor'],
       conn: ['openlock'],
-      layer: 'integral',
+      /* A `topper`, which is what the archive's floor-slot candidates are —
+         **88 of 88** across every s2w recipe. It read `integral` here, which made
+         the elevation tests pass without ever exercising the layer: a floor that
+         *is* its own base would collect no lift, and these tests are about a
+         floor being raised onto one. */
+      layer: 'topper',
       texture: 'dungeon_stone',
-      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+      tags: [
+        tag('shape|floor'),
+        tag('texture|dungeon_stone'),
+        tag('connection|openlock'),
+        tag('connection|openforge'),
+      ],
       foot: { shape: 'rect', w: 1, d: 1 },
     },
     {
@@ -114,9 +130,19 @@ export const FIXTURE_CATALOG = {
       name: 'Dungeon stone floor 2×2',
       kinds: ['floor'],
       conn: ['openlock'],
-      layer: 'integral',
+      /* A `topper`, which is what the archive's floor-slot candidates are —
+         **88 of 88** across every s2w recipe. It read `integral` here, which made
+         the elevation tests pass without ever exercising the layer: a floor that
+         *is* its own base would collect no lift, and these tests are about a
+         floor being raised onto one. */
+      layer: 'topper',
       texture: 'dungeon_stone',
-      tags: [tag('shape|floor'), tag('texture|dungeon_stone'), tag('connection|openlock')],
+      tags: [
+        tag('shape|floor'),
+        tag('texture|dungeon_stone'),
+        tag('connection|openlock'),
+        tag('connection|openforge'),
+      ],
       foot: { shape: 'rect', w: 2, d: 2 },
     },
     {
@@ -214,6 +240,42 @@ export const FIXTURE_CATALOG = {
       texture: 'cut_stone',
       tags: [tag('shape|wall'), tag('texture|cut_stone'), tag('build|thick wall')],
       foot: { shape: 'rect', w: 2, d: 0.5 },
+    },
+    {
+      /**
+       * A separately printed wall that **brings its own base** — `layer:
+       * 'integral'`, the 2,091-record population `facets.ts#classifyLayer`
+       * defines as *"not a base, not an insert, and carrying no
+       * `connection|openforge`"*.
+       *
+       * Here because the elevation rule turns on it and nothing else in this
+       * fixture did: every other wall is a `topper`, authored to clip **onto** a
+       * base and therefore to be raised by one base thickness. An integral wall
+       * is one piece from the ground up, so `tileMatrix` normalising its lowest
+       * point to `y = 0` already puts it where it belongs and the lift floats it
+       * by exactly `BASE_LIFT_MM`. That is the defect the project owner
+       * photographed on a modular corner.
+       */
+      id: 'tiles/cut_stone/separate_wall/2.integral.stl',
+      /* 12 rather than a value between its neighbours: ordinals are integers
+         and append-only, so a new record takes the next one whatever position it
+         reads best at in this list. */
+      ord: 12,
+      blob: blob(20),
+      file: '2.integral.stl',
+      bytes: 2_400_000,
+      sprite: true,
+      thumb: false,
+      family: 'tiles/cut_stone/separate_wall',
+      design: 'd-integral-wall',
+      name: 'Cut stone separate wall 2',
+      kinds: ['wall'],
+      conn: [],
+      build: 'separate wall',
+      layer: 'integral',
+      texture: 'cut_stone',
+      tags: [tag('shape|wall'), tag('texture|cut_stone'), tag('build|separate wall')],
+      foot: { shape: 'wall', length: 2 },
     },
     {
       id: 'tiles/cut_stone/curve/4r45.convex.openlock.stl',
@@ -366,6 +428,8 @@ export const FIXTURE_IDS = {
   thickWall: 'tiles/cut_stone/thick_wall/2x0.5.openlock.stl',
   /** A 1.5-unit corner wall — the run row D9 measured. See its record. */
   cornerWall: 'tiles/cut_stone/wall/corner+right.2x.openlock.stl',
+  /** A wall that brings its own base: `layer: 'integral'`. See its record. */
+  integralWall: 'tiles/cut_stone/separate_wall/2.integral.stl',
 } as const
 
 /* --------------------------------------------------------------- templates */
@@ -597,5 +661,8 @@ export function fixtureInstance(
     z: over.z ?? 0,
     rotation: over.rotation ?? 0,
     fills,
+    // *Any* on every axis. The canvas's tests are about geometry and a control
+    // position narrows candidates, which is a question one level up.
+    filters: [],
   }
 }

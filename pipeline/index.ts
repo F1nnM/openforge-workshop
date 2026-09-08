@@ -41,6 +41,9 @@ export type { AggregateViolation, AggregationReport, DetectionScore } from './ag
 export { buildCatalog } from './build'
 export type { BuildOptions, BuildResult, BuildStats } from './build'
 export { buildDesignIndex, designId, designKey } from './design'
+export { FOLD_OPERATIONS, foldRecipes } from './fold'
+export type { AssemblyControls, ControlPosition, FoldedAssembly } from './fold'
+export { deriveAssemblySizes } from './sizes'
 export {
   ANY_SIZE,
   BARE_BASE_KEY,

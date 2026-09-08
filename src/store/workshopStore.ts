@@ -38,6 +38,7 @@ import {
   PlacementId as PlacementIdSchema,
   TemplateInstance as TemplateInstanceSchema,
   defaultWorkshopState,
+  filledSlots,
   normalizeRotation,
 } from './schema'
 import { clearPendingArm } from './selection'
@@ -140,8 +141,16 @@ function newPlacementId(): PlacementId {
  * nothing in the app can produce one. `Omit` rather than a second hand-written
  * interface, so a field added to {@link TemplateInstance} arrives here without an
  * edit.
+ *
+ * **`filters` is optional here and required there**, which is the one departure
+ * and it is the schema's own: the field carries a `.default([])`, so an absent
+ * one is not a missing value but a stated choice — *any* on every axis. Writing
+ * it as `Partial` says that in the type rather than making forty call sites
+ * repeat `filters: []` to mean nothing. Every other field stays required,
+ * because none of them has a defensible default.
  */
-export type NewTemplateInstance = Omit<TemplateInstance, 'id'>
+export type NewTemplateInstance = Omit<TemplateInstance, 'id' | 'filters'> &
+  Partial<Pick<TemplateInstance, 'filters'>>
 
 /**
  * Put a **template instance** on the grid and return its key.
@@ -526,6 +535,104 @@ export function unpinFill(id: PlacementId, slot: SlotName): UnpinOutcome {
     return { placements: { ...state.placements, [id]: updated } }
   })
   return outcome
+}
+
+/* ------------------------------------------------------------------- filters */
+
+/** What a filter change did. `'unchanged'` when neither the filters nor a fill moved. */
+export type FiltersOutcome = 'set' | 'unchanged' | 'unknown-placement'
+
+/**
+ * **Re-arm one placed instance** — write its palette filters and the fills that
+ * follow from them, in one transaction.
+ *
+ * ## Why the fills come with the filters rather than after them
+ *
+ * A filter change moves the candidate *set*, so every slot's answer can change
+ * at once — that is the whole difference from the lock, whose candidate set is
+ * lock-free (`template/relock.ts`). Writing the filters and then the fills would
+ * put a room on screen for one render in which the instance claims to be an
+ * arched door and holds a rectangular one. And writing them slot by slot through
+ * {@link fillSlot} could not work at all: that action **refuses a pinned slot**
+ * by design, and a filter change is the one gesture that may replace a pin.
+ *
+ * So this is `relock.ts`' *"one transaction"* — the first of the three options
+ * its docblock prices — for the case that needs it: one `setState`, one persist,
+ * whatever the instance's slot count.
+ *
+ * ## Why it may overwrite a pin, when nothing else here may
+ *
+ * Contract **C-k** is about a *silent* discard on a change made for an unrelated
+ * reason. This is not that: `template/relock.ts#reSolveInstance` is the only
+ * caller's only source of `fills`, it decides which pins the new filters still
+ * admit, and it **reports every one it drops** so the surface can say so. The
+ * argument in full is on that function; what matters here is that the store's
+ * guard is deliberately not in the way, and that this action therefore takes a
+ * whole `fills` map rather than a tile — a caller cannot reach a pin through it
+ * one slot at a time.
+ *
+ * The map replaces `fills` wholesale, because a filter change can **empty** a
+ * slot — a slot with no entry is a slot needing a choice (contract C-g), and a
+ * merge could not express that.
+ *
+ * Like every other write here it changes no mesh and re-solves nothing: row A2's
+ * `planSceneMeshes` is lock-free and reconciles on the placements, so the fills
+ * this action writes are the whole route to the drawing, the bill and the pack.
+ *
+ * ## One transaction is also one undo
+ *
+ * `canvas/useHistory.ts` subscribes to `placements` and records on a changed
+ * *identity*, so this action needs nothing at the call site to be undoable — and
+ * because the filters and the fills go in a single `setState`, one `Ctrl+Z`
+ * restores both. Two writes would have been two steps, and the intermediate one
+ * is the state this action exists to make unreachable: an instance claiming to be
+ * an arched door while holding a rectangular one.
+ *
+ * The `'unchanged'` case returns the identical state object, so pressing the chip
+ * an instance is already on records no step either.
+ */
+export function setPlacementFilters(
+  id: PlacementId,
+  filters: readonly string[],
+  fills: TemplateInstance['fills'],
+): FiltersOutcome {
+  let outcome: FiltersOutcome = 'unknown-placement'
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    /* Parsed on the way in for {@link placeTemplate}'s reason: a caller that
+       handed over a malformed tag or slot name should fail at the call that
+       produced it, where the stack still names the culprit, rather than at a
+       hydration months later where it reads as storage corruption. */
+    const updated: TemplateInstance = TemplateInstanceSchema.parse({ ...current, filters, fills })
+    if (sameInstance(current, updated)) {
+      outcome = 'unchanged'
+      return state
+    }
+    outcome = 'set'
+    return { placements: { ...state.placements, [id]: updated } }
+  })
+  return outcome
+}
+
+/**
+ * Whether two instances carry the same filters and the same fills.
+ *
+ * So that a filter change that lands on the position the instance was already at
+ * returns the identical state object and wakes no subscriber — the same courtesy
+ * {@link fillSlot}'s `'unchanged'` extends, and it matters more here because this
+ * action writes the whole map on every press.
+ */
+function sameInstance(a: TemplateInstance, b: TemplateInstance): boolean {
+  if (a.filters.length !== b.filters.length) return false
+  if (a.filters.some((tag, at) => b.filters[at] !== tag)) return false
+  const keys = filledSlots(a.fills)
+  if (keys.length !== filledSlots(b.fills).length) return false
+  return keys.every((slot) => {
+    const one = a.fills[slot]
+    const other = b.fills[slot]
+    return one !== undefined && other !== undefined && one.tile === other.tile && one.pinned === other.pinned
+  })
 }
 
 /* ----------------------------------------------------------- generated bases */

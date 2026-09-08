@@ -150,6 +150,14 @@ import {
  * | 5 | a `Placement` holds `design`, not `tileId` (row V4) |
  * | 6 | `library` is **deleted**; a placement is a {@link TemplateInstance} — a template id plus a fill per slot (row A1) |
  * | 7 | adds `design` — the room-wide design family, a `texture` root or absent (row D6) |
+ * | 8 | a {@link TemplateInstance} adds `filters` — the control filters it was placed at |
+ *
+ * **Row 8's bump is additive too, and bumps for the same reason.** `filters` is
+ * one field with a defaulted absent reading — `[]`, which is *any* on every axis
+ * and exactly the state every instance placed before it existed was in — so a
+ * version 7 blob read as a version 8 one would in fact come back correct. That
+ * is the argument for not bumping, and it is refused here as it was for `design`:
+ * one version number must name one shape.
  *
  * **Row D6's bump is the *additive* kind, and it bumps anyway.** `design` is one
  * optional field whose absent reading is the shipped default, so a version 6
@@ -173,7 +181,7 @@ import {
  * **To ship version N+1 once it is not:** see the expiry note in the module
  * docblock.
  */
-export const STORE_VERSION = 7
+export const STORE_VERSION = 8
 
 /** A state recovered from untrusted input, plus what had to be thrown away. */
 export interface RecoveredState {
@@ -423,12 +431,46 @@ function salvageInstance(key: PlacementId, value: unknown, dropped: string[]): T
   const z = salvageCoordinate(key, 'z', source.z, dropped)
   if (x === undefined || z === undefined) return undefined
   const fills = salvageFills(key, source.fills, dropped)
+  const filters = salvageFilters(key, source.filters, dropped)
 
   if (source.rotation === undefined || typeof source.rotation === 'number') {
-    return { id: key, template, x, z, rotation: normalizeRotation(source.rotation ?? 0), fills }
+    return { id: key, template, x, z, rotation: normalizeRotation(source.rotation ?? 0), fills, filters }
   }
   dropped.push(`placements.${key}: rotation is not a number (${describeValue(source.rotation)}), reset to 0`)
-  return { id: key, template, x, z, rotation: 0, fills }
+  return { id: key, template, x, z, rotation: 0, fills, filters }
+}
+
+/**
+ * One instance's control filters, or `[]`.
+ *
+ * **Absent is `[]` and not a dropped instance**, which is the same reading
+ * {@link salvageFills} gives an absent `fills`: `[]` is *any* on every axis, so
+ * an instance without a position is one that narrows nothing — a complete,
+ * ordinary state and the one every instance placed before the field existed was
+ * in. There is no threshold at which missing filters invalidate a placement.
+ *
+ * A non-array, or an array holding anything but non-empty strings, is reported
+ * and reduced to `[]` rather than taken apart entry by entry. That is the
+ * opposite of `salvageFills`' per-entry rule and deliberately so: a fill is one
+ * slot's answer and its neighbours are independent, while the filters are **one
+ * choice across axes** — half of `['component|door|arched', 'size|width|2']` is
+ * not a narrower version of it, it is a different filter nobody chose.
+ */
+function salvageFilters(key: PlacementId, value: unknown, dropped: string[]): readonly string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    dropped.push(`placements.${key}: filters is not an array (${describeValue(value)}), reset to none`)
+    return []
+  }
+  const bad = value.filter((tag) => typeof tag !== 'string' || tag.length === 0)
+  if (bad.length > 0) {
+    dropped.push(
+      `placements.${key}: filters holds ${String(bad.length)} entry that is not a tag ` +
+        `(${describeValue(bad[0])}), reset to none`,
+    )
+    return []
+  }
+  return value as readonly string[]
 }
 
 function salvagePlacements(input: unknown, dropped: string[]): WorkshopState['placements'] {

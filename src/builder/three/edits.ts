@@ -160,6 +160,8 @@ export type SurfaceEdit =
       /** Minimum corner, snapped. The marker's own anchor, not a second derivation. */
       readonly anchor: PlanPoint
       readonly rotation: number
+      /** The control filters the instance is placed at; `[]` is *any* on every axis. */
+      readonly filters: readonly string[]
       /**
        * The slots this instance is placed with, every one `pinned: false`.
        *
@@ -382,6 +384,11 @@ export function projectPlacement(
     z: anchor[1],
     rotation,
     fills,
+    /* No filters, and it is not an omission: this instance exists to be
+       projected into a scene and measured against the room, and what it occupies
+       is decided by the `fills` above. The filters narrow which files a slot
+       *offers*, which is a question about an editor and not about a footprint. */
+    filters: [],
   }
   const projected = buildPlanScene({ [CANDIDATE_ID]: candidate }, catalog, style)
   const piece = projected.pieces[0]
@@ -431,6 +438,10 @@ export function planPlacement(
   step: number,
   fill?: PlacementFill,
   projection?: PlacementProjection,
+  /* Last, and defaulted, so the two callers that have no palette behind them —
+     the landing hero and a component test — say nothing about the filters by
+     saying nothing at all. */
+  filters: readonly string[] = [],
 ): SurfaceEdit {
   if (template === null) {
     return { kind: 'none', message: 'No template is armed. Choose one in the palette first.' }
@@ -457,6 +468,12 @@ export function planPlacement(
     anchor: ghost.anchor,
     rotation: ghost.rotation,
     fills: fill?.fills ?? {},
+    /* The filters that narrowed those fills, kept on the instance because the
+       slot editor needs them and the fills cannot supply them: *any component*
+       and *arched door, which happens to be what is filled* are the same map.
+       Defaulted to none, which is *any* on every axis and what a caller with no
+       palette — the landing hero, a component test — honestly means. */
+    filters,
     message:
       fill === undefined
         ? `${placed}${tail} with no parts chosen yet. Fill its slots to give it something to draw.`

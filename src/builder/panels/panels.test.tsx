@@ -231,10 +231,11 @@ function PaletteHarness({ query = '' }: { query?: string }) {
         onQueryChange={() => undefined}
       />
       <p data-testid="selected-template">{tools.selectedTemplate ?? 'none'}</p>
-      {/* Row C5: the armed **size**, as `PlanTools` now carries it. The chip on
-          screen is the same fact rendered by the panel; this is the fact the 3D
-          surface reads to solve the fills, and the two must not diverge. */}
-      <p data-testid="armed-size">{tools.armedSize.join(' ') || 'any'}</p>
+      {/* Row C5: the armed **control position**, as `PlanTools` now carries it —
+          every axis's tags joined. The chips on screen are the same fact
+          rendered by the panel; this is what the 3D surface reads to solve the
+          fills, and the two must not diverge. */}
+      <p data-testid="armed-size">{tools.armedPosition.join(' ') || 'any'}</p>
       <p data-testid="activity">{tools.activity}</p>
       <p data-testid="selected-piece">{tools.selected ?? 'none'}</p>
     </div>
@@ -277,28 +278,36 @@ function row(name: string): HTMLElement {
   return last
 }
 
-/** The pressed size chip's label, or `'none'`. */
+/**
+ * The pressed size chip's label, or `'none'`.
+ *
+ * The `Size: ` prefix is stripped: every chip of every axis now names its own
+ * axis in its accessible name — `AxisControl` is one component since the slot
+ * editor grew the same three controls — and what these tests are about is
+ * *which position is pressed*.
+ */
 function armedSize(): string {
   const group = screen.queryByRole('group', { name: /^Size for / })
   if (group === null) return 'none'
   const pressed = within(group).getAllByRole('button', { pressed: true })[0]
-  return pressed === undefined ? 'none' : (pressed.getAttribute('aria-label') ?? '')
+  return pressed === undefined ? 'none' : (pressed.getAttribute('aria-label') ?? '').replace(/^Size: /, '')
 }
 
 describe('the palette', () => {
-  it('lists the 87 templates this build ships, and nothing from the archive', () => {
+  it('lists the 57 templates this build ships, and nothing from the archive', () => {
     // The list was the **library** until row A0 and the **archive search** until
     // this row: 3,822 items, none of them placeable, which is why row A8 had to
     // make the panel arm nothing at all. What is here now is B4's 47 generated
-    // families plus the 40 shipped recipes. (51 families until row D1 dropped the
-    // four whose whole population was bases; 89 rows while row E3's two authored
-    // assemblies shipped, and both are withdrawn.)
+    // families plus the 10 derived assemblies. (51 families until row D1 dropped
+    // the four whose whole population was bases; 89 rows while row E3's two
+    // authored assemblies shipped, and both are withdrawn; 87 until the recipe
+    // fold made a component a control instead of 14 rows.)
     render(<PaletteHarness />)
 
-    expect(paletteRows()).toHaveLength(87)
+    expect(paletteRows()).toHaveLength(57)
     // Row D2: the total is two section headings rather than one, because the
     // two counts are the fact the owner needed and 87 was not.
-    expect(screen.getByRole('heading', { name: /^Assemblies 40/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^Assemblies 10/ })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /^Single tiles 47/ })).toBeInTheDocument()
     // Not the archive, and not the library before it.
     expect(screen.queryByRole('heading', { name: /Archive/ })).toBeNull()
@@ -340,26 +349,27 @@ describe('the palette', () => {
     expect(screen.getByText(/inserts are not templates/i)).toBeInTheDocument()
   })
 
-  it('puts the 40 assemblies above all 47 single tiles', () => {
+  it('puts the 10 assemblies above all 47 single tiles', () => {
     /* **The defect, as a DOM order.** The owner placed a corner, got a one-slot
        row, and reported that they could not modify the walls or pick a floor —
        *"Thats the whole point of the templates I wanted."* The assembly they were
-       describing was in the build all along, as row 50 of 87. The kind of thing a
+       describing was in the build all along, as row 50 of 87 — row 52 of 57 now
+       that the fold has removed 30 duplicate rows. The kind of thing a
        row is is now the first division the list makes. */
     render(<PaletteHarness />)
 
     const rows = paletteRows()
-    /* 40 assemblies first, and every one of them carries the shipped prefix. Row
+    /* 10 assemblies first, and every one of them carries the shipped prefix. Row
        E3's two did not — deliberately, because D4 measured that the `S2W:`
        opening all 40 names is the *floor's* build system and E3's widened wall
        lifted exactly that requirement off its floor slot. Both are withdrawn, and
        with them the only rows in this section whose name did not begin `S2W:`. */
-    expect(rows.slice(0, 40).filter((name) => name.startsWith('S2W: Wall on Tile: '))).toHaveLength(40)
-    expect(rows.slice(40).some((name) => name.includes('Wall on Tile: '))).toBe(false)
+    expect(rows.slice(0, 10).filter((name) => name.startsWith('S2W: Wall on Tile: '))).toHaveLength(10)
+    expect(rows.slice(10).some((name) => name.includes('Wall on Tile: '))).toBe(false)
     // Two section headings, assemblies first, each carrying its own count.
     expect(
       screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent ?? ''),
-    ).toEqual(['Assemblies 40', 'Single tiles 47'])
+    ).toEqual(['Assemblies 10', 'Single tiles 47'])
   })
 
   it('states a slot count on every row, and it is the template\u2019s own part count', () => {
@@ -394,13 +404,19 @@ describe('the palette', () => {
        sixteen before row D1 dropped two of them as base-only. The section puts
        the 8 assemblies above all 14; `palette.ts#rankFamilies` then orders inside
        the section by where the token landed and, for a tie, by how many `': '`
-       qualifiers the query did not ask for — so the unqualified
-       `Corner (Any, …)` sorts above `Corner: Low (…)`. */
+       qualifiers the query did not ask for.
+
+       **Which height leads moved with the fold's rename and the ranking did
+       not.** `Corner (Any, …)` used to be unqualified and so beat
+       `Corner: Low (…)`; both now carry a qualifier — `: Full` and `: Low` — so
+       the tie falls to the shorter, which is `Low`. What the owner needed is
+       unchanged and is what this asserts: a five-slot corner *assembly* first,
+       above all fourteen one-slot rows. */
     render(<PaletteHarness query="corner" />)
 
     const rows = paletteRows()
     expect(rows).toHaveLength(22)
-    expect(rows[0]).toContain('S2W: Wall on Tile: Corner (Any, Single Piece)')
+    expect(rows[0]).toMatch(/^S2W: Wall on Tile: Corner: (Full|Low) \(Single Piece\)/)
     expect(rows.slice(0, 8).every((name) => name.startsWith('S2W: Wall on Tile: '))).toBe(true)
     // The internal corners are still corners and still shown, below the four
     // whose label *starts* with the word.
@@ -419,12 +435,12 @@ describe('the palette', () => {
        land. */
     render(<PaletteHarness />)
 
-    const assembly = row('S2W: Wall on Tile: Corner (Any, Single Piece)')
-    expect(within(assembly).getByText('Corner (Any, Single Piece)')).toBeInTheDocument()
+    const assembly = row('S2W: Wall on Tile: Corner: Full (Single Piece)')
+    expect(within(assembly).getByText('Corner: Full (Single Piece)')).toBeInTheDocument()
     expect(assembly.textContent).toContain('5 slots')
     expect(assembly.textContent).toContain('S2W')
     expect(assembly.getAttribute('aria-label')).toBe(
-      'S2W: Wall on Tile: Corner (Any, Single Piece), 5 slots, S2W build system',
+      'S2W: Wall on Tile: Corner: Full (Single Piece), 5 slots, S2W build system',
     )
   })
 
@@ -483,12 +499,12 @@ describe('the palette', () => {
     expect(rows.length).toBeGreaterThan(0)
     expect(rows.every((text) => text.toLowerCase().includes('corner'))).toBe(true)
     // `s2w` matches `build|s2w` on the rows whose visible name does not say it.
-    expect(screen.getByRole('status')).toHaveTextContent(`${String(rows.length)} of 87 templates`)
+    expect(screen.getByRole('status')).toHaveTextContent(`${String(rows.length)} of 57 templates`)
   })
 
   it('narrows the single tiles by form and leaves the assemblies alone', () => {
-    /* **`form` is an axis only 47 of the 87 carry.** C1 applied it to everything,
-       so a form chip hid all 40 assemblies — and `Corner`, the most natural
+    /* **`form` is an axis only 47 of the 57 carry.** C1 applied it to everything,
+       so a form chip hid all 10 assemblies — and `Corner`, the most natural
        narrowing for the query the owner actually ran, emptied the section holding
        the answer. An assembly carries no `form|` tag: its form is up to five
        values in its parts' own `require` blocks. So the chip is labelled for what
@@ -500,28 +516,28 @@ describe('the palette', () => {
 
     // Two octagon families: `wall|octagon|separate wall` and `floor|octagon`.
     expect(screen.getByRole('heading', { name: /^Single tiles 2/ })).toBeInTheDocument()
-    // And all 40 assemblies are still there, which is the point.
-    expect(screen.getByRole('heading', { name: /^Assemblies 40/ })).toBeInTheDocument()
-    expect(paletteRows()).toHaveLength(42)
+    // And all 10 assemblies are still there, which is the point.
+    expect(screen.getByRole('heading', { name: /^Assemblies 10/ })).toBeInTheDocument()
+    expect(paletteRows()).toHaveLength(12)
 
     // Re-pressing clears it, which is what `aria-pressed` promises.
     fireEvent.click(
       within(screen.getByRole('group', { name: 'Tile form' })).getByRole('button', { name: 'Octagon' }),
     )
-    expect(paletteRows()).toHaveLength(87)
+    expect(paletteRows()).toHaveLength(57)
   })
 
   it('narrows both sections by build, because every template carries one', () => {
-    // `build` is the axis both kinds have on themselves: all 40 assemblies are
+    // `build` is the axis both kinds have on themselves: all 10 assemblies are
     // `build|s2w`, and 7 of the 47 single tiles are.
     render(<PaletteHarness />)
 
     const build = screen.getByRole('group', { name: 'Build' })
     fireEvent.click(within(build).getByRole('button', { name: 'S2W' }))
 
-    expect(screen.getByRole('heading', { name: /^Assemblies 40/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^Assemblies 10/ })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /^Single tiles 7/ })).toBeInTheDocument()
-    expect(paletteRows()).toHaveLength(47)
+    expect(paletteRows()).toHaveLength(17)
 
     // A build no assembly carries drops the section rather than heading nothing.
     fireEvent.click(within(screen.getByRole('group', { name: 'Build' })).getByRole('button', { name: 'S2W' }))
@@ -547,7 +563,7 @@ describe('the palette', () => {
     expect(armedSize()).toBe('any size, 5 tiles')
 
     const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
-    fireEvent.click(within(sizes).getByRole('button', { name: /^1 wide by 1 deep/ }))
+    fireEvent.click(within(sizes).getByRole('button', { name: /^Size: 1 wide by 1 deep/ }))
 
     expect(armedSize()).toBe('1 wide by 1 deep, 2 tiles')
     // The row's own number follows the chosen position, because that is the set
@@ -591,25 +607,104 @@ describe('the palette', () => {
     expect(screen.getByTestId('selected-template')).toHaveTextContent('decor-straight')
   })
 
-  it('shows slots and a build system on an assembly, and offers it no size', () => {
-    // An assembly has 3 or 5 slots, so one candidate count cannot answer "how
-    // many tiles fill this"; and its parts `require` their own `size|width|2`, so
-    // a size is part of which assembly this is rather than a parameter of the
-    // placement — a size control here would be a chip that changed nothing,
-    // because no `constrain` block would collect its tags.
+  it('shows slots and a build system on an assembly, and offers a corner no size', () => {
+    /* An assembly has 3 or 5 slots, so one candidate count cannot answer "how
+       many tiles fill this".
+
+       A **corner** still gets no size control, and now for a reason that is true
+       of the corners alone: its slots `require` their own `size|width|2` and
+       `size|depth|2`, so its whole domain is that one 2x2 and a control with one
+       position cannot be operated. C1 wrote that of all 40; the fold measured it
+       and found it true of these 8 and false of the 32 wall recipes, whose slots
+       carried `constrain: [size|width, size|depth]` and no size at all — so
+       `constrain` collected nothing and their size was whatever the user
+       happened to click. The test below is the other half. */
     render(<PaletteHarness />)
 
     const recipe = row('S2W: Wall on Tile: Corner: Low (Single Piece)')
     expect(recipe.getAttribute('aria-label')).toContain('5 slots')
     expect(recipe.textContent).toContain('5 slots')
     expect(recipe.textContent).toContain('S2W')
-    expect(TEMPLATE_FAMILIES.filter((f) => f.kind === 'recipe' && f.sizes.length > 0)).toEqual([])
 
     fireEvent.click(recipe)
     expect(screen.queryByRole('group', { name: /^Size for/ })).toBeNull()
     expect(screen.getByTestId('selected-template')).toHaveTextContent(
       's2w-wall-on-tile-corner-low-single-piece',
     )
+  })
+
+  it('offers a wall assembly a size control, which is what the fold bought', () => {
+    /* The defect the project owner named: *"an assembly always has a fixed size,
+       no matter the slot selection."* It did not. `Arched Door (Single Piece)`
+       offered 8 floor footprints and 13 base footprints, because its slots
+       constrain a size the template never supplied.
+       The merged wall assembly has a domain of `(width, depth)` pairs that each
+       pin the cell slot to exactly one footprint, and **no `any size`
+       position** — `pipeline/sizes.test.ts` asserts both over the archive. */
+    render(<PaletteHarness />)
+
+    const wall = TEMPLATE_FAMILIES.find((f) => f.id === 's2w-wall-on-tile-wall-single-piece')
+    expect(wall?.sizes.length).toBeGreaterThan(1)
+    expect(wall?.sizes.filter((position) => position.tags.length === 0)).toEqual([])
+    // Every position names both spans, or the size is not pinned.
+    for (const position of wall?.sizes ?? []) expect(position.tags).toHaveLength(2)
+
+    fireEvent.click(row('S2W: Wall on Tile: Wall (Single Piece)'))
+    expect(screen.getByRole('group', { name: /^Size for/ })).toBeInTheDocument()
+  })
+
+  it('offers the 14 folded components as a control, and arming one keeps the size', () => {
+    /* **What the 30 removed rows became.** `Arched Door` and `Rectangular Door`
+       differed by one tag on one slot and shipped as two of the 40; they are two
+       chips on one row now. The regression this guards is the one that would make
+       the fold a loss rather than a simplification: if picking a component
+       cleared the size, the two controls could not be used together and a user
+       would have to choose which of the two facts about their placement to keep. */
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('S2W: Wall on Tile: Wall (Single Piece)'))
+
+    const component = screen.getByRole('group', { name: /^Component for/ })
+    // 14 components plus `any component`, which is a real position carrying no tag.
+    expect(within(component).getAllByRole('button')).toHaveLength(15)
+    expect(within(component).getByRole('button', { name: 'Component: arched door' })).toBeInTheDocument()
+    expect(within(component).getByRole('button', { name: 'Component: rectangular door' })).toBeInTheDocument()
+    // `any component` is pressed until something else is, rather than nothing being.
+    expect(
+      within(component).getByRole('button', { name: 'Component: any component' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+
+    // A height axis too, because `shape|wall` and `shape|wall|low` are disjoint.
+    const height = screen.getByRole('group', { name: /^Height for/ })
+    expect(within(height).getAllByRole('button').map((one) => one.textContent)).toEqual([
+      'any height',
+      'full',
+      'low',
+    ])
+
+    const size = screen.getByRole('group', { name: /^Size for/ })
+    fireEvent.click(within(size).getAllByRole('button')[0]!)
+    const chosenSize = screen.getByTestId('armed-size').textContent ?? ''
+    expect(chosenSize).toContain('size|width|')
+
+    fireEvent.click(within(component).getByRole('button', { name: 'Component: arched door' }))
+    const both = screen.getByTestId('armed-size').textContent ?? ''
+    expect(both).toContain('component|door|arched')
+    // The size survived the component press, which is the point.
+    for (const tag of chosenSize.split(' ')) expect(both).toContain(tag)
+  })
+
+  it('gives a corner no component or height control, because it has neither', () => {
+    /* The corners are not folded: their low/full split is two templates because
+       `shape|column` overlaps its `|low` qualifier, so there is no position to
+       offer and no component variant to offer either. An empty axis renders
+       nothing rather than an empty group. */
+    render(<PaletteHarness />)
+
+    fireEvent.click(row('S2W: Wall on Tile: Corner: Full (Single Piece)'))
+
+    expect(screen.queryByRole('group', { name: /^Component for/ })).toBeNull()
+    expect(screen.queryByRole('group', { name: /^Height for/ })).toBeNull()
   })
 
   it('remembers what was armed, newest first, as a strip and not a third section', () => {
@@ -634,7 +729,7 @@ describe('the palette', () => {
     // **A strip, because a group would duplicate rows.** All 87 rows are always
     // listed, so a RECENT group would put a second pressed row — and a second
     // live size control — on screen for the same family.
-    expect(paletteRows()).toHaveLength(87)
+    expect(paletteRows()).toHaveLength(57)
     expect(screen.getAllByRole('button', { pressed: true }).filter(isRow)).toHaveLength(1)
 
     // The ring is a set with an order: arming one twice does not spend two slots.
@@ -651,7 +746,7 @@ describe('the palette', () => {
 
     fireEvent.click(row('Floor: Straight'))
     const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
-    fireEvent.click(within(sizes).getByRole('button', { name: /^2 wide by 2 deep/ }))
+    fireEvent.click(within(sizes).getByRole('button', { name: /^Size: 2 wide by 2 deep/ }))
     // Disarm, so the chip has something to restore.
     fireEvent.click(row('Floor: Straight'))
     expect(armedRow()).toBe('none')
@@ -665,7 +760,7 @@ describe('the palette', () => {
     expect(armedSize()).toBe('2 wide by 2 deep, 1 tiles')
     // Two sizes of one family are two arms, which is the point of holding the
     // size at all.
-    fireEvent.click(within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', { name: /^any size/ }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', { name: /^Size: any size/ }))
     expect(
       within(screen.getByRole('group', { name: 'Recent' })).getAllByRole('button'),
     ).toHaveLength(2)
@@ -684,12 +779,53 @@ describe('the palette', () => {
     expect(screen.getByTestId('armed-size')).toHaveTextContent('any')
 
     const sizes = screen.getByRole('group', { name: 'Size for Floor: Straight' })
-    fireEvent.click(within(sizes).getByRole('button', { name: /^2 wide by 2 deep/ }))
+    fireEvent.click(within(sizes).getByRole('button', { name: /^Size: 2 wide by 2 deep/ }))
 
     // The exact `size|` spelling `FillContext.size` takes, so the palette and
     // B4's `GENERATED_FAMILY_SIZES` cannot drift into two vocabularies.
     expect(screen.getByTestId('armed-size')).toHaveTextContent('size|width|2 size|depth|2')
     expect(armedSize()).toBe('2 wide by 2 deep, 1 tiles')
+  })
+
+  it('keeps every axis of an assembly pressed at once', () => {
+    /* **The defect the `AxisControl` lift fixed.** The palette's two controls
+       had grown two different pressed rules, and `PlanTools.armedPosition` joins
+       all three axes into one tag list — so the size control's equal-length test
+       (`entry.tags.length === position.length`) stopped pressing *any* size chip
+       the moment a component was armed beside it. The row looked as though it had
+       forgotten the size the user had just chosen, while the tags it was arming
+       with were right the whole time.
+
+       `families.ts#positionIn` is the one rule now: the most specific position of
+       *this axis* the joined list satisfies. */
+    render(<PaletteHarness />)
+    const modular = 'S2W: Wall on Tile: Wall (Modular)'
+
+    fireEvent.click(row(modular))
+    fireEvent.click(
+      within(screen.getByRole('group', { name: `Size for ${modular}` })).getByRole('button', {
+        name: /^Size: 2 wide by 2 deep/,
+      }),
+    )
+    fireEvent.click(
+      within(screen.getByRole('group', { name: `Component for ${modular}` })).getByRole('button', {
+        name: 'Component: torch',
+      }),
+    )
+
+    const pressed = (axis: string) =>
+      within(screen.getByRole('group', { name: `${axis} for ${modular}` }))
+        .getAllByRole('button', { pressed: true })
+        .map((one) => (one.getAttribute('aria-label') ?? '').replace(/,.*$/, ''))
+
+    expect(pressed('Size')).toEqual(['Size: 2 wide by 2 deep'])
+    expect(pressed('Component')).toEqual(['Component: torch'])
+    // The height axis is untouched and sits on its own `any` position, which is
+    // a real position rather than the absence of one.
+    expect(pressed('Height')).toEqual(['Height: any height'])
+    expect(screen.getByTestId('armed-size')).toHaveTextContent(
+      'component|torch size|width|2 size|depth|2',
+    )
   })
 
   it('drops the armed size when a different family is armed', () => {
@@ -703,7 +839,7 @@ describe('the palette', () => {
     fireEvent.click(row('Floor: Straight'))
     fireEvent.click(
       within(screen.getByRole('group', { name: 'Size for Floor: Straight' })).getByRole('button', {
-        name: /^2 wide by 2 deep/,
+        name: /^Size: 2 wide by 2 deep/,
       }),
     )
     fireEvent.click(row('Wall: Straight (Separate Wall)'))
@@ -865,7 +1001,7 @@ describe('the pre-selection handoff', () => {
     fireEvent.click(
       within(screen.getByRole('group', { name: 'Tile form' })).getByRole('button', { name: 'Octagon' }),
     )
-    expect(paletteRows()).toHaveLength(42)
+    expect(paletteRows()).toHaveLength(12)
     view.unmount()
 
     act(() => {
@@ -873,7 +1009,7 @@ describe('the pre-selection handoff', () => {
     })
     mountPalette()
 
-    expect(paletteRows()).toHaveLength(87)
+    expect(paletteRows()).toHaveLength(57)
     expect(armedRow()).toContain('Floor: Straight')
   })
 

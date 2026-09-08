@@ -971,7 +971,11 @@ describeCorpus(title, () => {
           if (position.tags.length === 0) continue
           if (position.tags.length === 1) {
             run += 1
-            expect(position.label).toMatch(/^[\d.]+ wide$/)
+            /* Two spellings, one predicate: a run that admits records at several
+               depths says *"N wide, any depth"*. Which of the 47 take which
+               suffix is a biconditional over the corpus and is asserted as one
+               further down this block. */
+            expect(position.label).toMatch(/^[\d.]+ wide(?:, any depth)?$/)
             /* Every admitted record carries the width the label states. */
             for (const tile of candidatesOf(family, position)) {
               expect(tagsOf.get(tile)).toContain(position.tags[0])
@@ -997,7 +1001,10 @@ describeCorpus(title, () => {
          them — they just cannot be isolated from the 2-by-anything floors. */
       const floors = byId.get('floor-straight')
       if (floors === undefined) throw new Error('no floor|straight family')
-      const twoWide = floors.sizes.find((position) => position.label === '2 wide')
+      /* *"2 wide, any depth"* since the relabel, and this position is exactly
+         why: the 365 it admits span depths 0.5, 1, 2, 3 and 4, and it sat beside
+         *"2 wide by 2 deep"* saying nothing about containing it. */
+      const twoWide = floors.sizes.find((position) => position.label === '2 wide, any depth')
       if (twoWide === undefined) throw new Error('no 2-wide position on floor|straight')
       const atTwoWide = candidatesOf(floors, twoWide)
       expect(atTwoWide).toHaveLength(365)
@@ -1103,7 +1110,9 @@ describeCorpus(title, () => {
          they are the 12 the `admittedBeyond` count above found. */
       const base = byId.get(familySlug(BARE_BASE_KEY))
       if (base === undefined) throw new Error('no bare-base family')
-      const fourWide = base.sizes.find((position) => position.label === '4 wide')
+      /* *"4 wide, any depth"* since the relabel — the base family's run
+         positions span depths 0.5 through 4, so all of its four take the suffix. */
+      const fourWide = base.sizes.find((position) => position.label === '4 wide, any depth')
       if (fourWide === undefined) throw new Error('no 4-wide position on the base family')
       const wrong = candidatesOf(base, fourWide).filter((tile) => {
         const record = file.records.find((entry) => entry.id === tile)
@@ -1281,8 +1290,8 @@ describeCorpus(title, () => {
          `FAMILY_TABLE_BYTES` is asserted against the emitter rather than
          quoted, so a family set that grows moves the constant or fails. */
       const fixtures = loadTemplateFixtures(FIXTURES_DIR)
-      const withFamilies = printTemplateModule(fixtures, families)
-      const without = printTemplateModule(fixtures, [])
+      const withFamilies = printTemplateModule(fixtures, families, [])
+      const without = printTemplateModule(fixtures, [], [])
       const delta = Buffer.byteLength(withFamilies, 'utf8') - Buffer.byteLength(without, 'utf8')
       expect(delta).toBe(FAMILY_TABLE_BYTES)
 
@@ -1313,6 +1322,82 @@ describeCorpus(title, () => {
       expect(byLayer).toHaveLength(285)
       expect(byRole.filter((record) => record.layer !== 'insert')).toEqual([])
     })
+
+    it('says "any depth" on a width-only position exactly when it admits several', () => {
+      /* **A biconditional over all 47 run positions, not a spot check.** A run
+         names a width and no depth, so it may admit records at several cells of
+         that width — and a control listing *"2 wide"* beside *"2 wide by 2 deep"*
+         gives a reader no way to tell that the first contains the second.
+
+         The two halves are identified independently and they partition: the ones
+         that vary in depth are exactly the ones that **coexist with a cell
+         position at the same width**, which is asserted below rather than
+         assumed. 23 resolve one depth and say *"N wide"*; 24 cover two to seven
+         and say *"N wide, any depth"*. */
+      const widthOf = (position: FamilySizePosition): string | undefined =>
+        position.tags.find((tag) => tag.startsWith('size|width|'))?.slice('size|width|'.length)
+
+      let honest = 0
+      let relabelled = 0
+      for (const family of families) {
+        const cellWidths = new Set(
+          family.sizes.filter((position) => position.tags.length === 2).map(widthOf),
+        )
+        for (const position of family.sizes) {
+          if (position.tags.length !== 1 || !(position.tags[0] ?? '').startsWith('size|width|')) continue
+
+          const resolved = resolveSlotTags(family.slot.tags, position.tags, [])
+          const admitted = file.records.filter(
+            (record) =>
+              resolved.require.every((ref) => tags(record).includes(ref)) &&
+              !resolved.deny.some((ref) => tags(record).includes(ref)),
+          )
+          const depths = new Set(
+            admitted.map((record) => sizeOf(record)?.d).filter((d): d is number => d !== undefined),
+          )
+
+          const where = `${family.id} / ${position.label}`
+          if (depths.size > 1) {
+            expect(position.label, where).toMatch(/, any depth$/)
+            /* And the coexistence, which is the same 24 reached from the other
+               side: a run that varies in depth is a run whose width already has
+               a `(w, d)` position beside it. */
+            expect(cellWidths.has(widthOf(position)), `${where} coexistence`).toBe(true)
+            relabelled += 1
+          } else {
+            expect(position.label, where).not.toMatch(/any depth/)
+            expect(cellWidths.has(widthOf(position)), `${where} coexistence`).toBe(false)
+            honest += 1
+          }
+        }
+      }
+
+      expect(honest).toBe(23)
+      expect(relabelled).toBe(24)
+      /* **Not dropped, and this is why.** The fallback is not sloppiness: a
+         separate wall is 0.5 deep and is tagged by its *run* alone, so cell
+         `2x0.5` resolves as tags and admits none of its own records — the pair is
+         spellable and empty. The run is the only expressible position those
+         records have, and dropping it would leave them reachable through nothing
+         but `ANY_SIZE`.
+
+         Scoped to the family, because the tag itself is not the problem:
+         `size|depth|0.5` exists and risers do carry it, which is why
+         `riser|straight` gets a real *"2 wide by 0.5 deep"* cell position. What
+         is family-specific is that walls do not. */
+      expect(has('size|depth|0.5')).toBe(true)
+      const wallFamily = families.find((family) => family.key === 'wall|straight|separate wall')
+      expect(wallFamily, 'wall|straight|separate wall').toBeDefined()
+      const wallResolved = resolveSlotTags((wallFamily as GeneratedFamily).slot.tags, [], [])
+      const wallRecords = file.records.filter(
+        (record) =>
+          wallResolved.require.every((ref) => tags(record).includes(ref)) &&
+          !wallResolved.deny.some((ref) => tags(record).includes(ref)),
+      )
+      const atHalfDeep = wallRecords.filter((record) => sizeOf(record)?.d === 0.5)
+      expect(atHalfDeep.length).toBeGreaterThan(0)
+      expect(atHalfDeep.filter((record) => tags(record).includes('size|depth|0.5'))).toEqual([])
+    })
   })
 })
 
@@ -1327,7 +1412,13 @@ describeCorpus(title, () => {
 function predicateFromLabel(label: string): SizePredicate {
   const cell = /^([\d.]+) wide by ([\d.]+) deep$/.exec(label)
   if (cell !== null) return { kind: 'cell', w: Number(cell[1]), d: Number(cell[2]) }
-  const run = /^([\d.]+) wide$/.exec(label)
+  /* Both run spellings are the same predicate. *"2 wide, any depth"* is the same
+     `size|width|2` ref as *"2 wide"*, and the suffix is the position saying that
+     it admits records at more than one depth rather than a different claim about
+     what it requires. So this reads through it deliberately: the assertions above
+     compare the *predicate*, and a run that started requiring a depth would fail
+     them either way. */
+  const run = /^([\d.]+) wide(?:, any depth)?$/.exec(label)
   if (run !== null) return { kind: 'run', run: Number(run[1]) }
   if (label === ANY_SIZE.label) return { kind: 'none' }
   throw new Error(`unreadable size label: ${label}`)
