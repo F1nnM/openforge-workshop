@@ -343,15 +343,11 @@
  *     way `templates.test.ts` does for B2.
  *
  * The table ships in the bundle instead, in the lazily-mounted `/assemblies`
- * chunk row X9 landed, at {@link FAMILY_TABLE_BYTES} raw. The counterfactual is
- * priced against the same artefact at the same epoch — the construction B1, B2
- * and B3 all quote — and a `families` key carrying the 47 slots and their 304
- * size positions costs **+2,277 B brotli**, taking the index from 366,173 B to
- * 368,450 B.
+ * chunk row X9 landed, at {@link FAMILY_TABLE_BYTES} raw.
  *
- * The budget would carry it, as it would have carried the 40's +1,260 B. The
- * reason it is declined is `pipeline/templates.ts`'s reason for the 40,
- * unchanged: the recipe list is the one part of that screen that renders before
+ * The reason it is not in the index is `pipeline/templates.ts`'s reason for the
+ * 40, and it is about **latency rather than size**: the recipe list is the one
+ * part of that screen that renders before
  * the 5.6 MB index lands, and a family row has no sprite and nothing to draw but
  * its name. Moving the table into the index makes the first thing the palette
  * shows the last thing that arrives.
@@ -923,9 +919,7 @@ export function familyLayout(family: GeneratedFamily): TemplateLayout {
  * 24,561 B of it is the `GENERATED_FAMILIES` const and 20,138 B the
  * `GENERATED_FAMILY_SIZES` one. They sum to 44,699 rather than to the delta
  * because the familyless module still spells both declarations (211 B of empty
- * `[]` and `{}`) and its header line still states its counts, 7 B shorter. At
- * brotli-11 the whole delta is **1,877 B** of module source, the emitted table
- * being 47 near-identical blocks, which is the shape brotli is best at.
+ * `[]` and `{}`) and its header line still states its counts, 7 B shorter.
  *
  * ## What it costs the bundle, which row C1 now pays
  *
@@ -946,11 +940,10 @@ export function familyLayout(family: GeneratedFamily): TemplateLayout {
  * regeneration, measured with `gzip -9` rather than read off the reporter, so
  * they are comparable with each other and not with the table this replaced.
  *
- * The **index** gains 0 B in every case, which is structural: nothing on
- * `build.ts`'s path imports this module. Proved by digest, not by a byte count —
- * the serialised index is sha256 `cf21ab85ac304a20…`, 5,907,324 B raw and
- * 366,173 B brotli, which is the same digest `templates.test.ts` recorded from a
- * tree with row B2 reverted, and `npm run stamp` reports
- * `content 7bf89a1d617714ff` unchanged with `PIPELINE_VERSION` still 2.
+ * The **index** carries none of this in any case, which is structural: nothing
+ * on `build.ts`'s path imports this module. Proved by digest rather than by
+ * weighing the artefact — `npm run stamp` reports `content` unchanged with
+ * `PIPELINE_VERSION` standing still, and `families.test.ts` asserts that none of
+ * the family model's vocabulary appears in the emitted bytes.
  */
 export const FAMILY_TABLE_BYTES = 44_450

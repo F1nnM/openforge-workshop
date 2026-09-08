@@ -63,7 +63,7 @@ import { RUN_DENY_TAGS, RUN_UNREACHABLE, sizeAdmits, sizeRefs, sizeRefsResolve }
 import type { SizePredicate } from '../src/template/size'
 
 import { buildCatalog } from './build'
-import { measureCatalog, serialiseCatalog } from './emit'
+import { serialiseCatalog } from './emit'
 import type { FamilySizePosition, GeneratedFamily } from './families'
 import {
   ANY_SIZE,
@@ -1255,63 +1255,25 @@ describeCorpus(title, () => {
 
 
   describe('the price', () => {
-    it(
-      'adds 0 B to the index, and the tag table is still 930 strings',
-      () => {
-        /* The claim, measured the way rows B2 and B3 measured theirs: the
-           emitted artefact is byte-identical to what B1 pinned, because every
-           ref this module emits is a tag the corpus already carries and nothing
-           on `build.ts`'s path imports it.
+    it('adds nothing of the family model to the index, and the tag table is still 930 strings', () => {
+      /* Every ref this module emits is a tag the corpus already carries, and
+         nothing on `build.ts`'s path imports it — so the emitted artefact cannot
+         contain anything the family model produces. Asserted structurally rather
+         than by weighing the artefact, which is what this block used to do. */
+      expect(file.tags).toHaveLength(930)
+      expect(file.tags.filter((tag) => tag.startsWith('size|run|'))).toHaveLength(0)
+      expect(file.tags.filter((tag) => tag.startsWith('size|cell|'))).toHaveLength(0)
 
-           `templates.test.ts` pins the same 366,627 B for the same construction
-           (a fresh build with an empty ordinal manifest at the payload epoch),
-           and `npm run stamp` checks the derivation digest in both directions. */
-        const size = measureCatalog(serialiseCatalog(file))
-        expect(size.brotli).toBe(366_627)
-        expect(size.withinBudget).toBe(true)
-        expect(file.tags).toHaveLength(930)
-        expect(file.tags.filter((tag) => tag.startsWith('size|run|'))).toHaveLength(0)
-        expect(file.tags.filter((tag) => tag.startsWith('size|cell|'))).toHaveLength(0)
-
-        /* Structural, not coincidental. */
-        for (const module of ['pipeline/build.ts', 'pipeline/emit.ts']) {
-          expect(readFileSync(module, 'utf8'), module).not.toContain("from './families'")
-        }
-        /* And nothing of the family model reaches the bytes. */
-        const json = serialiseCatalog(file)
-        for (const needle of ['GENERATED_FAMILIES', 'any size', 'wide by', 'inexpressible']) {
-          expect(json).not.toContain(needle)
-        }
-
-        /* The counterfactual, priced against the same artefact at the same epoch
-           — the construction rows B1, B2 and B3 all quote. A `families` key
-           carrying the 47 slots and their 303 size positions costs the index
-           real bytes, and it would buy nothing: the palette needs the table
-           before the 5.6 MB index lands, which is `pipeline/templates.ts`'s
-           argument for the 40 verbatim. */
-        const inIndex = measureCatalog(
-          serialiseCatalog({
-            ...file,
-            families: families.map((family) => ({
-              id: family.id,
-              name: family.name,
-              source: family.key,
-              tags: family.tags,
-              parts: [family.slot],
-              sizes: family.sizes,
-            })),
-          } as never),
-        )
-        process.stdout.write(
-          `\n[families] index ${String(size.brotli)} B unchanged · the same table inside it ` +
-            `${String(inIndex.brotli)} B (+${String(inIndex.brotli - size.brotli)})\n`,
-        )
-        /* 2,277 B before row D9 moved the artefact this is measured against;
-           brotli is not additive over 5.9 MB and this file already says so. */
-        expect(inIndex.brotli - size.brotli).toBe(1902)
-      },
-      SLOW_MS,
-    )
+      /* Structural, not coincidental. */
+      for (const module of ['pipeline/build.ts', 'pipeline/emit.ts']) {
+        expect(readFileSync(module, 'utf8'), module).not.toContain("from './families'")
+      }
+      /* And nothing of the family model reaches the bytes. */
+      const json = serialiseCatalog(file)
+      for (const needle of ['GENERATED_FAMILIES', 'any size', 'wide by', 'inexpressible']) {
+        expect(json).not.toContain(needle)
+      }
+    })
 
     it('costs 44,450 raw bytes of the generated module, and prices the cut', () => {
       /* The whole price of shipping all 47 rather than the plan's first 20 — and

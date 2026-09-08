@@ -39,16 +39,20 @@
  * do here once the blockers lift.
  */
 import type { CatalogFile, VersionStamp } from '../../src/catalog'
-import type { SizeReport } from '../../pipeline'
-import { formatBytes } from '../../pipeline'
 
 import type { ArtefactStamp } from './artefacts'
 import { formatStamp, stampDifference } from './artefacts'
 import type { CorpusDigest, CorpusDrift } from './corpus'
 import { isClean } from './corpus'
 
-/** Version of `stamp.json`'s own shape. */
-export const STAMP_VERSION = 1
+/**
+ * Version of `stamp.json`'s own shape.
+ *
+ * **2 since the `payload` block was removed.** The stamp no longer measures the
+ * emitted index — see `pipeline/emit.ts` for why the budget went — so a reader
+ * written against shape 1 would look for a field that is not there.
+ */
+export const STAMP_VERSION = 2
 
 export type ArtefactId = 'index' | 'share' | 'sidecar' | 'thumbs' | 'lod'
 
@@ -108,8 +112,6 @@ export interface StampReport {
   /** Every distinct md5 the index names. */
   corpus: CorpusDigest
   records: number
-  /** Measured at `PAYLOAD_EPOCH`, so it is comparable across branches. */
-  payload: SizeReport
   lock: LockReport
   share: ShareReport
   artefacts: ArtefactReport[]
@@ -240,7 +242,6 @@ export function formatReport(report: StampReport): string {
   const lines = [
     `index         ${formatStamp(report.index)} · built ${report.index.built}`,
     `corpus        ${String(report.corpus.blobs)} distinct md5 over ${String(report.records)} records · ${report.corpus.digest.slice(0, 16)}`,
-    `payload       ${formatBytes(report.payload.brotli)} brotli at the payload epoch (${formatBytes(report.payload.raw)} raw, ${formatBytes(report.payload.gzip)} gzip) of ${formatBytes(report.payload.budget)}`,
     `derivation    ${report.lock.ok ? 'locked' : 'VIOLATED'} · content ${report.lock.content.slice(0, 16)} · config ${report.lock.config.slice(0, 16)}`,
     '',
   ]
@@ -280,7 +281,6 @@ export function markdownSummary(report: StampReport): string {
     '',
     `- index: \`${formatStamp(report.index)}\``,
     `- corpus: ${String(report.corpus.blobs)} distinct md5, digest \`${report.corpus.digest.slice(0, 16)}\``,
-    `- payload at the payload epoch: ${formatBytes(report.payload.brotli)} brotli of ${formatBytes(report.payload.budget)}`,
     `- derivation lock: ${report.lock.ok ? 'held' : '**violated**'}`,
     '',
     '| artefact | what | status | gate | detail |',
@@ -332,7 +332,6 @@ export function serialiseStamp(report: StampReport): string {
       index: report.index,
       corpus: report.corpus,
       records: report.records,
-      payload: report.payload,
       lock: report.lock,
       share: report.share,
       artefacts,

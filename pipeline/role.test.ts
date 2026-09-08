@@ -42,14 +42,13 @@ import { createCompositionIndex, resolveSlotTags } from '../src/composition'
 import type { SlotTags } from '../src/composition'
 
 import { buildCatalog } from './build'
-import { measureCatalog, serialiseCatalog } from './emit'
 import { fixturesDir, loadFixtureRows } from './fixtures'
 import { emptyManifest } from './ordinals'
 import type { Role, RoleInput } from './role'
 import { FORMS, ROLES, inferRole } from './role'
 import { buildTagTable } from './tags'
 import { loadTemplateFixtures } from './templates'
-import { PAYLOAD_TIMESTAMP, SIZE_BUDGET_BYTES } from './version'
+import { PAYLOAD_TIMESTAMP } from './version'
 
 const FIXTURES_DIR = fixturesDir()
 
@@ -60,9 +59,6 @@ const describeCorpus = hasFixtures ? describe : describe.skip
 const title = hasFixtures
   ? 'role and form over the real corpus'
   : `role and form — SKIPPED, no fixtures at ${FIXTURES_DIR} (set OPENFORGE_FIXTURES)`
-
-/** Building the corpus, brotli-ing 5.9 MB at quality 11, and 128 slot resolutions. */
-const SLOW_MS = 180_000
 
 describeCorpus(title, () => {
   const file: CatalogFile = hasFixtures
@@ -198,70 +194,20 @@ describeCorpus(title, () => {
     expect(file.tags.indexOf('role|wall')).toBeLessThan(10)
   })
 
-  it(
-    'costs 468 B brotli at the payload epoch, not the 865 B the plan priced',
-    () => {
-      // The same artefact with the derived tags stripped and the table rebuilt
-      // is exactly what the pipeline emitted before this row, **except for the
-      // version stamp**, which is left at 2 on both sides on purpose. That makes
-      // this the *field* figure. The *artefact* figure — pipeline 1 at 365,629 B
-      // against pipeline 2 at 366,173 B, so **+544 B** — is in
-      // `pipeline/version.ts`, following row P3's precedent of reporting both
-      // and naming which is which. They differ by 76 B, which is the brotli cost
-      // of one character changing in `version.pipeline`, and that is the whole
-      // reason a "this field costs N bytes" figure is a fact about one artefact
-      // at one epoch and never a rate.
-      //
-      // The plan priced this row at **+865 B**, and it does not reproduce. The
-      // research measured the encoding by appending the 15 derived strings to
-      // the *tail* of the 915-entry table, which `buildTagTable` does not do —
-      // it orders by descending frequency, so the derived values take ids 0 and
-      // 1 and every existing id shifts. Re-measured against this baseline the
-      // tail-append construction costs +776 B and the frequency-ordered one
-      // ships at +468 B, both below the price the plan set aside for it.
-      const lists = file.records.map((record) =>
-        (tagsOf.get(record.id) ?? []).filter(
-          (tag) => !tag.startsWith('role|') && !tag.startsWith('form|'),
-        ),
-      )
-      const { table, idOf } = buildTagTable(lists)
-      const before = {
-        ...file,
-        tags: table,
-        records: file.records.map((record, index) => ({
-          ...record,
-          tags: (lists[index] ?? []).map((tag) => idOf.get(tag) ?? -1),
-        })),
-      }
-
-      const baseline = measureCatalog(serialiseCatalog(before as CatalogFile))
-      const shipped = measureCatalog(serialiseCatalog(file))
-      process.stdout.write(
-        `\n[role] without ${String(baseline.brotli)} B · with role+form ${String(shipped.brotli)} B ` +
-          `· delta ${String(shipped.brotli - baseline.brotli)} B · ` +
-          `${((100 * shipped.brotli) / SIZE_BUDGET_BYTES).toFixed(2)}% of budget\n`,
-      )
-
-      /* **Row D9 moved both numbers and the delta between them, which is this
-         test's own caveat firing.** The corner-run correction touches neither
-         `role` nor `form`, and it still took the with-tags artefact from 366,173
-         to 366,627 B and the without-tags one from 365,705 to 365,721 —
-         so the measured price of role+form went 468 -> 906 B on changes that
-         added no tag. brotli is not additive over 5.9 MB: a "this field costs N
-         bytes" figure is a fact about one artefact at one epoch, never a rate,
-         and 999 is the same field's price against a different artefact. The
-         conclusion is untouched — it is still far under the 865 B the plan
-         priced as a *problem*, and 0.2 points of a 512,000 B budget. */
-      expect(table).toHaveLength(915)
-      expect(baseline.brotli).toBe(365_721)
-      expect(shipped.brotli).toBe(366_627)
-      expect(shipped.brotli - baseline.brotli).toBe(906)
-      expect(shipped.withinBudget).toBe(true)
-      // 0.20 points of a 512,000 B budget, against 145,334 B of headroom.
-      expect(shipped.brotli / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
-    },
-    SLOW_MS,
-  )
+  it('takes the tag table from 915 strings to 930, and that is the whole encoding', () => {
+    /* Role and form are emitted as ordinary interned tags, so the entire cost of
+       the derivation is 15 new strings in the intern table and two ids on each
+       record. Rebuilding the table from the same records with the two namespaces
+       stripped is what the pipeline emitted before this row. */
+    const lists = file.records.map((record) =>
+      (tagsOf.get(record.id) ?? []).filter(
+        (tag) => !tag.startsWith('role|') && !tag.startsWith('form|'),
+      ),
+    )
+    const { table } = buildTagTable(lists)
+    expect(table).toHaveLength(915)
+    expect(file.tags).toHaveLength(930)
+  })
 
   it('needs no new code in the candidate solver to predicate on a role', () => {
     // The whole argument for the tag encoding. `PartSlot.tags.require` is a list

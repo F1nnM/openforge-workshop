@@ -4,10 +4,10 @@
  * Two jobs, and the second is the one that makes this file worth its runtime:
  *
  *   1. **Every figure in `measure.ts`'s docblock is re-measured here**, so the
- *      table of readings and the table of priced alternatives fail the suite
- *      rather than sitting stale. That includes the brotli figures: the four
- *      encodings this row declined to ship are actually built and actually
- *      compressed, with `node:zlib`, at the same quality `pipeline/emit.ts` uses.
+ *      table of readings fails the suite rather than sitting stale. The byte
+ *      prices that used to sit beside it are gone: the index has no size budget
+ *      any more, and compressing 5.9 MB at quality 11 to restate a number nobody
+ *      would act on was the most expensive thing in this suite.
  *   2. **The two readings are compared.** The plan's open question was "thousands
  *      versus twelve", and the whole value of the port is that it answers it with
  *      the function the live catalog serves compositions with. Both numbers are
@@ -28,15 +28,6 @@
  * `pipeline/catalog.test.ts` and `src/search/corpus.test.ts` both set.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { brotliCompressSync, constants as zlibConstants } from 'node:zlib'
-
-/**
- * These blocks brotli-compress candidate sets over the whole 8,702-record corpus,
- * which is seconds of real work rather than a hang. The 5,000 ms default is fine
- * on an idle machine and times out when the suite runs beside anything else —
- * which is how it first failed, on a box at load average 25.
- */
-const SLOW_CORPUS_MS = 120_000
 
 import { describe, expect, it } from 'vitest'
 
@@ -55,15 +46,6 @@ const title = present
 
 /** Materialising 99,931 candidate sets is the slow row of the pricing table. */
 const SLOW_MS = 300_000
-
-/** Brotli at the quality `pipeline/emit.ts` compresses the index with. */
-function brotli(value: unknown): { raw: number; compressed: number } {
-  const raw = Buffer.from(JSON.stringify(value), 'utf8')
-  const compressed = brotliCompressSync(raw, {
-    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
-  })
-  return { raw: raw.length, compressed: compressed.length }
-}
 
 /** Ordinals ascending, delta-encoded — the leanest honest encoding of a set. */
 function deltas(ordinals: readonly number[]): number[] {
@@ -165,43 +147,29 @@ describeCorpus(title, () => {
       })
       sets.push(deltas(candidates.tiles.map((tile) => ordOf.get(tile) ?? 0)))
     }
-    const size = brotli(sets)
-    console.log(`wide, distinct declarations: ${String(sets.length)} sets, raw ${String(size.raw)} B, brotli ${String(size.compressed)} B`)
     // Deduplicating by the raw *declaration* lands on the same 110 as
     // `measure.ts`'s canonical key, which is itself a small corpus fact: no two
     // tiles write one slot with their refs in a different order, so the
     // order-insensitive key is currently buying nothing. It stays, because a key
     // that only works while the fixtures happen to be tidy is not a key.
     expect(sets.length).toBe(110)
-    expect(size.compressed).toBeLessThan(1_000)
   })
 
-  it('prices the ported reading per tile-slot, both encodings', () => {
+  it('resolves 3,695 tile-slots across the corpus', () => {
+    /* The structural half of what used to be a pricing table: every slot every
+       tile declares resolves, and the count is pinned. The two encodings this
+       test used to weigh at brotli 11 are gone — payload was never what made the
+       wide reading wrong, and `measure.ts` carries the argument that did. */
     const lean: number[][] = []
-    const fat: { t: string; n: string; c: string[] }[] = []
     for (const { tile, slot } of slotsOf()) {
       const candidates = index.resolve(slot, tile)
       lean.push(deltas(candidates.tiles.map((id) => ordOf.get(id) ?? 0)))
-      fat.push({ t: tile, n: slot.name, c: [...candidates.tiles] })
     }
-
-    const leanSize = brotli(lean)
-    const fatSize = brotli(fat)
-    console.log(`ported, ordinals:    ${String(lean.length)} sets, raw ${String(leanSize.raw)} B, brotli ${String(leanSize.compressed)} B`)
-    console.log(`ported, id strings:  ${String(fat.length)} sets, raw ${String(fatSize.raw)} B, brotli ${String(fatSize.compressed)} B`)
-
     expect(lean.length).toBe(3695)
-    expect(leanSize.raw).toBe(283_368)
-    expect(leanSize.compressed).toBe(3_606)
-    // The plan's feared order of magnitude, and it is a *raw* figure: brotli
-    // takes the same data to 37.7 KB, which the remaining budget would absorb.
-    // Payload was never what made this reading wrong.
-    expect(fatSize.raw).toBeGreaterThan(15_000_000)
-    expect(fatSize.compressed).toBeLessThan(40_000)
-  }, SLOW_CORPUS_MS)
+  })
 
   it(
-    'prices materialising every sibling-selection state',
+    'materialises 99,931 candidate sets over every sibling-selection state',
     () => {
       const sets: number[][] = []
       for (const record of file.records) {
@@ -236,10 +204,7 @@ describeCorpus(title, () => {
         })
       }
 
-      const size = brotli(sets)
-      console.log(`every sibling state: ${String(sets.length)} sets, raw ${String(size.raw)} B, brotli ${String(size.compressed)} B`)
       expect(sets.length).toBe(99_931)
-      expect(size.raw).toBe(2_798_529)
     },
     SLOW_MS,
   )

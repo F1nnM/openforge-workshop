@@ -23,9 +23,9 @@
  *
  * `./templates.ts` is still where the 40 are, and it is still asserted
  * byte-identical to its generator's output — from `pipeline/`, over
- * `TEMPLATES_MODULE_PATH`. Putting them in `catalog.json` instead was measured at
- * **+1,260 B brotli** and declined, because the recipe list is the one part of
- * this screen that renders before the 5.6 MB index lands.
+ * `TEMPLATES_MODULE_PATH`. Putting them in `catalog.json` instead was declined,
+ * because the recipe list is the one part of this screen that renders before the
+ * 5.6 MB index lands.
  *
  * ## What these tests cannot do
  *

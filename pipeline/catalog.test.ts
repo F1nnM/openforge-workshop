@@ -39,7 +39,7 @@ import {
 
 import type { BuildResult } from './build'
 import { buildCatalog } from './build'
-import { measureCatalog, serialiseCatalog } from './emit'
+import { serialiseCatalog } from './emit'
 import { CONNECTION_POSITIONS, classifyLayer, connectionSystems, connectionsByPosition, isLockSystem } from './facets'
 import type { FixtureRow } from './fixtures'
 import { fixturesDir, liveRows, loadFixtureRows } from './fixtures'
@@ -58,7 +58,6 @@ import {
   arcBandSideOfRadius,
   isMeasured,
 } from './tessellation'
-import { SIZE_BUDGET_BYTES } from './version'
 
 const FIXTURES_DIR = fixturesDir()
 
@@ -74,9 +73,9 @@ const title = hasFixtures
 const BUILT_AT = '2026-01-01T00:00:00.000Z'
 
 /**
- * Timeout for the tests that build the 8,702-tile corpus again, or brotli it at
- * quality 11. Both are seconds of real work on 5 MB of JSON, and the 5 s default
- * turns that into a flaky failure rather than a slow pass.
+ * Timeout for the tests that build the 8,702-tile corpus again. That is seconds
+ * of real work on 5 MB of JSON, and the 5 s default turns it into a flaky
+ * failure rather than a slow pass.
  */
 const SLOW_MS = 120_000
 
@@ -1315,17 +1314,6 @@ describeCorpus(title, () => {
       expect(spriteless.every((record) => !record.thumb)).toBe(true)
     })
   })
-
-  /* ------------------------------------------------------------ size budget */
-
-  it('fits the 500 KB brotli budget, and reports what it actually costs', () => {
-    const size = measureCatalog(json)
-    process.stdout.write(
-      `\n[catalog] raw ${String(size.raw)} B · gzip ${String(size.gzip)} B · brotli ${String(size.brotli)} B ` +
-        `of ${String(SIZE_BUDGET_BYTES)} B budget\n`,
-    )
-    expect(size.brotli).toBeLessThanOrEqual(SIZE_BUDGET_BYTES)
-  }, SLOW_MS)
 })
 
 /* -------------------------------------------------------------------- oracle */

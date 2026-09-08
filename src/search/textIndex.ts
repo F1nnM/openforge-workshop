@@ -20,8 +20,7 @@
  *   3. **Prefix matching is nine lines** over a sorted token array, and the
  *      corpus has 449 distinct tokens.
  *
- * It also keeps a dependency out of a bundle whose whole architecture rests on
- * the index fitting in 355.7 KB brotli.
+ * It also keeps a search dependency out of the bundle entirely.
  *
  * ## A document is an aggregate: the union of its variants' tokens
  *

@@ -85,23 +85,10 @@
  * ## Why there are three rules and not a 135-row table
  *
  * A 128-row table is the same information with 125 more places to disagree with
- * itself, and it costs bytes nobody needs to spend. Measured with
- * `pipeline/emit.ts`'s own brotli-11 path over the shipped artefact at
- * `PAYLOAD_EPOCH` — the construction every payload docblock in this repo
- * quotes — a `layouts` key carrying the expansion is **+222 B** against the
- * 366,768 B baseline. The rule ships in the **bundle** instead and the index
- * gains **0 B**, which is asserted rather than argued:
- * `pipeline/templates.test.ts` rebuilds the corpus from the fixtures and finds
- * the emitted bytes identical to row B1's pinned figure, and `corpus.test.ts`
- * prices the counterfactual.
- *
- * Two other measurements of the same table, kept because they disagree and the
- * disagreement is the point: against a *fresh build* at the same epoch with an
- * empty ordinal manifest it is **+808 B**, and T2 measured **+374 B** against
- * the pre-B1 `catalog.json` that was on disk at the time (365,598 B baseline).
- * Row B1 records the lesson in its own file — brotli is not additive over
- * 5.9 MB, so a "this field costs N bytes" figure is a fact about one artefact at
- * one epoch and never a rate.
+ * itself. The rule ships in the **bundle** instead and the index carries none of
+ * it, which is asserted rather than argued: `pipeline/templates.test.ts`
+ * rebuilds the corpus from the fixtures and finds none of the model's vocabulary
+ * in the emitted bytes.
  *
  * `pipeline/templates.ts` reads {@link conventionFor} at import time and throws
  * when a fixture's part-name set has no convention, so a twenty-first fixture

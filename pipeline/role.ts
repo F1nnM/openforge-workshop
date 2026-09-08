@@ -566,22 +566,10 @@ export function inferRole(input: RoleInput): Inferred {
 /**
  * The two tags a record carries for its axes, in emission order.
  *
- * **This is the whole persistence decision**, and it was priced against five
- * alternatives with `emit.ts`'s own brotli-11 at {@link
- * import('./version').PAYLOAD_EPOCH}:
- *
- * | encoding | index delta |
- * | --- | ---: |
- * | **`role\|x` + `form\|x` as interned tags** | **+865 B** |
- * | side table, one base-36 char per record per axis | +858 B |
- * | `rl` / `fm` integer-code fields on each record | +868 B |
- * | `role` string field only, no `form` | +773 B |
- * | `role` + `form` as string fields | +2,416 B |
- * | side table, posting lists per role and form | +15,342 B |
- * | derived in the browser | +0 B index, 1,561 B of JS, 31.7 ms |
- *
- * The tag encoding wins for a reason that is **not** the byte count, because at
- * this granularity four of the six are within 10 B of each other:
+ * **This is the whole persistence decision.** Six encodings were considered — as
+ * interned tags, as a side table of base-36 codes, as integer-code fields, as
+ * plain string fields, as posting lists, and derived in the browser. The tag
+ * encoding wins, and the reason is structural rather than a matter of size:
  *
  *   1. **A slot predicates with the grammar that already exists.**
  *      `src/composition/candidates.ts` builds a CSR inverted index over the tag

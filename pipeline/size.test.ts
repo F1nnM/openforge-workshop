@@ -30,13 +30,12 @@ import {
 } from '../src/template/size'
 
 import { buildCatalog } from './build'
-import { measureCatalog, serialiseCatalog } from './emit'
 import { fixturesDir, loadFixtureRows } from './fixtures'
 import { formatUnit, sizeToken } from './footprint'
 import { emptyManifest } from './ordinals'
 import { cellExtentUnits, resolveGridSize, sizeRefusalOf } from './size'
 import type { SizeRefusal } from './size'
-import { buildTagTable, numericTagValue, tagValue } from './tags'
+import { numericTagValue, tagValue } from './tags'
 import { PAYLOAD_TIMESTAMP } from './version'
 
 const FIXTURES_DIR = fixturesDir()
@@ -47,7 +46,7 @@ const title = hasFixtures
   ? 'size resolution over the real corpus'
   : `size resolution — SKIPPED, no fixtures at ${FIXTURES_DIR} (set OPENFORGE_FIXTURES)`
 
-/** Building the corpus once and brotli-ing 5.9 MB at quality 11, four times. */
+/** Building the 8,702-tile corpus once, which is seconds of real work. */
 const SLOW_MS = 300_000
 
 const tally = <T>(values: readonly T[]): Map<string, number> => {
@@ -62,7 +61,7 @@ describeCorpus(title, () => {
         rows: loadFixtureRows(FIXTURES_DIR),
         manifest: emptyManifest(),
         fixturesRef: 'test',
-        /* The payload epoch, so the byte figures below are the quotable ones. */
+        /* A fixed clock, so two builds of two branches are comparable. */
         builtAt: PAYLOAD_TIMESTAMP,
       }).file
     : ({ tags: [], records: [] } as unknown as CatalogFile)
@@ -633,49 +632,6 @@ describeCorpus(title, () => {
     expect(sizes.reduce((a, b) => a + b, 0)).toBe(294)
     expect(sizes[Math.floor(sizes.length / 2)]).toBe(4)
     expect(Math.max(...sizes)).toBe(31)
-  })
-
-  /* ----------------------------------------------------------------- the price */
-
-  it('emits 0 bytes, and prices the derived tag it declined', () => {
-    const price = (extra: (record: CatalogRecord) => readonly string[]): number => {
-      const lists = file.records.map((record) => [...tags(record), ...extra(record)])
-      const { table, idOf } = buildTagTable(lists)
-      const rebuilt = {
-        ...file,
-        tags: table,
-        records: file.records.map((record, index) => ({
-          ...record,
-          tags: (lists[index] ?? []).map((tag) => idOf.get(tag) ?? 0),
-        })),
-      } as CatalogFile
-      return measureCatalog(serialiseCatalog(rebuilt)).brotli
-    }
-
-    /* The baseline is this same reserialisation with nothing added, so the
-       deltas are a property of the tag and not of the round trip. */
-    const baseline = price(() => [])
-    const cellTag = (record: CatalogRecord): readonly string[] => {
-      const size = sizeOf(record)
-      return size === undefined ? [] : [`size|cell|${formatUnits(size.w)}x${formatUnits(size.d)}`]
-    }
-    const runTag = (record: CatalogRecord): readonly string[] => {
-      const size = sizeOf(record)
-      return size?.run === null || size === undefined ? [] : [`size|run|${formatUnits(size.run)}`]
-    }
-    const cellOnly = price(cellTag) - baseline
-    const runOnly = price(runTag) - baseline
-    const both = price((record) => [...cellTag(record), ...runTag(record)]) - baseline
-
-    /* Recorded rather than bounded tightly: brotli is not additive over 5.9 MB
-       and row B1's file already records that a "this field costs N bytes" figure
-       is a fact about one artefact at one epoch. What is asserted is the shape of
-       the answer — the run tag is the cheap one, all three fit, and none of them
-       is what declined the encoding. */
-    expect(runOnly).toBeGreaterThan(0)
-    expect(runOnly).toBeLessThan(cellOnly)
-    expect(both).toBeLessThan(3000)
-    expect(baseline + both).toBeLessThan(512_000)
   })
 
   /* ----------------------------- the plan's figures that do not reproduce */

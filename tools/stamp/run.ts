@@ -31,15 +31,12 @@ import type { CatalogFile } from '../../src/catalog'
 import { buildShareManifest } from '../../src/share/manifest'
 import type { BuildResult } from '../../pipeline'
 import {
-  assertWithinBudget,
-  atPayloadEpoch,
   buildCatalog,
   buildTimestamp,
   compressCatalog,
   fixturesDir,
   loadFixtureRows,
   loadManifest,
-  measureCatalog,
   resolveFixturesRef,
   serialiseCatalog,
 } from '../../pipeline'
@@ -113,11 +110,6 @@ export function runStamp(options: StampOptions = {}): StampRun {
     written.push(jsonPath, brPath)
   }
 
-  // Measured at the payload epoch, never at the build clock: the timestamp alone
-  // swings brotli 655 B on this corpus, which is most of any delta worth
-  // quoting. See PAYLOAD_EPOCH.
-  const payload = measureCatalog(serialiseCatalog(atPayloadEpoch(file)))
-
   const lock = readLock()
   const lockCheck = checkLock(lock, lockedBuild(rows), fixturesRef)
 
@@ -163,7 +155,6 @@ export function runStamp(options: StampOptions = {}): StampRun {
     index: file.version,
     corpus: corpusDigest(live),
     records: file.records.length,
-    payload,
     lock: {
       ok: lockCheck.ok,
       schema: lockCheck.schema,
@@ -177,10 +168,6 @@ export function runStamp(options: StampOptions = {}): StampRun {
   }
 
   const report: StampReport = { ...partial, failures: failuresOf(partial) }
-
-  // Last, so the whole report is available to a caller even when the payload is
-  // the thing that broke — the same order `scripts/import-catalog.ts` uses.
-  assertWithinBudget(payload)
 
   return { report, file, json, written }
 }

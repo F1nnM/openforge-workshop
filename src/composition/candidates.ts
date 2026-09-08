@@ -1,38 +1,27 @@
 /**
- * Slot candidate sets, **derived in the browser and shipped as 0 bytes**.
+ * Slot candidate sets, **derived in the browser rather than precomputed**.
  *
  * ## Why nothing is precomputed
  *
  * `config.ts` establishes that `constrain` is a join over the parent's tags and
  * the siblings selected so far. The parent half is static; the sibling half is
- * runtime state, so a precomputed set is correct only until the first click.
- * That is the argument, and the measurements behind it are in `measure.ts`:
- * shipping the initial-state sets costs **283,368 B raw / 3,606 B brotli** and
- * buys a set the UI has to recompute anyway, and materialising every
- * sibling-selection state means **99,931 sets, 2,798,529 B raw**. Deriving them
- * instead costs one pass over data the artefact already carries.
+ * runtime state, so **a precomputed set is correct only until the first click**.
+ * That is the whole argument, and it is about correctness rather than about
+ * size: shipping the initial-state sets would buy a set the UI has to recompute
+ * anyway, and 535 tiles carry two or more slots. Materialising every
+ * sibling-selection state instead means 99,931 sets, which `measure.ts` counts.
  *
- * The corpus is what makes deriving cheap rather than merely correct: a slot's
- * candidate set has a **median of 14** members, so the work is bounded by the
- * shortest posting list rather than by the 8,702 records.
- *
- * Row A1 established the pattern and the arithmetic: it declined to emit the
- * aggregate grouping at 40,454 B brotli against an index already at 71.4% of its
- * 500 KB budget, and derived it in the browser for **1,896 B** of JavaScript.
- * This row emits **0 bytes** for the same reason with a stronger argument,
- * because here the precomputed answer would also be *wrong*. Measured the same
- * way — esbuild, bundled, minified, `@/catalog` external, brotli 11 — this file
- * and `config.ts` together are **3,831 B minified, 1,438 B brotli**, against the
- * 283,368 B of raw JSON the leanest per-slot encoding would have added.
- * `measure.ts` is not part of that: only the tests import it, so it is
- * tree-shaken out of any bundle C2 builds.
+ * The corpus is what makes deriving cheap as well as correct: a slot's candidate
+ * set has a **median of 14** members, so the work is bounded by the shortest
+ * posting list rather than by the 8,702 records. Building the whole index is a
+ * measured **3–5 ms** over the real corpus.
  *
  * ## The index
  *
  * One inverted index over the tag table, in CSR layout: `offsets` (one Int32 per
  * tag plus one) and `docs` (one Int32 per tag reference, **101,427** of them over
- * 8,702 records and 930 tags — 405,708 B and 3,724 B respectively, both exact
- * and both allocated once). Postings are in record order, and records are sorted by
+ * 8,702 records and 930 tags, both allocated once). Postings are in record
+ * order, and records are sorted by
  * `id`, so every posting list is ascending and every intersection is a
  * two-pointer walk. Slot candidate sets are small — median 14 under the ported
  * reading — so the whole cost of a resolution is the postings walk over the
@@ -43,8 +32,9 @@
  * reasons and neither is taste: `@/search`'s barrel does not export the bitset
  * primitives, so using them would mean reaching past a seam row A2 deliberately
  * drew; and a bitset over 8,702 records is 1,088 B per tag, so the 930-tag index
- * would be **1,011,840 B against this one's measured 409,432 B** — bitsets win on
- * wide facet queries and lose on 14-element intersections.
+ * would hold roughly 1 MB against this one's 409,432 B — bitsets win on wide
+ * facet queries and lose on 14-element intersections. That one is a *run-time
+ * memory* comparison and survives the payload budget's removal.
  */
 import type {
   AggregateAddress,
