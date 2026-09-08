@@ -42,6 +42,7 @@ import type { AssemblyTemplate } from '@/assembly'
 import { buildAssemblyIndex } from '@/assembly'
 import type { PlanCatalog, PlanScene, PlanTools, SnapMode } from '@/builder/canvas'
 import { SNAP_STEP, buildPlanScene, createStyleResolver } from '@/builder/canvas'
+import type { UndoControls } from '@/builder/canvas/useHistory'
 import {
   FIXTURE_SLOTS,
   FIXTURE_TEMPLATE,
@@ -52,7 +53,7 @@ import {
 import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { buildAggregateIndex } from '@/catalog'
 import { createCompositionIndex } from '@/composition'
-import type { TemplateId, TemplateInstance, WorkshopState } from '@/store'
+import type { PlacementId, TemplateId, TemplateInstance, WorkshopState } from '@/store'
 
 import type { FillAuthorities, PlacementFiller } from './fills'
 import { createPlacementFiller } from './fills'
@@ -141,12 +142,20 @@ export function sceneOf(catalog: PlanCatalog, placed: readonly FixturePlacement[
   return buildPlanScene(placementsOf(placed), catalog, createStyleResolver(catalog))
 }
 
-/** What {@link planTools} recorded. */
+/**
+ * What {@link planTools} recorded.
+ *
+ * `tool` is gone with the modes. `armed` and `selection` replace it, and they
+ * are two lists rather than one because they are two questions a test asks
+ * separately: *did the palette arm this* and *did the surface select that*.
+ */
 export interface ToolCalls {
   readonly rotate: { step: number; direction: 1 | -1 }[]
-  readonly tool: string[]
   readonly snap: SnapMode[]
-  readonly selected: (string | null)[]
+  /** Families armed, in order. `null` for a disarm. */
+  readonly armed: (string | null)[]
+  /** Placements selected, in order. `null` for a deselect. */
+  readonly selection: (string | null)[]
   /** Row C5: the size positions the palette armed. */
   readonly armedSize: (readonly string[])[]
   toggledSnap: number
@@ -155,39 +164,76 @@ export interface ToolCalls {
 /**
  * A `PlanTools` that records instead of setting state.
  *
- * `selectedTemplate` takes a plain string and brands it here, for `tileId`'s
- * reason: a `TemplateId` is an opaque brand over a string and a test naming
+ * `selectedTemplate` and `selected` take plain strings and are branded here, for
+ * `tileId`'s reason: both are opaque brands over a string and a test naming
  * `FIXTURE_TEMPLATE` should not have to say so twice.
+ *
+ * **It does not enforce the arm/select exclusivity**, and that is deliberate: a
+ * recorder that resolved the invariant itself could not be used to test that the
+ * *real* hook resolves it, and a test that wants an impossible state in order to
+ * prove a reader handles it should be able to build one. `planTools.test.tsx`
+ * proves the invariant against `usePlanTools`, which is where it lives.
  */
 export function planTools(
-  overrides: Partial<Pick<PlanTools, 'tool' | 'snap' | 'rotation' | 'armedSize'>> & {
+  overrides: Partial<Pick<PlanTools, 'snap' | 'rotation' | 'armedSize'>> & {
     readonly selectedTemplate?: string | null | undefined
+    readonly selected?: string | null | undefined
   } = {},
 ): PlanTools & { readonly calls: ToolCalls } {
   const snap: SnapMode = overrides.snap ?? 'fine'
-  const calls: ToolCalls = { rotate: [], tool: [], snap: [], selected: [], armedSize: [], toggledSnap: 0 }
-  const selected = overrides.selectedTemplate ?? null
+  const calls: ToolCalls = { rotate: [], snap: [], armed: [], selection: [], armedSize: [], toggledSnap: 0 }
+  const armed = overrides.selectedTemplate ?? null
+  const chosen = overrides.selected ?? null
   return {
-    tool: overrides.tool ?? 'place',
+    activity: armed !== null ? 'armed' : chosen !== null ? 'selected' : 'idle',
     snap,
     step: SNAP_STEP[snap],
     rotation: overrides.rotation ?? 0,
-    selectedTemplate: selected === null ? null : (selected as TemplateId),
+    selectedTemplate: armed === null ? null : (armed as TemplateId),
     /* Row C5's other half of *what is armed*. A plain field, defaulting to the
        palette's `any size` position — which is `[]` and a real position rather
        than an absence, so a test that says nothing about size still exercises
        the path a user who never touched the control takes. */
     armedSize: overrides.armedSize ?? [],
-    setTool: (next) => calls.tool.push(next),
-    toggleTool: () => calls.tool.push('toggle'),
+    selected: chosen === null ? null : (chosen as PlacementId),
     setSnap: (next) => calls.snap.push(next),
     toggleSnap: () => {
       calls.toggledSnap += 1
     },
     rotate: (step, direction = 1) => calls.rotate.push({ step, direction }),
     setRotation: () => undefined,
-    setSelectedTemplate: (id) => calls.selected.push(id),
+    arm: (id, size = []) => {
+      calls.armed.push(id)
+      calls.armedSize.push(size)
+    },
+    select: (id) => calls.selection.push(id),
     setArmedSize: (size) => calls.armedSize.push(size),
+    calls,
+  }
+}
+
+/**
+ * An {@link UndoControls} that records instead of undoing.
+ *
+ * Both stacks report as available by default, so a test asserting a button is
+ * enabled does not have to arrange history first; a test about the disabled
+ * state passes `canUndo: false`.
+ */
+export function planHistory(
+  overrides: Partial<Pick<UndoControls, 'canUndo' | 'canRedo'>> = {},
+): UndoControls & { readonly calls: { undo: number; redo: number } } {
+  const calls = { undo: 0, redo: 0 }
+  return {
+    canUndo: overrides.canUndo ?? true,
+    canRedo: overrides.canRedo ?? true,
+    undo: () => {
+      calls.undo += 1
+      return 'Removed 1 tile.'
+    },
+    redo: () => {
+      calls.redo += 1
+      return 'Placed 1 tile.'
+    },
     calls,
   }
 }

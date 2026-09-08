@@ -108,6 +108,7 @@ import { useCallback, useMemo, useState } from 'react'
 
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
 import { useAnnouncer } from '@/builder/canvas/hooks'
+import type { UndoControls } from '@/builder/canvas/useHistory'
 import type { CatalogAssets, CatalogRecord } from '@/catalog'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
@@ -213,12 +214,30 @@ export interface BuilderRoomProps {
    * room is a wire, and the state it would otherwise hold is `BuilderScreen`'s.
    */
   readonly onEditSlots?: (placement: PlacementId, slot?: SlotName) => void
+  /**
+   * Undo and redo, from the screen's single {@link useHistory} call.
+   *
+   * Threaded rather than taken here: the hook holds its ring in a ref, so a
+   * component that called it would own a *second* history of the same room and
+   * the toolbar's buttons would disagree with the canvas's keys.
+   */
+  readonly history: UndoControls
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
 }
 
-export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, onStatus, fetchImpl }: BuilderRoomProps) {
+export function BuilderRoom({
+  catalog,
+  scene,
+  tools,
+  assets,
+  fill,
+  history,
+  onEditSlots,
+  onStatus,
+  fetchImpl,
+}: BuilderRoomProps) {
   /**
    * The armed **family**, straight off the shared tool state.
    *
@@ -396,7 +415,9 @@ export function BuilderRoom({ catalog, scene, tools, assets, fill, onEditSlots, 
               tools={tools}
               armed={armed}
               fill={filler}
-              {...(onEditSlots === undefined ? {} : { onEditSlots })}
+              catalog={catalog}
+              history={history}
+                  {...(onEditSlots === undefined ? {} : { onEditSlots })}
               onOutline={setOutline}
               onStatus={publish}
               announce={announce}

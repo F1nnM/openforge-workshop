@@ -131,10 +131,25 @@
    `tabIndex` and `role="application"` on the `<canvas>` itself, because that is
    the element the pointer listeners are on and r3f puts unknown props on its
    wrapper `<div>`. So the focus ring has to be drawn here rather than inherited
-   from a button: a keyboard user needs to know the plan has the keys. */
+   from a button: a keyboard user needs to know the plan has the keys.
+
+   **Quieter than it was**, and the reason is what else now says the same thing.
+   This was 2px of `--acc` inset around the whole viewport, which is a lot of
+   accent for a state the user is usually in — `:focus-visible` matches once the
+   browser is in keyboard modality, so pressing `R` or `Ctrl`+`Z` turns it on and
+   it stays on. The owner's report was simply that they did not like it, and they
+   were right: a full-bleed accent border reads as an error state, not as "this
+   pane has the keys".
+
+   It is **not removed**, because a `role="application"` tab stop with no visible
+   focus indicator fails WCAG 2.4.7 outright. Instead the job is split: this is
+   now 1px of `--line`, a hairline the eye reads as a pane boundary, and the loud
+   half of the cue moved *into the scene* — `RoomSurface`'s caret appears on
+   focus, at the cursor, which is where a keyboard user is actually working. One
+   quiet frame plus one legible in-scene mark beats one loud frame. */
 .of-b3d-canvas canvas:focus-visible {
-  outline: 2px solid var(--acc);
-  outline-offset: -2px;
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
 }
 
 /* ── The plates over the drawing ─────────────────────────────────────────────

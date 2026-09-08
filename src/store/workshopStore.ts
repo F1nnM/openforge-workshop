@@ -217,6 +217,27 @@ export function removePlacement(id: PlacementId): void {
   })
 }
 
+/**
+ * Put the placement map back to a value it previously held. Undo's one write.
+ *
+ * **A whole-map write, and that is what makes it the only action undo needs.**
+ * Every other action here is a verb — place one, move one, turn one, fill a slot
+ * — and an undo built out of verbs needs an inverse for each of them, forever,
+ * with a silent hole in the history the first time someone adds a verb and
+ * forgets its inverse. `history.ts` holds snapshots instead, so the whole of
+ * undo is *this map, again*, whatever produced it.
+ *
+ * It does **not** touch `generated`. A generated base owns a mesh hold
+ * (`retainGeneratedMeshes`), so restoring that map means reconciling the holds
+ * too, and a restore that dropped one would leak or free a mesh under a piece
+ * still on the plan. Undo therefore covers the catalog placements — which is
+ * every gesture this row added — and the generated map is a row of its own.
+ * `useHistory` subscribes to `placements` alone for the same reason.
+ */
+export function restorePlacements(placements: WorkshopState['placements']): void {
+  useWorkshopStore.setState({ placements })
+}
+
 /** Clear the builder scene, keeping the lock preference. */
 export function clearPlacements(): void {
   useWorkshopStore.setState({ placements: {}, generated: {} })

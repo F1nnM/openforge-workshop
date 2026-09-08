@@ -91,31 +91,24 @@
  * `edits.ts#planSlotEdit` rather than here, because *what a gesture means* has
  * been that module's since row A4b and a right click is not an exception.
  *
- * ## The right click, and why it is a `pointerup` and not a `contextmenu`
+ * ## The right click is the camera's again
  *
- * The owner asked for the slot editor to *"come up with a right click"*. Row C3
- * built the editor and could not put the gesture on the drawing: `onDown` began
- * `if (event.button !== 0) return`, so a secondary press was never seen here at
- * all. It is seen now, and the two decisions that make it safe are both about
- * the camera.
- *
- * **The press is never claimed.** `OrbitControls` binds the right button to
- * `MOUSE.PAN` and `Stage` passes `enablePan` for this surface, so a right-drag
- * pans across the plan — which is the gesture `surface.ts`'s own note calls the
- * way to reach the rest of a 96-unit lattice. The secondary press is recorded
- * and propagated, so three's controls get it exactly as before.
- *
- * **The release asks the 5 px question.** `isClickGesture` and
- * {@link DRAG_THRESHOLD_PX} are the mockup's own threshold and they are already
- * what separates a left-click from an orbit; a right-click and a right-pan are
- * the same physical distinction, so they get the same test rather than a second
- * one. This is why a bare `contextmenu` listener is the wrong seam and not
- * merely a different one: that event fires from the mouse *down* on X11 and
- * macOS, before any travel exists to measure, so it would open a dialog at the
+ * The owner asked for the slot editor to *"come up with a right click"*, and
+ * row C3 delivered it here — through a `pointerup` rather than a `contextmenu`,
+ * with the 5 px test separating a click from a pan, because `contextmenu` fires
+ * from the mouse *down* on X11 and macOS and would have opened a dialog at the
  * start of every pan.
  *
- * The browser's own menu is suppressed on the canvas and only there — see
- * `onContextMenu` below for why that is two reasons rather than one taste.
+ * **All of it is deleted**, and what deleted it is the selection rather than a
+ * change of mind about the gesture. The right click was carrying the editor
+ * because there was nothing else to carry it: with no persistent selection the
+ * only operand available was *whatever the pointer resolved to*, so the gesture
+ * had to be a pointer gesture. The editor now opens from the action bar over
+ * the selected piece, which is an operand the user chose deliberately.
+ *
+ * So the secondary button pans and does nothing else, the `contextmenu`
+ * suppression is gone with it, and a user right-clicking the canvas gets their
+ * browser's own menu like anywhere else on the page.
  *
  * ## Row D7: the glow is the tile's silhouette, and D3's was the plan view
  *
@@ -215,11 +208,12 @@
  */
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { BufferGeometry, Mesh } from 'three'
-import { GridHelper, Matrix4, Raycaster } from 'three'
+import type { BufferGeometry } from 'three'
+import { Matrix4, Raycaster } from 'three'
 
 import type {
   MoveDrag,
+  PlanCatalog,
   PlanPart,
   PlanPiecePart,
   PlanPoint,
@@ -228,6 +222,9 @@ import type {
   ScenePiece,
 } from '@/builder/canvas'
 import {
+  beginMove,
+  claimsPress,
+  createStyleResolver,
   describeCell,
   describeNudge,
   dragMoveTo,
@@ -235,10 +232,12 @@ import {
   nudgeMove,
   pieceAt,
   pieceName,
+  pressMeaning,
   previewMove,
+  resolveSelection,
   snapTo,
 } from '@/builder/canvas'
-import { GRID_UNIT_MM } from '@/catalog'
+import type { UndoControls } from '@/builder/canvas/useHistory'
 import type { PlacementId, SlotName, TemplateId } from '@/store'
 import {
   moveGeneratedPlacement,
@@ -250,7 +249,6 @@ import {
   rotatePlacement,
 } from '@/store'
 import type { OutlineRequest, OutlineSubject } from '@/three/outline'
-import { ScreenLine } from '@/three/ScreenLine'
 
 import type { SurfaceEdit, SurfaceStatus, TemplateGhost } from './edits'
 import type { PlacementFiller } from './fills'
@@ -260,21 +258,22 @@ import {
   planDrop,
   planGrab,
   planPlacement,
-  planRemoval,
   planSlotEdit,
   planTurn,
+  projectPlacement,
   removalOf,
   templateGhost,
 } from './edits'
 import { InstancedTiles } from './InstancedTiles'
+import { ArmedAnchor } from './ArmedAnchor'
+import { SelectionAnchor } from './SelectionAnchor'
+import { Caret, FootprintPlate, Ghost, Lattice, SelectionMark } from './surfaceDraw'
 import type { LodInstanceGroup, Room3D } from './instances'
 import type { LodGeometry } from './loadLod'
-import { PLATE_HEIGHT_MM, caretPositions, plateEdgePositions, plateGeometry } from './markers'
+import { PLATE_HEIGHT_MM, plateGeometry } from './markers'
 import { liftMatrix, tileMatrix } from './place'
 import type { SurfaceFit, SurfacePick } from './surface'
 import {
-  SURFACE_GRID_DROP_MM,
-  SURFACE_GRID_UNITS,
   isClickGesture,
   meshHeightMm,
   ndcOf,
@@ -298,24 +297,28 @@ const SECONDARY_BUTTON = 2
 /** The accent, as three cannot read a CSS custom property. `--acc` in `tokens.css`. */
 const ACCENT = '#8f5b21'
 
-/** The grid's lines and its two centre lines. `--mut` and `--line`'s dark end. */
-const GRID_LINE = '#79684d'
-
 /**
- * Line weights, in **CSS pixels**. See `ScreenLine.tsx` for why the unit is
- * spelled out and why these are numbers at all.
+ * A ghost that will not place: **`--mut`**, the palette's own de-emphasis tone.
  *
- * They were never chosen before: every one of these lines was a `gl.LINES`
- * primitive, which WebGL draws one *device* pixel wide, so the weight was
- * whatever `devicePixelRatio` happened to be — 0.91 CSS px on the display this
- * was reported from, and 0.5 px once the dpr floor went to 2, at which point the
- * grid started breaking into dashes. The values here restore the weights that
- * display used to get and then hold them there on every other display too.
+ * Not a red, and the absence is the palette's rather than an omission —
+ * `tokens.css` has no danger colour, because the parchment theme has no red in
+ * it at all. Inventing one for this would put a colour on screen that belongs to
+ * no family and would be the only saturated hue in the app.
+ *
+ * `--mut` says the right thing anyway, and arguably the better thing: a greyed
+ * ghost reads as **disabled**, and *"this click will do nothing"* is exactly
+ * what a blocked placement is. It also matches the one precedent the surface
+ * already has — `movingParts` draws an alarmed preview in the accent rather than
+ * in a warning colour, so a second warning vocabulary would be a third opinion
+ * about the same idea.
+ *
+ * **Colour is not the sole carrier.** The hint line names the piece that is in
+ * the way and the cell it is in — `edits.ts#blockedMessage` — so a user who
+ * cannot distinguish these two browns is told in words, before pressing.
  */
-const GRID_WIDTH_PX = 1
-const PLATE_OUTLINE_WIDTH_PX = 1.5
-const CARET_WIDTH_PX = 1.5
-const GRID_AXIS = '#8f5b21'
+const BLOCKED = '#79684d'
+
+
 
 /**
  * The hover cue's colour: **`--acc` lifted 35% of the way to `--bg`**.
@@ -423,6 +426,30 @@ export interface RoomSurfaceProps {
    * a final empty request would be a state update into a tree that is going away.
    */
   readonly onOutline: (request: OutlineRequest) => void
+  /**
+   * The catalog, so a candidate placement can be projected before it happens.
+   *
+   * **Required, and it is what makes the overlap refusal possible at all.** The
+   * surface used to take a `scene` and nothing else, which is why
+   * `edits.ts#templateGhost` could only draw a one-cell marker and
+   * `planPlacement` could only refuse an empty palette: with no catalog there is
+   * no way to turn an armed *family* into the parts it would draw, so there was
+   * no footprint to test a conflict against.
+   *
+   * `BuilderRoom` already holds one, so this is a prop and not a second lookup.
+   */
+  readonly catalog: PlanCatalog
+  /**
+   * Undo and redo, so `Ctrl`+`Z` has something to call.
+   *
+   * **A prop and not a `useHistory()` call here**, and the reason is a defect the
+   * shape prevents: the hook holds its ring in a `useRef` and subscribes to the
+   * store, so two callers would build two independent rings, both recording every
+   * edit, and the toolbar's buttons would undo a different history from the
+   * keyboard's. It is called once, by the screen that owns the builder, and
+   * handed to everything that offers the verb.
+   */
+  readonly history: UndoControls
   readonly onStatus: (status: SurfaceStatus) => void
   readonly announce: (text: string) => void
   /** Id of the paragraph holding the key map, for the canvas's `aria-describedby`. */
@@ -438,6 +465,8 @@ export function RoomSurface({
   tools,
   armed,
   fill,
+  catalog,
+  history,
   onEditSlots,
   onOutline,
   onStatus,
@@ -531,6 +560,61 @@ export function RoomSurface({
   )
   const under = useMemo(() => (cursor === null ? undefined : pieceAt(scene, cursor)), [scene, cursor])
   const moving = useMemo(() => (drag === null ? undefined : previewMove(drag, scene)), [drag, scene])
+  /**
+   * The selected piece, **resolved against the current scene on every render**.
+   *
+   * Not cached, and that is the point. The scene is a pure projection of the
+   * store and is rebuilt on every write, so a held `ScenePiece` would be a stale
+   * copy the moment the user turned or moved it. Resolving the id instead makes
+   * two invariants one rule: a piece that has been removed, cleared or undone out
+   * of existence simply resolves to `null`, so the selection cannot outlive its
+   * subject and nothing has to remember to clear it.
+   */
+  const selectedPiece = useMemo(() => resolveSelection(scene, tools.selected), [scene, tools.selected])
+
+  /**
+   * The style resolver the candidate projection goes through.
+   *
+   * Created once per catalog rather than per call, for `createStyleResolver`'s
+   * own stated reason: it memoises on the record, so one built inside `actAt`
+   * would be thrown away on every gesture and memoise nothing.
+   */
+  const style = useMemo(() => createStyleResolver(catalog), [catalog])
+
+  /**
+   * The armed template as the scene would draw it, and whether it lands clear.
+   *
+   * ## Why this can exist now, and could not before
+   *
+   * `edits.ts#templateGhost` draws a **one-cell marker**, and its docblock is
+   * emphatic that this is honest rather than lazy: since row A4b the armed thing
+   * is a *family*, a family's footprint is the union of its parts' boxes as B2's
+   * rule places them, and the surface had neither the fills nor a `PlanCatalog`
+   * to resolve them. Rows C5 and C6 supplied the solver and the layout rule; the
+   * `catalog` prop supplies the last of it. So the ghost is the real parts.
+   *
+   * ## Memoised on the snapped anchor, not on the cursor
+   *
+   * This is the difference between an affordable hover and a per-frame cost. The
+   * anchor changes when the pointer crosses a **cell boundary**, and the cursor
+   * changes on every pointer move — hundreds a second. Keying the memo on the
+   * anchor means a pointer travelling across one cell projects **once**, and
+   * `fills.ts` memoises the solve on `(family, size)` on top of that, so the
+   * second cell costs a projection and no solve at all.
+   *
+   * What is left per boundary crossing is one `buildPlanScene` over a single
+   * instance and one conflict sweep against the room. That is the cost the click
+   * already paid; it is now paid one gesture earlier, which is the entire point —
+   * an overlapping placement is refused, and a refusal the user could not see
+   * coming would be the worst version of that.
+   */
+  const armedGhost = useMemo(() => {
+    if (armed === null || ghost === null) return null
+    const solved = fill(armed, tools.armedSize)
+    return projectPlacement(catalog, style, scene, armed, ghost.anchor, tools.rotation, solved.fills)
+    // `ghost.anchor` and not `cursor`: see the docblock. `ghost` is itself
+    // memoised on the cursor, so this depends on the snapped value through it.
+  }, [armed, ghost, fill, tools.armedSize, tools.rotation, catalog, style, scene])
 
   /**
    * Everything with no mesh, as one flat list of plates — **per part**.
@@ -635,8 +719,27 @@ export function RoomSurface({
    * `under` keeps its identity while the pointer stays on one piece, and 200
    * moves across a two-part piece build **one** subject list.
    */
+  /**
+   * Which piece the pass is drawing: **the selection, or the hover when there is
+   * none.**
+   *
+   * One pass, one colour — see {@link outline} — so the subject and the colour
+   * have to be chosen by the same rule or they disagree. They did: this memo
+   * read `under` while the colour read `selectedPiece`, so hovering a *neighbour*
+   * of the selected piece outlined the neighbour in the **selection** colour.
+   * That is the worst available answer, because it says the wrong piece is
+   * selected rather than merely showing a cue at the wrong strength.
+   *
+   * The selection winning is also what makes the ground marker's job the one
+   * `markers.ts` describes: the marker persists so that hovering elsewhere does
+   * not *lose* the selection cue, and that only holds if the pass is showing the
+   * hover at those moments rather than the selection twice.
+   */
+  const litPiece = selectedPiece ?? under
+
   const silhouettes = useMemo<readonly OutlineSubject[]>(() => {
-    if (under === undefined) return []
+    if (litPiece === undefined || litPiece === null) return []
+    const under = litPiece
     const subjects: OutlineSubject[] = []
     // The surface draws in millimetres inside a scaled group; the pass draws in
     // the scene's own frame. `outline.ts` carries why the scale is composed here.
@@ -658,7 +761,7 @@ export function RoomSurface({
       if (plate.pieceId === under.id) subjects.push({ key: plate.key, geometry: plate.geometry, matrix: world })
     }
     return subjects
-  }, [under, room, plated, fit.scale])
+  }, [litPiece, room, plated, fit.scale])
 
   /**
    * The cue, published for `Stage`'s pass — one drawing at two strengths.
@@ -676,9 +779,18 @@ export function RoomSurface({
   const outline = useMemo<OutlineRequest>(
     () => ({
       subjects: dragging ? [] : silhouettes,
-      colour: tools.tool === 'erase' ? ACCENT : HOVER_GLOW,
+      // One pass, one colour, and which cue it carries is a fact about the
+      // state. The tempting alternative — a second, heavier outline for the
+      // selection — costs a second `OutlineEffect`, a second mask render target
+      // and a second fullscreen quad, against a pass `Stage.tsx` is deliberate
+      // about costing *one*. So the pass draws whichever cue is live, and the
+      // selection's persistent marker is a different drawing entirely:
+      // `markers.ts` puts a contour on its footprint, on the plan, where
+      // nothing can occlude it and where it stays while the pointer hovers
+      // something else.
+      colour: selectedPiece !== null ? ACCENT : HOVER_GLOW,
     }),
-    [dragging, silhouettes, tools.tool],
+    [dragging, silhouettes, selectedPiece],
   )
 
   useEffect(() => {
@@ -754,8 +866,36 @@ export function RoomSurface({
    * mid-gesture — so they read this rather than closing over state. `PlanCanvas`
    * needs the same thing for the same reason.
    */
-  const latest = useRef({ scene, tools, armed, fill, drag, heightOf, fit, apply, say, onEditSlots })
-  latest.current = { scene, tools, armed, fill, drag, heightOf, fit, apply, say, onEditSlots }
+  const latest = useRef({
+    scene,
+    tools,
+    armed,
+    fill,
+    drag,
+    heightOf,
+    fit,
+    apply,
+    say,
+    onEditSlots,
+    catalog,
+    style,
+    history,
+  })
+  latest.current = {
+    scene,
+    tools,
+    armed,
+    fill,
+    drag,
+    heightOf,
+    fit,
+    apply,
+    say,
+    onEditSlots,
+    catalog,
+    style,
+    history,
+  }
 
   /** The pick under a pointer event, or `null` when the ray misses the plan. */
   const pickAt = useCallback(
@@ -785,13 +925,48 @@ export function RoomSurface({
    */
   const actAt = useCallback(
     (at: PlanPoint) => {
-      const { scene: current, tools: state, armed: family, fill: solve, apply: run } = latest.current
-      if (state.tool === 'erase') {
-        run(planRemoval(current, at))
+      const {
+        scene: current,
+        tools: state,
+        armed: family,
+        fill: solve,
+        apply: run,
+        style: styleOf,
+        catalog: table,
+      } = latest.current
+      // `pressMeaning` and not a branch of its own: the pointer and the keyboard
+      // both arrive here, and a second reading of "what does a press at this
+      // point mean" is a second thing to keep in step with the first.
+      const meaning = pressMeaning(current, at, family !== null)
+      if (meaning.kind === 'camera') return
+      if (meaning.kind === 'deselect') {
+        state.select(null)
+        return
+      }
+      if (meaning.kind === 'select') {
+        state.select(meaning.id)
+        const piece = resolveSelection(current, meaning.id)
+        if (piece !== null) latest.current.say(`${pieceName(piece)} selected.`)
         return
       }
       const solved = family === null ? undefined : solve(family, state.armedSize)
-      run(planPlacement(family, state.rotation, at, state.step, solved))
+      // The projection is the whole of the refusal, and it is computed here
+      // rather than inside `planPlacement` for that module's own reason: it is
+      // pure, and projecting needs a catalog and a style resolver. So the
+      // component resolves the candidate and the verdict reads it.
+      const projection =
+        family === null
+          ? undefined
+          : projectPlacement(
+              table,
+              styleOf,
+              current,
+              family,
+              templateGhost(family, state.rotation, at, state.step).anchor,
+              state.rotation,
+              solved?.fills ?? {},
+            )
+      run(planPlacement(family, state.rotation, at, state.step, solved, projection))
     },
     [],
   )
@@ -805,21 +980,18 @@ export function RoomSurface({
    * Where a **secondary** press started, or `null`. Its own ref, deliberately.
    *
    * Two refs rather than one with a `button` field, and the second one is worth
-   * a paragraph because the alternative reintroduced a bug. `press` is read by
-   * `onUp` *whatever button was released*, so with a right press recorded in the
-   * same slot a chorded gesture would resolve as the wrong one — and that is not
-   * hypothetical, it is the shape of the bug that was already there: press the
-   * primary button, then right-click without releasing it, and today's `onUp`
-   * takes the *primary* press it finds, passes the 5 px test against the
-   * secondary release and **places a tile**. Keeping the two presses apart makes
-   * each release read only its own press, so the primary path below is unchanged
-   * line for line and the chord no longer places.
+   * a paragraph because the alternative reintroduces a bug this file already
+   * fixed once: `press` is read by `onUp` *whatever button was released*, so
+   * with a right press recorded in the same slot a chorded gesture resolves as
+   * the wrong one — hold the primary button, right-click without releasing it,
+   * and the release passes the 5 px test against the *primary* press and places
+   * a tile. Keeping the two apart makes each release read only its own press.
    *
    * There is no `claimed` on this one and there never can be: claiming a
-   * secondary press would take the camera pan away from the right button, which
-   * is the interaction the 5 px test exists to protect.
+   * secondary press would take the camera pan away from the right button.
    */
   const secondary = useRef<{ x: number; y: number } | null>(null)
+
 
   useEffect(() => {
     const canvas = gl.domElement
@@ -849,60 +1021,60 @@ export function RoomSurface({
      * pay for it. `planSlotEdit` decides the rest — including both arms that
      * open nothing, each of which still says so.
      */
-    const openSlotsAt = (event: PointerEvent) => {
-      const started = secondary.current
-      secondary.current = null
-      const open = latest.current.onEditSlots
-      if (started === null || open === undefined) return
-      if (!isClickGesture(started, { x: event.clientX, y: event.clientY })) return
-      const pick = pickAt(event.clientX, event.clientY)
-      if (pick === null) return
-      const asked = planSlotEdit(latest.current.scene, pick.point)
-      latest.current.say(asked.message)
-      if (asked.placement !== null) open(asked.placement, asked.slot)
-    }
-
     const onDown = (event: PointerEvent) => {
+      // A secondary press is **recorded and never claimed**. Not claimed,
+      // because `OrbitControls` binds the right button to `MOUSE.PAN` and
+      // `Stage` passes `enablePan` — so every pan gesture starts with one, and
+      // claiming it would take panning away from the button. Recorded, so the
+      // release can ask the 5 px question and tell a *click* from a pan.
+      //
+      // The one thing a right-click does is **cancel what is armed**, which is
+      // the affordance `ArmedLabel` states. That is a much safer thing to hang
+      // on this button than the slot editor row C3 hung here: a stray cancel
+      // costs one click to undo by re-arming, where a stray dialog interrupted
+      // the pan it was mistaken for. It is also why a bare `contextmenu`
+      // listener is still the wrong seam — that event fires from the mouse
+      // *down* on X11 and macOS, before any travel exists to measure.
       if (event.button === SECONDARY_BUTTON) {
-        // **Never claimed**, so the event goes on to `OrbitControls` and a
-        // right-*drag* still pans the camera exactly as it did. All this press
-        // does is remember where it started, so `onUp` can ask the mockup's own
-        // 5 px question — which is the whole of the click/drag distinction and
-        // the reason a bare `contextmenu` listener would be wrong: that event
-        // fires on the press on X11 and macOS, before any travel exists to
-        // measure, so it would claim every pan gesture in the app.
-        //
-        // Dropped while a piece is in the air: a chorded press mid-carry is not
-        // a request to open a dialog over the drag it would interrupt.
-        secondary.current =
-          latest.current.onEditSlots === undefined || press.current?.claimed === true
-            ? null
-            : { x: event.clientX, y: event.clientY }
+        secondary.current = { x: event.clientX, y: event.clientY }
         return
       }
       if (event.button !== 0) return
+      // **The bug class, not one instance.** This listener is on the canvas's
+      // *parent* in the capture phase and calls `stopPropagation` on the presses
+      // it claims, and drei's `<Html>` portals its overlays into that same
+      // parent. Without this guard, no button on the selection's action bar — or
+      // on any overlay added inside the host later — is ever clickable, because
+      // the press is swallowed before it reaches the button. Moving one portal
+      // elsewhere would leave the trap armed for the next one.
+      if (!claimsPress(event.target, canvas)) return
       const { scene: current, tools: state } = latest.current
       const pick = pickAt(event.clientX, event.clientY)
       if (pick === null) return
       setCursor(pick.point)
 
-      // Move mode, or Shift with the primary button in any mode — the same
-      // modeless gesture `PlanCanvas` teaches, so the modifier means one thing
-      // in both views.
-      const wantsMove = state.tool === 'move' || event.shiftKey
-      if (wantsMove) {
+      // A press on a piece with nothing armed **selects it and picks it up in
+      // one gesture** — the editor "tweak": press to select, then drag to move,
+      // with no intermediate click. A press on bare ground is not claimed, so it
+      // orbits, which is what keeps the camera reachable without a mode.
+      const meaning = pressMeaning(current, pick.point, state.selectedTemplate !== null)
+      if (meaning.kind === 'select') {
+        state.select(meaning.id)
         const grabbed = planGrab(current, pick.point, pick.point)
+        if (grabbed.drag !== null) {
+          // Claimed: the orbit must not also run, or the camera swings while the
+          // piece is being carried.
+          event.stopPropagation()
+          event.preventDefault()
+          press.current = { x: event.clientX, y: event.clientY, button: event.button, claimed: true }
+          setDrag(grabbed.drag)
+          if (typeof canvas.setPointerCapture === 'function') canvas.setPointerCapture(event.pointerId)
+          invalidate()
+          return
+        }
+        // Selectable but not grabbable. The selection stands; the press is left
+        // to the camera rather than being claimed for a drag that cannot start.
         latest.current.say(grabbed.message)
-        if (grabbed.drag === null) return
-        // Claimed: the orbit must not also run, or the camera swings while the
-        // piece is being carried.
-        event.stopPropagation()
-        event.preventDefault()
-        press.current = { x: event.clientX, y: event.clientY, button: event.button, claimed: true }
-        setDrag(grabbed.drag)
-        if (typeof canvas.setPointerCapture === 'function') canvas.setPointerCapture(event.pointerId)
-        invalidate()
-        return
       }
 
       // Not claimed: `OrbitControls` gets the press and orbits. Whether the
@@ -942,7 +1114,14 @@ export function RoomSurface({
       // the pointer finished over, without waiting for the next move.
       glowWhileHeld(false)
       if (event.button === SECONDARY_BUTTON) {
-        openSlotsAt(event)
+        const from = secondary.current
+        secondary.current = null
+        // A pan, not a click. Nothing to do; the camera already moved.
+        if (from === null || !isClickGesture(from, { x: event.clientX, y: event.clientY })) return
+        if (latest.current.tools.selectedTemplate !== null) {
+          latest.current.tools.arm(null)
+          latest.current.say('Nothing armed.')
+        }
         return
       }
       const started = press.current
@@ -955,7 +1134,18 @@ export function RoomSurface({
       if (started.claimed) {
         const held = latest.current.drag
         setDrag(null)
-        if (held !== null) latest.current.apply(planDrop(held, latest.current.scene))
+        if (held === null) return
+        // The same 5 px question the unclaimed path asks, and it has to be asked
+        // here too now that a press on a piece is claimed for the tweak: a
+        // *click* on a piece is a selection and nothing else, and running it
+        // through `planDrop` would announce "left at (4, 7). Nothing moved." on
+        // every selecting click. A press that travelled is a real move.
+        if (isClickGesture(started, { x: event.clientX, y: event.clientY })) {
+          const piece = resolveSelection(latest.current.scene, latest.current.tools.selected)
+          if (piece !== null) latest.current.say(`${pieceName(piece)} selected.`)
+          return
+        }
+        latest.current.apply(planDrop(held, latest.current.scene))
         return
       }
       // The mockup's own test, and the whole of the orbit/click distinction.
@@ -988,40 +1178,18 @@ export function RoomSurface({
       }
     }
 
-    /**
-     * The browser's own menu, suppressed — **on the canvas and nowhere else**.
-     *
-     * Needed for two reasons and each on its own would be enough. The menu would
-     * cover the editor it is meant to open; and on Windows `contextmenu` fires
-     * from the mouse *up*, so a native menu grabbing focus there can swallow the
-     * `pointerup` this row's whole gesture is measured on.
-     *
-     * `OrbitControls` also calls `preventDefault` here, and this listener is not
-     * therefore redundant: it does so only while `controls.enabled` is true and
-     * only as long as it stays connected to this element, neither of which is
-     * this row's to promise. Two `preventDefault`s on one event cost nothing.
-     *
-     * Scoped to `canvas` rather than `host` or `document` on purpose — a user
-     * right-clicking the panel, the bill or the page still gets their browser's
-     * menu, because nothing outside this surface has claimed the gesture.
-     */
-    const onContextMenu = (event: MouseEvent) => {
-      event.preventDefault()
-    }
 
     host.addEventListener('pointerdown', onDown, true)
     canvas.addEventListener('pointermove', onMove)
     canvas.addEventListener('pointerup', onUp)
     canvas.addEventListener('pointerleave', onLeave)
     canvas.addEventListener('pointercancel', onCancel)
-    canvas.addEventListener('contextmenu', onContextMenu)
     return () => {
       host.removeEventListener('pointerdown', onDown, true)
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointerup', onUp)
       canvas.removeEventListener('pointerleave', onLeave)
       canvas.removeEventListener('pointercancel', onCancel)
-      canvas.removeEventListener('contextmenu', onContextMenu)
     }
   }, [actAt, gl, invalidate, pickAt])
 
@@ -1069,6 +1237,37 @@ export function RoomSurface({
     [invalidate],
   )
 
+  /**
+   * Move the selection by one snap step, with no drag in the air.
+   *
+   * **A one-shot grab, drop and announce**, rather than the {@link nudge} path,
+   * which nudges a piece the user is already carrying. The two are not the same
+   * gesture: a carried piece is ephemeral component state and commits on release,
+   * where an arrow key on a selection is a complete edit — so this writes to the
+   * store once per press, which is exactly what undo wants to see.
+   *
+   * The refusal path is `move.ts`'s and is not re-decided here: a nudge into an
+   * exact overlap comes back as an uncommittable preview, is said out loud, and
+   * the piece stays where it was.
+   */
+  const nudgeSelection = useCallback((dx: number, dz: number) => {
+    const { scene: current, tools: state, apply: run } = latest.current
+    const chosen = resolveSelection(current, state.selected)
+    if (chosen === null) return
+    const proposed = nudgeMove(beginMove(chosen, null), dx, dz, state.step)
+    const preview = previewMove(proposed, current)
+    if (preview === undefined) return
+    if (!preview.committable) {
+      latest.current.say(preview.refusal?.message ?? describeNudge(preview))
+      invalidate()
+      return
+    }
+    run(planDrop(proposed, current))
+    const box = preview.moved.box
+    setCursor([box.x + box.w / 2, box.z + box.d / 2])
+    invalidate()
+  }, [invalidate])
+
   const nudge = useCallback(
     (dx: number, dz: number) => {
       const held = latest.current.drag
@@ -1110,6 +1309,11 @@ export function RoomSurface({
       navIndex.current = (navIndex.current + direction + order.length) % order.length
       const piece = order[navIndex.current] as ScenePiece
       setCursor([piece.box.x + piece.box.w / 2, piece.box.z + piece.box.d / 2])
+      // **Selects, not merely announces**, and that is what makes this the
+      // primary keyboard route rather than a readout. Every verb acts on the
+      // selection, so stepping onto a piece has to *be* selecting it or a
+      // keyboard user could reach a piece and then have nothing to press.
+      latest.current.tools.select(piece.id)
       latest.current.say(`${String(navIndex.current + 1)} of ${String(order.length)}: ${piece.label}`)
       invalidate()
     },
@@ -1175,22 +1379,46 @@ export function RoomSurface({
         }
       }
 
+      // Undo first, and modifier-qualified, so it cannot be shadowed by a bare
+      // letter below. `metaKey` as well as `ctrlKey`: on macOS the gesture is
+      // Cmd+Z, and a builder that only answered Ctrl would appear to have no
+      // undo at all on half the platforms the app ships to.
+      if ((event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z')) {
+        handled()
+        const said = event.shiftKey ? latest.current.history.redo() : latest.current.history.undo()
+        latest.current.say(said ?? (event.shiftKey ? 'Nothing to redo.' : 'Nothing to undo.'))
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && (event.key === 'y' || event.key === 'Y')) {
+        handled()
+        latest.current.say(latest.current.history.redo() ?? 'Nothing to redo.')
+        return
+      }
+
+      const chosen = resolveSelection(current, state.selected)
+
       switch (event.key) {
-        case 'ArrowLeft': handled(); moveCursor(-step, 0); return
-        case 'ArrowRight': handled(); moveCursor(step, 0); return
-        case 'ArrowUp': handled(); moveCursor(0, -step); return
-        case 'ArrowDown': handled(); moveCursor(0, step); return
+        // The arrows do one of two things, and which one is a fact about the
+        // state rather than a mode: with a selection they nudge **the piece**,
+        // and with none they walk the plan cursor so a keyboard user can reach
+        // a piece to select in the first place.
+        case 'ArrowLeft': handled(); if (chosen !== null) nudgeSelection(-step, 0); else moveCursor(-step, 0); return
+        case 'ArrowRight': handled(); if (chosen !== null) nudgeSelection(step, 0); else moveCursor(step, 0); return
+        case 'ArrowUp': handled(); if (chosen !== null) nudgeSelection(0, -step); else moveCursor(0, -step); return
+        case 'ArrowDown': handled(); if (chosen !== null) nudgeSelection(0, step); else moveCursor(0, step); return
         case 'Enter':
         case ' ': {
           handled()
-          if (at === null) {
-            latest.current.say('Move the cursor onto the plan first.')
+          // On a selection, `Enter` opens its slots — the gesture the right
+          // click used to carry, moved to the keyboard path that has an operand.
+          if (chosen !== null) {
+            const asked = planSlotEdit(current, [chosen.placement.x, chosen.placement.z])
+            latest.current.say(asked.message)
+            if (asked.placement !== null) latest.current.onEditSlots?.(asked.placement, asked.slot)
             return
           }
-          if (state.tool === 'move' || event.shiftKey) {
-            const grabbed = planGrab(current, at, null)
-            latest.current.say(grabbed.message)
-            setDrag(grabbed.drag)
+          if (at === null) {
+            latest.current.say('Move the cursor onto the plan first.')
             return
           }
           actAt(at)
@@ -1199,19 +1427,37 @@ export function RoomSurface({
         case 'Delete':
         case 'Backspace':
           handled()
-          if (at !== null) run(planRemoval(current, at))
+          // The selection, not the cursor. This is the whole of what replaced
+          // erase mode: one operand, chosen deliberately, and undo behind it.
+          if (chosen !== null) run(removalOf(chosen))
+          else latest.current.say('Nothing selected. Click a template to select it.')
           return
         case 'r':
         case 'R': {
           handled()
-          const target = at === null ? undefined : pieceAt(current, at)
-          const edit = planTurn(current, sticky.current, target, family, state.rotation, event.shiftKey ? -1 : 1)
-          sticky.current = edit.kind === 'turn' ? edit.id : null
+          // No `sticky` ref any more. It existed to remember which piece `R`
+          // turned last, because the pointer may have moved off it between
+          // presses — which is exactly the job a selection does, and does
+          // without a second piece of state that can disagree with the drawing.
+          const edit = planTurn(current, chosen?.id ?? null, chosen ?? undefined, family, state.rotation, event.shiftKey ? -1 : 1)
           run(edit)
           return
         }
         case '[': handled(); stepToPiece(-1); return
         case ']': handled(); stepToPiece(1); return
+        case 'Escape':
+          handled()
+          // One key, two things to let go of, and they are mutually exclusive
+          // so there is no precedence to decide: disarm the palette, or drop the
+          // selection.
+          if (state.selectedTemplate !== null) {
+            state.arm(null)
+            latest.current.say('Nothing armed.')
+          } else if (state.selected !== null) {
+            state.select(null)
+            latest.current.say('Nothing selected.')
+          }
+          return
         case 'g':
         case 'G': {
           handled()
@@ -1219,18 +1465,23 @@ export function RoomSurface({
           latest.current.say(`Snap ${state.snap === 'fine' ? '1' : '0.5'} units.`)
           return
         }
-        case 'e':
-        case 'E': handled(); state.setTool('erase'); latest.current.say('Erase mode. Click a tile to remove it.'); return
-        case 'p':
-        case 'P': handled(); state.setTool('place'); latest.current.say('Place mode.'); return
-        case 'm':
-        case 'M': handled(); state.setTool('move'); latest.current.say('Move mode. Drag a tile to reposition it.'); return
         default:
           return
       }
     }
 
-    const onFocus = () => { setFocused(true) }
+    const onFocus = () => {
+      setFocused(true)
+      // Put the keyboard cursor somewhere visible if it has nowhere yet, so
+      // focus has an **in-scene** cue rather than only a ring around the
+      // viewport. A `role="application"` tab stop has to show that it holds the
+      // keys, and the caret says it where the user is looking; `builder3d.css`
+      // carries why the ring itself is as quiet as it is.
+      if (cursorRef.current === null) {
+        setCursor([0, 0])
+        invalidate()
+      }
+    }
     const onBlur = () => { setFocused(false) }
 
     canvas.addEventListener('keydown', onKey)
@@ -1253,15 +1504,27 @@ export function RoomSurface({
   const hint = useMemo(
     () =>
       describeSurfaceHint({
-        tool: tools.tool,
+        activity: tools.activity,
         armed,
+        selected: selectedPiece ?? undefined,
         under,
         moving,
         onPlan: cursor !== null,
         waiting: plated.length,
         unfilled: scene.unfilled.length,
+        blocked: armedGhost?.blocking,
       }),
-    [tools.tool, armed, under, moving, cursor, plated.length, scene.unfilled.length],
+    [
+      tools.activity,
+      armed,
+      selectedPiece,
+      under,
+      moving,
+      cursor,
+      plated.length,
+      scene.unfilled.length,
+      armedGhost,
+    ],
   )
 
   const status = useMemo<SurfaceStatus>(
@@ -1269,9 +1532,12 @@ export function RoomSurface({
       cursor: cursor ?? [0, 0],
       snap: tools.snap,
       step: tools.step,
-      tool: tools.tool,
+      activity: tools.activity,
       hint,
-      selectedName: ghost?.name ?? null,
+      // The armed family's name while armed, and the selected piece's while
+      // selected — the two are exclusive, so one field answers for both and the
+      // readout never has to show two names or choose between them.
+      selectedName: ghost?.name ?? (selectedPiece === null ? null : pieceName(selectedPiece)),
       // Nothing left to refuse about an armed family — see `edits.ts`. It stays a
       // field of the readout because `move.ts` and row C2's solver both have
       // refusals to put in it, and a `null` here is a true statement about the
@@ -1285,7 +1551,7 @@ export function RoomSurface({
       placements: scene.pieces.length + scene.unfilled.length,
       conflicts: scene.conflicts.size,
     }),
-    [cursor, tools.snap, tools.step, tools.tool, hint, ghost, moving, scene],
+    [cursor, tools.snap, tools.step, tools.activity, hint, ghost, moving, scene, selectedPiece],
   )
 
   useEffect(() => {
@@ -1387,6 +1653,94 @@ export function RoomSurface({
       ))}
 
       {/*
+        What the next click will place, and how to stop — at the cursor, where
+        the eye already is.
+
+        The armed state used to announce itself only in the two corner plates of
+        a full-bleed viewport, and neither of them said how to *stop*: `Escape`
+        disarmed and always did, and nothing on screen mentioned it. A user who
+        armed a family by accident had a ghost following their pointer and a
+        primary button that placed a tile wherever they clicked next.
+
+        Anchored at the ghost's own snapped anchor rather than at the raw
+        cursor, so the label sits still while the pointer moves within a cell —
+        the same value the projection is memoised on. `ArmedLabel` carries why it
+        takes no pointer events, which is the constraint that makes it a label
+        rather than a control.
+      */}
+      {ghost === null || armed === null ? null : (
+        <ArmedAnchor anchor={ghost.anchor} name={ghost.name} blocked={armedGhost?.blocking} />
+      )}
+
+      {/*
+        The selection's **persistent** cue, on the plan.
+
+        The outline pass carries whichever cue is live — the selection, or the
+        hover when nothing is selected — because it is one pass with one colour
+        and `Stage.tsx` is deliberate about it costing one fullscreen quad. That
+        leaves a gap this fills: while the pointer hovers a *different* piece,
+        the pass is drawing that one, and the user still needs to see what is
+        selected.
+
+        A contour on the footprint answers it, and it is **D3's rejected drawing
+        used correctly**. D3 built the *hover* cue this way — a flat loop lifted
+        to a part's top height — and the owner's diagnosis was right: as a
+        silhouette substitute it was the plan view floating in the air above the
+        mesh, and occludable. On the ground, where the piece's footprint
+        actually is, it is none of those things. It is what `markers.ts` exists
+        to draw.
+
+        No new geometry function: `plateEdgePositions` already traces the convex
+        parts, so the marker and the plates come out of one derivation and
+        cannot disagree about where a piece is.
+      */}
+      {selectedPiece !== null && (
+        <SelectionMark parts={selectedPiece.polygons} colour={ACCENT} />
+      )}
+
+      {/*
+        The selection's verbs, anchored to the piece they act on.
+
+        `key` on the placement id, which is what resets the bar's own disclosure
+        state when the selection moves to another piece: an expanded slot editor
+        left open across a change of subject would be showing one piece's parts
+        under another piece's name.
+
+        Absent when there is no selection, so the DOM has no inert overlay over
+        the canvas — which matters because the capture-phase listener would
+        otherwise have a target to ignore on every press.
+      */}
+      {selectedPiece !== null && (
+        <SelectionAnchor
+          key={selectedPiece.id}
+          piece={selectedPiece}
+          heightMm={heightOf(selectedPiece)}
+          {...(onEditSlots === undefined
+            ? {}
+            : {
+                onEditSlots: () => {
+                  // `planSlotEdit` and not a bare `onEditSlots(id)`: it is the
+                  // one place that decides *which slot* a request opens on, and
+                  // the piece's own anchor is the honest point to ask about when
+                  // the request came from a button rather than from a pointer.
+                  const asked = planSlotEdit(scene, [
+                    selectedPiece.placement.x,
+                    selectedPiece.placement.z,
+                  ])
+                  say(asked.message)
+                  if (asked.placement !== null) onEditSlots(asked.placement, asked.slot)
+                },
+              })}
+          onTurn={() => {
+            apply(planTurn(scene, selectedPiece.id, selectedPiece, armed, tools.rotation, 1))
+          }}
+          onRemove={() => {
+            apply(removalOf(selectedPiece))
+          }}
+        />
+      )}
+
+      {/*
         The hover cue is **not drawn here**, and that is row D7's whole shape. It
         is a silhouette of the geometry above rather than a loop beside it, so it
         cannot be a line in this tree: it is a post pass over the frame this tree
@@ -1414,15 +1768,38 @@ export function RoomSurface({
         `Ghost` with a null matrix, which is the path a tile whose mesh had not
         arrived already took, so there is no second absent-geometry state.
       */}
-      {ghost === null ? null : (
-        <Ghost
-          parts={ghost.polygons}
-          matrix={null}
-          geometry={undefined}
-          tint={ACCENT}
-          plateHeightMm={PLATE_HEIGHT_MM * 2}
-        />
-      )}
+      {/*
+        The ghost, as the real parts where they are known and as the one-cell
+        marker where they are not — a caller with no recipe for the armed family
+        still gets something under the pointer rather than nothing, which is
+        `edits.ts#templateGhost`'s own argument for the marker existing at all.
+
+        A **blocked** ghost is tinted with the refusal colour *and* hatched: it is
+        the one state on this surface where the drawing has to say "this click
+        will do nothing", and colour is never the sole carrier of that.
+      */}
+      {ghost === null
+        ? null
+        : (armedGhost?.piece?.parts ?? []).length > 0
+          ? armedGhost?.piece?.parts.map((part) => (
+              <Ghost
+                key={`${ghost.anchor[0]}:${ghost.anchor[1]}:${part.slot}`}
+                parts={part.polygons}
+                matrix={null}
+                geometry={undefined}
+                tint={armedGhost.blocking.length > 0 ? BLOCKED : ACCENT}
+                plateHeightMm={part.layout.elevationMm + PLATE_HEIGHT_MM * 2}
+              />
+            ))
+          : (
+              <Ghost
+                parts={ghost.polygons}
+                matrix={null}
+                geometry={undefined}
+                tint={ACCENT}
+                plateHeightMm={PLATE_HEIGHT_MM * 2}
+              />
+            )}
 
       {movingParts.map((part) => (
         <Ghost
@@ -1435,7 +1812,7 @@ export function RoomSurface({
         />
       ))}
 
-      {focused && cursor !== null ? <Caret at={cursor} /> : null}
+      {focused && cursor !== null ? <Caret at={cursor} colour={ACCENT} /> : null}
     </group>
   )
 }
@@ -1480,194 +1857,4 @@ const CASTER = new Raycaster()
 
 function findPiece(scene: PlanScene, id: PlacementId): ScenePiece | undefined {
   return scene.pieces.find((piece) => piece.id === id) ?? scene.generated.find((piece) => piece.id === id)
-}
-
-/* -------------------------------------------------------------------- drawing */
-
-/**
- * The lattice, in millimetres, one inch a division.
- *
- * `GridHelper` still builds it — it is core three, it is the right arithmetic and
- * it carries the two colours on a vertex attribute — but it is used as a
- * *source of geometry* rather than mounted. Mounted, it is a `LineSegments`, and
- * that is one device pixel per line whatever the display: at dpr 2 the grid came
- * out at half a CSS pixel and broke into dashes, because a half-pixel line cannot
- * cover a pixel. {@link ScreenLine} draws the same 388 vertices at a width stated
- * in CSS pixels.
- *
- * Dropped {@link SURFACE_GRID_DROP_MM} below the plan so a floor tile resting on
- * `y = 0` does not z-fight with the line under it.
- *
- * Both arrays are memoised with no dependencies, so the helper is constructed
- * and read once: a fresh array every render would rebuild the geometry on every
- * pointer move.
- */
-function Lattice() {
-  const lattice = useMemo(() => {
-    const helper = new GridHelper(SURFACE_GRID_UNITS * GRID_UNIT_MM, SURFACE_GRID_UNITS, GRID_AXIS, GRID_LINE)
-    const positions = new Float32Array(helper.geometry.getAttribute('position').array)
-    const colours = new Float32Array(helper.geometry.getAttribute('color').array)
-    // The helper owns a `LineBasicMaterial` and the geometry we have just copied
-    // out of; neither is used again and neither is r3f's, because neither came
-    // from JSX.
-    helper.geometry.dispose()
-    helper.material.dispose()
-    return { positions, colours }
-  }, [])
-
-  return (
-    <ScreenLine
-      positions={lattice.positions}
-      colors={lattice.colours}
-      widthPx={GRID_WIDTH_PX}
-      position={[0, -SURFACE_GRID_DROP_MM, 0]}
-    />
-  )
-}
-
-/**
- * A part with no mesh: its tagged footprint, filled and ringed.
- *
- * Flat, 0.6 mm of it, in the part's own material tint with a bright contour —
- * `markers.ts` sets out why that cannot be read as the tile and why it must not
- * be omitted.
- *
- * Takes `parts` and two colours rather than a piece, which since row **A4b** is
- * the only shape that works: a plate is drawn **per slot**, so it needs that
- * slot's own outline and tint, and a generated base has neither a record nor a
- * slot. `heightMm` is the slot's declared elevation plus the plate's thickness,
- * so a wall waiting for a mesh appears at wall height over the floor that has
- * one.
- *
- * **The geometry is handed in since row D7** and is not this component's to
- * dispose. It used to be built and released here, which was right while a plate
- * was the only thing drawn from it; the hover cue outlines the plate's own
- * silhouette, so the plate and the cue have to hold the same object, and the
- * owner is the one place that can see both — see the {@link plated} memo.
- */
-function FootprintPlate({
-  parts,
-  geometry,
-  tint,
-  edge,
-  heightMm,
-}: {
-  parts: readonly PlanPart[]
-  geometry: BufferGeometry
-  tint: string
-  edge: string
-  heightMm: number
-}) {
-  return (
-    <>
-      <mesh geometry={geometry} dispose={null}>
-        <meshStandardMaterial color={tint} flatShading transparent opacity={0.72} roughness={0.95} metalness={0} />
-      </mesh>
-      <PlateOutline parts={parts} colour={edge} heightMm={heightMm} />
-    </>
-  )
-}
-
-/**
- * The ring around a plate, and the ghost's fallback when it has no mesh.
- *
- * Not the hover cue any more — row D7 moved that to a silhouette pass, and the
- * two things it drew were never the same drawing: this one traces the tagged
- * footprint on purpose, because a plate *is* the tagged footprint given 0.6 mm of
- * thickness, while a cue tracing a footprint over a 63.5 mm wall was the defect.
- */
-function PlateOutline({
-  parts,
-  colour,
-  heightMm,
-}: {
-  parts: readonly PlanPart[]
-  colour: string
-  heightMm: number
-}) {
-  const positions = useMemo(() => plateEdgePositions(parts, heightMm), [parts, heightMm])
-
-  return <ScreenLine positions={positions} colour={colour} widthPx={PLATE_OUTLINE_WIDTH_PX} opacity={0.9} />
-}
-
-/**
- * The ghost: the tile's own geometry where it will land, translucent.
- *
- * `matrix` comes from `place.ts`'s `tileMatrix` — the *same* call
- * `buildRoom3D` makes for the placed instance — so the ghost and the tile
- * cannot be in different places. When the mesh has not arrived there is no
- * matrix and the footprint plate stands in, which is the same fallback a placed
- * piece gets and for the same reason.
- *
- * The material is this component's own and never `material.ts`'s: that registry
- * refcounts a material shared with the detail viewer, and turning its opacity
- * down for a ghost would make every tile in the drawer translucent.
- */
-function Ghost({
-  parts,
-  matrix,
-  geometry,
-  tint,
-  plateHeightMm = PLATE_HEIGHT_MM * 2,
-}: {
-  parts: readonly PlanPart[]
-  matrix: Matrix4 | null
-  geometry: BufferGeometry | undefined
-  tint: string
-  /**
-   * Where the fallback ring is drawn when there is no mesh.
-   *
-   * A parameter rather than the constant it was, because a part that will land
-   * at a slot elevation has to ring the cell at the height it will land at — the
-   * same reason the matrix is lifted.
-   */
-  plateHeightMm?: number
-}) {
-  const ref = useRef<Mesh>(null)
-  useEffect(() => {
-    const mesh = ref.current
-    if (mesh === null || matrix === null) return
-    mesh.matrixAutoUpdate = false
-    mesh.matrix.copy(matrix)
-    mesh.matrixWorldNeedsUpdate = true
-  }, [matrix])
-
-  if (geometry === undefined || matrix === null) {
-    return <PlateOutline parts={parts} colour={tint} heightMm={plateHeightMm} />
-  }
-
-  return (
-    <mesh ref={ref} geometry={geometry} dispose={null}>
-      {/* `depthWrite: false` so the ghost does not occlude the tile it is about
-          to sit beside, and `flatShading` so it reads as the same kind of object
-          as the placed tiles rather than as a smooth blob. */}
-      <meshStandardMaterial
-        color={tint}
-        flatShading
-        transparent
-        opacity={0.5}
-        depthWrite={false}
-        roughness={0.6}
-        metalness={0}
-      />
-    </mesh>
-  )
-}
-
-/**
- * The plan cursor, shown only while the canvas has focus.
- *
- * `PlanCanvas`'s reasoning, unchanged: it exists for the keyboard, and a second
- * crosshair chasing a mouse pointer that already has a ghost is noise.
- */
-function Caret({ at }: { at: PlanPoint }) {
-  const positions = useMemo(() => caretPositions(), [])
-  return (
-    <ScreenLine
-      positions={positions}
-      colour={ACCENT}
-      widthPx={CARET_WIDTH_PX}
-      position={[at[0] * GRID_UNIT_MM, PLATE_HEIGHT_MM * 3, at[1] * GRID_UNIT_MM]}
-    />
-  )
 }

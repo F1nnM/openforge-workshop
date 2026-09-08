@@ -85,12 +85,17 @@ export function freeCellFor(scene: PlanScene, foot: Footprint, heightMm = 0): Pl
     const geometry = planGeometry(shape, 0, at[0], at[1])
     const subject: OverlapSubject = {
       band: 'area',
+      // Asserted rather than derived: this function *chooses* the band, so it
+      // knows it, and a cell it hands back must be one the scene will not flag —
+      // which means every conflict counts here, exact or not.
+      bandSource: 'kinds',
       level: { elevationMm: 0, heightMm },
       box: geometry.box,
       parts: geometry.parts,
       axisAligned: geometry.axisAligned,
+      cover: shape.cover,
     }
-    return !occupied.some((candidate) => subjectsConflict(candidate, subject))
+    return !occupied.some((candidate) => subjectsConflict(candidate, subject) !== null)
   }
 
   // Ring by ring, so the answer is the *nearest* free cell rather than the first

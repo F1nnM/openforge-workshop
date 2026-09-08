@@ -75,23 +75,32 @@
  * {@link isConcentricOnLattice} is nevertheless written as the arithmetic rather
  * than as `sweep === 90`, because it is the arithmetic that is true.
  *
- * ## Blocked moves: flagged, not refused — with one exception
+ * ## Blocked moves: the drag is free, the drop is not
  *
- * `overlap.ts` is emphatic that a conflict informs and never prevents, and gives
- * the reason a *move* needs most: *"overlapping while arranging is normal. Users
- * push a piece through its neighbours on the way to where it belongs."* The
- * error direction seals it — a sector's convex parts are an outward bound, so the
- * test can report a contact that is not there. Refusing a drop on that would take
- * a piece the user can see is clear and refuse to put it down.
+ * An overlapping drop used to commit. It no longer does — but **only when the
+ * conflict is exact**, and the distinction is `overlap.ts`'s own since it began
+ * returning a {@link ConflictKind} instead of a boolean.
  *
- * So an overlapping drop **commits**, previews in the accent, and announces the
- * count; the piece then carries W6's conflict hatch like any other.
+ * The sentence that used to govern this section still governs the *drag*:
+ * *"overlapping while arranging is normal. Users push a piece through its
+ * neighbours on the way to where it belongs."* So the piece follows the pointer
+ * anywhere, through anything, and {@link MovePreview.overlaps} still reports
+ * every contact it finds along the way. Nothing about the gesture narrowed.
  *
- * The one refusal is the one `ghost.ts` already makes for a placement, for the
- * same reason and by the same rule: an **identical** tile at identical
- * coordinates and an identical angle is invisible on the plan and would silently
- * double a line in the bill of tiles. A drop onto one is refused and the piece
- * goes back where it came from, said out loud.
+ * What narrowed is the commit. {@link MovePreview.blocking} is the subset of
+ * those contacts that `overlap.ts` is *sure* about — exact geometry on both
+ * sides, both levels known, both bands measured — and a non-empty `blocking`
+ * refuses the drop and puts the piece back. The old objection was the error
+ * direction, *"a sector's convex parts are an outward bound, so the test can
+ * report a contact that is not there"*, and that objection is now expressed in
+ * the type rather than argued against: a sector's conflict is `inexact`, it
+ * never reaches `blocking`, and such a drop commits exactly as before.
+ *
+ * The `duplicate` refusal is unchanged and takes precedence where both apply:
+ * an **identical** tile at identical coordinates and an identical angle is
+ * invisible on the plan and would silently double a line in the bill, and
+ * *"already placed here"* is more use than *"blocked by"* when the blocker is
+ * the piece's own twin.
  */
 import type { Footprint } from '@/catalog'
 import type { PlacementId } from '@/store'
@@ -99,6 +108,7 @@ import { filledSlots } from '@/store'
 
 import type { PlanBox, PlanPoint } from './geometry'
 import { describeCell, formatUnits, snapTo } from './geometry'
+import type { ConflictKind } from './overlap'
 import { subjectsConflict } from './overlap'
 import type { PlanScene, ScenePiece } from './scene'
 import { pieceName, pieceSubjects, reanchorPiece, sceneSubjects, scenePaintOrder } from './scene'
@@ -182,8 +192,16 @@ function same(a: PlanPoint, b: PlanPoint): boolean {
 
 /* -------------------------------------------------------------- the verdict */
 
-/** Why a drop cannot be committed. One case, and it is `ghost.ts`'s. */
-export type MoveRefusalCode = 'duplicate'
+/**
+ * Why a drop cannot be committed.
+ *
+ * `duplicate` is `ghost.ts`'s, unchanged. `overlap` is the refusal the owner
+ * asked for, and it fires **only on an exact conflict** — see the module note.
+ * Ordered by specificity where both apply: an identical tile at an identical
+ * angle is also an overlap, and *"already placed here"* is the more useful thing
+ * to be told.
+ */
+export type MoveRefusalCode = 'duplicate' | 'overlap'
 
 export interface MoveRefusal {
   readonly code: MoveRefusalCode
@@ -241,6 +259,15 @@ export interface MovePreview {
   readonly anchor: PlanPoint
   /** The pieces the drop would overlap, in either population. */
   readonly overlaps: readonly ScenePiece[]
+  /**
+   * The subset of {@link overlaps} whose conflict is **exact**, and therefore
+   * the pieces that refuse this drop.
+   *
+   * Separate from `overlaps` rather than replacing it: the preview still draws
+   * every conflict it found, because an inexact one is real information about
+   * where the piece is going. Only this list stops the drop.
+   */
+  readonly blocking: readonly ScenePiece[]
   readonly conflict: boolean
   /** Whether the proposal is where the piece already is. */
   readonly unchanged: boolean
@@ -275,16 +302,23 @@ export function previewMove(drag: MoveDrag, scene: PlanScene): MovePreview | und
   const subjects = pieceSubjects(moved)
   // Every candidate but this piece's own parts: a piece cannot collide with, or
   // duplicate, itself.
-  const hit = new Set(
-    sceneSubjects(scene)
-      .filter((candidate) => candidate.id !== drag.id)
-      .filter((candidate) => subjects.some((subject) => subjectsConflict(candidate, subject)))
-      .map((candidate) => candidate.id),
-  )
+  // Id to *kind*, not a bare set: a drop is refused by an exact conflict and
+  // merely annotated by an inexact one, so the sweep has to keep them apart.
+  // `exact` wins for a candidate hit by both, for `findConflicts`' own reason.
+  const hit = new Map<PlacementId, ConflictKind>()
+  for (const candidate of sceneSubjects(scene)) {
+    if (candidate.id === drag.id) continue
+    for (const subject of subjects) {
+      const verdict = subjectsConflict(candidate, subject)
+      if (verdict === null) continue
+      if (verdict.kind === 'exact' || !hit.has(candidate.id)) hit.set(candidate.id, verdict.kind)
+    }
+  }
   const overlaps = order.filter((candidate) => hit.has(candidate.id))
+  const blocking = order.filter((candidate) => hit.get(candidate.id) === 'exact')
   const unchanged = same(drag.origin, drag.anchor)
   const others = order.filter((candidate) => candidate.id !== drag.id)
-  const refusal = duplicateRefusal(piece, others, drag.anchor)
+  const refusal = duplicateRefusal(piece, others, drag.anchor) ?? overlapRefusal(blocking)
 
   return {
     id: drag.id,
@@ -294,11 +328,37 @@ export function previewMove(drag: MoveDrag, scene: PlanScene): MovePreview | und
     fromBox: reanchorPiece(piece, drag.origin).box,
     anchor: drag.anchor,
     overlaps,
+    blocking,
     conflict: overlaps.length > 0,
     unchanged,
     refusal,
     note: firstConcentricNote(piece),
     committable: !unchanged && refusal === null,
+  }
+}
+
+/**
+ * The refusal an exact conflict makes, or `null`.
+ *
+ * **Names the blocking piece rather than counting them**, which is the opposite
+ * of {@link overlapTail}'s choice and the difference is the point:
+ * `overlap.ts` warns that *"a heuristic that blocks and is occasionally wrong
+ * costs them a tile they cannot place and no way to find out why"*, so the one
+ * message that stops the user has to say what stopped them. A count would be
+ * exactly the readout that sentence is about.
+ *
+ * The first blocker is named even when there are several. A drop into a tiled
+ * floor can touch four neighbours, and moving off any one of them is progress —
+ * naming all four would be the paragraph `overlapTail` refuses to read out.
+ */
+function overlapRefusal(blocking: readonly ScenePiece[]): MoveRefusal | null {
+  const first = blocking[0]
+  if (first === undefined) return null
+  const where = describeCell(first.placement.x, first.placement.z)
+  const more = blocking.length > 1 ? ` and ${String(blocking.length - 1)} more` : ''
+  return {
+    code: 'overlap',
+    message: `Blocked by ${pieceName(first)} at ${where}${more}. Nothing moved.`,
   }
 }
 

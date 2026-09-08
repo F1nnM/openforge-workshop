@@ -1,5 +1,5 @@
 /**
- * The plan's pieces and their slots — the surface the right-click editor opens
+ * The plan's pieces and their slots — the second surface the slot editor opens
  * from, and the accessory inventory the bill cannot hold.
  *
  * §2.4 gives the right-hand column to the bill of tiles, and the bill is an
@@ -8,41 +8,40 @@
  * subject, and **what the files in those slots themselves hold**, which is the
  * question one step further in.
  *
- * ## The right click is on the drawing **and** here, and both are load-bearing
+ * ## The editor opens from the drawing **and** from here, and both are load-bearing
  *
  * §3.3 asks for *"a popover on the placed instance"*, and the placed instance is
- * drawn by `builder/three/RoomSurface.tsx`. Row C3 could not put the gesture
- * there and said exactly why: `onDown` began `if (event.button !== 0) return`,
- * so a secondary press was never seen at all, and the 5 px discriminator that
- * separates a click from a camera drag — `surface.ts#isClickGesture`,
- * `DRAG_THRESHOLD_PX` — is inside a module that imports three.js and is exported
- * from `@/builder/three` **type-only**, by a boundary test that keeps the
- * renderer out of the entry chunk. Re-declaring five pixels here would have been
- * a second copy of the number the owner's reference was felt with.
+ * drawn by `builder/three/RoomSurface.tsx`. Row C3 hung that on a **right
+ * click**, through a `pointerup` so the 5 px discriminator that separates a
+ * click from a camera pan could be reused where it lives.
  *
- * Row **C8** built the seam on the far side instead — a `RoomSurface` prop that
- * fires from `pointerup`, so the discriminator is reused where it lives and this
- * panel never sees a pixel. What that changes here is the *state*, and only the
- * state: which piece's editor is open is now `BuilderScreen`'s, because two
- * surfaces open it and neither can hold the other's. Everything else about this
- * panel is unchanged.
+ * **The selection model replaced that gesture entirely.** The right click was
+ * carrying the editor because there was nothing else to carry it: with no
+ * persistent selection the only operand available was whatever the pointer
+ * resolved to. The editor now opens from the `Slots` button on the action bar
+ * floating over the **selected** piece — an operand the user chose — and the
+ * secondary button went back to being the camera's. What survives from C8 is the
+ * *state* lift, and it survives for exactly the reason C8 gave: two surfaces
+ * open one dialog, so neither can hold the other's open state, and
+ * `BuilderScreen` holds it.
  *
- * **The panel route stays, and deleting it would have been a regression twice
- * over.** A right click has no keyboard equivalent every platform agrees on, so
- * the drawing's gesture is pointer-only by construction — the canvas is a
- * `role="application"` with its own key map and no `contextmenu` key binding.
- * Every piece on the plan is a real `<button>` here, `onContextMenu` opens its
- * editor and so do `Enter` and `Space`, which is §3.3's second requirement.
+ * **The panel route stays, and deleting it would still be a regression twice
+ * over.** The first reason has changed shape and not gone away: the drawing's
+ * route is now keyboard-reachable (`Enter` on the selection), but it is
+ * reachable only *through the canvas*, which is a `role="application"` with its
+ * own key map — so a user navigating the page by tab still needs a real
+ * `<button>` per piece, and every row here is one.
  *
- * The second reason is not about the keyboard at all and is worth writing down,
- * because it is invisible from the drawing: **a right click can only reach what
- * is drawn.** `PlanScene.unfilled` is *"one per instance with no filled slots at
+ * The second reason is unchanged and is worth writing down, because it is
+ * invisible from the drawing: **a gesture on the plan can only reach what is
+ * drawn.** `PlanScene.unfilled` is *"one per instance with no filled slots at
  * all"*, and neither `RoomSurface`'s plates nor its instanced meshes walk it —
  * both walk `scene.pieces` and `scene.generated` — so an instance holding
- * nothing occupies no pixels and there is nothing on the plan to right-click.
- * {@link planPieces} walks the **placements map**, so those pieces are rows in
- * this list, and this list is the only way to fill them. Row C5's solve makes
- * that the uncommon case rather than the normal one, not an impossible one.
+ * nothing occupies no pixels, cannot be clicked, and therefore cannot be
+ * selected. {@link planPieces} walks the **placements map**, so those pieces are
+ * rows in this list, and this list is the only way to fill them. Row C5's solve
+ * makes that the uncommon case rather than the normal one, not an impossible
+ * one.
  *
  * ## A pick writes a `SlotFill`, and only a template slot can hold one
  *
@@ -122,10 +121,10 @@ export interface SlotsPanelProps {
    * Which piece's editor is open, and on which slot — `null` for none.
    *
    * **Lifted out of this component by row C8**, and the lift is what the row
-   * needed rather than a tidy-up: the same editor now opens from a right click
-   * on the drawing, and two components cannot each own the one dialog's open
-   * state. `BuilderScreen` holds it because it is the only thing that renders
-   * both surfaces.
+   * needed rather than a tidy-up: the same editor also opens from the action bar
+   * over the selected piece, and two components cannot each own the one dialog's
+   * open state. `BuilderScreen` holds it because it is the only thing that
+   * renders both surfaces.
    */
   readonly editing: SlotEditTarget | null
   /** Open an editor, or close the open one with `null`. */
@@ -197,8 +196,8 @@ export function SlotsPanel({ catalog, assembly, templates, placements, editing, 
         <>
           <p className="of-planslots-note">
             {`${String(pieces.length)} ${pieces.length === 1 ? 'piece' : 'pieces'} placed. `}
-            Right-click a piece on the plan to choose what goes in the slot you clicked, or press a
-            row below for all of its slots.
+            Select a piece on the plan and press <strong>Slots</strong> on it, or press a row below
+            for all of its slots.
             {gaps === 0 ? '' : ` ${String(gaps)} ${gaps === 1 ? 'slot needs' : 'slots need'} a choice.`}
           </p>
 

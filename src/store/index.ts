@@ -67,6 +67,7 @@ export {
   removeGeneratedPlacement,
   removePlacement,
   resetWorkshop,
+  restorePlacements,
   rotateGeneratedPlacement,
   rotatePlacement,
   selectGeneratedPlacements,

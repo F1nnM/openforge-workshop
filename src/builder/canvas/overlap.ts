@@ -112,19 +112,49 @@
  * either"* pin both halves, and *"separates two stacked instances once the layout
  * rule gives them elevations"* keeps the interval itself honest.
  *
- * ## Flag, not prevent
+ * ## Prevent where this module is sure; flag where it is not
  *
- * A conflict is drawn and counted; the placement still happens. Three reasons:
+ * An overlapping placement is **refused**. The owner asked for it, and it makes
+ * a downloaded room printable by construction rather than by the user noticing a
+ * hatch.
  *
- *   1. §7 sets the precedent for the whole builder — "compatibility informs; it
- *      never refuses a placement" — and refusal is only used in this PR for
- *      something categorically different: a footprint with nothing to draw.
+ * It cannot be an unconditional gate, and the reason is the property the rest of
+ * this docblock spends its length establishing: **the error here is deliberately
+ * one-directional.** Every part is a superset of the geometry it stands for, an
+ * unknown level reads as *every* level, and a band may come from tag data. So a
+ * conflict this module reports is either a fact or a conservative guess, and
+ * only the facts may refuse.
+ *
+ * {@link subjectsConflict} therefore returns a {@link Conflict} rather than a
+ * boolean, and {@link ConflictReason} names which of the three doubts is live.
+ * An `exact` conflict refuses a placement or a drop; an `inexact` one keeps the
+ * behaviour this section used to describe for all of them — drawn, counted, and
+ * committed.
+ *
+ * The three reasons the old rule gave are why the split exists rather than
+ * arguments against it, and all three still hold:
+ *
+ *   1. §7's precedent — "compatibility informs; it never refuses a placement" —
+ *      is about *compatibility*, a judgement over lock systems and tags. A
+ *      geometric collision two exact polygons agree on is not that kind of
+ *      claim, which is why it may now refuse where compatibility still may not.
  *   2. The band assignment is a **heuristic over tag data**, and the tag data
- *      drifts (§16). A heuristic that warns and is occasionally wrong costs the
+ *      drifts (§16). *"A heuristic that warns and is occasionally wrong costs the
  *      user a glance; a heuristic that blocks and is occasionally wrong costs
- *      them a tile they cannot place and no way to find out why.
- *   3. Overlapping while arranging is normal. Users push a piece through its
- *      neighbours on the way to where it belongs.
+ *      them a tile they cannot place and no way to find out why."* That sentence
+ *      is why a refusal names the piece that blocked it, and why
+ *      `unbucketed-band` is a doubt.
+ *
+ *      It is **not** a reason to distrust every `kinds`-derived band, and the
+ *      difference decides whether the gate works at all: a tile tagged `floor`
+ *      *is* a floor, so two of them in one square is the mistake this docblock's
+ *      first sentence promises the user will see. Treating that as doubtful
+ *      would leave the canonical error unrefusable while blocking almost
+ *      nothing. {@link BandSource} draws the line at evidence versus default.
+ *   3. Overlapping while arranging is normal — so a *drag* still shows the piece
+ *      wherever the pointer takes it, through its neighbours, and only the
+ *      **drop** is refused. Nothing about the gesture got narrower; only its
+ *      commit did.
  *
  * ## Two walls meeting at a corner are not a conflict either
  *
@@ -169,13 +199,45 @@ import type { CatalogRecord } from '@/catalog'
 import { GRID_UNIT_MM, WALL_THICKNESS_UNITS } from '@/catalog'
 import type { PlacementId } from '@/store'
 
-import type { PlanBox, PlanPart, PlanPoint } from './geometry'
+import type { PlanBox, PlanCover, PlanPart, PlanPoint } from './geometry'
 
 /**
  * Which height band a piece occupies. See the module docblock — this is v1's
  * stand-in for the `y` axis, not a category of tile.
  */
 export type PlanBand = 'area' | 'edge'
+
+/**
+ * Which of the module's three over-reports makes a conflict untrustworthy.
+ *
+ * Each name is one of the doubts the docblock proves this module has, and each
+ * is a reason a conflict may be *drawn* but not *acted on*:
+ *
+ *   - `curved` — one of the pieces is an `arc`, whose convex parts strictly
+ *     contain the sector (by at most 0.246 mm, per `sector.ts`). The pieces may
+ *     not actually touch.
+ *   - `unknown-level` — one of the pieces has `level: null`, which this module
+ *     reads as *every* level. It may be nowhere near the other in `y`.
+ *   - `unbucketed-band` — one of the pieces carries no tag that decides its
+ *     band, so its `area` is this module's conservative default rather than a
+ *     fact. A positively tagged band is **not** a doubt; see {@link BandSource}.
+ */
+export type ConflictReason = 'curved' | 'unknown-level' | 'unbucketed-band'
+
+/**
+ * Whether a conflict may be acted on as a fact, or only reported.
+ *
+ * `exact` refuses a placement or a drop. `inexact` is drawn, counted and
+ * committed, exactly as every conflict was before the split.
+ */
+export type ConflictKind = 'exact' | 'inexact'
+
+/** A reported overlap, and how much of it is fact. */
+export interface Conflict {
+  readonly kind: ConflictKind
+  /** `null` exactly when {@link kind} is `exact`. */
+  readonly reason: ConflictReason | null
+}
 
 /**
  * Tolerance, in grid units, below which an intersection is treated as touching.
@@ -262,12 +324,59 @@ function isWallThickness(foot: CatalogRecord['foot']): boolean {
  * a real elevation and B2's conventions put the two at the same height — see the
  * module docblock.
  */
-export function planBand(record: Pick<CatalogRecord, 'foot' | 'kinds'>): PlanBand {
-  if (isWallThickness(record.foot)) return 'edge'
+export function planBand(record: Pick<CatalogRecord, 'foot' | 'kinds'>): BandVerdict {
+  if (isWallThickness(record.foot)) return { band: 'edge', source: 'footprint' }
   const wall = record.kinds.includes('wall')
   const fills = record.kinds.some((kind) => AREA_KINDS.includes(kind))
-  return wall && !fills ? 'edge' : 'area'
+  const band = wall && !fills ? 'edge' : 'area'
+  // A *positive* tag match is evidence; the absence of one is a default. Both
+  // produce a band, and only the second is a guess — see {@link BandSource}.
+  return { band, source: wall || fills ? 'kinds' : 'unbucketed' }
 }
+
+/**
+ * A band, and whether it was **measured or inferred**.
+ *
+ * The two halves of `planBand`'s own docblock, made legible to a caller that has
+ * to decide whether to act on a conflict. The footprint branch is a
+ * *measurement* — a `wall` shape **is** the 0.5-unit thickness constant, so an
+ * edge filed that way is not a guess. The `kinds` branch is the heuristic the
+ * module warns about: *"the tag data drifts"*, and **11.9% of tiles are in no
+ * bucket at all**, so the fallback to `area` is a conservative default rather
+ * than a fact about the piece.
+ *
+ * Carried with the value rather than offered as a second function, for the
+ * reason `PlanShape` carries {@link PlanCover}: two functions over the same
+ * `switch` can disagree, and a band whose provenance is re-derived somewhere
+ * else is a band whose provenance can be wrong in one place only.
+ */
+export interface BandVerdict {
+  readonly band: PlanBand
+  readonly source: BandSource
+}
+
+/**
+ * What a band was decided on, in descending order of evidence.
+ *
+ * The distinction that matters is **not** footprint-versus-tags; it is *evidence
+ * versus default*. Two of these three are answers, and the third is a fallback:
+ *
+ *   - `footprint` — the piece has a `wall` shape, which **is** the 0.5-unit
+ *     thickness constant. A measurement.
+ *   - `kinds` — the piece carries a tag that positively decides the question:
+ *     `wall`, or one of {@link AREA_KINDS}. Tag data drifts, but a tile tagged
+ *     `floor` is a floor; the drift the module warns about renames and
+ *     re-buckets tiles, it does not make a `floor` tag mean an edge piece.
+ *   - `unbucketed` — the piece carries **no** deciding tag, and `area` is the
+ *     conservative default the module chose rather than a fact about the piece.
+ *     This is the 11.9% the docblock counts, and the only one of the three that
+ *     makes a conflict unrefusable.
+ *
+ * Getting this cut wrong in the obvious place — treating every `kinds`-derived
+ * band as doubtful — makes *two floors in one square* unrefusable, which is the
+ * one mistake this module's first sentence says the user should see.
+ */
+export type BandSource = 'footprint' | 'kinds' | 'unbucketed'
 
 /**
  * How much vertical space a piece takes, in millimetres.
@@ -327,6 +436,19 @@ export interface OverlapSubject {
    * which for a `diag` at rotation 0 means refusing on the intrinsic 45°.
    */
   readonly axisAligned: boolean
+  /**
+   * Whether {@link parts} **are** the piece or merely contain it.
+   *
+   * `geometry.ts#PlanCover`, carried through unchanged, because that type's own
+   * docblock nominates this caller: *"carried rather than inferred from `shape`
+   * so a consumer that reports on its own accuracy does not have to know which
+   * cases are curved."* This module is the consumer that reports on its own
+   * accuracy, and `outward` is the first of the three doubts that make a
+   * conflict unrefusable.
+   */
+  readonly cover: PlanCover
+  /** What {@link band} was decided on. Only `unbucketed` makes a conflict inexact. */
+  readonly bandSource: BandSource
 }
 
 /**
@@ -499,12 +621,33 @@ function isCornerJunction(a: OverlapSubject, b: OverlapSubject): boolean {
  * last two can cost more than constant time, and neither is reached until the
  * three cheap ones have all said yes.
  */
-export function subjectsConflict(a: OverlapSubject, b: OverlapSubject): boolean {
-  if (a.band !== b.band) return false
-  if (!levelsOverlap(a, b)) return false
-  if (!boxesIntersect(a.box, b.box)) return false
-  if (!partsOverlap(a.parts, b.parts)) return false
-  return !isCornerJunction(a, b)
+export function subjectsConflict(a: OverlapSubject, b: OverlapSubject): Conflict | null {
+  if (a.band !== b.band) return null
+  if (!levelsOverlap(a, b)) return null
+  if (!boxesIntersect(a.box, b.box)) return null
+  if (!partsOverlap(a.parts, b.parts)) return null
+  if (isCornerJunction(a, b)) return null
+  const reason = conflictDoubt(a, b)
+  return { kind: reason === null ? 'exact' : 'inexact', reason }
+}
+
+/**
+ * Why this pair's conflict is not trusted, or `null` when it is.
+ *
+ * The three doubts are exactly the three the module docblock names, and they are
+ * tested in the order a reader meets them there, so the reason reported is the
+ * strongest one rather than whichever happened to be checked first.
+ *
+ * Both subjects have to be sound for the pair to be: a doubtful piece makes
+ * every conflict it is part of doubtful, which is the same one-directional
+ * conservatism the geometry has. Erring here means declining to *refuse* a
+ * placement, never declining to report one.
+ */
+function conflictDoubt(a: OverlapSubject, b: OverlapSubject): ConflictReason | null {
+  if (a.cover === 'outward' || b.cover === 'outward') return 'curved'
+  if (a.level === null || b.level === null) return 'unknown-level'
+  if (a.bandSource === 'unbucketed' || b.bandSource === 'unbucketed') return 'unbucketed-band'
+  return null
 }
 
 /**
@@ -531,7 +674,13 @@ export function partsOverlap(a: readonly PlanPart[], b: readonly PlanPart[]): bo
 }
 
 /**
- * Every placement that shares interior area with another in its own band.
+ * Every placement that shares interior area with another in its own band, and
+ * how much each of those conflicts is trusted.
+ *
+ * A map rather than a set since the split: the hatch draws both kinds, but it
+ * draws them differently, and the bill's warning row wants to say how many of a
+ * room's conflicts are actually blocking. `Map` keeps `.has` and `.size` for the
+ * callers that only ever asked *whether*.
  *
  * Swept on `x` rather than compared pairwise: the candidates are sorted by their
  * left edge and each one is compared only against those still open at its left
@@ -541,8 +690,21 @@ export function partsOverlap(a: readonly PlanPart[], b: readonly PlanPart[]): bo
  * dungeon reaches, where the pairwise version is two million tests on every
  * store write.
  */
-export function findConflicts(candidates: readonly OverlapCandidate[]): ReadonlySet<PlacementId> {
-  const conflicts = new Set<PlacementId>()
+export function findConflicts(
+  candidates: readonly OverlapCandidate[],
+): ReadonlyMap<PlacementId, ConflictKind> {
+  const conflicts = new Map<PlacementId, ConflictKind>()
+  /**
+   * `exact` wins over `inexact` for a piece in more than one conflict.
+   *
+   * A piece the module is *sure* about must not be softened by a second,
+   * doubtful pair it also happens to be in — the drawing would then invite a
+   * placement the gate refuses, which is the one combination that reads as a
+   * bug rather than as caution.
+   */
+  const record = (id: PlacementId, kind: ConflictKind) => {
+    if (kind === 'exact' || !conflicts.has(id)) conflicts.set(id, kind)
+  }
   const ordered = [...candidates].sort((a, b) => a.box.x - b.box.x)
   const open: OverlapCandidate[] = []
 
@@ -559,9 +721,10 @@ export function findConflicts(candidates: readonly OverlapCandidate[]): Readonly
       // row A1 that sentence has content: a template's stacked slots would
       // otherwise light up every instance in the room.
       if (other.id === candidate.id) continue
-      if (!subjectsConflict(other, candidate)) continue
-      conflicts.add(candidate.id)
-      conflicts.add(other.id)
+      const verdict = subjectsConflict(other, candidate)
+      if (verdict === null) continue
+      record(candidate.id, verdict.kind)
+      record(other.id, verdict.kind)
     }
     open.push(candidate)
   }

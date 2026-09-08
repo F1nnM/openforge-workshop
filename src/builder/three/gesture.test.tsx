@@ -70,11 +70,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { PlanScene } from '@/builder/canvas'
 import { buildPlanScene, createStyleResolver, planCatalogFromFile } from '@/builder/canvas'
-import { FIXTURE_IDS, FIXTURE_SLOTS, fixtureCatalogFile, fixtureSlotLayout } from '@/builder/canvas/fixture'
+import {
+  FIXTURE_IDS,
+  FIXTURE_SLOTS,
+  FIXTURE_TEMPLATE,
+  fixtureCatalogFile,
+  fixtureSlotLayout,
+} from '@/builder/canvas/fixture'
 import type { BlobId } from '@/catalog'
 import { resolveMaterial } from '@/materials'
 import { contrastRatio, formatHex, parseHex } from '@/materials/color'
 import { MATERIALS } from '@/materials/palette'
+import type { TemplateId } from '@/store'
 import { PlacementId } from '@/store'
 import { aGeneratedBase } from '@/store/fixture'
 import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR, CAMERA_POSITION, VIEW_RADIUS } from '@/three/frame'
@@ -182,6 +189,25 @@ vi.mock('@/three/ScreenLine', () => ({
   ),
 }))
 
+/*
+  `SelectionAnchor` stubbed, for exactly the reason `InstancedTiles` is.
+
+  The anchor is drei's `<Html>`, and drei reaches r3f's store through its own CJS
+  entry — which this file's `@react-three/fiber` mock does not cover, so the real
+  `useThree` runs and throws *"Hooks can only be used within the Canvas
+  component"*. Every mount with a selection would fail on the wrapper rather than
+  on its subject.
+
+  Nothing is lost, because the wrapper is the one part of this design that was
+  decomposed to be untestable here: the clamp it exists for is `anchor.test.ts`'s
+  subject and the bar's markup is `pieceActions.test.tsx`'s, both without a
+  canvas. What this file is about is the gesture, and a selection has to be
+  mountable for that.
+*/
+vi.mock('./SelectionAnchor', () => ({ SelectionAnchor: () => null }))
+
+vi.mock('./ArmedAnchor', () => ({ ArmedAnchor: () => null }))
+
 vi.mock('./markers', async (importOriginal) => {
   const actual = await importOriginal<typeof Markers>()
   return {
@@ -194,7 +220,7 @@ vi.mock('./markers', async (importOriginal) => {
 })
 
 const { HOVER_GLOW, RoomSurface } = await import('./RoomSurface')
-const { fixtureFiller, planTools, sceneOf } = await import('./fixture')
+const { fixtureFiller, planHistory, planTools, sceneOf } = await import('./fixture')
 const { surfaceFit } = await import('./surface')
 const { buildRoom3D } = await import('./instances')
 
@@ -254,19 +280,42 @@ interface Mounted {
    * nothing at all for the moves in between.
    */
   readonly cues: OutlineRequest[]
+  /**
+   * The tool recorder the surface was handed.
+   *
+   * Exposed so a test can assert what a *gesture* asked the state to do —
+   * `calls.armed` for a disarm, `calls.selection` for a select — without
+   * reaching for a second mount. The surface writes to `PlanTools` for two of
+   * its verbs now (arming and selecting), where before it only ever read.
+   */
+  readonly tools: ReturnType<typeof planTools>
 }
 
-/** The surface, mounted over a scene, with every callback recording. */
+/**
+ * The surface, mounted over a scene, with every callback recording.
+ *
+ * `tool` is **gone** with the modes, and the two options that replaced it are
+ * not a rename: what the primary button means is now a reading of what is armed
+ * or selected, so a test arranges the *state* it wants and the gesture follows.
+ * `armed` and `selected` are mutually exclusive in `usePlanTools`, and the
+ * default — neither — is the idle state a press on a piece resolves as a
+ * selection in.
+ */
 function mount(
   scene: PlanScene,
   options: {
     readonly wired?: boolean
-    readonly tool?: 'place' | 'move' | 'erase'
+    /** The armed family. A press on the plan then places rather than selecting. */
+    readonly armed?: string | null
+    /** The selected placement, for the tests about the selection's own chrome. */
+    readonly selected?: string | null
     /** Store objects by blob, for the tests that want a mesh instead of a plate. */
     readonly geometries?: ReadonlyMap<string, LodGeometry>
   } = {},
 ) {
-  const state: Mounted = { opened: [], said: [], reached: [], cues: [] }
+  const armed = options.armed ?? null
+  const tools = planTools({ selectedTemplate: armed, selected: options.selected ?? null })
+  const state: Mounted = { opened: [], said: [], reached: [], cues: [], tools }
   const onDown = (event: Event) => {
     state.reached.push((event as MouseEvent).button)
   }
@@ -284,10 +333,12 @@ function mount(
   render(
     <RoomSurface
       announce={(text) => state.said.push(text)}
-      armed={null}
+      armed={armed === null ? null : (armed as TemplateId)}
+      catalog={CATALOG}
       fill={fixtureFiller()}
       fit={FIT}
       geometries={geometries}
+      history={planHistory()}
       keyHelpId="of-keys"
       label="a room"
       {...(options.wired === false
@@ -299,7 +350,7 @@ function mount(
       onStatus={() => undefined}
       room={room}
       scene={scene}
-      tools={planTools({ tool: options.tool ?? 'place' })}
+      tools={tools}
     />,
   )
   return state
@@ -423,88 +474,69 @@ function rightClick(travel = 0) {
   press('pointerup', 2, [100, 100 + travel])
 }
 
-describe('the right click opens the slot editor on the piece', () => {
-  it('names the placement the pointer is on', () => {
-    const scene = corner(-1)
-    const state = mount(scene)
-    rightClick()
-    expect(state.opened).toHaveLength(1)
-    expect(state.opened[0]?.placement).toBe(scene.pieces[0]?.id)
-  })
-
-  it('pre-selects the slot whose part was hit, and the part decides it', () => {
-    // Same recipe, same gesture, two anchors — see `corner`. The floor covers the
-    // picked point at `x = -1` and the wall covers it at `x = -1.75`, so a
-    // gesture that resolved only to the placement would answer the same thing
-    // twice and the user would have to find the row they just pointed at.
+/**
+ * The right button, after the selection took the slot editor off it.
+ *
+ * Five `describe`s and eleven tests used to live here, all about a right click
+ * opening the slot editor: which placement it named, which slot the part decided,
+ * what it announced, how it shared `isClickGesture`'s 5 px boundary with the
+ * camera pan, and how the two presses were kept apart so a chord could not
+ * resolve the wrong one. **Every one of their subjects is deleted.**
+ *
+ * They are not replaced one for one, because the gesture was not moved — it was
+ * *made unnecessary*. The right click was carrying the editor because with no
+ * persistent selection the only operand available was whatever the pointer
+ * resolved to; the `Slots` button on the selected piece's action bar has an
+ * operand the user chose, and `pieceActions.test.tsx` covers it without a canvas.
+ *
+ * What survives is what is still true about the button, and one regression that
+ * would still be a defect if it came back.
+ */
+describe('the right button pans, and cancels what is armed', () => {
+  it('opens no dialog, at any travel distance', () => {
+    // The gesture row C3 hung here is gone at both ends of the old 5 px
+    // discriminator, which is the simplification the selection bought.
     const state = mount(corner(-1))
-    rightClick()
-    expect(state.opened[0]?.slot).toBe(FIXTURE_SLOTS.floor)
-  })
-
-  it('names the wall when the wall is what is under the pointer', () => {
-    const state = mount(corner(-1.75))
-    rightClick()
-    expect(state.opened[0]?.slot).toBe(FIXTURE_SLOTS.rightWall)
-  })
-
-  it('announces which slot it opened, so the gesture is not silent', () => {
-    const state = mount(corner(-1.75))
-    rightClick()
-    expect(state.said.join(' ')).toMatch(/The right wall slot of/)
-  })
-
-  /**
-   * The pre-selection inherits `pickSurface`'s parallax correction, and this is
-   * the disclosure rather than a bug.
-   *
-   * `heightOf` credits a piece with its **tallest** part's top — `surface.ts`
-   * argues for that at length, and erase and move need it: a pointer over a
-   * corner template must land on the wall standing on the floor or the click
-   * falls through to whatever is behind the piece. One consequence reaches this
-   * row: the point the slot is resolved at is the point on *that* plane, so a
-   * click over the low part of a tall assembly can name the tall part.
-   *
-   * Here the ground point `(0, 0)` is inside the floor and outside the wall, and
-   * the wall plane's own point `(0.592, 0.820)` is inside the wall — so the slot
-   * named is `right wall`. That is the surface the user is looking at, and it is
-   * the same answer erase would act on.
-   *
-   * **The size of the effect is bounded and it shrinks as the assembly gets
-   * taller**, which is the part that makes it acceptable rather than merely
-   * documented: the offset is `h / (tan 27.38° · 25.4)` units, so this fixture's
-   * 13.3 mm wall shifts the point 1.011 units and a real 63.5 mm wall shifts it
-   * **4.83 units** — well outside a 2 x 2 template, so the elevated plane is
-   * rejected and the ground point is used. The pre-selection is therefore exact
-   * on the shipped recipes and approximate only on low assemblies, where the
-   * editor's slot list is one press away in any case.
-   */
-  it('resolves the slot at the plane the pick accepted, parallax and all', () => {
-    const state = mount(corner(-1, -1))
-    rightClick()
-    expect(state.opened[0]?.slot).toBe(FIXTURE_SLOTS.rightWall)
-  })
-})
-
-describe('the camera keeps the right button', () => {
-  it('does not open on a right drag, which is how the plan is panned', () => {
-    // The whole reason the seam is a `pointerup` and a 5 px test rather than a
-    // `contextmenu` listener: `OrbitControls` binds the right button to
-    // `MOUSE.PAN` and `Stage` passes `enablePan` for this surface, so every pan
-    // gesture starts with a secondary press. Twenty pixels of travel is a pan.
-    const state = mount(corner(-1))
+    rightClick(0)
     rightClick(20)
     expect(state.opened).toEqual([])
+  })
+
+  it('disarms on a click, which is the way out the armed label promises', () => {
+    /*
+      `ArmedLabel` tells the user *"Esc or right-click to cancel"*, and a
+      promise on screen has to be kept by the gesture layer. This is the second
+      half; `planTools.test.tsx` covers what `arm(null)` does to the state.
+
+      Hung on this button deliberately, and it is a much safer thing to hang
+      here than the slot editor was: a stray cancel costs one click to undo by
+      re-arming, where a stray dialog interrupted the pan it was mistaken for.
+    */
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
+    rightClick(0)
+    expect(state.tools.calls.armed).toEqual([null])
+    expect(state.said.at(-1)).toBe('Nothing armed.')
+  })
+
+  it('does not disarm on a pan, because a pan is not a cancel', () => {
+    // The 5 px question, and the whole reason the seam is a `pointerup` rather
+    // than a `contextmenu` listener: `contextmenu` fires from the mouse *down*
+    // on X11 and macOS, before any travel exists to measure, so it would cancel
+    // the arming at the start of every pan gesture.
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
+    rightClick(20)
+    expect(state.tools.calls.armed).toEqual([])
     expect(state.said).toEqual([])
   })
 
-  it('opens at the threshold itself, so the two gestures share one number', () => {
-    // Five, inclusive — `isClickGesture`'s own boundary, asserted here as well
-    // as in `surface.test.ts` because this is where it decides a user-visible
-    // outcome rather than a boolean.
+  it('says nothing when a right-click has nothing to cancel', () => {
+    // With nothing armed the button is purely the camera's, and a builder that
+    // announced "nothing armed" every time the user finished a pan would be
+    // narrating the camera.
     const state = mount(corner(-1))
-    rightClick(5)
-    expect(state.opened).toHaveLength(1)
+    rightClick(0)
+    expect(state.tools.calls.armed).toEqual([])
+    expect(state.said).toEqual([])
   })
 
   it('never claims the press, so the event still reaches the controls', () => {
@@ -512,97 +544,63 @@ describe('the camera keeps the right button', () => {
       `OrbitControls` listens on the canvas. The surface's own listener is
       capture-phase on the canvas's **parent**, so claiming a press —
       `stopPropagation` — stops it ever reaching the canvas at all. That is what
-      a move-drag deliberately does, and it is what a right press must never do:
-      claiming it would take the camera pan away from the right button.
+      a press that picks a piece up deliberately does, and it is what a right
+      press must never do: claiming it would take the camera pan away from the
+      right button.
 
       Asserted against the primary path rather than in isolation, because a test
       that only showed the secondary press arriving would pass on a surface whose
-      capture listener had stopped working altogether.
+      capture listener had stopped working altogether. The primary press is on a
+      piece with nothing armed, which is the gesture that selects it and picks it
+      up in one — the claim `move` mode used to be needed for.
     */
-    const state = mount(corner(-1), { tool: 'move' })
+    const state = mount(corner(-1))
     press('pointerdown', 2, [100, 100])
     expect(state.reached).toEqual([2])
 
     press('pointerdown', 0, [100, 100])
     expect(state.reached).toEqual([2])
   })
-})
 
-describe('the browser’s own menu', () => {
-  it('is suppressed on the canvas, so it cannot cover the editor', () => {
+  it('leaves the browser’s own menu alone', () => {
+    /*
+      **The opposite of what this file asserted before, and deliberately.** The
+      `contextmenu` listener existed for two reasons, and both were about a
+      dialog the right click opened: the native menu would cover the editor, and
+      on Windows `contextmenu` fires from the mouse *up*, where a menu taking
+      focus could swallow the `pointerup` the gesture was measured on.
+
+      No dialog opens from this button any more, so suppressing the menu would be
+      taking a browser affordance away for nothing. A user right-clicking the
+      canvas gets their menu, exactly as they do everywhere else on the page.
+    */
     mount(corner(-1))
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
     canvas.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(true)
-  })
-
-  it('is left alone everywhere else, because nothing else claimed the gesture', () => {
-    // Scoped to the canvas and not to the document: a user right-clicking the
-    // bill, the slots panel or the page still gets their browser's menu.
-    mount(corner(-1))
-    const elsewhere = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-    document.body.dispatchEvent(elsewhere)
-    expect(elsewhere.defaultPrevented).toBe(false)
-  })
-})
-
-describe('what a right click does when there is nothing to customise', () => {
-  it('opens nothing over bare ground, and says so', () => {
-    const state = mount(sceneOf(CATALOG, []))
-    rightClick()
-    expect(state.opened).toEqual([])
-    expect(state.said.join(' ')).toMatch(/Nothing to customise at/)
-  })
-
-  it('opens nothing on a generated base, and says why', () => {
-    const scene = buildPlanScene({}, CATALOG, STYLE, {
-      [PlacementId.parse('g0')]: aGeneratedBase({ x: -1, z: -1 }),
-    })
-    const state = mount(scene)
-    rightClick()
-    expect(state.opened).toEqual([])
-    expect(state.said.join(' ')).toMatch(/generated from parameters/)
-  })
-
-  it('does nothing at all when no handler is wired, not even an announcement', () => {
-    // The prop is optional, so every caller that had one before row C8 keeps the
-    // behaviour it had: the press is not even recorded.
-    const state = mount(corner(-1), { wired: false })
-    rightClick()
-    expect(state.opened).toEqual([])
-    expect(state.said).toEqual([])
-  })
-})
-
-describe('the two presses stay apart', () => {
-  it('ignores a secondary press while a piece is in the air', () => {
-    // A chord mid-carry is not a request to open a dialog over the drag it would
-    // interrupt. `move` mode claims the primary press and starts the drag.
-    const state = mount(corner(-1), { tool: 'move' })
-    press('pointerdown', 0, [100, 100])
-    rightClick()
-    expect(state.opened).toEqual([])
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('does not let a secondary release resolve a primary press', () => {
     /*
-      **This is a defect row C8 found and fixed rather than one it introduced.**
-      Before this row `onUp` read one press slot whatever button was released, so
-      holding the primary button and right-clicking passed the 5 px test against
-      the *primary* press and ran the place gesture. Nothing armed means nothing
-      is placed either way, so the assertion is on the announcement: a resolved
-      place gesture always says something, and this one must say nothing.
+      **A defect row C8 found and fixed, kept fixed through the deletion.**
+      `onUp` used to read one press slot whatever button was released, so holding
+      the primary button and right-clicking passed the 5 px test against the
+      *primary* press and ran the place gesture.
+
+      The two-slot bookkeeping that fixed it is gone with the gesture that needed
+      it — `onUp` now returns immediately on a secondary release — so the fix is
+      by construction rather than by arithmetic. This asserts the outcome either
+      implementation owes: mounted **armed**, which is what leaves the primary
+      press unclaimed and therefore the only state the defect was reachable from,
+      a secondary release must not place anything.
     */
-    const state = mount(corner(-1))
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
     press('pointerdown', 0, [100, 100])
     press('pointerdown', 2, [100, 100])
     press('pointerup', 2, [100, 100])
 
-    // The right click says its own sentence, which is the row's subject. What
-    // must not be there is the *place* gesture's: nothing is armed, so a
-    // resolved primary click announces "No template is armed".
-    expect(state.said.filter((text) => /armed/.test(text))).toEqual([])
-    expect(state.opened).toHaveLength(1)
+    expect(state.said.filter((text) => /^Placed /.test(text))).toEqual([])
+    expect(state.opened).toEqual([])
   })
 })
 
@@ -718,11 +716,51 @@ describe('the piece under the pointer is outlined by its own silhouette', () => 
     expect(cue(state).count).toBe(2)
   })
 
-  it('hands the loud colour to erase, where the click deletes what it names', () => {
-    // One drawing at two strengths and not two drawings: the same silhouettes,
-    // in the accent, when the gesture the user is aiming is a removal.
-    const state = mount(corner(-1), { tool: 'erase' })
+  it('hands the loud colour to the selection, which is what the verbs act on', () => {
+    /*
+      One drawing at two strengths and not two drawings, which is the decision
+      erase mode's cue made and the selection inherited — for a better reason
+      than erase had. `OutlineRequest` carries **one** colour and one
+      `edgeStrength` for the whole request, so a second weight means a second
+      `OutlineEffect`, a second mask target and a second fullscreen quad against
+      a pass `Stage.tsx` is deliberate about costing one. So the pass draws
+      whichever cue is live, at whichever strength, and the selection's
+      *persistent* cue is a different drawing entirely — `markers.ts`'s contour
+      on the footprint, which is what stays visible while the pointer is
+      elsewhere.
+
+      `p0` is the id `placementsOf` gives the corner, so the piece selected here
+      is the piece the pointer is over: one subject list, in the loud colour.
+    */
+    const state = mount(corner(-1), { selected: 'p0' })
     hover()
+    expect(cue(state)).toEqual({ count: 2, colour: color.acc })
+  })
+
+  it('goes back to the quiet colour with nothing selected', () => {
+    // The colour is the axis, so it has to be shown moving in both directions:
+    // a cue that were always loud would pass the assertion above and say nothing.
+    const state = mount(corner(-1))
+    hover()
+    expect(cue(state).colour).toBe(HOVER_GLOW)
+  })
+
+  it('keeps the pass on the selection while the pointer is over a neighbour', () => {
+    /*
+      **The defect this exists for**, found in review rather than by a test: the
+      subject list was memoised on the *hovered* piece while the colour was read
+      off the *selected* one. So pointing at a neighbour of the selected piece
+      outlined the neighbour in the selection colour — which does not merely show
+      a cue at the wrong strength, it says the wrong piece is selected.
+
+      Two pieces, far enough apart that the pointer at (100, 100) lands on
+      neither: with `p0` selected the pass must still be drawing `p0`, in the
+      loud colour, and the hover must contribute nothing to it. What keeps the
+      hover visible at all in this state is a different drawing — `markers.ts`'s
+      contour, which is on the plan and not in this pass.
+    */
+    const state = mount(corner(-1), { selected: 'p0' })
+    hover([2, 2])
     expect(cue(state)).toEqual({ count: 2, colour: color.acc })
   })
 })

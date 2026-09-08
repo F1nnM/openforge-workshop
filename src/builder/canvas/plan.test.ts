@@ -45,7 +45,7 @@ import { SLOT_CONVENTIONS } from '@/template/rules'
 
 import { computeGhost, ghostOverlaps } from './ghost'
 import { SNAP_STEP, planBox, planQuad } from './geometry'
-import { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap } from './overlap'
+import { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap, subjectsConflict } from './overlap'
 import type { OverlapCandidate } from './overlap'
 import { buildPlanScene, navigationOrder, partAt, pieceAt, pieceRotationStep } from './scene'
 import type { PlanPiece } from './scene'
@@ -172,6 +172,12 @@ const candidate = (
   box: { x, z, w, d },
   parts: [planQuad({ w, d }, 0, x, z)],
   axisAligned: true,
+  // A quad is its own outline and the band is given, so this fixture is a
+  // *trusted* candidate — which is what keeps every conflict assertion below
+  // reading `exact`. The doubtful cases are built by overriding these two, so
+  // the default has to be the sound one or the split would be untested.
+  cover: 'exact',
+  bandSource: 'kinds',
 })
 
 
@@ -194,21 +200,21 @@ const solid = (
 
 describe('bands', () => {
   it('files a wall footprint as an edge piece', () => {
-    expect(planBand(record(FIXTURE_IDS.wall2))).toBe('edge')
+    expect(planBand(record(FIXTURE_IDS.wall2)).band).toBe('edge')
   })
 
   it('files a thick wall that arrives as a rect as an edge piece too', () => {
     expect(record(FIXTURE_IDS.thickWall).foot.shape).toBe('rect')
-    expect(planBand(record(FIXTURE_IDS.thickWall))).toBe('edge')
+    expect(planBand(record(FIXTURE_IDS.thickWall)).band).toBe('edge')
   })
 
   it('files a floor as an area piece', () => {
-    expect(planBand(record(FIXTURE_IDS.floor2))).toBe('area')
+    expect(planBand(record(FIXTURE_IDS.floor2)).band).toBe('area')
   })
 
   it('files an unbucketed tile as an area piece — the conservative answer', () => {
     expect(record(FIXTURE_IDS.shapeless).kinds).toEqual([])
-    expect(planBand(record(FIXTURE_IDS.shapeless))).toBe('area')
+    expect(planBand(record(FIXTURE_IDS.shapeless)).band).toBe('area')
   })
 
   it('files a column as an edge piece on its footprint, not on its kinds', () => {
@@ -216,27 +222,109 @@ describe('bands', () => {
     // the kind heuristic alone would call a 12.70 x 12.70 mm pillar a floor and
     // then flag it against the floor it stands on.
     expect(record(FIXTURE_IDS.column).kinds).toEqual(['column'])
-    expect(planBand(record(FIXTURE_IDS.column))).toBe('edge')
+    expect(planBand(record(FIXTURE_IDS.column)).band).toBe('edge')
   })
 
   it('files a diagonal wall run as an edge piece', () => {
-    expect(planBand(record(FIXTURE_IDS.diag))).toBe('edge')
+    expect(planBand(record(FIXTURE_IDS.diag)).band).toBe('edge')
   })
 
   it('files a curve whose band is one wall thickness wide as an edge piece', () => {
     // `convex` is [R-0.5, R] — a curved *wall*, whatever its kinds say. 248 of
     // the corpus's curved walls carry base/floor/stairs kinds because the curve
     // belongs to a floor family.
-    expect(planBand(record(FIXTURE_IDS.arcFallback))).toBe('edge')
+    expect(planBand(record(FIXTURE_IDS.arcFallback)).band).toBe('edge')
   })
 
   it('files a wide curve on its kinds, since its band is a floor and not a wall', () => {
     // The fixture's quarter disc is [0, 2] — two units of band, a floor.
-    expect(planBand(record(FIXTURE_IDS.arc))).toBe('area')
+    expect(planBand(record(FIXTURE_IDS.arc)).band).toBe('area')
   })
 
   it('files a filled right triangle as an area piece', () => {
-    expect(planBand(record(FIXTURE_IDS.tri))).toBe('area')
+    expect(planBand(record(FIXTURE_IDS.tri)).band).toBe('area')
+  })
+
+  /**
+   * The provenance half of the verdict, and the reason it exists: a band read
+   * off the footprint is a **measurement**, and one read off `kinds` is the
+   * heuristic `overlap.ts` warns drifts. Only the first may refuse a placement.
+   */
+  it('reports a footprint-derived band as measured', () => {
+    expect(planBand(record(FIXTURE_IDS.wall2)).source).toBe('footprint')
+    expect(planBand(record(FIXTURE_IDS.column)).source).toBe('footprint')
+    expect(planBand(record(FIXTURE_IDS.diag)).source).toBe('footprint')
+  })
+
+  it('reports a kinds-derived band as inferred, including the thick-wall case', () => {
+    // The thick wall is the sharpest case: it comes out `edge`, which is the
+    // *right* band, and it is still inferred — the answer came from
+    // `build|thick wall` in the tag data and not from a 0.5-unit footprint.
+    expect(planBand(record(FIXTURE_IDS.thickWall))).toEqual({ band: 'edge', source: 'kinds' })
+    expect(planBand(record(FIXTURE_IDS.floor2)).source).toBe('kinds')
+    expect(planBand(record(FIXTURE_IDS.shapeless)).source).toBe('unbucketed')
+  })
+})
+
+/**
+ * Which conflicts may be acted on.
+ *
+ * `overlap.ts` establishes that its error is one-directional — it over-reports
+ * and never misses — so a conflict is either a fact or a conservative guess, and
+ * only the facts may refuse a placement. These four tests are that split, one
+ * per doubt plus the sound case, and they are the contract the refusal gate in
+ * `move.ts` and `three/edits.ts` reads.
+ */
+describe('how much a conflict is trusted', () => {
+  const floor = (id: string) => candidate(id, 'area', 0, 0, 1, 1)
+
+  it('is exact when the geometry, the levels and the bands are all sound', () => {
+    expect(subjectsConflict(floor('a'), floor('b'))).toEqual({ kind: 'exact', reason: null })
+  })
+
+  it('is inexact when either piece only contains its geometry', () => {
+    // An `arc`'s convex parts are a superset of the sector by up to 0.246 mm, so
+    // the pieces may not actually touch.
+    expect(subjectsConflict(floor('a'), { ...floor('b'), cover: 'outward' })).toEqual({
+      kind: 'inexact',
+      reason: 'curved',
+    })
+  })
+
+  it('is inexact when either level is unknown, because null reads as every level', () => {
+    expect(subjectsConflict(floor('a'), { ...floor('b'), level: null })).toEqual({
+      kind: 'inexact',
+      reason: 'unknown-level',
+    })
+  })
+
+  it('is inexact when either band came from the kinds heuristic', () => {
+    expect(subjectsConflict(floor('a'), { ...floor('b'), bandSource: 'unbucketed' })).toEqual({
+      kind: 'inexact',
+      reason: 'unbucketed-band',
+    })
+  })
+
+  it('is null when the pieces do not share area at all', () => {
+    expect(subjectsConflict(floor('a'), candidate('b', 'area', 4, 0, 1, 1))).toBeNull()
+  })
+
+  it('names the strongest doubt when a pair has more than one', () => {
+    const doubtful = { ...floor('b'), cover: 'outward' as const, level: null, bandSource: 'unbucketed' as const }
+    expect(subjectsConflict(floor('a'), doubtful)?.reason).toBe('curved')
+  })
+
+  it('lets an exact conflict win over an inexact one for the same piece', () => {
+    // `a` is in two conflicts: an exact one with `b` and a curved one with `c`.
+    // It must report `exact`, or the drawing would invite a placement the gate
+    // refuses — the one combination that reads as a bug rather than as caution.
+    const conflicts = findConflicts([
+      floor('a'),
+      floor('b'),
+      { ...candidate('c', 'area', 0.5, 0, 1, 1), cover: 'outward' },
+    ])
+    expect(conflicts.get('a' as PlacementId)).toBe('exact')
+    expect(conflicts.get('c' as PlacementId)).toBe('inexact')
   })
 })
 
@@ -249,7 +337,7 @@ describe('overlap', () => {
       candidate('floor', 'area', 0, 0, 2, 2),
       candidate('wall', 'edge', 0, 0, 2, 0.5),
     ])
-    expect([...conflicts]).toEqual([])
+    expect([...conflicts.keys()]).toEqual([])
   })
 
   it('flags two floors in the same square', () => {
@@ -257,7 +345,7 @@ describe('overlap', () => {
       candidate('a', 'area', 0, 0, 2, 2),
       candidate('b', 'area', 1, 1, 1, 1),
     ])
-    expect([...conflicts].sort()).toEqual(['a', 'b'])
+    expect([...conflicts.keys()].sort()).toEqual(['a', 'b'])
   })
 
   it('flags two walls on the same edge', () => {
@@ -265,7 +353,7 @@ describe('overlap', () => {
       candidate('a', 'edge', 0, 0, 2, 0.5),
       candidate('b', 'edge', 1, 0, 2, 0.5),
     ])
-    expect([...conflicts].sort()).toEqual(['a', 'b'])
+    expect([...conflicts.keys()].sort()).toEqual(['a', 'b'])
   })
 
   it('treats a shared face as touching, not overlapping', () => {
@@ -274,7 +362,7 @@ describe('overlap', () => {
       candidate('b', 'area', 1, 0, 1, 1),
       candidate('c', 'area', 0, 1, 1, 1),
     ])
-    expect([...conflicts]).toEqual([])
+    expect([...conflicts.keys()]).toEqual([])
   })
 
   it('tests turned pieces as shapes, not as bounding boxes', () => {
@@ -307,7 +395,7 @@ describe('overlap', () => {
       candidate('north', 'edge', 0, 0, 4, 0.5),
       candidate('west', 'edge', 0, 0, 0.5, 4),
     ])
-    expect([...conflicts]).toEqual([])
+    expect([...conflicts.keys()]).toEqual([])
   })
 
   it('still needs that exemption after A7, because a corner is a same-level pair', () => {
@@ -347,7 +435,7 @@ describe('overlap', () => {
       candidate('corner', 'edge', 0, 0, 2, 0.5),
       candidate('corner', 'edge', 1.5, 0, 2, 0.5),
     ])
-    expect([...conflicts]).toEqual([])
+    expect([...conflicts.keys()]).toEqual([])
   })
 
   it('still flags two parallel walls overlapping by the same half unit', () => {
@@ -356,7 +444,7 @@ describe('overlap', () => {
       candidate('a', 'edge', 0, 0, 2, 0.5),
       candidate('b', 'edge', 1.5, 0, 2, 0.5),
     ])
-    expect([...conflicts].sort()).toEqual(['a', 'b'])
+    expect([...conflicts.keys()].sort()).toEqual(['a', 'b'])
   })
 
   it('does not exempt a corner-sized overlap of two floors', () => {
@@ -364,7 +452,7 @@ describe('overlap', () => {
       candidate('a', 'area', 0, 0, 2, 2),
       candidate('b', 'area', 1.5, 1.5, 2, 2),
     ])
-    expect([...conflicts].sort()).toEqual(['a', 'b'])
+    expect([...conflicts.keys()].sort()).toEqual(['a', 'b'])
   })
 
   it('separates two stacked instances once the layout rule gives them elevations', () => {
@@ -379,7 +467,7 @@ describe('overlap', () => {
       candidate('under', 'area', 0, 0, 2, 2, 0),
       candidate('over', 'area', 0, 0, 2, 2, 6.35),
     ])
-    expect([...conflicts]).toEqual([])
+    expect([...conflicts.keys()]).toEqual([])
 
     // And the same pair on one level still fires, so the test above is about the
     // height and not about the pair.
@@ -387,7 +475,7 @@ describe('overlap', () => {
       candidate('under', 'area', 0, 0, 2, 2, 0),
       candidate('over', 'area', 0, 0, 2, 2, 0),
     ])
-    expect([...level].sort()).toEqual(['over', 'under'])
+    expect([...level.keys()].sort()).toEqual(['over', 'under'])
   })
 
   it('reads a real thickness as an interval, so a riser reaching a level conflicts with it', () => {
@@ -395,7 +483,7 @@ describe('overlap', () => {
     // half-squares), and the interval is why: a 50.8 mm riser standing on the
     // ground reaches the 12.7 mm level and a bare level comparison would miss it.
     const wall = candidate('wall', 'area', 0, 0, 2, 2, 12.7)
-    expect([...findConflicts([solid('riser', 0, 0, 2, 2, 0, 50.8), wall])].sort()).toEqual(['riser', 'wall'])
+    expect([...findConflicts([solid('riser', 0, 0, 2, 2, 0, 50.8), wall]).keys()].sort()).toEqual(['riser', 'wall'])
     // 6 mm of base does not reach it.
     expect(findConflicts([solid('base', 0, 0, 2, 2, 0, 6), wall]).size).toBe(0)
   })
@@ -417,7 +505,7 @@ describe('overlap', () => {
       candidate('b', 'area', 1, 0, 2, 1),
       candidate('c', 'area', 6, 0, 2, 1),
     ])
-    expect([...conflicts].sort()).toEqual(['a', 'b'])
+    expect([...conflicts.keys()].sort()).toEqual(['a', 'b'])
   })
 })
 
@@ -479,7 +567,7 @@ describe('the band, and why row A7 could not delete it — re-measured under row
       grounded,
       groundedStyle,
     )
-    expect([...stacked.conflicts].sort()).toEqual(['base', 'floor'])
+    expect([...stacked.conflicts.keys()].sort()).toEqual(['base', 'floor'])
   })
 
   it('is what separates a base from what stands on it, once the rule lifts one', () => {
@@ -597,7 +685,7 @@ describe('the band, and why row A7 could not delete it — re-measured under row
       wired,
       wiredStyle,
     )
-    expect([...same.conflicts].sort()).toEqual(['a', 'b'])
+    expect([...same.conflicts.keys()].sort()).toEqual(['a', 'b'])
   })
 })
 
@@ -1135,7 +1223,7 @@ describe('scene', () => {
     // The two parts really do occupy the same square, which is what makes this
     // an exemption rather than a vacuous pass.
     expect(scene.pieces[0]?.parts[0]?.box).toEqual(scene.pieces[0]?.parts[1]?.box)
-    expect([...scene.conflicts]).toEqual([])
+    expect([...scene.conflicts.keys()]).toEqual([])
   })
 
   it('still flags two different instances whose parts share a square', () => {
@@ -1149,7 +1237,7 @@ describe('scene', () => {
       catalog,
       styleOf,
     )
-    expect([...scene.conflicts].sort()).toEqual(['p1', 'p2'])
+    expect([...scene.conflicts.keys()].sort()).toEqual(['p1', 'p2'])
   })
 
   it('finds a conflict against a part that is not the first, and marks the whole piece', () => {
@@ -1177,7 +1265,7 @@ describe('scene', () => {
       catalog,
       styleOf,
     )
-    expect([...scene.conflicts].sort()).toEqual(['p1', 'p2'])
+    expect([...scene.conflicts.keys()].sort()).toEqual(['p1', 'p2'])
     expect(scene.pieces.every((piece) => piece.conflict)).toBe(true)
   })
 

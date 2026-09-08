@@ -295,7 +295,7 @@ describe('reaching the plan view’s collision', () => {
     expect(piece.box).toEqual(geometry.box)
     expect(piece.parts).toEqual(geometry.parts)
     expect(piece.axisAligned).toBe(geometry.axisAligned)
-    expect(piece.band).toBe(planBand({ foot: { shape: 'rect', w: 2, d: 2 }, kinds: ['base'] }))
+    expect(piece.band).toBe(planBand({ foot: { shape: 'rect', w: 2, d: 2 }, kinds: ['base'] }).band)
     // A base fills its square, which is the archive's own answer for a record
     // whose kinds are ["base"].
     expect(piece.band).toBe('area')
@@ -324,8 +324,10 @@ describe('reaching the plan view’s collision', () => {
       box: overlapping.box,
       parts: overlapping.parts,
       axisAligned: overlapping.axisAligned,
+      cover: 'exact' as const,
+      bandSource: 'kinds' as const,
     }
-    expect([...findConflicts([generated, catalogue])].sort()).toEqual([idOf(1), idOf(2)])
+    expect([...findConflicts([generated, catalogue]).keys()].sort()).toEqual([idOf(1), idOf(2)])
 
     const clear = planGeometry(shape!, 0, 4, 4)
     expect(
