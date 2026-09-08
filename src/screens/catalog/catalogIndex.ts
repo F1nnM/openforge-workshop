@@ -29,9 +29,9 @@
  * `src/routes/**` is PR 6's, and a route loader would put a data dependency in a
  * file this PR only swaps a `component:` reference in. The cost of doing it here
  * instead is one render with `status: 'loading'`, which the screen has to handle
- * regardless — a cold visitor waits for 364 KB brotli over the network either
- * way, and a route loader would spend that time on a blank frame rather than on
- * a skeleton.
+ * regardless — a cold visitor waits for the index over the network either way,
+ * and a route loader would spend that time on a blank frame rather than on a
+ * skeleton.
  */
 import { useEffect, useState } from 'react'
 

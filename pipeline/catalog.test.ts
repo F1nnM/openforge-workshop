@@ -73,9 +73,9 @@ const title = hasFixtures
 const BUILT_AT = '2026-01-01T00:00:00.000Z'
 
 /**
- * Timeout for the tests that build the 8,702-tile corpus again, or brotli it at
- * quality 11. Both are seconds of real work on 5 MB of JSON, and the 5 s default
- * turns that into a flaky failure rather than a slow pass.
+ * Timeout for the tests that build the 8,702-tile corpus again. That is seconds
+ * of real work on 5 MB of JSON, and the 5 s default turns it into a flaky
+ * failure rather than a slow pass.
  */
 const SLOW_MS = 120_000
 

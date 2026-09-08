@@ -94,10 +94,9 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * adds no field to `CatalogRecord` and no key to `CatalogFile`: an aggregate is a
  * pure function of the records already here, derived by
  * `src/catalog/aggregate.ts` the way `buildAssemblyIndex` derives its four maps.
- * Measured, the leanest shippable form of the grouping — design id, address and
- * the member ordinals, nothing else — is **40,454 B brotli**, which would take an
- * index at 71.4% of its 500 KB budget to 79.3% to say something the reader can
- * recompute in one pass. A schema-3 index is therefore fully readable under
+ * Emitting it would put a body of JSON in every visitor's download to say
+ * something the reader recomputes in one measured pass of 52 ms. A schema-3
+ * index is therefore fully readable under
  * aggregation, which is exactly what the stamp is supposed to mean.
  *
  * **4** — row P3 added {@link CatalogRecord.thumb}, and this is the first
@@ -846,8 +845,7 @@ export type CompositionConfig = z.infer<typeof CompositionConfig>
  * One live tile.
  *
  * Field order follows identity → provenance → facets → geometry → composition.
- * Keys are short because there are 8,702 of these and §5 budgets 500 KB brotli
- * for the whole index against a measured 261 KB floor.
+ * Keys are short because there are 8,702 of these.
  */
 export const CatalogRecord = z.object({
   /** Catalog identity — the fixture `full_name`. See {@link TileId}. */
@@ -903,10 +901,9 @@ export const CatalogRecord = z.object({
    * key would be indistinguishable from a pipeline that never asked, which is
    * exactly the failure this replaces: before this row `@/ui/thumb` had no way
    * to tell "no thumbnail exists" from "one exists and I have not been told", so
-   * it could only ever render the sheet. Measured, requiring it costs **121 B
-   * brotli** for 8,702 `false`s against a 512,000 B budget — brotli collapses
-   * the repetition — so the optional form's saving is not worth a flag that
-   * can be silently missing.
+   * it could only ever render the sheet. Requiring it costs almost nothing —
+   * 8,702 `false`s compress to nothing at all — so the optional form's saving is
+   * not worth a flag that can be silently missing.
    *
    * **Existence is a property of the blob, not of the record.** The object is
    * `thumbs/{md5[:6]}/{md5}.webp`, and 171 md5s are shared by 520 rows, so this
@@ -1067,8 +1064,8 @@ export type CatalogRecord = z.infer<typeof CatalogRecord>
  * Every live file is a `.stl`.
  *
  * That regularity is worth exploiting rather than restating: storing both URLs
- * per record would add roughly 600 KB of raw JSON to an index budgeted at 500 KB
- * brotli, to say the same thing 8,702 times. Bases live here, paths come from
+ * per record would add roughly 600 KB of raw JSON to say the same thing 8,702
+ * times, and every visitor would parse it. Bases live here, paths come from
  * {@link shardedPath}, and `thumbs` is the new 256 px WebP derivative (§8).
  *
  * `lod` is the GLB store row **G1** writes (`/lod/{md5[:6]}/{md5}.glb`). It is

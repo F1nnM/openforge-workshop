@@ -8,20 +8,16 @@
  * paints a sprite immediately, offers the published STL, and never touches the
  * 10.5 MB engine.
  *
- * ## The map is derived in the browser and ships as zero bytes
+ * ## The map is derived in the browser rather than emitted
  *
- * Row S4 was written expecting a build-time reverse index, *"~12 KB brotli
- * riding in the index"*. Measured at `PAYLOAD_EPOCH` the way rows C1 and A1
- * measured theirs, it is **3,588 B** — the plan's estimate is 3.4x high — and it
- * is not shipped at all, because the index already contains every input: each
+ * Row S4 was written expecting a build-time reverse index riding in the catalog.
+ * It is not shipped at all, because the index already contains every input: each
  * base record carries its `file`, and the filename *is* the parameter tuple. The
- * 709 keys are 132,954 B raw and 3,639 B brotli on their own; adding them takes
- * the index from 366,768 B to 370,356 B, 72.3% of the 500 KB budget, to say
- * something a reader recomputes in **31 ms** over all 8,702 records, once,
- * memoised on the index file. That is the shape rows A1 and C1 settled on for
- * the aggregate and for `constrain`, for the same reason and on the same kind of
- * measurement. `resolve.test.ts` re-measures every number in this paragraph, so
- * none of them can go stale quietly.
+ * 709 keys are something a reader recomputes in a measured **8–9 ms** over all
+ * 8,702 records, once, memoised on the index file — so emitting them would add
+ * download and parse time to save single-digit milliseconds. That is the shape
+ * rows A1 and C1 settled on for the aggregate and for `constrain`.
+ * `resolve.test.ts` re-measures the counts, so they cannot go stale quietly.
  *
  * What *is* in the build is the gate. `pipeline/build.ts` classifies every base
  * filename through {@link classifyArchiveBase} and fails on one it cannot

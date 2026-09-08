@@ -2,9 +2,8 @@
  * Build-time verification of the aggregate layer.
  *
  * `src/catalog/aggregate.ts` derives one catalog item per design and ships
- * nothing — the whole grouping is recomputed in the browser, because the leanest
- * emittable form of it measures 40,454 B brotli against an index already at
- * 71.4% of its 500 KB budget. This module is the other half of that trade: if the
+ * nothing — the whole grouping is recomputed in the browser, in a measured 52 ms
+ * over 8,702 records. This module is the other half of that trade: if the
  * grouping is not in the artefact, then the *properties* six downstream rows read
  * it for have to be checked where the artefact is made.
  *

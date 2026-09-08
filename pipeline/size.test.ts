@@ -46,7 +46,7 @@ const title = hasFixtures
   ? 'size resolution over the real corpus'
   : `size resolution — SKIPPED, no fixtures at ${FIXTURES_DIR} (set OPENFORGE_FIXTURES)`
 
-/** Building the corpus once and brotli-ing 5.9 MB at quality 11, four times. */
+/** Building the 8,702-tile corpus once, which is seconds of real work. */
 const SLOW_MS = 300_000
 
 const tally = <T>(values: readonly T[]): Map<string, number> => {
@@ -61,7 +61,7 @@ describeCorpus(title, () => {
         rows: loadFixtureRows(FIXTURES_DIR),
         manifest: emptyManifest(),
         fixturesRef: 'test',
-        /* The payload epoch, so the byte figures below are the quotable ones. */
+        /* A fixed clock, so two builds of two branches are comparable. */
         builtAt: PAYLOAD_TIMESTAMP,
       }).file
     : ({ tags: [], records: [] } as unknown as CatalogFile)

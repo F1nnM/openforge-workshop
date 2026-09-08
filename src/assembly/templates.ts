@@ -21,9 +21,9 @@
  *
  * None of it is in `catalog.json`. No template carries `file_metadata`, so none is
  * an STL and none is a `CatalogRecord`; putting the 40 in the index anyway was
- * measured at +1,260 B brotli and declined. Every ref the families emit is a tag
- * the corpus already carries, so the index gains 0 B and the tag table stays at 930
- * strings. The reason both live in the bundle is that the recipe list is the one
+ * declined. Every ref the families emit is a tag the corpus already carries,
+ * so the tag table stays at 930 strings. The reason both live in the bundle is
+ * that the recipe list is the one
  * part of the builder’s palette that renders before the index lands.
  *
  * 40 templates over 20 fixture files, 128 parts.

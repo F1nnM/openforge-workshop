@@ -1,11 +1,10 @@
 /**
- * What the ported reading of `constrain` actually does to this corpus — and what
- * the readings it displaces were measured to cost.
+ * What the ported reading of `constrain` actually does to this corpus, and why
+ * the readings it displaces were rejected.
  *
  * §5 of the architecture plan put the question as a payload question: *"under one
- * reading the median slot has thousands of candidates, under another twelve, and
- * precomputed candidate sets range from 29 KB to 9.4 MB accordingly."* Both
- * readings are implemented here and both are measured, so the choice is a
+ * reading the median slot has thousands of candidates, under another twelve."*
+ * Both readings are implemented here and both are measured, so the choice is a
  * comparison rather than an assertion:
  *
  * | reading | sets | median | mean | max | empty |
@@ -19,37 +18,21 @@
  * touches anything**. 2,843 of the 3,695 slots (76.9%) then have under 50
  * candidates, which is the regime C2's inline sprite grid was designed for.
  *
- * ## What the alternatives cost, measured
+ * ## Why the browser derives them
  *
- * Every figure below is `JSON.stringify` of the sets with ordinals delta-encoded,
- * brotli quality 11, over the live 8,702-record index:
+ * Two things settled this, and neither is the payload question §5 framed it as:
  *
- * | what would be shipped | sets | raw | brotli |
- * | --- | ---: | ---: | ---: |
- * | wide reading, deduplicated to the 110 distinct slots | 110 | 13,037 B | 513 B |
- * | ported reading, per tile-slot, ordinals | 3,695 | 283,368 B | 3,606 B |
- * | ported reading, per tile-slot, ids as strings | 3,695 | 15,107,263 B | 37,542 B |
- * | every sibling-selection state, ordinals | 99,931 | 2,798,529 B | 5,767 B |
- * | **this row: derive in the browser** | — | **0 B** | **0 B** |
+ *   - **Correctness.** Every encoding that could be shipped, except the wide
+ *     one, bakes in "no sibling selected". A slot's set is only that until the
+ *     first pick, and 535 tiles have two or more slots, so the artefact would
+ *     carry a large body of JSON the client must recompute anyway. The wide
+ *     reading is stale in a different way: it is not the set the user is owed,
+ *     since it ignores the parent the slot is attached to.
+ *   - **Deriving is cheap.** The inverted index `candidates.ts` builds costs a
+ *     measured 3–5 ms over the real corpus, against a median candidate set of
+ *     14 members.
  *
- * Two of those numbers correct the plan rather than confirm it, and both matter:
- *
- *   - **Brotli eats these sets alive.** The plan feared 9.4 MB; the fat encoding
- *     is indeed **15,107,263 B raw**, but it is **37,542 B** compressed, and the
- *     index this row built measures 366,768 B against a 512,000 B budget (P3's
- *     `thumb` flag took it up 200 B and B1's role and form axes 1,165 B more),
- *     so there are 145,232 B free and the
- *     fattest encoding on the table would fit
- *     three times over. **Payload was never the binding constraint here.** Saying
- *     otherwise would have been a number chosen because it argued for the answer.
- *   - **Correctness is.** Every shipped row above except the first bakes in "no
- *     sibling selected". A slot's set is only that until the first pick, and 535
- *     tiles have two or more slots, so the artefact would carry 283 KB of raw
- *     JSON that the client must recompute anyway. The first row — the wide
- *     reading, 513 B — is cheap and stale in a different way: it is not the set
- *     the user is owed, since it ignores the parent the slot is attached to.
- *
- * So: **0 bytes emitted**, one 409,432 B inverted index built at run time
+ * So: nothing emitted, one 409,432 B inverted index built at run time
  * (`candidates.ts`), and the record shape untouched — `SCHEMA_VERSION` stays 3
  * and `PIPELINE_VERSION` stays 1, for the reason `pipeline/version.ts` records.
  *

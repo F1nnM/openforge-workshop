@@ -82,25 +82,11 @@
  *
  * Every ref below is a tag the corpus **already** carries, so the emitted index
  * is byte-identical and `src/composition/candidates.ts` needs no change — the
- * same property row B1 bought its axes for, without B1's 865 B.
+ * same property row B1 bought its axes for.
  *
- * A derived `size|run|<r>` tag was measured and **declined**. With `emit.ts`'s
- * own brotli-11 path, appending it to every record that has a run costs:
- *
- * | derived tag | vs a rebuild of the shipped artefact | vs a fresh build at `PAYLOAD_EPOCH` |
- * | --- | ---: | ---: |
- * | `size\|run\|<r>` | **+300 B** | **+756 B** |
- * | `size\|cell\|<w>x<d>` | +1,266 B | +1,812 B |
- * | both | +1,792 B | +2,501 B |
- *
- * Two baselines because they disagree and the disagreement is row B1's own
- * lesson, kept for the same reason its file keeps three: brotli is not additive
- * over 5.9 MB, so a "this field costs N bytes" figure is a fact about one
- * artefact at one epoch and never a rate. `pipeline/size.test.ts` re-measures
- * the fresh-build column every run.
- *
- * The price is not what declines it — the budget has 145,232 B free. What
- * declines it is that the tag table moves **930 -> 940** strings (988 for both),
+ * A derived `size|run|<r>` tag was considered and **declined**. Size is not what
+ * declines it. What declines it is that the tag table moves **930 -> 940**
+ * strings (988 for both),
  * and 930 is a hard assertion in `pipeline/role.test.ts`,
  * `pipeline/catalog.test.ts` and `src/composition/corpus.test.ts`, a quoted
  * figure in thirteen more docblocks across `pipeline/**`, `src/search/**`,

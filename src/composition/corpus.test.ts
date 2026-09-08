@@ -4,10 +4,10 @@
  * Two jobs, and the second is the one that makes this file worth its runtime:
  *
  *   1. **Every figure in `measure.ts`'s docblock is re-measured here**, so the
- *      table of readings and the table of priced alternatives fail the suite
- *      rather than sitting stale. That includes the brotli figures: the four
- *      encodings this row declined to ship are actually built and actually
- *      compressed, with `node:zlib`, at the same quality `pipeline/emit.ts` uses.
+ *      table of readings fails the suite rather than sitting stale. The byte
+ *      prices that used to sit beside it are gone: the index has no size budget
+ *      any more, and compressing 5.9 MB at quality 11 to restate a number nobody
+ *      would act on was the most expensive thing in this suite.
  *   2. **The two readings are compared.** The plan's open question was "thousands
  *      versus twelve", and the whole value of the port is that it answers it with
  *      the function the live catalog serves compositions with. Both numbers are

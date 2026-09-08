@@ -792,9 +792,8 @@ function Builder({ index }: { index: CatalogIndex }) {
 
           It takes `records` because catalog-first resolution is a join against
           the archive's own base filenames, and the index this screen already
-          holds is the only copy of those: `resolve.ts` measures the alternative,
-          a shipped reverse index, at 3,650 B brotli to say what the records
-          already say.
+          holds is the only copy of those: `resolve.ts` records why a shipped
+          reverse index would only restate what the records already say.
 
           `onPlace` is row S5's seam, wired by row X9. The drawer resolves the
           recipe and hands over a `RecipePlacement` plus the bytes when the

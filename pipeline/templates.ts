@@ -75,22 +75,8 @@
  *
  * ## Why not the index
  *
- * Measured at `PAYLOAD_EPOCH`, over the pinned corpus, with the real
- * ordinal manifest and thumbnail inventory — so it is comparable to every other
- * figure in `pipeline/version.ts`:
- *
- * | | raw | brotli | of budget |
- * | --- | ---: | ---: | ---: |
- * | `catalog.json` as merged | 5,907,360 B | 366,768 B | 71.6% |
- * | with a `templates` key | 5,946,827 B | 368,028 B | 71.9% |
- * | **the 40 would add** | **+39,467 B** | **+1,260 B** | **+0.25 pt** |
- * | the same 40 alone | 39,454 B | 1,452 B | — |
- *
- * So the index could afford them — 1,260 B is 0.86% of the 146,397 B of
- * headroom, and per row P3's warning that figure is a fact about one artefact at
- * one epoch rather than a rate. **The budget is not why they are not in there.**
- *
- * The reason is a property of C3's screen that the index would destroy.
+ * **Size is not why.** The reason is a property of C3's screen that the index
+ * would destroy.
  * `AssembliesScreen`'s recipe list *"needs no catalog — it is the one part of the
  * screen that works before the 5.6 MB index has landed"*, because a template has
  * no sprite and nothing to render but its name and its parts. Move the 40 into
@@ -99,8 +85,8 @@
  * artefact for row X4's stamp to cover.
  *
  * So the 40 stay **in the bundle**, in the lazily-mounted `/assemblies` chunk row
- * X9 landed — 1,474 B brotli of JavaScript, paid by the people who open the
- * screen and by nobody else, and 0 B of the index. What changes is who writes
+ * X9 landed — paid by the people who open the screen and by nobody else, and
+ * carried nowhere in the index. What changes is who writes
  * them: {@link printTemplateModule} does, `npm run import:catalog` runs it, and
  * `templates.test.ts` fails when the committed module is not byte-for-byte what
  * this file emits. The path is {@link TEMPLATES_MODULE_PATH} and it is a constant
@@ -636,8 +622,7 @@ export function checkTemplateTags(entries: readonly TemplateFixture[]): void {
  * Row **B2**'s build-time gate, and the one thing the pipeline does with slot
  * geometry. Nothing is *emitted*: the three conventions ship in the bundle in
  * `src/template/rules.ts`, and the index gains **0 B** — a 128-row expansion of
- * the same rule as a `layouts` key was measured at **+222 B** brotli against the
- * shipped artefact at the payload epoch and declined, exactly as the 40
+ * the same rule as a `layouts` key was declined, exactly as the 40
  * templates themselves were. `templates.test.ts` asserts the 0 B rather than
  * quoting it, by rebuilding the corpus and comparing the emitted bytes;
  * `src/template/corpus.test.ts` prices the counterfactual against the shipped
@@ -894,9 +879,9 @@ export function printTemplateModule(
     ' *',
     ' * None of it is in `catalog.json`. No template carries `file_metadata`, so none is',
     ' * an STL and none is a `CatalogRecord`; putting the 40 in the index anyway was',
-    ' * measured at +1,260 B brotli and declined. Every ref the families emit is a tag',
-    ' * the corpus already carries, so the index gains 0 B and the tag table stays at 930',
-    ' * strings. The reason both live in the bundle is that the recipe list is the one',
+    ' * declined. Every ref the families emit is a tag the corpus already carries,',
+    ' * so the tag table stays at 930 strings. The reason both live in the bundle is',
+    ' * that the recipe list is the one',
     ' * part of the builder’s palette that renders before the index lands.',
     ' *',
     ` * ${String(entries.length)} templates over ${String(new Set(entries.map((entry) => entry.source)).size)} fixture files, ${String(
