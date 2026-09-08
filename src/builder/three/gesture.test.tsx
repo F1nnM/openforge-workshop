@@ -88,6 +88,7 @@ import { CAMERA_FAR, CAMERA_FOV, CAMERA_NEAR, CAMERA_POSITION, VIEW_RADIUS } fro
 import type { OutlineRequest } from '@/three/outline'
 import { color } from '@/tokens/tokens'
 
+import { ARMED_TURN_STEP_DEG } from './edits'
 import type { LodGeometry } from './loadLod'
 import type * as Markers from './markers'
 
@@ -289,6 +290,8 @@ interface Mounted {
    * its verbs now (arming and selecting), where before it only ever read.
    */
   readonly tools: ReturnType<typeof planTools>
+  /** The undo recorder the surface was handed. See {@link Mounted.tools}. */
+  readonly history: ReturnType<typeof planHistory>
 }
 
 /**
@@ -315,7 +318,8 @@ function mount(
 ) {
   const armed = options.armed ?? null
   const tools = planTools({ selectedTemplate: armed, selected: options.selected ?? null })
-  const state: Mounted = { opened: [], said: [], reached: [], cues: [], tools }
+  const history = planHistory()
+  const state: Mounted = { opened: [], said: [], reached: [], cues: [], tools, history }
   const onDown = (event: Event) => {
     state.reached.push((event as MouseEvent).button)
   }
@@ -338,7 +342,7 @@ function mount(
       fill={fixtureFiller()}
       fit={FIT}
       geometries={geometries}
-      history={planHistory()}
+      history={history}
       keyHelpId="of-keys"
       label="a room"
       {...(options.wired === false
@@ -863,6 +867,83 @@ describe('what the cue costs', () => {
     frames = 0
     for (let i = 0; i < 10; i += 1) hover([100 + i, 100])
     expect(frames).toBe(10)
+  })
+})
+
+/**
+ * Where the shortcuts listen, and where they refuse to.
+ *
+ * **The defect these exist for was reported from the running app**, and it was
+ * the kind no test here could have caught while the listener was on the canvas:
+ * every one of them fired `fireEvent.keyDown(canvas, …)`, which is the one
+ * target that always worked. A user arms a family by clicking a *palette row* —
+ * a `<button>`, which takes focus — so `R` and `Escape` went to the palette and
+ * did nothing, and pressing `Undo` on the rail broke `Ctrl`+`Z` the same way.
+ *
+ * So these fire at `document.body` and at a text input instead: the two places
+ * the old wiring got wrong in opposite directions.
+ */
+describe('the key map reaches the whole screen, and stops at a text field', () => {
+  it('turns the armed ghost from a press that never touched the canvas', () => {
+    // The reported case. `body` stands in for the palette row that has focus
+    // after arming — what matters is only that it is not the canvas.
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
+    fireEvent.keyDown(document.body, { key: 'r' })
+    expect(state.tools.calls.rotate).toEqual([{ step: ARMED_TURN_STEP_DEG, direction: 1 }])
+  })
+
+  it('disarms from a press that never touched the canvas', () => {
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(state.tools.calls.armed).toEqual([null])
+  })
+
+  it('undoes from a press that never touched the canvas', () => {
+    // The same class, arriving from the rail: clicking `Undo` focuses that
+    // button, and the next Ctrl+Z has to still reach the ring.
+    const state = mount(corner(-1))
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true })
+    expect(state.history.calls.undo).toBe(1)
+  })
+
+  it('leaves a text field alone, so the palette search can contain an r', () => {
+    /*
+      The guard that makes the reach safe. `r` in the palette's search box must
+      type an `r`, not turn the ghost — and the same holds for `g`, `[`, `]` and
+      every other bare letter in the map.
+    */
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
+    const field = document.createElement('input')
+    document.body.append(field)
+    try {
+      fireEvent.keyDown(field, { key: 'r' })
+      fireEvent.keyDown(field, { key: 'Escape' })
+      expect(state.tools.calls.rotate).toEqual([])
+      expect(state.tools.calls.armed).toEqual([])
+    } finally {
+      field.remove()
+    }
+  })
+
+  it('suspends the whole map while a dialog is open', () => {
+    /*
+      The slot editor and the two pickers are modals. `Escape` inside one belongs
+      to the dialog, and a shortcut firing behind it would edit a room the user
+      cannot see — so the map goes quiet for *every* key rather than carrying a
+      per-key exception list that the next key would be forgotten from.
+    */
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    document.body.append(dialog)
+    try {
+      fireEvent.keyDown(document.body, { key: 'r' })
+      fireEvent.keyDown(document.body, { key: 'Escape' })
+      expect(state.tools.calls.rotate).toEqual([])
+      expect(state.tools.calls.armed).toEqual([])
+    } finally {
+      dialog.remove()
+    }
   })
 })
 
