@@ -259,6 +259,7 @@ and a caption stating the demo downloads a manifest while production bundles a z
 | Add / remove library | Card button, detail drawer | Persisted |
 | Group library by kind | Library | Uses the component facet ordering |
 | Arm a palette family | Builder palette | Arms the family **and its size**; clears any selection |
+| Cancel the arming | `Escape`, or a right-**click** on the plan | Both stated on the label at the cursor |
 | Place | Builder canvas | Click while armed. Refused where it would exactly overlap — see below |
 | Select | Builder canvas | Click a piece while nothing is armed. Or `[` / `]`, which is the keyboard route |
 | Deselect | Builder canvas | Click bare ground, or `Escape` |
@@ -268,7 +269,7 @@ and a caption stating the demo downloads a manifest while production bundles a z
 | Edit slots | Action bar `▤ Slots`, `Enter`, or the slots panel row | Opens on the selected piece |
 | Undo / redo | Toolbar, or `Ctrl`/`Cmd`+`Z` / `Ctrl`/`Cmd`+`Shift`+`Z` / `Ctrl`+`Y` | 50 entries, in memory, not persisted |
 | Orbit | Builder canvas | Left-drag from bare ground, or **middle-drag anywhere** |
-| Pan / zoom | Builder canvas | Right-drag pans, wheel zooms |
+| Pan / zoom | Builder canvas | Right-**drag** pans, wheel zooms. A right *click* cancels the arming — the 5 px travel test tells the two apart |
 | Clear build | Toolbar | Undoable |
 | Snap size | `G`, or the toolbar readout | 0.5 / 1 unit. There is no ¼ — see §7 of the architecture plan |
 | Download pack | Bill of tiles | A ZIP built in the browser |
@@ -280,6 +281,18 @@ mode; a right click opens the slot editor.~~ **All superseded.** There are no mo
 force or escape, so `Shift`-click is left free for its conventional meaning (extend a
 selection) and `Alt`-drag for duplicate, when those arrive. Right-drag is pan and nothing
 else — the slot editor moved to the selection, where it has a real operand.
+
+**The armed state says what it will place and how to stop.** A label rides the
+cursor naming the armed family, and stating both ways out — `Esc` and a
+right-click. Before it, the armed state announced itself only in the two corner
+plates of a full-bleed viewport and *neither of them said how to stop*: `Escape`
+disarmed and always did, and nothing on screen mentioned it. A user who armed a
+family by accident had a ghost following their pointer, no visible way out, and a
+primary button that placed a tile wherever they clicked next.
+
+The label takes no pointer events, which is what makes it a label rather than a
+small toolbar: it sits under the cursor, so anything it swallowed would be
+swallowed on every click.
 
 **Middle-drag orbit is new and it is not a convenience.** With a drag from a piece now
 meaning *move*, a room that fills the viewport would otherwise leave no reachable ground

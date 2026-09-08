@@ -41,11 +41,11 @@
  * its own dialog semantics and its own tests, and rewriting it to render in
  * either shape is not this row's work.
  *
- * ## Pointer events stop here
+ * ## Pointer events stop here, and focus does not move
  *
  * `RoomSurface` listens for `pointerdown` on the canvas's **parent** in the
  * capture phase, and drei's `<Html>` portals this component into that same
- * parent. Two things therefore have to be true, and both are:
+ * parent. Three things therefore have to be true:
  *
  *   1. `RoomSurface` ignores presses whose target is not the canvas —
  *      `selection.ts#claimsPress`, and it is written as a fix for the *class*
@@ -54,6 +54,13 @@
  *      half that survives someone moving the portal: a press on a button must
  *      never also reach `OrbitControls`, or clicking `Remove` orbits the camera
  *      while the piece disappears.
+ *   3. **A press here does not move focus.** This is the one that was wrong, and
+ *      it was invisible to every test in this repo: clicking a `<button>` focuses
+ *      it, which blurs the canvas — so after pressing `⟳` here, `R`, `Delete`
+ *      and `Ctrl`+`Z` stopped reaching the surface and the keyboard caret went
+ *      out. `preventDefault` on `mousedown` is the standard answer for a toolbar
+ *      floating over a canvas, and it costs nothing in accessibility: `Tab`
+ *      still reaches every button, because tab focus is not a default action.
  */
 import type { ScenePiece } from '@/builder/canvas'
 import { pieceName } from '@/builder/canvas'
@@ -92,6 +99,10 @@ export function PieceActionsBar({ piece, onEditSlots, onTurn, onRemove }: PieceA
       // See the docblock: never let a press on a button reach the camera.
       onPointerDown={(event) => {
         event.stopPropagation()
+      }}
+      // And never let it take focus off the canvas, or the key map goes with it.
+      onMouseDown={(event) => {
+        event.preventDefault()
       }}
     >
       <div className="of-piece-actions-row">

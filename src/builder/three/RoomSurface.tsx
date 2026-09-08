@@ -265,6 +265,7 @@ import {
   templateGhost,
 } from './edits'
 import { InstancedTiles } from './InstancedTiles'
+import { ArmedAnchor } from './ArmedAnchor'
 import { SelectionAnchor } from './SelectionAnchor'
 import { Caret, FootprintPlate, Ghost, Lattice, SelectionMark } from './surfaceDraw'
 import type { LodInstanceGroup, Room3D } from './instances'
@@ -975,6 +976,22 @@ export function RoomSurface({
   /** The press being tracked, or `null`. `claimed` means the surface took it. */
   const press = useRef<{ x: number; y: number; button: number; claimed: boolean } | null>(null)
 
+  /**
+   * Where a **secondary** press started, or `null`. Its own ref, deliberately.
+   *
+   * Two refs rather than one with a `button` field, and the second one is worth
+   * a paragraph because the alternative reintroduces a bug this file already
+   * fixed once: `press` is read by `onUp` *whatever button was released*, so
+   * with a right press recorded in the same slot a chorded gesture resolves as
+   * the wrong one — hold the primary button, right-click without releasing it,
+   * and the release passes the 5 px test against the *primary* press and places
+   * a tile. Keeping the two apart makes each release read only its own press.
+   *
+   * There is no `claimed` on this one and there never can be: claiming a
+   * secondary press would take the camera pan away from the right button.
+   */
+  const secondary = useRef<{ x: number; y: number } | null>(null)
+
 
   useEffect(() => {
     const canvas = gl.domElement
@@ -1005,12 +1022,23 @@ export function RoomSurface({
      * open nothing, each of which still says so.
      */
     const onDown = (event: PointerEvent) => {
-      // A secondary press is the camera's and nothing else now. It used to be
-      // recorded here so the release could ask the 5 px question and open the
-      // slot editor; the editor opens from the selection's action bar, which
-      // has an operand the pointer had to guess at. So right-drag pans, a
-      // right-click does nothing, and `OrbitControls` sees every one of them.
-      if (event.button === SECONDARY_BUTTON) return
+      // A secondary press is **recorded and never claimed**. Not claimed,
+      // because `OrbitControls` binds the right button to `MOUSE.PAN` and
+      // `Stage` passes `enablePan` — so every pan gesture starts with one, and
+      // claiming it would take panning away from the button. Recorded, so the
+      // release can ask the 5 px question and tell a *click* from a pan.
+      //
+      // The one thing a right-click does is **cancel what is armed**, which is
+      // the affordance `ArmedLabel` states. That is a much safer thing to hang
+      // on this button than the slot editor row C3 hung here: a stray cancel
+      // costs one click to undo by re-arming, where a stray dialog interrupted
+      // the pan it was mistaken for. It is also why a bare `contextmenu`
+      // listener is still the wrong seam — that event fires from the mouse
+      // *down* on X11 and macOS, before any travel exists to measure.
+      if (event.button === SECONDARY_BUTTON) {
+        secondary.current = { x: event.clientX, y: event.clientY }
+        return
+      }
       if (event.button !== 0) return
       // **The bug class, not one instance.** This listener is on the canvas's
       // *parent* in the capture phase and calls `stopPropagation` on the presses
@@ -1085,7 +1113,17 @@ export function RoomSurface({
       // Whatever the release was, it ended it: the glow comes back on the piece
       // the pointer finished over, without waiting for the next move.
       glowWhileHeld(false)
-      if (event.button === SECONDARY_BUTTON) return
+      if (event.button === SECONDARY_BUTTON) {
+        const from = secondary.current
+        secondary.current = null
+        // A pan, not a click. Nothing to do; the camera already moved.
+        if (from === null || !isClickGesture(from, { x: event.clientX, y: event.clientY })) return
+        if (latest.current.tools.selectedTemplate !== null) {
+          latest.current.tools.arm(null)
+          latest.current.say('Nothing armed.')
+        }
+        return
+      }
       const started = press.current
       press.current = null
       if (started === null) return
@@ -1128,6 +1166,7 @@ export function RoomSurface({
 
     const onCancel = (event: PointerEvent) => {
       glowWhileHeld(false)
+      secondary.current = null
       const started = press.current
       press.current = null
       if (started?.claimed !== true) return
@@ -1431,7 +1470,18 @@ export function RoomSurface({
       }
     }
 
-    const onFocus = () => { setFocused(true) }
+    const onFocus = () => {
+      setFocused(true)
+      // Put the keyboard cursor somewhere visible if it has nowhere yet, so
+      // focus has an **in-scene** cue rather than only a ring around the
+      // viewport. A `role="application"` tab stop has to show that it holds the
+      // keys, and the caret says it where the user is looking; `builder3d.css`
+      // carries why the ring itself is as quiet as it is.
+      if (cursorRef.current === null) {
+        setCursor([0, 0])
+        invalidate()
+      }
+    }
     const onBlur = () => { setFocused(false) }
 
     canvas.addEventListener('keydown', onKey)
@@ -1601,6 +1651,26 @@ export function RoomSurface({
           heightMm={plate.heightMm}
         />
       ))}
+
+      {/*
+        What the next click will place, and how to stop — at the cursor, where
+        the eye already is.
+
+        The armed state used to announce itself only in the two corner plates of
+        a full-bleed viewport, and neither of them said how to *stop*: `Escape`
+        disarmed and always did, and nothing on screen mentioned it. A user who
+        armed a family by accident had a ghost following their pointer and a
+        primary button that placed a tile wherever they clicked next.
+
+        Anchored at the ghost's own snapped anchor rather than at the raw
+        cursor, so the label sits still while the pointer moves within a cell —
+        the same value the projection is memoised on. `ArmedLabel` carries why it
+        takes no pointer events, which is the constraint that makes it a label
+        rather than a control.
+      */}
+      {ghost === null || armed === null ? null : (
+        <ArmedAnchor anchor={ghost.anchor} name={ghost.name} blocked={armedGhost?.blocking} />
+      )}
 
       {/*
         The selection's **persistent** cue, on the plan.

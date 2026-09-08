@@ -206,6 +206,8 @@ vi.mock('@/three/ScreenLine', () => ({
 */
 vi.mock('./SelectionAnchor', () => ({ SelectionAnchor: () => null }))
 
+vi.mock('./ArmedAnchor', () => ({ ArmedAnchor: () => null }))
+
 vi.mock('./markers', async (importOriginal) => {
   const actual = await importOriginal<typeof Markers>()
   return {
@@ -278,6 +280,15 @@ interface Mounted {
    * nothing at all for the moves in between.
    */
   readonly cues: OutlineRequest[]
+  /**
+   * The tool recorder the surface was handed.
+   *
+   * Exposed so a test can assert what a *gesture* asked the state to do —
+   * `calls.armed` for a disarm, `calls.selection` for a select — without
+   * reaching for a second mount. The surface writes to `PlanTools` for two of
+   * its verbs now (arming and selecting), where before it only ever read.
+   */
+  readonly tools: ReturnType<typeof planTools>
 }
 
 /**
@@ -302,7 +313,9 @@ function mount(
     readonly geometries?: ReadonlyMap<string, LodGeometry>
   } = {},
 ) {
-  const state: Mounted = { opened: [], said: [], reached: [], cues: [] }
+  const armed = options.armed ?? null
+  const tools = planTools({ selectedTemplate: armed, selected: options.selected ?? null })
+  const state: Mounted = { opened: [], said: [], reached: [], cues: [], tools }
   const onDown = (event: Event) => {
     state.reached.push((event as MouseEvent).button)
   }
@@ -317,7 +330,6 @@ function mount(
     resolve: (record) => resolveMaterial(CATALOG.tags(record), record.file),
     viewRadius: VIEW_RADIUS,
   })
-  const armed = options.armed ?? null
   render(
     <RoomSurface
       announce={(text) => state.said.push(text)}
@@ -338,7 +350,7 @@ function mount(
       onStatus={() => undefined}
       room={room}
       scene={scene}
-      tools={planTools({ selectedTemplate: armed, selected: options.selected ?? null })}
+      tools={tools}
     />,
   )
   return state
@@ -480,15 +492,50 @@ function rightClick(travel = 0) {
  * What survives is what is still true about the button, and one regression that
  * would still be a defect if it came back.
  */
-describe('the right button is the camera’s, and only the camera’s', () => {
-  it('opens nothing, at any travel distance', () => {
-    // Both ends of the old 5 px discriminator in one assertion, because the
-    // number no longer decides anything here: a click and a pan are the same
-    // answer now, which is the simplification the selection bought.
+describe('the right button pans, and cancels what is armed', () => {
+  it('opens no dialog, at any travel distance', () => {
+    // The gesture row C3 hung here is gone at both ends of the old 5 px
+    // discriminator, which is the simplification the selection bought.
     const state = mount(corner(-1))
     rightClick(0)
     rightClick(20)
     expect(state.opened).toEqual([])
+  })
+
+  it('disarms on a click, which is the way out the armed label promises', () => {
+    /*
+      `ArmedLabel` tells the user *"Esc or right-click to cancel"*, and a
+      promise on screen has to be kept by the gesture layer. This is the second
+      half; `planTools.test.tsx` covers what `arm(null)` does to the state.
+
+      Hung on this button deliberately, and it is a much safer thing to hang
+      here than the slot editor was: a stray cancel costs one click to undo by
+      re-arming, where a stray dialog interrupted the pan it was mistaken for.
+    */
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
+    rightClick(0)
+    expect(state.tools.calls.armed).toEqual([null])
+    expect(state.said.at(-1)).toBe('Nothing armed.')
+  })
+
+  it('does not disarm on a pan, because a pan is not a cancel', () => {
+    // The 5 px question, and the whole reason the seam is a `pointerup` rather
+    // than a `contextmenu` listener: `contextmenu` fires from the mouse *down*
+    // on X11 and macOS, before any travel exists to measure, so it would cancel
+    // the arming at the start of every pan gesture.
+    const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
+    rightClick(20)
+    expect(state.tools.calls.armed).toEqual([])
+    expect(state.said).toEqual([])
+  })
+
+  it('says nothing when a right-click has nothing to cancel', () => {
+    // With nothing armed the button is purely the camera's, and a builder that
+    // announced "nothing armed" every time the user finished a pan would be
+    // narrating the camera.
+    const state = mount(corner(-1))
+    rightClick(0)
+    expect(state.tools.calls.armed).toEqual([])
     expect(state.said).toEqual([])
   })
 
