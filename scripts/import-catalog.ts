@@ -48,7 +48,6 @@ import { join } from 'node:path'
 
 import {
   TEMPLATES_MODULE_PATH,
-  assertWithinBudget,
   buildCatalog,
   compressCatalog,
   deriveFamilies,
@@ -57,7 +56,6 @@ import {
   loadFixtureRows,
   loadManifest,
   loadTemplateFixtures,
-  measureCatalog,
   printTemplateModule,
   readThumbInventory,
   resolveFixturesRef,
@@ -84,10 +82,9 @@ function main(): number {
   })
 
   const json = serialiseCatalog(result.file)
-  const size = measureCatalog(json)
   const families = deriveFamilies(result.file)
   const module = printTemplateModule(templates, families)
-  report(dir, result, size, dryRun, inventory, templates, families, module)
+  report(dir, result, dryRun, inventory, templates, families, module)
 
   if (!dryRun) {
     mkdirSync(OUT_DIR, { recursive: true })
@@ -97,15 +94,12 @@ function main(): number {
     writeFileSync(join(process.cwd(), TEMPLATES_MODULE_PATH), module)
   }
 
-  // Last, so the numbers are printed even when the build fails on them.
-  assertWithinBudget(size)
   return 0
 }
 
 function report(
   dir: string,
   result: ReturnType<typeof buildCatalog>,
-  size: ReturnType<typeof measureCatalog>,
   dryRun: boolean,
   inventory: ReturnType<typeof readThumbInventory>,
   templates: ReturnType<typeof loadTemplateFixtures>,
@@ -132,7 +126,6 @@ function report(
       }`,
     `names         ${String(stats.distinctNames)} distinct over ${String(stats.records)} records`,
     `ordinals      ${String(result.manifest.ids.length)} issued · ${String(stats.newOrdinals)} new · ${String(stats.retiredOrdinals)} retired`,
-    `size          raw ${formatBytes(size.raw)} · gzip ${formatBytes(size.gzip)} · brotli ${formatBytes(size.brotli)} of ${formatBytes(size.budget)} budget`,
     `templates     ${String(templates.length)} recipes over ${String(new Set(templates.map((entry) => entry.source)).size)} yaml fixtures · ` +
       `${String(templates.reduce((total, entry) => total + entry.parts.length, 0))} parts · ` +
       `${formatBytes(Buffer.byteLength(module, 'utf8'))} raw of generated module, 0 B of the index`,

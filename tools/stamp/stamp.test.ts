@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { CatalogFile, ManifestOrdinal } from '../../src/catalog'
-import { atPayloadEpoch, emptyManifest, fixturesDir, measureCatalog, serialiseCatalog } from '../../pipeline'
+import { emptyManifest, fixturesDir } from '../../pipeline'
 import { MANIFEST_VERSION as LOD_MANIFEST_VERSION } from '../lod/manifest'
 import { MEASURE_SIDECAR_VERSION } from '../measure/sidecar'
 import { blobOf, testCatalog } from '../measure/fixtures/catalog'
@@ -232,14 +232,6 @@ describeCorpus(title, () => {
     // recomputed here from the file the run returned.
     expect(run.report.corpus).toEqual(corpusDigest(run.file.records.map((record) => record.blob)))
     expect(run.report.corpus.blobs).toBeLessThan(run.report.records)
-  })
-
-  it('measures the payload at the payload epoch, not at the build clock', () => {
-    // Fails if the size is taken from the file as built: the clock reading alone
-    // swings brotli 655 B on this corpus, which is most of any delta a row would
-    // want to quote.
-    expect(run.report.payload).toEqual(measureCatalog(serialiseCatalog(atPayloadEpoch(run.file))))
-    expect(run.report.payload.withinBudget).toBe(true)
   })
 
   it('promotes an advisory artefact when --require names it', () => {

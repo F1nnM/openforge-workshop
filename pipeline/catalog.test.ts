@@ -39,7 +39,7 @@ import {
 
 import type { BuildResult } from './build'
 import { buildCatalog } from './build'
-import { measureCatalog, serialiseCatalog } from './emit'
+import { serialiseCatalog } from './emit'
 import { CONNECTION_POSITIONS, classifyLayer, connectionSystems, connectionsByPosition, isLockSystem } from './facets'
 import type { FixtureRow } from './fixtures'
 import { fixturesDir, liveRows, loadFixtureRows } from './fixtures'
@@ -58,7 +58,6 @@ import {
   arcBandSideOfRadius,
   isMeasured,
 } from './tessellation'
-import { SIZE_BUDGET_BYTES } from './version'
 
 const FIXTURES_DIR = fixturesDir()
 
@@ -1315,17 +1314,6 @@ describeCorpus(title, () => {
       expect(spriteless.every((record) => !record.thumb)).toBe(true)
     })
   })
-
-  /* ------------------------------------------------------------ size budget */
-
-  it('fits the 500 KB brotli budget, and reports what it actually costs', () => {
-    const size = measureCatalog(json)
-    process.stdout.write(
-      `\n[catalog] raw ${String(size.raw)} B · gzip ${String(size.gzip)} B · brotli ${String(size.brotli)} B ` +
-        `of ${String(SIZE_BUDGET_BYTES)} B budget\n`,
-    )
-    expect(size.brotli).toBeLessThanOrEqual(SIZE_BUDGET_BYTES)
-  }, SLOW_MS)
 })
 
 /* -------------------------------------------------------------------- oracle */

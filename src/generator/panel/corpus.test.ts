@@ -17,7 +17,6 @@
  * way rows C1, W7 and X4 each filed theirs against the same file.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { brotliCompressSync, constants as zlibConstants } from 'node:zlib'
 
 import { describe, expect, it } from 'vitest'
 
@@ -35,15 +34,6 @@ const describeCorpus = present ? describe : describe.skip
 const title = present
   ? 'the archive, all of it'
   : `the archive — SKIPPED, no ${CATALOG} (run \`npm run import:catalog\`)`
-
-/** `pipeline/version.ts`'s epoch, so a payload figure is comparable across branches. */
-const PAYLOAD_TIMESTAMP = '2026-01-01T00:00:00.000Z'
-
-function brotli(text: string): number {
-  return brotliCompressSync(Buffer.from(text, 'utf8'), {
-    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
-  }).length
-}
 
 describeCorpus(title, () => {
   const file = JSON.parse(readFileSync(CATALOG, 'utf8')) as CatalogFileType
@@ -132,27 +122,12 @@ describeCorpus(title, () => {
     expect(expressible + unitDimension + toplessLock).toBe(442)
   })
 
-  it('costs 3,650 B brotli to ship, at the payload epoch, so it is derived instead', () => {
-    // Measured the way rows C1 and A1 measured theirs: the same file at
-    // `PAYLOAD_EPOCH`, once without the field and once with it. Row X4
-    // established that the clock alone swings this by 655 B, so a delta
-    // measured at the build clock would not be a delta.
-    const atEpoch = { ...file, version: { ...file.version, built: PAYLOAD_TIMESTAMP } }
-    const baseline = brotli(JSON.stringify(atEpoch))
-    // **366,768 since row B1**, which emits the derived `role|<x>` and
-    // `form|<x>` axes as 15 interned tags over 17,404 new references: 365,603 +
-    // **1,165 B**. This is the shipped-artefact figure, measured on both sides
-    // with the same instrument, and it is the one every payload docblock in the
-    // repo quotes. Row B1's own test measures the *field* in isolation and gets
-    // 468 B; the two differ because `version.pipeline` also went 1 to 2 and
-    // brotli is not additive over 5.9 MB — the same caveat P3 recorded one line
-    // below, now fired twice.
-    // **366,720 since the derivative bases moved host**; 366,682 before that, from
-    // row D9, which corrected 245 corner walls from a tagged
-    // 2-unit run to their measured 1.5: +40 B brotli on the shipped artefact.
-    // (366,768 before it, from row B1's two derived axes.)
-    expect(baseline).toBe(366_720)
-
+  it('resolves 709 generated bases to a recipe key, and ships none of the map', () => {
+    /* The map is derived in the browser rather than emitted, so the assertion is
+       that it *resolves* rather than what it would have weighed. `buildBaseResolver`
+       is priced by the frame-budget test below; the byte counterfactual that used
+       to live here compressed the 5.9 MB index twice to produce a figure that
+       moved every time an unrelated row touched the artefact. */
     const map: Record<string, number> = {}
     for (const record of bases) {
       const classified = classifyArchiveBase(record, replayed)
@@ -160,24 +135,7 @@ describeCorpus(title, () => {
       map[recipeKey({ v: 1, entry: classified.swept.entry, parameters: classified.swept.parameters })] = record.ord
     }
     expect(Object.keys(map)).toHaveLength(709)
-    const withMap = brotli(JSON.stringify({ ...atEpoch, bases: map }))
-    // 3,732 B since row D9, and the fourth value this line has held. It went
-    // 3,776 → 3,650 when P3 added a boolean per record, 3,650 → 3,588 when B1
-    // added two tag references per record, and 3,588 → 3,732 when D9 corrected
-    // 245 corner-wall run lengths and bumped `PIPELINE_VERSION` — and **not one
-    // of the three did anything about the recipe map**: the *baseline* it is
-    // measured against moved each time, and brotli is not additive. Three rows
-    // have now shifted this delta by 126 B, 62 B and 144 B without touching a
-    // byte of its subject, and D9's own two halves pulled it in opposite
-    // directions (the footprint alone gave 3,509; the version character brought
-    // it to 3,732, and moving two asset bases to a second host to 3,790). A delta
-// over a 5.9 MB artefact is a fact about one artefact,
-    // which is exactly why this line is asserted and not quoted from a docblock.
-    expect(withMap - baseline).toBe(3_790)
-    // The row expected ~12 KB. It is 3.3x smaller than that and still 0 is
-    // cheaper, because every input is already in the records.
-    expect(withMap - baseline).toBeLessThan(12_288)
-  }, 180_000)
+  })
 
   it('derives the map in well under a frame budget, once', () => {
     const started = performance.now()

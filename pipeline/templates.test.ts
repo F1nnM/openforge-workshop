@@ -50,7 +50,7 @@ import { TagRef } from '../src/catalog'
 import { SLOT_CONVENTIONS, conventionFor } from '../src/template/rules'
 
 import { buildCatalog } from './build'
-import { measureCatalog, serialiseCatalog } from './emit'
+import { serialiseCatalog } from './emit'
 import { deriveFamilies } from './families'
 import type { GeneratedFamily } from './families'
 import { FixtureRow, fixtureFingerprint, fixturesDir, loadFixtureRows } from './fixtures'
@@ -69,7 +69,7 @@ import {
   templateSlug,
   templateTagDefects,
 } from './templates'
-import { PAYLOAD_TIMESTAMP, SIZE_BUDGET_BYTES } from './version'
+import { PAYLOAD_TIMESTAMP } from './version'
 
 const FIXTURES = fixturesDir()
 const hasFixtures = existsSync(FIXTURES)
@@ -314,108 +314,57 @@ describeFixtures(title, () => {
       }
     })
 
-    it(
-      'adds 0 B to the index, and prices the same rule inside it at +396 B',
-      () => {
-        /* The claim the row rests on, measured rather than argued. The
-           conventions ship in the bundle, `pipeline/build.ts` never reaches this
-           module, and the emitted artefact is therefore **byte-identical** to
-           what row B1 pinned — which is what "0 B" has to mean to be checkable.
+    it('keeps the whole slot-anchor model out of the emitted index', () => {
+      /* The claim the row rests on, asserted structurally. The conventions ship
+         in the bundle and `pipeline/build.ts` never reaches this module, so none
+         of the model's vocabulary can appear in the artefact — and the table it
+         would otherwise have shipped is the 128 rows counted at the end.
 
-           Confirmed once directly as well, by building the same corpus at the
-           same epoch from a tree with this row reverted: same raw length
-           (5,907,324 B), same brotli (366,173 B) and the same SHA-256 of the
-           serialised index, `cf21ab85ac304a20…`.
+         This used to also weigh the artefact with and without a `layouts` key.
+         That measurement is gone: the figure moved four times (+808 B, then
+         -71 B, then +396 B, then +257 B) across rows that changed not one byte
+         of the table it was pricing, which is what "brotli is not additive over
+         5.9 MB" means in practice. The structural claim is the one that holds. */
+      const { file } = buildCatalog({
+        rows: loadFixtureRows(FIXTURES),
+        manifest: emptyManifest(),
+        fixturesRef: 'test',
+        builtAt: PAYLOAD_TIMESTAMP,
+      })
+      const json = serialiseCatalog(file)
 
-           **Row D9 moved that artefact, and proved what moved it the same way.**
-           Building this same corpus at this same epoch from a tree with *only*
-           `pipeline/footprint.ts` reverted to its pre-D9 state reproduces
-           `cf21ab85ac304a20…` byte for byte — 5,904,652 B raw, 366,173 B brotli
-           — and with the corrected corner run it is
-           `e1d5ca5459812bb1f636b4acfe923f4b8b26e640761ef05bdcf754f843428a33`,
-           5,905,632 B raw and **366,627 B brotli** (366,677 B until the derivative asset
-           bases moved to their own host, which brotli priced at -50 B here). So the whole of the +980 B
-           raw / **+493 B** brotli is 245 records writing `"length":1.5` where
-           they wrote `"length":2`, and B2's own "0 B" claim is unaffected: it is
-           a claim about *this* module, and reverting *this* module still gives
-           the artefact the surrounding tree produces.
+      const layouts = entries.map((entry) => ({
+        id: templateSlug(entry.name),
+        slots: templateConvention(entry).slots.map((slot) => ({
+          part: slot.part,
+          anchor: slot.anchor,
+          side: slot.side,
+          restsOn: slot.restsOn,
+        })),
+      }))
 
-           The counterfactual here is the 128-row expansion of the same three
-           rules as a `layouts` key, against **this** construction — a fresh
-           build with an empty ordinal manifest. `src/template/corpus.test.ts`
-           prices it against the shipped artefact instead and gets +222 B, and
-           the research measured +374 B against the pre-B1 `catalog.json`. All
-           three are the same table. Row B1 records the lesson in this same
-           file: brotli is not additive over 5.9 MB, so a "this field costs N
-           bytes" figure is a fact about one artefact at one epoch, never a
-           rate. */
-        const { file } = buildCatalog({
-          rows: loadFixtureRows(FIXTURES),
-          manifest: emptyManifest(),
-          fixturesRef: 'test',
-          builtAt: PAYLOAD_TIMESTAMP,
-        })
-        const json = serialiseCatalog(file)
-        const shipped = measureCatalog(json)
-
-        const layouts = entries.map((entry) => ({
-          id: templateSlug(entry.name),
-          slots: templateConvention(entry).slots.map((slot) => ({
-            part: slot.part,
-            anchor: slot.anchor,
-            side: slot.side,
-            restsOn: slot.restsOn,
-          })),
-        }))
-        const withTable = measureCatalog(serialiseCatalog({ ...file, layouts } as never))
-
-        process.stdout.write(
-          `\n[template] index ${String(shipped.brotli)} B unchanged · the same rule inside it ` +
-            `${String(withTable.brotli)} B (+${String(withTable.brotli - shipped.brotli)})\n`,
-        )
-
-        expect(shipped.brotli).toBe(366_627)
-        expect(shipped.withinBudget).toBe(true)
-        expect(shipped.brotli / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
-        /* And nothing of the model is in the bytes, which is the structural half.
-           `residual` is the newest needle and the reason the list keeps the
-           withdrawn ones: `corridor`, `authored` and `Any Floor` named row E3's
-           convention, its module and its palette row, and a needle that stops
-           being searched for is a needle that can come back. This is the same
-           claim `stamp.json`'s `lock.content` and `corpus.digest` make, from
-           inside the build. */
-        for (const needle of [
-          'anchor',
-          'restsOn',
-          'residual',
-          'layouts',
-          'wall-on-tile',
-          'external-corner',
-          'corridor',
-          'authored',
-          'Any Floor',
-          'no-walk',
-        ]) {
-          expect(json).not.toContain(needle)
-        }
-        expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
-        /* **+257 B, and the fourth reading of one unchanged table.** The same
-           128 rows, asserted just above, have now priced at +808 B, then -71 B
-           (adding the `layouts` key made the index *smaller*), then +396 B when
-           `version.pipeline` went 2 to 3 — one character — and +261 B here, where
-           the only edit is one anchor string per floor slot going `cell` to
-           `residual`.
-
-           So the figure brackets the *instrument* rather than the subject: a
-           "this field costs N bytes" number over a 5.9 MB brotli stream is not
-           even reliably positive, let alone a rate. It is asserted anyway,
-           because a figure nobody checks is a figure that drifts. The row's claim
-           rests on the structural assertion below and on the byte-identical
-           revert digest above. */
-        expect(withTable.brotli - shipped.brotli).toBe(261)
-      },
-      SLOW_MS,
-    )
+      /* `residual` is the newest needle and the reason the list keeps the
+         withdrawn ones: `corridor`, `authored` and `Any Floor` named row E3's
+         convention, its module and its palette row, and a needle that stops
+         being searched for is a needle that can come back. This is the same
+         claim `stamp.json`'s `lock.content` and `corpus.digest` make, from
+         inside the build. */
+      for (const needle of [
+        'anchor',
+        'restsOn',
+        'residual',
+        'layouts',
+        'wall-on-tile',
+        'external-corner',
+        'corridor',
+        'authored',
+        'Any Floor',
+        'no-walk',
+      ]) {
+        expect(json).not.toContain(needle)
+      }
+      expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
+    })
 
     it('is not on the index’s path at all, so the 0 B is structural', () => {
       /* `pipeline/templates.ts` already documents that `build.ts` does not

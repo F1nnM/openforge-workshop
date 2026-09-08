@@ -53,13 +53,10 @@ export {
 } from './families'
 export type { FamilySizePosition, GeneratedFamily } from './families'
 export {
-  assertWithinBudget,
   compressCatalog,
   formatBytes,
-  measureCatalog,
   serialiseCatalog,
 } from './emit'
-export type { SizeReport } from './emit'
 export {
   CONNECTION_POSITIONS,
   LOCK_SYSTEMS,
@@ -146,7 +143,5 @@ export {
   PAYLOAD_EPOCH,
   PAYLOAD_TIMESTAMP,
   PIPELINE_VERSION,
-  SIZE_BUDGET_BYTES,
-  atPayloadEpoch,
   buildTimestamp,
 } from './version'

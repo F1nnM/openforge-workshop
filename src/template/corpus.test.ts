@@ -41,7 +41,6 @@
  * their own closure split and their own acceptance gate.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { brotliCompressSync, constants as zlibConstants } from 'node:zlib'
 
 import { describe, expect, it } from 'vitest'
 
@@ -97,36 +96,12 @@ const SLOW_MS = 600_000
 /**
  * The 40 read from the fixtures, and row **E3**'s two authored beside them.
  *
- * Split on `source`, whose `authored:` prefix is
- * `pipeline/authored.ts#AUTHORED_SOURCE_PREFIX` — spelled here rather than
- * imported, the same node/app boundary {@link PAYLOAD_TIMESTAMP} is written
- * across, so a drift shows up as a count that no longer matches.
+ * Split on `source`, whose `authored:` prefix upstream's fixtures never carry.
+ * Row E3's two authored rows are withdrawn, so the split is now a guard that the
+ * withdrawal held rather than a live partition.
  */
 const FIXTURE_RECIPES = RECIPE_TEMPLATES.filter((template) => !template.source.startsWith('authored:'))
 const AUTHORED = RECIPE_TEMPLATES.filter((template) => template.source.startsWith('authored:'))
-
-/**
- * The payload epoch, so the byte figures below are the quotable ones.
- *
- * Spelled out rather than imported: `pipeline/version.ts` is in the node project
- * and this file is in the app project, which is exactly why
- * `src/generator/panel/corpus.test.ts` writes the same literal for the same
- * figure. A drift between the two would show up as a byte count that no longer
- * matches, which is a visible failure rather than a silent one.
- */
-const PAYLOAD_TIMESTAMP = '2026-01-01T00:00:00.000Z'
-const SIZE_BUDGET_BYTES = 500 * 1024
-
-/** `emit.ts#measureCatalog`'s own instrument: brotli 11 with the size hint set. */
-function brotli(json: string): number {
-  const bytes = Buffer.from(json, 'utf8')
-  return brotliCompressSync(bytes, {
-    params: {
-      [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
-      [zlibConstants.BROTLI_PARAM_SIZE_HINT]: bytes.byteLength,
-    },
-  }).byteLength
-}
 
 interface MeasuredExtent {
   readonly minMm: readonly number[]
@@ -958,74 +933,19 @@ describeCorpus(corpusTitle, () => {
     expect(buckets.atZero / total).toBeCloseTo(0.775, 3)
   })
 
-  /* -------------------------------------------------------- the byte price */
-
-  it(
-    'would cost the index a few hundred bytes to ship the rule as 128 rows, so it ships in the bundle',
-    () => {
-      /* The counterfactual, measured with `emit.ts`'s own brotli-11 instrument
-         over the **shipped artefact at the payload epoch** — the construction
-         `src/generator/panel/corpus.test.ts` calls *"the one every payload docblock
-         in the repo quotes"*, and the baseline is its 366,768 B.
-
-         The row itself adds **0 B**: `pipeline/templates.test.ts` rebuilds the
-         corpus from the fixtures and finds the emitted bytes identical to row B1's
-         pinned figure, with `build.ts` and `emit.ts` reaching neither
-         `pipeline/templates.ts` nor `src/template/**`.
-
-         Two other measurements of the same table, kept because they disagree:
-         against a fresh build at the same epoch with an empty ordinal manifest it
-         is +808 B, and the research measured +374 B against the pre-B1
-         `catalog.json` (365,598 B baseline). Row B1 recorded the lesson — brotli is
-         not additive over 5.9 MB, so this is a fact about one artefact at one
-         epoch and never a rate. */
-      const raw = JSON.parse(readFileSync(CATALOG, 'utf8')) as Record<string, unknown>
-      const version = raw.version as Record<string, unknown>
-      const atEpoch = { ...raw, version: { ...version, built: PAYLOAD_TIMESTAMP } }
-      const baseline = brotli(JSON.stringify(atEpoch))
-
-      const layouts = RECIPE_TEMPLATES.map((template) => {
-        const convention = conventionFor(template.parts.map((part) => part.name))
-        if (convention === undefined) throw new Error(`no convention for ${template.id}`)
-        return {
-          id: template.id,
-          slots: convention.slots.map((slot) => ({
-            part: slot.part,
-            anchor: slot.anchor,
-            side: slot.side,
-            restsOn: slot.restsOn,
-          })),
-        }
-      })
-      const withTable = brotli(JSON.stringify({ ...atEpoch, layouts }))
-
-      process.stdout.write(
-        `\n[template] index ${String(baseline)} B · with a 128-row layouts key ${String(withTable)} B ` +
-          `(+${String(withTable - baseline)})\n`,
-      )
-      /* 366,768 B before row **D9**. The corrected corner footprint writes
-         `"length":1.5` where 245 records said `"length":2` and turns their size
-         token from `2x` to `1.5x`, which is +980 B raw and **+40 B brotli** —
-         a fact about one artefact at one epoch, never a rate, exactly as B1
-         recorded. */
-      expect(baseline).toBe(366_720)
-      /* 128 rows again, row E3's 7 having gone with its two templates. The
-         counterfactual prices what would actually be emitted, so it moves when the
-         bundle does — and the delta is asserted as an exact number *and* bounded
-         as a fraction, because the number is a fact about one artefact at one
-         epoch and never a rate. D4 measured +4/+8/+12/+40 entries at
-         +227/+3/+115/+176 B, **not monotone**, over a 5.9 MB payload; the same
-         table has now priced at +102 B, +541 B and this figure without a row
-         changing meaning. What the assertion has to say is that the table is small
-         against the 146 kB of headroom, and the exact value is pinned so that a
-         drift is noticed rather than absorbed. */
-      expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
-      expect(withTable - baseline).toBe(207)
-      expect(withTable - baseline).toBeLessThan(1024)
-      expect(baseline / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
-    },
-    SLOW_MS,
-  )
+  it('expands the three conventions to the 128 slots the 40 templates declare', () => {
+    /* The rule ships in the bundle rather than in the index. What used to be
+       here weighed a `layouts` key against the artefact twice at brotli 11; the
+       claim that survives is the one about the table itself — three conventions
+       cover all 40 templates and expand to exactly the 128 parts they declare. */
+    const layouts = FIXTURE_RECIPES.map((template) => {
+      const layout = conventionFor(template.parts.map((part) => part.name))
+      if (layout === undefined) throw new Error(`no convention for ${template.id}`)
+      return layout
+    })
+    expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
+    expect(new Set(layouts).size).toBe(3)
+  })
 })
 
 /* ============================================================== row C2's half */
