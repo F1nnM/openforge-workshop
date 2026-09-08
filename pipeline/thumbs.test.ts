@@ -5,8 +5,10 @@
  * does not parse, that declares a version this pipeline does not understand, or
  * that records a probe failure must all **throw**, because every one of them
  * would otherwise emit `thumb: false` on records whose objects exist — and a
- * false negative is indistinguishable from an un-backfilled bucket, which is
- * exactly the state the app is in today and will look correct for years.
+ * false negative is indistinguishable from an un-backfilled bucket, which is a
+ * state this app was in for years and which looked entirely correct throughout.
+ * Now that the backfill has run, those refusals are what stop it silently
+ * reverting to that appearance.
  *
  * The second is the file on disk. It is checked in, it is the only input to
  * `CatalogRecord.thumb`, and it is the artefact a reviewer of this row is being
@@ -91,13 +93,18 @@ describe('the committed inventory', () => {
     expect(inventory).toBeDefined()
   })
 
-  it('records a complete probe of the live bucket, with nothing found', () => {
-    // Measured 2026-09-02: every one of the 8,352 distinct sprite-carrying md5s
-    // HEADed through the public hostname, 419.9 s at concurrency 6. All 404.
-    // The backfill is blocked on R2 write credentials, so this is the truth and
-    // not a placeholder — and it is why `withThumb` is 0 in the import's report.
-    expect(inventory?.counted).toEqual({ probed: 8352, present: 0, absent: 8352, failed: 0 })
-    expect(inventory?.present).toEqual([])
+  it('records a complete probe of the live bucket, with every object found', () => {
+    // Measured 2026-09-08, after the backfill: every one of the 8,352 distinct
+    // sprite-carrying md5s HEADed through the public hostname, 407.8 s. All 200.
+    //
+    // The previous reading here was the mirror of this one — 0 present, 8,352
+    // absent, probed 2026-09-02 — because B2 had blocked the upload against a
+    // bucket this project could not write to. It now writes its own, so the
+    // 8,352 objects exist and `withThumb` is 8,701 of 8,702 records in the
+    // import's report: one record carries no sprite sheet to derive from, and
+    // 349 md5s are shared by more than one record.
+    expect(inventory?.counted).toEqual({ probed: 8352, present: 8352, absent: 0, failed: 0 })
+    expect(inventory?.present).toHaveLength(8352)
   })
 
   it('names the base and extension it probed, so a moved bucket is visible', () => {
@@ -105,7 +112,13 @@ describe('the committed inventory', () => {
     // about this one. Recorded rather than checked against `ASSET_BASES` here,
     // because the pipeline importing its own config into this assertion would
     // make the two agree by construction and prove nothing.
-    expect(inventory?.base).toBe('https://objects.openforge.tools/thumbs')
+    //
+    // The bucket did move — this literal is the proof that the probe followed it
+    // rather than that the two were wired to agree. `pipeline/headers.test.ts`
+    // takes the opposite approach for the CSP, and deliberately: there two files
+    // that share no import must agree, so deriving one from the other is the
+    // whole check. Here the file records an event, so it is pinned.
+    expect(inventory?.base).toBe('https://bucket-openforge-workshop.mfinn.de/thumbs')
     expect(inventory?.extension).toBe('.webp')
   })
 

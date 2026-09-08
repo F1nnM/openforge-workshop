@@ -19,15 +19,22 @@
  * staged **on somebody's laptop**, and staged is not uploaded. The manifest is
  * an inventory of intent; this is an inventory of fact.
  *
- * ## What it says today, and what flipping it over takes
+ * ## What it says today
  *
- * Probed 2026-09-02 against `https://objects.openforge.tools/thumbs`, all 8,352
- * distinct sprite-carrying md5s in the index: **0 present, 8,352 absent**. Every
- * record therefore emits `thumb: false` and the grid renders sprite sheets, which
- * is the truth. `v1-pr-series.md`'s non-PR blockers table has "R2 write
- * credentials for the `/thumbs/` prefix" open, so there is nothing there to find.
+ * Probed 2026-09-08 against `https://bucket-openforge-workshop.mfinn.de/thumbs`,
+ * all 8,352 distinct sprite-carrying md5s in the index: **8,352 present, 0
+ * absent, 0 failed**. So `thumb` is `true` on 8,701 of 8,702 records — the
+ * exception carries no sprite sheet to derive a thumbnail from — and the grid
+ * renders the 256 px WebP rather than cropping a sprite sheet.
  *
- * When the backfill runs, the sequence is three commands and no code change:
+ * It read the mirror of that until this backfill: 0 present, 8,352 absent,
+ * probed 2026-09-02, because B2 wanted R2 write credentials for a bucket this
+ * project could not write to. The derivative stores now live on one it owns, so
+ * the blocker is closed rather than waited on — see `pipeline/version.ts`'s
+ * `ASSET_BASES`.
+ *
+ * Flipping it over took three commands and no code change, which is the sequence
+ * to repeat whenever the objects change:
  *
  *   1. the `aws s3 sync` in `tools/thumbnails/out/upload-manifest.json`;
  *   2. `npm run thumbs -- --inventory`, which rewrites this file;
