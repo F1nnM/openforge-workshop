@@ -145,7 +145,16 @@ for the repetition ninety times.
 
 `SHARE_FORMAT_VERSION` **4 → 5**. The capacity figures are **re-measured, not
 adjusted by arithmetic**, and `capacity.test.ts` recomputes them from the codec
-either way.
+either way. Measured: the room shape goes **7,358 → 6,956** instances inside a
+2,000-character URL and the scattered one **88 → 81**, while the win from
+interning the three identities rather than writing them inline grows from 3.1x to
+**4.1x** on the room shape — the same argument arriving a third time, since a
+room repeats its filter position exactly as it repeats its family.
+
+A v4 link cannot be read as v5 by defaulting the field, and that is worth stating
+because it is the one bump where it looks possible: the filters are *not*
+derivable from the fills, so `[]` is the honest guess and is exactly what a
+missing column cannot be distinguished from.
 
 ## The one place two bases meet
 
@@ -159,13 +168,41 @@ Those are two answers to one question. If they disagree, the editor can offer a
 file the re-solve would not choose — not a corruption, since both are valid under
 the filters, but a surface that contradicts itself.
 
-They are expected to agree on the shipped assemblies: for a `cell` or `residual`
-anchor both produce the congruence, and for the wall's `edge` anchor both produce
-`size|width|N`, differing at most in the run predicate's `deny`.
+This section predicted they would agree on the shipped assemblies — *"for the
+wall's `edge` anchor both produce `size|width|N`, differing at most in the run
+predicate's `deny`"*. **Measured, that is wrong on four triples**, and the
+prediction is left here rather than edited away because the reason it was wrong
+is the interesting part.
 
-**Asserted rather than assumed.** A test compares the two bases' resolved
-candidate sets per slot, per assembly, per size position. If they differ, that is
-a finding to report and not a difference to paper over.
+`src/template/corpus.test.ts` compares both routes over all **188**
+`(assembly, size, component)` pairs, per slot, and also checks that the editor's
+own `assemblyState` pool contains what the click places. Everything a surface can
+arm agrees. What does not:
+
+> the two **external-corner single-piece** assemblies' `right wall` and
+> `left wall` come back **empty** on the `cell` route, and fill on the
+> `parentTags` route.
+
+An `edge` slot's run is the anchored face *minus the corner span*
+(`size.ts#slotSizePredicate`), so a 2x2 external corner asks its walls for
+`size|width|1.5`. That is the honest geometry and it is a tag **no corner wall
+carries**: row **D9** measured them at 1.5 units while the corpus tags them
+`size|width|2`. So the two routes disagree exactly where the corpus disagrees
+with itself, which puts it under row **B6**'s precedent — an upstream tag defect
+is recorded as a census, not normalised.
+
+**No surface can reach it.** Those two assemblies' whole size domain is the
+single `2 wide by 2 deep` their slots already `require`, and
+`families.ts#sizesFor` drops a one-position axis because a one-position control
+cannot be operated — so `TemplateFamily.sizes` is empty for all eight corners and
+neither the palette row nor the slot editor renders the chip. The test splits
+reachable from unreachable, asserts the reachable half is empty, pins the four,
+and **asserts the reachability claim itself**, so a row that starts offering
+one-position axes fails there naming them.
+
+Fixing it means either an `edge` predicate that asks for the tag rather than the
+geometry — which is `size.ts`' own decision for `residual`, argued in its
+docblock — or the mitre in a tag. Both are B3's and the archive's.
 
 ## Testing
 
@@ -180,7 +217,12 @@ a finding to report and not a difference to paper over.
 | the axis controls render above the slots | `src/builder/panels/slots/slots.test.tsx` |
 | the filters survive a share round trip | `src/share/link.test.ts` |
 | the payload prices are re-measured | `src/share/capacity.test.ts` |
-| the two size bases agree per slot, per size position | `src/template/corpus.test.ts` |
+| the two size routes agree wherever a surface can arm them | `src/template/corpus.test.ts` |
+| the four they do not agree on stay unreachable | `src/template/corpus.test.ts` |
+| a filter change is one store write over filters and fills | `src/store/workshopStore.test.ts` |
+| a filter change may replace a pin where `fillSlot` may not | `src/store/workshopStore.test.ts` |
+| an unreadable filter set widens its instances and keeps them | `src/share/link.test.ts` |
+| every axis of an assembly stays pressed at once | `src/builder/panels/panels.test.tsx` |
 
 ## What breaks, accepted
 

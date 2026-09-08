@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-08-instance-filters-design.md`
 
-**Status:** 3 of 7 tasks done. Full suite green at each commit — currently **172 files / 4,000 tests / 0 failures**.
+**Status:** **done** — 7 of 7 tasks. Full suite green at each commit — currently **172 files / 4,019 tests / 0 failures**.
 
 ## Global Constraints
 
@@ -24,7 +24,7 @@
 
 ## What changed from the spec
 
-Three things, all decided during implementation and all now reflected in the spec itself.
+Six things, all decided during implementation and all now reflected in the spec itself.
 
 ### 1. The field is `filters`, not `position` — a correction, not a refinement
 
@@ -46,6 +46,39 @@ That is the schema's own `.default([])` expressed in the type, and it cut the ch
 ### 3. The salvager reduces malformed filters *whole*
 
 Not in the spec. `salvageFills` works per entry — one unreadable fill costs that slot and not the other four — and `salvageFilters` deliberately does not: a malformed filter list is reported and reduced to `[]` rather than picked apart. A fill is one slot's answer and its neighbours are independent; the filters are **one choice across axes**, and half of `['component|door|arched', 'size|width|2']` is not a narrower version of it, it is a different filter nobody chose.
+
+### 4. `reSolveInstance` reports its query cost
+
+Not in the spec, which gave the driver `{ fills, replaced }`. It returns
+`queries` as well, because the pin-compatibility probes happen **outside**
+`solveTemplateFills` and its counter — so a surface pricing a filter change off
+the solve's own number would undercount it by one query per deliberate choice in
+the instance. Every other report in `relock.ts` is priced in the same unit.
+
+### 5. `AxisControl`'s lift fixed a defect the two controls had grown
+
+Not in the spec, and not anticipated: lifting the chips forced one `aria-pressed`
+rule, and neither of the two the palette had was right. `SizeControl` tested
+equal length, which stopped pressing *any* size chip the moment a component was
+armed beside it — `PlanTools.armedPosition` joins all three axes, so the joined
+list is longer than any one position in it. `AxisControl` tested subset, which
+presses two chips of a generated family's size axis at once, because `2 wide`'s
+tags are a subset of `2 wide by 2 deep`'s.
+
+`families.ts#positionIn` — the most specific position of the axis — is right on
+both, and is `positionOf`'s own rule generalised past the size axis. The chips'
+accessible names gained a `Size: ` prefix as a side effect, which is what six
+palette assertions had to be re-read for.
+
+### 6. A store action had to exist: `setPlacementFilters`
+
+The spec said the editor "writes the instance" without saying through what, and
+nothing in `@/store` could. A filter change moves the candidate set, so it can
+rewrite every slot at once and may replace a pin — which `fillSlot` refuses by
+design. So it is one transaction taking a whole `fills` map: `relock.ts`'s own
+first option, for the case that needs it. Taking the map rather than a tile is
+also what keeps the C-k exception narrow — a caller cannot reach a pin through it
+one slot at a time.
 
 ---
 
@@ -82,81 +115,77 @@ The test uses its own recipe rather than the file's `EDITOR_TEMPLATE`, whose `to
 
 ---
 
-### Task 4: `reSolveInstance` — the pin rule
+### Task 4: `reSolveInstance` — the pin rule — DONE (`14fb847`)
 
-**Files:**
-- Modify: `src/template/relock.ts` (new export beside `reSolveScene`)
-- Test: `src/template/relock.test.ts`
+**Files:** `src/template/relock.ts`, `src/template/relock.test.ts`, `src/template/index.ts`
 
-**Interfaces:**
-- Produces: `reSolveInstance(instance, filters, index, context): InstanceFilterReSolve`
+- [x] Four tests, not three: the fourth is the one the design turns on
+- [x] `reSolveInstance(instance, filters, index, context): InstanceFilterReSolve`
+- [x] Pin compatibility resolved with **no sibling selections** — the widest set the filters allow
+- [x] Docblock carries the contract **C-k** argument: the first solver-driven pin discard, and why the reasoning does not extend to a filter change
+- [x] Fills keyed by a slot the recipe does not declare are carried through untouched
+- [x] Commit
 
-```ts
-interface InstanceFilterReSolve {
-  readonly fills: TemplateInstance['fills']
-  /** Pins dropped because the new filters do not admit them. Reported, never silent. */
-  readonly replaced: readonly { readonly slot: SlotName; readonly was: TileId }[]
-}
-```
+The spec asked for three tests and there are four. `tests a pin against the
+filters alone, not against its siblings` is the one the design turns on: with a
+sibling selection in the compatibility probe, a `curved` floor the user never
+touched would close a `flat` wall they *did* choose, and the report would then
+name the filter change as the reason for a discard the filters did not cause.
+The fixture's `interface` constrain inherits from every sibling, so that is
+observable rather than argued.
 
-- [ ] **Step 1: Write the failing tests**
+### Task 5: The chips above the slots — DONE (`c5a2550`)
 
-Three claims, and the second is the one that sets a precedent:
+**Files:** `src/builder/panels/AxisControl.tsx` (new), `PalettePanel.tsx`,
+`families.ts`, `slots/slotEditor.ts`, `slots/SlotEditor.tsx`, `slots/slots.css`,
+`src/store/workshopStore.ts`, and four test files
 
-```ts
-it('keeps a pinned fill the new filters still admit', () => { … })
-it('drops a pinned fill the new filters do not admit, and reports it', () => { … })
-it('re-solves every auto fill regardless', () => { … })
-```
+- [x] `AxisControl` lifted into its own module, holding no `PositionAxis`, no `TemplateFamily` and no store write — the palette binds a family and an axis, the editor binds an instance and a re-solve
+- [x] `sizeChipLabel` moved with it, so the abbreviation has one spelling
+- [x] `families.ts#positionIn` / `isChosenPosition` — one pressed rule, replacing two that were each wrong on one axis
+- [x] Mounted per axis in `SlotEditor.tsx` **above** the slot list, asserted as DOM order
+- [x] `editorAxes` / `filtersWith` / `reFilterInstance` / `replacedSentence` in `slotEditor.ts`, headless
+- [x] `@/store#setPlacementFilters` — one transaction over the filters and the whole fills map
+- [x] The replaced pins reported in the dialog, naming the piece and the slot
+- [x] `AxisControl.tsx` imports the stylesheet that defines its classes, so it does not look styled only when the palette happens to be mounted
+- [x] Commit
 
-- [ ] **Step 2: Run them, confirm they fail**
+The lift was the point rather than a side effect, and it earned that twice: see
+*What changed from the spec* 5 and 6.
 
-Run: `npx vitest run src/template/relock.test.ts -t reSolveInstance`
+### Task 6: The share codec — DONE (`adbf8f7`)
 
-- [ ] **Step 3: Implement**
+**Files:** `src/share/payload.ts`, `src/share/link.ts`, and the three share test files
 
-Per slot, resolve candidates under the posed template with **no sibling selections** — the widest set the filters allow, which makes the compatibility test a function of the filters alone rather than of the order slots are walked. Surviving pins become `solveTemplateFills`' preset; dropped ones are returned.
+- [x] Round-trip test over a scene where two instances hold the same file and differ only in their filters
+- [x] A filter table after the slot table plus a per-instance column after the template one — `writeTable`'s fourth use
+- [x] One entry per distinct filter **set**, `NUL`-joined, written as the escape (`tools/hygiene/source.test.ts` fails the build on the byte)
+- [x] `SHARE_FORMAT_VERSION` 4 -> 5, with the argument for why a v4 link cannot be read as v5 by defaulting the field
+- [x] An unreadable entry widens its instances to *any* and keeps the piece, reported once against the table entry
+- [x] Capacity **re-measured**: room 7,358 -> 6,956, scattered 88 -> 81, interning win 3.1x -> 4.1x
+- [x] Commit
 
-The docblock must carry the contract **C-k** argument the spec sets out: this is the first solver-driven pin discard, `relock.ts` is explicit that clearing has exactly one caller and it is the user, and the reasoning does not extend here because it is one control on one instance with the piece on screen. What carries over is the reporting.
-
-- [ ] **Step 4: Run, then `npm test`**
-- [ ] **Step 5: Commit**
-
-### Task 5: The chips above the slots
-
-**Files:**
-- Create: `src/builder/panels/AxisControl.tsx` (lifted out of `PalettePanel.tsx`)
-- Modify: `src/builder/panels/PalettePanel.tsx`, `src/builder/panels/slots/SlotEditor.tsx`
-- Test: `src/builder/panels/slots/slots.test.tsx`
-
-- [ ] **Step 1: Failing test** — the axis groups render, and **above** the first slot group in DOM order
-- [ ] **Step 2: Confirm it fails**
-- [ ] **Step 3:** Lift `AxisControl` into its own module; mount it per non-empty axis in `SlotEditor.tsx`; changing one calls Task 4's driver and writes the instance
-- [ ] **Step 4: Report the replaced pins** in the modal — a driver that returned them and a UI that swallowed them would be C-k's failure with an extra step
-- [ ] **Step 5:** `npm test`, commit
-
-Two spellings of one chip would drift, which is why the lift is the point rather than a side effect.
-
-### Task 6: The share codec
-
-**Files:**
-- Modify: `src/share/payload.ts`, `src/share/link.ts`
-- Test: `src/share/link.test.ts`, `src/share/capacity.test.ts`
-
-- [ ] **Step 1: Failing test** — a scene with filters survives a round trip
-- [ ] **Step 2: Confirm it fails**
-- [ ] **Step 3:** A filter table plus a per-instance index column, through the existing `writeTable` — its fourth use beside the template, slot and recipe tables. One table entry per distinct filter **set**, joined, because they repeat across a room and a per-instance tag list would pay for the repetition ninety times.
-- [ ] **Step 4:** `SHARE_FORMAT_VERSION` 4 → 5
-- [ ] **Step 5: Re-measure the capacity prices**, never adjust them by arithmetic. `capacity.test.ts` recomputes from the codec either way.
-- [ ] **Step 6:** `npm test`, commit
-
-### Task 7: The two bases agree
+### Task 7: The two size routes — DONE (`1b89339`)
 
 **Files:** `src/template/corpus.test.ts`
 
-- [ ] **Step 1:** Compare `positionContextFor`'s `cell` route against the `parentTags` route, per slot, per assembly, per size position
-- [ ] **Step 2:** If they agree, the test pins it. **If they differ, report it — do not paper over it.** The placement path uses the cell route and the editor uses `parentTags`; a disagreement means the editor can offer a file the re-solve would not choose.
-- [ ] **Step 3:** Commit
+- [x] All 188 `(assembly, size, component)` pairs, both routes, per slot
+- [x] Plus the editor's own `assemblyState` pool contains what the click places
+- [x] **They differ on four triples, and the test reports them**
+
+The finding: on the `cell` route the two **external-corner single-piece**
+assemblies' `right wall` and `left wall` come back empty, where the `parentTags`
+route fills them. `size.ts#slotSizePredicate` gives an `edge` slot the face
+minus the mitre, so a 2x2 external corner asks for `size|width|1.5` — the honest
+geometry, and a tag **no corner wall carries**: row D9 measured them at 1.5 while
+the corpus tags them `size|width|2`. The routes disagree exactly where the corpus
+disagrees with itself, and B6's precedent applies — recorded, not normalised.
+
+No surface can reach it: those assemblies' whole size domain is the single
+`2 wide by 2 deep` their slots already `require`, and `families.ts#sizesFor`
+drops a one-position axis as an inoperable control. The test splits reachable
+from unreachable and **asserts that reachability claim**, so a row that starts
+offering one-position axes fails here naming these four.
 
 ---
 
@@ -164,9 +193,9 @@ Two spellings of one chip would drift, which is why the lift is the point rather
 
 Both this feature and the recipe fold live on `worktree-assembly-fold-and-fixed-size`, open as **PR #157** against `main`. Push updates the preview at `pr-157-openforge-workshop-staging`.
 
-The PR body describes the fold only and will need the filters section added before merge.
+The PR body has the filters section.
 
 ## Accepted breakage
 
 - **Saved rooms are discarded** — `STORE_VERSION` 8, by the licence `package.json`'s `0.1.0` still grants.
-- **Existing share links stop resolving** once Task 6 lands. `SHARE_FORMAT_VERSION` is checked *"first and hardest"*, so a stale link is refused with the version in the message rather than decoded into a wrong room.
+- **Existing share links stop resolving.** `SHARE_FORMAT_VERSION` is 5 and is checked *"first and hardest"*, so a stale link is refused with the version in the message rather than decoded into a wrong room.
