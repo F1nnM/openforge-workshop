@@ -5,7 +5,7 @@
  * ## What this file proves
  *
  *   - A card's slot is **a plain 2D canvas**, labelled as an image, sized in CSS
- *     pixels with a backing store in device pixels under the same `[1, 2]` cap
+ *     pixels with a backing store in device pixels under the same `[2, 2]` band
  *     `<Canvas dpr>` applies to the shared buffer. The two ends agreeing on dpr
  *     is the difference between a crisp preview and a soft one, and it is checked
  *     here by reading the registered surface's own canvas back.
