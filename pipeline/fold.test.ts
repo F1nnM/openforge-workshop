@@ -184,14 +184,40 @@ describe('foldRecipes', () => {
     expect(folded.filter((assembly) => assembly.name.includes('(Any'))).toEqual([])
   })
 
-  it('leaves every corner’s parts byte for byte the fixture’s own', () => {
-    /* The corners are a rename. Their low/full split is not expressible as a
-       position, so there is nothing to widen and nothing to restore. */
+  it('leaves every corner’s parts the fixture’s own but for row D1’s deny', () => {
+    /* The corners are a rename: their low/full split is not expressible as a
+       position, so there is nothing to widen and nothing to restore. The one
+       change is `shape|base` on their non-base slots, and they need it as much as
+       a wall does — both wall slots of `Corner (Any, Modular)` admit 144
+       integrated-base records each. */
     for (const assembly of folded) {
       if (assembly.controls.component.length > 0) continue
       const source = fixtures.find((fixture) => fixture.name === assembly.replaces[0])
-      expect(assembly.parts).toEqual(source?.parts)
       expect(assembly.tags).toEqual(source?.tags)
+      for (const part of assembly.parts) {
+        const original = source?.parts.find((one) => one.name === part.name)
+        expect(original, `${assembly.id}/${part.name}`).toBeDefined()
+        expect(part.tags.require).toEqual(original?.tags.require)
+        expect(part.tags.constrain).toEqual(original?.tags.constrain)
+        expect(part.fulfills).toEqual(original?.fulfills)
+        const added = (part.tags.deny ?? [])
+          .map((ref) => ref.tag)
+          .filter((tag) => !(original?.tags.deny ?? []).some((ref) => ref.tag === tag))
+        expect(added, `${assembly.id}/${part.name}`).toEqual(part.name === 'base' ? [] : ['shape|base'])
+      }
+    }
+  })
+
+  it('denies shape|base on every non-base slot of all 10, and only there', () => {
+    /* The class and not the three instances. A base keeps the role of the piece
+       it sits under, so any slot that does not deny `shape|base` can admit one —
+       the three that do so in today's corpus are where it shows, not where the
+       hazard is. The `base` slot itself must of course keep requiring it. */
+    for (const assembly of folded) {
+      for (const part of assembly.parts) {
+        const deny = (part.tags.deny ?? []).map((ref) => ref.tag)
+        expect(deny.includes('shape|base'), `${assembly.id}/${part.name}`).toBe(part.name !== 'base')
+      }
     }
   })
 

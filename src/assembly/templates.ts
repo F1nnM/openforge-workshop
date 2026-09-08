@@ -87,6 +87,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|wall' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -121,6 +122,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|wall' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
         },
         fulfills: [],
@@ -146,6 +148,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'shape|column|corner' }, { tag: 'shape|column|low' }, { tag: 'build|s2w' }, { tag: 'size|column_shape|L' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
         },
         fulfills: [],
@@ -154,6 +157,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'right wall',
         tags: {
           require: [{ tag: 'build|s2w' }, { tag: 'shape|corner|right' }, { tag: 'shape|wall|low' }, { tag: 'connection|openforge' }, { tag: 'size|width|2' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
         },
         fulfills: ['base'],
@@ -162,6 +166,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'left wall',
         tags: {
           require: [{ tag: 'build|s2w' }, { tag: 'shape|corner|left' }, { tag: 'shape|wall|low' }, { tag: 'connection|openforge' }, { tag: 'size|width|2' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
         },
         fulfills: ['base'],
@@ -170,6 +175,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }, { tag: 'connection|openforge' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -193,7 +199,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'shape|column|low' }, { tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'build|s2w' }],
+          deny: [{ tag: 'build|s2w' }, { tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
         },
         fulfills: [],
@@ -202,6 +208,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'right wall',
         tags: {
           require: [{ tag: 'shape|wall|low' }, { tag: 'size|width|1.5' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
         },
         fulfills: [],
@@ -210,6 +217,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'left wall',
         tags: {
           require: [{ tag: 'shape|wall|low' }, { tag: 'size|width|1.5' }],
+          deny: [{ tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
         },
         fulfills: [],
@@ -218,6 +226,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }, { tag: 'connection|openforge' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -242,7 +251,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'shape|column|corner' }, { tag: 'build|s2w' }, { tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'shape|column|low' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
         },
         fulfills: [],
@@ -251,7 +260,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'right wall',
         tags: {
           require: [{ tag: 'build|s2w' }, { tag: 'shape|corner|right' }, { tag: 'connection|openforge' }, { tag: 'size|width|2' }],
-          deny: [{ tag: 'shape|column|low' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
         },
         fulfills: ['base'],
@@ -260,7 +269,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'left wall',
         tags: {
           require: [{ tag: 'build|s2w' }, { tag: 'shape|corner|left' }, { tag: 'connection|openforge' }, { tag: 'size|width|2' }],
-          deny: [{ tag: 'shape|column|low' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
         },
         fulfills: ['base'],
@@ -269,6 +278,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }, { tag: 'connection|openforge' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -292,7 +302,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'build|s2w' }, { tag: 'shape|column|low' }],
+          deny: [{ tag: 'build|s2w' }, { tag: 'shape|column|low' }, { tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
         },
         fulfills: [],
@@ -301,7 +311,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'right wall',
         tags: {
           require: [{ tag: 'shape|wall' }, { tag: 'size|width|1.5' }],
-          deny: [{ tag: 'shape|column|low' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
         },
         fulfills: [],
@@ -310,7 +320,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'left wall',
         tags: {
           require: [{ tag: 'shape|wall' }, { tag: 'size|width|1.5' }],
-          deny: [{ tag: 'shape|column|low' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
         },
         fulfills: [],
@@ -319,6 +329,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -343,6 +354,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'shape|column|corner' }, { tag: 'shape|column|low' }, { tag: 'build|s2w' }, { tag: 'size|column_shape|L' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -350,6 +362,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|internal_corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -373,7 +386,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'shape|column|low' }, { tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'build|s2w' }],
+          deny: [{ tag: 'build|s2w' }, { tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -381,6 +394,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|internal_corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -404,7 +418,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'shape|column|corner' }, { tag: 'build|s2w' }, { tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'shape|column|low' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -412,6 +426,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|internal_corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -435,7 +450,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'shape|column|low' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
         },
         fulfills: [],
       },
@@ -443,6 +458,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'floor',
         tags: {
           require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|internal_corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|base' }],
         },
         fulfills: [],
       },

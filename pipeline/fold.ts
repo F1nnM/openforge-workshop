@@ -164,6 +164,32 @@ const AXIS_CONSTRAIN: readonly ConstrainRef[] = [
   { tag: 'shape|wall', siblings: [] },
 ]
 
+/**
+ * Row D1's deny, on every slot that is not the `base`.
+ *
+ * A base keeps the **role of the piece it sits under**, so a wall's base carries
+ * `role|wall` and a `shape|wall` slot admits it. Row D1 measured what that costs
+ * a palette row — *"17 rows offering bases, 1,963 wrong candidates"* — and made
+ * all 47 generated families deny `shape|base`. The 40 recipes never got it.
+ *
+ * Measured on the fixtures against the live archive, **3 slots** admit one: the
+ * wall of `Wall (Any, Modular)` at 278 of 1,608, and both wall slots of
+ * `Corner (Any, Modular)` at 144 of 490. The assembly then fills its own `base`
+ * slot as well, so the wall stands on a second base and floats — which is what
+ * the project owner reported.
+ *
+ * Applied to **every** non-base slot rather than to the three that need it, and
+ * that is the point: the three are where the corpus happens to have such a
+ * record today, and the class is *any* slot that does not deny it. Measured cost
+ * on the slots that do not need it: zero candidates, on all of them.
+ */
+function denyIntegratedBase(part: PartSlot): PartSlot {
+  if (part.name === 'base') return part
+  const deny = tagsOf(part.tags.deny)
+  if (deny.includes('shape|base')) return part
+  return { ...part, tags: { ...part.tags, deny: refs([...deny, 'shape|base']) } }
+}
+
 /** A component axis label from a fixture name: `"…: Wall: Arched Door (Modular)"` → `"arched door"`. */
 function componentLabel(fixtureName: string): string {
   const match = /: Wall: (.+?) \((?:Single Piece|Modular)\)$/.exec(fixtureName)
@@ -251,28 +277,20 @@ function foldWallGroup(members: readonly TemplateFixture[], build: string): Fold
      and it is what keeps the slot from admitting a floor once no shape tag is
      required of it. */
   const require = [...sharedRequire, 'role|wall']
-  /* Row D1's deny, which the 47 families all carry and the 40 recipes never got.
-     Measured: 278 of 1,608 candidates of `Wall (Any, Modular)` are walls with an
-     integrated base, and the assembly fills its own base slot as well, so the
-     wall floats on a second one. It is added to both builds: a single-piece wall
-     legitimately *is* its own base, but it says so with `fulfills` and 0 of its
-     693 candidates carry `shape|base`, so the deny costs it nothing. */
-  const deny = [...sharedDeny, 'shape|base']
-
   const first = wallSlots[0]
   if (first === undefined) throw new Error(`no wall slot in the ${build} group`)
 
   const parts: PartSlot[] = [
-    {
+    denyIntegratedBase({
       name: 'wall',
       tags: {
         require: refs(require),
-        deny: refs(deny),
+        deny: refs(sharedDeny),
         constrain: [...(first.tags.constrain ?? []), ...AXIS_CONSTRAIN],
       },
       ...(first.fulfills === undefined ? {} : { fulfills: first.fulfills }),
-    },
-    identicalSlot(members, 'floor'),
+    }),
+    denyIntegratedBase(identicalSlot(members, 'floor')),
     identicalSlot(members, 'base'),
   ]
 
@@ -361,19 +379,24 @@ function identicalSlot(members: readonly TemplateFixture[], name: string): PartS
 /* ----------------------------------------------------------- the corner half */
 
 /**
- * A corner or internal corner: **renamed, and otherwise byte for byte the
- * fixture's own.**
+ * A corner or internal corner: **renamed, with row D1's deny, and otherwise byte
+ * for byte the fixture's own.**
  *
  * The two shapes name their full-height variant inconsistently and neither
  * name is true. `Corner (Any, Single Piece)` *denies* `shape|column|low`, and
  * `Internal Corner (Single Piece)` denies it too while saying nothing at all. So
  * both become `: Full`, beside the `: Low` they ship with.
  *
- * Nothing else changes here. The low/full split stays two templates because
- * `shape|column` and `shape|corner` each overlap their `|low` qualifier on all 25
- * low columns, so "full" is only ever expressible as the deny it already is —
- * and a deny cannot travel through `parentTags`, which is a control axis's only
- * channel.
+ * Nothing else about their **structure** changes. The low/full split stays two
+ * templates because `shape|column` and `shape|corner` each overlap their `|low`
+ * qualifier on all 25 low columns, so "full" is only ever expressible as the deny
+ * it already is — and a deny cannot travel through `parentTags`, which is a
+ * control axis's only channel.
+ *
+ * What does change is {@link denyIntegratedBase}, and a corner needs it as much
+ * as a wall does: both wall slots of `Corner (Any, Modular)` admit **144**
+ * integrated-base records each, the largest instance of the defect in the
+ * fixtures after the merged wall's own 278.
  */
 function renameCorner(fixture: TemplateFixture): FoldedAssembly {
   const low = fixture.name.includes(': Low (')
@@ -388,7 +411,7 @@ function renameCorner(fixture: TemplateFixture): FoldedAssembly {
     name,
     source: fixture.source,
     tags: fixture.tags,
-    parts: fixture.parts,
+    parts: fixture.parts.map(denyIntegratedBase),
     controls: { component: [], height: [], size: [] },
     replaces: [fixture.name],
   }
