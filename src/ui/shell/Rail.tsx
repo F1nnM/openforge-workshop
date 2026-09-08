@@ -224,6 +224,12 @@ export function Rail({ slotRef }: RailProps) {
     <div className="of-rail">
       <header className="of-rail-head">
         <Wordmark />
+        {/* A hairline between identity and navigation, matching the mockup's
+            divider under the logotype block. `aria-hidden`: it carries no
+            content, and the two things it separates are already distinct
+            landmarks (a link and a nav) that need no visual rule to be told
+            apart by assistive tech. */}
+        <div className="of-rail-divider" aria-hidden="true" />
         <nav className="of-nav" aria-label="Sections">
           <NavTab to="/" label="Catalog" shape="catalog" />
           <NavTab

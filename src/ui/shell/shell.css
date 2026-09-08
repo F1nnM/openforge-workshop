@@ -212,6 +212,17 @@ canvas {
   border-bottom: 1px solid var(--line);
 }
 
+/* The mockup's divider under the logotype block, between identity and
+   navigation. `flex: none` and a fixed height rather than a `border-top` on
+   `.of-nav`: a border adds its own box-model space on top of the head's
+   `gap`, which would widen this one gap without touching any other — a
+   dedicated line keeps every gap in the column equal. */
+.of-rail-divider {
+  flex: none;
+  height: 1px;
+  background: var(--line);
+}
+
 /* The screen's own sidebar, portalled in by `RailSlot`. It takes the rest of
    the column and scrolls inside itself; the head above it does not move. A
    screen that contributes nothing leaves this empty, and an empty flex child
@@ -433,6 +444,15 @@ canvas {
     box-sizing: border-box;
     height: var(--of-rail-head-h);
     padding: 12px 14px;
+  }
+
+  /* A vertical rule reading "identity | navigation" would fit a row layout
+     where the horizontal one does not, but the gap between the two already
+     reads as separation at this width, and this row exists to save height —
+     adding a rule back only to remove the reason for shrinking it seems
+     backwards. */
+  .of-rail-divider {
+    display: none;
   }
 
   .of-nav {

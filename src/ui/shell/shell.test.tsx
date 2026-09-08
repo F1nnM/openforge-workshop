@@ -188,12 +188,23 @@ describe('the rail slot', () => {
       expect(screen.getByRole('group', { name: 'Component' })).toBeInTheDocument()
     })
 
-    const order = [...rail(container).querySelectorAll('.of-wordmark, .of-nav, .of-rail-slot')]
+    const order = [
+      ...rail(container).querySelectorAll(
+        '.of-wordmark, .of-rail-divider, .of-nav, .of-rail-slot',
+      ),
+    ]
     expect(order.map((element) => element.className.split(' ')[0])).toEqual([
       'of-wordmark',
+      'of-rail-divider',
       'of-nav',
       'of-rail-slot',
     ])
+    // The divider is decoration, so it must not reach the accessibility tree:
+    // the link and the nav it sits between are already distinct landmarks.
+    expect(rail(container).querySelector('.of-rail-divider')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    )
     expect(rail(container).querySelector('.of-rail-slot')).toContainElement(
       screen.getByRole('complementary', { name: 'Filters' }),
     )
