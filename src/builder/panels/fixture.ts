@@ -488,6 +488,7 @@ export function aStrictInstance(
     z: at.z ?? 0,
     rotation: at.rotation ?? 0,
     fills: { [STRICT_SLOT]: { tile: tile as TileId, pinned: true } },
+    position: [],
   }
 }
 
@@ -550,5 +551,6 @@ export function anInstance(
     z: at.z ?? 0,
     rotation: at.rotation ?? 0,
     fills: Object.fromEntries(filled),
+    position: [],
   }
 }

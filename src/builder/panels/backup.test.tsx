@@ -128,6 +128,8 @@ describe('export and import', () => {
       z: -2,
       rotation: 90,
       fills: { column: { tile: A_TILE, pinned: false } },
+      // Round-trips like every other field, which is the claim this test makes.
+      position: [],
     })
     expect(report()).toHaveTextContent('Imported 2 placements.')
   })
@@ -210,6 +212,9 @@ describe('export and import', () => {
         z: 0,
         rotation: 0,
         fills: { floor: { tile: A_TILE, pinned: true } },
+        // Defaulted by the salvager: a file written without a position holds an
+        // instance that narrows nothing, which is what `[]` means.
+        position: [],
       },
     ])
   })

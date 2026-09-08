@@ -85,6 +85,7 @@ const SCENE = {
       z: 0,
       rotation: 0,
       fills: { [FLOOR]: { tile: TILE_A, pinned: false }, [WALL]: { tile: TILE_B, pinned: true } },
+      position: ['component|door|arched', 'size|width|2', 'size|depth|2'],
     },
     [PLACEMENT_B]: {
       id: PLACEMENT_B,
@@ -93,12 +94,27 @@ const SCENE = {
       z: -1.5,
       rotation: 270,
       fills: { [FLOOR]: { tile: TILE_A, pinned: false } },
+      /* `[]` is *any* on every axis — a real position, and the one every
+         instance placed before the field existed was in. */
+      position: [],
     },
   },
   generated: { [PLACEMENT_C]: GENERATED_BASE },
   lock: 'magnetic',
   lockChosen: false,
 } as const
+
+/** {@link SCENE}'s instances with the `position` field taken back off. */
+const withoutPosition = (scene: typeof SCENE) => ({
+  ...scene,
+  placements: Object.fromEntries(
+    Object.entries(scene.placements).map(([id, instance]) => {
+      const rest: Record<string, unknown> = { ...instance }
+      delete rest.position
+      return [id, rest]
+    }),
+  ),
+})
 
 /**
  * The placement map as versions 1–4 wrote it: keyed by **file**.
@@ -198,7 +214,17 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
        once by the stamp and again by `salvageTemplate`. `migrations.ts` states
        why an additive field bumps the stamp anyway — one version number must
        name one shape — and this entry is what makes the claim testable. */
-    { ...SCENE, design: undefined },
+    { ...withoutPosition(SCENE), design: undefined },
+  ],
+  [
+    7,
+    'template instances with no control position (row D6, before the fold)',
+    /* The current scene minus `position`, which makes it the second entry the
+       current reader could in fact read: the field defaults to `[]` and `[]` is
+       what every instance here meant. So the **gate** is the only thing
+       discarding it, which is the claim `migrations.ts` makes about an additive
+       bump and this entry is what makes it testable. */
+    withoutPosition(SCENE),
   ],
 ]
 
@@ -387,7 +413,19 @@ describe('the licence to discard persisted state', () => {
  * previous library, an object truncated by a tab killed mid-write, a hand edit
  * in devtools, an export format that used an array, a field whose type changed.
  */
-const AN_INSTANCE = { id: PLACEMENT_A, template: A_TEMPLATE, x: 0, z: 0, rotation: 0, fills: {} }
+/* `position: []` because the salvager defaults an absent one to it, so an
+   expectation written without the field would compare a 6-key object to a
+   7-key one. `[]` is *any* on every axis, which is what an instance with no
+   position means. */
+const AN_INSTANCE = {
+  id: PLACEMENT_A,
+  template: A_TEMPLATE,
+  x: 0,
+  z: 0,
+  rotation: 0,
+  fills: {},
+  position: [],
+}
 
 const GARBAGE: readonly (readonly [string, unknown])[] = [
   ['null', null],

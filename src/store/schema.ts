@@ -321,6 +321,14 @@ export type SlotFill = z.infer<typeof SlotFill>
  * build if an aggregate holds two values of any of them. Copying one here would
  * double the payload and desynchronise on the next import.
  *
+ * **{@link TemplateInstance.position} is not in that class, and the difference is
+ * the whole reason it is a field.** A hoisted facet is *derivable*, so storing it
+ * only creates something that can go stale. A position is not derivable: *any
+ * component* and *arched door, which happens to be what is filled* produce
+ * **identical fills**. The distinction exists only if it is stored, and it is
+ * exactly the distinction the slot editor turns on — one offers every wall, the
+ * other offers 54.
+ *
  * **No slot offsets.** §1.4 measured the `base` slot admitting **25 distinct
  * footprints** and `wall` 14, so a stored `(dx, dz, dy, yaw)` is wrong for most
  * fills of the same slot. Layout is a *rule* evaluated against the fill's own
@@ -338,6 +346,27 @@ export const TemplateInstance = z.object({
   z: coordinate,
   rotation: Rotation,
   fills: z.record(SlotName, SlotFill),
+  /**
+   * The **control position** this instance was placed at: every axis's tags,
+   * exactly as `builder/canvas/usePlanTools.ts#armedPosition` joins them.
+   *
+   * `['component|door|arched', 'size|width|2', 'size|depth|2']` for an arched
+   * door at 2 x 2, and `[]` for *any* on every axis — which is a real position
+   * rather than an absence, and the one every instance placed before this field
+   * existed was in.
+   *
+   * **Defaulted rather than optional**, so a reader never has two shapes to
+   * handle. The absent case belongs to `migrations.ts`, which discards the blob
+   * that would produce it.
+   *
+   * Validated as a tag list and nothing stronger. Whether these tags name
+   * anything, or anything *this template* can express, needs the family table —
+   * which must not enter the store's file closure, for the reason
+   * {@link TemplateId} gives at length. A position naming an axis the template
+   * has no control for narrows nothing and is inert, which is the same way an
+   * unknown `fills` key fails closed.
+   */
+  position: z.array(z.string().min(1)).readonly().default([]),
 })
 export type TemplateInstance = z.infer<typeof TemplateInstance>
 

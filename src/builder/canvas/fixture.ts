@@ -661,5 +661,8 @@ export function fixtureInstance(
     z: over.z ?? 0,
     rotation: over.rotation ?? 0,
     fills,
+    // *Any* on every axis. The canvas's tests are about geometry and a control
+    // position narrows candidates, which is a question one level up.
+    position: [],
   }
 }

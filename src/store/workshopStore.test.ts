@@ -120,6 +120,31 @@ describe('placing a template', () => {
     }
   })
 
+  it('keeps the control position it was placed at', () => {
+    /* The position is **not** recoverable from the fills, which is the whole
+       reason it is stored: *any component* and *arched door, which happens to be
+       what is filled* produce identical fills. The slot editor needs the
+       difference — one offers every wall, the other offers 54. */
+    const id = placeTemplate(
+      aTemplateInstance({ position: ['component|door|arched', 'size|width|2', 'size|depth|2'] }),
+    )
+    expect(state().placements[id]?.position).toEqual([
+      'component|door|arched',
+      'size|width|2',
+      'size|depth|2',
+    ])
+  })
+
+  it('defaults the position to none, which is a real choice and not an absence', () => {
+    // `[]` is *any* on every axis: with no tags the slots' `constrain` blocks
+    // collect nothing and the instance admits whatever its recipe does. Every
+    // instance placed before this field existed was in exactly that state.
+    // Placed first and read after: `state()` is a snapshot, so calling it in the
+    // same expression as the placement reads the state from before it.
+    const id = placeTemplate(aTemplateInstance())
+    expect(state().placements[id]?.position).toEqual([])
+  })
+
   it('places a template whose fills are empty — contract C-g', () => {
     // §3.2: a template with no candidate for a part *"places anyway"*, marked
     // needs a choice. If this row refused an incomplete map, that state would be
@@ -707,6 +732,9 @@ describe('persistence', () => {
       z: -1,
       rotation: 90,
       fills: { [FLOOR]: { tile: A_TILE, pinned: true } },
+      // Persisted like every other field. `[]` is *any* on each axis, which is
+      // what this instance was placed at.
+      position: [],
     })
     expect((payload?.state as WorkshopState).lock).toBe('magnetic')
   })
