@@ -381,7 +381,7 @@ describeCorpus(corpusTitle, () => {
     }
 
     const mismatches: string[] = []
-    const delta = { integratedBase: 0, notRoleWall: 0, notS2wBase: 0, lowSecretDoor: 0 }
+    const delta = { integratedBase: 0, notRoleWall: 0, notS2wBase: 0, lowSecretDoor: 0, topperInModular: 0 }
 
     for (const fixture of fixtures) {
       const derived = derivedFor(fixture)
@@ -414,6 +414,13 @@ describeCorpus(corpusTitle, () => {
                slot omitted that require where all 15 siblings carry it, so it
                could resolve a base that is not an s2w base at all: 305
                candidates over 10 footprints against their 48 over 4.
+             - a **modular** wall or column's `topper` records — the ones carrying
+               `connection|openforge`. A modular tile's s2w base is authored 0.5
+               short on every walled axis, so it does not extend under the wall
+               and what stands there must bring its own base. A topper has nothing
+               beneath it, which the project owner photographed: *"the left,
+               shorter wall has no integrated base … the base is missing."* The
+               largest instance is the merged modular wall at 691 of 1,451.
 
            Gained:
              - low-wall records carrying `component|secret_door`. The low-wall
@@ -433,6 +440,19 @@ describeCorpus(corpusTitle, () => {
           }
           if (part.name === 'base' && !carries(id, 'build|s2w')) {
             delta.notS2wBase += 1
+            return true
+          }
+          /* A modular wall or column must bring its own base. `column` joins the
+             two wall names here and nowhere above, because the integrated-base
+             and role|wall deltas are about walls while this one is about anything
+             that stands in the strip the s2w base gives up. */
+          const stands = isWall || part.name === 'column'
+          if (
+            stands &&
+            fixture.tags.includes('build|s2w|modular') &&
+            carries(id, 'connection|openforge')
+          ) {
+            delta.topperInModular += 1
             return true
           }
           return false
@@ -466,8 +486,9 @@ describeCorpus(corpusTitle, () => {
     }
     process.stdout.write(
       `\n[fold] 40 recipes reproduced by the 10 — dropped ${String(delta.integratedBase)} integrated-base, ` +
-        `${String(delta.notRoleWall)} non-role|wall and ${String(delta.notS2wBase)} non-s2w base candidates; ` +
-        `reached ${String(delta.lowSecretDoor)} low secret doors the fixtures denied\n`,
+        `${String(delta.notRoleWall)} non-role|wall, ${String(delta.notS2wBase)} non-s2w base and ` +
+        `${String(delta.topperInModular)} self-baseless modular candidates; reached ` +
+        `${String(delta.lowSecretDoor)} low secret doors the fixtures denied\n`,
     )
   }, SLOW_MS)
 

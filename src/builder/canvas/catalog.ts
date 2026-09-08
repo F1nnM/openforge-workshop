@@ -318,7 +318,15 @@ export function templateSlotLayout(
     // right: one slot is its own cell.
     if (layout === undefined) return ORIGIN_LAYOUT
 
-    const elevationMm = slotElevationMm(layout, slot, (resting) => liftOf(fills.get(resting as SlotName)))
+    /* A fill that brings its own base rests on nothing, so it collects no
+       thickness — not the base's, and not any ancestor's. Every `restsOn` chain
+       over the three shipped conventions is one link long and ends at `base`
+       (`plan.test.ts` pins that), so "collects nothing" and "is not raised by the
+       base" are the same number today; written as the walk being skipped rather
+       than as `0` so a deeper convention keeps the meaning. */
+    const elevationMm = bringsOwnBase(fills.get(slot))
+      ? 0
+      : slotElevationMm(layout, slot, (resting) => liftOf(fills.get(resting as SlotName)))
     /* Which fills are authored short of the cell their tag names — the 95 s2w
        bases. Read off the *fill* and never off the recipe, because
        `Corner (Any, Modular)` and the drain's modular recipe each admit both an
@@ -382,6 +390,30 @@ export function templateSlotLayout(
  */
 function liftOf(record: CatalogRecord | undefined): number {
   return record === undefined ? 0 : BASE_LIFT_MM
+}
+
+/**
+ * Whether a fill **is its own base**, and so rests on nothing.
+ *
+ * `layer: 'integral'` — `facets.ts#classifyLayer`'s *"not a base, not an insert,
+ * and carrying no `connection|openforge`"*, 2,091 records. A `topper` is authored
+ * to clip **onto** a base and must be raised by one base thickness; an integral
+ * piece is one unit from the ground up, so `three/place.ts#tileMatrix` normalising
+ * its lowest point to `y = 0` has already put it where it belongs and the lift
+ * would raise it by the base it already contains.
+ *
+ * **This is the question {@link liftOf} does not ask, and could not.** That
+ * reader takes the *resting* slot and its docblock is right about why it must not
+ * read a record: the recipe says what a base slot holds and a second opinion
+ * could disagree with the convention. But *"how thick is what I stand on"* and
+ * *"do I stand on anything"* are different questions, and only the second one is
+ * about the **standing** fill. Answering it needs that record and nothing else.
+ *
+ * The project owner photographed the consequence on a modular corner: a wall with
+ * an integrated base floating by exactly `BASE_LIFT_MM`.
+ */
+function bringsOwnBase(record: CatalogRecord | undefined): boolean {
+  return record?.layer === 'integral'
 }
 
 /**

@@ -208,6 +208,42 @@ function denyIntegratedBase(part: PartSlot): PartSlot {
   return { ...part, tags: { ...part.tags, deny: refs([...deny, 'shape|base']) } }
 }
 
+/**
+ * A **modular** wall or column must bring its own base.
+ *
+ * That is what modular *means* in this system, and the s2w base is the evidence:
+ * it is authored 0.5 short on every walled axis, so the base deliberately does
+ * not extend under the wall. What stands in that strip is a separately printed
+ * wall carrying its own base — `layer: 'integral'`.
+ *
+ * A `topper` there has nothing beneath it. The project owner photographed both
+ * halves of that on one corner: *"the left, shorter wall has no integrated base,
+ * so it's at the right height, but the base is missing. The right wall has an
+ * integrated base, but is floating."* The float was
+ * `catalog.ts#bringsOwnBase`'s to fix; the missing base is this — a candidate
+ * that was never valid for a modular slot.
+ *
+ * **Expressed as a deny of `connection|openforge`, and that is exact rather than
+ * convenient.** `facets.ts#classifyLayer` calls a record a `topper` on a *prefix*
+ * test of that tag, and a slot `deny` is equality — which would leak a topper
+ * carrying only `connection|openforge|dragonlock` or `|split`. Measured over the
+ * archive: **0 of the 4,363 toppers lack the bare tag** and **0 of the 2,091
+ * integrals carry it**, so the two sub-tags never appear alone and the deny
+ * selects exactly the non-topper set. With `shape|base` already denied and
+ * `role|` excluding inserts, what is left is `integral`.
+ *
+ * The **single-piece** slots need none of this: they *require*
+ * `connection|openforge` outright, which is the same discriminator read from the
+ * other side, and every one of their candidates is a topper standing on a
+ * full-cell base.
+ */
+function requireOwnBase(part: PartSlot): PartSlot {
+  if (part.name === 'base' || part.name === 'floor') return part
+  const deny = tagsOf(part.tags.deny)
+  if (deny.includes('connection|openforge')) return part
+  return { ...part, tags: { ...part.tags, deny: refs([...deny, 'connection|openforge']) } }
+}
+
 /** A component axis label from a fixture name: `"…: Wall: Arched Door (Modular)"` → `"arched door"`. */
 function componentLabel(fixtureName: string): string {
   const match = /: Wall: (.+?) \((?:Single Piece|Modular)\)$/.exec(fixtureName)
@@ -298,16 +334,22 @@ function foldWallGroup(members: readonly TemplateFixture[], build: string): Fold
   const first = wallSlots[0]
   if (first === undefined) throw new Error(`no wall slot in the ${build} group`)
 
+  /* Modular only. A single-piece slot already *requires* `connection|openforge`,
+     which is the same discriminator read from the other side. */
+  const ownBase = build === 'modular' ? requireOwnBase : (part: PartSlot): PartSlot => part
+
   const parts: PartSlot[] = [
-    denyIntegratedBase({
-      name: 'wall',
-      tags: {
-        require: refs(require),
-        deny: refs(sharedDeny),
-        constrain: [...(first.tags.constrain ?? []), ...AXIS_CONSTRAIN],
-      },
-      ...(first.fulfills === undefined ? {} : { fulfills: first.fulfills }),
-    }),
+    ownBase(
+      denyIntegratedBase({
+        name: 'wall',
+        tags: {
+          require: refs(require),
+          deny: refs(sharedDeny),
+          constrain: [...(first.tags.constrain ?? []), ...AXIS_CONSTRAIN],
+        },
+        ...(first.fulfills === undefined ? {} : { fulfills: first.fulfills }),
+      }),
+    ),
     denyIntegratedBase(identicalSlot(members, 'floor')),
     identicalSlot(members, 'base'),
   ]
@@ -429,7 +471,13 @@ function renameCorner(fixture: TemplateFixture): FoldedAssembly {
     name,
     source: fixture.source,
     tags: fixture.tags,
-    parts: fixture.parts.map(denyIntegratedBase),
+    /* A modular corner's walls and column must bring their own base too, and the
+       corners are where the largest instance of that defect lives: both wall
+       slots of `Corner: Full (Modular)` offer 186 toppers against 160 integrals,
+       and its column slot 12 against 25. */
+    parts: fixture.parts
+      .map(denyIntegratedBase)
+      .map(fixture.tags.includes('build|s2w|modular') ? requireOwnBase : (part) => part),
     controls: { component: [], height: [], size: [] },
     replaces: [fixture.name],
   }

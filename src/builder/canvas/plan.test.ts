@@ -524,6 +524,45 @@ describe('the band, and why row A7 could not delete it — re-measured under row
     expect(scene.conflicts.size).toBe(0)
   })
 
+  it('does not lift a fill that brings its own base, because it is already on the ground', () => {
+    /* **The defect the project owner photographed on a modular corner**: a wall
+       with an integrated base, floating by exactly one base thickness.
+       `liftOf` reads the **resting** slot — *is the base filled* — which is right
+       for a `topper`, authored to clip onto a base. It never asks what the
+       *standing* slot holds, and for an `integral` fill the answer decides
+       everything: that piece is one unit from the ground up, `tileMatrix`
+       normalises its lowest point to `y = 0`, and the lift then raises it by the
+       base thickness it already contains.
+
+       The floor beside it is still lifted, which is the half that must not
+       change: a modular tile really is an s2w base with a floor on top and a
+       self-based wall standing on the ground beside them. */
+    const scene = buildPlanScene(
+      familyOf(OTHER_FIXTURE_TEMPLATE, [
+        [
+          'piece',
+          [
+            [FIXTURE_SLOTS.base, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+            [FIXTURE_SLOTS.wall, FIXTURE_IDS.integralWall],
+          ],
+          0,
+          0,
+          0,
+        ],
+      ]),
+      wired,
+      wiredStyle,
+    )
+    const parts = scene.pieces.flatMap((piece) => piece.parts)
+    const elevationOf = (slot: SlotName) => parts.find((part) => part.slot === slot)?.layout.elevationMm
+
+    expect(elevationOf(FIXTURE_SLOTS.wall)).toBe(0)
+    // And nothing else moves: the base is the ground and the floor stands on it.
+    expect(elevationOf(FIXTURE_SLOTS.base)).toBe(0)
+    expect(elevationOf(FIXTURE_SLOTS.floor)).toBe(BASE_LIFT_MM)
+  })
+
   it('does not retire, because a wall and a floor come out at the same height', () => {
     /*
       **The measurement row C6 owes A7, and it says the band stays.** A7 pinned
@@ -683,11 +722,18 @@ describe('the wired slot layout', () => {
       cell: FIXTURE_CELL,
       residual: { w: 1.5, d: 1.5 },
     })
+    /* **The column is `layer: 'integral'`, so it collects no lift.** It read
+       `BASE_LIFT_MM` here and that was the same defect the project owner
+       photographed on a wall: a piece that brings its own base, raised by the
+       base it already contains. Both populations are real in this slot — the
+       archive's modular corners offer 25 integral columns and their single-piece
+       siblings 12 toppers — so the number has to come from the *fill*, which is
+       what `catalog.ts#bringsOwnBase` now asks. */
     expect(at(FIXTURE_SLOTS.column)).toEqual({
       dx: 0,
       dz: 0,
       rotation: 0,
-      elevationMm: BASE_LIFT_MM,
+      elevationMm: 0,
       cell: FIXTURE_CELL,
     })
     expect(at(FIXTURE_SLOTS.rightWall)).toEqual({

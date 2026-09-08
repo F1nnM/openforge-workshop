@@ -78,7 +78,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'wall',
         tags: {
           require: [{ tag: 'build|separate wall' }, { tag: 'role|wall' }],
-          deny: [{ tag: 'shape|curved' }, { tag: 'size|width|1.5' }, { tag: 'shape|base' }],
+          deny: [{ tag: 'shape|curved' }, { tag: 'size|width|1.5' }, { tag: 'shape|base' }, { tag: 'connection|openforge' }],
           constrain: [{ tag: 'size|width' }, { tag: 'component', siblings: [] }, { tag: 'interface', siblings: [] }, { tag: 'shape|wall', siblings: [] }],
         },
         fulfills: [],
@@ -199,7 +199,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'shape|column|low' }, { tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'build|s2w' }, { tag: 'shape|base' }],
+          deny: [{ tag: 'build|s2w' }, { tag: 'shape|base' }, { tag: 'connection|openforge' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
         },
         fulfills: [],
@@ -208,7 +208,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'right wall',
         tags: {
           require: [{ tag: 'shape|wall|low' }, { tag: 'size|width|1.5' }],
-          deny: [{ tag: 'shape|base' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'connection|openforge' }],
           constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
         },
         fulfills: [],
@@ -217,7 +217,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'left wall',
         tags: {
           require: [{ tag: 'shape|wall|low' }, { tag: 'size|width|1.5' }],
-          deny: [{ tag: 'shape|base' }],
+          deny: [{ tag: 'shape|base' }, { tag: 'connection|openforge' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
         },
         fulfills: [],
@@ -302,7 +302,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'build|s2w' }, { tag: 'shape|column|low' }, { tag: 'shape|base' }],
+          deny: [{ tag: 'build|s2w' }, { tag: 'shape|column|low' }, { tag: 'shape|base' }, { tag: 'connection|openforge' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
         },
         fulfills: [],
@@ -311,7 +311,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'right wall',
         tags: {
           require: [{ tag: 'shape|wall' }, { tag: 'size|width|1.5' }],
-          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }, { tag: 'connection|openforge' }],
           constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
         },
         fulfills: [],
@@ -320,7 +320,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'left wall',
         tags: {
           require: [{ tag: 'shape|wall' }, { tag: 'size|width|1.5' }],
-          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }, { tag: 'connection|openforge' }],
           constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
         },
         fulfills: [],
@@ -386,7 +386,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'shape|column|low' }, { tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'build|s2w' }, { tag: 'shape|base' }],
+          deny: [{ tag: 'build|s2w' }, { tag: 'shape|base' }, { tag: 'connection|openforge' }],
         },
         fulfills: [],
       },
@@ -450,7 +450,7 @@ export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
         name: 'column',
         tags: {
           require: [{ tag: 'size|column_shape|L' }],
-          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }],
+          deny: [{ tag: 'shape|column|low' }, { tag: 'shape|base' }, { tag: 'connection|openforge' }],
         },
         fulfills: [],
       },

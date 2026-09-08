@@ -184,16 +184,24 @@ describe('foldRecipes', () => {
     expect(folded.filter((assembly) => assembly.name.includes('(Any'))).toEqual([])
   })
 
-  it('leaves every corner’s parts the fixture’s own but for row D1’s deny', () => {
+  it('leaves every corner’s parts the fixture’s own but for two added denies', () => {
     /* The corners are a rename: their low/full split is not expressible as a
-       position, so there is nothing to widen and nothing to restore. The one
-       change is `shape|base` on their non-base slots, and they need it as much as
-       a wall does — both wall slots of `Corner (Any, Modular)` admit 144
-       integrated-base records each. */
+       position, so there is nothing to widen and nothing to restore. Their
+       `require`, `constrain` and `fulfills` are the fixture's own bytes, and the
+       only additions are the two denies — both of which a corner needs as much as
+       a wall does, and by the largest margins in the fixtures:
+
+         - `shape|base`, row D1's deny. Both wall slots of `Corner (Any, Modular)`
+           admitted 144 integrated-base records each.
+         - `connection|openforge` on a **modular** wall or column, so it brings
+           its own base. Those same slots offered 186 toppers each, and the
+           column 12.
+    */
     for (const assembly of folded) {
       if (assembly.controls.component.length > 0) continue
       const source = fixtures.find((fixture) => fixture.name === assembly.replaces[0])
       expect(assembly.tags).toEqual(source?.tags)
+      const modular = assembly.tags.includes('build|s2w|modular')
       for (const part of assembly.parts) {
         const original = source?.parts.find((one) => one.name === part.name)
         expect(original, `${assembly.id}/${part.name}`).toBeDefined()
@@ -203,9 +211,50 @@ describe('foldRecipes', () => {
         const added = (part.tags.deny ?? [])
           .map((ref) => ref.tag)
           .filter((tag) => !(original?.tags.deny ?? []).some((ref) => ref.tag === tag))
-        expect(added, `${assembly.id}/${part.name}`).toEqual(part.name === 'base' ? [] : ['shape|base'])
+        const wants =
+          part.name === 'base'
+            ? []
+            : modular && part.name !== 'floor'
+              ? ['shape|base', 'connection|openforge']
+              : ['shape|base']
+        expect(added, `${assembly.id}/${part.name}`).toEqual(wants)
       }
     }
+  })
+
+  it('makes every modular wall and column bring its own base, and no floor', () => {
+    /* What modular *means*: the s2w base is authored 0.5 short on every walled
+       axis, so it does not extend under the wall and what stands there must carry
+       its own base. A `topper` in that slot has nothing beneath it — the missing
+       base the project owner photographed.
+
+       The floor is exempt and must be: it clips **onto** the base, and all 88 of
+       its candidates are toppers. */
+    for (const assembly of folded) {
+      const modular = assembly.tags.includes('build|s2w|modular')
+      for (const part of assembly.parts) {
+        const deny = (part.tags.deny ?? []).map((ref) => ref.tag)
+        const wants = modular && part.name !== 'base' && part.name !== 'floor'
+        expect(deny.includes('connection|openforge'), `${assembly.id}/${part.name}`).toBe(wants)
+      }
+    }
+  })
+
+  it('leaves the single-piece slots alone, because they require the same tag', () => {
+    /* The same discriminator read from the other side. A single-piece wall
+       *requires* `connection|openforge`, so it is a topper standing on a
+       full-cell base by construction and a deny would empty it outright. */
+    for (const assembly of folded) {
+      if (assembly.tags.includes('build|s2w|modular')) continue
+      for (const part of assembly.parts) {
+        expect(
+          (part.tags.deny ?? []).map((ref) => ref.tag),
+          `${assembly.id}/${part.name}`,
+        ).not.toContain('connection|openforge')
+      }
+    }
+    const wall = byId('s2w-wall-on-tile-wall-single-piece').parts.find((part) => part.name === 'wall')
+    expect((wall?.tags.require ?? []).map((ref) => ref.tag)).toContain('connection|openforge')
   })
 
   it('denies shape|base on every non-base slot of all 10, and only there', () => {
