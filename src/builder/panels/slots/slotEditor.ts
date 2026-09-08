@@ -320,7 +320,17 @@ export function slotEditorModel(
   recipes: RecipeIndex = createRecipeIndex(catalog, compositionIndexFor(catalog)),
 ): SlotEditorModel {
   const choice = choiceOf(instance)
-  const state = assemblyState(recipes, template, choice)
+  /* **The instance's control position, posed onto the template's own tags.**
+     `assemblyState` reads `template.tags` as the `parentTags` a `constrain` block
+     collects, so adding the position here is the whole of filtering this editor —
+     no per-slot table and no second resolver. An instance placed as an arched
+     door offers 54 walls in its wall slot rather than 1,451.
+     `[]` poses nothing, which is *any* on every axis. */
+  const posed =
+    instance.position.length === 0
+      ? template
+      : { ...template, tags: [...template.tags, ...instance.position] }
+  const state = assemblyState(recipes, posed, choice)
   const geometry = layoutOf(template, instance, index)
 
   const slots = state.steps.map((step): EditorSlot => {

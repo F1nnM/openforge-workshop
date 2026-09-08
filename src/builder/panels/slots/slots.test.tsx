@@ -61,6 +61,7 @@ import {
   useWorkshopStore,
 } from '@/store'
 
+import { slotEditorModel } from './slotEditor'
 import { planPieces, planSlots } from './planSlots'
 import type { SlotEditTarget } from './SlotsPanel'
 import { SlotsPanel } from './SlotsPanel'
@@ -469,6 +470,66 @@ const pieceRow = () => screen.getByRole('button', { name: /Fixture: Secret Door/
 /** A card in the editor's grid, by the item it stands for. */
 const card = (name: string | RegExp) =>
   within(screen.getByRole('group', { name: /^Fill the/ })).getByRole('button', { name })
+
+describe('the instance’s control position narrows the editor', () => {
+  /**
+   * A one-slot recipe whose slot **constrains `texture`**, so a position can
+   * reach it.
+   *
+   * Purpose-built rather than reusing {@link EDITOR_TEMPLATE}: that one's `top`
+   * slot declares no `constrain` at all, which is the correct shape for what it
+   * tests and exactly the shape a position cannot narrow. A position is offered
+   * to every slot and collected only by the ones that asked — that is the whole
+   * mechanism — so a fixture without a `constrain` block would test nothing here
+   * and adding one to it would move the assertions of five other tests.
+   */
+  const TEXTURED: RecipeTemplate = {
+    id: 'fixture-textured-top',
+    name: 'Fixture: Textured Top',
+    source: 'fixture',
+    tags: ['object|tile'],
+    parts: [
+      {
+        name: 'top',
+        tags: { require: [{ tag: 'component|top' }], constrain: [{ tag: 'texture', siblings: [] }] },
+        fulfills: [],
+      },
+    ],
+  }
+
+  const modelAt = (position: readonly string[]) =>
+    slotEditorModel(
+      SLOT_CATALOG,
+      ASSEMBLY,
+      {
+        id: KEY,
+        template: TemplateId.parse(TEXTURED.id),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: {},
+        position,
+      },
+      TEXTURED,
+    )
+
+  it('offers every texture when the instance was placed at no position', () => {
+    // `[]` is *any*: the `constrain` collects nothing and the slot admits what
+    // its own `require` does.
+    const designs = modelAt([]).slots[0]?.designs ?? []
+    expect(designs.length).toBeGreaterThan(1)
+  })
+
+  it('offers only the position’s texture when the instance carries one', () => {
+    /* **The point of storing the position.** The instance was placed as a towne
+       piece, so its editor offers towne tops — not every top in the archive and
+       then a surprise when the user picks one the placement never meant. */
+    const designs = modelAt(['texture|towne']).slots[0]?.designs ?? []
+    expect(designs.length).toBeGreaterThan(0)
+    expect(designs.length).toBeLessThan((modelAt([]).slots[0]?.designs ?? []).length)
+    for (const bucket of designs) expect(bucket.family).toBe('towne')
+  })
+})
 
 describe('the slot editor', () => {
   it('opens on a right click, which is what §3.3 asks for', () => {
