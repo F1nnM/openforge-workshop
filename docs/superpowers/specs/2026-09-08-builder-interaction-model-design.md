@@ -134,11 +134,29 @@ Right-click loses the slot editor and becomes pan and nothing else, so
 ### Selection chrome
 
 The hover cue is D7's screen-space silhouette, traced by the outline pass in
-`src/three/Stage.tsx`. Selection reuses that pass at a **second, stronger weight** rather
-than introducing a second drawing — the pass already takes a set of proxy meshes, so a
-selected piece is one more entry with a different colour and width. Hover remains the
-weaker cue and continues to follow the pointer, so hover-over-a-non-selected-piece and
-selection are simultaneously legible.
+`src/three/Stage.tsx`. The obvious move — a second, heavier outline for the selection — is
+**rejected on cost**: `OutlineRequest` carries one `colour` and one `edgeStrength` for the
+whole request, so two weights means a second `OutlineEffect`, a second mask render target
+and a second fullscreen quad. `Stage.tsx` is deliberate that the pass costs *"one more
+fullscreen quad, and only while something is outlined"*, and doubling that for a cue is a
+bad trade.
+
+Instead the two cues use two **different drawings**, which is also the more legible answer:
+
+- **The outline pass carries whichever is live.** With a selection, it outlines the
+  selection, in the selection colour; with none, it outlines the hover, in the hover
+  colour. Only one is ever in the request, so one colour per request stays true and the
+  pass is untouched.
+- **The selection additionally gets a ground-plane marker** — a highlighted contour on its
+  footprint plate, drawn by `markers.ts`, which already builds plates and contours from the
+  same convex parts the collision sweep uses. That is what stays visible while the pointer
+  hovers a *different* piece, so both states remain legible without a second pass.
+
+This is D3's rejected drawing, used correctly. D3 built the *hover* cue as a flat footprint
+loop lifted to a part's top height, and the owner's diagnosis was right: as a silhouette
+substitute it was the plan view floating in the air above the mesh, and occludable. As a
+**selection marker on the plan** it is none of those things — it is on the ground, where
+the piece's footprint actually is, which is exactly what `markers.ts` exists to draw.
 
 ### The floating action bar
 
@@ -216,12 +234,63 @@ This design threads the `PlanCatalog` in and projects the hovered placement thro
 ghost then draws the real parts and can answer the question it could not answer before:
 **does this land on top of something?**
 
-**The commit behaviour does not change.** `overlap.ts` is emphatic that an overlap
-*informs and commits*, and that is a deliberate product decision about a physical
-kit where two pieces may legitimately share ground. So the ghost **marks** a conflict and
-the click still places. What changes is that the user is told before pressing rather than
-after. The mark is not colour alone — colour is never the sole carrier — but a hatch on the
-conflicting parts plus the existing status line.
+### Overlap is prohibited — where the detector is exact
+
+`overlap.ts` currently *flags and commits*, under a documented principle
+(*"compatibility informs; it never refuses a placement"*). **That changes: an overlapping
+placement is refused.** The owner's call, and it makes a room printable by construction.
+
+It cannot become an unconditional gate, though, and the module says why in its own words:
+its error is **deliberately one-directional**. *"Every part is a superset of the geometry it
+stands for, so this module can report a conflict that is not quite there and can never miss
+one that is."* Three named sources of over-report:
+
+| Source | Why it over-reports |
+| --- | --- |
+| Curved footprints | an `arc` is decomposed into convex parts that strictly *contain* the sector, by up to 0.246 mm |
+| Unknown elevation | `level: null` reads as *every* level, so a piece of unknown height conflicts with everything in its band |
+| Band assignment | `planBand` reads `kinds` tags, and *"the tag data drifts"* |
+
+So the gate is **exact conflicts only**; an inexact conflict keeps today's warn-and-commit.
+The module already carries the flag this needs: `PlanShape.cover` is `'exact' | 'outward'`
+with `slack` in grid units, and its docblock says it is *"carried rather than inferred from
+`shape` so a consumer that reports on its own accuracy does not have to know which cases are
+curved."* This is that consumer.
+
+A conflict is **refusable** when all three hold, and a warning otherwise:
+
+1. **Geometry is exact** — every part of both subjects comes from a shape with
+   `cover: 'exact'` (equivalently `slack === 0`). The five straight cases qualify; `arc`
+   does not.
+2. **Both levels are known** — neither subject has `level: null`, so the vertical
+   disjointness test ran on real numbers rather than on the every-level guess. A generated
+   base qualifies: a recipe computes a real interval.
+3. **Both bands are measured** — the band came from the footprint's own wall thickness
+   (`isWallThickness`), not from the `kinds` heuristic.
+
+Two thirds of that improves *because of* the rest of this design rather than in spite of it:
+threading the `PlanCatalog` into `RoomSurface` gives the ghost a projected template with
+real `SlotLayout.elevationMm` per part, so condition 2 goes from "never true for a ghost"
+to "normally true". The ghost stops being the module's worst-calibrated caller.
+
+Mechanically this means:
+
+- `OverlapSubject` gains `cover: PlanCover`, set where subjects are built.
+- `planBand` returns `{ band, measured }` rather than a bare `PlanBand`, so provenance
+  travels with the value instead of being re-derived. Callers are updated; nothing keeps a
+  compatibility shim.
+- `subjectsConflict` returns a verdict — `null`, `{ kind: 'exact' }` or `{ kind: 'inexact' }`
+  — rather than a boolean.
+- `planPlacement` and `previewMove` refuse on `exact` and note on `inexact`. A refusal names
+  the piece and cell it hit, because *"a heuristic that blocks and is occasionally wrong
+  costs them a tile they cannot place and no way to find out why"* is the failure this must
+  not reproduce.
+- The scene keeps drawing a hatch for both kinds; `PlanScene.conflicts` becomes
+  `ReadonlyMap<PlacementId, ConflictKind>` so the drawing can distinguish them.
+
+The ghost therefore has three states, and colour is never the sole carrier of any of them:
+clear, **blocked** (refusable — hatched, and the click does nothing but explain), and
+**warned** (inexact — hatched more lightly, and the click places).
 
 Cost, stated honestly: hover now pays the solve the click already pays — 1 to 19 queries,
 up to 3.3 ms cold, memoised on `(family, size)` thereafter, against a pointer path whose
@@ -249,7 +318,10 @@ is testable and only the anchoring wrapper is not.
 | Unit | Change |
 | --- | --- |
 | `usePlanTools.ts` | drop the tool; add `selected` / `select` / `arm` with the exclusivity invariant |
-| `edits.ts` | verdicts keyed to the selection rather than to a cursor pick |
+| `overlap.ts` | `planBand` returns provenance; `OverlapSubject` gains `cover`; `subjectsConflict` returns an exact/inexact verdict |
+| `move.ts` | an exact conflict becomes a refusal rather than a note |
+| `scene.ts` | `conflicts` becomes a map of id → conflict kind; `pieceSubjects` sets `cover` |
+| `edits.ts` | verdicts keyed to the selection rather than to a cursor pick; placement refuses on an exact conflict |
 | `RoomSurface.tsx` | the new gesture model; the `event.target` guard; MMB orbit; the `PlanCatalog` for the ghost |
 | `PlanToolbar.tsx` | drop the mode toggle; add Undo / Redo |
 | `workshopStore.ts` | add `restorePlacements` |
@@ -288,6 +360,17 @@ should be revisited rather than declared done.
    match rather than left describing the old model.
 3. **The ghost solve on hover.** Memoised, but the first hover of each armed family and
    size pays up to 3.3 ms. Acceptable; worth measuring rather than assuming.
+5. **Prohibition against a deliberately over-reporting detector.** The exact/inexact split
+   is what keeps a false positive from becoming a dead end, but the split is itself a
+   judgement about which of `overlap.ts`'s three error sources are live in a given pair.
+   If it is drawn wrongly the symptom is a placement the user believes is fine being
+   refused with a confident explanation — worse than today's spurious hatch. The three
+   conditions are therefore tested individually and in combination, and a room that
+   *already* holds overlaps (persisted before this change) must still load, draw and
+   download: prohibition applies to new edits, never retroactively.
+6. **Two behaviours to predict.** A user who is refused once and warned once will ask why.
+   The refusal and the warning must read as different things — the refusal names the
+   blocking piece and says the placement did not happen; the warning says it did.
 4. **The bar over a small piece.** A 1×1 tile at a shallow camera angle is smaller than its
    own action bar. The clamp keeps the bar on screen; it does not keep it from covering
    neighbours. Accepted for now.
