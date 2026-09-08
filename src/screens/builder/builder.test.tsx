@@ -276,15 +276,14 @@ describe('the builder screen', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Builder' })).toHaveClass('of-sr-only')
   })
 
-  it('shows the lock notice and the work-area lock control, which is what it now points at', async () => {
+  it('shows the work-area lock control, and no longer a banner beside it', async () => {
     await renderBuilder()
-    // PR 19 mounts nothing itself: `LockNotice` renders here or nowhere.
-    expect(screen.getByRole('complementary', { name: 'Lock system' })).toBeInTheDocument()
-    // Row L1: the notice used to be the only route to `/settings`. That screen
-    // is deleted and the preference is a control in the stage, so both have to
-    // be on this screen — the notice's "show me the control" action moves focus
-    // to the second of these and does nothing if it is absent.
+    // The toggle is the whole of the lock UI now. `LockNotice` — the first-run
+    // banner that sat above the bill and whose "show me the control" action
+    // moved focus to this button — is deleted, so the control is the only thing
+    // that states the preference and the only thing that can change it.
     expect(screen.getByRole('button', { name: /^Lock system: / })).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Lock system' })).toBeNull()
   })
 
   it('reads the query out of the URL, so a shared palette link arrives filtered', async () => {

@@ -1,7 +1,7 @@
 /**
  * The lock preference UI, as one import.
  *
- * Four things, in the order a caller is likely to want them:
+ * Three things, in the order a caller is likely to want them:
  *
  *   - **`LockToggle`** — the control, in the builder's work area. No props: the
  *     preference is global and the figures come from the emitted index. It is a
@@ -10,11 +10,6 @@
  *     argument for it, **including the documented decision it overrules** — the
  *     deleted `/settings` screen rejected exactly this shape — and the list of
  *     what the disclosure dropped relative to that screen.
- *   - **`LockNotice`** — the one-time banner. No props, renders `null` once the
- *     user has answered. Mount it where the preference changes what the user
- *     gets: the builder, and anything on the download path. Not on the landing
- *     page. `LockNotice.tsx` carries the banner-not-modal reasoning, and why it
- *     survived the screen it used to link to.
  *   - **`LockPicker`** — the picker itself, controlled. `LockToggle`'s disclosure
  *     mounts it under a title; a second host can mount the same component with
  *     its own `name`, which is what that prop is for.
@@ -42,8 +37,6 @@
  */
 export type { LockBuild, LockBuildEntry, UnbuildableDesigns } from './build'
 export { buildOf, deriveLockBuild } from './build'
-
-export { LockNotice } from './LockNotice'
 
 export { LOCK_TOGGLE_ID, LockToggle } from './LockToggle'
 

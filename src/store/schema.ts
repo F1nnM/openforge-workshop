@@ -440,10 +440,10 @@ export const WorkshopState = z.object({
    * mention a preference that costs up to 40.2 percentage points of catalog
    * reach (see {@link DEFAULT_LOCK_SYSTEM}).
    *
-   * Set by `setLockSystem` — picking a system, including re-picking openlock, is
-   * a decision — and by `acknowledgeLockSystem`, which is "I read the notice and
-   * the default is fine" without touching `lock`. Both live in
-   * `workshopStore.ts`.
+   * Set by `setLockSystem` in `workshopStore.ts` — picking a system, including
+   * re-picking openlock, is a decision. It used to have a second writer,
+   * `acknowledgeLockSystem`, for the dismiss action on the first-run notice;
+   * that notice is gone, so the toggle is the only thing that can answer now.
    *
    * Persisted, because the whole point is that it survives a reload.
    */

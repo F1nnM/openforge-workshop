@@ -625,19 +625,6 @@ export function setLockSystem(lock: LockSystem): void {
   useWorkshopStore.setState({ lock, lockChosen: true })
 }
 
-/**
- * Record that the user has seen the lock choice and is keeping what is set.
- *
- * The dismiss action on the first-run notice, and the only way to set the flag
- * without touching `lock`. Kept separate from {@link setLockSystem} so that
- * "keep the default" does not have to be spelled
- * `setLockSystem(DEFAULT_LOCK_SYSTEM)` — which reads as a change and would be
- * wrong the day the default moves.
- */
-export function acknowledgeLockSystem(): void {
-  useWorkshopStore.setState({ lockChosen: true })
-}
-
 /* --------------------------------------------------------------- room design */
 
 /**

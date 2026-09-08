@@ -233,7 +233,12 @@ describe('the room with an empty store — today’s real state', () => {
     expect(screen.getByText(/part is really there/i)).toBeInTheDocument()
   })
 
-  it('reports the budget and the draw count even when nothing drew', async () => {
+  it('groups nothing and still hands the surface the part, so it can be outlined', async () => {
+    // This used to read the counts off the `of-b3d-readout` footer. That footer
+    // is deleted — it was developer telemetry on a work surface — so the claim is
+    // made against the props the surface is actually handed, which is the thing
+    // the readout was only ever a rendering of.
+    reset()
     render(
       <BuilderRoom
         catalog={CATALOG}
@@ -245,9 +250,12 @@ describe('the room with an empty store — today’s real state', () => {
       />,
     )
     await waitFor(() => {
-      expect(screen.getByText('0 parts in 0 instanced meshes, 1 outlined')).toBeInTheDocument()
+      expect(screen.getByText(/1 of 1 placed part has no mesh/i)).toBeInTheDocument()
     })
-    expect(screen.getByText('1 of 150 meshes')).toBeInTheDocument()
+    const call = surfaceCalls.at(-1)
+    expect(call?.groups).toBe(0)
+    expect(call?.instances).toBe(0)
+    expect(call?.loaded).toBe(0)
   })
 
   it('draws an empty plan without fetching, and still gives it a canvas', async () => {
@@ -348,9 +356,6 @@ describe('when an object is there and broken', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(/could not be loaded/i)
     })
-    // And the readout counts it apart from the absences, rather than subtracting
-    // one from the other and calling it loaded.
-    expect(screen.getByText('0 of 1 loaded, 1 failed')).toBeInTheDocument()
     // The surface is still there: a failed mesh changes what is *drawn* and
     // nothing about what may be placed where.
     expect(screen.getByTestId('surface')).toBeInTheDocument()
@@ -406,18 +411,10 @@ describe('the room with a store object', () => {
       expect(surfaceCalls.at(-1)?.groups).toBe(1)
     })
 
-    // Three placements of one file: one instanced mesh, three parts.
-    expect(screen.getByText('3 parts in 1 instanced mesh')).toBeInTheDocument()
-    // And the arity the other lines are in terms of, so "3 parts in 1 mesh" is
-    // readable — three placements of one part each, none of them empty.
-    expect(screen.getByText('3 placed')).toBeInTheDocument()
-    // 118 triangles per instance from the fixture, times three.
-    expect(screen.getByText('354')).toBeInTheDocument()
-    expect(screen.getByText('1 of 1 loaded')).toBeInTheDocument()
-    // The budget row quotes the resident geometry against the ceiling borrowed
-    // from `src/three/gate.ts` — 36.2 MB, the same allowance one raw STL gets.
-    expect(screen.getByText(/1 of 150 meshes · .* of 36\.2 MB/)).toBeInTheDocument()
-
+    // Three placements of one file: one instanced mesh, three parts. That claim
+    // used to be read off the `of-b3d-readout` footer as well; the footer is
+    // deleted, and the block below already makes it against the surface's own
+    // props, which is where it always belonged.
     const call = stageCalls.at(-1)
     expect(call?.label).toContain('3 placed templates')
     // `enablePan`, at last passed by the component `Stage`'s prop docblock names:

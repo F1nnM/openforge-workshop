@@ -110,7 +110,6 @@ import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import {
   buildPlanScene,
   createStyleResolver,
-  describeCell,
   freeCellFor,
   planCatalogFromFile,
   templateSlotLayout,
@@ -158,7 +157,7 @@ import {
 } from '@/store'
 import { reSolveScene } from '@/template'
 import { DesignToggle } from '@/ui/design-picker'
-import { LockNotice, LockToggle } from '@/ui/lock-picker'
+import { LockToggle } from '@/ui/lock-picker'
 import { Button, Eyebrow } from '@/ui/primitives'
 import { RailSlot } from '@/ui/shell'
 
@@ -620,18 +619,6 @@ function Builder({ index }: { index: CatalogIndex }) {
     if (mesh !== null) holdGeneratedMesh(placed.placement.base, mesh)
   }, [])
 
-  /**
-   * The armed **family**, as the recipe table names it.
-   *
-   * `tools.selectedTemplate` is a `TemplateId` since row A1, so there is no
-   * record to look up: `planCatalog.record` takes a file and a family is not
-   * one. This screen holds the table the id names — see `templates` above — so
-   * it can say the family's real name, which is exactly the case
-   * `canvas/scene.ts#describeTemplate` defers to: *"A panel that holds the table
-   * can say it better; nothing here can."*
-   */
-  const armed = tools.selectedTemplate === null ? undefined : recipes.get(tools.selectedTemplate)
-
   return (
     <section className="of-builder" aria-label="Builder">
       <h1 className="of-sr-only">Builder</h1>
@@ -721,17 +708,13 @@ function Builder({ index }: { index: CatalogIndex }) {
           />
         </div>
 
-        {/* §2.4's two corner plates. Pointer-transparent, so a click near the
-            bottom of the room still reaches the surface — which matters more now
-            than it did on the plan, because the primary gesture *is* a click on
-            the drawing. */}
-        <p className="of-build-plate of-build-hint">{status?.hint ?? 'Pick a tile from the palette to start.'}</p>
-        <p className="of-build-plate of-build-armed">
-          {armed === undefined ? 'No recipe armed' : armed.name}
-          {status === null ? null : (
-            <span className="of-build-at">{describeCell(status.cursor[0], status.cursor[1])}</span>
-          )}
-        </p>
+        {/* §2.4's two corner plates are gone. The hint was drawn **twice** —
+            `BuilderRoom` puts the same `status.hint` on its own plate over the
+            canvas — and the armed plate restated the palette's own selection
+            beside a cursor coordinate that changed on every pointer move. The
+            room's plate is the one kept, so the surface owns its own readout and
+            this screen owns none. `status` is still lifted here for
+            `PlanToolbar`, which is what it was lifted for. */}
 
         {/*
           Rows G2, R2 and R4. **The stage**, and no longer a panel: R2 opened it
@@ -816,13 +799,6 @@ function Builder({ index }: { index: CatalogIndex }) {
       </div>
 
       <div className="of-builder-bill">
-        {/*
-          The lock preference decides which base is matched under every openforge
-          topper in the bill below, which makes this the one screen where the
-          notice is load-bearing rather than noise. It renders `null` once the
-          user has answered. See `@/ui/lock-picker/LockNotice.tsx`.
-        */}
-        <LockNotice className="of-builder-lock" />
         <BillPanel
           bill={bill}
           placements={placements}
