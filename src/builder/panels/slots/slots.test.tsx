@@ -61,9 +61,10 @@ import {
   useWorkshopStore,
 } from '@/store'
 
-import { planPieces, planSlots } from './planSlots'
-import type { SlotEditTarget } from './SlotsPanel'
-import { SlotsPanel } from './SlotsPanel'
+import { AccessorySection } from './AccessorySection'
+import { planSlots } from './planSlots'
+import type { SlotEditTarget } from './SlotEditor'
+import { SlotEditor } from './SlotEditor'
 
 /** Built once: it is a pure function of the fixture and scans every record. */
 const ASSEMBLY = buildAssemblyIndex(SLOT_CATALOG)
@@ -129,33 +130,43 @@ const MITRE_TEMPLATE: RecipeTemplate = {
 const TEMPLATES = (id: string): RecipeTemplate | undefined =>
   [EDITOR_TEMPLATE, MITRE_TEMPLATE].find((one) => one.id === id)
 
+/** The accessory inventory over a plan, which is all this section is now. */
+function accessories(placements: Record<string, TemplateInstance>) {
+  return render(<AccessorySection catalog={SLOT_CATALOG} placements={placements} />)
+}
+
 /**
- * The panel with the two indexes the builder screen hands it — and the open
- * state row **C8** lifted out of it.
+ * The editor, mounted the way `BuilderScreen` mounts it.
  *
- * A host component holding `editing` rather than a fixed prop, and the
- * difference is not cosmetic: since C8 the editor's open state is
- * `BuilderScreen`'s, because the same dialog opens from a right click on the 3D
- * drawing, so every assertion below about the editor appearing is now an
- * assertion about the **round trip** — the panel asks through `onEdit`, the
- * owner of the state answers, the panel renders. Passing `editing={null}` with a
- * no-op `onEdit` would leave all of them passing while the editor never opened.
+ * **It is not opened from a panel any more, and that is what the sidebar cleanup
+ * moved.** The editor is a modal dialog and its open state was already the
+ * screen's — two surfaces open one dialog, so neither could hold the other's —
+ * and the surfaces are now the 3D drawing's right click and a `Slots` press on a
+ * bill row. Neither is in this file, so this host is the screen's own three
+ * lines: resolve the target to an instance and a recipe, render the dialog, and
+ * take `null` back from `onClose`.
  *
- * `start` is what a right click on the *drawing* hands over: a placement and the
- * slot whose part was under the pointer. It defaults to `null`, so every test
- * written before this row exercises exactly the path it did.
+ * `target` is what an opener hands over: a placement, and optionally the slot
+ * whose part was under the pointer. Held in state rather than fixed, so the
+ * Escape assertion is a real round trip.
  */
-function panel(placements: Record<string, TemplateInstance>, start: SlotEditTarget | null = null) {
+function editor(placements: Record<string, TemplateInstance>, target: SlotEditTarget) {
   function Host() {
-    const [editing, setEditing] = useState<SlotEditTarget | null>(start)
+    const [editing, setEditing] = useState<SlotEditTarget | null>(target)
+    const instance = editing === null ? undefined : placements[editing.placement]
+    const template = instance === undefined ? undefined : TEMPLATES(instance.template)
+    if (instance === undefined || template === undefined) return null
     return (
-      <SlotsPanel
-        assembly={ASSEMBLY}
+      <SlotEditor
         catalog={SLOT_CATALOG}
-        editing={editing}
-        onEdit={setEditing}
-        placements={placements}
-        templates={TEMPLATES}
+        index={ASSEMBLY}
+        instance={instance}
+        key={`${instance.id}:${editing?.slot ?? ''}`}
+        onClose={() => {
+          setEditing(null)
+        }}
+        {...(editing?.slot === undefined ? {} : { initialSlot: editing.slot })}
+        template={template}
       />
     )
   }
@@ -338,97 +349,45 @@ function piece(fills: Readonly<Record<string, string>>, x = 0, z = 0): TemplateI
   }
 }
 
-describe('planPieces', () => {
-  it('counts the declared slots a piece has filled, and names the ones it has not', () => {
-    const [only] = planPieces(SLOT_CATALOG, { a: piece({ top: FILL.topWall }) }, TEMPLATES)
-    expect(only).toMatchObject({ name: 'Fixture: Secret Door', slots: 2, filled: 1, pinned: 0 })
-    expect(only?.needsChoice).toEqual(['base'])
+/* ------------------------------------------------------ the accessory list */
+
+describe('AccessorySection', () => {
+  /**
+   * **The empty state is the normal state, so it is nothing at all.**
+   *
+   * 1,005 of the archive's 8,702 files declare a slot — 11.5% — so the common
+   * plan opens none, and this section used to spend a four-line paragraph
+   * quoting that arithmetic at every user who had not placed a torch wall. In a
+   * fixed-height column beside a parts list, an explanation of why there is
+   * nothing to show costs the parts list four lines on nearly every visit.
+   */
+  it('renders nothing when the plan opens no accessory', () => {
+    const { container } = accessories({ a: at(PARENT.plainFloor, 0, 0) })
+    expect(container).toBeEmptyDOMElement()
   })
 
-  it('reads the plan in depth-then-across order, the same as the bill', () => {
-    const pieces = planPieces(
-      SLOT_CATALOG,
-      {
-        far: piece({ top: FILL.topWall }, 0, 4),
-        nearRight: piece({ top: FILL.topWall }, 3, 0),
-        nearLeft: piece({ top: FILL.topWall }, 0, 0),
-      },
-      TEMPLATES,
-    )
-    expect(pieces.map((one) => one.placement)).toEqual(['nearLeft', 'nearRight', 'far'])
-  })
-
-  it('calls a fill this index has retired a slot needing a choice', () => {
-    // Not "filled": the file is in the store and not in the catalog, so there is
-    // nothing to print and nothing to draw. The same reading `resolveInstance`
-    // takes, which emits `unknown-tile` *and* `slot-unfilled` for one fill.
-    const [only] = planPieces(SLOT_CATALOG, { a: piece({ top: RETIRED_TILE }) }, TEMPLATES)
-    expect(only).toMatchObject({ filled: 0 })
-    expect(only?.needsChoice).toEqual(['top', 'base'])
-  })
-
-  it('says nothing about the slots of a recipe this build no longer ships', () => {
-    const [only] = planPieces(SLOT_CATALOG, { a: at(PARENT.wallTowne, 0, 0) }, TEMPLATES)
-    expect(only?.template).toBeUndefined()
-    // The id, because there is no name to give: `TemplateId` is not a catalog
-    // identity and only the party holding the table can turn one into a name.
-    expect(only?.name).toBe(A_RECIPE)
-    expect(only?.slots).toBe(0)
-  })
-})
-
-/* ----------------------------------------------------------------- the panel */
-
-describe('SlotsPanel', () => {
-  it('states the archive’s 11.5% when the plan opens no accessory', () => {
-    panel({ a: at(PARENT.plainFloor, 0, 0) })
-    expect(screen.getByText(/1,005 of the archive’s 8,702 files declare a slot/)).toBeInTheDocument()
-  })
-
-  it('leads with the pieces and how many slots still need a choice', () => {
-    panel({ a: piece({ top: FILL.topWall }), b: piece({}, 2, 0) })
-    // One piece has its `base` open and the other has both — three in all.
-    expect(screen.getByText(/2 pieces placed\./)).toBeInTheDocument()
-    expect(screen.getByText(/3 slots need a choice/)).toBeInTheDocument()
-  })
-
-  it('names each piece with its family and its grid position', () => {
-    panel({ a: piece({ top: FILL.topWall }, 3.5, 2) })
-    const row = screen.getByRole('button', { name: /Fixture: Secret Door/ })
-    expect(row).toHaveAccessibleName(/at x 3\.5, z 2/)
-    expect(row).toHaveAccessibleName(/1 of 2 slots filled/)
-    expect(row).toHaveAccessibleName(/needs a choice: base/)
-  })
-
-  it('refuses to open a piece whose recipe this build does not ship, and says so', () => {
-    panel({ a: at(PARENT.wallTowne, 0, 0) })
-    expect(screen.getByRole('button', { name: /ships no such recipe/ })).toBeDisabled()
-    expect(
-      screen.getByText(/1 piece names a recipe this build no longer ships/),
-    ).toBeInTheDocument()
-  })
-
-  it('explains that an accessory pick is a preview, because a fill is one level up', () => {
-    panel({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.wallLow, 2, 0) })
+  it('states what a pick here is, in one line, because it keeps nothing', () => {
+    accessories({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.wallLow, 2, 0) })
     expect(screen.getByText(/2 slots open on 2 pieces, 1 of them required/)).toBeInTheDocument()
-    // Row A0 said "not yet something this build can keep", which was a schedule.
-    // The reason is structural and is now stated as one: `fills` is flat.
-    expect(screen.getByText(/one level below the recipe’s own slots/)).toBeInTheDocument()
+    // The reason is structural — `TemplateInstance.fills` is one level, so there
+    // is no key for a slot of a *file* — and a picker that silently kept nothing
+    // would be the one thing worse than saying so. Cut to a line, not to zero.
+    expect(screen.getByText(/a fill can name a recipe’s slot, not a file’s/)).toBeInTheDocument()
   })
 
   it('names each accessory holder with its slot and grid position', () => {
-    panel({ a: at(PARENT.wallTowne, 3.5, 2) })
+    accessories({ a: at(PARENT.wallTowne, 3.5, 2) })
     expect(screen.getByText(/slot0 · x 3\.5, z 2/)).toBeInTheDocument()
     expect(screen.getByText(/Dungeon Stone Torch Wall 2x/)).toBeInTheDocument()
   })
 
   it('calls an unfillable accessory slot an archive gap rather than a step to take', () => {
-    panel({ a: at(PARENT.contradiction, 0, 0) })
+    accessories({ a: at(PARENT.contradiction, 0, 0) })
     expect(screen.getByText(/gap in the archive, not a step to take/)).toBeInTheDocument()
   })
 
   it('greys the dead-end accessory pick here too, because the picker is the same one', () => {
-    panel({ a: at(PARENT.wallTowne, 0, 0) })
+    accessories({ a: at(PARENT.wallTowne, 0, 0) })
     expect(screen.getByRole('button', { name: /Towne Torch/ })).toHaveAttribute(
       'aria-disabled',
       'true',
@@ -436,7 +395,7 @@ describe('SlotsPanel', () => {
   })
 
   it('says how many placements it cannot describe', () => {
-    panel({ gone: atRetired() })
+    accessories({ gone: atRetired() })
     expect(
       // "a file", not "an item": a fill names a file (decision D1), so an orphan
       // is a file the index has retired rather than an item it has lost.
@@ -445,7 +404,10 @@ describe('SlotsPanel', () => {
   })
 
   it('scopes each accessory picker to that placement’s own file', () => {
-    const { container } = panel({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.pairedGrate, 2, 0) })
+    const { container } = accessories({
+      a: at(PARENT.wallTowne, 0, 0),
+      b: at(PARENT.pairedGrate, 2, 0),
+    })
     // By class, not by `listitem`: the option cards are list items too, which is
     // the right markup for a grid and makes the role ambiguous here.
     const holders = [...container.querySelectorAll<HTMLElement>('.of-planslots-holder')]
@@ -459,23 +421,25 @@ describe('SlotsPanel', () => {
 
 /* ---------------------------------------------------------------- the editor */
 
-/** The piece row, whichever way it is going to be opened. */
-const pieceRow = () => screen.getByRole('button', { name: /Fixture: Secret Door/ })
-
 /** A card in the editor's grid, by the item it stands for. */
 const card = (name: string | RegExp) =>
   within(screen.getByRole('group', { name: /^Fill the/ })).getByRole('button', { name })
 
 describe('the slot editor', () => {
-  it('opens on a right click, which is what §3.3 asks for', () => {
-    panel({ a: piece({ top: FILL.topWall }) })
-    expect(screen.queryByRole('dialog')).toBeNull()
-
-    fireEvent.contextMenu(pieceRow())
+  /**
+   * **Where it opens *from* is no longer in this file.**
+   *
+   * The two openers are a right click on the 3D drawing — asserted in
+   * `builder/three/` against the 5 px click discriminator that lives there — and
+   * a `Slots` press on a bill row, asserted in `panels.test.tsx` against the
+   * request it emits. Both hand over the same {@link SlotEditTarget}, and what
+   * is this file's is what the editor does with one.
+   */
+  it('opens on the piece it is given, on the slot still needing a choice', () => {
+    editor({ a: piece({ top: FILL.topWall }) }, { placement: KEY })
 
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveAccessibleName('Fixture: Secret Door')
-    // Both slots listed, and it opens on the one still needing a choice.
     expect(within(dialog).getByRole('group', { name: 'Fill the base slot' })).toBeInTheDocument()
   })
 
@@ -488,7 +452,7 @@ describe('the slot editor', () => {
       pointed at wins. Without `initialSlot` the group below reads
       *Fill the base slot*, which is what the test above asserts.
     */
-    panel({ a: piece({ top: FILL.topWall }) }, { placement: KEY, slot: TOP })
+    editor({ a: piece({ top: FILL.topWall }) }, { placement: KEY, slot: TOP })
 
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByRole('group', { name: 'Fill the top slot' })).toBeInTheDocument()
@@ -500,25 +464,18 @@ describe('the slot editor', () => {
     // `template.parts` — and they agree today because a fill is keyed by the
     // recipe's own part name. If they ever stop agreeing the editor must open on
     // its own rule rather than on nothing.
-    panel({ a: piece({ top: FILL.topWall }) }, { placement: KEY, slot: SlotName.parse('no such slot') })
+    editor(
+      { a: piece({ top: FILL.topWall }) },
+      { placement: KEY, slot: SlotName.parse('no such slot') },
+    )
 
     expect(
       within(screen.getByRole('dialog')).getByRole('group', { name: 'Fill the base slot' }),
     ).toBeInTheDocument()
   })
 
-  it('opens on a plain press too, so it is reachable without a pointer', () => {
-    // The right click has no keyboard equivalent every platform agrees on, so
-    // the row is a real `<button>` and `Enter` fires its `onClick`. Asserted as
-    // a click because that is what jsdom dispatches for `Enter` on a button.
-    panel({ a: piece({ top: FILL.topWall }) })
-    fireEvent.click(pieceRow())
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-  })
-
   it('closes on Escape, so it is dismissible without a pointer', () => {
-    panel({ a: piece({ top: FILL.topWall }) })
-    fireEvent.contextMenu(pieceRow())
+    editor({ a: piece({ top: FILL.topWall }) }, { placement: KEY })
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
   })
@@ -526,8 +483,7 @@ describe('the slot editor', () => {
   it('offers the design filter, counted in items, and applies it', () => {
     // §1.6: the filter is the texture family, and the count is what it leaves.
     // `top` offers one dungeon_stone item and one towne item.
-    panel({ a: piece({}) })
-    fireEvent.contextMenu(pieceRow())
+    editor({ a: piece({}) }, { placement: KEY })
 
     // By class rather than by role, because a chip and the card it leaves carry
     // the same texture in their accessible names.
@@ -551,8 +507,7 @@ describe('the slot editor', () => {
   })
 
   it('greys the pick that would empty a still-open sibling, before it is pressed', () => {
-    panel({ a: piece({}) })
-    fireEvent.contextMenu(pieceRow())
+    editor({ a: piece({}) }, { placement: KEY })
 
     const towne = card(/Towne Secret Door Top/)
     expect(towne).toHaveAttribute('aria-disabled', 'true')
@@ -568,8 +523,7 @@ describe('the slot editor', () => {
     // Contract C-k from the other end: the editor is the one thing in the app
     // that writes `pinned: true`, and `fillSlot` refuses to overwrite it.
     useWorkshopStore.setState({ placements: { [KEY]: piece({}) } })
-    panel(useWorkshopStore.getState().placements)
-    fireEvent.contextMenu(pieceRow())
+    editor(useWorkshopStore.getState().placements, { placement: KEY })
 
     fireEvent.click(card(/Dungeon Stone Secret Door Top/))
 
@@ -586,8 +540,7 @@ describe('the slot editor', () => {
     // there is no store action that can clear the base it would strand.
     const held = piece({ top: FILL.topWall, base: BASE_STONE })
     useWorkshopStore.setState({ placements: { [KEY]: held } })
-    panel(useWorkshopStore.getState().placements)
-    fireEvent.contextMenu(pieceRow())
+    editor(useWorkshopStore.getState().placements, { placement: KEY })
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^top —/ }))
 
     const towne = card(/Towne Secret Door Top/)
@@ -613,10 +566,11 @@ describe('the slot editor', () => {
     //
     // A 1 x 1 cell with a 2-unit wall on its edge is the same arithmetic the
     // corner mitres fail on, reached with two fills instead of five.
-    panel({
-      a: {
-        id: KEY,
-        template: TemplateId.parse(MITRE_TEMPLATE.id),
+    editor(
+      {
+        a: {
+          id: KEY,
+          template: TemplateId.parse(MITRE_TEMPLATE.id),
         x: 0,
         z: 0,
         rotation: 0,
@@ -625,8 +579,9 @@ describe('the slot editor', () => {
           [SlotName.parse('wall')]: { tile: PARENT.wallTowne as TileId, pinned: true },
         },
       },
-    })
-    fireEvent.contextMenu(screen.getByRole('button', { name: /Fixture: Wall on Tile/ }))
+      },
+      { placement: KEY },
+    )
 
     // Both numbers, and neither is a correction: `want` is the cell edge and
     // `got` is what the pieces on it sum to.
@@ -641,24 +596,25 @@ describe('the slot editor', () => {
     // B3's predicate over the instance's own resolved cell — the 2 x 2 grate in
     // the `floor` slot makes it a 2 x 2 cell, so the `base` slot wants that and
     // the `wall` slot wants a 2-unit run along its edge.
-    panel({
-      a: {
-        id: KEY,
-        template: TemplateId.parse(MITRE_TEMPLATE.id),
+    editor(
+      {
+        a: {
+          id: KEY,
+          template: TemplateId.parse(MITRE_TEMPLATE.id),
         x: 0,
         z: 0,
         rotation: 0,
         fills: { [SlotName.parse('floor')]: { tile: PARENT.pairedGrate as TileId, pinned: true } },
       },
-    })
-    fireEvent.contextMenu(screen.getByRole('button', { name: /Fixture: Wall on Tile/ }))
+      },
+      { placement: KEY },
+    )
 
     expect(screen.getByText(/This slot takes 2 wide by 2 deep\./)).toBeInTheDocument()
   })
 
   it('leads with the slots that still need a choice', () => {
-    panel({ a: piece({}) })
-    fireEvent.contextMenu(pieceRow())
+    editor({ a: piece({}) }, { placement: KEY })
     expect(screen.getByText(/2 of these slots need a choice: top, base/)).toBeInTheDocument()
   })
 
@@ -670,8 +626,7 @@ describe('the slot editor', () => {
     // until it is filled. `panels.test.tsx` carries the refusal itself, because
     // that needs a bill.
     useWorkshopStore.setState({ placements: { [KEY]: piece({ top: FILL.topWall }) } })
-    panel(useWorkshopStore.getState().placements)
-    fireEvent.contextMenu(pieceRow())
+    editor(useWorkshopStore.getState().placements, { placement: KEY })
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^top —/ }))
 
     fireEvent.click(screen.getByRole('button', { name: /^Empty the top slot/ }))
@@ -684,8 +639,7 @@ describe('the slot editor', () => {
   })
 
   it('offers nothing to empty on a slot that is already empty', () => {
-    panel({ a: piece({}) })
-    fireEvent.contextMenu(pieceRow())
+    editor({ a: piece({}) }, { placement: KEY })
     expect(screen.queryByRole('button', { name: /^Empty the/ })).toBeNull()
   })
 
@@ -693,8 +647,7 @@ describe('the slot editor', () => {
     // The preference already owns an `auto` fill, so the control would claim to
     // do something it cannot — and `unpinFill` would answer `'unchanged'`.
     useWorkshopStore.setState({ placements: { [KEY]: piece({ top: FILL.topWall }) } })
-    panel(useWorkshopStore.getState().placements)
-    fireEvent.contextMenu(pieceRow())
+    editor(useWorkshopStore.getState().placements, { placement: KEY })
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^top —/ }))
 
     expect(screen.getByRole('button', { name: /^Empty the top slot/ })).toBeInTheDocument()
@@ -718,8 +671,7 @@ describe('the slot editor', () => {
     useWorkshopStore.setState({
       placements: { [KEY]: { ...pinned, fills: { [TOP]: { tile: FILL.topTowne as TileId, pinned: true } } } },
     })
-    panel(useWorkshopStore.getState().placements)
-    fireEvent.contextMenu(pieceRow())
+    editor(useWorkshopStore.getState().placements, { placement: KEY })
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^top —/ }))
 
     fireEvent.click(screen.getByRole('button', { name: /^Hand the top slot back/ }))

@@ -1,5 +1,5 @@
 /**
- * The builder's three panels, as one import.
+ * The builder's panels, as one import.
  *
  * `src/screens/builder/BuilderScreen.tsx` is the only consumer; everything here
  * is a component or a pure helper over data the screen already holds, and none of
@@ -10,10 +10,13 @@
  * The plan-view canvas is **not** here: it is `@/builder/canvas` (row 17), which
  * this directory imports and never modifies.
  *
- * Row **A0** adds a fourth: `BackupPanel`, the JSON export/import that was the
- * deleted library screen's and is the app's only backup path. It is a panel for
- * the reason its own docblock gives — what the envelope carries is the room, and
- * this column is already everything about the room that is not the 3D surface.
+ * **The right column is one panel.** `BillPanel` is the whole of it since the
+ * sidebar cleanup: `BackupPanel` — the JSON export/import that was the deleted
+ * library screen's and is the app's only backup path — is a line in its footer
+ * rather than a section under it, and `slots/AccessorySection` sits at the foot
+ * of its scroll band. Both are passed to it as nodes, so each keeps its own file
+ * and none of them competes for the column's height. `BillPanel.tsx` carries the
+ * argument, including why the pieces list that stood between them is gone.
  *
  * Row S5's generated bases reach two of these. `BillPanel` takes an optional
  * `generated` prop and renders `GeneratedBillSection` inside its scroll area;

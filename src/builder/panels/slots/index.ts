@@ -1,30 +1,38 @@
 /**
  * The plan's pieces and their slots, as one import.
  *
- * Rows C2, C3 and C8. `planSlots` is the pure accessory inventory over a
- * drawing's placements and `planPieces` is the per-instance summary the slot
- * editor opens from; `slotEditor.ts` is the editor's own model, `SlotEditor` its
- * dialog, and `SlotsPanel` renders both halves — reusing the drawer's picker whole from
- * `@/screens/detail/slots` and the guided-assembly walk from
+ * `planSlots` is the pure accessory inventory over a drawing's placements;
+ * `slotEditor.ts` is the editor's own model, `SlotEditor` its dialog, and
+ * `AccessorySection` renders the inventory — reusing the drawer's picker whole
+ * from `@/screens/detail/slots` and the guided-assembly walk from
  * `@/screens/assemblies` rather than restating dead-end greying twice.
  *
- * Mounted by `src/screens/builder/BuilderScreen.tsx` in the bill column, after
- * the bill of tiles — see `slots.css` for why the order matters to that column's
- * grid.
+ * **There is no panel here any more.** `SlotsPanel` rendered a second list of
+ * every piece on the plan above the accessory inventory, in the same fixed-height
+ * column as the bill of tiles — and the bill already expands each file row into
+ * the placements behind it. The two things that list alone could do are a `Slots`
+ * press on those rows now: it is tab-reachable where the plan's route is only
+ * reachable through a `role="application"` canvas, and it reaches a piece that
+ * resolved to no parts and is therefore drawn nowhere to select. So the list went
+ * and the parts list got its height back; `BillPanel.tsx` carries that argument
+ * in full. `planPieces` — the per-instance summary that list's rows were written
+ * from, with each piece's filled and pinned counts and the slots still needing a
+ * choice — went with it: the dialog needs one instance and one recipe, and both
+ * are a map read away.
  *
- * **Which piece's editor is open is the screen's state and not this panel's**,
- * since row C8 put the owner's right click on the 3D drawing as well: two
- * surfaces open one dialog, so neither can hold the other's state.
- * {@link SlotEditTarget} is the shape they agree on.
+ * **Which piece's editor is open is the screen's state**, because two surfaces
+ * open one dialog — the action bar over the selected piece and a `Slots` press on
+ * a bill row — so neither can hold the other's. {@link SlotEditTarget} is the
+ * shape they agree on, and it lives with the dialog they both open.
  */
-export type { SlotEditTarget, SlotsPanelProps } from './SlotsPanel'
-export { SlotsPanel } from './SlotsPanel'
+export type { AccessorySectionProps } from './AccessorySection'
+export { AccessorySection } from './AccessorySection'
 
-export type { SlotEditorProps } from './SlotEditor'
+export type { SlotEditTarget, SlotEditorProps } from './SlotEditor'
 export { SlotEditor } from './SlotEditor'
 
-export type { PlanPiece, PlanSlotHolder, PlanSlotInventory } from './planSlots'
-export { planPieces, planSlots } from './planSlots'
+export type { PlanSlotHolder, PlanSlotInventory } from './planSlots'
+export { planSlots } from './planSlots'
 
 export type { DesignBucket, EditorSlot, Invalidation, SlotEditorModel } from './slotEditor'
 export {
