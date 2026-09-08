@@ -462,88 +462,34 @@ function rightClick(travel = 0) {
   press('pointerup', 2, [100, 100 + travel])
 }
 
-describe('the right click opens the slot editor on the piece', () => {
-  it('names the placement the pointer is on', () => {
-    const scene = corner(-1)
-    const state = mount(scene)
-    rightClick()
-    expect(state.opened).toHaveLength(1)
-    expect(state.opened[0]?.placement).toBe(scene.pieces[0]?.id)
-  })
-
-  it('pre-selects the slot whose part was hit, and the part decides it', () => {
-    // Same recipe, same gesture, two anchors — see `corner`. The floor covers the
-    // picked point at `x = -1` and the wall covers it at `x = -1.75`, so a
-    // gesture that resolved only to the placement would answer the same thing
-    // twice and the user would have to find the row they just pointed at.
+/**
+ * The right button, after the selection took the slot editor off it.
+ *
+ * Five `describe`s and eleven tests used to live here, all about a right click
+ * opening the slot editor: which placement it named, which slot the part decided,
+ * what it announced, how it shared `isClickGesture`'s 5 px boundary with the
+ * camera pan, and how the two presses were kept apart so a chord could not
+ * resolve the wrong one. **Every one of their subjects is deleted.**
+ *
+ * They are not replaced one for one, because the gesture was not moved — it was
+ * *made unnecessary*. The right click was carrying the editor because with no
+ * persistent selection the only operand available was whatever the pointer
+ * resolved to; the `Slots` button on the selected piece's action bar has an
+ * operand the user chose, and `pieceActions.test.tsx` covers it without a canvas.
+ *
+ * What survives is what is still true about the button, and one regression that
+ * would still be a defect if it came back.
+ */
+describe('the right button is the camera’s, and only the camera’s', () => {
+  it('opens nothing, at any travel distance', () => {
+    // Both ends of the old 5 px discriminator in one assertion, because the
+    // number no longer decides anything here: a click and a pan are the same
+    // answer now, which is the simplification the selection bought.
     const state = mount(corner(-1))
-    rightClick()
-    expect(state.opened[0]?.slot).toBe(FIXTURE_SLOTS.floor)
-  })
-
-  it('names the wall when the wall is what is under the pointer', () => {
-    const state = mount(corner(-1.75))
-    rightClick()
-    expect(state.opened[0]?.slot).toBe(FIXTURE_SLOTS.rightWall)
-  })
-
-  it('announces which slot it opened, so the gesture is not silent', () => {
-    const state = mount(corner(-1.75))
-    rightClick()
-    expect(state.said.join(' ')).toMatch(/The right wall slot of/)
-  })
-
-  /**
-   * The pre-selection inherits `pickSurface`'s parallax correction, and this is
-   * the disclosure rather than a bug.
-   *
-   * `heightOf` credits a piece with its **tallest** part's top — `surface.ts`
-   * argues for that at length, and erase and move need it: a pointer over a
-   * corner template must land on the wall standing on the floor or the click
-   * falls through to whatever is behind the piece. One consequence reaches this
-   * row: the point the slot is resolved at is the point on *that* plane, so a
-   * click over the low part of a tall assembly can name the tall part.
-   *
-   * Here the ground point `(0, 0)` is inside the floor and outside the wall, and
-   * the wall plane's own point `(0.592, 0.820)` is inside the wall — so the slot
-   * named is `right wall`. That is the surface the user is looking at, and it is
-   * the same answer erase would act on.
-   *
-   * **The size of the effect is bounded and it shrinks as the assembly gets
-   * taller**, which is the part that makes it acceptable rather than merely
-   * documented: the offset is `h / (tan 27.38° · 25.4)` units, so this fixture's
-   * 13.3 mm wall shifts the point 1.011 units and a real 63.5 mm wall shifts it
-   * **4.83 units** — well outside a 2 x 2 template, so the elevated plane is
-   * rejected and the ground point is used. The pre-selection is therefore exact
-   * on the shipped recipes and approximate only on low assemblies, where the
-   * editor's slot list is one press away in any case.
-   */
-  it('resolves the slot at the plane the pick accepted, parallax and all', () => {
-    const state = mount(corner(-1, -1))
-    rightClick()
-    expect(state.opened[0]?.slot).toBe(FIXTURE_SLOTS.rightWall)
-  })
-})
-
-describe('the camera keeps the right button', () => {
-  it('does not open on a right drag, which is how the plan is panned', () => {
-    // The whole reason the seam is a `pointerup` and a 5 px test rather than a
-    // `contextmenu` listener: `OrbitControls` binds the right button to
-    // `MOUSE.PAN` and `Stage` passes `enablePan` for this surface, so every pan
-    // gesture starts with a secondary press. Twenty pixels of travel is a pan.
-    const state = mount(corner(-1))
+    rightClick(0)
     rightClick(20)
     expect(state.opened).toEqual([])
     expect(state.said).toEqual([])
-  })
-
-  it('opens at the threshold itself, so the two gestures share one number', () => {
-    // Five, inclusive — `isClickGesture`'s own boundary, asserted here as well
-    // as in `surface.test.ts` because this is where it decides a user-visible
-    // outcome rather than a boolean.
-    const state = mount(corner(-1))
-    rightClick(5)
-    expect(state.opened).toHaveLength(1)
   })
 
   it('never claims the press, so the event still reaches the controls', () => {
@@ -568,78 +514,38 @@ describe('the camera keeps the right button', () => {
     press('pointerdown', 0, [100, 100])
     expect(state.reached).toEqual([2])
   })
-})
 
-describe('the browser’s own menu', () => {
-  it('is suppressed on the canvas, so it cannot cover the editor', () => {
+  it('leaves the browser’s own menu alone', () => {
+    /*
+      **The opposite of what this file asserted before, and deliberately.** The
+      `contextmenu` listener existed for two reasons, and both were about a
+      dialog the right click opened: the native menu would cover the editor, and
+      on Windows `contextmenu` fires from the mouse *up*, where a menu taking
+      focus could swallow the `pointerup` the gesture was measured on.
+
+      No dialog opens from this button any more, so suppressing the menu would be
+      taking a browser affordance away for nothing. A user right-clicking the
+      canvas gets their menu, exactly as they do everywhere else on the page.
+    */
     mount(corner(-1))
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
     canvas.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(true)
-  })
-
-  it('is left alone everywhere else, because nothing else claimed the gesture', () => {
-    // Scoped to the canvas and not to the document: a user right-clicking the
-    // bill, the slots panel or the page still gets their browser's menu.
-    mount(corner(-1))
-    const elsewhere = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-    document.body.dispatchEvent(elsewhere)
-    expect(elsewhere.defaultPrevented).toBe(false)
-  })
-})
-
-describe('what a right click does when there is nothing to customise', () => {
-  it('opens nothing over bare ground, and says so', () => {
-    const state = mount(sceneOf(CATALOG, []))
-    rightClick()
-    expect(state.opened).toEqual([])
-    expect(state.said.join(' ')).toMatch(/Nothing to customise at/)
-  })
-
-  it('opens nothing on a generated base, and says why', () => {
-    const scene = buildPlanScene({}, CATALOG, STYLE, {
-      [PlacementId.parse('g0')]: aGeneratedBase({ x: -1, z: -1 }),
-    })
-    const state = mount(scene)
-    rightClick()
-    expect(state.opened).toEqual([])
-    expect(state.said.join(' ')).toMatch(/generated from parameters/)
-  })
-
-  it('does nothing at all when no handler is wired, not even an announcement', () => {
-    // The prop is optional, so every caller that had one before row C8 keeps the
-    // behaviour it had: the press is not even recorded.
-    const state = mount(corner(-1), { wired: false })
-    rightClick()
-    expect(state.opened).toEqual([])
-    expect(state.said).toEqual([])
-  })
-})
-
-describe('the two presses stay apart', () => {
-  it('ignores a secondary press while a piece is in the air', () => {
-    // A chord mid-carry is not a request to open a dialog over the drag it would
-    // interrupt. With nothing armed, a press on a piece selects it and picks it
-    // up — that is what claims the primary press and starts the drag.
-    const state = mount(corner(-1))
-    press('pointerdown', 0, [100, 100])
-    rightClick()
-    expect(state.opened).toEqual([])
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('does not let a secondary release resolve a primary press', () => {
     /*
-      **This is a defect row C8 found and fixed rather than one it introduced.**
-      Before this row `onUp` read one press slot whatever button was released, so
-      holding the primary button and right-clicking passed the 5 px test against
-      the *primary* press and ran the place gesture.
+      **A defect row C8 found and fixed, kept fixed through the deletion.**
+      `onUp` used to read one press slot whatever button was released, so holding
+      the primary button and right-clicking passed the 5 px test against the
+      *primary* press and ran the place gesture.
 
-      Mounted **armed**, which is what leaves the primary press unclaimed: with
-      nothing armed a press on a piece is claimed for the tweak, and a claimed
-      press drops the secondary one by design — that is the test above. So this
-      is the state where both presses are live at once, which is the only state
-      the defect was reachable from. The assertion is on the announcement: a
-      resolved placement always says so, and this one must not have happened.
+      The two-slot bookkeeping that fixed it is gone with the gesture that needed
+      it — `onUp` now returns immediately on a secondary release — so the fix is
+      by construction rather than by arithmetic. This asserts the outcome either
+      implementation owes: mounted **armed**, which is what leaves the primary
+      press unclaimed and therefore the only state the defect was reachable from,
+      a secondary release must not place anything.
     */
     const state = mount(corner(-1), { armed: FIXTURE_TEMPLATE })
     press('pointerdown', 0, [100, 100])
@@ -647,7 +553,7 @@ describe('the two presses stay apart', () => {
     press('pointerup', 2, [100, 100])
 
     expect(state.said.filter((text) => /^Placed /.test(text))).toEqual([])
-    expect(state.opened).toHaveLength(1)
+    expect(state.opened).toEqual([])
   })
 })
 

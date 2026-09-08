@@ -17,18 +17,29 @@
  * competing with it. That is the whole reason the `kbd` is not decorative: a
  * user who finds `⟳` here should end up pressing `R`.
  *
- * ## It carries the slot editor too, and the right column stays the bill
+ * ## It *opens* the slot editor rather than holding it
  *
- * The alternative was an inspector in the right-hand column, which is where a
- * DCC editor would put it. It was rejected for a specific cost: that column is
- * the bill of tiles, and a bill that disappeared whenever a piece was selected
- * would take away the one view of *what this room will cost to print* exactly
- * when the user is changing it. So the properties come to the work instead, and
- * the bill is never displaced.
+ * The plan was for the editor to expand inside this bar, so that the right-hand
+ * column could stay the bill of tiles permanently — a bill that disappeared
+ * whenever a piece was selected would take away the one view of *what this room
+ * will cost to print* exactly when the user is changing it.
  *
- * What that buys beyond the column: the slots are edited **at the piece they
- * belong to**. `SlotsPanel`'s list could only identify a piece by name, and a
- * room with four `Fixture corner`s in it made that a guess.
+ * **That is not what `SlotEditor` is.** It renders a `Dialog`, for a reason its
+ * own docblock gives, and a dialog portals to the document body — so an editor
+ * nested in a collapsed disclosure here appeared the moment a piece was
+ * selected, ignoring the collapse entirely. Rendering a modal inside a floating
+ * bar is a category error, not a wiring mistake.
+ *
+ * So this button opens it, and the outcome the column argument wanted is
+ * reached anyway: the bill is never displaced, because the editor was never
+ * going to live in that column either way. What the bar contributes is the
+ * **operand** — the editor opens on the piece the user selected, where
+ * `SlotsPanel`'s list could only identify a piece by name and a room with four
+ * `Fixture corner`s in it made that a guess.
+ *
+ * Making the editor inline-able is a real option and a separate change: it owns
+ * its own dialog semantics and its own tests, and rewriting it to render in
+ * either shape is not this row's work.
  *
  * ## Pointer events stop here
  *
@@ -44,8 +55,6 @@
  *      never also reach `OrbitControls`, or clicking `Remove` orbits the camera
  *      while the piece disappears.
  */
-import { useState } from 'react'
-
 import type { ScenePiece } from '@/builder/canvas'
 import { pieceName } from '@/builder/canvas'
 import { Button, VisuallyHidden } from '@/ui/primitives'
@@ -56,31 +65,24 @@ export interface PieceActionsBarProps {
   /** The selected piece. The bar exists only while there is one. */
   readonly piece: ScenePiece
   /**
-   * Builds the slot editor for {@link piece}, and takes the callback that
-   * collapses this disclosure.
+   * Open the slot editor on this piece, or `undefined` when the caller has
+   * nowhere to open one.
    *
-   * A render prop rather than a node, and the boundary is the reason:
-   * `SlotEditor` lives in `builder/panels/slots/`, on the far side of the line
-   * `builder/panels/boundary.test.ts` keeps, so this component must not import
-   * it. The caller composes it and this holds the space.
-   *
-   * `close` is passed *down* rather than the open state being lifted up,
-   * because the disclosure belongs to this bar: the editor's own dismiss should
-   * collapse the section, not drop the selection and take the whole bar with
-   * it. Absent when the caller has no editor to offer, which leaves a two-verb
-   * bar rather than a broken third button.
+   * A callback out and not a component in, which is the shape the surface
+   * already uses for this destination: the editor lives in
+   * `builder/panels/slots/`, on the far side of the line
+   * `builder/panels/boundary.test.ts` keeps, so nothing here may import it. The
+   * `undefined` case leaves a two-verb bar rather than a button that does
+   * nothing — the landing hero and the component tests are real callers with no
+   * editor to offer.
    */
-  readonly renderSlots?: (piece: ScenePiece, close: () => void) => React.ReactNode
+  readonly onEditSlots?: (() => void) | undefined
   readonly onTurn: () => void
   readonly onRemove: () => void
 }
 
-export function PieceActionsBar({ piece, renderSlots, onTurn, onRemove }: PieceActionsBarProps) {
-  const [open, setOpen] = useState(false)
+export function PieceActionsBar({ piece, onEditSlots, onTurn, onRemove }: PieceActionsBarProps) {
   const name = pieceName(piece)
-  const close = () => {
-    setOpen(false)
-  }
 
   return (
     <div
@@ -107,11 +109,8 @@ export function PieceActionsBar({ piece, renderSlots, onTurn, onRemove }: PieceA
 
         <Button
           size="sm"
-          disabled={renderSlots === undefined}
-          onClick={() => {
-            setOpen((current) => !current)
-          }}
-          aria-expanded={open}
+          disabled={onEditSlots === undefined}
+          onClick={onEditSlots}
           title={`Choose the parts of ${name} — Enter`}
         >
           <span aria-hidden="true">▤</span>
@@ -136,16 +135,6 @@ export function PieceActionsBar({ piece, renderSlots, onTurn, onRemove }: PieceA
             ⌫
           </kbd>
         </Button>
-      </div>
-
-      {/*
-        `hidden` rather than a conditional render, so the editor's own state — a
-        half-chosen slot, a scrolled list — survives a collapse. The reset
-        happens when the *selection* changes, because the caller keys this
-        component on the piece.
-      */}
-      <div className="of-piece-actions-slots" hidden={!open}>
-        {renderSlots?.(piece, close)}
       </div>
     </div>
   )

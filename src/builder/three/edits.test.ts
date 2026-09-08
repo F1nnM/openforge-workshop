@@ -664,6 +664,29 @@ describe('the contextual line', () => {
     expect(hint).toMatch(/Delete removes it/)
   })
 
+  it('keeps the selection line while the pointer is off the plan', () => {
+    /*
+      Found by driving the real builder rather than by a test, which is why it is
+      worth one: moving the pointer onto the action bar takes it *off the plan*,
+      so the off-plan line replaced the selection's own at exactly the moment the
+      user reached for the buttons that line describes.
+
+      The rule is the one the hover already follows — a selection outranks where
+      the pointer happens to be, because `Delete` and `R` do not care.
+    */
+    const piece = scene.pieces[0]
+    if (piece === undefined) throw new Error('the fixture scene has no piece')
+    const hint = describeSurfaceHint({
+      ...base,
+      activity: 'selected',
+      armed: null,
+      selected: piece,
+      onPlan: false,
+    })
+    expect(hint).toContain('selected')
+    expect(hint).not.toMatch(/Point at the plan/)
+  })
+
   it('reads a selection whose piece has gone as idle, not as a prompt to arm', () => {
     /*
       **A real state, not a contradiction.** `activity` is `selected` because

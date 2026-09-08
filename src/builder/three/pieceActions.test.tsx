@@ -58,7 +58,7 @@ function onePiece(): ScenePiece {
 function bar(over: Partial<Parameters<typeof PieceActionsBar>[0]> = {}) {
   const props = {
     piece: onePiece(),
-    renderSlots: () => <p>slot editor</p>,
+    onEditSlots: vi.fn(),
     onTurn: vi.fn(),
     onRemove: vi.fn(),
     ...over,
@@ -106,30 +106,23 @@ describe('the verbs', () => {
 })
 
 describe('the slots', () => {
-  it('keeps the editor out of the way until it is asked for', () => {
-    bar()
-    expect(screen.queryByText('slot editor')).not.toBeVisible()
-
+  it('opens the editor rather than holding it', () => {
+    // The bar *routes* to the editor. It cannot hold it: `SlotEditor` renders a
+    // `Dialog`, which portals to the document body, so an editor nested in a
+    // collapsed disclosure here appeared the moment a piece was selected and
+    // ignored the collapse entirely. What the bar contributes is the operand.
+    const props = bar()
     fireEvent.click(screen.getByRole('button', { name: /slots/i }))
-    expect(screen.getByText('slot editor')).toBeVisible()
+    expect(props.onEditSlots).toHaveBeenCalledOnce()
   })
 
-  it('reports its own expanded state', () => {
-    bar()
-    const toggle = screen.getByRole('button', { name: /slots/i })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    fireEvent.click(toggle)
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  })
-
-  it('hides rather than unmounts, so a half-made choice survives a collapse', () => {
-    // `hidden` and not a conditional render: collapsing the disclosure must not
-    // throw away a scroll position or a part-chosen slot.
-    bar()
-    const toggle = screen.getByRole('button', { name: /slots/i })
-    fireEvent.click(toggle)
-    fireEvent.click(toggle)
-    expect(screen.getByText('slot editor', { ignore: '' })).toBeInTheDocument()
+  it('disables the button when the caller has nowhere to open one', () => {
+    // The landing hero and the component tests are real callers with no editor
+    // to offer. A button that did nothing would be worse than a disabled one.
+    render(
+      <PieceActionsBar piece={onePiece()} onTurn={vi.fn()} onRemove={vi.fn()} />,
+    )
+    expect(screen.getByRole('button', { name: /slots/i })).toBeDisabled()
   })
 })
 
@@ -138,7 +131,7 @@ describe('the camera', () => {
     const escaped = vi.fn()
     render(
       <div onPointerDown={escaped}>
-        <PieceActionsBar piece={onePiece()} renderSlots={() => null} onTurn={vi.fn()} onRemove={vi.fn()} />
+        <PieceActionsBar piece={onePiece()} onEditSlots={vi.fn()} onTurn={vi.fn()} onRemove={vi.fn()} />
       </div>,
     )
     const remove = screen.getByRole('button', { name: /remove/i })

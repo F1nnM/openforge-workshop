@@ -833,18 +833,24 @@ export function describeSurfaceHint(input: SurfaceHintInput): string {
   // A piece in the air outranks everything: nothing else on screen is what the
   // user is doing.
   if (moving !== undefined) return describeMoveHint(moving)
+
+  // **A selection outranks both the hover and the pointer's whereabouts**,
+  // because it is what the verbs act on. The pointer may be anywhere — over a
+  // neighbour, over the action bar, off the plan entirely — while `Delete` and
+  // `R` still mean the selected piece, so a line about pointing at the plan
+  // would be describing a gesture the keys are not about.
+  //
+  // Found by driving the real builder: moving the pointer onto the bar takes it
+  // off the plan, so the off-plan line replaced the selection's own the moment
+  // the user reached for the buttons it describes.
+  if (activity === 'selected' && selected !== undefined) {
+    return `${pieceName(selected)} selected. Drag to move it, R turns it, Delete removes it.`
+  }
+
   if (!onPlan) {
     return activity === 'armed'
       ? 'Drag to orbit. Point at the plan to place the armed template.'
       : 'Drag to orbit. Point at the plan to select a template.'
-  }
-
-  // A selection outranks a hover, because it is what the verbs act on: the
-  // pointer may be anywhere while `Delete` and `R` still mean the selected
-  // piece, and a line that named the hovered one would be describing a gesture
-  // the keys are not about.
-  if (activity === 'selected' && selected !== undefined) {
-    return `${pieceName(selected)} selected. Drag to move it, R turns it, Delete removes it.`
   }
   // `selected === undefined` while the activity says `selected` is a real state
   // and not a contradiction: `tools.selected` names a placement a Clear or an

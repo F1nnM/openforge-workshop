@@ -83,13 +83,13 @@ export interface SelectionAnchorProps {
   readonly piece: ScenePiece
   /** The piece's height above the plan, in millimetres — the pick's own answer. */
   readonly heightMm: number
-  /** Builds the slot editor for this piece; `close` collapses the disclosure. */
-  readonly renderSlots?: (piece: ScenePiece, close: () => void) => React.ReactNode
+  /** Open the slot editor on this piece. See `PieceActionsBar`. */
+  readonly onEditSlots?: (() => void) | undefined
   readonly onTurn: () => void
   readonly onRemove: () => void
 }
 
-export function SelectionAnchor({ piece, heightMm, renderSlots, onTurn, onRemove }: SelectionAnchorProps) {
+export function SelectionAnchor({ piece, heightMm, onEditSlots, onTurn, onRemove }: SelectionAnchorProps) {
   const { box } = piece
   const centreX = (box.x + box.w / 2) * GRID_UNIT_MM
   const centreZ = (box.z + box.d / 2) * GRID_UNIT_MM
@@ -110,7 +110,7 @@ export function SelectionAnchor({ piece, heightMm, renderSlots, onTurn, onRemove
     >
       <PieceActionsBar
         piece={piece}
-        {...(renderSlots === undefined ? {} : { renderSlots })}
+        {...(onEditSlots === undefined ? {} : { onEditSlots })}
         onTurn={onTurn}
         onRemove={onRemove}
       />

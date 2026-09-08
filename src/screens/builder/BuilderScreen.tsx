@@ -109,7 +109,6 @@ import { getRouteApi } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
-import type { ScenePiece } from '@/builder/canvas'
 import {
   buildPlanScene,
   createStyleResolver,
@@ -128,7 +127,7 @@ import {
   useArchiveDownload,
 } from '@/builder/panels'
 import type { SlotEditTarget } from '@/builder/panels/slots'
-import { SlotEditor, SlotsPanel } from '@/builder/panels/slots'
+import { SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 import type { SurfaceStatus } from '@/builder/three'
 // Deep, and not through the barrel: `@/builder/three/index.ts` exports only
@@ -361,46 +360,6 @@ function Builder({ index }: { index: CatalogIndex }) {
      diverge, the control must follow the table the bill and the solver use. */
   const designRecipes = useMemo(() => [...recipes.values()], [recipes])
 
-  /**
-   * The slot editor for whichever piece the surface has selected.
-   *
-   * **Composed here because it cannot be composed there.** The editor now lives
-   * on the action bar floating over the selected piece, which is in
-   * `builder/three` — and `builder/panels/boundary.test.ts` keeps a line that
-   * package must not cross to reach `builder/panels/slots`. So the surface takes
-   * a render prop and this screen, which already imports both sides, fills it.
-   *
-   * Four `undefined` returns and none of them is defensive:
-   *
-   *   - a **generated base** has no template and no slots to edit;
-   *   - a placement the store no longer holds, which a selection can outlive for
-   *     one render after an undo;
-   *   - a family this build has no recipe for — C1 measured all 51 of B4's
-   *     generated families reporting `unknown-template`, so this is a population
-   *     rather than an edge case.
-   *
-   * In each case the bar shows its two verbs and disables the third, which is
-   * `PieceActionsBar`'s own behaviour for an absent editor.
-   */
-  const renderSlots = useCallback(
-    (piece: ScenePiece, close: () => void) => {
-      if (piece.kind !== 'catalog') return null
-      const instance = placements[piece.id]
-      if (instance === undefined) return null
-      const recipe = templates(instance.template)
-      if (recipe === undefined) return null
-      return (
-        <SlotEditor
-          catalog={index.file}
-          index={assembly}
-          instance={instance}
-          template={recipe}
-          onClose={close}
-        />
-      )
-    },
-    [placements, templates, index.file, assembly],
-  )
   /**
    * **Row B2's slot conventions, wired.** The one thing the canvas cannot see.
    *
@@ -791,7 +750,6 @@ function Builder({ index }: { index: CatalogIndex }) {
           scene={scene}
           tools={tools}
           history={history}
-          renderSlots={renderSlots}
           assets={index.file.assets}
           /*
             Row **C5**: the three authorities the click's fill solve needs, and

@@ -75,7 +75,6 @@
 import { Suspense, lazy } from 'react'
 
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
-import type { ScenePiece } from '@/builder/canvas'
 import type { UndoControls } from '@/builder/canvas/useHistory'
 import type { CatalogAssets } from '@/catalog'
 import type { PlacementId, SlotName } from '@/store'
@@ -144,16 +143,6 @@ export interface Builder3DPanelProps {
    * the toolbar's buttons would disagree with the canvas's keys.
    */
   readonly history: UndoControls
-  /**
-   * The slot editor for the selected piece, composed by the caller.
-   *
-   * Passed straight through to `RoomSurface`, which carries the argument for why
-   * it is a render prop: `SlotEditor` is on the far side of
-   * `builder/panels/boundary.test.ts`'s line, so nothing in `builder/three` may
-   * build it — but the action bar over the selected piece is where it now
-   * belongs. The screen composes it; the surface holds the space.
-   */
-  readonly renderSlots?: (piece: ScenePiece, close: () => void) => React.ReactNode
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
@@ -166,7 +155,6 @@ export function Builder3DPanel({
   assets,
   fill,
   history,
-  renderSlots,
   onEditSlots,
   onStatus,
   fetchImpl,
@@ -181,7 +169,6 @@ export function Builder3DPanel({
           assets={assets}
           fill={fill}
           history={history}
-          {...(renderSlots === undefined ? {} : { renderSlots })}
           {...(onEditSlots === undefined ? {} : { onEditSlots })}
           {...(onStatus === undefined ? {} : { onStatus })}
           {...(fetchImpl === undefined ? {} : { fetchImpl })}

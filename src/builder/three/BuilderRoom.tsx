@@ -108,7 +108,6 @@ import { useCallback, useMemo, useState } from 'react'
 
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
 import { useAnnouncer } from '@/builder/canvas/hooks'
-import type { ScenePiece } from '@/builder/canvas'
 import type { UndoControls } from '@/builder/canvas/useHistory'
 import type { CatalogAssets, CatalogRecord } from '@/catalog'
 import type { Resolution } from '@/materials'
@@ -223,16 +222,6 @@ export interface BuilderRoomProps {
    * the toolbar's buttons would disagree with the canvas's keys.
    */
   readonly history: UndoControls
-  /**
-   * The slot editor for the selected piece, composed by the caller.
-   *
-   * Passed straight through to `RoomSurface`, which carries the argument for why
-   * it is a render prop: `SlotEditor` is on the far side of
-   * `builder/panels/boundary.test.ts`'s line, so nothing in `builder/three` may
-   * build it — but the action bar over the selected piece is where it now
-   * belongs. The screen composes it; the surface holds the space.
-   */
-  readonly renderSlots?: (piece: ScenePiece, close: () => void) => React.ReactNode
   readonly onStatus?: (status: SurfaceStatus) => void
   /** Injected by tests so no request leaves the process. */
   readonly fetchImpl?: typeof fetch
@@ -245,7 +234,6 @@ export function BuilderRoom({
   assets,
   fill,
   history,
-  renderSlots,
   onEditSlots,
   onStatus,
   fetchImpl,
@@ -429,8 +417,7 @@ export function BuilderRoom({
               fill={filler}
               catalog={catalog}
               history={history}
-              {...(renderSlots === undefined ? {} : { renderSlots })}
-              {...(onEditSlots === undefined ? {} : { onEditSlots })}
+                  {...(onEditSlots === undefined ? {} : { onEditSlots })}
               onOutline={setOutline}
               onStatus={publish}
               announce={announce}
