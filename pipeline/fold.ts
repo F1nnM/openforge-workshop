@@ -68,6 +68,24 @@
  * carries a census **inside the fixtures** so that upstream fixing the data
  * fails the import as loudly as upstream breaking a third file would — row B6's
  * rule, applied to a repair rather than to a note.
+ *
+ * ## What it costs, measured
+ *
+ * | lazy `families` chunk | raw | gzip |
+ * | --- | ---: | ---: |
+ * | after row D1, 40 recipes / 47 families | 96,818 B | 13,389 B |
+ * | after the fold, 10 assemblies / 47 families | **76,709 B** | **13,266 B** |
+ *
+ * **20,109 B raw and 123 B gzip**, and the two figures being that far apart is
+ * the point rather than a curiosity: 30 of the 40 templates were near-identical
+ * copies, so gzip was already deduplicating almost all of them and the raw
+ * saving is what the parser stops doing. `RECIPE_TEMPLATES` is still in the
+ * chunk — the losslessness test needs it — so this is the fold's cost *including*
+ * keeping its own evidence.
+ *
+ * The **index** is byte-identical, which is structural rather than careful:
+ * nothing on `build.ts`'s path imports this module, and `catalog.json.br` does
+ * not move through a regeneration.
  */
 import type { ConstrainRef, PartSlot, TagRef } from '../src/catalog'
 
