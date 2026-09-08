@@ -141,7 +141,7 @@ import {
   stageSamples,
 } from './frame'
 import type { OutlineRequest } from './outline'
-import { OUTLINE_EDGE_STRENGTH, OUTLINE_LAYER, OUTLINE_RESOLUTION_SCALE, outlineProxies } from './outline'
+import { OUTLINE_EDGE_STRENGTH, OUTLINE_LAYER, outlineProxies, outlineResolutionScale } from './outline'
 
 /**
  * Occlusion radius, in world units, against `VIEW_RADIUS = 1`.
@@ -428,7 +428,7 @@ export function useStageComposer({ outline = false }: StageComposerOptions = {})
     ao.configuration.intensity = 2.6
     created.addPass(ao)
 
-    const silhouette = outline ? addOutlinePass(created, scene, camera) : null
+    const silhouette = outline ? addOutlinePass(created, scene, camera, gl.getPixelRatio()) : null
 
     created.addPass(new EffectPass(camera, new SMAAEffect()))
     return { composer: created, ao, silhouette }
@@ -564,15 +564,19 @@ interface OutlinePass {
  *   contains the tile the proxy duplicates — equal depths to within float noise
  *   — so the classification of a silhouette's own pixels is noise. One colour
  *   makes that noise invisible instead of a speckled two-tone edge.
- * - **`blur: false`.** {@link OUTLINE_RESOLUTION_SCALE} already softens the edge
+ * - **`blur: false`.** The edge pass's own resolution already softens the band
  *   to about two pixels; a Kawase blur on top is two more half-resolution passes
  *   to spread a cue that is meant to be *"slightly"* there.
+ * - **The resolution scale is derived from the dpr**, not a constant, so the band
+ *   is a fixed width in *device-independent* pixels — `outlineResolutionScale`
+ *   carries why, and it is the same rule `ScreenLine.tsx` applies to the lines
+ *   the renderer draws directly.
  */
-function addOutlinePass(composer: EffectComposer, scene: Scene, camera: Camera): OutlinePass {
+function addOutlinePass(composer: EffectComposer, scene: Scene, camera: Camera, dpr: number): OutlinePass {
   const effect = new OutlineEffect(scene, camera, {
     blendFunction: BlendFunction.ALPHA,
     edgeStrength: OUTLINE_EDGE_STRENGTH,
-    resolutionScale: OUTLINE_RESOLUTION_SCALE,
+    resolutionScale: outlineResolutionScale(dpr),
     xRay: true,
     blur: false,
   })

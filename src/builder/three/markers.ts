@@ -34,7 +34,7 @@
  * it would fold, which is why {@link platePositions} takes parts and not an
  * outline path: the `outline` field is an SVG `d` string and can be concave.
  */
-import { BufferAttribute, BufferGeometry, Vector3 } from 'three'
+import { BufferAttribute, BufferGeometry } from 'three'
 
 import type { PlanPart, PlanPoint } from '@/builder/canvas'
 import { GRID_UNIT_MM } from '@/catalog'
@@ -133,14 +133,6 @@ export function plateEdgePositions(parts: readonly PlanPart[], heightMm = PLATE_
   return new Float32Array(values)
 }
 
-/** A `LineSegments` geometry for {@link plateEdgePositions}. */
-export function plateEdgeGeometry(parts: readonly PlanPart[], heightMm = PLATE_HEIGHT_MM): BufferGeometry {
-  const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new BufferAttribute(plateEdgePositions(parts, heightMm), VERTICES_PER_TRIANGLE))
-  geometry.computeBoundingSphere()
-  return geometry
-}
-
 /**
  * The plan cursor's crosshair, in millimetres, centred on the origin.
  *
@@ -151,14 +143,9 @@ export function plateEdgeGeometry(parts: readonly PlanPart[], heightMm = PLATE_H
  * `armUnits` is in grid units and 0.35 is `PlanCanvas`'s own `Caret` arm, kept
  * so the two views' cursors are the same size relative to a tile.
  */
-export function caretGeometry(armUnits = 0.35): BufferGeometry {
+export function caretPositions(armUnits = 0.35): Float32Array {
   const arm = armUnits * GRID_UNIT_MM
-  const geometry = new BufferGeometry().setFromPoints([
-    new Vector3(-arm, 0, 0),
-    new Vector3(arm, 0, 0),
-    new Vector3(0, 0, -arm),
-    new Vector3(0, 0, arm),
-  ])
-  geometry.computeBoundingSphere()
-  return geometry
+  // Segment endpoints, the layout `ScreenLine` and a `LineSegments` position
+  // attribute share: two strokes crossing at the origin.
+  return new Float32Array([-arm, 0, 0, arm, 0, 0, 0, 0, -arm, 0, 0, arm])
 }

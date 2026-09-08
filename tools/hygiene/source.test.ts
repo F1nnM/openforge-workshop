@@ -1,5 +1,9 @@
 /**
- * Source hygiene: no raw control byte in a text source file.
+ * Source hygiene: two rules the type system cannot state.
+ *
+ * One is about bytes in a source file. The other is about a rendering primitive
+ * whose size is silently tied to the display — see *"Device-dependent line
+ * widths"* below.
  *
  * ## Why this exists
  *
@@ -27,6 +31,25 @@
  *
  * The remedy is never to remove the delimiter. It is a good delimiter, precisely
  * because it cannot occur in a tag or a filename. Write it as an escape.
+ *
+ * ## Device-dependent line widths
+ *
+ * `THREE.LineSegments` and `THREE.Line` draw `gl.LINES`, and WebGL renders those
+ * at **exactly one device pixel**; `LineBasicMaterial.linewidth` is ignored on
+ * every platform this app runs on. So the width of such a line is never written
+ * down anywhere — it is whatever `devicePixelRatio` happens to be — and it moves
+ * when something entirely unrelated moves.
+ *
+ * It did. Raising the dpr floor to 2 to stop the room looking pixelated took the
+ * floor grid, the plate rings and the plan caret from 0.91 CSS px to 0.5 CSS px
+ * in one commit, and the grid began breaking into dashes because a half-pixel
+ * line cannot cover a pixel. No line of code about any of them changed, and no
+ * test failed.
+ *
+ * `src/three/ScreenLine.tsx` is the replacement, and its width is in
+ * device-independent pixels by construction. This rule stops the old primitive
+ * coming back: it is the kind of mistake that is invisible in review, because
+ * `<lineSegments>` is exactly what you would write.
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -94,6 +117,45 @@ function controlBytes(bytes: Buffer): { offset: number; byte: number }[] {
   return found
 }
 
+/**
+ * The device-dependent primitives, as they appear in r3f's JSX and in three's own
+ * API. Matched as source text rather than by parsing: a regex over the tracked
+ * files is the whole implementation, and the failure it produces names the file.
+ */
+const DEVICE_DEPENDENT_LINES: readonly { pattern: RegExp; what: string }[] = [
+  { pattern: /<lineSegments[\s/>]/, what: '<lineSegments>' },
+  { pattern: /<lineBasicMaterial[\s/>]/, what: '<lineBasicMaterial>' },
+  { pattern: /<gridHelper[\s/>]/, what: '<gridHelper>' },
+  { pattern: /new\s+LineBasicMaterial\b/, what: 'new LineBasicMaterial' },
+]
+
+/**
+ * Files allowed to name them, and why each one is.
+ *
+ * `ScreenLine.tsx` is the replacement and explains the rule; the hygiene test
+ * itself has to contain the patterns to check for them. Nothing else should be
+ * on this list — a new entry is the thing this rule exists to make someone argue
+ * for.
+ */
+const LINE_RULE_EXEMPT = new Set(['src/three/ScreenLine.tsx', 'tools/hygiene/source.test.ts'])
+
+/**
+ * Code with the comments taken out.
+ *
+ * The rule is about what the renderer is asked to draw, and this repository
+ * documents heavily — several files explain the banned primitive at length,
+ * including the one that replaced it. A check that could not tell a docblock
+ * from a call site would make the rule unwriteable in prose, which is the
+ * opposite of what it is for.
+ *
+ * Crude on purpose: block comments, then line comments where the `//` is not
+ * preceded by a colon, so a `https://` inside a string survives. It only has to
+ * be good enough to tell JSX from prose.
+ */
+function withoutComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+}
+
 describe('source hygiene', () => {
   it('finds text files to check, so a broken listing cannot pass vacuously', () => {
     const files = trackedTextFiles()
@@ -127,6 +189,36 @@ describe('source hygiene', () => {
     expect(
       offenders,
       'Write the delimiter as an escape, not as the byte itself. A raw NUL makes git treat the file as binary, so it diffs as "Bin" and cannot be reviewed.',
+    ).toEqual([])
+  })
+})
+
+describe('device-independent line widths', () => {
+  it('checks the files that would carry the primitive, so this cannot pass vacuously', () => {
+    const checked = trackedTextFiles().filter((path) => path.endsWith('.tsx') && path.startsWith('src/'))
+    expect(checked.length).toBeGreaterThan(10)
+    expect(checked).toContain('src/builder/three/RoomSurface.tsx')
+  })
+
+  it('draws no line whose width is one device pixel', () => {
+    const offenders: string[] = []
+    for (const path of trackedTextFiles()) {
+      if (!path.startsWith('src/')) continue
+      if (LINE_RULE_EXEMPT.has(path)) continue
+      let text: string
+      try {
+        text = withoutComments(readFileSync(resolve(REPO_ROOT, path), 'utf8'))
+      } catch {
+        continue
+      }
+      for (const { pattern, what } of DEVICE_DEPENDENT_LINES) {
+        if (pattern.test(text)) offenders.push(`${path}: ${what}`)
+      }
+    }
+
+    expect(
+      offenders,
+      'WebGL draws gl.LINES at one device pixel and ignores `linewidth`, so these scale with devicePixelRatio and their width is never stated anywhere. Use `<ScreenLine>` (src/three/ScreenLine.tsx), whose width is in CSS pixels.',
     ).toEqual([])
   })
 })

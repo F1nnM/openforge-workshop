@@ -163,16 +163,42 @@ export const OUTLINE_EDGE_STRENGTH = 2
 export const OUTLINE_LAYER = 10
 
 /**
- * Resolution of the edge pass, against the drawing buffer: **half**.
+ * Width of the edge band, in **device-independent pixels**: about two.
  *
- * `OutlineEffect`'s own default, kept and stated because it is what makes the
- * cue read as a *glow* rather than as a second hairline: a half-resolution edge
- * sampled at full resolution is a soft two-pixel band, which is the shape the
- * owner asked for in the word *"glow"*. It also halves the one genuinely
- * expensive thing in the pass — the occluder depth render of the whole room,
- * which is what makes an outline know it is behind something.
+ * `OutlineEffect` has no thickness setting; the band's width falls out of the
+ * resolution its edge pass runs at, and a half-resolution edge sampled at full
+ * resolution is a soft two-pixel band — which is the shape the owner asked for
+ * in the word *"glow"*.
+ *
+ * **Two pixels of what** is the part that bit.** `resolutionScale` is a fraction
+ * of the *drawing buffer*, so 0.5 meant two device pixels, and two device pixels
+ * is a different cue on every display. Raising {@link DPR_BAND}'s floor to 2 took
+ * this from 1.8 CSS px to 1.0 and the outline came out looking like a hairline.
+ * So the width is stated here in CSS pixels and {@link outlineResolutionScale}
+ * converts, which is the same move `ScreenLine.tsx` makes for the lines the
+ * renderer draws directly.
  */
-export const OUTLINE_RESOLUTION_SCALE = 0.5
+export const OUTLINE_WIDTH_PX = 1.8
+
+/**
+ * {@link OUTLINE_WIDTH_PX} as the fraction of the drawing buffer the edge pass
+ * should run at.
+ *
+ * The band is roughly `1 / scale` buffer pixels wide, and a buffer pixel is
+ * `1 / dpr` CSS pixels, so `scale = 1 / (widthPx * dpr)`. Clamped to a sane band:
+ * above 1 is meaningless (the pass cannot run finer than the buffer) and a very
+ * small scale would make the occluder depth render so coarse that the
+ * visible/hidden test gets blocky.
+ *
+ * It also keeps the pass cheap on a dense display for free, which is the reason
+ * the half-resolution default existed in the first place: the occluder depth
+ * render of the whole room is the one genuinely expensive thing here, and this
+ * scales it *down* as the buffer grows.
+ */
+export function outlineResolutionScale(dpr: number): number {
+  const ratio = Number.isFinite(dpr) && dpr > 0 ? dpr : 1
+  return Math.min(1, Math.max(0.1, 1 / (OUTLINE_WIDTH_PX * ratio)))
+}
 
 /**
  * One mask-only {@link Mesh} per subject, ready to add to a scene.

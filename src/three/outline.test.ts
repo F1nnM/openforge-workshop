@@ -19,7 +19,8 @@ import {
   NO_OUTLINE,
   OUTLINE_EDGE_STRENGTH,
   OUTLINE_MASK,
-  OUTLINE_RESOLUTION_SCALE,
+  OUTLINE_WIDTH_PX,
+  outlineResolutionScale,
   outlineProxies,
 } from './outline'
 
@@ -107,7 +108,22 @@ describe('the two numbers the pass is tuned with', () => {
     expect(OUTLINE_EDGE_STRENGTH * 0.5).toBe(1)
   })
 
-  it('runs the edge at half resolution, which is what makes it a glow', () => {
-    expect(OUTLINE_RESOLUTION_SCALE).toBe(0.5)
+  it('holds the band at a fixed device-independent width, not a fixed buffer fraction', () => {
+    // The regression this replaces: `resolutionScale` was a flat 0.5, meaning
+    // two *device* pixels, so the cue's width moved whenever the dpr moved. It
+    // halved when `DPR_BAND` gained a floor of 2 and the outline read as a
+    // hairline. What must hold now is that the band is the same width in CSS
+    // pixels on every display.
+    const bandCssPx = (dpr: number): number => 1 / (outlineResolutionScale(dpr) * dpr)
+    for (const dpr of [1, 1.1, 1.5, 2, 3]) {
+      expect(bandCssPx(dpr)).toBeCloseTo(OUTLINE_WIDTH_PX, 6)
+    }
+  })
+
+  it('never asks the edge pass to run finer than the buffer', () => {
+    // Above 1 is meaningless, and a dpr below 1 would ask for it.
+    expect(outlineResolutionScale(0.5)).toBeLessThanOrEqual(1)
+    expect(outlineResolutionScale(Number.NaN)).toBeLessThanOrEqual(1)
+    expect(outlineResolutionScale(Number.NaN)).toBeGreaterThan(0)
   })
 })

@@ -34,8 +34,7 @@ import { GRID_UNIT_MM } from '@/catalog'
 import { sceneOf } from './fixture'
 import {
   PLATE_HEIGHT_MM,
-  caretGeometry,
-  plateEdgeGeometry,
+  caretPositions,
   plateEdgePositions,
   plateGeometry,
   platePositions,
@@ -197,10 +196,13 @@ describe('the geometries', () => {
     expect(plate.boundingSphere?.radius).toBeGreaterThan(0)
     plate.dispose()
 
-    const ring = plateEdgeGeometry(piece.polygons)
-    expect(ring.getAttribute('position').itemSize).toBe(3)
-    expect(ring.boundingSphere).not.toBeNull()
-    ring.dispose()
+    // The ring is a bare position array now rather than a `BufferGeometry`:
+    // `ScreenLine` builds the `LineSegmentsGeometry` from it, because a
+    // `LineSegments` is one device pixel wide whatever the display and that is
+    // the bug this stopped being drawn with.
+    const ring = plateEdgePositions(piece.polygons)
+    expect(ring.length % 6).toBe(0)
+    expect(ring.length).toBeGreaterThan(0)
   })
 
   it('is thin enough that nobody could read it as a tile', () => {
@@ -212,16 +214,15 @@ describe('the geometries', () => {
   })
 
   it('builds the caret at the plan view’s own arm length', () => {
-    const caret = caretGeometry()
-    const positions = caret.getAttribute('position')
-    expect(positions.count).toBe(4)
+    const caret = caretPositions()
+    // Two strokes, four endpoints, three components each.
+    expect(caret.length).toBe(12)
     // 0.35 units either side of the centre, in millimetres.
     // Float32 again: 8.89 mm stores as 8.890000343322754.
-    expect(positions.getX(1)).toBeCloseTo(0.35 * GRID_UNIT_MM, 4)
-    expect(positions.getZ(3)).toBeCloseTo(0.35 * GRID_UNIT_MM, 4)
+    expect(caret[3]).toBeCloseTo(0.35 * GRID_UNIT_MM, 4)
+    expect(caret[11]).toBeCloseTo(0.35 * GRID_UNIT_MM, 4)
     // Flat: every vertex on `y = 0`, positioned by the caller.
-    for (let i = 0; i < positions.count; i += 1) expect(positions.getY(i)).toBe(0)
-    caret.dispose()
+    for (let i = 1; i < caret.length; i += 3) expect(caret[i]).toBe(0)
   })
 })
 
