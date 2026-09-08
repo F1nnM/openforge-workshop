@@ -49,7 +49,9 @@ import { join } from 'node:path'
 import {
   TEMPLATES_MODULE_PATH,
   buildCatalog,
+  deriveAssemblySizes,
   deriveFamilies,
+  foldRecipes,
   fixturesDir,
   formatBytes,
   loadFixtureRows,
@@ -82,7 +84,11 @@ function main(): number {
 
   const json = serialiseCatalog(result.file)
   const families = deriveFamilies(result.file)
-  const module = printTemplateModule(templates, families)
+  /* The fold is pure over the fixtures; the size domains need the corpus that was
+     just built, so the two run in that order and `sizes.ts` throws rather than
+     emitting an assembly no position can place. */
+  const assemblies = deriveAssemblySizes(foldRecipes(templates), result.file)
+  const module = printTemplateModule(templates, families, assemblies)
   report(dir, result, dryRun, inventory, templates, families, module)
 
   if (!dryRun) {

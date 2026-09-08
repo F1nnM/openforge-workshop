@@ -1,15 +1,31 @@
 /**
- * The 40 recipe templates and the 47 generated families, as data.
+ * The 10 assemblies, the 40 recipe templates they are folded from, and the 47 generated families, as data.
  *
  * **Generated. Do not edit.** `pipeline/templates.ts` reads the 20 `*.yaml`
- * fixtures beside the JSON, `pipeline/families.ts` derives the families
- * from the built corpus, and this file is what the two emit;
+ * fixtures beside the JSON, `pipeline/fold.ts` folds them, `pipeline/sizes.ts`
+ * derives their size domains and `pipeline/families.ts` derives the families
+ * from the built corpus; this file is what they emit.
  * `npm run import:catalog` writes it and `pipeline/templates.test.ts` asserts the
  * committed bytes are exactly what the emitter returns, so an edit here fails the
  * suite rather than drifting quietly.
  *
+ * ## What the palette lists, and what is kept beside it
+ *
+ * `ASSEMBLY_TEMPLATES` is the 10 the palette lists, derived from the 40:
+ * 32 of the fixtures differ only by one `component|` require on one slot, so the
+ * component is a **control** rather than 14 templates. `ASSEMBLY_CONTROLS` holds
+ * the three axes per assembly — component, height and size — and a position’s tags
+ * join a placed instance’s `parentTags`, where each slot’s own `constrain` block
+ * collects only the roots that slot asked for. No assembly carries an `any size`
+ * position: a placement is sized.
+ *
  * `RECIPE_TEMPLATES` is the 40 read from the fixtures and nothing else — all
- * of them `S2W: Wall on Tile`, reaching 35.4% of the corpus.
+ * of them `S2W: Wall on Tile`, reaching 35.4% of the corpus. It is **kept**
+ * rather than replaced, and not for compatibility: `src/assembly/corpus.test.ts`
+ * walks all 40 against the 10 and asserts candidate-**set** equality slot by slot,
+ * which is what licenses the fold. Without the fixtures in the bundle that test
+ * would have nothing to compare against.
+ *
  * `GENERATED_FAMILIES` is one
  * family per `(role, form, build)` key the emitted tags already carry, each with
  * one required slot denying `shape|base`, plus the bare-base family no such key
@@ -28,8 +44,472 @@
  *
  * 40 templates over 20 fixture files, 128 parts.
  * 47 generated families over 8417 records, 303 size positions.
+ * 10 assemblies over 38 parts, with 56 control positions between them.
  */
 import type { RecipeTemplate } from './recipeWalk'
+
+/** One position of one control axis. `tags` is empty on an `any` position. */
+export interface ControlPosition {
+  readonly label: string
+  readonly tags: readonly string[]
+}
+
+/**
+ * The three axes of one assembly’s controls.
+ *
+ * An empty axis means **no control**: the eight corners have no `height`
+ * because their low/full split is two templates rather than a position, and a
+ * one-position axis is a control that cannot be operated.
+ */
+export interface AssemblyControls {
+  readonly component: readonly ControlPosition[]
+  readonly height: readonly ControlPosition[]
+  readonly size: readonly ControlPosition[]
+}
+
+export const ASSEMBLY_TEMPLATES: readonly RecipeTemplate[] = [
+  {
+    id: 's2w-wall-on-tile-wall-modular',
+    name: 'S2W: Wall on Tile: Wall (Modular)',
+    source: 'blueprints.s2w.wall.arrow_slit.yaml,blueprints.s2w.wall.boss_door.yaml,blueprints.s2w.wall.door+arched.yaml,blueprints.s2w.wall.door+rectangle.yaml,blueprints.s2w.wall.drain.yaml,blueprints.s2w.wall.grate.yaml,blueprints.s2w.wall.magnetic.yaml,blueprints.s2w.wall.niche.yaml,blueprints.s2w.wall.portcullis.yaml,blueprints.s2w.wall.secret_door.yaml,blueprints.s2w.wall.torch.yaml,blueprints.s2w.wall.wall+low.yaml,blueprints.s2w.wall.wall.yaml,blueprints.s2w.wall.window+arched.yaml,blueprints.s2w.wall.window+square.yaml,blueprints.s2w.wall.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|modular'],
+    parts: [
+      {
+        name: 'wall',
+        tags: {
+          require: [{ tag: 'build|separate wall' }, { tag: 'role|wall' }],
+          deny: [{ tag: 'shape|curved' }, { tag: 'size|width|1.5' }, { tag: 'shape|base' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'component', siblings: [] }, { tag: 'interface', siblings: [] }, { tag: 'shape|wall', siblings: [] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|wall' }, { tag: 'build|s2w' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'shape|base|wall' }, { tag: 'build|s2w' }],
+          deny: [{ tag: 'shape|base|corner' }, { tag: 'shape|option|notch' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }, { tag: 'connection', siblings: ['wall'] }, { filter: 'connection|side' }, { filter: 'connection|openforge' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-wall-single-piece',
+    name: 'S2W: Wall on Tile: Wall (Single Piece)',
+    source: 'blueprints.s2w.wall.arrow_slit.yaml,blueprints.s2w.wall.boss_door.yaml,blueprints.s2w.wall.door+arched.yaml,blueprints.s2w.wall.door+rectangle.yaml,blueprints.s2w.wall.drain.yaml,blueprints.s2w.wall.grate.yaml,blueprints.s2w.wall.magnetic.yaml,blueprints.s2w.wall.niche.yaml,blueprints.s2w.wall.portcullis.yaml,blueprints.s2w.wall.secret_door.yaml,blueprints.s2w.wall.torch.yaml,blueprints.s2w.wall.wall+low.yaml,blueprints.s2w.wall.wall.yaml,blueprints.s2w.wall.window+arched.yaml,blueprints.s2w.wall.window+square.yaml,blueprints.s2w.wall.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|single_piece'],
+    parts: [
+      {
+        name: 'wall',
+        tags: {
+          require: [{ tag: 'build|separate wall' }, { tag: 'connection|openforge' }, { tag: 'role|wall' }],
+          deny: [{ tag: 'shape|curved' }, { tag: 'size|width|1.5' }, { tag: 'shape|base' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'component', siblings: [] }, { tag: 'interface', siblings: [] }, { tag: 'shape|wall', siblings: [] }],
+        },
+        fulfills: ['base'],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|wall' }, { tag: 'build|s2w' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'shape|base|square' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'build|s2w' }, { tag: 'shape|option|notch' }],
+          constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-corner-low-single-piece',
+    name: 'S2W: Wall on Tile: Corner: Low (Single Piece)',
+    source: 'blueprints.s2w.corner.low.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|single_piece', 'shape|corner|low'],
+    parts: [
+      {
+        name: 'column',
+        tags: {
+          require: [{ tag: 'shape|column|corner' }, { tag: 'shape|column|low' }, { tag: 'build|s2w' }, { tag: 'size|column_shape|L' }],
+          constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'right wall',
+        tags: {
+          require: [{ tag: 'build|s2w' }, { tag: 'shape|corner|right' }, { tag: 'shape|wall|low' }, { tag: 'connection|openforge' }, { tag: 'size|width|2' }],
+          constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
+        },
+        fulfills: ['base'],
+      },
+      {
+        name: 'left wall',
+        tags: {
+          require: [{ tag: 'build|s2w' }, { tag: 'shape|corner|left' }, { tag: 'shape|wall|low' }, { tag: 'connection|openforge' }, { tag: 'size|width|2' }],
+          constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
+        },
+        fulfills: ['base'],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }, { tag: 'connection|openforge' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'shape|base|square' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'build|s2w' }, { tag: 'shape|option|notch' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-corner-low-modular',
+    name: 'S2W: Wall on Tile: Corner: Low (Modular)',
+    source: 'blueprints.s2w.corner.low.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|modular', 'shape|corner|low'],
+    parts: [
+      {
+        name: 'column',
+        tags: {
+          require: [{ tag: 'shape|column|low' }, { tag: 'size|column_shape|L' }],
+          deny: [{ tag: 'build|s2w' }],
+          constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'right wall',
+        tags: {
+          require: [{ tag: 'shape|wall|low' }, { tag: 'size|width|1.5' }],
+          constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'left wall',
+        tags: {
+          require: [{ tag: 'shape|wall|low' }, { tag: 'size|width|1.5' }],
+          constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }, { tag: 'connection|openforge' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'build|s2w' }, { tag: 'shape|base|corner' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'shape|base|wall' }, { tag: 'shape|option|notch' }],
+          constrain: [{ tag: 'connection', siblings: ['right wall', 'left wall'] }, { filter: 'connection|side' }, { filter: 'connection|openforge' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-corner-full-single-piece',
+    name: 'S2W: Wall on Tile: Corner: Full (Single Piece)',
+    source: 'blueprints.s2w.corner.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|single_piece', 'shape|corner'],
+    parts: [
+      {
+        name: 'column',
+        tags: {
+          require: [{ tag: 'shape|column|corner' }, { tag: 'build|s2w' }, { tag: 'size|column_shape|L' }],
+          deny: [{ tag: 'shape|column|low' }],
+          constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'right wall',
+        tags: {
+          require: [{ tag: 'build|s2w' }, { tag: 'shape|corner|right' }, { tag: 'connection|openforge' }, { tag: 'size|width|2' }],
+          deny: [{ tag: 'shape|column|low' }],
+          constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
+        },
+        fulfills: ['base'],
+      },
+      {
+        name: 'left wall',
+        tags: {
+          require: [{ tag: 'build|s2w' }, { tag: 'shape|corner|left' }, { tag: 'connection|openforge' }, { tag: 'size|width|2' }],
+          deny: [{ tag: 'shape|column|low' }],
+          constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
+        },
+        fulfills: ['base'],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }, { tag: 'connection|openforge' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'shape|base|square' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'build|s2w' }, { tag: 'shape|option|notch' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-corner-full-modular',
+    name: 'S2W: Wall on Tile: Corner: Full (Modular)',
+    source: 'blueprints.s2w.corner.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|modular', 'shape|corner'],
+    parts: [
+      {
+        name: 'column',
+        tags: {
+          require: [{ tag: 'size|column_shape|L' }],
+          deny: [{ tag: 'build|s2w' }, { tag: 'shape|column|low' }],
+          constrain: [{ tag: 'connection|side', siblings: ['right wall', 'left wall'] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'right wall',
+        tags: {
+          require: [{ tag: 'shape|wall' }, { tag: 'size|width|1.5' }],
+          deny: [{ tag: 'shape|column|low' }],
+          constrain: [{ tag: 'connection|side', siblings: ['column', 'left wall'] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'left wall',
+        tags: {
+          require: [{ tag: 'shape|wall' }, { tag: 'size|width|1.5' }],
+          deny: [{ tag: 'shape|column|low' }],
+          constrain: [{ tag: 'connection|side', siblings: ['right wall', 'column'] }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'shape|base|corner' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'shape|base|wall' }, { tag: 'shape|option|notch' }],
+          constrain: [{ tag: 'connection', siblings: ['right wall', 'left wall'] }, { filter: 'connection|side' }, { filter: 'connection|openforge' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-internal-corner-low-single-piece',
+    name: 'S2W: Wall on Tile: Internal Corner: Low (Single Piece)',
+    source: 'blueprints.s2w.internal_corner.low.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|single_piece', 'shape|internal_corner|low'],
+    parts: [
+      {
+        name: 'column',
+        tags: {
+          require: [{ tag: 'shape|column|corner' }, { tag: 'shape|column|low' }, { tag: 'build|s2w' }, { tag: 'size|column_shape|L' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|internal_corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'shape|base|square' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'build|s2w' }, { tag: 'shape|option|notch' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-internal-corner-low-modular',
+    name: 'S2W: Wall on Tile: Internal Corner: Low (Modular)',
+    source: 'blueprints.s2w.internal_corner.low.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|modular', 'shape|corner'],
+    parts: [
+      {
+        name: 'column',
+        tags: {
+          require: [{ tag: 'shape|column|low' }, { tag: 'size|column_shape|L' }],
+          deny: [{ tag: 'build|s2w' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|internal_corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'build|s2w' }, { tag: 'shape|base|internal_corner' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'shape|base|wall' }, { tag: 'shape|option|notch' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-internal-corner-full-single-piece',
+    name: 'S2W: Wall on Tile: Internal Corner: Full (Single Piece)',
+    source: 'blueprints.s2w.internal_corner.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|single_piece', 'shape|internal_corner'],
+    parts: [
+      {
+        name: 'column',
+        tags: {
+          require: [{ tag: 'shape|column|corner' }, { tag: 'build|s2w' }, { tag: 'size|column_shape|L' }],
+          deny: [{ tag: 'shape|column|low' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|internal_corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'shape|base|square' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'build|s2w' }, { tag: 'shape|option|notch' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+  {
+    id: 's2w-wall-on-tile-internal-corner-full-modular',
+    name: 'S2W: Wall on Tile: Internal Corner: Full (Modular)',
+    source: 'blueprints.s2w.internal_corner.yaml',
+    tags: ['object|tile', 'object|tile|wall_on_tile', 'build|s2w', 'build|s2w|modular', 'shape|corner'],
+    parts: [
+      {
+        name: 'column',
+        tags: {
+          require: [{ tag: 'size|column_shape|L' }],
+          deny: [{ tag: 'shape|column|low' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'floor',
+        tags: {
+          require: [{ tag: 'shape|floor' }, { tag: 'shape|floor|internal_corner' }, { tag: 'build|s2w' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+        },
+        fulfills: [],
+      },
+      {
+        name: 'base',
+        tags: {
+          require: [{ tag: 'shape|base' }, { tag: 'shape|base|internal_corner' }, { tag: 'size|width|2' }, { tag: 'size|depth|2' }],
+          deny: [{ tag: 'shape|wall' }, { tag: 'shape|base|wall' }, { tag: 'shape|option|notch' }],
+        },
+        fulfills: [],
+      },
+    ],
+  },
+]
+
+export const ASSEMBLY_CONTROLS: Readonly<Record<string, AssemblyControls>> = {
+  's2w-wall-on-tile-wall-modular': {
+    component: [{ label: 'any component', tags: [] }, { label: 'arched door', tags: ['component|door|arched'] }, { label: 'arched window', tags: ['component|window|arched'] }, { label: 'arrow slit', tags: ['component|arrow_slit'] }, { label: 'boss door', tags: ['component|boss_door'] }, { label: 'drain', tags: ['component|drain'] }, { label: 'grate', tags: ['component|grate'] }, { label: 'magnetic', tags: ['component|magnetic'] }, { label: 'niche', tags: ['component|niche'] }, { label: 'portcullis', tags: ['component|portcullis'] }, { label: 'rectangular door', tags: ['component|door|rectangular'] }, { label: 'secret door', tags: ['component|secret_door', 'interface|secret_door|bottom'] }, { label: 'square window', tags: ['component|window|square'] }, { label: 'torch', tags: ['component|torch'] }, { label: 'wall', tags: ['component|wall'] }],
+    height: [{ label: 'any height', tags: [] }, { label: 'full', tags: ['shape|wall'] }, { label: 'low', tags: ['shape|wall|low'] }],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
+  },
+  's2w-wall-on-tile-wall-single-piece': {
+    component: [{ label: 'any component', tags: [] }, { label: 'arched door', tags: ['component|door|arched'] }, { label: 'arched window', tags: ['component|window|arched'] }, { label: 'arrow slit', tags: ['component|arrow_slit'] }, { label: 'boss door', tags: ['component|boss_door'] }, { label: 'drain', tags: ['component|drain'] }, { label: 'grate', tags: ['component|grate'] }, { label: 'magnetic', tags: ['component|magnetic'] }, { label: 'niche', tags: ['component|niche'] }, { label: 'portcullis', tags: ['component|portcullis'] }, { label: 'rectangular door', tags: ['component|door|rectangular'] }, { label: 'secret door', tags: ['component|secret_door', 'interface|secret_door|bottom'] }, { label: 'square window', tags: ['component|window|square'] }, { label: 'torch', tags: ['component|torch'] }, { label: 'wall', tags: ['component|wall'] }],
+    height: [{ label: 'any height', tags: [] }, { label: 'full', tags: ['shape|wall'] }, { label: 'low', tags: ['shape|wall|low'] }],
+    size: [{ label: '1 wide by 1 deep', tags: ['size|width|1', 'size|depth|1'] }, { label: '2 wide by 1 deep', tags: ['size|width|2', 'size|depth|1'] }, { label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }, { label: '3 wide by 1 deep', tags: ['size|width|3', 'size|depth|1'] }, { label: '3 wide by 3 deep', tags: ['size|width|3', 'size|depth|3'] }, { label: '4 wide by 1 deep', tags: ['size|width|4', 'size|depth|1'] }, { label: '4 wide by 2 deep', tags: ['size|width|4', 'size|depth|2'] }, { label: '4 wide by 4 deep', tags: ['size|width|4', 'size|depth|4'] }],
+  },
+  's2w-wall-on-tile-corner-low-single-piece': {
+    component: [],
+    height: [],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  },
+  's2w-wall-on-tile-corner-low-modular': {
+    component: [],
+    height: [],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  },
+  's2w-wall-on-tile-corner-full-single-piece': {
+    component: [],
+    height: [],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  },
+  's2w-wall-on-tile-corner-full-modular': {
+    component: [],
+    height: [],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  },
+  's2w-wall-on-tile-internal-corner-low-single-piece': {
+    component: [],
+    height: [],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  },
+  's2w-wall-on-tile-internal-corner-low-modular': {
+    component: [],
+    height: [],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  },
+  's2w-wall-on-tile-internal-corner-full-single-piece': {
+    component: [],
+    height: [],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  },
+  's2w-wall-on-tile-internal-corner-full-modular': {
+    component: [],
+    height: [],
+    size: [{ label: '2 wide by 2 deep', tags: ['size|width|2', 'size|depth|2'] }],
+  },
+}
 
 export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
   {

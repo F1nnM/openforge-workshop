@@ -1281,8 +1281,8 @@ describeCorpus(title, () => {
          `FAMILY_TABLE_BYTES` is asserted against the emitter rather than
          quoted, so a family set that grows moves the constant or fails. */
       const fixtures = loadTemplateFixtures(FIXTURES_DIR)
-      const withFamilies = printTemplateModule(fixtures, families)
-      const without = printTemplateModule(fixtures, [])
+      const withFamilies = printTemplateModule(fixtures, families, [])
+      const without = printTemplateModule(fixtures, [], [])
       const delta = Buffer.byteLength(withFamilies, 'utf8') - Buffer.byteLength(without, 'utf8')
       expect(delta).toBe(FAMILY_TABLE_BYTES)
 
