@@ -1,6 +1,16 @@
 {
   "name": "openforge-workshop",
   "version": "0.1.0",
+  "description": "Catalog and room builder for the OpenForge library of 3D-printable modular dungeon terrain",
+  "license": "MIT",
+  "homepage": "https://openforge-workshop.mfinn.de",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/F1nnM/openforge-workshop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/F1nnM/openforge-workshop/issues"
+  },
   "private": true,
   "type": "module",
   "engines": {
