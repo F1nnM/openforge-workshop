@@ -93,13 +93,15 @@
  *     anchor. This is the path for a template with a **layout**: a 2x2 recipe
  *     wants a 2x2 floor and a 2-unit *run* of wall, which one ref list cannot
  *     say.
- *   - {@link FillContext.size} — exact `size|` refs applied to every slot. This
- *     is row **B4**'s own control, and it is here because B4 landed mid-row and
- *     **all 51 of its generated families have exactly one part and no layout**,
- *     deliberately and with four measurements behind it — so **0 of 51 have a
- *     convention** and `cell` would have been inert on every palette row C1 is
- *     building. Measured over B4's shipped domain: **350 of 350 size options
- *     fill, and 51 of 51 families fill with no size asked for at all.**
+ *   - {@link FillContext.position} — the armed control position, joined onto the
+ *     template's own `parentTags` so each slot's `constrain` block collects the
+ *     roots it asked for. This is row **B4**'s own control, generalised: it is
+ *     here because **all 47 generated families have exactly one part and no
+ *     layout**, deliberately and with four measurements behind it — so **0 of 47
+ *     have a convention** and `cell` would have been inert on every palette row.
+ *     It carried only `size|` refs, as a require of every slot, until the
+ *     recipe fold gave the assemblies a component and a height axis too; the
+ *     field's own docblock carries that change and why the route had to move.
  *
  * There is no second spelling of `size|width|<n>` in this file either way — B3
  * asks to be consulted before a ref is authored, and B4's table is the same
@@ -243,7 +245,41 @@ export interface FillContext {
    */
   readonly cell?: GridSize | undefined
   /**
-   * Exact `size|` refs to require of **every** slot — row B4's own size control.
+   * The armed **control position**: the tags a placed instance carries as its
+   * own `parentTags`, from every axis of its row's controls at once.
+   *
+   * ## It joins `parentTags`, and it used to be a require of every slot
+   *
+   * This field was `size`, and it appended its refs to the `require` of **every
+   * slot**. That was sound, and its own docblock said so while naming the exact
+   * condition: *"Family-wide is correct only because the family has one slot.
+   * Applying one ref list to every slot of a multi-slot recipe would require the
+   * wall and the floor to carry the same size tags, which is the mistake `cell`
+   * exists to avoid."*
+   *
+   * The folded assemblies are precisely that case. They are multi-slot, and
+   * their controls are no longer only size: a `component|door|arched` position
+   * required of every slot would empty the `floor` and the `base`, which carry
+   * no `component|` tag at all.
+   *
+   * So a position joins `parentTags` instead, where each slot's own `constrain`
+   * block collects **only the roots that slot asked for**. A merged wall slot
+   * constrains `component`, `interface`, `shape|wall` and `size|width`; the floor
+   * and base beside it constrain `size|width` and `size|depth`. One position
+   * therefore narrows the wall by its component and all three by their size, at
+   * the cost of no per-slot table and no new resolution code — which is the
+   * mechanism `assembly/templates.ts`' docblock always described.
+   *
+   * **A slot that declares no `constrain` is now narrowed by nothing, and that
+   * is the behaviour change.** It is safe for every shipped row because all 47
+   * generated families declare `families.ts#CONSTRAIN_SIZE` on their one slot,
+   * so collecting `size|width|2` from the parent and requiring it directly
+   * resolve to the same refs — `corpus.test.ts` asserts that across all 303
+   * positions rather than arguing it.
+   *
+   * Distinct from {@link cell}, which stays a direct per-slot require: that is
+   * derived from B2's anchor rather than chosen by a user, and B3 measured that
+   * an `edge` slot wants a run where a `cell` slot wants a congruence.
    *
    * ## Why this exists beside `cell`, and what it corrects
    *
@@ -279,7 +315,7 @@ export interface FillContext {
    * that gives both for a multi-slot template gets the intersection it asked
    * for.
    */
-  readonly size?: readonly string[] | undefined
+  readonly position?: readonly string[] | undefined
 }
 
 /* --------------------------------------------------------------- the decision */
@@ -543,7 +579,12 @@ function siblingsOf(walk: Walk, exclude?: string): readonly SiblingSelection[] {
  * construction rather than by discipline.
  */
 function candidatesOf(walk: Walk, slot: AssemblySlot, override?: readonly SiblingSelection[]): SlotCandidates {
-  const resolved = resolveSlotTags(slot.tags, walk.template.tags, override ?? siblingsOf(walk, slot.name))
+  /* The armed position rides in as `parentTags` beside the template's own, so
+     each slot's `constrain` block collects only the roots it asked for. See
+     {@link FillContext.position} for why this is not a require of every slot. */
+  const position = walk.context.position ?? []
+  const parentTags = position.length === 0 ? walk.template.tags : [...walk.template.tags, ...position]
+  const resolved = resolveSlotTags(slot.tags, parentTags, override ?? siblingsOf(walk, slot.name))
   const size = sizeRefsFor(walk, slot.name)
   walk.queries += 1
   if (size === undefined) return walk.context.composition.candidatesFor(resolved)
@@ -555,24 +596,24 @@ function candidatesOf(walk: Walk, slot: AssemblySlot, override?: readonly Siblin
 }
 
 /**
- * The size refs one slot carries, or `undefined` when size is not a parameter of
- * this fill.
+ * The size refs one slot carries from **B3's anchor derivation**, or `undefined`
+ * when the anchor is not a parameter of this fill.
  *
- * Two sources, unioned: {@link FillContext.size}, which is B4's own per-family
- * list and applies to every slot, and {@link FillContext.cell}, which is B3's
- * per-slot derivation from B2's anchor.
+ * One source now: {@link FillContext.cell}, B3's per-slot derivation from B2's
+ * anchor. It used to union in {@link FillContext.position} as well — under its
+ * old name `size`, and as a require of every slot — and that source moved into
+ * `candidatesOf`'s `parentTags`, where each slot's own `constrain` collects it.
+ * The field's docblock carries why.
  *
- * `undefined` means *do not narrow*, and it has four distinct causes that all
- * mean the same thing: neither field was given; the part-name set has no layout
- * to read an anchor from (**all 51 of B4's generated families**, which is why
- * the `size` field exists); the anchor is a `corner`, for which B3 measured the
- * honest predicate to be `{ kind: 'none' }`; or the family's size domain is
- * empty and B4's option carries no tags — **8 of its 51 families** have nothing
- * but *any size*. The last two are the ones worth naming: a slot with no size
- * control must not become a slot with no candidates.
+ * `undefined` means *do not narrow*, and it has three distinct causes that all
+ * mean the same thing: no `cell` was given; the part-name set has no layout to
+ * read an anchor from (**all 47 generated families**, which is why the position
+ * route exists at all); or the anchor is a `corner`, for which B3 measured the
+ * honest predicate to be `{ kind: 'none' }`. A slot with no size control must
+ * not become a slot with no candidates.
  */
 function sizeRefsFor(walk: Walk, part: string): { readonly require: readonly string[]; readonly deny: readonly string[] } | undefined {
-  const require = [...(walk.context.size ?? [])]
+  const require: string[] = []
   const deny: string[] = []
 
   const cell = walk.context.cell

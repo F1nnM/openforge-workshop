@@ -474,6 +474,34 @@ describe('the size parameter', () => {
     { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
   ])
 
+  /**
+   * The same three slots with the `constrain` block the shipped recipes carry.
+   *
+   * Held apart from {@link sizedTemplate} rather than folded into it, because a
+   * `constrain` entry with no `siblings` field inherits from **every** sibling
+   * selection as well as from the parent (`config.ts#inheritedTags`). So adding
+   * one does not merely open the parentTags route — it couples the slots to each
+   * other, which is the shipped recipes' own behaviour and would silently change
+   * what every `cell`-path test above is measuring.
+   */
+  const constrainedTemplate = wallTemplate([
+    { name: 'wall', tags: { require: [{ tag: 'shape|wall' }], constrain: [{ tag: 'size|width' }] } },
+    {
+      name: 'floor',
+      tags: {
+        require: [{ tag: 'shape|floor' }],
+        constrain: [{ tag: 'size|width', siblings: [] }, { tag: 'size|depth', siblings: [] }],
+      },
+    },
+    {
+      name: 'base',
+      tags: {
+        require: [{ tag: 'shape|base' }],
+        constrain: [{ tag: 'size|width', siblings: [] }, { tag: 'size|depth', siblings: [] }],
+      },
+    },
+  ])
+
   it('takes the recipe’s own answer when no cell is asked for', () => {
     const { index, context } = harness(SIZED_RECORDS, { lock: 'openlock' })
     const fill = solveTemplateFills(sizedTemplate, index, context)
@@ -529,19 +557,32 @@ describe('the size parameter', () => {
     expect(fill.complete).toBe(false)
   })
 
-  it('applies B4’s per-family refs to every slot, layout or no layout', () => {
-    /* Row B4's own size control: `GENERATED_FAMILY_SIZES` gives a family a list
-       of `{ label, tags }` whose tags are exactly this spelling. All 51 of its
-       families have one part and none has a convention, so this is the only
-       path that reaches them — `corpus.test.ts` runs all 350 of its options. */
+  it('reaches a generated family’s one slot through the constrain it declares', () => {
+    /* B4's own size control: `GENERATED_FAMILY_SIZES` gives a family a list of
+       `{ label, tags }` whose tags are exactly this spelling. All 47 of its
+       families have one part and none has a convention, so this is the only path
+       that reaches them — `corpus.test.ts` runs all 303 of its options.
+
+       The slot carries `families.ts#CONSTRAIN_SIZE`, and it has to: a position
+       joins `parentTags` and a slot is narrowed by the roots **it** constrains,
+       so a family generated without that block would be narrowed by nothing.
+       The test below is the other half of that pair. */
     const { index, context } = harness(SIZED_RECORDS, {
       lock: 'openlock',
-      size: ['size|width|2', 'size|depth|2'],
+      position: ['size|width|2', 'size|depth|2'],
     })
     const template: AssemblyTemplate = {
       id: 'fixture-generated-floor',
       tags: ['role|floor'],
-      parts: [{ name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } }],
+      parts: [
+        {
+          name: 'floor',
+          tags: {
+            require: [{ tag: 'shape|floor' }],
+            constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+          },
+        },
+      ],
     }
     const fill = solveTemplateFills(template, index, context)
 
@@ -550,15 +591,45 @@ describe('the size parameter', () => {
     expect(fill.complete).toBe(true)
   })
 
+  it('narrows a slot that constrains nothing by nothing, which is what makes an axis per-slot', () => {
+    /* The behaviour the recipe fold needs and the old family-wide `require`
+       could not give. A position is not a constraint on every slot: it is
+       offered to all of them and collected only by the ones that asked. That is
+       what lets one `component|door|arched` narrow a merged wall slot while the
+       `floor` and `base` beside it — which carry no `component|` tag at all —
+       keep every candidate they had. */
+    const { index, context } = harness(SIZED_RECORDS, {
+      lock: 'openlock',
+      position: ['size|width|2', 'size|depth|2'],
+    })
+    const template: AssemblyTemplate = {
+      id: 'fixture-unconstrained-floor',
+      tags: ['role|floor'],
+      parts: [{ name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } }],
+    }
+    const fill = solveTemplateFills(template, index, context)
+
+    expect(fill.fills.floor).toBe('tiles/floor-1x1')
+    expect(fill.decisions[0]?.candidates).toBe(2)
+  })
+
   it('narrows nothing for a family whose size domain is empty', () => {
-    /* B4 ships *any size* as an option carrying no tags at all, and 8 of its 51
+    /* B4 ships *any size* as an option carrying no tags at all, and 7 of its 47
        families have nothing else. An empty ref list must not read as a
        constraint — B3's third measured trap, and the one the brief names. */
-    const { index, context } = harness(SIZED_RECORDS, { lock: 'openlock', size: [] })
+    const { index, context } = harness(SIZED_RECORDS, { lock: 'openlock', position: [] })
     const template: AssemblyTemplate = {
       id: 'fixture-no-domain',
       tags: ['role|floor'],
-      parts: [{ name: 'floor', tags: { require: [{ tag: 'shape|floor' }] } }],
+      parts: [
+        {
+          name: 'floor',
+          tags: {
+            require: [{ tag: 'shape|floor' }],
+            constrain: [{ tag: 'size|width' }, { tag: 'size|depth' }],
+          },
+        },
+      ],
     }
     const fill = solveTemplateFills(template, index, context)
 
@@ -570,9 +641,12 @@ describe('the size parameter', () => {
     const { index, context } = harness(SIZED_RECORDS, {
       lock: 'openlock',
       cell: { w: 2, d: 2 },
-      size: ['size|width|1'],
+      position: ['size|width|1'],
     })
-    const floor = solveTemplateFills(sizedTemplate, index, context).decisions.find(
+    /* {@link constrainedTemplate} and not `sizedTemplate`: the position reaches a
+       slot only through a `constrain` block, so a template that declares none is
+       narrowed by the `cell` alone and there is no second path to intersect. */
+    const floor = solveTemplateFills(constrainedTemplate, index, context).decisions.find(
       (one) => one.slot === 'floor',
     )
 

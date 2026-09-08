@@ -1,6 +1,6 @@
 /**
- * The click's fill: C2's solver, the palette's armed size, and B2's geometry,
- * composed once per placement.
+ * The click's fill: C2's solver, the palette's armed control position, and B2's
+ * geometry, composed once per placement.
  *
  * ## The defect this file closes
  *
@@ -19,10 +19,10 @@
  *   - **`solveTemplateFills`** decides *what*. Its acceptance condition is
  *     C2's — every slot it filled, and the gaps it reports for the ones it could
  *     not — and nothing here re-orders, re-ranks or second-guesses it.
- *   - **The armed size** is `PlanTools.armedSize`, C1's size position as its own
- *     `size|` tags, and it reaches the solver as {@link FillContext.size} or as
- *     {@link FillContext.cell}. Which one is not a preference: see
- *     {@link sizeContextFor}.
+ *   - **The armed control position** is `PlanTools.armedPosition`, the palette's
+ *     component, height and size choices as their own tags, and it reaches the
+ *     solver as {@link FillContext.position} or as {@link FillContext.cell}.
+ *     Which one is not a preference: see {@link positionContextFor}.
  *   - **`placeTemplateSlots`** decides whether the chosen fills *close*, and it
  *     is called here for one reason — so a **one-click** placement discloses the
  *     same {@link SlotDoubt} C3's editor already mounts. C2 measured its own
@@ -46,7 +46,7 @@
  * filler is created per `(lock, family, index)` — `BuilderRoom` builds it in a
  * `useMemo` on exactly those — so the preference *is* in the key, by
  * construction, and the map can outlive a call. What is left to key on is the
- * template and the armed size, which is what a user places twenty of.
+ * template and the armed position, which is what a user places twenty of.
  *
  * Every fill it produces is `pinned: false`. That is not a shorthand: the store
  * is explicit that `pinned` means *the user chose this file*, a lock change
@@ -112,12 +112,12 @@ export interface PlacementFill {
 }
 
 /**
- * Solve one armed family at one armed size.
+ * Solve one armed family at one armed control position.
  *
  * Total: an unknown template answers `known: false` with no fills rather than
  * throwing, because a click must not be able to take the surface down.
  */
-export type PlacementFiller = (template: TemplateId, size?: readonly string[]) => PlacementFill
+export type PlacementFiller = (template: TemplateId, position?: readonly string[]) => PlacementFill
 
 /** Everything a filler needs: C2's context, plus the assembly index it walks. */
 export interface PlacementFillInput {
@@ -143,39 +143,60 @@ export interface FillAuthorities {
 }
 
 /**
- * The armed size, as the solver's own two fields.
+ * The armed control position, as the solver's own two fields.
  *
- * **`size` for a family, `cell` for a layout-bearing recipe**, and C2 is
- * emphatic about why one ref list cannot serve both: a family-wide list requires
- * *every* slot to carry the same `size|` tags, which is right for B4's
- * one-slot families and wrong for a 2x2 recipe that wants a 2x2 **floor** and a
- * 2-unit **run** of wall. `cell` goes through B3's per-slot anchor derivation
- * instead — congruence for a `cell` anchor, the anchored face's run for an
- * `edge`, nothing for a `corner` — which is the only reading that narrows a
- * five-slot recipe correctly.
+ * **`cell` for a layout-bearing recipe, `position` for everything a cell cannot
+ * say**, and C2 is emphatic about why one ref list cannot serve both: a
+ * family-wide list requires *every* slot to carry the same `size|` tags, which is
+ * right for a one-slot family and wrong for a 2x2 recipe that wants a 2x2
+ * **floor** and a 2-unit **run** of wall. `cell` goes through B3's per-slot
+ * anchor derivation instead — congruence for a `cell` anchor, the anchored
+ * face's run for an `edge`, nothing for a `corner` — which is the only reading
+ * that narrows a five-slot recipe correctly.
  *
- * **Which branch is reachable is measured, not assumed.** C1's `sizesFor` gives
- * a family a control only when `GENERATED_FAMILY_SIZES` holds more than one
- * position for it, and that table has **no entry for any of the 40 recipes** —
- * so every size a user can arm today belongs to a one-slot family and takes the
- * `size` branch. The `cell` branch is not speculative all the same: it is what
- * makes the answer correct the day B5 or a later row gives a recipe a size
- * table, and `fills.test.ts` places a three-slot `wall`/`floor`/`base` template
- * at 2x2 through it.
+ * **Both branches are now live, and the recipe fold is what made them so.** C1
+ * measured that `GENERATED_FAMILY_SIZES` had *"no entry for any of the 40
+ * recipes"*, so every size a user could arm belonged to a one-slot family and
+ * the `cell` branch was reachable only in `fills.test.ts`. The fold gives the
+ * assemblies a size domain of their own — and a layout — so the `cell` branch is
+ * the one they take, which is the good outcome: their walls get a run and their
+ * floors a congruence rather than one list imposed on both.
  *
- * A position with only one axis — C1's *"2 wide"* — cannot become a cell, so it
- * stays a family-wide ref. That is the honest reading rather than a fallback: a
- * cell needs both spans, and inventing the second would place a size nobody
- * chose.
+ * A position with only one axis — *"2 wide"* — cannot become a cell, so the
+ * whole position rides as `parentTags`. That is the honest reading rather than a
+ * fallback: a cell needs both spans, and inventing the second would place a size
+ * nobody chose.
+ *
+ * The component and height axes never become a cell and are never a require of
+ * every slot. They ride as `parentTags` in every case; see
+ * `template/fill.ts#FillContext.position`.
  */
-export function sizeContextFor(
+export function positionContextFor(
   template: AssemblyTemplate,
-  size: readonly string[],
-): Pick<FillContext, 'size' | 'cell'> {
-  if (size.length === 0) return {}
+  position: readonly string[],
+): Pick<FillContext, 'position' | 'cell'> {
+  if (position.length === 0) return {}
+  /* The size axis and everything else, because the two take different routes
+     and the fold is what made that a real split rather than a distinction with
+     one case. A `size|width|2` + `size|depth|2` pair over a template with a
+     layout becomes a **cell**, which B3's derivation spreads per slot — a 2x2
+     floor and a 2-unit *run* of wall, which no single ref list can say. A
+     component or a height cannot become a cell and must not try: it rides as
+     `parentTags` and each slot's `constrain` block decides whether it applies,
+     which is how a `component|door|arched` narrows the wall and leaves the floor
+     and the base alone. */
+  const size = position.filter((tag) => tag.startsWith('size|'))
+  const axes = position.filter((tag) => !tag.startsWith('size|'))
   const layout = layoutFor(template.parts.map((part) => part.name))
   const cell = layout === undefined ? undefined : cellOf(size)
-  return cell === undefined ? { size } : { cell }
+  /* With no cell the whole position rides as parentTags — which is the one-slot
+     family's path, and the width-only position's: a cell needs both spans and
+     inventing the second would place a size nobody chose. */
+  const parent = cell === undefined ? position : axes
+  return {
+    ...(cell === undefined ? {} : { cell }),
+    ...(parent.length === 0 ? {} : { position: parent }),
+  }
 }
 
 /** `['size|width|2', 'size|depth|2']` as a {@link GridSize}, or nothing. */
@@ -196,16 +217,16 @@ function axisValue(size: readonly string[], axis: 'width' | 'depth'): number | u
 }
 
 /**
- * The memo key: the family and the armed size.
+ * The memo key: the family and the armed control position.
  *
  * `NUL`-joined for this repo's usual reason — two of the six shipped slot names
  * contain a space, so every printable delimiter is ambiguous on real data — and
- * the tags are **sorted**, because two positions spelling the same size in
+ * the tags are **sorted**, because two positions spelling the same choice in
  * either order are the same solve. Written as the escape and never as the byte;
  * `tools/hygiene/source.test.ts` fails the build on the byte.
  */
-function memoKey(template: TemplateId, size: readonly string[]): string {
-  return [template, ...[...size].sort()].join('\u0000')
+function memoKey(template: TemplateId, position: readonly string[]): string {
+  return [template, ...[...position].sort()].join('\u0000')
 }
 
 /**
@@ -220,8 +241,8 @@ function memoKey(template: TemplateId, size: readonly string[]): string {
 export function createPlacementFiller({ index, context }: PlacementFillInput): PlacementFiller {
   const memo = new Map<string, PlacementFill>()
 
-  return (id, size = []) => {
-    const key = memoKey(id, size)
+  return (id, position = []) => {
+    const key = memoKey(id, position)
     const hit = memo.get(key)
     if (hit !== undefined) return { ...hit, queries: 0 }
 
@@ -242,7 +263,7 @@ export function createPlacementFiller({ index, context }: PlacementFillInput): P
 
     const solved = solveTemplateFills(template, index, {
       ...context,
-      ...sizeContextFor(template, size),
+      ...positionContextFor(template, position),
     })
     const placed = placementOf(template, solved)
     memo.set(key, placed)

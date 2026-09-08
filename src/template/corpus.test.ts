@@ -1381,7 +1381,7 @@ describeCorpus(
         if (!solveTemplateFills(family, index, ctx).complete) unfilled.push(`${family.id} / no size`)
         for (const option of GENERATED_FAMILY_SIZES[family.id] ?? []) {
           options += 1
-          const fill = solveTemplateFills(family, index, { ...ctx, size: option.tags })
+          const fill = solveTemplateFills(family, index, { ...ctx, position: option.tags })
           if (!fill.complete) unfilled.push(`${family.id} / ${option.label}`)
         }
       }
@@ -1409,6 +1409,51 @@ describeCorpus(
       expect(
         Object.values(GENERATED_FAMILY_SIZES).filter((sizes) => sizes.length === 1),
       ).toHaveLength(7)
+    })
+
+    it('resolves all 47 families identically through parentTags as through a direct require', () => {
+      /* **The assertion that licenses moving the size route.**
+         `FillContext.position` used to be `size` and appended its refs to the
+         `require` of every slot; it now joins `parentTags` and each slot's own
+         `constrain` block collects it. For a one-slot family the two are the
+         same refs — the slot declares `families.ts#CONSTRAIN_SIZE`, so it
+         collects exactly what the old code required — and *the same refs* is a
+         claim about 303 positions over 8,417 records, not an argument.
+
+         Checked as the chosen **tile**, not as a count: two different candidate
+         sets can be the same size, and it is the fill a user sees. */
+      const { index, context: ctx } = ready()
+      const drift: string[] = []
+
+      for (const family of GENERATED_FAMILIES) {
+        const slot = family.parts[0]
+        if (slot === undefined) continue
+        for (const option of GENERATED_FAMILY_SIZES[family.id] ?? []) {
+          const viaParent = solveTemplateFills(family, index, { ...ctx, position: option.tags })
+          /* The old route, rebuilt exactly: the position's tags as a `require` on
+             the slot itself, with no `parentTags` involved. */
+          const asRequire: AssemblyTemplate = {
+            ...family,
+            parts: [
+              {
+                ...slot,
+                tags: {
+                  ...slot.tags,
+                  require: [...(slot.tags.require ?? []), ...option.tags.map((tag) => ({ tag }))],
+                },
+              },
+            ],
+          }
+          const direct = solveTemplateFills(asRequire, index, ctx)
+          if (viaParent.fills[slot.name] !== direct.fills[slot.name]) {
+            drift.push(
+              `${family.id} / ${option.label}: ${String(viaParent.fills[slot.name])} vs ${String(direct.fills[slot.name])}`,
+            )
+          }
+        }
+      }
+
+      expect(drift).toEqual([])
     })
 
     /* --------------------------------------------------------- the scene scale */
