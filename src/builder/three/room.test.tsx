@@ -155,7 +155,7 @@ const { AO_RADIUS_MM, BuilderRoom, MEDIAN_TILE_MM } = await import('./BuilderRoo
 const { AO_RADIUS } = await import('@/three/Stage')
 const { VIEW_RADIUS } = await import('@/three/geometry')
 const { surfaceFit } = await import('./surface')
-const { fixtureAuthorities, planTools, sceneOf } = await import('./fixture')
+const { fixtureAuthorities, planHistory, planTools, sceneOf } = await import('./fixture')
 const { readFileSync } = await import('node:fs')
 const { join } = await import('node:path')
 
@@ -165,6 +165,13 @@ const CATALOG = planCatalogFromFile(fixtureCatalogFile())
    once for the file — eleven records, but `buildAssemblyIndex` is not free and
    nothing here mutates it. */
 const AUTHORITIES = fixtureAuthorities()
+/* The undo controls, likewise required and likewise built once. One recorder for
+   the file because the real screen calls `useHistory` once and hands the same
+   controls to the toolbar and to the surface — two rings over one room would
+   each record every edit and undo a different history of it. Nothing in this
+   file presses undo; the surface's `Ctrl`+`Z` is `gesture.test.tsx`'s subject and
+   the buttons are `panels.test.tsx`'s. */
+const HISTORY = planHistory()
 const ASSETS = { lod: 'https://objects.openforge.tools/lod' }
 
 function scene(ids: readonly string[]) {
@@ -210,6 +217,7 @@ describe('the room with an empty store — today’s real state', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.wall2])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -244,6 +252,7 @@ describe('the room with an empty store — today’s real state', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -266,6 +275,7 @@ describe('the room with an empty store — today’s real state', () => {
         catalog={CATALOG}
         scene={scene([])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={fetchImpl as unknown as typeof fetch}
@@ -299,6 +309,7 @@ describe('the armed family', () => {
         catalog={CATALOG}
         scene={scene([])}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={fetchImpl as unknown as typeof fetch}
@@ -322,6 +333,7 @@ describe('the armed family', () => {
         catalog={CATALOG}
         scene={drawn}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={fetchImpl as unknown as typeof fetch}
@@ -348,6 +360,7 @@ describe('when an object is there and broken', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={broken as unknown as typeof fetch}
@@ -375,6 +388,7 @@ describe('when the browser cannot decode meshopt', () => {
           catalog={CATALOG}
           scene={scene([FIXTURE_IDS.floor1])}
           tools={planTools()}
+          history={HISTORY}
           assets={ASSETS}
         fill={AUTHORITIES}
             fetchImpl={fetchImpl as unknown as typeof fetch}
@@ -401,6 +415,7 @@ describe('the room with a store object', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor1, FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={glbResponder()}
@@ -452,6 +467,7 @@ describe('the room with a store object', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={glbResponder()}
@@ -469,6 +485,7 @@ describe('the room with a store object', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2, FIXTURE_IDS.wall2, FIXTURE_IDS.angled])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={glbResponder()}
@@ -493,6 +510,7 @@ describe('what a click would place — row C5', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -522,6 +540,7 @@ describe('what a click would place — row C5', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools({ selectedTemplate: OTHER_FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -545,6 +564,7 @@ describe('what a click would place — row C5', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -560,6 +580,7 @@ describe('what a click would place — row C5', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1, FIXTURE_IDS.floor2])}
         tools={planTools({ selectedTemplate: FIXTURE_TEMPLATE })}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}
@@ -588,6 +609,7 @@ describe('the keyboard path exists in the document', () => {
         onEditSlots={() => undefined}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
       />,
     )
     await waitFor(() => {
@@ -606,6 +628,7 @@ describe('the keyboard path exists in the document', () => {
         fill={AUTHORITIES}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
       />,
     )
     await waitFor(() => {
@@ -624,6 +647,7 @@ describe('the keyboard path exists in the document', () => {
         catalog={CATALOG}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
+        history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
         fetchImpl={notFound}

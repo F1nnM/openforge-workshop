@@ -1,0 +1,69 @@
+/*
+  The selected piece's action bar.
+
+  Deliberately the **same plate treatment** as `.of-build-toolbar` in
+  `builder/panels/panels.css` — same border, radius, translucency, blur and
+  shadow — because the two are the same kind of object: chrome floating over the
+  work surface. A third surface treatment for a third floating thing is how a
+  design system stops being one.
+
+  What differs is only what has to: this one is anchored to a piece rather than
+  to the viewport, so it needs a pointer-events opt-in (its parent plate is
+  pointer-transparent) and a size cap for the slot editor it can expand to hold.
+*/
+
+.of-piece-actions {
+  /* drei's `<Html>` wrapper is positioned; this is the plate inside it. */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  max-width: 320px;
+  padding: 6px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg2) 92%, transparent);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 6px 18px -12px var(--scrim);
+  /* The bar is chrome over a 3D scene: it must take its own clicks even though
+     the canvas beneath it is the work surface. */
+  pointer-events: auto;
+  /* Above the two corner readout plates, which are the only other chrome the
+     stage floats. `<Html>`'s own `zIndexRange` handles the canvas itself. */
+  z-index: 3;
+}
+
+.of-piece-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.of-piece-actions-slots {
+  /* A recipe with five slots is taller than the stage at 720px, so the editor
+     scrolls inside the plate rather than growing past the viewport — the same
+     rule the bill column follows. */
+  max-height: 40vh;
+  overflow-y: auto;
+  /* Separated from the verbs by a rule rather than by space alone: the two are
+     different kinds of thing (actions, then properties) and 6px of gap does not
+     say so on a translucent plate. */
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .of-piece-actions {
+    backdrop-filter: none;
+    background: var(--bg2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .of-piece-actions {
+    /* Matches `.of-build-toolbar`'s note: a blur is not motion, but it is a
+       compositing effect users often disable alongside it. */
+    backdrop-filter: none;
+    background: var(--bg2);
+  }
+}

@@ -584,32 +584,130 @@ describe('turning', () => {
 
 /* ------------------------------------------------------------------- the hints */
 
+/**
+ * One line per {@link PlanActivity}, and the line is keyed to the *state* rather
+ * than to a tool the user set.
+ *
+ * The three modes are gone, and with them the three tests that asserted a mode's
+ * sentence. Two of those sentences were only ever reachable by a mode
+ * disagreeing with the state it was about — `place` with nothing armed asked for
+ * a template while claiming a click would place one, and `erase` named the piece
+ * under the pointer as the thing a click would delete without anything having
+ * chosen it. Neither state exists: the arming *is* the armed activity, and
+ * removal is `Delete` on a selection with undo behind it.
+ *
+ * So this block asserts one line per activity plus the off-plan pair, which is
+ * the whole reachable domain: `moving` outranks everything and is
+ * `describeMoveHint`'s own subject above.
+ */
 describe('the contextual line', () => {
   const scene = sceneOf(CATALOG, [{ tile: FIXTURE_IDS.floor1, x: 0, z: 0 }])
-  const base = { under: undefined, moving: undefined, onPlan: true, waiting: 0, unfilled: 0 } as const
+  const base = {
+    under: undefined,
+    selected: undefined,
+    moving: undefined,
+    onPlan: true,
+    waiting: 0,
+    unfilled: 0,
+  } as const
 
-  it('teaches the orbit when the pointer is off the plan', () => {
-    const hint = describeSurfaceHint({ ...base, tool: 'place', armed: FIXTURE_TEMPLATE, onPlan: false })
-    expect(hint).toMatch(/Drag to orbit/)
+  /** A base, whose name is its own rather than its family's — see `pieceName`. */
+  function aBase() {
+    const generated = buildPlanScene({}, LAID_OUT, createStyleResolver(LAID_OUT), {
+      [PlacementId.parse('g0')]: aGeneratedBase({ x: 6, z: 6 }),
+    })
+    const piece = generated.generated[0]
+    if (piece === undefined) throw new Error('the fixture built no generated base')
+    return piece
+  }
+
+  it('teaches the orbit when the pointer is off the plan, and says what is waiting', () => {
+    // Two lines and not one, because the gesture the user gets back when they
+    // return to the plan is different: an armed palette places, an empty one
+    // selects. A single "drag to orbit" would be true and useless.
+    const armed = describeSurfaceHint({ ...base, activity: 'armed', armed: FIXTURE_TEMPLATE, onPlan: false })
+    expect(armed).toMatch(/Drag to orbit/)
+    expect(armed).toMatch(/place the armed template/)
+
+    const idle = describeSurfaceHint({ ...base, activity: 'idle', armed: null, onPlan: false })
+    expect(idle).toMatch(/Drag to orbit/)
+    expect(idle).toMatch(/select a template/)
   })
 
-  it('asks for a template before it asks for a click', () => {
-    expect(describeSurfaceHint({ ...base, tool: 'place', armed: null })).toMatch(
-      /Choose a template in the palette/,
-    )
+  it('offers both gestures over an empty plan, because either one is next', () => {
+    // The line the deleted `place`-with-nothing-armed sentence was reaching for,
+    // said from a state that can actually be in: nothing armed, nothing
+    // selected, nothing under the pointer.
+    const hint = describeSurfaceHint({ ...base, activity: 'idle', armed: null })
+    expect(hint).toMatch(/Click a template to select it/)
+    expect(hint).toMatch(/choose one in the palette to place/)
   })
 
-  it('names the piece the erase gesture would take', () => {
+  it('names the piece a click would select', () => {
     const piece = scene.pieces[0]
-    const hint = describeSurfaceHint({ ...base, tool: 'erase', armed: null, under: piece })
-    expect(hint).toContain('click to remove')
+    if (piece === undefined) throw new Error('the fixture scene has no piece')
+    const hint = describeSurfaceHint({ ...base, activity: 'idle', armed: null, under: piece })
+    expect(hint).toBe(`Click to select ${describeTemplate(FIXTURE_TEMPLATE)}.`)
+  })
+
+  it('names the selection and the three verbs that act on it', () => {
+    // The line that replaced erase mode's. A verb is named because there is now
+    // an operand for it to act on, which is the whole of the change: `Delete`
+    // removes a piece the user chose rather than the one the pointer happens to
+    // be over.
+    const piece = scene.pieces[0]
+    if (piece === undefined) throw new Error('the fixture scene has no piece')
+    const hint = describeSurfaceHint({ ...base, activity: 'selected', armed: null, selected: piece })
+    expect(hint).toContain(`${describeTemplate(FIXTURE_TEMPLATE)} selected`)
+    expect(hint).toMatch(/Drag to move it/)
+    expect(hint).toMatch(/R turns it/)
+    expect(hint).toMatch(/Delete removes it/)
+  })
+
+  it('reads a selection whose piece has gone as idle, not as a prompt to arm', () => {
+    /*
+      **A real state, not a contradiction.** `activity` is `selected` because
+      `tools.selected` names a placement, and `selected` is `undefined` because
+      `resolveSelection` looked that id up in the current scene and did not find
+      it — which is exactly what a Clear or an undo leaves behind for one render.
+
+      The line that used to come out was *"choose a template in the palette"*,
+      because the selected branch fell through to the armed one. That answers a
+      question about arming which the user did not ask, at the moment their
+      selection vanished. The idle line is the true one: there is nothing
+      selected any more.
+    */
+    const hint = describeSurfaceHint({ ...base, activity: 'selected', armed: null, selected: undefined })
+    expect(hint).toContain('Click a template to select it')
+    expect(hint).not.toMatch(/palette, then click/)
+  })
+
+  it('keeps the selection above a hover, because that is what the keys act on', () => {
+    /* The precedence `edits.ts` argues for, asserted with the two pieces
+       distinguishable: the pointer may be anywhere while `Delete` and `R` still
+       mean the selected piece, so a line naming the hovered one would describe a
+       gesture the keys are not about. A generated base is the hovered piece
+       because `pieceName` gives it a name of its own — two instances of one
+       family are named identically and could not tell these two lines apart. */
+    const selected = scene.pieces[0]
+    if (selected === undefined) throw new Error('the fixture scene has no piece')
+    const hovered = aBase()
+    const hint = describeSurfaceHint({
+      ...base,
+      activity: 'selected',
+      armed: null,
+      selected,
+      under: hovered,
+    })
+    expect(hint).toContain(`${describeTemplate(FIXTURE_TEMPLATE)} selected`)
+    expect(hint).not.toContain(hovered.name)
   })
 
   it('counts outlined parts rather than outlined placements', () => {
     // Parts, because a plate is drawn per part: a three-part template with one
     // converted file is two outlines, and a count of placements would say "1"
     // about two things on screen.
-    const waiting = describeSurfaceHint({ ...base, tool: 'place', armed: FIXTURE_TEMPLATE, waiting: 2 })
+    const waiting = describeSurfaceHint({ ...base, activity: 'armed', armed: FIXTURE_TEMPLATE, waiting: 2 })
     expect(waiting).toMatch(/2 placed parts have no mesh yet/)
   })
 
@@ -619,7 +717,7 @@ describe('the contextual line', () => {
     // fresh room, so the precedence is a real choice rather than a fallthrough.
     const hint = describeSurfaceHint({
       ...base,
-      tool: 'place',
+      activity: 'armed',
       armed: FIXTURE_TEMPLATE,
       waiting: 2,
       unfilled: 1,
@@ -634,10 +732,21 @@ describe('the contextual line', () => {
   })
 
   it('quotes the armed family’s own rotation step in the plain case', () => {
-    const hint = describeSurfaceHint({ ...base, tool: 'place', armed: FIXTURE_TEMPLATE })
+    const hint = describeSurfaceHint({ ...base, activity: 'armed', armed: FIXTURE_TEMPLATE })
     expect(hint).toContain('Click to place')
     expect(hint).toContain(describeTemplate(FIXTURE_TEMPLATE))
     expect(hint).toContain(String(ARMED_TURN_STEP_DEG))
+  })
+
+  it('ignores a hover while something is armed, because a click places either way', () => {
+    // The armed gestures table: a click on an existing piece *also* places, so
+    // the line must not start describing a selection that arming has already
+    // made impossible.
+    const piece = scene.pieces[0]
+    if (piece === undefined) throw new Error('the fixture scene has no piece')
+    const hint = describeSurfaceHint({ ...base, activity: 'armed', armed: FIXTURE_TEMPLATE, under: piece })
+    expect(hint).toContain('Click to place')
+    expect(hint).not.toContain('select')
   })
 })
 

@@ -95,13 +95,14 @@ import type {
   ConflictKind,
   MoveDrag,
   MovePreview,
+  PlanActivity,
   PlanBox,
   PlanCatalog,
   PlanPart,
+  PlanPiece,
   PlanPoint,
   PlanScene,
   PlanStyle,
-  PlanTool,
   ScenePiece,
   SnapMode,
 } from '@/builder/canvas'
@@ -350,8 +351,15 @@ const CANDIDATE_ID = 'candidate:not-placed' as PlacementId
  * answer: there is no geometry to collide.
  */
 export interface PlacementProjection {
-  /** The candidate as the scene would draw it, or `undefined` if it draws nothing. */
-  readonly piece: ScenePiece | undefined
+  /**
+   * The candidate as the scene would draw it, or `undefined` if it draws nothing.
+   *
+   * A {@link PlanPiece} and not a `ScenePiece`: the candidate is built from one
+   * `TemplateInstance`, so `buildPlanScene` can only put it in the catalog list.
+   * Widening it to the union would cost every caller a `kind` guard for a branch
+   * that cannot be reached.
+   */
+  readonly piece: PlanPiece | undefined
   /** Every scene piece the candidate lands on, exact or not. For the drawing. */
   readonly overlaps: readonly ScenePiece[]
   /** The subset of {@link overlaps} that **refuses** the placement. */
@@ -735,7 +743,8 @@ export interface SurfaceStatus {
   readonly cursor: PlanPoint
   readonly snap: SnapMode
   readonly step: number
-  readonly tool: PlanTool
+  /** What the builder is doing. See {@link SurfaceHintInput.activity}. */
+  readonly activity: PlanActivity
   readonly hint: string
   readonly selectedName: string | null
   readonly refusal: string | null
@@ -745,9 +754,31 @@ export interface SurfaceStatus {
 }
 
 export interface SurfaceHintInput {
-  readonly tool: PlanTool
+  /**
+   * What the builder is doing — `PlanActivity`, not a tool the user set.
+   *
+   * The three modes this replaced could each disagree with the state they were
+   * about: `place` with nothing armed said *"click to place"* over a palette
+   * with no selection, and `move` with nothing under the pointer said *"drag a
+   * template"* over bare ground. An activity derived from what is armed or
+   * selected cannot say either.
+   */
+  readonly activity: PlanActivity
   /** The armed family, or `null` when the palette has nothing selected. */
   readonly armed: TemplateId | null
+  /** The selected piece, resolved against the scene, or `undefined`. */
+  readonly selected: ScenePiece | undefined
+  /**
+   * The pieces an armed placement would be refused by, or `undefined`.
+   *
+   * **Named rather than counted, and it is the one line here that names.** Every
+   * other count in this readout is a count for `overlapTail`'s reason — four
+   * tile names is not a readout. A refusal is different in kind: it is the one
+   * message that tells the user *nothing happened*, and `overlap.ts` warns that
+   * a block with no stated cause costs them *"a tile they cannot place and no
+   * way to find out why"*. So this line answers the why, before the press.
+   */
+  readonly blocked?: readonly ScenePiece[] | undefined
   readonly under: ScenePiece | undefined
   readonly moving: MovePreview | undefined
   /** `false` while the pointer is off the plan — orbited past the horizon, or outside. */
@@ -797,26 +828,48 @@ export interface SurfaceHintInput {
  * asserting something it does not know.
  */
 export function describeSurfaceHint(input: SurfaceHintInput): string {
-  const { tool, armed, under, moving, onPlan, waiting, unfilled } = input
+  const { activity, armed, selected, under, moving, onPlan, waiting, unfilled, blocked } = input
 
   // A piece in the air outranks everything: nothing else on screen is what the
   // user is doing.
   if (moving !== undefined) return describeMoveHint(moving)
-  if (!onPlan) return 'Drag to orbit. Point at the plan to place or remove a template.'
-
-  if (tool === 'move') {
-    return under === undefined
-      ? 'Move: drag a template to reposition it. Drag anywhere else to orbit.'
-      : `Move: drag ${pieceName(under)} to reposition it.`
+  if (!onPlan) {
+    return activity === 'armed'
+      ? 'Drag to orbit. Point at the plan to place the armed template.'
+      : 'Drag to orbit. Point at the plan to select a template.'
   }
-  if (tool === 'erase') {
+
+  // A selection outranks a hover, because it is what the verbs act on: the
+  // pointer may be anywhere while `Delete` and `R` still mean the selected
+  // piece, and a line that named the hovered one would be describing a gesture
+  // the keys are not about.
+  if (activity === 'selected' && selected !== undefined) {
+    return `${pieceName(selected)} selected. Drag to move it, R turns it, Delete removes it.`
+  }
+  // `selected === undefined` while the activity says `selected` is a real state
+  // and not a contradiction: `tools.selected` names a placement a Clear or an
+  // undo has removed, and `resolveSelection` correctly answers `null` for it.
+  // Reading it as idle is the honest line — there is nothing selected any more —
+  // and the alternative is falling through to *"choose a template in the
+  // palette"*, which answers a question about arming that the user did not ask.
+  if (activity === 'idle' || activity === 'selected') {
     return under === undefined
-      ? 'Erase: click a template to remove it.'
-      : `Erase: click to remove ${pieceName(under)}.`
+      ? 'Click a template to select it, or choose one in the palette to place. Drag to orbit.'
+      : `Click to select ${pieceName(under)}.`
   }
   if (armed === null) return 'Choose a template in the palette, then click the plan to place it.'
 
   const name = describeTemplate(armed)
+  // Above `unfilled` and `waiting`, because those two describe the *room* and
+  // this describes what the next click will do — or rather will not do. A line
+  // about five other instances' missing parts, shown over a cell the user
+  // cannot place in, would be answering a question they did not ask.
+  const blocker = blocked?.[0]
+  if (blocker !== undefined) {
+    const where = describeCell(blocker.placement.x, blocker.placement.z)
+    const more = blocked !== undefined && blocked.length > 1 ? ` and ${String(blocked.length - 1)} more` : ''
+    return `${pieceName(blocker)} at ${where}${more} is in the way. ${name} will not place here.`
+  }
   if (unfilled > 0) {
     return (
       `${unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts the ` +
@@ -847,12 +900,15 @@ export function describeSurface(scene: PlanScene, waiting: number): string {
   if (placed === 0) {
     return 'An empty plan in 3D. Drag to orbit; click to place the armed template.'
   }
+  // Counts both kinds. A blocking conflict cannot be *created* any more, but a
+  // room saved before the refusal landed can still hold one, and a label that
+  // stopped mentioning them would make an old room's hatching unexplained.
   const conflict = scene.conflicts.size === 0 ? '' : `, ${String(scene.conflicts.size)} overlapping`
   const pending = waiting === 0 ? '' : `, ${String(waiting)} ${waiting === 1 ? 'part' : 'parts'} awaiting a mesh`
   const empty =
     scene.unfilled.length === 0 ? '' : `, ${String(scene.unfilled.length)} with no parts chosen`
   return (
     `${String(placed)} placed ${placed === 1 ? 'template' : 'templates'} in 3D${conflict}${empty}${pending}. ` +
-    'Drag to orbit; click to place or remove.'
+    'Drag to orbit; click a template to select it.'
   )
 }

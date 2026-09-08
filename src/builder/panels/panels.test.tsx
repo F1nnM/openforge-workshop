@@ -55,7 +55,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AssemblyIndex, BillOfTiles } from '@/assembly'
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import { usePlanTools } from '@/builder/canvas'
+import type { UndoControls } from '@/builder/canvas/useHistory'
 import type { SurfaceStatus } from '@/builder/three'
+/* The `UndoControls` recorder, from the surface's fixture rather than a second
+   copy here: the toolbar and the surface are handed the *same* controls by the
+   screen, so a test double that drifted between the two directories would be
+   asserting against a shape neither of them takes. It is a test module and
+   reaches no renderer — `panels/boundary.test.ts` walks production entries. */
+import { planHistory } from '@/builder/three/fixture'
 import type { CatalogFile, DesignId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, resolveTags, selectVariant } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
@@ -112,6 +119,15 @@ import { DownloadAction } from './DownloadAction'
  * record a bill line names, which blob a thumb loads.
  */
 const design = (key: keyof typeof FIXTURE_DESIGNS): DesignId => FIXTURE_DESIGNS[key] as DesignId
+
+/**
+ * A placement id for the selection {@link PaletteHarness} opens with.
+ *
+ * It names nothing in the store on purpose: what the palette does to a selection
+ * is drop it, and dropping it does not require it to resolve. `usePlanTools`
+ * holds a bare id and `selection.ts` is what looks one up against a scene.
+ */
+const SELECTED_PIECE = 'p0' as PlacementId
 
 let file: CatalogFile
 let index: CatalogIndex
@@ -194,9 +210,17 @@ function placementCount(): number {
  * `forgetRecentFamilies()` runs in this file's `beforeEach`: the RECENT ring is
  * module-level session state (`palette.ts` argues why it is not in the store), so
  * a family armed by one test would still be in it for the next.
+ *
+ * **It opens with a piece selected, which is not idle scenery.** The harness used
+ * to open in `erase` so that arming could be shown to force `place`; there are no
+ * modes to force, and what took that assertion's place is the invariant that
+ * replaced them — arming from the palette *clears the selection*, because both
+ * states claim the primary button and `usePlanTools` holds at most one of them.
+ * So the readouts below are `activity` and `selected` rather than `tool`, and
+ * every arming assertion checks the selection went with it.
  */
 function PaletteHarness({ query = '' }: { query?: string }) {
-  const tools = usePlanTools({ tool: 'erase' })
+  const tools = usePlanTools({ selected: SELECTED_PIECE })
   return (
     <div>
       <PalettePanel
@@ -210,7 +234,8 @@ function PaletteHarness({ query = '' }: { query?: string }) {
           screen is the same fact rendered by the panel; this is the fact the 3D
           surface reads to solve the fills, and the two must not diverge. */}
       <p data-testid="armed-size">{tools.armedSize.join(' ') || 'any'}</p>
-      <p data-testid="tool">{tools.tool}</p>
+      <p data-testid="activity">{tools.activity}</p>
+      <p data-testid="selected-piece">{tools.selected ?? 'none'}</p>
     </div>
   )
 }
@@ -415,7 +440,7 @@ describe('the palette', () => {
     ).toBeInTheDocument()
   })
 
-  it('arms a family, writes it to the tool state and forces place mode', () => {
+  it('arms a family, writes it to the tool state and drops the selection', () => {
     // **Row A8's reduction, undone.** The panel wrote nothing to `PlanTools`
     // because a `DesignId` in `selectedTemplate` would report every placement
     // `unknown-template`; a family id is what the surface places.
@@ -423,14 +448,19 @@ describe('the palette', () => {
 
     expect(armedRow()).toBe('none')
     expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
-    expect(screen.getByTestId('tool')).toHaveTextContent('erase')
+    expect(screen.getByTestId('activity')).toHaveTextContent('selected')
 
     fireEvent.click(row('Wall: Straight (Separate Wall)'))
 
     expect(screen.getByTestId('selected-template')).toHaveTextContent('wall-straight-separate-wall')
     expect(armedRow()).toContain('Wall: Straight (Separate Wall)')
-    // §3: "Sets the active tile and forces place mode."
-    expect(screen.getByTestId('tool')).toHaveTextContent('place')
+    /* §3 said "forces place mode"; there is no mode to force, and this is what
+       the sentence meant all along — a press on a palette row is the user saying
+       the primary button now places, so whatever else was claiming it lets go.
+       Asserted from both ends: the activity is a reading and the id is the fact
+       behind it, and a panel that armed without calling `arm` would keep one. */
+    expect(screen.getByTestId('activity')).toHaveTextContent('armed')
+    expect(screen.getByTestId('selected-piece')).toHaveTextContent('none')
   })
 
   it('disarms when the armed row is pressed again', () => {
@@ -742,7 +772,7 @@ describe('the pre-selection handoff', () => {
     return view
   }
 
-  it('arms the family the drawer sent, at the size it sent, and forces place mode', () => {
+  it('arms the family the drawer sent, at the size it sent, and drops the selection', () => {
     // Exactly what `TileDrawer`'s action does, in its order: post the arm, then
     // navigate — the navigation being this render. It used to post an item and
     // seed the palette's search with its name, because the list was the archive;
@@ -760,8 +790,10 @@ describe('the pre-selection handoff', () => {
     expect(screen.getByTestId('selected-template')).toHaveTextContent('floor-straight')
     expect(armedRow()).toContain('Floor: Straight')
     expect(armedSize()).toBe('1 wide by 1 deep, 2 tiles')
-    // The harness opens in `erase`; arming forces `place`, as a click does.
-    expect(screen.getByTestId('tool')).toHaveTextContent('place')
+    // The harness opens with a piece selected; a handoff arms through the same
+    // `arm` a click does, so it drops the selection exactly as a click does.
+    expect(screen.getByTestId('activity')).toHaveTextContent('armed')
+    expect(screen.getByTestId('selected-piece')).toHaveTextContent('none')
   })
 
   it('claims the handoff once, so a re-mount does not re-arm a family the user disarmed', () => {
@@ -776,7 +808,8 @@ describe('the pre-selection handoff', () => {
     first.unmount()
     mountPalette()
     expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
-    expect(screen.getByTestId('tool')).toHaveTextContent('erase')
+    // Nothing armed, so the fresh mount is back on the selection it opened with.
+    expect(screen.getByTestId('activity')).toHaveTextContent('selected')
   })
 
   it('takes the second press when two arrive with no claim between them', () => {
@@ -801,7 +834,9 @@ describe('the pre-selection handoff', () => {
     mountPalette()
 
     expect(screen.getByTestId('selected-template')).toHaveTextContent('none')
-    expect(screen.getByTestId('tool')).toHaveTextContent('erase')
+    // And nothing armed means nothing was dropped either: a handoff the palette
+    // refuses must not take the user's selection with it.
+    expect(screen.getByTestId('activity')).toHaveTextContent('selected')
     // Claimed all the same: a handoff this palette will not act on must not sit
     // in the box waiting to arm the next mount.
     expect(useSelectionStore.getState().pending).toBeNull()
@@ -960,7 +995,17 @@ describe('the two-sided item', () => {
 
 /* -------------------------------------------------------------- the toolbar */
 
-function ToolbarHarness({ moving }: { moving?: string }) {
+/**
+ * The undo controls for every toolbar test that is not about undo.
+ *
+ * Both stacks report available, which is what keeps the Rotate / Clear / snap
+ * assertions below reading a bar in its ordinary state rather than one with two
+ * disabled buttons on the left. A test whose subject *is* undo passes its own
+ * recorder, so it can read `calls`.
+ */
+const INERT_HISTORY = planHistory()
+
+function ToolbarHarness({ moving, history }: { moving?: string; history?: UndoControls }) {
   const tools = usePlanTools()
   const placements = usePlacements()
   const placed = Object.keys(placements).length
@@ -981,7 +1026,7 @@ function ToolbarHarness({ moving }: { moving?: string }) {
           cursor: [0, 0],
           snap: tools.snap,
           step: tools.step,
-          tool: tools.tool,
+          activity: tools.activity,
           hint: '',
           selectedName: null,
           refusal: null,
@@ -991,7 +1036,7 @@ function ToolbarHarness({ moving }: { moving?: string }) {
         }
   return (
     <div>
-      <button type="button" onClick={() => tools.setSelectedTemplate(ONE_SLOT_TEMPLATE_ID)}>
+      <button type="button" onClick={() => tools.arm(ONE_SLOT_TEMPLATE_ID)}>
         arm
       </button>
       <PlanToolbar
@@ -999,6 +1044,7 @@ function ToolbarHarness({ moving }: { moving?: string }) {
         status={status}
         armedStep={armedStep}
         placed={placed}
+        history={history ?? INERT_HISTORY}
         onClear={() => {
           useWorkshopStore.setState({ placements: {} })
         }}
@@ -1045,24 +1091,69 @@ describe('the toolbar', () => {
     expect(placementCount()).toBe(0)
   })
 
-  it('switches between place and erase', () => {
+  /**
+   * The two buttons that took the mode toggle's place, and the substitution is
+   * why they are tested here rather than only in `history.test.ts`.
+   *
+   * `Place` / `Erase` / `Move` are **gone**, and so are the two tests that
+   * pressed them — one asserted the toggle swapped `place` for `erase`, the
+   * other that `Move` came up and the other two went down. Both were assertions
+   * about a mode, and there is no mode: what the primary button means is a
+   * reading of what is armed or selected. The reason that is *safe* for the
+   * destructive verb the `Erase` mode used to guard is undo, so undo is what
+   * this bar gained, and these are its tests.
+   */
+  it('offers undo and redo where the three modes were', () => {
     render(<ToolbarHarness />)
-    fireEvent.click(screen.getByRole('button', { name: 'Erase' }))
-    expect(screen.getByRole('button', { name: 'Erase' })).toHaveAttribute('data-pressed')
+
+    expect(screen.getByRole('button', { name: /^Undo/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Redo/ })).toBeInTheDocument()
+    // The names the deleted toggle went by. Queried rather than reasoned about,
+    // so re-adding any of them fails here.
+    for (const mode of ['Place', 'Erase', 'Move']) {
+      expect(screen.queryByRole('button', { name: mode })).toBeNull()
+    }
   })
 
-  it('offers Move as a third mode, and only one mode is ever up', () => {
-    // PR #29 refused a move because a drag on the primary button is already
-    // drag-paint. A mode removes the ambiguity rather than arbitrating it; the
-    // canvas's Shift-drag is the same operation without the mode switch.
-    render(<ToolbarHarness />)
-    fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-    expect(screen.getByRole('button', { name: 'Move' })).toHaveAttribute('data-pressed')
-    expect(screen.getByRole('button', { name: 'Place' })).not.toHaveAttribute('data-pressed')
-    expect(screen.getByRole('button', { name: 'Erase' })).not.toHaveAttribute('data-pressed')
+  it('disables each button when its own stack is empty', () => {
+    // Independently, and both directions of each: a bar that disabled the pair
+    // together would hide a redo the user has and offer an undo they do not.
+    render(<ToolbarHarness history={planHistory({ canUndo: false })} />)
+    expect(screen.getByRole('button', { name: /^Undo/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Redo/ })).toBeEnabled()
+
+    cleanup()
+    render(<ToolbarHarness history={planHistory({ canRedo: false })} />)
+    expect(screen.getByRole('button', { name: /^Undo/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /^Redo/ })).toBeDisabled()
   })
 
-  it('names the piece in the air, which a Shift-drag move leaves no mode to show', () => {
+  it('says why a disabled button is disabled, rather than only looking dead', () => {
+    // The clipped half of the label. A `disabled` button with no reason on it is
+    // the state a screen-reader user cannot tell from a broken one.
+    render(<ToolbarHarness history={planHistory({ canUndo: false, canRedo: false })} />)
+    expect(screen.getByRole('button', { name: /nothing to undo/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /nothing to redo/i })).toBeInTheDocument()
+  })
+
+  it('calls through to the ring, one call per press', () => {
+    // The wire, and it is worth asserting because the toolbar takes the controls
+    // as a prop precisely so that its buttons and the canvas's Ctrl+Z walk one
+    // ring: a bar that built its own would undo a different history.
+    const history = planHistory()
+    render(<ToolbarHarness history={history} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Undo/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Redo/ }))
+
+    expect(history.calls).toEqual({ undo: 1, redo: 2 })
+  })
+
+  it('names the piece in the air, which nothing else on the bar can see', () => {
+    // A piece mid-carry is ephemeral component state inside the surface that no
+    // store write has happened for yet — so the readout is the only place it is
+    // visible, and it is the one editing state undo cannot describe either.
     render(<ToolbarHarness moving="Cut stone wall 2" />)
     expect(screen.getByText(/moving Cut stone wall 2/)).toBeInTheDocument()
   })

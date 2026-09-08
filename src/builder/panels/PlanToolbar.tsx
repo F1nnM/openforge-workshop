@@ -2,24 +2,27 @@
  * The floating toolbar — design-contract.md §2.4's centred plate at the top of
  * the canvas.
  *
- * `Place` / `Erase` / `Move`, `⟳ Rotate`, `Clear`, and a mono `snap {value}`
- * readout.
+ * `↶ Undo`, `↷ Redo`, `⟳ Rotate`, `Clear`, and a mono `snap {value}` readout.
  *
- * ## The third mode
+ * ## There is no mode toggle, and undo is what replaced it
  *
- * §2.4's toggle names two modes. `Move` is the third, and it is here because
- * PR #29's objection to a move was a *gesture* objection — on the plan view the
- * primary button was already drag-paint — which a mode answers without
- * arbitrating anything. The surface also takes `Shift` with the primary button as
- * a move in any mode, so this control is the discoverable path rather than the
- * only one; `M` is its shortcut, beside the existing `P` and `E`. (Row **R4**
- * deleted the drag-paint renderer that raised the objection. The mode is the
- * better answer either way, and the 3D surface has no drag-paint at all — its
- * drag is the orbit, which `three/surface.ts` sets out.)
+ * §2.4 specified a `Place` / `Erase` toggle and a `Move` mode was added beside
+ * it. All three are **deleted**. They were the only control here that changed
+ * what the primary button meant, and what the primary button means is now a
+ * function of what is armed or selected — `usePlanTools.ts` carries the whole
+ * argument, and `selection.ts#pressMeaning` is the function.
  *
- * A `Shift`-drag move leaves this toggle showing `Place`, which is why the
- * readout below reports `status.moving`: a piece in the air with no mode to show
- * it would be the one editing state the toolbar could not see.
+ * Undo and redo take their place, and the substitution is not arbitrary.
+ * `Erase` was a mode on a *destructive* verb, which is the one case the mode
+ * literature says not to mode-switch, because a slip destroys work. Removing a
+ * piece is now `Delete` on a deliberately chosen selection, and what makes that
+ * safe rather than merely different is that it can be taken back. The toolbar
+ * gained the control the mode was standing in for.
+ *
+ * The readout below still reports `status.moving`, and now for a better reason
+ * than it had: a piece in the air is ephemeral component state that no store
+ * write has happened for yet, so it is the one editing state nothing else on
+ * this bar can see.
  *
  * ## Snap offers 0.5 and 1.0, and there is no 0.25
  *
@@ -48,22 +51,33 @@
  *
  * ## `role="group"`, not `role="toolbar"`
  *
- * A `toolbar` promises arrow-key movement between its controls with one tab stop.
- * Implementing that around a Base UI `ToggleGroup` — which already owns arrow
- * keys inside itself — would mean two composites fighting over the same keys, and
- * the WAI pattern's own guidance is not to nest them. Four tab stops with a
- * labelled group is the honest markup, and the canvas's own key map (`R`, `P`,
- * `E`, `G`) is the fast path for anyone who wants one.
+ * A `toolbar` promises arrow-key movement between its controls with one tab
+ * stop. The `ToggleGroup` that made nesting two composites the problem is gone,
+ * but the answer is unchanged and for a simpler reason: these are four ordinary
+ * buttons, a labelled group is the honest markup for them, and the canvas's own
+ * key map (`R`, `G`, `Ctrl`+`Z`, `Delete`) is the fast path for anyone who wants
+ * one. Promising arrow keys here would also collide with the arrow keys the
+ * surface uses to nudge a selection.
  */
 import type { PlanTools } from '@/builder/canvas'
 import { formatUnits } from '@/builder/canvas'
+import type { UndoControls } from '@/builder/canvas/useHistory'
 import type { SurfaceStatus } from '@/builder/three'
-import { Button, ToggleGroup, ToggleItem, VisuallyHidden } from '@/ui/primitives'
+import { Button, VisuallyHidden } from '@/ui/primitives'
 
 import './panels.css'
 
 export interface PlanToolbarProps {
   readonly tools: PlanTools
+  /**
+   * Undo and redo, handed in rather than taken with `useHistory()`.
+   *
+   * The hook keeps its ring in a ref and subscribes to the store, so a second
+   * caller would build a second ring: the toolbar's buttons and the canvas's
+   * `Ctrl`+`Z` would then walk two independent histories of the same room. One
+   * caller, one ring, passed to everything that offers the verb.
+   */
+  readonly history: UndoControls
   /**
    * The work surface's readout. `null` until it has reported once.
    *
@@ -93,26 +107,46 @@ function stepLabel(step: number): string {
   return step === 1 ? 'one unit' : 'half a unit'
 }
 
-export function PlanToolbar({ tools, status, armedStep, placed, onClear }: PlanToolbarProps) {
+export function PlanToolbar({ tools, status, armedStep, placed, history, onClear }: PlanToolbarProps) {
   const step = armedStep
   const conflicts = status?.conflicts ?? 0
 
   return (
     <div className="of-build-toolbar" role="group" aria-label="Builder tools">
-      <ToggleGroup
-        label="Tool"
-        value={tools.tool}
-        onValueChange={(next) => {
-          // Always one mode: Base UI reports `null` when the pressed item is
-          // pressed again, and a builder with neither tool up would swallow every
-          // click on the canvas.
-          if (next !== null) tools.setTool(next)
+      {/*
+        The `Place` / `Erase` / `Move` toggle is **gone**, not moved. It was the
+        one control on this toolbar that changed what the primary button meant,
+        and all three of its modes are now readings of what is armed or selected
+        rather than settings beside them — see `usePlanTools.ts`. What replaced
+        it in this bar is undo and redo, which is the control the modes were
+        standing in for: `Erase` existed so a click could destroy, and the reason
+        that is safe now is that it can be taken back.
+      */}
+      <Button
+        size="sm"
+        disabled={!history.canUndo}
+        onClick={() => {
+          history.undo()
         }}
       >
-        <ToggleItem value="place">Place</ToggleItem>
-        <ToggleItem value="erase">Erase</ToggleItem>
-        <ToggleItem value="move">Move</ToggleItem>
-      </ToggleGroup>
+        <span aria-hidden="true">↶</span>
+        <span>Undo</span>{' '}
+        <VisuallyHidden>{history.canUndo ? 'the last change, shortcut Control Z' : '— nothing to undo'}</VisuallyHidden>
+      </Button>
+
+      <Button
+        size="sm"
+        disabled={!history.canRedo}
+        onClick={() => {
+          history.redo()
+        }}
+      >
+        <span aria-hidden="true">↷</span>
+        <span>Redo</span>{' '}
+        <VisuallyHidden>
+          {history.canRedo ? 'the change just undone, shortcut Control Shift Z' : '— nothing to redo'}
+        </VisuallyHidden>
+      </Button>
 
       <Button
         size="sm"

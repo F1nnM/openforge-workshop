@@ -23,9 +23,11 @@
  *
  * ## The four things this screen actually decides
  *
- *   1. **`usePlanTools()` is called once.** Mode, snap, pending rotation and the
- *      palette selection are one object shared by the palette, the toolbar and
- *      the surface — all three write to it. Two hooks would be two builders.
+ *   1. **`usePlanTools()` is called once.** Snap, the pending rotation, the
+ *      armed family and the selection are one object shared by the palette, the
+ *      toolbar and the surface — all three write to it. Two hooks would be two
+ *      builders. `useHistory()` is called once for the same reason and it is a
+ *      sharper one: two rings would each record the other's undos.
  *   2. **The bill is a projection of the store, not a copy.** `usePlacements()`
  *      feeds `buildBillOfTiles`, and the surface reads the same map through the
  *      same scene. Neither holds state of its own, so the room and the parts list
@@ -107,6 +109,7 @@ import { getRouteApi } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
+import type { ScenePiece } from '@/builder/canvas'
 import {
   buildPlanScene,
   createStyleResolver,
@@ -115,6 +118,7 @@ import {
   templateSlotLayout,
   usePlanTools,
 } from '@/builder/canvas'
+import { useHistory } from '@/builder/canvas/useHistory'
 import {
   BackupPanel,
   BillPanel,
@@ -124,7 +128,7 @@ import {
   useArchiveDownload,
 } from '@/builder/panels'
 import type { SlotEditTarget } from '@/builder/panels/slots'
-import { SlotsPanel } from '@/builder/panels/slots'
+import { SlotEditor, SlotsPanel } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 import type { SurfaceStatus } from '@/builder/three'
 // Deep, and not through the barrel: `@/builder/three/index.ts` exports only
@@ -283,6 +287,16 @@ function Builder({ index }: { index: CatalogIndex }) {
 
   // Once, and handed to three components. See the module note.
   const tools = usePlanTools()
+  /**
+   * Undo and redo — **called once, here**, for `usePlanTools`' own reason.
+   *
+   * The hook holds its ring in a `useRef` and subscribes to the store, so every
+   * call site is an independent history of the same room. Two would mean the
+   * toolbar's buttons and the canvas's `Ctrl`+`Z` walking different stacks, each
+   * recording the other's undos. One call, threaded to both.
+   */
+  const history = useHistory()
+
 
   const assembly = useMemo(() => buildAssemblyIndex(index.file), [index])
 
@@ -346,6 +360,47 @@ function Builder({ index }: { index: CatalogIndex }) {
      are about the templates this screen can actually place — if the two ever
      diverge, the control must follow the table the bill and the solver use. */
   const designRecipes = useMemo(() => [...recipes.values()], [recipes])
+
+  /**
+   * The slot editor for whichever piece the surface has selected.
+   *
+   * **Composed here because it cannot be composed there.** The editor now lives
+   * on the action bar floating over the selected piece, which is in
+   * `builder/three` — and `builder/panels/boundary.test.ts` keeps a line that
+   * package must not cross to reach `builder/panels/slots`. So the surface takes
+   * a render prop and this screen, which already imports both sides, fills it.
+   *
+   * Four `undefined` returns and none of them is defensive:
+   *
+   *   - a **generated base** has no template and no slots to edit;
+   *   - a placement the store no longer holds, which a selection can outlive for
+   *     one render after an undo;
+   *   - a family this build has no recipe for — C1 measured all 51 of B4's
+   *     generated families reporting `unknown-template`, so this is a population
+   *     rather than an edge case.
+   *
+   * In each case the bar shows its two verbs and disables the third, which is
+   * `PieceActionsBar`'s own behaviour for an absent editor.
+   */
+  const renderSlots = useCallback(
+    (piece: ScenePiece, close: () => void) => {
+      if (piece.kind !== 'catalog') return null
+      const instance = placements[piece.id]
+      if (instance === undefined) return null
+      const recipe = templates(instance.template)
+      if (recipe === undefined) return null
+      return (
+        <SlotEditor
+          catalog={index.file}
+          index={assembly}
+          instance={instance}
+          template={recipe}
+          onClose={close}
+        />
+      )
+    },
+    [placements, templates, index.file, assembly],
+  )
   /**
    * **Row B2's slot conventions, wired.** The one thing the canvas cannot see.
    *
@@ -646,6 +701,7 @@ function Builder({ index }: { index: CatalogIndex }) {
         <div className="of-builder-toolbar-slot">
           <PlanToolbar
             tools={tools}
+            history={history}
             status={status}
             /*
               The step, not the record — row A4b's answer, taken rather than
@@ -734,6 +790,8 @@ function Builder({ index }: { index: CatalogIndex }) {
           catalog={planCatalog}
           scene={scene}
           tools={tools}
+          history={history}
+          renderSlots={renderSlots}
           assets={index.file.assets}
           /*
             Row **C5**: the three authorities the click's fill solve needs, and
