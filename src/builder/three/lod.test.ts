@@ -185,10 +185,12 @@ describe('the corpus this store exists for', () => {
   const file = emittedCatalog()
 
   it.runIf(file !== null)('states the LOD base in the index, so nothing has to derive it', () => {
-    // tools/lod/catalog.ts reconstructs this base by swapping the last path
-    // segment of `assets.models`, with a docblock asking for the field. The
-    // field is here — that derivation is now a redundant inference.
-    expect(file?.assets.lod).toBe('https://objects.openforge.tools/lod')
+    // The store is served from this project's own bucket, not upstream's, so
+    // the index states a host `assets.models` cannot be used to derive. This
+    // row never derived it — LOD_GLB_URL is host-agnostic on purpose — which
+    // is why the move cost the consumer nothing.
+    expect(file?.assets.lod).toBe('https://bucket-openforge-workshop.mfinn.de/lod')
+    expect(new URL(file?.assets.lod ?? '').origin).not.toBe(new URL(file?.assets.models ?? '').origin)
     expect(LOD_GLB_URL.test(lodGlbUrl({ lod: file?.assets.lod ?? '' }, BLOB))).toBe(true)
   })
 

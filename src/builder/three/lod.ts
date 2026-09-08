@@ -179,14 +179,18 @@ export class LodUrlError extends Error {
 /**
  * The store object's URL for a content address.
  *
- * Reads `assets.lod` directly. That field **now exists** —
- * `src/catalog/schema.ts`'s `CatalogAssets` carries it and `pipeline/version.ts`
- * emits `https://objects.openforge.tools/lod` — which is worth noting because
- * `tools/lod/catalog.ts` still reconstructs the same base by swapping the last
- * path segment of `assets.models`, with a docblock saying row X4 should add the
- * field. It has been added. That derivation is now a redundant inference over a
- * value the index states, and removing it is a one-line change in a file this
- * row does not own.
+ * Reads `assets.lod` directly, and reads it as **an origin this row must not
+ * assume anything about**. `pipeline/version.ts` now emits
+ * `https://bucket-openforge-workshop.mfinn.de/lod` — a different host from
+ * `assets.models`, because the derivative stores moved to a bucket this project
+ * can actually write to. {@link LOD_GLB_URL} was always host-agnostic, which is
+ * the only reason that move cost this file nothing; it validates the *path*
+ * shape and leaves the host to the index.
+ *
+ * One consequence belongs here rather than in a commit message: the store is now
+ * genuinely cross-origin, so a CORS rejection is a reachable failure and
+ * `fetch` cannot distinguish it from a network fault. It arrives as
+ * {@link LodLoadError} — retryable — not as {@link LodAbsentError}.
  */
 export function lodGlbUrl(assets: Pick<CatalogAssets, 'lod'>, blob: BlobId): string {
   const url = `${assets.lod.replace(/\/+$/, '')}/${shardedPath(blob)}.glb`

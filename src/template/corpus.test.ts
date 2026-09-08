@@ -1008,7 +1008,7 @@ describeCorpus(corpusTitle, () => {
          token from `2x` to `1.5x`, which is +980 B raw and **+40 B brotli** —
          a fact about one artefact at one epoch, never a rate, exactly as B1
          recorded. */
-      expect(baseline).toBe(366_682)
+      expect(baseline).toBe(366_720)
       /* 128 rows again, row E3's 7 having gone with its two templates. The
          counterfactual prices what would actually be emitted, so it moves when the
          bundle does — and the delta is asserted as an exact number *and* bounded
@@ -1020,7 +1020,7 @@ describeCorpus(corpusTitle, () => {
          against the 146 kB of headroom, and the exact value is pinned so that a
          drift is noticed rather than absorbed. */
       expect(layouts.reduce((total, one) => total + one.slots.length, 0)).toBe(128)
-      expect(withTable - baseline).toBe(295)
+      expect(withTable - baseline).toBe(207)
       expect(withTable - baseline).toBeLessThan(1024)
       expect(baseline / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
     },

@@ -19,10 +19,12 @@ export interface TestRecord {
 
 export interface TestCatalogOptions {
   records: readonly TestRecord[]
-  /** Overridable so `lodBase`'s derivation from `assets.models` can be exercised. */
+  /** Overridable so a store on a different origin from the meshes can be exercised. */
   models?: string
-  /** Overrides `assets.lod`; must sit beside `models` or `lodBase` refuses it. */
+  /** Overrides `assets.lod`; must sit beside `thumbs` or `lodBase` refuses it. */
   readonly lod?: string
+  /** Overrides `assets.thumbs` — the sibling `lodBase` checks `lod` against. */
+  readonly thumbs?: string
 }
 
 export function testCatalog(options: TestCatalogOptions): CatalogFile {
@@ -37,7 +39,7 @@ export function testCatalog(options: TestCatalogOptions): CatalogFile {
     assets: {
       models: options.models ?? 'https://objects.example.test/models',
       sprites: 'https://objects.example.test/sprites',
-      thumbs: 'https://objects.example.test/thumbs',
+      thumbs: options.thumbs ?? 'https://objects.example.test/thumbs',
       lod: options.lod ?? 'https://objects.example.test/lod',
     },
     sprite: MEASURED_SPRITE_SHEET,

@@ -333,7 +333,8 @@ describeFixtures(title, () => {
            `cf21ab85ac304a20…` byte for byte — 5,904,652 B raw, 366,173 B brotli
            — and with the corrected corner run it is
            `e1d5ca5459812bb1f636b4acfe923f4b8b26e640761ef05bdcf754f843428a33`,
-           5,905,632 B raw and **366,677 B brotli**. So the whole of the +980 B
+           5,905,632 B raw and **366,627 B brotli** (366,677 B until the derivative asset
+           bases moved to their own host, which brotli priced at -50 B here). So the whole of the +980 B
            raw / **+493 B** brotli is 245 records writing `"length":1.5` where
            they wrote `"length":2`, and B2's own "0 B" claim is unaffected: it is
            a claim about *this* module, and reverting *this* module still gives
@@ -373,7 +374,7 @@ describeFixtures(title, () => {
             `${String(withTable.brotli)} B (+${String(withTable.brotli - shipped.brotli)})\n`,
         )
 
-        expect(shipped.brotli).toBe(366_677)
+        expect(shipped.brotli).toBe(366_627)
         expect(shipped.withinBudget).toBe(true)
         expect(shipped.brotli / SIZE_BUDGET_BYTES).toBeLessThan(0.72)
         /* And nothing of the model is in the bytes, which is the structural half.
@@ -401,7 +402,7 @@ describeFixtures(title, () => {
         /* **+257 B, and the fourth reading of one unchanged table.** The same
            128 rows, asserted just above, have now priced at +808 B, then -71 B
            (adding the `layouts` key made the index *smaller*), then +396 B when
-           `version.pipeline` went 2 to 3 — one character — and +257 B here, where
+           `version.pipeline` went 2 to 3 — one character — and +261 B here, where
            the only edit is one anchor string per floor slot going `cell` to
            `residual`.
 
@@ -411,7 +412,7 @@ describeFixtures(title, () => {
            because a figure nobody checks is a figure that drifts. The row's claim
            rests on the structural assertion below and on the byte-identical
            revert digest above. */
-        expect(withTable.brotli - shipped.brotli).toBe(257)
+        expect(withTable.brotli - shipped.brotli).toBe(261)
       },
       SLOW_MS,
     )
