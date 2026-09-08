@@ -65,6 +65,7 @@ describeCorpus(title, () => {
     ? buildCatalog({
         rows: loadFixtureRows(FIXTURES_DIR),
         manifest: emptyManifest(),
+        thumbs: new Set(),
         fixturesRef: 'test',
         /* The payload epoch, so the byte figures below are the quotable ones. */
         builtAt: PAYLOAD_TIMESTAMP,

@@ -48,6 +48,7 @@ describeCorpus(title, () => {
   const result = buildCatalog({
     rows,
     manifest: emptyManifest(),
+    thumbs: new Set(),
     fixturesRef: 'test',
     builtAt: '2026-01-01T00:00:00.000Z',
   })

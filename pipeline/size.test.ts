@@ -60,6 +60,7 @@ describeCorpus(title, () => {
     ? buildCatalog({
         rows: loadFixtureRows(FIXTURES_DIR),
         manifest: emptyManifest(),
+        thumbs: new Set(),
         fixturesRef: 'test',
         /* A fixed clock, so two builds of two branches are comparable. */
         builtAt: PAYLOAD_TIMESTAMP,

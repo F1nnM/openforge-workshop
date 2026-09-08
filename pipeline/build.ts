@@ -92,21 +92,35 @@ export interface BuildOptions {
   /**
    * The md5s a `/thumbs/` object exists for — `thumbBlobs(readThumbInventory())`.
    *
-   * Optional, and absent means **none**, which is the state of the bucket today
-   * and the state every pinned build wants. Three callers deliberately pass
-   * nothing: `tools/stamp/lock.ts`, whose digest has to be a function of the
-   * derivation code, the schema and the corpus and of nothing else, and the two
-   * test builds, which are about derivation rather than about a bucket. Only
-   * `scripts/import-catalog.ts` passes the real set.
+   * **Required, and it used to be optional.** The default was "none", which was
+   * the state of the bucket and therefore looked free: a caller that forgot it
+   * emitted `thumb: false`, the grid cropped sprite sheets, and that is exactly
+   * what an un-backfilled bucket looks like — so nothing failed. `tools/stamp/run.ts`
+   * forgot it, and since `npm run stamp` is the only build `deploy.yml` and
+   * `pr-preview.yml` run *and it overwrites the index*, `thumb` was false in
+   * every deployed build for as long as there was nothing in the bucket to
+   * notice. The moment the backfill landed, 8,352 objects sat there unused.
    *
-   * A forgotten caller therefore emits `thumb: false` and renders sprite sheets
-   * — today's behaviour, and never a 404. That is the safe direction, and it is
-   * why this is the one input here allowed to default: getting it wrong loses a
-   * derivative nobody has yet, while the *record* field it feeds is required
-   * precisely so that "no thumbnail" and "nobody asked" cannot be confused
-   * downstream. See `pipeline/thumbs.ts`.
+   * So the safe default stopped being safe, and the argument that justified it
+   * is retired. This field is now required for the same reason
+   * {@link CatalogRecord.thumb} is required one level down — *"so that 'no
+   * thumbnail' and 'nobody asked' cannot be confused"* — and the reasoning
+   * simply had not been carried up.
+   *
+   * Every caller now states its intent, and the two intents are both legitimate:
+   *
+   *   - `scripts/import-catalog.ts` and `tools/stamp/run.ts` pass the real set,
+   *     because they write the index the app reads.
+   *   - `tools/stamp/lock.ts` passes an empty set, because its digest must be a
+   *     function of the derivation code, the schema and the corpus and of
+   *     nothing else — a bucket's contents are input, and a backfill is not a
+   *     derivation. Tests that are about derivation rather than about a bucket
+   *     pass an empty set for the same reason.
+   *
+   * The point is not which value a caller picks; it is that omitting the choice
+   * no longer compiles. See `pipeline/thumbs.ts`.
    */
-  thumbs?: ReadonlySet<string>
+  thumbs: ReadonlySet<string>
   /** `version.built`. Defaults to {@link buildTimestamp}. */
   builtAt?: string
 }
@@ -291,7 +305,7 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       // content-addressed: the 520 rows sharing 171 meshes all read the same
       // answer, which is the point. `pipeline/thumbs.ts` says why the set comes
       // from a file rather than from a probe inside the build.
-      thumb: options.thumbs?.has(row.file_metadata.md5) ?? false,
+      thumb: options.thumbs.has(row.file_metadata.md5),
       family: dirname(id),
       design,
       name: displayName(row.tags, foot, row.file_metadata.file),

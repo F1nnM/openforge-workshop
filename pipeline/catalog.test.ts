@@ -85,6 +85,7 @@ describeCorpus(title, () => {
   const result: BuildResult = buildCatalog({
     rows,
     manifest: emptyManifest(),
+    thumbs: new Set(),
     fixturesRef: 'test',
     builtAt: BUILT_AT,
   })
@@ -1176,6 +1177,7 @@ describeCorpus(title, () => {
     const again = buildCatalog({
       rows,
       manifest: emptyManifest(),
+      thumbs: new Set(),
       fixturesRef: 'test',
       builtAt: BUILT_AT,
     })
@@ -1186,6 +1188,7 @@ describeCorpus(title, () => {
     const shuffled = buildCatalog({
       rows: [...rows].reverse(),
       manifest: emptyManifest(),
+      thumbs: new Set(),
       fixturesRef: 'test',
       builtAt: BUILT_AT,
     })
@@ -1198,6 +1201,7 @@ describeCorpus(title, () => {
     const first = buildCatalog({
       rows,
       manifest: emptyManifest(),
+      thumbs: new Set(),
       fixturesRef: 'test',
       builtAt: BUILT_AT,
     })
@@ -1218,6 +1222,7 @@ describeCorpus(title, () => {
     const second = buildCatalog({
       rows: [...rows.filter((row) => row.file_metadata.full_name !== dropped?.id), ...invented],
       manifest: first.manifest,
+      thumbs: new Set(),
       fixturesRef: 'test',
       builtAt: BUILT_AT,
     })
