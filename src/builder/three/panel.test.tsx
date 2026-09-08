@@ -93,10 +93,7 @@ const CATALOG = planCatalogFromFile(fixtureCatalogFile())
    the `lazy` boundary — but the panel's type demands it, which is the point:
    nothing can mount the surface without saying what fills a placement. */
 const AUTHORITIES = fixtureAuthorities()
-const ASSETS = {
-  lod: 'https://objects.openforge.tools/lod',
-  models: 'https://objects.openforge.tools/models',
-}
+const ASSETS = { lod: 'https://objects.openforge.tools/lod' }
 
 function scene(count: number): PlanScene {
   return sceneOf(

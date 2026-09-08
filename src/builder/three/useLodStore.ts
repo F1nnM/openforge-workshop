@@ -7,6 +7,33 @@
  * canvas suspends the renderer rather than the panel, and the progress readout
  * belongs in the DOM above the canvas anyway.
  *
+ * ## The set changes on every edit, so the loads are **incremental**
+ *
+ * This is the whole shape of the hook and it was worth a rewrite. The room's
+ * address set is derived from the scene, so placing a tile adds an address and
+ * deleting the last copy of one removes it. An effect keyed on that set — which
+ * is what this was — tears down and re-runs on **every** such edit, and a
+ * teardown disposed every geometry the room had and republished an empty map.
+ * The user saw it exactly as it was: *place one tile and every other tile in the
+ * room flashes away*, for as long as the re-fetch took.
+ *
+ * So the loaded objects live in a ref rather than in the effect's closure, and
+ * the effect **reconciles** rather than restarts:
+ *
+ *   - an address that is already loaded stays loaded, and keeps its
+ *     `BufferGeometry` identity, so `InstancedTiles` is not even reconstructed;
+ *   - an address that is new is appended to the queue;
+ *   - an address that has dropped out of the set is disposed, once, there;
+ *   - a request in flight is left alone — it lands into the same registry.
+ *
+ * The only thing that still discards everything is a change of **source** (the
+ * `/lod/` base or the injected `fetch`) and unmount, because both mean the
+ * objects in hand came from somewhere that is no longer being asked.
+ *
+ * `lodStore.test.tsx` guards the retention directly: it records every state the
+ * hook publishes across a set change and fails if any of them drops an address
+ * that was already loaded. That is the assertion the old shape failed.
+ *
  * ## What it does not do
  *
  * **No cache across mounts.** `src/three/material.ts` refcounts materials
@@ -18,31 +45,18 @@
  * year at the edge (G1's `LOD_CACHE_CONTROL`), so the second open is a memory
  * cache hit rather than a network one.
  *
- * **No retry loop.** An absence is not a failure and must not be retried — B2 is
- * a blocker, not a flake, and 150 objects retried on a timer against a prefix
- * that does not exist yet is a self-inflicted load test. A real failure is
- * retried by the user, through the panel.
+ * **No retry loop.** An absence is not a failure and must not be retried: the
+ * store answering 404 for a blob is a fact about the store, and 150 objects
+ * retried on a timer against a prefix that does not hold them is a self-inflicted
+ * load test. A real failure is retried by the user, through the panel.
  *
- * **No conversion.** This hook reads; it does not fetch a 10.77 MB STL and
- * decimate it. Row R1 converts on **add-to-library** — a deliberate action with
- * somewhere to put a progress bar — and this hook sees only the result, through
- * `loadMeshGeometry`. Converting here instead would put a 64 MB download behind
- * the moment the 3D view opens, which is the design the owner replaced: a stall
- * with no explanation, paid again by every viewer of a shared link.
- *
- * ## Two stores, one map
- *
- * {@link LodStoreState.geometries} is keyed by content address and says nothing
- * about provenance, because its consumers must not care: `instances.ts` groups
- * by md5 and `place.ts` stands up whatever it is handed. `/lod/` is preferred
- * when it answers — 21 kB against 10.77 MB — and the IndexedDB cache answers
- * when it does not. {@link LodStoreState.converted} counts the second kind for
- * the readout only.
- *
- * `absent` therefore means **neither store has it**, which for a blob is now a
- * real statement about the user's library rather than a restatement of B2: a
- * design nobody added was never converted. `BuilderRoom` already renders that
- * count as "not in the store" and the sentence stays true.
+ * **No conversion, and now no second store to read.** The `/lod/` prefix used to
+ * be empty, so this hook read a fallback: an in-browser decimation of the source
+ * STL, cached in IndexedDB by `src/mesh/`. The backfill has run — every one of
+ * the archive's 8,353 distinct meshes has an object — so the fallback can no
+ * longer fire, and it is deleted rather than left dormant along with the `epoch`
+ * nudge that existed only to re-read a cache that was still filling. `absent`
+ * therefore means what it says: `/lod/` has no object for this address.
  *
  * ## Concurrency
  *
@@ -50,16 +64,16 @@
  * (176.1 MB over 8,353) so the whole of a large room is a couple of megabytes,
  * and the reason to bound it at all is the browser's own per-host connection
  * limit: firing 150 requests at one hostname queues 144 of them anyway and
- * makes an abort mid-load slower, not faster.
+ * makes an abort mid-load slower, not faster. The bound is over the *registry*
+ * rather than over one effect run, so an edit mid-load adds to the same queue
+ * instead of opening a second set of six.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { BlobId, CatalogAssets } from '@/catalog'
-import type { MeshCache } from '@/mesh'
-import { sharedMeshCache } from '@/mesh'
 
 import type { LodGeometry } from './loadLod'
-import { LodAbsentError, loadMeshGeometry } from './loadLod'
+import { LodAbsentError, loadLodGeometry } from './loadLod'
 
 /** In-flight requests to one hostname. Six is Chrome's per-host HTTP/1.1 limit. */
 export const LOD_FETCH_CONCURRENCY = 6
@@ -68,18 +82,13 @@ export interface LodStoreState {
   /** Loaded objects by content address. Grows as they arrive. */
   readonly geometries: ReadonlyMap<string, LodGeometry>
   /**
-   * Addresses **neither** store could supply.
-   *
-   * `/lod/` answered 404/403 — expected today, blocker B2 — and the converted
-   * cache had no record either, which means the design was never added to the
-   * library and so nothing ever converted it.
+   * Addresses `/lod/` has no object for — a 404, or the 403 a bucket with no
+   * public read answers with.
    */
   readonly absent: ReadonlySet<string>
-  /** How many of {@link geometries} came from the R1 conversion cache. */
-  readonly converted: number
   /** Addresses that failed for another reason, with the reason. */
   readonly failed: ReadonlyMap<string, string>
-  /** Still in flight. */
+  /** Still queued or in flight. */
   readonly pending: number
   /** Total addresses asked for. */
   readonly requested: number
@@ -89,7 +98,6 @@ export interface LodStoreState {
 
 const EMPTY: LodStoreState = {
   geometries: new Map(),
-  converted: 0,
   absent: new Set(),
   failed: new Map(),
   pending: 0,
@@ -104,149 +112,239 @@ export interface UseLodStoreOptions {
   /** `false` parks the hook: nothing is fetched and everything loaded is released. */
   readonly enabled: boolean
   readonly fetchImpl?: typeof fetch
-  /**
-   * The R1 converted-mesh cache, consulted when `/lod/` answers 404.
-   *
-   * Omit it and the hook uses `sharedMeshCache()`, the origin's one handle —
-   * which is what makes this row work without `BuilderRoom.tsx` changing a
-   * line, and keeps row R2's rebase of the renderer clean. Pass `null` for
-   * `/lod/`-only, which is what a test asserting the store's own behaviour
-   * wants, and what a browser with no IndexedDB gets anyway.
-   */
-  readonly cache?: Promise<MeshCache | null> | null | undefined
-  /**
-   * A monotone counter the caller bumps when the converted cache has changed.
-   *
-   * **Row R2 needed this and the reason is a change of timing, not of design.**
-   * This hook reads the cache once per blob and treats a miss as `absent`; it
-   * does not subscribe. That was correct while the 3D view was a panel behind a
-   * press — the user placed tiles first and pressed afterwards, so a conversion
-   * begun at add-to-library had normally finished, and a press remounted the
-   * hook anyway. R2 opens the surface **with the screen**, so a conversion can
-   * now complete *after* this hook has already recorded the blob as absent, and
-   * without a nudge the mesh would never appear at all: the effect's other
-   * dependencies are the blob list and the asset base, and neither changes when
-   * a worker finishes.
-   *
-   * The window is narrower than it first looks and it is real. `wanted` is a
-   * **set**, so placing a second copy of an already-armed tile changes nothing,
-   * and arming a tile that is mid-conversion is exactly the sequence a user
-   * performs: add to the library, arm it, place it. Measured in Chrome with the
-   * epoch pinned to `0`, that sequence leaves the room reporting *"0 of 1
-   * loaded, 1 not in the store"* and three outlined tiles **indefinitely**; with
-   * the epoch live the same sequence reports *"3 in 1 instanced mesh"*.
-   *
-   * `BuilderRoom` supplies `@/mesh`'s own queue state — the count of tasks that
-   * have reached `ready` — so the re-read happens exactly when a conversion
-   * lands and not on a timer. The cost is that the whole room's geometry is
-   * disposed and re-read on each bump; those reads are IndexedDB and not
-   * network, and there is at most one bump per distinct mesh in the user's
-   * library, only while conversions are in flight.
-   */
-  readonly epoch?: number
+}
+
+/** The source a registry's contents came from. A change to it invalidates them all. */
+interface LodSource {
+  readonly base: string
+  readonly fetchImpl: typeof fetch | undefined
 }
 
 /**
- * Load a room's objects.
+ * The loads in hand, outliving any one effect run.
  *
- * Keyed on the *sorted, joined* address list rather than on the array's
- * identity — `useStlModel.ts` learned that the hard way: a caller computing its
- * blob list inline hands a new array every render, and an effect keyed on it
- * re-fetches the whole room on every keystroke.
+ * Mutable and held in a ref on purpose: this is the state an effect keyed on the
+ * address set would destroy, and the reason the room no longer flashes.
  */
-export function useLodStore({ blobs, assets, enabled, fetchImpl, cache, epoch = 0 }: UseLodStoreOptions): LodStoreState {
+interface LodRegistry {
+  readonly geometries: Map<string, LodGeometry>
+  readonly absent: Set<string>
+  readonly failed: Map<string, string>
+  /** Addresses a worker is currently awaiting. */
+  readonly inflight: Set<string>
+  /** Addresses waiting for a worker. */
+  queue: string[]
+  /** Workers running. Never above {@link LOD_FETCH_CONCURRENCY}. */
+  workers: number
+  /** The set the room currently wants. A load that lands outside it is discarded. */
+  wanted: Set<string>
+  /** `wanted.size`, read by {@link publish} so a worker cannot report a stale total. */
+  requested: number
+  /** Bumped by {@link release}. A load carrying an older one is discarded. */
+  generation: number
+  controller: AbortController
+  source: LodSource | null
+}
+
+function createRegistry(): LodRegistry {
+  return {
+    geometries: new Map(),
+    absent: new Set(),
+    failed: new Map(),
+    inflight: new Set(),
+    queue: [],
+    workers: 0,
+    wanted: new Set(),
+    requested: 0,
+    generation: 0,
+    controller: new AbortController(),
+    source: null,
+  }
+}
+
+/**
+ * Load a room's objects, keeping what is already loaded.
+ *
+ * The wanted set is memoised on the *sorted, joined* address list rather than on
+ * the array's identity — `useStlModel.ts` learned that the hard way: a caller
+ * computing its blob list inline hands a new array every render, and an effect
+ * keyed on it re-runs on every keystroke.
+ */
+export function useLodStore({ blobs, assets, enabled, fetchImpl }: UseLodStoreOptions): LodStoreState {
   const wanted = useMemo(() => [...new Set(blobs)].sort(), [blobs.join('\u0000')])
-  // `undefined` means "use the origin's cache"; `null` means "there is none".
-  // Resolved here rather than in the effect so the effect's dependency is a
-  // stable promise identity and not a fresh one per render.
-  const store = cache === undefined ? sharedMeshCache() : cache
   const key = wanted.join('\u0000')
   const base = assets.lod
 
   const [state, setState] = useState<LodStoreState>(EMPTY)
 
+  const held = useRef<LodRegistry | null>(null)
+  held.current ??= createRegistry()
+  const registry = held.current
+
+  // Unmount is the one teardown that is unconditional. Separate from the
+  // reconciling effect below precisely so that effect's dependencies — which
+  // include the address set — cannot trigger it.
+  useEffect(
+    () => () => {
+      release(registry)
+    },
+    [registry],
+  )
+
   useEffect(() => {
-    if (!enabled || wanted.length === 0) {
+    if (!enabled) {
+      release(registry)
       setState(EMPTY)
       return
     }
 
-    const controller = new AbortController()
-    const geometries = new Map<string, LodGeometry>()
-    const absent = new Set<string>()
-    const failed = new Map<string, string>()
-    // The effect's own closure owns these three, and the cleanup below disposes
-    // exactly what this run loaded. Reading them out of React state instead
-    // would see the value from the render the effect was created in.
-    let alive = true
-    let cursor = 0
-    let pending = wanted.length
-
-    const publish = () => {
-      if (!alive) return
-      let converted = 0
-      for (const lod of geometries.values()) if (lod.source === 'converted') converted += 1
-      setState({
-        geometries: new Map(geometries),
-        converted,
-        absent: new Set(absent),
-        failed: new Map(failed),
-        pending,
-        requested: wanted.length,
-        settled: pending === 0,
-      })
+    if (!sameSource(registry.source, base, fetchImpl)) {
+      release(registry)
+      registry.source = { base, fetchImpl }
     }
 
-    setState({
-      geometries: new Map(),
-      converted: 0,
-      absent: new Set(),
-      failed: new Map(),
-      pending: wanted.length,
-      requested: wanted.length,
-      settled: false,
-    })
-
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        const index = cursor
-        cursor += 1
-        const blob = wanted[index]
-        if (blob === undefined) return
-
-        try {
-          const lod = await loadMeshGeometry(blob, {
-            assets: { lod: base },
-            signal: controller.signal,
-            ...(fetchImpl === undefined ? {} : { fetchImpl }),
-            ...(store === null ? {} : { cache: store }),
-          })
-          if (!alive) {
-            lod.dispose()
-            return
-          }
-          geometries.set(blob, lod)
-        } catch (cause) {
-          if (cause instanceof DOMException && cause.name === 'AbortError') return
-          if (cause instanceof LodAbsentError) absent.add(blob)
-          else failed.set(blob, cause instanceof Error ? cause.message : 'the object could not be loaded')
-        }
-        pending -= 1
-        publish()
-      }
-    }
-
-    void Promise.all(
-      Array.from({ length: Math.min(LOD_FETCH_CONCURRENCY, wanted.length) }, () => worker()),
-    )
-
-    return () => {
-      alive = false
-      controller.abort()
-      for (const lod of geometries.values()) lod.dispose()
-      geometries.clear()
-    }
-  }, [key, base, enabled, fetchImpl, store, epoch])
+    registry.wanted = new Set(wanted)
+    registry.requested = wanted.length
+    prune(registry)
+    enqueue(registry)
+    pump(registry, setState)
+    publish(registry, setState)
+    // `key` stands in for `wanted`, whose identity is the memo above; `blobs`
+    // itself is a fresh array on every render of every caller.
+  }, [registry, key, base, enabled, fetchImpl])
 
   return state
+}
+
+function sameSource(source: LodSource | null, base: string, fetchImpl: typeof fetch | undefined): boolean {
+  return source !== null && source.base === base && source.fetchImpl === fetchImpl
+}
+
+/** Drop everything: the objects came from a source nothing is asking any more. */
+function release(registry: LodRegistry): void {
+  registry.generation += 1
+  registry.controller.abort()
+  registry.controller = new AbortController()
+  for (const lod of registry.geometries.values()) lod.dispose()
+  registry.geometries.clear()
+  registry.absent.clear()
+  registry.failed.clear()
+  registry.inflight.clear()
+  registry.queue = []
+  registry.workers = 0
+  registry.wanted = new Set()
+  registry.requested = 0
+  registry.source = null
+}
+
+/**
+ * Forget the addresses the room no longer holds.
+ *
+ * The disposal is here and only here: an address leaves the set when its last
+ * placement is deleted, and its geometry is the room's largest single object.
+ * Requests already in flight are not cancelled — one fetch is cheaper than the
+ * bookkeeping to abort exactly one of six — but their results are discarded by
+ * {@link worker} against the same `wanted` set.
+ */
+function prune(registry: LodRegistry): void {
+  for (const [blob, lod] of registry.geometries) {
+    if (registry.wanted.has(blob)) continue
+    lod.dispose()
+    registry.geometries.delete(blob)
+  }
+  for (const blob of registry.absent) if (!registry.wanted.has(blob)) registry.absent.delete(blob)
+  for (const blob of registry.failed.keys()) if (!registry.wanted.has(blob)) registry.failed.delete(blob)
+  registry.queue = registry.queue.filter((blob) => registry.wanted.has(blob))
+}
+
+/**
+ * Queue the addresses nothing has answered for yet.
+ *
+ * An absence and a failure are both terminal — see the module note on why
+ * neither is retried — so an address in either is not re-queued, and one already
+ * queued or in flight is not queued twice.
+ */
+function enqueue(registry: LodRegistry): void {
+  const queued = new Set(registry.queue)
+  for (const blob of registry.wanted) {
+    if (registry.geometries.has(blob)) continue
+    if (registry.absent.has(blob) || registry.failed.has(blob)) continue
+    if (registry.inflight.has(blob) || queued.has(blob)) continue
+    registry.queue.push(blob)
+    queued.add(blob)
+  }
+}
+
+type Publish = (next: LodStoreState) => void
+
+function publish(registry: LodRegistry, setState: Publish): void {
+  const pending = registry.queue.length + registry.inflight.size
+  setState({
+    geometries: new Map(registry.geometries),
+    absent: new Set(registry.absent),
+    failed: new Map(registry.failed),
+    pending,
+    requested: registry.requested,
+    settled: pending === 0,
+  })
+}
+
+/** Top the workers up to the bound. Called on every reconcile; idempotent. */
+function pump(registry: LodRegistry, setState: Publish): void {
+  while (registry.workers < LOD_FETCH_CONCURRENCY && registry.queue.length > 0) {
+    registry.workers += 1
+    void worker(registry, setState)
+  }
+}
+
+async function worker(registry: LodRegistry, setState: Publish): Promise<void> {
+  const generation = registry.generation
+  const source = registry.source
+  const controller = registry.controller
+
+  try {
+    if (source === null) return
+    for (;;) {
+      const blob = registry.queue.shift()
+      if (blob === undefined) return
+      registry.inflight.add(blob)
+
+      let loaded: LodGeometry | null = null
+      let absent = false
+      let failure: string | null = null
+      try {
+        loaded = await loadLodGeometry(blob as BlobId, {
+          assets: { lod: source.base },
+          signal: controller.signal,
+          ...(source.fetchImpl === undefined ? {} : { fetchImpl: source.fetchImpl }),
+        })
+      } catch (cause) {
+        if (cause instanceof DOMException && cause.name === 'AbortError') {
+          registry.inflight.delete(blob)
+          return
+        }
+        if (cause instanceof LodAbsentError) absent = true
+        else failure = cause instanceof Error ? cause.message : 'the object could not be loaded'
+      }
+      registry.inflight.delete(blob)
+
+      // Released under us, or the address left the room while this was in
+      // flight. Either way the result is not the registry's to keep.
+      if (registry.generation !== generation) {
+        loaded?.dispose()
+        return
+      }
+      if (!registry.wanted.has(blob)) {
+        loaded?.dispose()
+        continue
+      }
+
+      if (loaded !== null) registry.geometries.set(blob, loaded)
+      else if (absent) registry.absent.add(blob)
+      else if (failure !== null) registry.failed.set(blob, failure)
+      publish(registry, setState)
+    }
+  } finally {
+    registry.workers -= 1
+  }
 }

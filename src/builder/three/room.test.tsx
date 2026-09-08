@@ -32,7 +32,7 @@
  *
  *   - The heavy graph imports and the component mounts, in every state.
  *   - The full chain runs: the screen's `PlanScene` → `useLodStore` (fetch) →
- *     `loadMeshGeometry` (404) → `buildRoom3D` → the surface.
+ *     `loadLodGeometry` (404) → `buildRoom3D` → the surface.
  *   - **The canvas is mounted with an empty plan**, which is the row's whole
  *     premise, and the armed tile's mesh is requested before it is placed.
  *   - Absences and failures are counted apart and reported over the canvas
@@ -165,13 +165,7 @@ const CATALOG = planCatalogFromFile(fixtureCatalogFile())
    once for the file — eleven records, but `buildAssemblyIndex` is not free and
    nothing here mutates it. */
 const AUTHORITIES = fixtureAuthorities()
-const ASSETS = {
-  lod: 'https://objects.openforge.tools/lod',
-  // The conversion queue is keyed on this base and is never asked for anything
-  // in these tests — `ensureAggregateMeshes` is not called here — so it is only
-  // the key that matters.
-  models: 'https://objects.openforge.tools/models',
-}
+const ASSETS = { lod: 'https://objects.openforge.tools/lod' }
 
 function scene(ids: readonly string[]) {
   return sceneOf(
@@ -195,7 +189,7 @@ function glbResponder(): typeof fetch {
  * A `fetch` spy whose recorded calls carry the URL as a string.
  *
  * Typed `(url: string)` rather than `(url: RequestInfo | URL)` deliberately:
- * `loadMeshGeometry` builds its URL with `lodGlbUrl` and passes a string, so the
+ * `loadLodGeometry` builds its URL with `lodGlbUrl` and passes a string, so the
  * narrower parameter is the truth about this seam and it is what lets a test
  * read the address without stringifying a `Request`.
  */
@@ -223,7 +217,7 @@ describe('the room with an empty store — today’s real state', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText(/no mesh in the store yet/i)).toBeInTheDocument()
+      expect(screen.getByText(/no mesh in the store/i)).toBeInTheDocument()
     })
 
     // The row's whole premise: the canvas is there even though nothing loaded,
