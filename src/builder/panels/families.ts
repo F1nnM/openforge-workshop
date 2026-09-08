@@ -1,5 +1,5 @@
 /**
- * The 87 placeable templates, as the palette's rows — and the map from a catalog
+ * The 57 placeable templates, as the palette's rows — and the map from a catalog
  * item back to one of them.
  *
  * Row **C1**. `templates.ts` emits two arrays and a size table and says nothing
@@ -17,7 +17,7 @@
  * every page**. That file carries the A/B build and the tests that keep the
  * construction and this table in step.
  *
- * ## 87, and they are two different kinds of thing
+ * ## 57, and they are two different kinds of thing
  *
  *   - **47 generated families** (`GENERATED_FAMILIES`), one required slot each,
  *     keyed on B4's derived `(role, form, build)` — plus `shape-base`, which no
@@ -33,9 +33,22 @@
  *     (`wall|corner|separate wall`, `wall|internal_corner|s2w`) and two floors
  *     (`floor|straight|separate wall`, `floor|curve|separate wall`), 134 records
  *     between them, all reached through `shape-base` instead.
- *   - **40 shipped recipes** (`RECIPE_TEMPLATES`), read from the 20 blueprint
- *     fixtures, 128 authored parts between them, every one of them a
+ *   - **10 assemblies** (`ASSEMBLY_TEMPLATES`), derived from the 40 shipped
+ *     recipes the 20 blueprint fixtures carry, every one of them a
  *     `S2W: Wall on Tile` composition.
+ *
+ *     **It was the 40, and 32 of those were one template.** They differed by a
+ *     single `component|` require on a single slot — `Arched Door` and
+ *     `Rectangular Door` by `component|door|arched` against
+ *     `component|door|rectangular` and in no other byte — so a component is a
+ *     *control* on a row rather than 14 rows. `pipeline/fold.ts` carries the
+ *     derivation and `src/assembly/corpus.test.ts` proves it lossless as
+ *     candidate-set equality against the archive, slot by slot, for all 40.
+ *
+ *     The corners are not folded, only renamed: `shape|column` and
+ *     `shape|corner` each overlap their `|low` qualifier, so full height is
+ *     sayable there only as a `deny`, and a `deny` cannot travel through
+ *     `parentTags` — which is a control position's only channel.
  *
  * Both are `RecipeTemplate`s and both are placeable through `placeTemplate`, and
  * **row C1 read that as licence to list them together. It is not, and the cost
@@ -55,10 +68,22 @@
  * kind of thing a row is is the **first** distinction the palette makes now
  * (`palette.ts#paletteSections`), and the slot count is on every row.
  *
- * The other two differences C1 named still hold: an assembly has **no size
- * control** (its parts name their own `size|width|2`, so size is part of its
- * identity) and no single candidate count, because 3 or 5 slots have no one
- * answer to *"how many tiles fill this"*.
+ * One of the other two differences C1 named still holds and one has **reversed**.
+ * An assembly still has no single candidate count, because 3 or 5 slots have no
+ * one answer to *"how many tiles fill this"*.
+ *
+ * But an assembly now **has** a size control, and C1's reason it could not is
+ * exactly what the fold removed. C1 wrote that an assembly's *"parts name their
+ * own `size|width|2`, so size is part of its identity"*, and that a control here
+ * *"would offer a position whose tags join `parentTags` where no `constrain`
+ * collects them — a chip that changed nothing."* True of the corners, whose slots
+ * do require their 2x2 outright and which accordingly get no control. **False of
+ * the 32 wall recipes**: their slots carry `constrain: [size|width, size|depth]`
+ * and no size of their own, so `constrain` collected nothing and the assembly's
+ * size was whatever the user happened to click — `Arched Door (Single Piece)`
+ * offered 8 floor footprints and 13 base footprints. The fold gives them a
+ * domain of pairs that pin one footprint, and no `any size` position: an
+ * assembly places at a fixed size.
  *
  * ## Grouped by role inside the single tiles, because that is what inverts the cost
  *
@@ -139,7 +164,13 @@
  * 56 records to 8 because 48 of its 56 were.
  */
 import type { RecipeTemplate } from '@/assembly'
-import { GENERATED_FAMILIES, GENERATED_FAMILY_SIZES, RECIPE_TEMPLATES } from '@/assembly/templates'
+import type { AssemblyControls } from '@/assembly/templates'
+import {
+  ASSEMBLY_CONTROLS,
+  ASSEMBLY_TEMPLATES,
+  GENERATED_FAMILIES,
+  GENERATED_FAMILY_SIZES,
+} from '@/assembly/templates'
 import { TemplateId } from '@/store'
 
 import { axisOf } from './familyKey'
@@ -177,7 +208,7 @@ export type FamilyKind = 'family' | 'recipe'
 /**
  * The eight groups the single-tile rows are split into — {@link GROUP_ORDER}.
  *
- * **The 40 assemblies are not in here and no longer have a group.** They were a
+ * **The 10 assemblies are not in here and no longer have a group.** They were a
  * ninth `recipe` group under a heading that said `S2W: Wall on Tile`, which is
  * how the owner came to place a one-slot corner and conclude the templates were
  * broken: the assembly they wanted was thirty-eight rows further down under a heading
@@ -189,7 +220,7 @@ export type GroupKey = 'wall' | 'floor' | 'riser' | 'column' | 'stair' | 'roof' 
 
 /** One palette row: a template, with what the panel needs to show and filter it. */
 export interface TemplateFamily {
-  /** Branded on the way in; all 87 emitted ids parse. */
+  /** Branded on the way in; all 57 emitted ids parse. */
   readonly id: TemplateId
   /** The template's own name — `"Wall: Corner (S2W)"`, `"S2W: Wall on Tile: Wall: Torch (Modular)"`. */
   readonly name: string
@@ -211,7 +242,7 @@ export interface TemplateFamily {
    */
   readonly shortName: string
   readonly kind: FamilyKind
-  /** The single-tile group, or `undefined` for the 40 assemblies. */
+  /** The single-tile group, or `undefined` for the 10 assemblies. */
   readonly group: GroupKey | undefined
   /** B1's axes, from the template's own tags. `undefined` where the key has no such value. */
   readonly role: string | undefined
@@ -220,7 +251,7 @@ export interface TemplateFamily {
   /**
    * Slots to fill — **`template.parts.length` and nothing derived from it**.
    *
-   * 1 for all 47 families; **3 or 5** across the 40 assemblies — the 4 outer
+   * 1 for all 47 families; **3 or 5** across the 10 assemblies — the 4 outer
    * corners at 5, the other 36 at 3 (measured; C1's docblock said *"2 to 5"*
    * and no template has 2 or 4). Row D2 puts this number on every row, and
    * it is the row's whole job to be the number the next surface agrees with:
@@ -235,11 +266,27 @@ export interface TemplateFamily {
   /**
    * The size control's positions, or **empty when there is nothing to choose**.
    *
-   * Empty for the 40 recipes and for the 7 families whose table holds only
-   * `any size` — see the module note for the two different causes of that 7, and
-   * for why an empty control is not an unavailable one.
+   * Empty for the 7 families whose table holds only `any size` — see the module
+   * note for the two different causes of that 7, and for why an empty control is
+   * not an unavailable one — and for the 8 corner assemblies, whose domain is a
+   * single 2x2 their slots require outright.
+   *
+   * **No longer empty for every assembly.** The recipe fold gives the two wall
+   * assemblies 8 and 4 positions, and none of them is `any size`: an assembly
+   * places at a fixed size.
    */
   readonly sizes: readonly SizePosition[]
+  /**
+   * The three control axes of an assembly, or `undefined` for a single tile.
+   *
+   * `sizes` above is `controls.size` reduced to *what there is to choose*, and it
+   * is kept as its own field because a family has a size control and no
+   * `controls` at all. The other two axes — component and height — exist only on
+   * an assembly, and only where the fold could express them: the eight corners
+   * have neither, because their low/full split is two templates rather than a
+   * position and they carry no component variants.
+   */
+  readonly controls: AssemblyControls | undefined
   /** The underlying record, for the resolver. */
   readonly template: RecipeTemplate
 }
@@ -249,7 +296,7 @@ export interface TemplateFamily {
  *
  * Ordered by corpus records rather than by family count or the alphabet; the
  * table in the module note carries both figures and the reason they differ.
- * Eight rather than nine since row D2 — the 40 assemblies are a section and not
+ * Eight rather than nine since row D2 — the 10 assemblies are a section and not
  * a group, and {@link GroupKey} says why.
  */
 export const GROUP_ORDER: readonly GroupKey[] = [
@@ -308,7 +355,7 @@ export const INSERT_DESIGNS = 94
  * **The only stripper, and row D2 deliberately did not add a second one.** It
  * paid for itself while the heading above those 40 rows *was*
  * `S2W: Wall on Tile`; that heading is now `Assemblies`, and the strip is kept
- * because the words it removes are still not the row's own — every one of the 40
+ * because the words it removes are still not the row's own — every one of the 10
  * carries them, so they distinguish nothing and cost a third of a 272px column.
  * What did have to be replaced is the build system the heading used to carry:
  * `PalettePanel.tsx#rowFact` reads it off the template's own `build|` tag and
@@ -319,11 +366,14 @@ const RECIPE_PREFIX = 'S2W: Wall on Tile: '
 /**
  * The size table for an id, reduced to *what there is to choose*.
  *
- * One position is nothing to choose — see the module note on the 7 — and a
- * recipe has no entry in the table at all.
+ * One position is nothing to choose — see the module note on the 7, and on the 8
+ * corner assemblies whose whole domain is the 2x2 their slots require. Two
+ * tables, because the two kinds of row derive their domains differently:
+ * `GENERATED_FAMILY_SIZES` is B4's per-family list with its `any size` position,
+ * and `ASSEMBLY_CONTROLS` is the fold's, with no `any size` at all.
  */
 function sizesFor(id: string): readonly SizePosition[] {
-  const table = GENERATED_FAMILY_SIZES[id] ?? []
+  const table = ASSEMBLY_CONTROLS[id]?.size ?? GENERATED_FAMILY_SIZES[id] ?? []
   return table.length > 1 ? table : []
 }
 
@@ -336,7 +386,7 @@ function familyOf(template: RecipeTemplate, kind: FamilyKind): TemplateFamily {
   const prefix = group === undefined ? RECIPE_PREFIX : `${GROUP_LABEL[group]}: `
   return {
     // Parsed rather than cast: the pattern is the one thing about a generated id
-    // this module can check, all 87 pass it today, and a generator that emitted
+    // this module can check, all 57 pass it today, and a generator that emitted
     // `Wall Straight` should fail here loudly rather than resolve to nothing on
     // the grid three rows later.
     id: TemplateId.parse(template.id),
@@ -349,6 +399,7 @@ function familyOf(template: RecipeTemplate, kind: FamilyKind): TemplateFamily {
     build,
     slots: template.parts.length,
     sizes: sizesFor(template.id),
+    controls: ASSEMBLY_CONTROLS[template.id],
     template,
   }
 }
@@ -358,14 +409,14 @@ const groupRank = (family: TemplateFamily): number =>
   family.group === undefined ? GROUP_ORDER.length : GROUP_ORDER.indexOf(family.group)
 
 /**
- * All 87, in group order.
+ * All 57, in group order.
  *
  * A module constant because it is a pure function of two generated arrays: the
  * panel would otherwise rebuild it on every mount, and nothing about it can
  * change while the bundle is loaded.
  *
  * **This is a declared order and not the display order any more.** Row D2 shows
- * the 40 assemblies *above* the 47 single tiles, and does it in
+ * the 10 assemblies *above* the 47 single tiles, and does it in
  * `palette.ts#paletteSections` rather than by resorting this array — because
  * this array is also {@link PLACEABLE_TEMPLATES}, which two screens build a
  * `Map` from, and moving it would be moving a list for a reason that belongs to
@@ -375,7 +426,7 @@ const groupRank = (family: TemplateFamily): number =>
  */
 export const TEMPLATE_FAMILIES: readonly TemplateFamily[] = [
   ...GENERATED_FAMILIES.map((template) => familyOf(template, 'family')),
-  ...RECIPE_TEMPLATES.map((template) => familyOf(template, 'recipe')),
+  ...ASSEMBLY_TEMPLATES.map((template) => familyOf(template, 'recipe')),
 ].sort((a, b) => groupRank(a) - groupRank(b))
 
 /**

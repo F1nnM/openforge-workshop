@@ -343,14 +343,19 @@ describeCorpus(corpusTitle, () => {
         ` · untextured ${String(reach.untextured)}` +
         ` · top ${reach.entries.slice(0, 4).map((e) => `${e.family}=${String(e.parts)}`).join(' ')}\n`,
     )
-    /* 135 and 40 again: row E3 appended two authored assemblies to
-       `RECIPE_TEMPLATES` — 5 more non-base slots and 2 more base slots, taking
-       these to 140 and 42 — and both are withdrawn. The headline never moved
-       through either change: **28 designs offered and 8 cut**, because a design's
-       reach is a property of the archive's textures and not of how many rows ask
-       for them. */
-    expect(reach.totalParts).toBe(135)
-    expect(reach.baseSlots).toBe(40)
+    /* **75 and 10 since the recipe fold**, from 135 and 40. It was 139 and 40
+       before row D1 dropped four base-only families, and 140 and 42 while row
+       E3's two authored assemblies shipped. The fold takes 30 duplicate assembly
+       rows out — 32 wall recipes became 2 — so 60 non-base slots and 30 base
+       slots go with them.
+
+       **The headline has not moved through any of the three: 28 designs offered
+       and 8 cut**, with 36 roots and 44 untextured, because a design's reach is a
+       property of the archive's textures and not of how many rows ask for them.
+       Three independent changes to the row count is the strongest form that claim
+       has been in. */
+    expect(reach.totalParts).toBe(75)
+    expect(reach.baseSlots).toBe(10)
     expect(reach.roots).toBe(36)
     expect(reach.entries).toHaveLength(28)
     expect(reach.unreached).toBe(8)
@@ -363,13 +368,18 @@ describeCorpus(corpusTitle, () => {
          these to 124 / 113 / 90 / 60; withdrawing it takes 5 back off the first
          three and **2 off `aztlan`**, which is the interesting number — E3's
          seven slots were not all reachable by every design, so the four do not
-         move together and a single subtraction would have been wrong. What has
-         not moved through any of it is the headline, 28 designs offered and
-         8 cut. */
-      ['dungeon_stone', 119],
-      ['cut-stone', 108],
-      ['towne', 85],
-      ['aztlan', 58],
+         move together and a single subtraction would have been wrong.
+
+         The recipe fold moves all four again and, as before, **not together**:
+         119 / 108 / 85 / 58 becomes 59 / 48 / 47 / 27. `towne` loses 38 where
+         `dungeon_stone` loses 60, because the 30 folded rows were 30 copies of
+         the same three slots and the designs did not reach those slots equally.
+         What has not moved through any of it is the headline, 28 designs offered
+         and 8 cut. */
+      ['dungeon_stone', 59],
+      ['cut-stone', 48],
+      ['towne', 47],
+      ['aztlan', 27],
     ])
     // Descending, which is the ordering `DesignPicker` renders and does not sort.
     for (let at = 1; at < reach.entries.length; at += 1) {
