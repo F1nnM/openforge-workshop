@@ -54,8 +54,11 @@ export default defineConfig({
       `expect`, and they are all still exactly where they were.
     */
     testTimeout: 30_000,
-    // Only loaded for suites that opt into jsdom; a node-environment suite
-    // importing @testing-library would fail on a missing document.
+    // Loaded for **every** file, not only the jsdom ones — this note used to
+    // claim the opposite and it was wrong, which is what made the two
+    // `@testing-library` imports in the setup file a cost all 181 files paid to
+    // serve the 30 that render. The file now guards its own DOM half on
+    // `typeof document`; see its docblock for the measurement.
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.{ts,tsx}', 'pipeline/**/*.test.ts', 'tools/**/*.test.ts'],
   },
