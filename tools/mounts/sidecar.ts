@@ -121,6 +121,10 @@ export function readLog(logPath: string): Map<string, LogEntry> {
     } catch {
       continue
     }
+    // `null` and `7` are both valid JSON, and a hand-edited resume state is a
+    // thing that happens — so the shape is checked before the field is read,
+    // rather than letting a property access on `null` end the run.
+    if (typeof parsed !== 'object' || parsed === null) continue
     const entry = parsed as LogEntry
     if (typeof entry.blob !== 'string' || entry.blob === '') continue
     entries.set(entry.blob, entry)

@@ -71,6 +71,15 @@ describe('appendEntry and readLog', () => {
     expect([...readLog(path).keys()]).toEqual(['b'.repeat(32)])
   })
 
+  it('drops a line that parses to something that is not an entry', () => {
+    const path = join(temp(), 'mounts.jsonl')
+    const good = hostEntry('b'.repeat(32))
+    appendEntry(path, good)
+    writeFileSync(path, `${readFileSync(path, 'utf8')}null\n7\n[]\n{"blob":""}\n`, 'utf8')
+
+    expect([...readLog(path).keys()]).toEqual(['b'.repeat(32)])
+  })
+
   it('lets a later line for the same blob win, so a retried failure is superseded', () => {
     const path = join(temp(), 'mounts.jsonl')
     const blob = 'd'.repeat(32)
