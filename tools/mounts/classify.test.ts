@@ -1,23 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
 import { parseStl } from '../../src/three/stl/parse'
-import { analyseHost, analyseInsert, toBboxCoordinates } from './classify'
+import { analyseHost, analyseInsert, isDupontSocket, toBboxCoordinates } from './classify'
 import { syntheticStl } from './synthetic'
+import type { Pocket } from './sockets'
 
 /** Authored off-centre in y, like the cut-stone door wall. */
 const WALL = { min: [-25, 53.5, 0], max: [25, 66.5, 50] } as const
 const wallFoot = { shape: 'wall', length: 2 } as const
 
 /**
- * The 4-unit wall the double-door case declares a footprint for.
+ * The 4-unit wall the double-door case declares a footprint for, at its true
+ * 101.6 mm.
  *
- * Spelled at its true 101.6 mm rather than reusing `WALL`, because a 48 mm
- * doorway in a 50 mm wall leaves 4% of the columns at full height and
- * `throughOpenings` reads its top line at the 90th percentile of them — so that
- * host has no *silhouette* to cut an opening out of, which is a different
- * measurement from the one this test is about.
+ * Not `WALL` with the same doorway in it: a 48 mm doorway in a 50 mm wall leaves
+ * 4% of the columns at full height and `throughOpenings` reads its top line at
+ * the 90th percentile of them, so that host has no *silhouette* to cut an opening
+ * out of. That case is pinned separately, below.
  */
-const WIDE_WALL = { min: [-50, 53.5, 0], max: [50, 66.5, 50] } as const
+const WIDE_WALL = { min: [-50.8, 53.5, 0], max: [50.8, 66.5, 50] } as const
 
 const FLOOR = { min: [0, 0, 0], max: [50, 50, 5] } as const
 
@@ -113,6 +114,40 @@ describe('analyseHost', () => {
     expect(m.unresolved).toEqual([{ slot: 'door', reason: 'modelled-in' }])
   })
 
+  it('reports a doorway too wide for the top line as modelled-in', () => {
+    // 48 mm of doorway in a 50 mm wall — the brief's original fixture, kept as an
+    // executable record of a limitation that is `geometry.ts`'s, not this file's:
+    // `throughOpenings` takes the roof line as the 90th percentile of per-column
+    // tops, and 96% of these columns stop at the sill, so the line lands *below*
+    // the doorway and no opening is found at all. With no opening and no enclosed
+    // void either — an open top is not enclosed — the reason is `modelled-in`.
+    //
+    // Fix the percentile and this test goes red rather than the behaviour
+    // changing quietly: the expected answer then becomes one 48 mm opening.
+    const stl = parseStl(syntheticStl([WALL], [{ min: [-24, 53, 10], max: [24, 67, 51] }]))
+    const m = analyseHost(
+      { foot: { shape: 'wall', length: 2 }, slots: [{ name: 'door', require: [] }] },
+      stl.positions,
+      stl.triangles,
+    )
+    expect(m.mounts).toEqual([])
+    expect(m.unresolved).toEqual([{ slot: 'door', reason: 'modelled-in' }])
+  })
+
+  it('reports a void too small to be an opening as no-opening', () => {
+    // 5 × 5 mm through the wall: enclosed on all sides, so the host *is* cut
+    // through — which is what separates this from `modelled-in` — but under
+    // `throughOpenings`' 8 mm and 60 mm² floors, so nothing qualifies.
+    const stl = parseStl(syntheticStl([WALL], [{ min: [-2.5, 53, 20], max: [2.5, 67, 25] }]))
+    const m = analyseHost(
+      { foot: wallFoot, slots: [{ name: 'door', require: [] }] },
+      stl.positions,
+      stl.triangles,
+    )
+    expect(m.mounts).toEqual([])
+    expect(m.unresolved).toEqual([{ slot: 'door', reason: 'no-opening' }])
+  })
+
   it('refuses a doorway that runs off the end of the wall', () => {
     // Flush with the wall's −x end, so the void reaches the outermost column the
     // silhouette leaves maskable: a door hung here has nothing to hinge against.
@@ -190,6 +225,24 @@ describe('analyseHost', () => {
     expect(pocket.at[2]).toBeCloseTo(25, 0)
   })
 
+  it('reports a torch slot on a solid wall as no-socket', () => {
+    // A 12 mm stub of a wall, not the 50 mm one. A socket-class slot pays the
+    // real 31-angle sweep on all four side faces, and that cost is per grid cell:
+    // measured, this host takes 4.4 s where the 20 mm one took 9.1 s and the
+    // 50 mm one would take ~56 s. What is under test is that an unbored face
+    // yields `no-socket`, and the size of the face it is not bored into does not
+    // enter into it. (`vitest.config.ts` explains why a test that is comfortably
+    // inside the 30 s timeout on an idle machine is still worth shrinking.)
+    const stl = parseStl(syntheticStl([{ min: [-6, -6.5, 0], max: [6, 6.5, 12] }]))
+    const m = analyseHost(
+      { foot: wallFoot, slots: [{ name: 'torch', require: ['component|torch'] }] },
+      stl.positions,
+      stl.triangles,
+    )
+    expect(m.mounts).toEqual([])
+    expect(m.unresolved).toEqual([{ slot: 'torch', reason: 'no-socket' }])
+  })
+
   it('reads the doorway of an arc host through the unrolled frame', () => {
     const wall = arcWall()
     const m = analyseHost(
@@ -248,6 +301,71 @@ describe('analyseHost', () => {
       floor.triangles,
     )
     expect(inFloor.mounts[0]?.kind).toBe('hole')
+  })
+})
+
+/** The slot `sockets.test.ts` bores, as `socketPoses` reports it: 5.5 × 3 mm at 63°. */
+const SOCKET: Pocket = {
+  face: '-y',
+  entrance: [0, -6.5, 28],
+  bottom: [0, 2.1, 11],
+  axis: [0, 0.454, -0.891],
+  angleFromNormal: 63,
+  depth: 17.3,
+  entranceSize: [5.5, 3],
+  area: 16.5,
+  depthMax: 19,
+  theta: -60,
+}
+
+describe('isDupontSocket', () => {
+  it('takes a slot at the measured angle, mouth and depth', () => {
+    expect(isDupontSocket(SOCKET)).toBe(true)
+  })
+
+  it('holds all five bounds, from both sides of each', () => {
+    const variants: Readonly<Record<string, Partial<Pocket>>> = {
+      'angle 57.9': { angleFromNormal: 57.9 },
+      'angle 58': { angleFromNormal: 58 },
+      'angle 68': { angleFromNormal: 68 },
+      'angle 68.1': { angleFromNormal: 68.1 },
+      'mouth 4.9 wide': { entranceSize: [4.9, 3] },
+      'mouth 5 wide': { entranceSize: [5, 3] },
+      'mouth 6.5 wide': { entranceSize: [6.5, 3] },
+      'mouth 6.6 wide': { entranceSize: [6.6, 3] },
+      'mouth 1.9 thick': { entranceSize: [5.5, 1.9] },
+      'mouth 2 thick': { entranceSize: [5.5, 2] },
+      'mouth 3.5 thick': { entranceSize: [5.5, 3.5] },
+      'mouth 3.6 thick': { entranceSize: [5.5, 3.6] },
+      'depth 11.9': { depth: 11.9 },
+      'depth 12': { depth: 12 },
+    }
+    const got = Object.fromEntries(
+      Object.entries(variants).map(([name, change]) => [
+        name,
+        isDupontSocket({ ...SOCKET, ...change }),
+      ]),
+    )
+    expect(got).toEqual({
+      'angle 57.9': false,
+      'angle 58': true,
+      'angle 68': true,
+      'angle 68.1': false,
+      'mouth 4.9 wide': false,
+      'mouth 5 wide': true,
+      'mouth 6.5 wide': true,
+      'mouth 6.6 wide': false,
+      'mouth 1.9 thick': false,
+      'mouth 2 thick': true,
+      'mouth 3.5 thick': true,
+      'mouth 3.6 thick': false,
+      'depth 11.9': false,
+      'depth 12': true,
+    })
+  })
+
+  it('has no upper bound on depth — a socket bored right through still counts', () => {
+    expect(isDupontSocket({ ...SOCKET, depth: 40 })).toBe(true)
   })
 })
 

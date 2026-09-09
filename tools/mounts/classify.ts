@@ -38,6 +38,29 @@
  * {@link OPENING_CLEARANCE_MM} of an opening's box is dropped, which is why the
  * through-cast also runs for a socket host with no opening slot at all.
  *
+ * ## "Modelled in" is measured as enclosed voids, not as bare through-columns
+ *
+ * A slot with nothing to show for it is worth telling apart two ways: the host
+ * has a hole that does not pass the rule, or the host has no hole at all and the
+ * feature is sculpted into the solid. The second is `modelled-in`, and the test
+ * for it is **no enclosed empty cell inside the silhouette on the thin axis** —
+ * an empty column with material above it *and* material either side of it in its
+ * own row ({@link silhouetteOf}).
+ *
+ * Counting bare empty columns instead would call a crenellated wall's sky a
+ * void and report a wall with its door modelled in as `no-opening`, which is a
+ * different instruction to whoever reads the build log. The trade-off runs the
+ * other way for one shape: an open-topped opening so wide that
+ * `throughOpenings` cannot see it — see the top-line note below — has no
+ * enclosed cell either, so it also reads `modelled-in` today rather than
+ * `no-opening`. `classify.test.ts` pins that case as it stands.
+ *
+ * The near-full-width case is `geometry.ts`'s, not this file's:
+ * `throughOpenings` takes the roof line as the **90th percentile** of per-column
+ * tops, so an open-topped opening spanning more than about 90% of a host's
+ * columns drags that line below its own sill and leaves no silhouette to cut an
+ * opening out of.
+ *
  * ## Everything comes out in bbox coordinates
  *
  * Hosts are authored wherever the modeller left them — the cut-stone door wall
@@ -116,6 +139,22 @@ export interface SurfaceMount {
 
 export type Mount = OpeningMount | SocketMount | HoleMount | SurfaceMount
 
+/**
+ * Why a slot got no mount. Each is a different thing to do about it.
+ *
+ *   - `no-opening` / `no-socket` / `no-hole` / `no-pocket` — the cast ran and
+ *     found nothing that passes that class's rule. The host has *something*
+ *     cut into it; it does not pass.
+ *   - `modelled-in` — **no enclosed empty cell inside the silhouette on the thin
+ *     axis**: the host is not cut through at all, so the feature is sculpted into
+ *     the solid and there is nothing to fit an accessory into. See
+ *     {@link silhouetteOf} for what "enclosed" means, and the docblock at the top
+ *     of this file for the case it gets wrong.
+ *   - `runs-off-end` — every opening reaches the end of the host, so there is no
+ *     jamb to hinge against.
+ *   - `arc-fit-refused` — the host is tagged as a sector but its mesh is not
+ *     struck from those radii, so it cannot be unrolled and nothing is measured.
+ */
 export type UnresolvedReason =
   | 'no-opening'
   | 'no-socket'
@@ -170,9 +209,12 @@ type ResolvedClass = Exclude<SlotClass, 'grate'>
 /**
  * Every accessory slot name in the corpus, classed.
  *
- * All 28 of them are listed rather than left to the fallback, so a name that
- * turns up in a future fixture shows as a missing entry here instead of quietly
- * becoming a surface mount. A `grate` is an opening in a wall and a hole in a
+ * All 28 of them are listed rather than left to the fallback, because a name
+ * that is not here falls back to `'surface'` — the accessory is placed standing
+ * on the host's top face, which is the one answer that always resolves and never
+ * costs a cast. That is a safe default and a silent one, so the table is
+ * exhaustive over the corpus on purpose: a new name is a table edit, not a
+ * surface mount nobody ordered. A `grate` is an opening in a wall and a hole in a
  * floor, which is the one class a name alone cannot settle.
  */
 export const SLOT_CLASSES: Readonly<Record<string, SlotClass>> = {
@@ -639,7 +681,15 @@ function surfaceMount(slot: HostSlot, bbox: Bounds): SurfaceMount {
   }
 }
 
-function isDupontSocket({ pocket }: FoundPocket): boolean {
+/**
+ * Whether a pocket is a Dupont socket: the entry angle, the mouth in both
+ * directions, and the depth.
+ *
+ * Exported so the five thresholds can be tested on their own. A full sweep of a
+ * real host is the only way to *produce* a socket pocket and costs ~14 s a face,
+ * which is no way to check a bound.
+ */
+export function isDupontSocket(pocket: Pocket): boolean {
   return (
     between(pocket.angleFromNormal, SOCKET_ANGLE_DEG) &&
     between(pocket.entranceSize[0], SOCKET_WIDTH_MM) &&
@@ -665,7 +715,7 @@ function matchOpening(slot: HostSlot, openings: Openings, ctx: Context): Match {
 }
 
 function matchSocket(slot: HostSlot, sockets: readonly FoundPocket[], ctx: Context): Match {
-  const kept = sockets.filter(isDupontSocket)
+  const kept = sockets.filter((found) => isDupontSocket(found.pocket))
   if (kept.length === 0) return { mounts: [], reason: 'no-socket' }
   return { mounts: kept.map((found) => socketMount(slot, 'socket', found, ctx)) }
 }
