@@ -82,7 +82,7 @@ import { ARC_FIT_MIN_ON_RADIUS, fitArcCentre, reroll, rerollVector, unroll } fro
 import type { Axis, Columns, Opening } from './geometry'
 import { CELL_MM, columns, throughOpenings } from './geometry'
 import type { Pocket, SweepOptions } from './sockets'
-import { socketPoses } from './sockets'
+import { POCKET_MIN_DEPTH_MM, socketPoses } from './sockets'
 
 export type Vec3 = readonly [number, number, number]
 
@@ -263,8 +263,23 @@ const SOCKET_ANGLE_DEG = [58, 68] as const,
   SOCKET_THICKNESS_MM = [2, 3.5] as const,
   SOCKET_MIN_DEPTH_MM = 12
 
-/** A treasure niche's mouth, whichever way round it is measured. */
-const POCKET_SIZE_MM = [8, 14] as const
+/**
+ * A treasure niche's mouth, whichever way round it is measured — the three
+ * catalog variants run 9, 13 and 30 mm nominal.
+ */
+const POCKET_SIZE_MM = [7, 32] as const
+
+/**
+ * The pocket sweep's own thresholds: any masked pocket is deep enough — a
+ * treasure hollow measures 5–7 mm deep against the 12 mm the socket rule
+ * wants — and its mouth may run as wide as {@link POCKET_SIZE_MM}'s top end.
+ * θ = 0 and the thin faces are handled by the caller, not by these options.
+ */
+const POCKET_OPTIONS: SweepOptions = {
+  angles: [0],
+  minDepthMm: POCKET_MIN_DEPTH_MM,
+  maxSizeMm: POCKET_SIZE_MM[1],
+}
 
 /** Thickest a slab may be, and shortest its other two sides, to be a leaf. */
 const LEAF_MAX_THICKNESS_MM = 10,
@@ -573,13 +588,35 @@ function nearOpening(pocket: Pocket, frame: Frame, openings: Openings): boolean 
   )
 }
 
+/** One face, one sweep: every pocket it turns up that is not an opening's reveal. */
+function sweepFace(
+  frame: Frame,
+  triangles: number,
+  faceAxis: Axis,
+  sign: -1 | 1,
+  options: SweepOptions,
+  openings: Openings,
+): readonly FoundPocket[] {
+  const runAxis = faceAxis === frame.thin ? frame.run : frame.thin
+  const out: FoundPocket[] = []
+  for (const pocket of socketPoses(frame.work, triangles, faceAxis, runAxis, sign, options)) {
+    if (nearOpening(pocket, frame, openings)) continue
+    out.push({ pocket, faceAxis, face: faceName(faceAxis, sign) })
+  }
+  return out
+}
+
 /**
  * Every pocket of the faces worth sweeping, in the work frame.
  *
- * A socket-class slot pays the full tilt sweep over both pairs of side faces; a
- * pocket-class slot needs only θ = 0 on the two thin faces, and only its wider
- * mouth limit. A curved host has one pair of faces — the radii — because its
- * ends are cut planes rather than a surface anything mounts on.
+ * A socket-class slot pays the full tilt sweep over both pairs of side faces,
+ * at the socket sweep's own (unmodified) thresholds. A pocket-class slot needs
+ * only θ = 0 on the two thin faces, at {@link POCKET_OPTIONS}. A host that
+ * declares both runs the two sweeps separately rather than merging their
+ * options — a merged `maxSizeMm` could let a wider pocket-sized candidate
+ * displace a genuine socket in `sockets.ts`'s per-cluster pick. A curved host
+ * has one pair of faces for the socket sweep — the radii — because its ends
+ * are cut planes rather than a surface anything mounts on.
  */
 function findSockets(
   frame: Frame,
@@ -587,22 +624,16 @@ function findSockets(
   wants: ReadonlySet<ResolvedClass>,
   openings: Openings,
 ): readonly FoundPocket[] {
-  const tilt = wants.has('socket')
-  const faces: readonly Axis[] = frame.curved || !tilt ? [frame.thin] : [frame.thin, frame.run]
-  const options: SweepOptions = {
-    ...(tilt ? {} : { angles: [0] }),
-    ...(wants.has('pocket') ? { maxSizeMm: POCKET_SIZE_MM[1] } : {}),
-  }
-
   const out: FoundPocket[] = []
-  for (const faceAxis of faces) {
-    const runAxis = faceAxis === frame.thin ? frame.run : frame.thin
-    for (const sign of [-1, 1] as const) {
-      for (const pocket of socketPoses(frame.work, triangles, faceAxis, runAxis, sign, options)) {
-        if (nearOpening(pocket, frame, openings)) continue
-        out.push({ pocket, faceAxis, face: faceName(faceAxis, sign) })
-      }
-    }
+  if (wants.has('socket')) {
+    const faces: readonly Axis[] = frame.curved ? [frame.thin] : [frame.thin, frame.run]
+    for (const faceAxis of faces)
+      for (const sign of [-1, 1] as const)
+        out.push(...sweepFace(frame, triangles, faceAxis, sign, {}, openings))
+  }
+  if (wants.has('pocket')) {
+    for (const sign of [-1, 1] as const)
+      out.push(...sweepFace(frame, triangles, frame.thin, sign, POCKET_OPTIONS, openings))
   }
   return out
 }

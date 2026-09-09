@@ -225,6 +225,62 @@ describe('analyseHost', () => {
     expect(pocket.at[2]).toBeCloseTo(25, 0)
   })
 
+  it('finds a shallower, off-centre 9 mm treasure hollow', () => {
+    // The real corpus's `aztlan#treasure_hollow+9mm` reads a ~9 mm square
+    // recess about 5 mm deep, mid-height and off-centre along the run — not
+    // the 8 mm-deep, x-centred fixture above. 5 mm clears the pocket sweep's
+    // own 3.5 mm floor but not the socket rule's 12 mm, and 9 mm clears
+    // `POCKET_SIZE_MM`'s 7 mm floor.
+    const stl = parseStl(
+      syntheticStl([WALL], [{ min: [4.5, 53.5, 20.5], max: [13.5, 58.5, 29.5] }]),
+    )
+    const m = analyseHost(
+      { foot: wallFoot, slots: [{ name: 'treasure', require: [] }] },
+      stl.positions,
+      stl.triangles,
+    )
+    expect(m.unresolved).toEqual([])
+    expect(m.mounts).toHaveLength(1)
+    const pocket = m.mounts[0]
+    if (pocket?.kind !== 'pocket') throw new Error('pocket')
+    expect(pocket.face).toBe('-y')
+    expect(pocket.section[0]).toBeCloseTo(9, 0)
+    expect(pocket.section[1]).toBeCloseTo(9, 0)
+    expect(pocket.depth).toBeCloseTo(5, 0)
+  })
+
+  it('finds a 30 mm treasure hollow, 7 mm deep', () => {
+    // The corpus's `+30mm` variant: the widest of the three, and still short
+    // of the socket rule's 12 mm floor. `POCKET_SIZE_MM`'s 32 mm ceiling is
+    // what lets a mouth this wide resolve at all.
+    //
+    // `localBaseline`'s window (`geometry.ts`, ±6 mm) is what a treasure pocket
+    // is read against, and a recess wider than that window on *both* sides at
+    // once reads back as four corner slivers rather than one mouth — a solid
+    // 30 × 30 mm square only ever clears the mask at its corners, each under
+    // `POCKET_SIZE_MM`'s 7 mm floor, so it stays `no-pocket` however this
+    // file's thresholds are set. A recess no more than the window's ~12 mm
+    // tall does not have that problem: every column sees both its top and
+    // bottom edge at once, so the whole 30 mm run reads as one mouth — which
+    // is the shape this fixture measures.
+    const stl = parseStl(
+      syntheticStl([WALL], [{ min: [-15, 53.5, 22], max: [15, 60.5, 28] }]),
+    )
+    const m = analyseHost(
+      { foot: wallFoot, slots: [{ name: 'treasure', require: [] }] },
+      stl.positions,
+      stl.triangles,
+    )
+    expect(m.unresolved).toEqual([])
+    expect(m.mounts).toHaveLength(1)
+    const pocket = m.mounts[0]
+    if (pocket?.kind !== 'pocket') throw new Error('pocket')
+    expect(pocket.face).toBe('-y')
+    expect(pocket.section[0]).toBeCloseTo(30, 0)
+    expect(pocket.section[1]).toBeCloseTo(6, 0)
+    expect(pocket.depth).toBeCloseTo(7, 0)
+  })
+
   it('reports a torch slot on a solid wall as no-socket', () => {
     // A 12 mm stub of a wall, not the 50 mm one. A socket-class slot pays the
     // real 31-angle sweep on all four side faces, and that cost is per grid cell:
