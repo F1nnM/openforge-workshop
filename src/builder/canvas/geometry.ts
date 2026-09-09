@@ -548,8 +548,11 @@ export interface SlotLayout {
    * `reanchorPiece`'s re-projection through one value. `dx`/`dz` are the minimum
    * corner of *this* box, not of the tagged one.
    *
-   * Always a `rect` at rotation 0: a narrowed slot is the cell slot, and
-   * `offsets.ts#cellExtentOf` admits nothing but a `rect` as a cell.
+   * Always a `rect`, so it has no intrinsic angle: a narrowed slot is the cell
+   * slot, and `offsets.ts#cellExtentOf` admits nothing but a `rect` as a cell. It
+   * is in the part's **own** frame like the footprint it stands in for, so
+   * {@link slotGeometry} turns it by {@link rotation} and by the instance's, and
+   * `offsets.ts#SlotPlacement.residual` is where that frame is chosen.
    */
   readonly residual?: Extent | undefined
 }
