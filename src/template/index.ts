@@ -101,6 +101,7 @@ export type {
   SlotName,
   SlotRule,
   SlotSide,
+  SlotSpin,
   TemplateLayout,
 } from './rules'
 export {

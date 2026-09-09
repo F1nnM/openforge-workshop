@@ -65,6 +65,11 @@
  * | `column` | 8 | one footprint on 8 of 8, and `size|column_shape|L` types the junction as `corner` — which fixes the rotation up to the cell's 4-fold symmetry and not further | **authored** (1 decision) |
  * | `right wall` + `left wall` | 8 | chirality only | **authored** (1 decision) |
  *
+ * There is a fourth, it is per rule rather than per convention, and it is
+ * {@link SlotSpin}: *which way round the part sits* once the anchor has said
+ * where it goes. The table above is about position only, and position was never
+ * what was wrong with a drawn floor — see that type's own table.
+ *
  * The three authored decisions are keyed on the **part-name set**, which
  * classifies **40 of 40**. Keying on the template's own `shape|` tag is wrong on
  * **2 of 40**: the two `Modular` entries of `blueprints.s2w.internal_corner*`
@@ -232,14 +237,65 @@ export function isInsetFill(tags: readonly string[]): boolean {
  * `place.ts` maps plan `z` straight onto. The sequence runs
  * `-z` → `+x` → `+z` → `-x`, matching `geometry.ts#place`'s rotation
  * (`[dx·cos − dz·sin, dx·sin + dz·cos]`, so `+90°` sends `(x, z)` to
- * `(−z, x)`), so `side * 90` composes with a placement's own rotation by
- * addition and nothing else.
+ * `(−z, x)`), so a slot's quarter turns compose with a placement's own rotation
+ * by addition and nothing else.
  *
  * Ignored when the anchor is `cell` or `residual` — both are defined against the
  * whole cell rather than against one face — and 0 on every such rule so that one
  * formula covers all four anchors.
+ *
+ * It is **not** the whole of the slot's yaw. {@link SlotSpin} is the other term,
+ * and it is the one that says which way round the part's own mesh sits once the
+ * anchor has said where it goes.
  */
 export type SlotSide = 0 | 1 | 2 | 3
+
+/**
+ * How many quarter turns the part takes **inside** the box its anchor gives it —
+ * clockwise seen from above, the direction {@link SlotSide} counts in.
+ *
+ * A second turn composed with the anchor's own, and deliberately not a stored
+ * yaw: `offsets.ts#slotYaw` is `(side + spin) * 90`, so there is no number here
+ * that can disagree with the side. The side says which face or corner of the cell
+ * the part is anchored to; the spin says which way round the part is once it is
+ * there. **The two are independent facts**, and folding them into one number is
+ * what left every floor and every column of every assembly turned wrong in a
+ * room whose walls were right — the position was never the problem, and there
+ * was nowhere to say so.
+ *
+ * ## Authored, and it could not be anything else
+ *
+ * Nothing in the corpus fixes it, for the module docblock's reason: no tag links
+ * an STL's second axis to the plan's depth direction. `builder/three/place.ts`
+ * says the same thing from the renderer's side — *"nothing in the data links the
+ * STL's second axis to the plan's depth direction … so the tile takes a
+ * **canonical orientation**"* — and a canonical orientation is a convention, so
+ * a correction to it is another one. This is the **fourth authored decision** of
+ * this module, and the only one that is not keyed on the part-name set: it is
+ * read off the rendered room rather than off the archive, part by part.
+ *
+ * | slot | spin | what it lines up |
+ * | --- | ---: | --- |
+ * | `base`, `wall`, `right wall`, `left wall` | `0` | nothing to correct — the walls are the pieces the other two are turned to match |
+ * | `floor` of {@link WALL_ON_TILE} | `2` | **a half turn, not a quarter.** An `s2w` floor is the tile minus the strip its wall stands on, and the archive authors that strip on the face *opposite* the one this convention's wall is anchored to, so the cut-off half tiles came out pointing away from the wall and the slab's full tiles came out under it |
+ * | `floor` of {@link EXTERNAL_CORNER} and {@link INTERNAL_CORNER} | `1` | a corner floor's two cut edges, onto the two faces its walls are anchored to |
+ * | `column` | `1` | the column's own L onto the corner its `side` names |
+ *
+ * The two floor values differ because the two floors are cut differently — one
+ * face against two adjacent ones — and that is the reason the spin is per rule
+ * and not per anchor or per slot name. A single number for "the floor" would be
+ * right for one convention and a quarter turn wrong for the other, which is the
+ * same mistake in a smaller table.
+ *
+ * ## `0` on every `edge` rule, which is a constraint and not a coincidence
+ *
+ * `offsets.ts#edgeInsets` reads a wall fill's own `d` as the depth it takes off
+ * its face and `edgeRun` reads its own `w` as the run along it, and both are only
+ * true while the wall's own frame **is** its face's frame. A spun `edge` rule
+ * would silently transpose the residual its floor is left. `rules.test.ts`
+ * asserts the zero rather than trusting this paragraph.
+ */
+export type SlotSpin = 0 | 1 | 2 | 3
 
 /** Where one slot of a template sits, in the template's own frame. */
 export interface SlotRule {
@@ -247,6 +303,8 @@ export interface SlotRule {
   readonly part: SlotName
   readonly anchor: SlotAnchor
   readonly side: SlotSide
+  /** Quarter turns the part itself takes inside its anchor. See {@link SlotSpin}. */
+  readonly spin: SlotSpin
   /**
    * The part this one rests on, or `null` for the ground.
    *
@@ -355,9 +413,9 @@ export const WALL_ON_TILE: SlotConvention = {
   parts: ['base', 'floor', 'wall'],
   cell: 'floor',
   slots: [
-    { part: 'base', anchor: 'cell', side: 0, restsOn: null },
-    { part: 'floor', anchor: 'residual', side: 0, restsOn: 'base' },
-    { part: 'wall', anchor: 'edge', side: 0, restsOn: 'base' },
+    { part: 'base', anchor: 'cell', side: 0, spin: 0, restsOn: null },
+    { part: 'floor', anchor: 'residual', side: 0, spin: 2, restsOn: 'base' },
+    { part: 'wall', anchor: 'edge', side: 0, spin: 0, restsOn: 'base' },
   ],
 }
 
@@ -390,11 +448,11 @@ export const EXTERNAL_CORNER: SlotConvention = {
   parts: ['base', 'column', 'floor', 'left wall', 'right wall'],
   cell: 'floor',
   slots: [
-    { part: 'base', anchor: 'cell', side: 0, restsOn: null },
-    { part: 'floor', anchor: 'residual', side: 0, restsOn: 'base' },
-    { part: 'right wall', anchor: 'edge', side: 0, restsOn: 'base' },
-    { part: 'left wall', anchor: 'edge', side: 3, restsOn: 'base' },
-    { part: 'column', anchor: 'corner', side: 0, restsOn: 'base' },
+    { part: 'base', anchor: 'cell', side: 0, spin: 0, restsOn: null },
+    { part: 'floor', anchor: 'residual', side: 0, spin: 1, restsOn: 'base' },
+    { part: 'right wall', anchor: 'edge', side: 0, spin: 0, restsOn: 'base' },
+    { part: 'left wall', anchor: 'edge', side: 3, spin: 0, restsOn: 'base' },
+    { part: 'column', anchor: 'corner', side: 0, spin: 1, restsOn: 'base' },
   ],
 }
 
@@ -434,9 +492,9 @@ export const INTERNAL_CORNER: SlotConvention = {
   parts: ['base', 'column', 'floor'],
   cell: 'floor',
   slots: [
-    { part: 'base', anchor: 'cell', side: 0, restsOn: null },
-    { part: 'floor', anchor: 'residual', side: 0, restsOn: 'base' },
-    { part: 'column', anchor: 'corner', side: 2, restsOn: 'base' },
+    { part: 'base', anchor: 'cell', side: 0, spin: 0, restsOn: null },
+    { part: 'floor', anchor: 'residual', side: 0, spin: 1, restsOn: 'base' },
+    { part: 'column', anchor: 'corner', side: 2, spin: 1, restsOn: 'base' },
   ],
 }
 

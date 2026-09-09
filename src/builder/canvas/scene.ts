@@ -470,9 +470,12 @@ interface PlanOmissionOf {
  *
  * {@link SlotLayout.residual} is present on the `floor` slot of an `s2w` recipe
  * and on nothing else, and it is a smaller `rect` than the fill's own footprint —
- * the part of the cell the separately printed walls do not stand on. Substituting
- * the shape here, rather than adjusting a box downstream, is what makes the
- * narrowing reach every consumer through one value: the box, the polygons,
+ * the part of the cell the separately printed walls do not stand on. It is in the
+ * part's **own** frame, exactly like the footprint it replaces, so
+ * {@link slotGeometry} turns it by the slot's yaw and the instance's rotation
+ * with no case of its own. Substituting the shape here, rather than adjusting a
+ * box downstream, is what makes the narrowing reach every consumer through one
+ * value: the box, the polygons,
  * `overlap.ts`, `place.ts#tileMatrix`'s mesh centring, `instances.ts`'s footprint
  * disagreement, and {@link reanchorPiece}, which re-projects from
  * `PlanPiecePart.shape` and so carries it for free.

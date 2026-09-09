@@ -255,6 +255,50 @@ describe('each convention, as a property rather than a table', () => {
     })
   })
 
+  it('spins no `edge` slot, which is what lets a wall’s own depth be read off its face', () => {
+    each((convention) => {
+      for (const slot of convention.slots) {
+        /* The constraint `offsets.ts#edgeInsets` and `edgeRun` rest on: a wall's
+           own `d` is the depth it takes off its face and its own `w` is the run
+           along it, and both hold only while the wall's own frame *is* its
+           face's frame. A spun `edge` rule would put the inset on the wall's
+           length and take the whole face off its floor — silently, because both
+           numbers stay plausible. The spin belongs to the parts whose anchor
+           does not read their frame, and every one of those is a `residual`
+           floor or a `corner` column. */
+        if (slot.anchor === 'edge') expect(slot.spin, `${convention.id}/${slot.part}`).toBe(0)
+      }
+    })
+  })
+
+  it('spins the floor and the column, and nothing else, by the turn each one needs', () => {
+    /* **The fourth authored decision, as a table.** Read off the rendered room
+       rather than off the archive — nothing in the corpus links an STL's second
+       axis to the plan's depth direction, which `builder/three/place.ts` says
+       from the renderer's side too — so the values are stated here by convention
+       and slot, where a change to one of them is a visible change to one table
+       entry rather than an arithmetic edit.
+
+       The two floors differ, and that is the reason the spin is per rule and not
+       per slot name: an `s2w` wall floor is cut on one face and takes a **half**
+       turn, which is what points its cut-off half tiles at the wall they belong
+       under; a corner floor is cut on two adjacent faces and takes a quarter. A
+       single number for "the floor" would be right for one and a quarter turn
+       wrong for the other. */
+    const spins = (convention: SlotConvention): Record<string, number> =>
+      Object.fromEntries(convention.slots.map((slot) => [slot.part, slot.spin]))
+
+    expect(spins(WALL_ON_TILE)).toEqual({ base: 0, floor: 2, wall: 0 })
+    expect(spins(EXTERNAL_CORNER)).toEqual({
+      base: 0,
+      floor: 1,
+      'right wall': 0,
+      'left wall': 0,
+      column: 1,
+    })
+    expect(spins(INTERNAL_CORNER)).toEqual({ base: 0, floor: 1, column: 1 })
+  })
+
   it('leaves the internal corner’s residual equal to its cell, having no edge to subtract', () => {
     /* Why one anchor covers all three rather than the internal corner keeping
        `cell` as an exception. A residual is the cell less what the `edge` slots

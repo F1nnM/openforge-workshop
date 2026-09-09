@@ -79,7 +79,7 @@ import type { PlacedTemplate } from '@/template/offsets'
 import { placeTemplateSlots, slotDoubtSentence, slotElevationMm } from '@/template/offsets'
 
 import type { SlotLayout } from './geometry'
-import { ORIGIN_LAYOUT, footprintShape, rotatedExtent } from './geometry'
+import { ORIGIN_LAYOUT, boxShape, footprintShape, rotatedExtent } from './geometry'
 
 /**
  * Every **filled** slot of one instance whose file this build holds, by slot.
@@ -258,7 +258,10 @@ export const BASE_LIFT_MM = 6
  *     the *origin* snaps to. `snapTo(-0.75, 0.5)` is `-0.5`, and a quarter unit
  *     is the difference between a wall flush against a floor and a wall a quarter
  *     unit inside it.
- *   - **`rotation`** — `slotYaw`, i.e. `side * 90`, straight off the placement.
+ *   - **`rotation`** — `slotYaw`, i.e. `(side + spin) * 90`, straight off the
+ *     placement: where the anchor puts the part, plus which way round the part
+ *     sits there. `rules.ts#SlotSpin` is the second term and the only reason
+ *     there is one.
  *   - **`elevationMm`** — `slotElevationMm` walking `restsOn` to the ground, with
  *     {@link BASE_LIFT_MM} supplied for a resting slot that is **filled** and 0
  *     for one that is not. That second half is a real behaviour rather than a
@@ -352,10 +355,13 @@ export function templateSlotLayout(
        an `s2w` floor is tagged with the size of its *tile* and measures 0.5 less
        on each walled axis, so drawing it at `shape.extent` puts a quarter unit of
        it under each wall — the defect the project owner reported on a placed s2w
-       corner. It needs no `rotatedExtent`: a residual slot is the cell slot,
-       `cellExtentOf` admits only a `rect`, and its yaw is 0, so there is no
-       intrinsic angle and no quarter turn to fold in. */
-    const drawn = placement.residual ?? rotatedExtent(shape.extent, placement.yaw + shape.angle)
+       corner. It arrives in the part's own frame like any footprint, and is
+       turned by the slot's yaw like any footprint: `scene.ts#drawnShape`
+       substitutes the same box into the same rotation, and the two agreeing is
+       what makes the narrowing one value rather than two conventions. A residual
+       is a `rect`, so `boxShape` gives it the intrinsic angle 0 the fold needs. */
+    const drawnShape = placement.residual === undefined ? shape : boxShape(placement.residual)
+    const drawn = rotatedExtent(drawnShape.extent, placement.yaw + drawnShape.angle)
     return {
       dx: placement.offset[0] - drawn.w / 2 + cell.w / 2,
       dz: placement.offset[1] - drawn.d / 2 + cell.d / 2,

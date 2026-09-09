@@ -800,12 +800,22 @@ describe('the wired slot layout', () => {
       left a quarter unit of base bare at each open edge. `residual` is the box
       the renderer draws and `dx`/`dz` are that box's minimum corner, so the five
       parts now tile the cell exactly instead of the floor covering it alone.
+
+      **And `rules.ts#SlotSpin` changed two more, both of them a `rotation` and
+      neither of them a position.** The floor and the column of this corner came
+      back drawn in the frame their anchor implies, which is a quarter turn from
+      the frame the archive authors them in: the floor's two cut edges faced away
+      from the two walls they belong under, and the column's own L faced out of
+      the corner it stands in. Both now answer `rotation: 90`, and every `dx`,
+      `dz`, `residual` and `cell` in this table is the number it was — which is
+      the whole claim about a spin, asserted here on the only fixture that draws
+      all five slots at once.
     */
     expect(at(FIXTURE_SLOTS.base)).toEqual({ dx: 0, dz: 0, rotation: 0, elevationMm: 0, cell: FIXTURE_CELL })
     expect(at(FIXTURE_SLOTS.floor)).toEqual({
       dx: 0.5,
       dz: 0.5,
-      rotation: 0,
+      rotation: 90,
       elevationMm: BASE_LIFT_MM,
       cell: FIXTURE_CELL,
       residual: { w: 1.5, d: 1.5 },
@@ -820,7 +830,7 @@ describe('the wired slot layout', () => {
     expect(at(FIXTURE_SLOTS.column)).toEqual({
       dx: 0,
       dz: 0,
-      rotation: 0,
+      rotation: 90,
       elevationMm: 0,
       cell: FIXTURE_CELL,
     })

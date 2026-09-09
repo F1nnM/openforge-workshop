@@ -196,8 +196,8 @@ describe('slotOffset', () => {
        would agree with every square-cell test and be wrong by a unit here. */
     const cell = { w: 4, d: 2 }
     const part = { w: 4, d: WALL_THICKNESS_UNITS }
-    const north: SlotRule = { part: 'wall', anchor: 'edge', side: 0, restsOn: 'base' }
-    const east: SlotRule = { part: 'wall', anchor: 'edge', side: 1, restsOn: 'base' }
+    const north: SlotRule = { part: 'wall', anchor: 'edge', side: 0, spin: 0, restsOn: 'base' }
+    const east: SlotRule = { part: 'wall', anchor: 'edge', side: 1, spin: 0, restsOn: 'base' }
     expect(slotOffset(north, cell, part)).toEqual([0, -0.75])
     expect(slotOffset(east, cell, part)).toEqual([1.75, 0])
   })
@@ -379,15 +379,24 @@ describe('the frame swap, against the general rotation it deliberately does not 
 
     for (const anchor of ['edge', 'corner'] as const) {
       for (const side of [0, 1, 2, 3] as const) {
-        for (const cell of cells) {
-          for (const part of parts) {
-            const rule: SlotRule = { part: 'wall', anchor, side, restsOn: 'base' }
-            const inFrame = rotatedExtent(cell, side * 90)
-            const dz = -(inFrame.d - part.d) / 2
-            const dx = anchor === 'corner' ? -(inFrame.w - part.w) / 2 : 0
-            expect(slotOffset(rule, cell, part), `${anchor}/${String(side)}`).toEqual(
-              quarterTurn([dx, dz], side),
-            )
+        /* And over the spin, which is the term the anchors gained: a part turned
+           inside its anchor is anchored flush by its *drawn* depth, so the two
+           extents reach the face's frame by different turns. Written against
+           `rotatedExtent` on both, so the file's own equivalence carries the new
+           term as well as the old one. */
+        for (const spin of [0, 1, 2, 3] as const) {
+          for (const cell of cells) {
+            for (const part of parts) {
+              const rule: SlotRule = { part: 'wall', anchor, side, spin, restsOn: 'base' }
+              const inFrame = rotatedExtent(cell, side * 90)
+              const drawn = rotatedExtent(part, spin * 90)
+              const dz = -(inFrame.d - drawn.d) / 2
+              const dx = anchor === 'corner' ? -(inFrame.w - drawn.w) / 2 : 0
+              expect(
+                slotOffset(rule, cell, part),
+                `${anchor}/${String(side)}/${String(spin)}`,
+              ).toEqual(quarterTurn([dx, dz], side))
+            }
           }
         }
       }
@@ -443,23 +452,37 @@ describe('the 0.25 lattice, which the snap step does not reach', () => {
 /* ------------------------------------------------------------------- the yaw */
 
 describe('slotYaw', () => {
-  it('is side * 90, and is not stored anywhere it could disagree with the side', () => {
+  it('is (side + spin) * 90, and is not stored anywhere it could disagree with the side', () => {
     expect(
       SLOT_CONVENTIONS.flatMap((convention) => convention.slots)
         .map(slotYaw)
         .sort((a, b) => a - b),
     ).toEqual(
-      /* 11 slots over the three conventions: 9 on the reference face, the
-         external corner's left wall at 270 and the internal corner's column at
-         180. Row E3's corridor put a fourth slot at 180 — its left wall, the only
+      /* 11 slots over the three conventions. Five are drawn in the frame their
+         anchor implies — the three bases and the two walls anchored to the
+         reference face — and the other six are the two terms composing:
+
+           - the external corner's left wall at 270, side 3 and no spin;
+           - `WALL_ON_TILE`'s floor at 180, side 0 and a half turn, which points
+             its cut-off half tiles at the wall they belong under;
+           - both corner floors and the external corner's column at 90;
+           - the internal corner's column at 270, side 2 and a quarter turn — the
+             one slot whose two terms are both non-zero.
+
+         Row E3's corridor put a fourth slot at 180 — its left wall, the only
          slot in the table two quarter-turns from the reference face with no
          corner between them — and it is withdrawn with the convention. */
-      [0, 0, 0, 0, 0, 0, 0, 0, 0, 180, 270],
+      [0, 0, 0, 0, 0, 90, 90, 90, 180, 270, 270],
     )
     for (const side of [0, 1, 2, 3] as const) {
-      const rule: SlotRule = { part: 'wall', anchor: 'edge', side, restsOn: null }
-      expect(slotYaw(rule)).toBe(side * 90)
-      expect(rule).not.toHaveProperty('yaw')
+      for (const spin of [0, 1, 2, 3] as const) {
+        const rule: SlotRule = { part: 'wall', anchor: 'edge', side, spin, restsOn: null }
+        expect(slotYaw(rule)).toBe(((side + spin) % 4) * 90)
+        // Folded, so the one combination that sums to a full turn is 0 and not
+        // 360 — a rotation `@/store#normalizeRotation` would never hand out.
+        expect(slotYaw(rule)).toBeLessThan(360)
+        expect(rule).not.toHaveProperty('yaw')
+      }
     }
   })
 
@@ -489,7 +512,10 @@ describe('the rule table holds no measurement', () => {
       else if (value !== null && typeof value === 'object') Object.values(value).forEach(walk)
     }
     walk(SLOT_CONVENTIONS)
-    expect([...numbers].sort((a, b) => a - b)).toEqual([0, 2, 3])
+    /* 1 joined the set with `rules.ts#SlotSpin`, and it is a quarter turn like
+       every other number here: the table's whole numeric vocabulary is still
+       "which of four quarter turns", on two axes instead of one. */
+    expect([...numbers].sort((a, b) => a - b)).toEqual([0, 1, 2, 3])
   })
 })
 
@@ -546,8 +572,8 @@ describe('slotElevationMm', () => {
     const cyclic: TemplateLayout = {
       cell: 'floor',
       slots: [
-        { part: 'floor', anchor: 'cell', side: 0, restsOn: 'wall' },
-        { part: 'wall', anchor: 'edge', side: 0, restsOn: 'floor' },
+        { part: 'floor', anchor: 'cell', side: 0, spin: 0, restsOn: 'wall' },
+        { part: 'wall', anchor: 'edge', side: 0, spin: 0, restsOn: 'floor' },
       ],
     }
     expect(() => slotElevationMm(cyclic, 'floor', heights(6))).toThrow(/cycle through/)
@@ -705,6 +731,35 @@ describe('placeTemplateSlots', () => {
       ]),
     )
     expect(big.slots.find((slot) => slot.part === 'floor')?.residual).toEqual({ w: 3.5, d: 3.5 })
+  })
+
+  it('turns a spun floor’s residual into the part’s own frame, so a spin cannot move it', () => {
+    /* **The frame contract, and the one thing a spin must never do.**
+       `residualBox` derives the box in the *template's* frame — the cell less
+       what each wall takes off its own face — and `SlotPlacement.residual`
+       carries it in the part's own, because every consumer substitutes it for a
+       footprint and then turns it by the slot's yaw. Turning it back has to give
+       the template-frame box at every spin, which is what says the part was
+       turned and not moved.
+
+       None of the three shipped conventions can see this: `WALL_ON_TILE`'s floor
+       spins by a *half* turn and a w/d swap reads only parity, and both corner
+       floors are square. The quarter turn on a 2 x 1.5 residual is the case that
+       transposes, so it is the case asserted — and the offset stays put through
+       all four. */
+    const world = residualBox({ w: 2, d: 2 }, edgeInsets(WALL_ON_TILE, WALL_2X2)).extent
+    expect(world).toEqual({ w: 2, d: 1.5 })
+    for (const spin of [0, 1, 2, 3] as const) {
+      const layout: TemplateLayout = {
+        cell: 'floor',
+        slots: WALL_ON_TILE.slots.map((rule) => (rule.part === 'floor' ? { ...rule, spin } : rule)),
+      }
+      const floor = placeTemplateSlots(layout, WALL_2X2).slots.find((slot) => slot.part === 'floor')
+      const expected = spin % 2 === 0 ? world : { w: world.d, d: world.w }
+      expect(floor?.residual, `spin ${String(spin)}`).toEqual(expected)
+      expect(rotatedExtent(expected, spin * 90), `spin ${String(spin)} drawn`).toEqual(world)
+      expect(floor?.offset, `spin ${String(spin)} offset`).toEqual([0, 0.25])
+    }
   })
 
   it('leaves an internal corner’s residual equal to its cell, having no wall to subtract', () => {
@@ -970,12 +1025,13 @@ describe('the offsets, placed by the canvas', () => {
    *
    * The same two lines `builder/canvas/catalog.ts#templateSlotLayout` and
    * `scene.ts#drawnShape` run, which is what makes this block a measurement of
-   * the seam rather than of a third convention. A residual needs no
-   * `rotatedExtent`: it is the cell slot, `cellExtentOf` admits only a `rect`,
-   * and its yaw is 0.
+   * the seam rather than of a third convention. A residual is substituted for the
+   * footprint and turned exactly like one — it arrives in the part's own frame —
+   * and `boxShape` gives it the intrinsic angle 0 that a `rect` has.
    */
   function drawnAt(placement: SlotPlacement, shape: PlanShape): Extent {
-    return placement.residual ?? rotatedExtent(shape.extent, placement.yaw + shape.angle)
+    const drawn = placement.residual === undefined ? shape : boxShape(placement.residual)
+    return rotatedExtent(drawn.extent, placement.yaw + drawn.angle)
   }
 
   /** One of this module's placements, read into the canvas's `SlotLayout`. */

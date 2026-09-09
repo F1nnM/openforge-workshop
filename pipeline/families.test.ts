@@ -1148,7 +1148,7 @@ describeCorpus(title, () => {
         const layout = familyLayout(family)
         expect(layout.cell).toBe(family.slot.name)
         expect(layout.slots).toEqual([
-          { part: family.slot.name, anchor: 'cell', side: 0, restsOn: null },
+          { part: family.slot.name, anchor: 'cell', side: 0, spin: 0, restsOn: null },
         ])
       }
     })

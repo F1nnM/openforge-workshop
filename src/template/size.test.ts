@@ -83,7 +83,7 @@ describe('the predicate a slot carries', () => {
   const cell: GridSize = { w: 2, d: 3 }
 
   it('is exact congruence for a `cell` anchor', () => {
-    const rule = { part: 'floor', anchor: 'cell', side: 0, restsOn: null } as const
+    const rule = { part: 'floor', anchor: 'cell', side: 0, spin: 0, restsOn: null } as const
     expect(slotSizePredicate(rule, cell)).toEqual({ kind: 'cell', w: 2, d: 3 })
     /* A 2x2 floor slot must not admit a 4x4 floor — the brief's own test. */
     const two: SizePredicate = { kind: 'cell', w: 2, d: 2 }
@@ -95,8 +95,8 @@ describe('the predicate a slot carries', () => {
   })
 
   it('is the face it is anchored to for an `edge` anchor, less the corner span', () => {
-    const front = { part: 'wall', anchor: 'edge', side: 0, restsOn: 'base' } as const
-    const flank = { part: 'wall', anchor: 'edge', side: 1, restsOn: 'base' } as const
+    const front = { part: 'wall', anchor: 'edge', side: 0, spin: 0, restsOn: 'base' } as const
+    const flank = { part: 'wall', anchor: 'edge', side: 1, spin: 0, restsOn: 'base' } as const
     expect(slotSizePredicate(front, cell)).toEqual({ kind: 'run', run: 2 })
     expect(slotSizePredicate(flank, cell)).toEqual({ kind: 'run', run: 3 })
     /* A corner sibling takes half a unit off both of the faces it touches, which
@@ -107,7 +107,7 @@ describe('the predicate a slot carries', () => {
   })
 
   it('is nothing at all for a `corner` anchor, and says so', () => {
-    const rule = { part: 'column', anchor: 'corner', side: 0, restsOn: 'base' } as const
+    const rule = { part: 'column', anchor: 'corner', side: 0, spin: 0, restsOn: 'base' } as const
     expect(slotSizePredicate(rule, cell)).toEqual({ kind: 'none' })
     expect(sizeAdmits({ kind: 'none' }, undefined)).toBe(true)
     expect(sizeSentence({ kind: 'none' })).toBe('any size')

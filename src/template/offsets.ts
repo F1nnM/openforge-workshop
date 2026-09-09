@@ -12,20 +12,25 @@
  * Everything is derived in a frame `F` where the anchored face is `-z`. In `F`
  * the cell extent is the cell's own extent with `w` and `d` swapped on an odd
  * quarter turn — exact, never trigonometric, and asserted equal to
- * `geometry.ts#rotatedExtent` for every multiple of 90 — and the part is already
- * aligned, because the part is yawed by exactly `side * 90`. So:
+ * `geometry.ts#rotatedExtent` for every multiple of 90 — and the part reaches `F`
+ * by its **own** turn, `rules.ts#SlotSpin`, because a slot's yaw is
+ * `(side + spin) * 90` and only the first term is the face. `partF` below is the
+ * part's extent swapped on an odd spin, which is the identity on every rule this
+ * build ships and is the reason a spin can never move a part. So:
  *
  * ```
  * cell     →  (0, 0)
- * edge     →  (reserved / 2, −(cellF.d − part.d) / 2)             flush to −z, centred on what the corner leaves
- * corner   →  (−(cellF.w − part.w) / 2, −(cellF.d − part.d) / 2)  flush to −x and −z
- * residual →  ((minX − maxX) / 2, (minZ − maxZ) / 2)              what the edges leave, in the cell's own frame
+ * edge     →  (reserved / 2, −(cellF.d − partF.d) / 2)              flush to −z, centred on what the corner leaves
+ * corner   →  (−(cellF.w − partF.w) / 2, −(cellF.d − partF.d) / 2)  flush to −x and −z
+ * residual →  ((minX − maxX) / 2, (minZ − maxZ) / 2)                what the edges leave, in the cell's own frame
  * ```
  *
  * and the result is turned back by `side` quarter-turns — except the `residual`
  * line, which is stated against all four faces at once and so has no side to turn
  * by. It is the one anchor whose **extent** the rule supplies as well as its
- * position; see {@link residualBox} for why the fill's own footprint is not it.
+ * position; see {@link residualBox} for why the fill's own footprint is not it,
+ * and {@link SlotPlacement.residual} for why that extent leaves here in the
+ * part's own frame rather than in the cell's.
  *
  * The `z` term is always
  * an **inset** while the part is no deeper than the face it lies on, so nothing
@@ -115,8 +120,11 @@ import { footprintExtent } from '@/builder/canvas/geometry'
 import type { SlotAnchor, SlotName, SlotRule, SlotSide, TemplateLayout } from './rules'
 import { ruleFor } from './rules'
 
-/** Degrees per side step. Named so `side * 90` is written once. */
+/** Degrees per quarter turn. Named so `(side + spin) * 90` is written once. */
 const DEGREES_PER_SIDE = 90
+
+/** Quarter turns in a full turn — the modulus {@link slotYaw} folds its sum by. */
+const QUARTER_TURNS = 4
 
 /**
  * Tolerance for the closure comparison, in grid units.
@@ -158,7 +166,13 @@ export function quarterTurn(point: PlanPoint, side: SlotSide): PlanPoint {
 }
 
 /**
- * A cell extent seen from the frame in which face `side` is `-z`.
+ * An extent seen from the frame `turns` quarter turns away from this one.
+ *
+ * Takes a count rather than a {@link SlotSide} because it is asked two different
+ * questions with the same arithmetic: the cell as the anchored *face's* frame
+ * sees it (`side` turns), and the part as its *own* frame sees it (`spin` turns,
+ * the other term of {@link slotYaw}). Only the parity is read, so a sum of the
+ * two needs no fold.
  *
  * A w/d swap on an odd quarter turn, and the same answer
  * `geometry.ts#rotatedExtent` gives for a multiple of 90 —
@@ -176,8 +190,8 @@ export function quarterTurn(point: PlanPoint, side: SlotSide): PlanPoint {
  * reader and a second copy of its seven-case switch would be a second source of
  * truth, which is worth a dependency where a w/d swap is not.
  */
-function quarterTurnExtent(extent: Extent, side: SlotSide): Extent {
-  return side % 2 === 0 ? { w: extent.w, d: extent.d } : { w: extent.d, d: extent.w }
+function quarterTurnExtent(extent: Extent, turns: number): Extent {
+  return turns % 2 === 0 ? { w: extent.w, d: extent.d } : { w: extent.d, d: extent.w }
 }
 
 /**
@@ -251,8 +265,17 @@ export function slotOffset(
   if (rule.anchor === 'cell') return [0, 0]
   if (rule.anchor === 'residual') return residualBox(cell, insets).offset
   const inFrame = quarterTurnExtent(cell, rule.side)
-  const dz = -(inFrame.d - part.d) / 2
-  const dx = rule.anchor === 'corner' ? -(inFrame.w - part.w) / 2 : reserved / 2
+  /* Both extents read in the anchored face's frame, and the two get there by
+     different turns: the cell by the slot's `side`, the part by its `spin`. They
+     coincided while every rule's spin was 0 — the part's own frame *was* its
+     face's frame — and a spun part's box is transposed in it. Every spun rule
+     this build ships is anchored to a square part or to no face at all, so this
+     term is a no-op on all 40 templates and is written anyway: a flush inset that
+     silently reads the wrong axis is the defect this whole file exists to keep
+     out. */
+  const drawn = quarterTurnExtent(part, rule.spin)
+  const dz = -(inFrame.d - drawn.d) / 2
+  const dx = rule.anchor === 'corner' ? -(inFrame.w - drawn.w) / 2 : reserved / 2
   return quarterTurn([dx, dz], rule.side)
 }
 
@@ -282,10 +305,13 @@ export const NO_INSETS: EdgeInsets = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 }
  *
  * One pass over the rules, reading each `edge` fill's own footprint. The depth a
  * wall takes off its face is its own frame's `d` — **not** a quarter-turned
- * quantity — because {@link slotYaw} turns the part by `side * 90`, so its own
- * `d` always lies across the face it is anchored to. That is the same reading
+ * quantity — because {@link slotYaw} turns the part by `(side + spin) * 90` and
+ * `rules.ts#SlotSpin` is 0 on every `edge` rule, so its own `d` always lies
+ * across the face it is anchored to. That is the same reading
  * {@link slotOffset}'s `dz` term makes, which is what keeps the residual and the
- * walls from being two conventions.
+ * walls from being two conventions — and it is the reason a spun `edge` rule is
+ * asserted against rather than accommodated: it would put this sum on the wall's
+ * length and take the whole face off the floor.
  *
  * A slot with no fill, or a fill with no extent, contributes **0** rather than a
  * guess. That is the honest answer and it is also the useful one: an unfilled
@@ -359,18 +385,26 @@ export function residualBox(cell: Extent, insets: EdgeInsets): { offset: PlanPoi
 /**
  * The slot's yaw within the template, in degrees.
  *
- * `side * 90` and nothing else, which is why {@link SlotRule} carries no `yaw`
- * field: a stored yaw could disagree with the stored side. A placed template's
- * slot is drawn at `normalizeRotation(instance.rotation + slotYaw(rule))` — the
- * fold is the caller's, because `normalizeRotation` lives in `@/store` and this
- * row does not reach into row A1's directory.
+ * `(side + spin) * 90` and nothing else, which is why {@link SlotRule} carries no
+ * `yaw` field: a stored yaw could disagree with the stored side, and these two
+ * terms cannot. `side` is *where the part is anchored*, `spin` is *which way
+ * round it sits there*, and a yaw is the only thing either of them can be read
+ * out of — `rules.ts#SlotSpin` sets out why the second term has to exist and what
+ * each value lines up. A placed template's slot is drawn at
+ * `normalizeRotation(instance.rotation + slotYaw(rule))` — the fold is the
+ * caller's, because `normalizeRotation` lives in `@/store` and this row does not
+ * reach into row A1's directory.
+ *
+ * Folded into `[0, 360)` here as well, by taking the sum of the two quarter turns
+ * mod 4: side 3 and spin 1 is a full turn, and 360 is not a rotation this
+ * project's `normalizeRotation` would ever hand a caller.
  *
  * At a placement rotation in `{0, 90, 180, 270}` every slot yaw stays a multiple
  * of 90, so `rotatedExtent`'s exact-swap branch is taken for every slot of every
  * template and no slot picks up 6.1e-17.
  */
 export function slotYaw(rule: SlotRule): number {
-  return rule.side * DEGREES_PER_SIDE
+  return ((rule.side + rule.spin) % QUARTER_TURNS) * DEGREES_PER_SIDE
 }
 
 /**
@@ -556,11 +590,24 @@ export interface SlotPlacement {
    * Optional rather than always-present, and rather than a second field on every
    * anchor, because for the other three the fill's own footprint really is the
    * box and a duplicate of it here would be a second source for the same
-   * quantity — with the rotation question answered in two places. `residual` is
-   * the cell slot and `cellExtentOf` admits only a `rect`, so this extent is
-   * always axis-aligned at yaw 0 and needs no `rotatedExtent` to read; a `diag`'s
-   * intrinsic 45° cannot reach it. `builder/canvas/catalog.ts` prefers it where
-   * present and falls back to the rotated footprint otherwise.
+   * quantity — with the rotation question answered in two places.
+   *
+   * **In the part's own frame, like every other extent in this project**, which
+   * is what lets a caller substitute it for the fill's footprint and change
+   * nothing else: `builder/canvas/catalog.ts` and `scene.ts` both read
+   * `rotatedExtent(extent, yaw + angle)` over whichever of the two they have. The
+   * residual is *derived* in the template's frame — it is the cell less what the
+   * walls take, and faces are template-frame things — so
+   * {@link placeTemplateSlots} turns it out of that frame by the slot's own
+   * quarter turns before storing it here. While every rule's spin was 0 the frames
+   * were the same frame and the distinction could not be seen; it is real now,
+   * and a half turn (`WALL_ON_TILE`'s floor) still cannot see it because parity
+   * is all a w/d swap reads. A quarter turn on a floor whose residual is not
+   * square would, and it is the one this field would otherwise have transposed —
+   * moving a part the rule was asked only to turn.
+   *
+   * There is no intrinsic angle to fold in either way: `residual` is the cell
+   * slot, `cellExtentOf` admits only a `rect`, so a `diag`'s 45° cannot reach it.
    */
   readonly residual?: Extent
 }
@@ -721,7 +768,13 @@ export function placeTemplateSlots(
       offset: slotOffset({ ...rule, anchor }, cell, part, reserved, insets),
       yaw: slotYaw(rule),
       restsOn: rule.restsOn,
-      ...(anchor === 'residual' && residual !== undefined ? { residual: residual.extent } : {}),
+      ...(anchor === 'residual' && residual !== undefined
+        ? /* Template frame out, own frame in — see {@link SlotPlacement.residual}.
+             The turn is the slot's whole yaw and not just its spin, because the
+             caller rotates by the sum; an inset `cell` rule that became a
+             residual here carries both terms 0 and is unturned either way. */
+          { residual: quarterTurnExtent(residual.extent, rule.side + rule.spin) }
+        : {}),
     })
   }
 

@@ -180,7 +180,7 @@
  *
  * B2's three outputs are all constants here, which is checkable rather than
  * argued: `slotOffset` returns `[0, 0]` for a `cell` anchor **before it reads
- * the cell at all**, `slotYaw` is `side * 90` and the side is 0, and
+ * the cell at all**, `slotYaw` is `(side + spin) * 90` and both are 0, and
  * `slotElevationMm` walks `restsOn` and there is nothing to walk. So the single
  * fill sits at the instance's own origin, unrotated, on the ground.
  *
@@ -931,7 +931,7 @@ export function deriveFamilies(file: CatalogFile): readonly GeneratedFamily[] {
 export function familyLayout(family: GeneratedFamily): TemplateLayout {
   return {
     cell: family.slot.name,
-    slots: [{ part: family.slot.name, anchor: 'cell', side: 0, restsOn: null }],
+    slots: [{ part: family.slot.name, anchor: 'cell', side: 0, spin: 0, restsOn: null }],
   }
 }
 
