@@ -75,7 +75,10 @@ const MIN_MEASURED_COLUMNS = 50
 /** Two candidate mouths closer than this are one socket, read at two sweep angles. */
 const CLUSTER_MM = 4
 
-/** The deepest fraction of a pocket's columns, which vote on where its bottom is. */
+/**
+ * The depth percentile a column must reach to vote on where the bottom is, so
+ * the deepest 40 % of a pocket's columns set it and a shoulder cannot.
+ */
 const BOTTOM_PERCENTILE = 0.6
 
 /** The face depth map of one swept frame, and the columns deep enough to be a mouth. */
@@ -227,6 +230,12 @@ function candidateOf(
     bottom[1] - entrance[1],
     bottom[2] - entrance[2],
   )
+  // No separation, no axis. `entrance` averages the baseline over every column
+  // and `bottom` only the deepest 40 %, so the two are not held apart by the
+  // depth threshold: a mask whose baseline runs deeper than its own floor can
+  // put them on top of each other, and a normalise by zero is a NaN pose that
+  // travels all the way to the emitted mount.
+  if (length < 1e-9) return undefined
   const axis: Vec3 = [
     (bottom[0] - entrance[0]) / length,
     (bottom[1] - entrance[1]) / length,

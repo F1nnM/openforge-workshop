@@ -8,6 +8,16 @@ type Point = readonly [number, number, number]
 
 const WALL = { min: [-25, -6.5, 0], max: [25, 6.5, 45] } as const
 
+/**
+ * The default sweep at a 15° step instead of 5°, which is a third of the work.
+ *
+ * For the two cases that are not about angular resolution — nothing to find, and
+ * a socket square to the face, read at θ = 0 — and worth spelling because one
+ * `socketPoses` call over the full 31 angles costs ~14 s against this repo's
+ * 30 s test timeout.
+ */
+const COARSE = { angles: Array.from({ length: 11 }, (_, k) => -75 + 15 * k) }
+
 const TILT = (63 * Math.PI) / 180
 const HALF_WIDTH = 2.75,
   HALF_THICK = 1.5,
@@ -87,11 +97,16 @@ describe('socketPoses', () => {
     expect(p.angleFromNormal).toBeLessThan(72)
     expect(p.axis[2]).toBeLessThan(0) // descends
     expect(p.entranceSize[0]).toBeCloseTo(5.5, 0)
+    // The bore is 19 mm and `bottom` averages its deepest 40 % of columns, so
+    // the pose reads 17.3 mm — short of the bore, nowhere near collapsed onto
+    // the mouth, which is what a regression in `poseOf` would look like.
+    expect(p.depth).toBeGreaterThan(12)
+    expect(p.depth).toBeLessThan(22)
   })
 
   it('finds nothing on the +y face of the same wall', () => {
     const wall = slottedWall()
-    expect(socketPoses(wall.positions, wall.triangles, 1, 0, +1)).toEqual([])
+    expect(socketPoses(wall.positions, wall.triangles, 1, 0, +1, COARSE)).toEqual([])
   })
 
   it('returns both sockets of a wall with two', () => {
@@ -99,7 +114,7 @@ describe('socketPoses', () => {
       (x) => ({ min: [x - 2.75, -6.6, 20], max: [x + 2.75, 3, 23] }) as const,
     )
     const stl = parseStl(syntheticStl([WALL], cuts))
-    const found = socketPoses(stl.positions, stl.triangles, 1, 0, -1)
+    const found = socketPoses(stl.positions, stl.triangles, 1, 0, -1, COARSE)
     expect(found.map((p) => Math.round(p.entrance[0])).sort((a, b) => a - b)).toEqual([-20, 20])
   })
 })
