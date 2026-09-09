@@ -40,58 +40,39 @@ function others(axis: Axis): [Axis, Axis] {
 /** Twice the area below which a projected triangle is an edge, not a surface. */
 const DEGENERATE_AREA = 1e-12
 
-/** Fraction of a triangle's projected area within which a sample is *on* an edge. */
+/** Fraction of a triangle's projected area within which a sample counts as covered. */
 const EDGE_BAND = 1e-9
 
 /**
- * Does the triangle with edge `(a, b)` and opposite corner `c` claim a sample
- * lying on that edge?
+ * How far the sample lattice sits off the bounding-box corner, in u and in v.
  *
- * Without an answer to this, a column that lands on a shared edge is counted by
- * both triangles, and a flat quad-triangulated face reads as two crossings
- * instead of one. That is the common case rather than a corner case: tile
- * geometry is axis-aligned, so a face quad's diagonal passes exactly through
- * grid centres — the 50 × 50 wall face in the tests has its diagonal through
- * every centre on `z = x + 25`.
+ * A sample that lands exactly on the edge of a projected triangle has no right
+ * answer available. Count it in both of the triangles that meet there and a
+ * quad-triangulated face reads as two crossings instead of one — the 50 × 50
+ * wall the tests use has its diagonal through every plain cell centre on
+ * `z = x + 25`, and reports `hits = 4`. Hand the edge to one of the two by a
+ * claim rule and the *other* case breaks: an edge on the silhouette of the
+ * projection has only one non-degenerate triangle — cast along y, a wall's top
+ * edge is shared only with the edge-on top face, which never runs — so whenever
+ * the claim falls to the discarded triangle the sample is lost, and a 50.25 mm
+ * tall wall reads `hits = 0`, `tmin = Infinity` along the whole `z = 50.25` row
+ * of solid material. Measured, both of them.
  *
- * The rule orders the edge's two endpoints lexicographically, which two
- * triangles sharing that edge must agree on whichever way each of them winds,
- * and claims the sample for the triangle whose opposite corner is to the left of
- * that canonical direction. Exactly one of the two qualifies.
- *
- * A sample landing exactly on a *vertex* is not resolved by this — every
- * triangle in the fan has two zero edges, and the claims around the fan can
- * leave it to none of them, costing one column one crossing. Nothing corrects
- * for it: the grid is offset half a cell from the bounding-box minimum, so it
- * takes a vertex at an odd quarter-cell offset to hit one at all.
+ * So the lattice is moved instead of the arithmetic: no sample lands on an
+ * axis-aligned face edge or a 45° diagonal of a mesh whose features sit on
+ * quarter-millimetre multiples of its own bounding-box corner, which is what
+ * tile geometry is. Two different offsets, because a single one shifts u and v
+ * together and cancels along exactly the 45° diagonals a quad is cut on. Both
+ * are far below the 0.5 mm cell — a feature cannot hide between samples — and
+ * far above float32's ~4e-6 mm resolution at tile scale, so the nudge survives
+ * the coordinates being read back out of an STL.
  */
-function claimsEdge(
-  au: number,
-  av: number,
-  bu: number,
-  bv: number,
-  cu: number,
-  cv: number,
-): boolean {
-  const flip = bu < au || (bu === au && bv < av)
-  const fromU = flip ? bu : au,
-    fromV = flip ? bv : av
-  const toU = flip ? au : bu,
-    toV = flip ? av : bv
-  return (toU - fromU) * (cv - fromV) - (toV - fromV) * (cu - fromU) > 0
-}
+const NUDGE_U_MM = 1e-3,
+  NUDGE_V_MM = 3e-3
 
-/**
- * Cast the grid along `axis` over a non-indexed triangle soup.
- *
- * The grid spans the mesh's own bounding box in the other two axes, sampled at
- * cell centres, and each triangle only visits the cells its 2D bounding box
- * covers — which is why no acceleration structure is needed for a build-time
- * pass.
- */
-export function columns(positions: ArrayLike<number>, triangles: number, axis: Axis): Columns {
-  const [u, v] = others(axis)
-  const empty = {
+/** The grid of a mesh with nothing measurable in it. */
+function noColumns(axis: Axis, u: Axis, v: Axis): Columns {
+  return {
     axis,
     u,
     v,
@@ -103,27 +84,44 @@ export function columns(positions: ArrayLike<number>, triangles: number, axis: A
     tmax: new Float64Array(0),
     hits: new Uint32Array(0),
   }
+}
+
+/**
+ * Cast the grid along `axis` over a non-indexed triangle soup.
+ *
+ * The grid spans the mesh's own bounding box in the other two axes, sampled at
+ * cell centres nudged off the box corner, and each triangle only visits the
+ * cells its 2D bounding box covers — which is why no acceleration structure is
+ * needed for a build-time pass.
+ */
+export function columns(positions: ArrayLike<number>, triangles: number, axis: Axis): Columns {
+  const [u, v] = others(axis)
   // A valid corpus STL can declare zero facets — the smallest live file is an
   // 84-byte header doing exactly that — and an empty mesh has no grid, not a
   // NaN-sized one.
-  if (triangles <= 0) return empty
+  if (triangles <= 0) return noColumns(axis, u, v)
 
-  let ou = Infinity,
-    ov = Infinity,
+  let lu = Infinity,
+    lv = Infinity,
     hu = -Infinity,
     hv = -Infinity
   for (let o = 0; o < triangles * 9; o += 3) {
     const pu = positions[o + u] as number
     const pv = positions[o + v] as number
-    if (pu < ou) ou = pu
+    if (pu < lu) lu = pu
     if (pu > hu) hu = pu
-    if (pv < ov) ov = pv
+    if (pv < lv) lv = pv
     if (pv > hv) hv = pv
   }
-  if (!Number.isFinite(ou) || !Number.isFinite(ov)) return empty
+  if (!Number.isFinite(lu) || !Number.isFinite(lv)) return noColumns(axis, u, v)
 
-  const nu = Math.ceil((hu - ou) / CELL_MM) + 1,
-    nv = Math.ceil((hv - ov) / CELL_MM) + 1
+  // The cell count comes from the true extent and the origin from the nudged
+  // one, so the nudge cannot add a row: the last centre still clears `hu`, and
+  // the first still precedes `lu`.
+  const ou = lu - NUDGE_U_MM,
+    ov = lv - NUDGE_V_MM
+  const nu = Math.ceil((hu - lu) / CELL_MM) + 1,
+    nv = Math.ceil((hv - lv) / CELL_MM) + 1
   const tmin = new Float64Array(nu * nv).fill(Infinity),
     tmax = new Float64Array(nu * nv).fill(-Infinity),
     hits = new Uint32Array(nu * nv)
@@ -159,16 +157,16 @@ export function columns(positions: ArrayLike<number>, triangles: number, axis: A
       for (let j = j0; j <= j1; j += 1) {
         const py = ov + (j + 0.5) * CELL_MM
         // Each edge function is the barycentric weight of the opposite corner,
-        // times `scale`.
+        // times `scale`. The band is inclusive on purpose: the nudged lattice
+        // means a sample this close to an edge is float noise rather than a real
+        // coincidence, and counting it twice costs a wrong `hits` where dropping
+        // it would cost a phantom hole.
         const e01 = sign * ((x1 - x0) * (py - y0) - (y1 - y0) * (px - x0))
         if (e01 < -band) continue
         const e12 = sign * ((x2 - x1) * (py - y1) - (y2 - y1) * (px - x1))
         if (e12 < -band) continue
         const e20 = sign * ((x0 - x2) * (py - y2) - (y0 - y2) * (px - x2))
         if (e20 < -band) continue
-        if (e01 <= band && !claimsEdge(x0, y0, x1, y1, x2, y2)) continue
-        if (e12 <= band && !claimsEdge(x1, y1, x2, y2, x0, y0)) continue
-        if (e20 <= band && !claimsEdge(x2, y2, x0, y0, x1, y1)) continue
 
         const w = (e12 * w0 + e20 * w1 + e01 * w2) / scale
         const k = i * nv + j
@@ -382,13 +380,24 @@ export function localBaseline(
   return out
 }
 
+/**
+ * The two axes a right-handed turn about `axis` moves, in order.
+ *
+ * Cyclic — (y, z), (z, x), (x, y) — which is *not* `others()`'s ascending pair.
+ * They agree about x and about z and disagree about y, where the ascending pair
+ * (x, z) turns the wrong way and computes R_y(−θ).
+ */
+function turnPair(axis: Axis): [Axis, Axis] {
+  return axis === 0 ? [1, 2] : axis === 1 ? [2, 0] : [0, 1]
+}
+
 /** Rotate every vertex about `axis` by `degrees` (right-handed). Returns a copy. */
 export function rotateAbout(
   positions: ArrayLike<number>,
   axis: Axis,
   degrees: number,
 ): Float64Array {
-  const [i, j] = others(axis)
+  const [i, j] = turnPair(axis)
   const c = Math.cos((degrees * Math.PI) / 180),
     s = Math.sin((degrees * Math.PI) / 180)
   const out = Float64Array.from(positions)
