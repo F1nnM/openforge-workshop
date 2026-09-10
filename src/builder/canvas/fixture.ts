@@ -463,6 +463,14 @@ export const FIXTURE_CATALOG = {
       texture: 'cut_stone',
       tags: [tag('part|torch'), tag('texture|cut_stone')],
       foot: { shape: 'none' },
+      /* **Measured**, and it has to be: an insert with no `anchor` has no point
+         on its own mesh to seat on a mount, so `scene.ts#partAccessories` reports
+         it as unplaced and draws nothing — the same answer
+         `three/instances.ts#addAccessory` gives. A 7 x 7 x 12 mm peg standing on
+         its flange, which is what the corpus's torches measure as; `axis` runs
+         from `at` into the body, per `catalog/schema.ts#InsertAnchor`.
+         {@link fixtureUnanchoredCatalogFile} is the unmeasured half. */
+      anchor: { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] },
     },
   ],
 }
@@ -490,6 +498,30 @@ export function fixtureUnmeasuredCatalogFile(): CatalogFile {
     ...FIXTURE_CATALOG,
     records: FIXTURE_CATALOG.records.map((record) =>
       record.id === FIXTURE_IDS.wall2 ? { ...record, mounts: [] } : record,
+    ),
+  })
+}
+
+/**
+ * The same fixture with the **insert** unmeasured — {@link FIXTURE_IDS.torch}
+ * without its `anchor`.
+ *
+ * The other half of {@link fixtureUnmeasuredCatalogFile}'s pair: there the host
+ * has nowhere to put the torch, here the torch has nothing to be put by. Both
+ * end in one `PlanScene.unplaced` row and no accessory drawn, and they are
+ * separate fixtures because the two are separate faults with separate sentences.
+ *
+ * The key is **removed** rather than set to anything: `anchor` is optional and
+ * absent is the only spelling of *nobody has measured this blob* — unlike
+ * `mounts`, where an empty array says the same thing more shortly.
+ */
+export function fixtureUnanchoredCatalogFile(): CatalogFile {
+  return CatalogFileSchema.parse({
+    ...FIXTURE_CATALOG,
+    records: FIXTURE_CATALOG.records.map((record) =>
+      record.id === FIXTURE_IDS.torch
+        ? Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'anchor'))
+        : record,
     ),
   })
 }

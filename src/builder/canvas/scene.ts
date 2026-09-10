@@ -629,9 +629,9 @@ function declaresHold(host: CatalogRecord, hold: HoldName): boolean {
 }
 
 /**
- * The accessories of one drawn part, and the three ways a hold does not become one.
+ * The accessories of one drawn part, and the four ways a hold does not become one.
  *
- * Three answers per hold, in the order `assembly/resolve.ts#holdNotes` decides
+ * Four answers per hold, in the order `assembly/resolve.ts#holdNotes` decides
  * them, so the panel and the bill name one fault the same way and never both:
  *
  *   1. **The file is gone.** An `unknown` omission, exactly as for a stranded
@@ -643,6 +643,12 @@ function declaresHold(host: CatalogRecord, hold: HoldName): boolean {
  *      of the first rather than a second fact.
  *   3. **Nobody has measured where it attaches.** `hold-unplaced`. The host may
  *      well have the socket; this build has no coordinates for it.
+ *   4. **Nobody has measured how it plugs in.** `hold-unanchored`: the *insert*
+ *      carries no {@link CatalogRecord.anchor}, so there is no point on its own
+ *      mesh to seat on the host's mount. The mirror image of 3, and it gets a
+ *      row for the same reason: `three/instances.ts#addAccessory` skips an
+ *      anchorless insert and `roomBlobs` does not even fetch it, so without this
+ *      the file would be billed, drawn nowhere, and reported by nothing.
  *
  * Everything else is one accessory per mount — see {@link PlanAccessory}.
  */
@@ -692,6 +698,16 @@ function partAccessories(
         reason:
           `Nothing has measured where a ${held.hold} attaches to ${part.record.name}, ` +
           `so ${record.name} is in the bill and cannot be drawn.`,
+      })
+      continue
+    }
+    // The insert's own half of the measurement, and the last thing checked
+    // because it is a fact about the accessory rather than about the host: one
+    // row for the file, however many mounts it would otherwise have taken.
+    if (record.anchor === undefined) {
+      unplaced.push({
+        ...address,
+        reason: `Nothing has measured where ${record.name} plugs in, so it is in the bill and cannot be drawn.`,
       })
       continue
     }

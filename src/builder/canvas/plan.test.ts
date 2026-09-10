@@ -46,6 +46,7 @@ import {
   fixtureInstance,
   fixtureSlotLayout,
   fixtureTemplateParts,
+  fixtureUnanchoredCatalogFile,
   fixtureUnmeasuredCatalogFile,
 } from './fixture'
 import { SLOT_CONVENTIONS } from '@/template/rules'
@@ -1678,6 +1679,27 @@ describe('accessories: what a fill holds, projected onto the host s measured mou
     expect(scene.unplaced[0]?.reason).toContain('measured')
   })
 
+  it('reports a hold whose own file has no measured anchor as unplaced, and draws none of it', () => {
+    // The other half of the pair: the host's two sockets are measured, the
+    // torch's own peg is not. `three/instances.ts#addAccessory` skips an insert
+    // with no anchor and `roomBlobs` does not fetch it, so a `PlanAccessory`
+    // here would be a row the room silently dropped.
+    const unanchored = planCatalogFromFile(fixtureUnanchoredCatalogFile(), fixtureSlotLayout)
+    const scene = sceneOfFills(
+      holding([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]]),
+      unanchored,
+      createStyleResolver(unanchored),
+    )
+    expect(scene.pieces[0]?.accessories).toEqual([])
+    // **One row, not one per mount.** The fault is a fact about the file.
+    expect(scene.unplaced).toHaveLength(1)
+    expect(scene.unplaced[0]?.hold).toBe(FIXTURE_HOLDS.torch)
+    expect(scene.unplaced[0]?.tile).toBe(FIXTURE_IDS.torch)
+    expect(scene.unplaced[0]?.reason).toContain('plugs in')
+    // Not the host's sentence: the wall was measured and says so.
+    expect(scene.unplaced[0]?.reason).not.toContain('attaches to')
+  })
+
   it('reports a hold on a slot the host does not declare as unplaced, in the bill s words', () => {
     const scene = held([['lintel', FIXTURE_IDS.torch]])
     expect(scene.pieces[0]?.accessories).toEqual([])
@@ -1798,6 +1820,17 @@ describe('accessories: what a fill holds, projected onto the host s measured mou
     // about a room in which nothing happened.
     expect(room.unplaced).toHaveLength(1)
     expect(bill.unplaced).toEqual([
+      { placement: 'p1', slot: FIXTURE_SLOTS.leftWall, hold: FIXTURE_HOLDS.torch, tile: FIXTURE_IDS.torch },
+    ])
+
+    // And the third: the insert's own half of the measurement.
+    const unanchoredFile = fixtureUnanchoredCatalogFile()
+    const unanchored = planCatalogFromFile(unanchoredFile, fixtureSlotLayout)
+    const plugless = sceneOfFills(fitted, unanchored, createStyleResolver(unanchored))
+    const anchorBill = billFor(fitted, unanchoredFile)
+    expect(plugless.unplaced[0]?.reason).toBe(asSentence(billSays(anchorBill, 'hold-unanchored')))
+    expect(plugless.unplaced).toHaveLength(1)
+    expect(anchorBill.unplaced).toEqual([
       { placement: 'p1', slot: FIXTURE_SLOTS.leftWall, hold: FIXTURE_HOLDS.torch, tile: FIXTURE_IDS.torch },
     ])
   })

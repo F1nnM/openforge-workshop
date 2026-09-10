@@ -598,6 +598,16 @@ export function noteCopy(note: BillNote): NoteCopy {
           'measurement rather than in your room.',
       }
 
+    case 'hold-unanchored':
+      return {
+        ...base,
+        headline: `${n} ${files} ${is} in the pack and not on the plan`,
+        detail:
+          'Nothing has measured how this accessory plugs in — where its own peg, leaf or plate meets the tile — ' +
+          'so the plan cannot draw it. It is still downloaded once: the file you chose is in the pack, and the ' +
+          'gap is in the measurement rather than in your room.',
+      }
+
     case 'mixed-build-systems':
       return {
         ...base,

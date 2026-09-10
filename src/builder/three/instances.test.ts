@@ -55,6 +55,7 @@ import {
   fixtureHolds,
   fixtureInstance,
   fixtureSlotLayout,
+  fixtureUnanchoredCatalogFile,
   fixtureUnmeasuredCatalogFile,
 } from '@/builder/canvas/fixture'
 import type { Resolution } from '@/materials'
@@ -809,10 +810,10 @@ describe('fifty placements across twenty real designs', () => {
  * The fixture, with the torch **measured** — and optionally the wall's mounts
  * replaced.
  *
- * `src/builder/canvas/fixture.ts` carries the host's two torch sockets and the
- * insert record, but no {@link InsertAnchor}: an anchor is this row's own input
- * and nothing before it needed one. It is added here rather than there because
- * the canvas fixture is not this row's to widen — see the report.
+ * `src/builder/canvas/fixture.ts` carries the host's two torch sockets and a
+ * measured insert — a 7 x 7 x 12 mm peg. This overrides that anchor, because the
+ * cases below are about *which kind* of anchor is seated where: a door leaf and a
+ * lintel plate are the same fixture torch measured differently.
  */
 function measuredCatalog(anchor: InsertAnchor, mounts?: readonly Mount[]): CatalogFile {
   const file = fixtureCatalogFile()
@@ -952,21 +953,26 @@ describe('buildRoom3D draws an accessory at every measured mount', () => {
   })
 
   it('draws nothing for an insert nobody has measured, and does not fetch it', async () => {
-    // The fixture torch as it stands: an insert with no `anchor`. There is
-    // nowhere on its own mesh to plug it in by, so it cannot be placed — and it
-    // is not asked for either, which is what keeps the fetch set the draw set.
-    const file = fixtureCatalogFile()
+    // The fixture torch with its `anchor` taken away. There is nowhere on its
+    // own mesh to plug it in by, so it cannot be placed — and it is not asked
+    // for either, which is what keeps the fetch set the draw set.
+    const file = fixtureUnanchoredCatalogFile()
     const catalog = planCatalogFromFile(file)
     const scene = buildPlanScene(
       holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch),
       catalog,
       createStyleResolver(catalog),
     )
-    expect(scene.pieces[0]?.accessories).toHaveLength(2)
+    // **The scene says so too.** It used to hand this row two accessories the
+    // room then silently dropped; one `unplaced` row for the hold is the count
+    // both surfaces agree on, whatever the host's two sockets would have taken.
+    expect(scene.pieces[0]?.accessories).toEqual([])
+    expect(scene.unplaced).toHaveLength(1)
     expect(roomBlobs(scene).size).toBe(1)
 
     const room = await roomFrom(file, holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
     expect(room.instances).toBe(1)
+    expect(room.unplaced).toBe(1)
     expect(room.absent).toHaveLength(0)
   })
 

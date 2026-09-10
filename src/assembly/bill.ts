@@ -507,8 +507,13 @@ function holesIn(result: ResolvedInstance): UnfilledSlot[] {
  * The holds one instance bills and no surface can draw.
  *
  * Read off {@link ResolvedInstance.holds} rather than recomputed, for
- * {@link holesIn}'s reason: the `hold-unplaced` note and this list are the same
- * condition read twice from the same array, so they cannot disagree.
+ * {@link holesIn}'s reason: the `hold-unplaced` and `hold-unanchored` notes and
+ * this list are the same conditions read twice from the same array, so they
+ * cannot disagree.
+ *
+ * **Either half of the pair unmeasured puts the hold here**, and one row when
+ * both are: the list answers *"what is in the pack and not on the plan"*, which
+ * is one fact about one accessory however many ways it came about.
  */
 function undrawableIn(result: ResolvedInstance): UnplacedHold[] {
   const out: UnplacedHold[] = []
@@ -517,7 +522,8 @@ function undrawableIn(result: ResolvedInstance): UnplacedHold[] {
     // `Filled` is a union for: this condition narrows `record` to a
     // `CatalogRecord`, where a filtered array would need an assertion to read
     // its `id`.
-    if (held.record === undefined || held.mounts > 0) continue
+    if (held.record === undefined) continue
+    if (held.mounts > 0 && held.record.anchor !== undefined) continue
     out.push({ placement: result.instance.id, slot: held.slot, hold: held.hold, tile: held.record.id })
   }
   return out

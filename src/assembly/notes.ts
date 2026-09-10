@@ -56,7 +56,7 @@
  * was structurally unable to express: a fill can now be wrong, missing, or name
  * a template this build does not ship.
  *
- * ## Three more for the accessories, and only one of them is a warning
+ * ## Four more for the accessories, and only two of them are warnings
  *
  * A fill may carry **holds** — the torch in the wall's socket, the door in its
  * opening — and 1,047 of the 1,244 accessory declarations in the corpus are
@@ -70,6 +70,12 @@
  * measured mount for the slot is a gap in `tools/mounts/`'s pass rather than a
  * fault in the room, the accessory is still billed once, and *"in the bill, and
  * not on the plan"* is the sentence `no-footprint` already carries at `info`.
+ *
+ * `hold-unanchored` is the same gap read from the other end — the *insert* has
+ * no measured `CatalogRecord.anchor` — and is `info` for the same reason.
+ * Two codes rather than one, because the two are different halves of one pair
+ * and a user who is told *"nothing measured this"* can do nothing with either;
+ * whoever runs `tools/mounts/` needs to know which side came back empty.
  */
 import type { TileId } from '@/catalog'
 import type { PlacementId, SlotName } from '@/store'
@@ -214,6 +220,17 @@ export type NoteCode =
    */
   | 'hold-unplaced'
   /**
+   * The **insert** has no measured anchor: it prints, and nothing can draw it.
+   *
+   * `hold-unplaced`'s mirror image and `info` for the same reason. The host may
+   * be measured to the millimetre; without `CatalogRecord.anchor` there is no
+   * point on the accessory's *own* mesh to seat on the mount, and
+   * `builder/three/instances.ts` neither draws nor fetches one. Separate from
+   * `hold-unplaced` because the two name opposite halves of one pair, and the
+   * repair — measure this blob — is aimed at a different file.
+   */
+  | 'hold-unanchored'
+  /**
    * The scene mixes construction systems that do not physically go together.
    *
    * `separate wall` (3,351 tiles) and `wall on tile` (863) are different ways of
@@ -238,6 +255,7 @@ export const NOTE_SEVERITY: Readonly<Record<NoteCode, 'info' | 'warn'>> = Object
   'hold-unknown-tile': 'warn',
   'hold-off-slot': 'warn',
   'hold-unplaced': 'info',
+  'hold-unanchored': 'info',
   'mixed-build-systems': 'warn',
 })
 

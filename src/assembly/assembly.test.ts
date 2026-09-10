@@ -560,7 +560,7 @@ describe('download verdict', () => {
 })
 
 describe('note vocabulary', () => {
-  it('is twelve codes — nine for the tiles, three for the accessories in them', () => {
+  it('is thirteen codes — nine for the tiles, four for the accessories in them', () => {
     // The deletion, asserted rather than described. Every one of the eight was
     // about a part the app added on the user's behalf; a template declares its
     // base as a slot, so there is nothing for any of them to be about. The three
@@ -571,6 +571,7 @@ describe('note vocabulary', () => {
       'build-unspecified',
       'fill-off-slot',
       'hold-off-slot',
+      'hold-unanchored',
       'hold-unknown-tile',
       'hold-unplaced',
       'insert-on-grid',
@@ -606,6 +607,9 @@ describe('note vocabulary', () => {
     // bill, not on the plan — and no live record carries a measured mount yet,
     // so at `warn` it would fire on every hold in the app.
     expect(NOTE_SEVERITY['hold-unplaced']).toBe('info')
+    // Its mirror image — the insert unmeasured rather than the host — and `info`
+    // for the same reason: the file is in the pack, the gap is in the pass.
+    expect(NOTE_SEVERITY['hold-unanchored']).toBe('info')
   })
 
   it('warns one level down for the two states a hold can be wrong in', () => {
@@ -687,6 +691,8 @@ interface Row {
   readonly config?: CatalogRecord['config']
   /** Where they attach, measured. Absent is what every live record carries today. */
   readonly mounts?: CatalogRecord['mounts']
+  /** How an insert plugs in, measured. Absent is `hold-unanchored`'s case. */
+  readonly anchor?: CatalogRecord['anchor']
 }
 
 function worldCatalog(rows: readonly Row[]): CatalogFile {
@@ -722,6 +728,7 @@ function worldCatalog(rows: readonly Row[]): CatalogFile {
         ...(row.build === undefined ? {} : { build: row.build }),
         ...(row.config === undefined ? {} : { config: row.config }),
         ...(row.mounts === undefined ? {} : { mounts: row.mounts }),
+        ...(row.anchor === undefined ? {} : { anchor: row.anchor }),
       }
     }),
   })
@@ -1300,6 +1307,18 @@ describe('the holds', () => {
     layer: 'insert',
     build: 'separate wall',
     bytes: 2_048,
+    // Measured: a 7 x 7 x 12 mm peg, the corpus's torch. An insert without one
+    // is `hold-unanchored` and cannot be drawn, which is its own case below.
+    anchor: { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] },
+  }
+
+  /** The same torch nobody has measured — the insert half of the pair. */
+  const UNANCHORED_TORCH_ROW: Row = {
+    id: TORCH,
+    tags: ['kind|torch'],
+    layer: 'insert',
+    build: 'separate wall',
+    bytes: 2_048,
   }
 
   /** One instance of {@link HOST} whose wall holds the named accessories. */
@@ -1366,6 +1385,26 @@ describe('the holds', () => {
     expect(note?.severity).toBe('info')
     expect(note?.message).toContain('torch')
     // It is filled, so it is not a hole: the download is not refused over it.
+    expect(bill.complete).toBe(true)
+  })
+
+  it('bills an unmeasured insert once, and says the plan cannot draw that either', () => {
+    // The host is measured to the millimetre and the *accessory* is not: no
+    // `anchor` means no point on its own mesh to seat on the socket, so
+    // `builder/three/instances.ts` neither draws nor fetches it. One row and one
+    // note, aimed at the other file of the pair than `hold-unplaced`'s.
+    const { index, context } = worldOf([hostRow({ sockets: 4 }), UNANCHORED_TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: TORCH })], index, context)
+
+    // Still four prints: the mounts are real and the user has to print one per
+    // socket whether or not anything can draw them.
+    expect(bill.lines.find((entry) => entry.tile.id === TORCH)?.quantity).toBe(4)
+    expect(bill.unplaced).toEqual([{ placement: 'p1', slot: 'wall', hold: 'torch', tile: TORCH }])
+    const note = bill.notes.find((entry) => entry.code === 'hold-unanchored')
+    expect(note?.severity).toBe('info')
+    expect(note?.message).toContain('plugs in')
+    // One fault, one note: the host's own measurement is not in question.
+    expect(bill.notes.map((entry) => entry.code)).toEqual(['hold-unanchored'])
     expect(bill.complete).toBe(true)
   })
 

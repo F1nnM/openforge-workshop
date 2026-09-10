@@ -300,6 +300,9 @@ export function roomBlobs(scene: PlanScene): ReadonlySet<BlobId> {
     // The accessories too, and **only the ones that can be drawn**: an insert
     // with no measured `anchor` has nowhere on its own mesh to be plugged in by,
     // so it is neither drawn nor asked for and the fetch set stays the draw set.
+    // `canvas/scene.ts#partAccessories` keeps one out of `accessories` and puts
+    // it in `unplaced` instead, so this narrows a type the scene has already
+    // decided rather than making a second decision about it.
     for (const accessory of piece.accessories) {
       if (accessory.record.anchor !== undefined) blobs.add(accessory.record.blob)
     }
@@ -452,7 +455,10 @@ function addInstance(
  *   - **Nothing for an unmeasured insert.** `record.anchor` is absent on every
  *     insert nobody has measured, and there is no way to seat one without it.
  *     {@link roomBlobs} leaves those out of the fetch for the same reason, so
- *     this is a skip and not a gap.
+ *     this is a skip and not a gap — and it is not a silent one either:
+ *     `canvas/scene.ts#partAccessories` reports the hold as `unplaced` and never
+ *     builds the `PlanAccessory`, so what reaches here is already anchored and
+ *     this narrows the optional field rather than deciding anything.
  *
  * The gap it *does* record is the ordinary one: an insert whose object the store
  * does not hold is absent exactly as a part's is, named once per placement.

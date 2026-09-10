@@ -550,7 +550,7 @@ function resolvedHold(
 /**
  * Every note that is a fact about one hold.
  *
- * Three, and none of them is `slot-unfilled`'s: an empty required accessory slot
+ * Four, and none of them is `slot-unfilled`'s: an empty required accessory slot
  * is carried by {@link ResolvedInstance.complete} and `BillOfTiles.unfilled`
  * alone, because `slot-unfilled`'s copy is about the 128 template parts and a
  * roll-up that mixed the two would tell a user a *recipe* slot is empty when a
@@ -591,6 +591,19 @@ function holdNotes(instance: TemplateInstance, host: CatalogRecord, held: Resolv
         'hold-unplaced',
         `nothing has measured where a ${held.hold} attaches to ${host.name}, so ${held.record.name} ` +
           'is in the bill and cannot be drawn.',
+        { ...subject, tileId: held.record.id },
+      ),
+    )
+    // **And nothing else**, for the reason `hold-off-slot` returns above: the
+    // two measurement gaps are one repair — run `tools/mounts/` over this pair —
+    // and a hold that hit both would report it twice.
+    return notes
+  }
+  if (held.record.anchor === undefined) {
+    notes.push(
+      note(
+        'hold-unanchored',
+        `nothing has measured where ${held.record.name} plugs in, so it is in the bill and cannot be drawn.`,
         { ...subject, tileId: held.record.id },
       ),
     )
