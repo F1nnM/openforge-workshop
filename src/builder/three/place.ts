@@ -252,10 +252,12 @@ export function zUpToYUp(v: Vec3): Vector3 {
 /**
  * The world matrix of **one accessory instance** — one insert, at one mount.
  *
- * `M = hostFrame · T(seat) · R(align) · T(−anchor) · T(−bboxCentre) · R_x(−90°)`,
- * read right to left: stand the insert up in its own bbox frame, bring its
- * anchor point to the origin, turn the anchor's axis to face the way the mount
- * wants, move it to the seat, and carry the lot round with the host.
+ * `M = hostFrame · T(seat) · R(align) · T(−hold) · T(−bboxCentre) · R_x(−90°)`,
+ * read right to left: stand the insert up in its own bbox frame, bring the point
+ * of it that plugs in to the origin, turn it to face the way the mount wants,
+ * move it to the seat, and carry the lot round with the host. {@link Seat} says
+ * which point that is — the anchor's for the three kinds that plug in, and the
+ * insert's bottom centre for the two it stands on.
  *
  * `hostFrame` is {@link tileMatrix} **without** its `standUpright` — because the
  * mount's coordinates are already in the host's bbox frame, so applying the
@@ -306,9 +308,13 @@ export function zUpToYUp(v: Vec3): Vector3 {
  *     a door's declared `+thin`, so its relief faces out — and `+normal`
  *     otherwise, a lintel's `at` being on its mid-plane where the choice costs
  *     nothing;
- *   - `hole` and `surface` take **no rotation whatever**: the accessory stands on
- *     a floor, nothing in the mount fixes its yaw, and the host's own `x` is as
- *     good an answer as any invented one.
+ *   - `hole` and `surface` take **no rotation whatever** and no anchor offset
+ *     either — `standUpright` and the seat, and nothing else. The accessory
+ *     stands on a floor, nothing in the mount fixes its yaw, the host's own `x`
+ *     is as good an answer as any invented one, and the point that lands on the
+ *     mount is the insert's bottom centre rather than whichever face its anchor
+ *     names (see {@link Seat}: a brazier base anchored on its top face would
+ *     otherwise sink its whole height into the floor).
  *
  * There is no roll step on these three kinds because there is no freedom left to
  * spend on one: the vertical is fixed by the extents and the yaw by the normal.
@@ -337,20 +343,37 @@ export function accessoryMatrix(
   target = new Matrix4(),
 ): Matrix4 {
   const seat = mountSeat(mount, insert.anchor, slot, copy)
-  const anchor = zUpToYUp(insert.anchor.at)
 
   return target
     .copy(hostMatrix(host))
     .multiply(new Matrix4().makeTranslation(seat.point.x, seat.point.y, seat.point.z))
     .multiply(new Matrix4().makeRotationFromQuaternion(seat.align))
-    .multiply(new Matrix4().makeTranslation(-anchor.x, -anchor.y, -anchor.z))
+    .multiply(new Matrix4().makeTranslation(-seat.hold.x, -seat.hold.y, -seat.hold.z))
     .multiply(standUpright(insert.bounds))
 }
 
 /** Where one instance sits on the host, and how it is turned to get there. */
 interface Seat {
-  /** The anchor's landing point, in the host's bbox frame, Y-up. */
+  /** The landing point, in the host's bbox frame, Y-up. */
   readonly point: Vector3
+  /**
+   * The insert's **own** point that lands there, in its bbox frame, Y-up.
+   *
+   * `anchor.at` for the three kinds that plug in — a socket, a pocket and an
+   * opening all catch the insert by the part of it the measurement is about —
+   * and the **origin of the insert's bbox frame**, which is its bottom centre,
+   * for a `hole` and a `surface`. Those two are the kinds where the insert
+   * *stands on* the host rather than plugging into it, and it is what the spec's
+   * own table says: *bottom-centre at the hole centre on the top face*.
+   *
+   * Not `anchor.at` there, and the reason is measured: `brazier+large,base.stl`
+   * is a `plate` anchored on its **+z** face, 11.01 mm up its own box, and
+   * landing that point on the floor's top face buries the whole brazier in the
+   * floor. `brazier+small.stl` is a `peg` whose flange is its top and does the
+   * same. An anchor point says which face plugs in, which is a question a hole
+   * does not ask.
+   */
+  readonly hold: Vector3
   /**
    * The turn applied to the insert **after** {@link standUpright}.
    *
@@ -390,16 +413,16 @@ function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, copy: 0 | 1
       // {@link EPSILON} for what a zero vector does to the alignment.
       const from = zUpToYUp(anchor.axis)
       const align = alignToAxis(from.lengthSq() > EPSILON ? from.normalize() : WORLD_UP.clone(), axis)
-      return { point: zUpToYUp(mount.at), align }
+      return { point: zUpToYUp(mount.at), hold: zUpToYUp(anchor.at), align }
     }
     case 'opening':
       return openingSeat(mount, anchor, slot, copy)
     case 'hole':
     case 'surface':
-      // No turn at all: `standUpright` has already put the insert's own +z up,
-      // and nothing in a hole or a top face fixes a yaw to spend the remaining
-      // freedom on. See {@link accessoryMatrix}.
-      return { point: zUpToYUp(mount.at), align: new Quaternion() }
+      // `standUpright` and the seat, and nothing else: no turn, because the
+      // insert's own +z is already up and nothing here fixes a yaw; and no
+      // anchor offset, because the insert stands on the host. See {@link Seat}.
+      return { point: zUpToYUp(mount.at), hold: new Vector3(), align: new Quaternion() }
   }
 }
 
@@ -458,6 +481,7 @@ function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, co
 
   const through = throughIndex(anchor.size)
   const align = yawOnto(meshAxis(through), out.clone().multiplyScalar(throughSign(anchor, through)))
+  const hold = zUpToYUp(anchor.at)
 
   // `±width/4` is where two half-width slabs meet in the middle of the opening.
   // Non-null whenever `copiesOf` says two — it is the same `up × normal` test.
@@ -470,7 +494,7 @@ function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, co
     if (copy === 1) align.premultiply(new Quaternion().setFromAxisAngle(WORLD_UP, Math.PI))
   }
 
-  return { point, align }
+  return { point, hold, align }
 }
 
 /**

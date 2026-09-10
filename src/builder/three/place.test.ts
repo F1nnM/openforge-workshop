@@ -838,10 +838,13 @@ describeCorpus('accessoryMatrix poses a measured insert by its extents', () => {
       const up = placedAxis(matrix, bounds, 2)
       expect(up.lengthMm).toBeCloseTo(11.01, 2)
       expect(degreesBetween(up.direction, new Vector3(0, 1, 0))).toBeLessThan(1)
-      // The plate's own anchor point — its top-face centre, 11.01 mm up its own
-      // box — is the point that lands on the mount, so the seat is read off the
-      // measurement rather than guessed.
-      expect(landsAt(matrix, topCentre(bounds)).y).toBeCloseTo(mount.at[2], 3)
+      // And it **stands on** the host rather than plugging into it: the bottom
+      // centre lands on the mount and the top is its own 11.01 mm above it. The
+      // anchor point is the plate's *top* face, so catching it there instead
+      // would have buried the whole brazier in the floor — the right way up and
+      // invisible.
+      expect(landsAt(matrix, bottomCentre(bounds)).y).toBeCloseTo(mount.at[2], 3)
+      expect(landsAt(matrix, topCentre(bounds)).y).toBeCloseTo(mount.at[2] + 11.01, 2)
     }
   })
 
