@@ -52,7 +52,7 @@ export {
 } from './schema'
 
 export type { RecoveredState } from './migrations'
-export { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
+export { STORE_VERSION, UNSAFE_KEYS, readPersistedState, salvageWorkshopState } from './migrations'
 
 export { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 

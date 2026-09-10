@@ -449,9 +449,28 @@ describe('payload refuses input it cannot represent', () => {
 describe('payload decode is total under corruption', () => {
   const good = encodePayload(payload(ROOM))
 
-  it('fails, without hanging or reading out of bounds, at every truncation', () => {
-    for (let length = 0; length < good.length; length += 1) {
-      const cut = good.subarray(0, length)
+  /**
+   * The same realistic scene with accessories in it, so the sweep below cuts
+   * **inside** the four hold columns rather than only inside the fill ones.
+   *
+   * `ROOM`'s fills all hold nothing, which makes its hold count column a run of
+   * zeros and its other three columns empty — so every prefix of it stops before
+   * a hold slot, a hold ordinal or a hold bit, and none of the reads format 6
+   * added would ever be the one that runs off the end.
+   */
+  const HELD = encodePayload(
+    payload([
+      holding([filled(0, 10, [hold(1, 500), hold(2, 501, true)]), filled(3, 11, [])]),
+      holding([filled(4, 8697, [hold(5, 8698)], true)]),
+    ]),
+  )
+
+  it.each([
+    ['a room with no holds', good],
+    ['a room whose fills carry holds', HELD],
+  ])('fails, without hanging or reading out of bounds, at every truncation of %s', (_label, bytes) => {
+    for (let length = 0; length < bytes.length; length += 1) {
+      const cut = bytes.subarray(0, length)
       let thrown: unknown
       try {
         decodePayload(cut)

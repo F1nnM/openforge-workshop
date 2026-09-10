@@ -602,6 +602,95 @@ describe('holds travel with the fill they are fitted into', () => {
     expect(decoded.dropped).toEqual(['hold name 1: not a readable hold name, dropping 2 holds'])
   })
 
+  it('refuses a hold named after a key no record may carry, keeping the rest', async () => {
+    /* `HoldName` is `z.string().min(1)`, so `__proto__` parses — the authority on
+       what a mount is called is the composition, not this module. It is refused
+       by name against the store's own `UNSAFE_KEYS`, because the decoded record
+       is handed to `placeTemplate` and walked with plain indexing from there. */
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        slots: ['floor', '__proto__', 'torch'],
+        instances: [
+          {
+            template: 0,
+            filters: 0,
+            x: 0,
+            z: 0,
+            rotation: 0,
+            fills: [
+              {
+                slot: 0,
+                ordinal: 1,
+                pinned: false,
+                holds: [
+                  { slot: 1, ordinal: 2, pinned: false },
+                  { slot: 2, ordinal: 3, pinned: false },
+                ],
+              },
+            ],
+          },
+        ],
+        digest: resolveOrdinals([1, 2, 3], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    const fill = decoded.scene.placements[0]?.fills['floor' as SlotName]
+    expect(fill?.holds).toEqual(holdsOf([['torch', 3]]))
+    expect(Object.getPrototypeOf(fill?.holds)).toBe(Object.prototype)
+    expect(decoded.dropped).toEqual([
+      'placement 0, slot floor: hold __proto__ names an unsafe key, dropping the hold',
+    ])
+  })
+
+  it('keeps a hold whose name happens to be an Object.prototype member', async () => {
+    /* The bug the collector's `Map` exists for, and it is the *ordinary* half of
+       the prototype hazard rather than the exotic one: on a plain object
+       `record['toString'] !== undefined` is true before anything is written, so
+       the first hold named `toString` was discarded as a duplicate of a function
+       nobody put there — with a `dropped` line saying something untrue about
+       why. `toString` is a perfectly good mount name and it is kept. */
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        slots: ['floor', 'toString', 'hasOwnProperty'],
+        instances: [
+          {
+            template: 0,
+            filters: 0,
+            x: 0,
+            z: 0,
+            rotation: 0,
+            fills: [
+              {
+                slot: 0,
+                ordinal: 1,
+                pinned: false,
+                holds: [
+                  { slot: 1, ordinal: 2, pinned: false },
+                  { slot: 2, ordinal: 3, pinned: true },
+                ],
+              },
+            ],
+          },
+        ],
+        digest: resolveOrdinals([1, 2, 3], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.placements[0]?.fills['floor' as SlotName]?.holds).toEqual(
+      holdsOf([
+        ['toString', 2],
+        ['hasOwnProperty', 3, true],
+      ]),
+    )
+    expect(decoded.dropped).toEqual([])
+  })
+
   it('keeps the first of two holds naming one name, and says so', async () => {
     // Unreachable from any encoder — `holds` is a map on both sides — so this is
     // a hand-edited payload contradicting itself, and choosing silently between
@@ -639,7 +728,6 @@ describe('holds travel with the fill they are fitted into', () => {
     expect(decoded.scene.placements[0]?.fills['floor' as SlotName]?.holds).toEqual(holdsOf([['torch', 2]]))
     expect(decoded.dropped).toEqual(['placement 0, slot floor: hold torch is filled twice, keeping the first'])
   })
-
 })
 
 describe('manifest drift', () => {
@@ -879,6 +967,49 @@ describe('salvage, at the three levels row A1 made different', () => {
     // cost, not once per placement — `readStringTable`'s rule for all three.
     expect(decoded.dropped).toEqual([
       'filters 1: not a readable filter list, widening 2 placements to any',
+    ])
+  })
+
+  it('refuses a slot named after a key no record may carry, keeping the other fills', async () => {
+    /* The same defence as the hold level and through the same collector, because
+       it is the same loose key schema: `SlotName` is `z.string().min(1)`, so a
+       hand-edited table can name a slot `constructor` and a decoded `fills`
+       record must not carry it into `placeTemplate`. The rest of the instance is
+       untouched — an unsafe key costs its own fill, like a retired file does. */
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        slots: ['floor', 'constructor', 'valueOf'],
+        instances: [
+          {
+            template: 0,
+            filters: 0,
+            x: 0,
+            z: 0,
+            rotation: 0,
+            fills: [
+              { slot: 0, ordinal: 1, pinned: false, holds: [] },
+              { slot: 1, ordinal: 2, pinned: false, holds: [] },
+              // A legitimate name that only *looks* dangerous: it is an
+              // `Object.prototype` member and not an unsafe key, so it is kept.
+              { slot: 2, ordinal: 3, pinned: true, holds: [] },
+            ],
+          },
+        ],
+        digest: resolveOrdinals([1, 2, 3], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    const fills = decoded.scene.placements[0]?.fills
+    expect(fills).toEqual({
+      ['floor' as SlotName]: { tile: tileId(1), pinned: false },
+      ['valueOf' as SlotName]: { tile: tileId(3), pinned: true },
+    })
+    expect(Object.getPrototypeOf(fills)).toBe(Object.prototype)
+    expect(decoded.dropped).toEqual([
+      'placement 0: slot constructor names an unsafe key, dropping the fill',
     ])
   })
 

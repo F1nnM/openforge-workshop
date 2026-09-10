@@ -80,7 +80,15 @@
 import type { TileId } from '@/catalog'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
 import type { HoldFill, LockSystem, NewTemplateInstance, SlotFill } from '@/store'
-import { DEFAULT_LOCK_SYSTEM, HoldName, SlotName, TemplateId, filledSlots, normalizeRotation } from '@/store'
+import {
+  DEFAULT_LOCK_SYSTEM,
+  HoldName,
+  SlotName,
+  TemplateId,
+  UNSAFE_KEYS,
+  filledSlots,
+  normalizeRotation,
+} from '@/store'
 import { parseCompactSearch, stringifyCompactSearch } from '@/search/searchSchema'
 
 import { MalformedPayloadError, TruncatedPayloadError } from './bytes'
@@ -827,15 +835,87 @@ function readFilterSet(entry: string): readonly string[] | undefined {
   return tags.some((tag) => tag === '') ? undefined : tags
 }
 
+/** What {@link collectFilled} says when it discards an entry. One phrasing per level. */
+interface DropReasons<K extends string> {
+  /** The name is one no record may be keyed by — see `store/migrations.ts#UNSAFE_KEYS`. */
+  readonly unsafe: (name: K) => string
+  /** The ordinal names no file this build carries. */
+  readonly missing: (name: K, ordinal: number) => string
+  /** A second entry names a name already taken. */
+  readonly duplicate: (name: K) => string
+}
+
 /**
- * The fills of one instance, as the schema's map.
+ * Collect wire entries into a map keyed by their names, reporting what it drops.
+ *
+ * **One helper for both levels, because the hazard is one hazard.** A slot name
+ * and a hold name are both `z.string().min(1)` — the loosest key schema in the
+ * store, because the authority on what a part is called is the template
+ * (`store/schema.ts#SlotName`) — so a payload out of a URL can name a slot
+ * `__proto__`, `toString` or `hasOwnProperty`, and every one of those parses.
+ *
+ * Two things make that safe here, and neither is a check against a list of the
+ * names anyone thought of:
+ *
+ *   1. **The accumulator is a `Map`.** `has` is an own-key test, where
+ *      `record[name] !== undefined` reads the *prototype chain* — so on a plain
+ *      object `toString` is already "taken" before anything is written and the
+ *      **first** hold named `toString` is discarded as a duplicate of a function
+ *      nobody put there. That was the real bug: not the exotic key, but every
+ *      ordinary member of `Object.prototype` silently costing a fill with a
+ *      dropped line that says something untrue about why.
+ *   2. **{@link UNSAFE_KEYS} is refused outright**, and named. `Object.fromEntries`
+ *      would define `__proto__` as an honest own property rather than invoking the
+ *      setter, so the map alone would already be sound — but the result is handed
+ *      to `placeTemplate` and thence to code that walks these records with plain
+ *      indexing, and a `constructor` key surviving that far is a hazard this
+ *      module has no business exporting. The store's salvager refuses the same
+ *      three keys reading the same two schemas out of `localStorage`; sharing the
+ *      set is what keeps the two readers from drifting apart.
  *
  * `tiles` is the *checksum's* own view — the (ordinal, tile id) pairs
  * `resolveOrdinals` resolved, because §13's failure is two ordinals swapping the
- * files they name — so reading the fill out of it rather than calling `tileOf`
+ * files they name — so reading a fill out of it rather than calling `tileOf`
  * again is what keeps the room and the digest describing the same files by
  * construction rather than by two lookups agreeing.
  */
+function collectFilled<E extends WireHold, K extends string, V>(
+  wire: readonly E[],
+  names: ReadonlyMap<number, K>,
+  tiles: ReadonlyMap<number, TileId>,
+  build: (tile: TileId, entry: E, name: K) => V,
+  reasons: DropReasons<K>,
+  dropped: string[],
+): Map<K, V> {
+  const filled = new Map<K, V>()
+  for (const entry of wire) {
+    const name = names.get(entry.slot)
+    // Reported once against the table entry, not once per use.
+    if (name === undefined) continue
+    if (UNSAFE_KEYS.has(name)) {
+      dropped.push(reasons.unsafe(name))
+      continue
+    }
+    const tile = tiles.get(entry.ordinal)
+    if (tile === undefined) {
+      dropped.push(reasons.missing(name, entry.ordinal))
+      continue
+    }
+    if (filled.has(name)) {
+      // Unreachable from any encoder — both levels are maps on both sides — so
+      // this is a hand-edited payload contradicting itself. First writer wins,
+      // which is deterministic rather than correct, and it is named because
+      // silently choosing between two files is the one thing this codec does not
+      // do.
+      dropped.push(reasons.duplicate(name))
+      continue
+    }
+    filled.set(name, build(tile, entry, name))
+  }
+  return filled
+}
+
+/** The fills of one instance, as the schema's map. */
 function assembleFills(
   wire: readonly WireFill[],
   index: number,
@@ -843,52 +923,45 @@ function assembleFills(
   tiles: ReadonlyMap<number, TileId>,
   dropped: string[],
 ): Record<SlotName, SlotFill> {
-  const fills: Record<SlotName, SlotFill> = {}
-  for (const fill of wire) {
-    const slot = names.slots.get(fill.slot)
-    // Reported once against the table entry, not once per fill.
-    if (slot === undefined) continue
-    const tile = tiles.get(fill.ordinal)
-    if (tile === undefined) {
-      dropped.push(
-        `placement ${String(index)}, slot ${slot}: tile ordinal ${String(fill.ordinal)} is not in this ` +
-          'catalog build',
-      )
-      continue
-    }
-    if (fills[slot] !== undefined) {
-      // Unreachable from any encoder — `fills` is a map on both sides — so this
-      // is a hand-edited payload contradicting itself. First writer wins, which
-      // is deterministic rather than correct, and it is named because silently
-      // choosing between two files is the one thing this codec does not do.
-      dropped.push(`placement ${String(index)}: slot ${slot} is filled twice, keeping the first`)
-      continue
-    }
-    const holds = assembleHolds(fill.holds, `placement ${String(index)}, slot ${slot}`, names.holdNames, tiles, dropped)
-    /* **The field is present only when something is in it**, which is the module
-       docblock's ruling: an empty map would say *solved, and holds nothing* — a
-       decision nobody on this side of the link made — where absence says *never
-       solved* and lets the default-hold pass fill it in when the room opens. A
-       fill whose every hold was dropped above therefore arrives unsolved, and is
-       repaired rather than frozen. */
-    fills[slot] = holds === undefined ? { tile, pinned: fill.pinned } : { tile, pinned: fill.pinned, holds }
-  }
-  return fills
+  const fills = collectFilled(
+    wire,
+    names.slots,
+    tiles,
+    (tile, fill, slot): SlotFill => {
+      const where = `placement ${String(index)}, slot ${slot}`
+      const holds = assembleHolds(fill.holds, where, names.holdNames, tiles, dropped)
+      /* **The field is present only when something is in it**, which is the
+         module docblock's ruling: an empty map would say *solved, and holds
+         nothing* — a decision nobody on this side of the link made — where
+         absence says *never solved* and lets the default-hold pass fill it in
+         when the room opens. A fill whose every hold was dropped therefore
+         arrives unsolved, and is repaired rather than frozen. */
+      return holds === undefined ? { tile, pinned: fill.pinned } : { tile, pinned: fill.pinned, holds }
+    },
+    {
+      unsafe: (slot) => `placement ${String(index)}: slot ${slot} names an unsafe key, dropping the fill`,
+      missing: (slot, ordinal) =>
+        `placement ${String(index)}, slot ${slot}: tile ordinal ${String(ordinal)} is not in this catalog build`,
+      duplicate: (slot) => `placement ${String(index)}: slot ${slot} is filled twice, keeping the first`,
+    },
+    dropped,
+  )
+  return Object.fromEntries(fills)
 }
 
 /**
  * The holds of one fill, as the schema's map — or `undefined` when none survived.
  *
- * The same three failures as {@link assembleFills}, one level down and named one
- * level down with them: a name the table cannot read is reported once against the
- * entry, a file this build does not carry drops its hold and says which, and two
- * holds naming one mount keep the first because choosing silently between two
- * files is the one thing this codec does not do.
+ * The same failures as {@link assembleFills} through the same collector, named
+ * one level down: a name the table cannot read is reported once against the
+ * entry, an unsafe key and a file this build does not carry each drop their hold
+ * and say which, and two holds naming one mount keep the first.
  *
  * `undefined` rather than `{}` for the empty result, for the reason written into
  * the caller and the module docblock — and returning it from here rather than
  * letting the caller test emptiness keeps the two spellings of *no holds* from
- * being decided in two places.
+ * being decided in two places. The size is the collector's own key count, so it
+ * counts what actually survived rather than what was attempted.
  */
 function assembleHolds(
   wire: readonly WireHold[],
@@ -897,27 +970,20 @@ function assembleHolds(
   tiles: ReadonlyMap<number, TileId>,
   dropped: string[],
 ): Record<HoldName, HoldFill> | undefined {
-  const holds: Record<HoldName, HoldFill> = {}
-  for (const hold of wire) {
-    const name = names.get(hold.slot)
-    if (name === undefined) continue
-    const tile = tiles.get(hold.ordinal)
-    if (tile === undefined) {
-      dropped.push(`${where}, hold ${name}: tile ordinal ${String(hold.ordinal)} is not in this catalog build`)
-      continue
-    }
-    if (holds[name] !== undefined) {
-      dropped.push(`${where}: hold ${name} is filled twice, keeping the first`)
-      continue
-    }
-    holds[name] = { tile, pinned: hold.pinned }
-  }
-  // Counted off the map rather than off a tally, so a name that cannot become an
-  // own property — `__proto__` parses as a `HoldName`, and assigning it writes no
-  // key — leaves the fill unsolved instead of carrying an empty map that claims
-  // it was looked at. The fill path above has the same hole and the same shape of
-  // outcome; this is not the row to widen it.
-  return Object.keys(holds).length === 0 ? undefined : holds
+  const holds = collectFilled(
+    wire,
+    names,
+    tiles,
+    (tile, hold): HoldFill => ({ tile, pinned: hold.pinned }),
+    {
+      unsafe: (name) => `${where}: hold ${name} names an unsafe key, dropping the hold`,
+      missing: (name, ordinal) =>
+        `${where}, hold ${name}: tile ordinal ${String(ordinal)} is not in this catalog build`,
+      duplicate: (name) => `${where}: hold ${name} is filled twice, keeping the first`,
+    },
+    dropped,
+  )
+  return holds.size === 0 ? undefined : Object.fromEntries(holds)
 }
 
 /**

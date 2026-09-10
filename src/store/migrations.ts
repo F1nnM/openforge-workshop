@@ -250,8 +250,14 @@ export interface RecoveredState {
  * neither of the other two levels has ever been exposed; they keep the check
  * because it costs a set lookup and because relying on a key pattern to defend
  * the prototype is the kind of reasoning that breaks when the pattern loosens.
+ *
+ * **Exported for `src/share/link.ts`**, which reads the same two loose key
+ * schemas out of a URL rather than out of `localStorage` — a stranger's slot and
+ * hold names, which is the more hostile of the two sources. One set rather than
+ * two, because a key that is unsafe to write into a record is unsafe wherever
+ * the record came from, and two lists would drift the day one of them grows.
  */
-const UNSAFE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
+export const UNSAFE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
 
 /**
  * Narrow to a plain keyed object, rejecting arrays and `null`.
