@@ -315,6 +315,31 @@ describeCorpus(
       }
     })
 
+    /**
+     * An `openTop` opening's `head` is the **host's own top face**, and that is
+     * what a lintel is seated against.
+     *
+     * The measured convention: a rectangular door wall carries a ~33 mm notch
+     * that runs up through the silhouette, so `findOpenings` finds no soffit and
+     * reports the top line — which is the wall's top. A consumer seating a
+     * lintel's *bottom* there puts it a lintel's thickness above the wall, which
+     * is `place.ts#openingRise`'s subject and was the visible fault. Asserted
+     * against the bbox, which only this file and the inventory can see.
+     */
+    it('reads an open-topped opening s head as the top of the host', () => {
+      const openTops = hosts.flatMap(([blob, host]) =>
+        host.mounts
+          .filter((mount) => mount.kind === 'opening' && mount.openTop)
+          .map((mount) => ({ name: nameOf(blob), host, mount })),
+      )
+      expect(openTops.length).toBeGreaterThan(0)
+      for (const { name, host, mount } of openTops) {
+        if (mount.kind !== 'opening') continue
+        const top = host.bbox.max[2] - host.bbox.min[2]
+        expect(Math.abs(mount.head - top), `${name} ${mount.slot}`).toBeLessThan(0.5)
+      }
+    })
+
     /* ------------------------------------------------------ the orientations */
 
     it('gives every mount a unit outward normal', () => {

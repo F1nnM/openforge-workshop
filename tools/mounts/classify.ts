@@ -268,6 +268,19 @@ const PLATE_PLANE_MM = 0.3
 /** The fraction of a face a plate must cover, with its opposite under half of it. */
 const PLATE_MIN_COVERAGE = 0.5
 
+/**
+ * How flat a `z` face must be to be the **bed** — the face the piece was printed
+ * on — and how open the other must be for the answer to be unambiguous.
+ *
+ * Measured on `door_lintel.1.stl` (blob `00605266…`), the piece the rule exists
+ * for: **0.976 on `-z` against 0.122 on `+z`**. The gap is an order of magnitude
+ * wide, so the two thresholds sit far from both numbers; a slab that is flat both
+ * ways — every door leaf, both z faces at 1.0 — falls between them and gets no
+ * answer, which is the honest one.
+ */
+const BED_FLAT_COVERAGE = 0.9,
+  BED_OPEN_COVERAGE = 0.5
+
 const AXIS_NAME = ['x', 'y', 'z'] as const
 
 /** x and y from the bbox centre, z from the bbox bottom. Axes are not touched. */
@@ -1054,6 +1067,35 @@ function plateAnchor(
   }
 }
 
+/**
+ * Which `z` face the insert was printed on, or `undefined` when the mesh does
+ * not say.
+ *
+ * A print sits on the build plate, not on the wall, so this is the one fact
+ * about an insert's authored orientation that the mesh carries: the face pressed
+ * flat is smooth and fully covered and the one facing up is not.
+ * `src/catalog/schema.ts#InsertAnchor` states what a consumer does with it, and
+ * `place.ts#openingSeat` is the consumer — a lintel is authored print-side down
+ * and its bed face is the one that shows in the room.
+ *
+ * Only the `z` pair is asked about. An insert is authored Z-up like every other
+ * file in the archive, so the plate is a `z` face by construction, and reading
+ * the same asymmetry off a side face would be re-deriving {@link plateAnchor}
+ * with different thresholds.
+ */
+function bedFace(
+  positions: ArrayLike<number>,
+  triangles: number,
+  bbox: Bounds,
+): '-z' | '+z' | undefined {
+  const covered = faceCoverage(positions, triangles, bbox)
+  const low = covered[4] as number,
+    high = covered[5] as number
+  if (low >= BED_FLAT_COVERAGE && high < BED_OPEN_COVERAGE) return '-z'
+  if (high >= BED_FLAT_COVERAGE && low < BED_OPEN_COVERAGE) return '+z'
+  return undefined
+}
+
 function anchorOf(
   positions: ArrayLike<number>,
   triangles: number,
@@ -1111,5 +1153,11 @@ function anchorOf(
  */
 export function analyseInsert(positions: Float32Array, triangles: number): InsertMeasurement {
   const bbox = meshBounds(positions, triangles)
-  return { bbox, anchor: anchorOf(positions, triangles, bbox, extentOf(bbox)) }
+  const anchor = anchorOf(positions, triangles, bbox, extentOf(bbox))
+  /* A second pass over the soup for the 139 inserts, rather than threading a
+     coverage array through four anchor rules three of which never ask for one.
+     `bed` is a fact about the *print* and not about the kind, so it is attached
+     to whichever anchor came back. */
+  const bed = bedFace(positions, triangles, bbox)
+  return { bbox, anchor: bed === undefined ? anchor : { ...anchor, bed } }
 }

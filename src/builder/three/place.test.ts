@@ -585,9 +585,60 @@ describe('accessoryMatrix hangs leaves in an opening', () => {
     const lintel = accessoryMatrix(hostFrame(0), single, insert, 'lintel', 0)
     const door = accessoryMatrix(hostFrame(0), single, insert, 'door', 0)
     // The slot name decides, not the insert's shape: the same leaf hung under
-    // `lintel` sits on the head and under `door` on the sill.
+    // `lintel` sits on the head and under `door` on the sill. `DOORWAY` is a
+    // **closed** opening — its head is a soffit the lintel rests on.
     expectAt(landsAt(lintel, LEAF_SEAT), 0, 61.5, 6.5)
     expectAt(landsAt(door, LEAF_SEAT), 0, 1.5, 6.5)
+  })
+
+  it('hangs a lintel’s top at the head of an open-topped opening', () => {
+    /*
+      On an `openTop` host the head *is* the top of the wall — the opening runs
+      up through the notch the lintel fills — so the piece drops into it rather
+      than sitting on it. Bottom-at-head left every one of the 131 measured
+      lintel mounts floating its own thickness clear of the wall.
+    */
+    const notched: OpeningMount = { ...DOORWAY, leaves: 1, openTop: true }
+    const matrix = accessoryMatrix(hostFrame(0), notched, insert, 'lintel', 0)
+    // The leaf is 55 mm tall and held at its bottom centre, so its bottom lands
+    // 55 mm under the head and its top exactly on it.
+    expectAt(landsAt(matrix, LEAF_SEAT), 0, 61.5 - 55, 6.5)
+    const top = new Vector3(LEAF_SEAT.x, LEAF_SEAT.y, LEAF_MESH.max.z)
+    expect(landsAt(matrix, top).y).toBeCloseTo(61.5, 3)
+  })
+
+  it('turns a lintel printed flat-side down so the bed face is up', () => {
+    /*
+      `InsertAnchor.bed` is the face the piece was printed on, and for a lintel
+      that is the face the room sees: `door_lintel.*.stl` is 97.6 % covered on
+      `-z` and 12.2 % on `+z`, so mesh-`+z`-up — right for every other insert —
+      showed the flat underside of the print and hid the moulding in the notch.
+    */
+    const notched: OpeningMount = { ...DOORWAY, leaves: 1, openTop: true }
+    const bedded = { bounds: LEAF_MESH, anchor: { ...LEAF, bed: '-z' } as const }
+    const matrix = accessoryMatrix(hostFrame(0), notched, bedded, 'lintel', 0)
+
+    // The bed face is the mesh's own `z` minimum, and it is now on top — the
+    // held point still lands on the seat, so the body hangs below it.
+    expectAt(landsAt(matrix, LEAF_SEAT), 0, 61.5, 6.5)
+    const bedUp = pointsAlong(matrix, new Vector3(LEAF_SEAT.x, LEAF_SEAT.y, LEAF_MESH.max.z), LEAF_SEAT)
+    expect(degreesBetween(bedUp, new Vector3(0, 1, 0))).toBeLessThan(1)
+    // Still 55 mm of lintel, all of it inside the wall's notch.
+    expect(landsAt(matrix, new Vector3(LEAF_SEAT.x, LEAF_SEAT.y, LEAF_MESH.max.z)).y).toBeCloseTo(
+      61.5 - 55,
+      3,
+    )
+  })
+
+  it('leaves a door standing the way it was authored, bed face or not', () => {
+    // The rule is the lintel's, not the mesh's: a door leaf's bed face is the
+    // bottom edge it was printed on, and turning one over hangs it upside down.
+    const bedded = { bounds: LEAF_MESH, anchor: { ...LEAF, bed: '-z' } as const }
+    const single: OpeningMount = { ...DOORWAY, leaves: 1 }
+    const matrix = accessoryMatrix(hostFrame(0), single, bedded, 'door', 0)
+    expectAt(landsAt(matrix, LEAF_SEAT), 0, 1.5, 6.5)
+    const up = pointsAlong(matrix, LEAF_SEAT, new Vector3(LEAF_SEAT.x, LEAF_SEAT.y, LEAF_MESH.max.z))
+    expect(degreesBetween(up, new Vector3(0, 1, 0))).toBeLessThan(1)
   })
 
   it('faces the leaf along the measured normal, not along the face label', () => {
@@ -796,8 +847,14 @@ describeCorpus('accessoryMatrix poses a measured insert by its extents', () => {
     const across = new Vector3(0, 1, 0).cross(zUpToYUp(mount.normal)).normalize()
     expect(Math.abs(span.direction.dot(across))).toBeCloseTo(1, 3)
 
-    // And it sits on the **head** of the opening, which is the slot's own rule.
-    expect(landsAt(matrix, bottomCentre(bounds)).y).toBeCloseTo(mount.head, 3)
+    // And its **top** sits on the head, which is the slot's own rule on an
+    // open-topped opening: `head` 43.997 is the wall's own top face (the mesh is
+    // 43.990 mm tall), the 33 mm notch runs up through it, and the 6.09 mm
+    // lintel drops into it flush rather than perching on top of it.
+    expect(mount.openTop).toBe(true)
+    const seat = landsAt(matrix, bottomCentre(bounds)).y
+    expect(seat).toBeCloseTo(mount.head - 6.086, 2)
+    expect(seat + height.lengthMm).toBeCloseTo(mount.head, 3)
   })
 
   /**

@@ -479,6 +479,43 @@ describe('analyseInsert', () => {
     expect(m.anchor.at).toEqual([0, 0, 0])
     expect(Math.abs(m.anchor.axis[1])).toBe(1)
     expect(m.anchor.size).toEqual([28, 4, 35])
+    // Flat at both ends of `z`, so nothing was printed face-down here as far as
+    // the mesh is concerned — which is every door leaf in the archive.
+    expect(m.anchor.bed).toBeUndefined()
+  })
+
+  /**
+   * `door_lintel.*.stl`'s shape, and the reason `bed` exists.
+   *
+   * A lintel is authored print-side down: the flat face that lay on the build
+   * plate is `-z` and the moulding is at `+z`. Measured on the real blob
+   * (`00605266…`, `door_lintel.1.stl`, 32.84 × 12.99 × 6.09 mm): **0.976 on
+   * `-z` against 0.122 on `+z`**. This is that asymmetry in a fixture — a full
+   * 32 × 12 bed, and a 32 × 5 ridge standing on it, so `+z` reads 0.42.
+   */
+  it('reads the bed off a slab printed flat-side down', () => {
+    const stl = parseStl(
+      syntheticStl([
+        { min: [-16, -6, 0], max: [16, 6, 5] },
+        { min: [-16, -6, 5], max: [16, -1, 6] },
+      ]),
+    )
+    const m = analyseInsert(stl.positions, stl.triangles)
+    expect(m.anchor.kind).toBe('leaf')
+    expect(m.anchor.size).toEqual([32, 12, 6])
+    expect(m.anchor.bed).toBe('-z')
+  })
+
+  it('reads the bed off a slab printed the other way up', () => {
+    // The rule is *bed face up*, whichever face that is, so the mirror image has
+    // to answer `+z` rather than falling through to nothing.
+    const stl = parseStl(
+      syntheticStl([
+        { min: [-16, -6, 1], max: [16, 6, 6] },
+        { min: [-16, -6, 0], max: [16, -1, 1] },
+      ]),
+    )
+    expect(analyseInsert(stl.positions, stl.triangles).anchor.bed).toBe('+z')
   })
 
   it('classes a tall thin prism as a peg with its axis along the long side', () => {

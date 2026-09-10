@@ -145,6 +145,16 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * of those 1,301 mounts carries a `normal`, so the field has never been absent
  * in the wild and never will be.
  *
+ * The optional {@link InsertAnchor} `bed` — the face the piece was printed on —
+ * is schema 5 as well, and did not bump for the same reason `mounts` and
+ * `anchor` are one version between them: an index without it reads cleanly under
+ * this shape, an index with it reads cleanly under the older one, and the only
+ * consumer that can tell the difference is the one asking whether a *given* blob
+ * was measured — which is what the 5 already answers. It was added for the
+ * lintel that rendered upside down: `door_lintel.1.stl` covers **97.6 % of its
+ * `-z` face and 12.2 % of its `+z`**, so the flat face is the one it was printed
+ * on and the one that faces the room, and only the mesh could say which.
+ *
  * {@link InsertAnchor}'s `axis` sign convention — *from `at` into the insert's
  * body* — was pinned on the same footing and did **not** bump either. It names
  * what the producer always meant to emit rather than a new shape: the field is
@@ -1078,6 +1088,25 @@ export const InsertAnchor = z.object({
    */
   axis: Vec3,
   size: Vec3,
+  /**
+   * The face the piece was printed on; **for a lintel that face is the top in
+   * situ.**
+   *
+   * The flat one of the two `z` faces, and present only when the mesh is
+   * unambiguous about it: one `z` face covered ≥ 90 % and the other under 50 %
+   * (`tools/mounts/classify.ts#bedFace`). A slab flat both ways — every door
+   * leaf — carries nothing here, because nothing was measured.
+   *
+   * It exists because an accessory is authored for the build plate rather than
+   * for the wall. `door_lintel.*.stl` is a 33 × 13 × 6 mm slab whose flat side
+   * is `-z` (97.6 % against 12.2 %) and whose decorative curve is `+z`, so
+   * standing it up mesh-`+z`-up — which is right for every other insert in the
+   * archive — showed the print's underside to the room and hid the moulding
+   * against the wall's own lintel notch. `place.ts#openingSeat` turns a `lintel`
+   * whose `bed` is `-z` about its span so the bed face is up; the rule is *bed
+   * face up*, whichever face that is.
+   */
+  bed: z.enum(['-z', '+z']).optional(),
 })
 export type InsertAnchor = z.infer<typeof InsertAnchor>
 

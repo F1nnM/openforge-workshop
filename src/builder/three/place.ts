@@ -328,6 +328,13 @@ export function zUpToYUp(v: Vec3): Vector3 {
  * that distinguishes *the piece that spans the top* from *the piece that fills
  * the hole* is what the host called the slot it goes in.
  *
+ * The slot name carries two further rules, both of them a lintel's and both
+ * measured — {@link openingRise} and {@link bedFlip}. On an **`openTop`**
+ * opening the lintel's *top* goes to the `head`, because `head` there is the top
+ * of the wall and the opening runs up through the notch the lintel fills; and a
+ * lintel whose `InsertAnchor.bed` is `-z` is turned over, because it is authored
+ * flat-side down on the build plate and that flat side is what the room sees.
+ *
  * `slot` is an argument rather than `mount.slot` read off the record. The two are
  * equal by construction — `catalog/mounts.ts#mountsFor` selects a host's mounts
  * *by* the hold name — and taking it explicitly is what puts the dependency at
@@ -427,7 +434,11 @@ function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, copy: 0 | 1
   }
 }
 
-/** The composition slot whose insert seats at the opening's head. See {@link accessoryMatrix}. */
+/**
+ * The composition slot whose insert seats at the opening's head, is turned over
+ * when it was printed flat-side down, and fills the notch rather than sitting on
+ * it. See {@link accessoryMatrix}, {@link openingRise} and {@link bedFlip}.
+ */
 const LINTEL_SLOT = 'lintel'
 
 /**
@@ -469,19 +480,24 @@ function faceAcross(out: Vector3): Vector3 | null {
 /**
  * A leaf, a lintel or a grille in a doorway — posed by its own extents.
  *
- * The seat is the slot's: `lintel` on the `head`, everything else on the `sill`,
- * at the opening's `at` in the other two axes. The turn is the yaw that lays the
- * insert's **shorter horizontal extent** through the wall and therefore its
- * **longer** one across the face; see {@link accessoryMatrix} for why the
- * anchor's axis cannot be asked instead, and {@link copiesOf} for the second
- * leaf's offset.
+ * The seat is the slot's — {@link openingRise} — at the opening's `at` in the
+ * other two axes. The turn is the yaw that lays the insert's **shorter
+ * horizontal extent** through the wall and therefore its **longer** one across
+ * the face, with {@link bedFlip}'s half-turn folded in for a lintel authored
+ * print-side down; see {@link accessoryMatrix} for why the anchor's axis cannot
+ * be asked instead, and {@link copiesOf} for the second leaf's offset.
  */
 function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, copy: 0 | 1): Seat {
   const out = outwardAxis(mount.normal)
-  const point = zUpToYUp([mount.at[0], mount.at[1], slot === LINTEL_SLOT ? mount.head : mount.sill])
-
   const through = throughIndex(anchor.size)
+  const flip = bedFlip(anchor, slot, through)
+  const point = zUpToYUp([mount.at[0], mount.at[1], openingRise(mount, anchor, slot, flip !== null)])
+
   const align = yawOnto(meshAxis(through), out.clone().multiplyScalar(throughSign(anchor, through)))
+  // Post-multiplied: the flip is in the insert's own upright frame, about an
+  // axis through the point that lands on the seat, and the yaw then carries the
+  // turned box round onto the face.
+  if (flip !== null) align.multiply(flip)
   const hold = zUpToYUp(anchor.at)
 
   // `±width/4` is where two half-width slabs meet in the middle of the opening.
@@ -496,6 +512,68 @@ function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, co
   }
 
   return { point, hold, align }
+}
+
+/**
+ * The height in the host's bbox frame that the insert's **held point** lands on.
+ *
+ * Three answers, and only the third is new:
+ *
+ *   - anything but a `lintel` seats its anchor point on the `sill`;
+ *   - a `lintel` on a **closed** opening seats its anchor point on the `head`,
+ *     which is the lintel's own seat cut into the host;
+ *   - a `lintel` on an **`openTop`** opening puts its **top** at the `head`,
+ *     because on those hosts `head` *is* the top of the wall.
+ *
+ * That last one is the fix for a lintel floating a lintel's height above the
+ * wall. The measured convention is a rectangular door wall with a ~33 mm notch
+ * running up through the silhouette: the opening reaches the top line, so
+ * `findOpenings` reads `openTop` and `head` comes back as the wall's own top
+ * rather than as a soffit. Seating the piece's bottom there hung all 131 lintel
+ * mounts one thickness clear of the wall they fill — 6.09 mm for
+ * `door_lintel.1.stl` — instead of flush into the notch.
+ *
+ * `above` is the insert's vertical extent **above the held point after the
+ * pose**, which is why the flip has to be decided first: {@link bedFlip} turns
+ * the box about a horizontal axis through that very point, so a leaf held at its
+ * bottom centre hangs entirely below it once flipped and entirely above it
+ * otherwise.
+ */
+function openingRise(
+  mount: OpeningMount,
+  anchor: InsertAnchor,
+  slot: string,
+  flipped: boolean,
+): number {
+  if (slot !== LINTEL_SLOT) return mount.sill
+  if (!mount.openTop) return mount.head
+  return mount.head - (flipped ? anchor.at[2] : anchor.size[2] - anchor.at[2])
+}
+
+/**
+ * The half-turn that puts a lintel's **bed face** up, or `null` for every other
+ * insert and every unmeasured one.
+ *
+ * `InsertAnchor.bed` is the face the piece was printed on, and for a lintel that
+ * face is the one the room sees: `door_lintel.*.stl` is authored flat-side down
+ * on the build plate (`-z`, 97.6 % covered) with its moulding at `+z` (12.2 %),
+ * so the pose every other insert wants — mesh `+z` world up, which
+ * {@link standUpright} has already applied — showed the print's flat underside
+ * to the room and buried the carving in the wall's notch.
+ *
+ * About the **span** axis, which is the horizontal extent the yaw lays across
+ * the face, so the turn inverts the vertical and the through direction and
+ * leaves the span where it was. Inverting the through direction costs a lintel
+ * nothing — see {@link throughSign}: its `at` sits on the opening's mid-plane
+ * and its anchor axis is its height, so there is no declared front to lose.
+ *
+ * **Lintels only**, and that is a claim about the slot rather than about the
+ * mesh: a door leaf's bed face is not its top in situ, it is its bottom edge on
+ * the plate, and turning one over would hang the door upside down.
+ */
+function bedFlip(anchor: InsertAnchor, slot: string, through: 0 | 1): Quaternion | null {
+  if (slot !== LINTEL_SLOT || anchor.bed !== '-z') return null
+  return new Quaternion().setFromAxisAngle(meshAxis(through === 0 ? 1 : 0), Math.PI)
 }
 
 /**
