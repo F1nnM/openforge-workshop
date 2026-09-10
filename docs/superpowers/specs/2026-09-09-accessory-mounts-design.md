@@ -370,7 +370,10 @@ their side. An insert is authored Z-up, so the extents cannot be wrong that way:
 ±`normal` — the sign from `anchor.axis` when the anchor axis *is* that mesh axis (a door's
 declared `+thin`), else `+normal` — and the span therefore lands across the face. A `hole`
 or a `surface` takes no rotation at all. There is no roll step on these three: the vertical
-is fixed by the extents and the yaw by the normal.
+is fixed by the extents and the yaw by the normal. What lands on the mount for those two kinds is
+the insert's bottom centre — its bbox origin — rather than the point `anchor.at` names:
+`brazier+large,base.stl` is anchored on its +z face and `brazier+small.stl` at its top, and
+seating either by its anchor point would bury it upright and inverted.
 
 | mount | anchor | where |
 | --- | --- | --- |
@@ -381,8 +384,8 @@ is fixed by the extents and the yaw by the normal.
 | `opening` + `lintel` | `leaf` / `plate` / `block` | anchor point at `(at.x, head, at.y)` — it sits on the head of the opening, one piece however many leaves the doorway takes |
 | `opening` + `portcullis` | `leaf` | as a single leaf, bottom at `sill` |
 | `pocket` | `block` / `peg` | anchor point on the entrance, axis into the wall |
-| `hole` | any | anchor point at the hole centre on the top face, unturned |
-| `surface` | any | anchor point at the top-face centre, unturned |
+| `hole` | any | bottom-centre at the hole centre on the top face, unturned — the anchor point is not used |
+| `surface` | any | bottom-centre at the top-face centre, unturned — the anchor point is not used |
 
 **Two copies is `copiesOf`, not `leaves`.** `leaves: 2` says *the doorway is authored for
 two leaves*, which is not the claim *this insert is one of them*: the same 47.5 mm opening

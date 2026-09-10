@@ -1049,10 +1049,15 @@ function anchorOf(
  * row with nothing in the corpus to exercise it. A ≥ 50 % flat face whose
  * opposite carries under half of it is the *stronger* claim of the two: it is a
  * measurement of where the piece lies against the host, where the peg rule is an
- * inference from three bbox ratios. A genuine peg is unaffected, and the reason
- * is the plate rule's own asymmetry — `torch.stl` is a 7 × 7 × 12 mm prism whose
- * six faces are all flat, so *every* face is refused for having a flat opposite,
- * and it falls through to {@link pegAnchor} exactly as before.
+ * inference from three bbox ratios. The plate rule's own asymmetry now also
+ * catches `torch.stl` — a 7 × 7 × 12 mm prism with a flat 7 × 7 base and a
+ * tapered head — which reads `plate` with a byte-identical anchor (`at [0,0,0]`,
+ * `axis [0,0,1]`) to what {@link pegAnchor} gave it before. The render is
+ * unchanged either way, because a socket mount aligns the anchor *axis*
+ * regardless of `kind`, and the only place in `src/` that reads `anchor.kind`
+ * is `copiesOf`'s `leaf` test. No corpus insert now exercises the spec's
+ * `socket` + `peg` row — the `brazier+small` blobs and the synthetic fixtures
+ * keep {@link pegAnchor} itself covered.
  *
  * **Every kind's `axis` runs from `at` into the insert's body** — the contract
  * `src/catalog/schema.ts#InsertAnchor` states and `place.ts#accessoryMatrix`
