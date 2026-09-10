@@ -332,11 +332,12 @@ function wireOf(scene: SharedScene): WirePayload {
           ordinal: fill === undefined ? 0 : (MANIFEST.ordinalOfTile(fill.tile) ?? 0),
           pinned: fill?.pinned ?? false,
           /* The two shapes measured here fill no holds, so what format 6 costs
-             them is the zero hold count per fill and nothing else — which is
-             exactly what the byte-for-byte assertion below is checking the
-             control writes. What a hold itself costs is measured in
+             them is the zero hold count and the emptied bit per fill and nothing
+             else — which is exactly what the byte-for-byte assertion below is
+             checking the control writes. What a hold itself costs is measured in
              `payload.test.ts`, against the payload rather than against a URL. */
           holds: [],
+          emptied: false,
         }
       }),
   }))
@@ -433,6 +434,11 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
     for (const hold of holds) writeSlot(hold.slot)
     for (const hold of holds) writer.uvar(hold.ordinal)
     writePinned(writer, holds, layout)
+    writeFlags(
+      writer,
+      fills.map((fill) => fill.emptied),
+      layout,
+    )
   } else {
     for (const instance of payload.instances) {
       writeTemplate(instance.template)
@@ -451,6 +457,7 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
           writer.uvar(hold.ordinal)
           writer.u8(hold.pinned ? 1 : 0)
         }
+        writer.u8(fill.emptied ? 1 : 0)
       }
     }
   }
@@ -463,14 +470,30 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
 }
 
 function writePinned(writer: ByteWriter, fills: readonly { pinned: boolean }[], layout: Layout): void {
+  writeFlags(
+    writer,
+    fills.map((fill) => fill.pinned),
+    layout,
+  )
+}
+
+/**
+ * One bit per value, or one byte per value under the `bitset: false` control.
+ *
+ * Three columns go through it — the fills' pinned bits, the holds' pinned bits
+ * and the fills' emptied bits — so the control row that prices the bitset prices
+ * all three, which is what makes that row a measurement of the *choice* rather
+ * than of one of its uses.
+ */
+function writeFlags(writer: ByteWriter, values: readonly boolean[], layout: Layout): void {
   if (!layout.bitset) {
-    for (const fill of fills) writer.u8(fill.pinned ? 1 : 0)
+    for (const value of values) writer.u8(value ? 1 : 0)
     return
   }
-  for (let start = 0; start < fills.length; start += 8) {
+  for (let start = 0; start < values.length; start += 8) {
     let byte = 0
-    for (let bit = 0; bit < 8 && start + bit < fills.length; bit += 1) {
-      if (fills[start + bit]?.pinned === true) byte |= 1 << bit
+    for (let bit = 0; bit < 8 && start + bit < values.length; bit += 1) {
+      if (values[start + bit] === true) byte |= 1 << bit
     }
     writer.u8(byte)
   }

@@ -33,10 +33,10 @@
  * | --------------------------- | ----------------: | --------------: |
  * | naive JSON array of objects |               261 |              45 |
  * | columnar JSON               |             3,897 |              70 |
- * | row-major varint            |               520 |              56 |
- * | ids inline, no tables       |             1,670 |              80 |
- * | pinned as a byte per fill   |             6,283 |              77 |
- * | **columnar varint (this)**  |         **6,683** |          **80** |
+ * | row-major varint            |               510 |              55 |
+ * | ids inline, no tables       |             1,666 |              80 |
+ * | pinned as a byte per fill   |             6,070 |              77 |
+ * | **columnar varint (this)**  |         **6,680** |          **80** |
  *
  * The middle rows are there to separate the effects, because they are not the
  * same size. **Layout** is what carries the room build: columnar JSON reaches
@@ -44,7 +44,7 @@
  * same characters. **Representation** is what carries the scattered build: it is
  * essentially incompressible — `deflate-raw` returns *more* bytes than it was
  * given below about a hundred placements — so no layout helps, and the varint
- * packing lifts it from 45 to 56. Columnar varint takes both, and is the only one
+ * packing lifts it from 45 to 55. Columnar varint takes both, and is the only one
  * of the six that is last on neither shape.
  *
  * The two JSON rows carry **no hold column at all**, which flatters them by
@@ -52,18 +52,18 @@
  * behind on the room shape, so the comparison survives the asymmetry rather than
  * depending on it.
  *
- * The spread between the two shapes is 80 to 6,683, a factor of 84, which is why
+ * The spread between the two shapes is 80 to 6,680, a factor of 84, which is why
  * `link.ts` gates on the measured URL rather than on a count: any instance-count
  * threshold is wrong by nearly two orders of magnitude at one end or the other.
  *
- * **What format 6 cost the shape people build**: 6,956 instances to **6,683**
- * (−3.9%) on the room build and 81 to **80** on the scattered one, re-measured
+ * **What format 6 cost the shape people build**: 6,956 instances to **6,680**
+ * (−4.0%) on the room build and 81 to **80** on the scattered one, re-measured
  * rather than adjusted, on fixtures that fill **no holds at all** — so that is
- * the price of the zero hold count per fill, paid by every room that never fits
- * an accessory. A byte per fill is what a column has to cost to be re-splittable
- * at all, and the alternative — a flag bit saying *this payload has no holds* —
- * buys 3.9% of the loose end and nothing of the tight one, for a second way to
- * read the same bytes.
+ * the price of the zero hold count and the emptied bit per fill, paid by every
+ * room that never fits an accessory. A byte per fill is what a count column has
+ * to cost to be re-splittable at all, and the alternative — a flag bit saying
+ * *this payload has no holds* — buys that back on the loose end and nothing on
+ * the tight one, for a second way to read the same bytes.
  *
  * **What the filters cost, measured under format 5 and unchanged by 6, since it
  * is a comparison of two variants at one format**: 7,358 to 6,956 on the room
@@ -109,6 +109,7 @@
  *   hold slot column                holds x uvar (index into the slot table)
  *   hold ordinal column             holds x uvar (the hold's own file ordinal)
  *   hold pinned bitset              ceil(holds / 8) bytes, LSB first
+ *   emptied bitset                  ceil(fills / 8) bytes, LSB first
  *   uvar    recipe count            distinct generated bases in the scene
  *   recipe table                    recipeCount x (uvar byte length, UTF-8 bytes)
  *   uvar    generated count         generated placements on the scene
@@ -141,18 +142,34 @@
  * table would double the table overhead of the format to keep two populations
  * apart that the decoder tells apart by *position* anyway.
  *
- * What a hold-free payload pays is **one byte per fill** — its zero hold count —
- * and nothing else: measured, a one-fill payload goes from 224 bytes to 225, and
- * an empty scene stays at 14, because the column is per fill rather than a fourth
- * empty column of its own. A fill that does carry two holds pays 5 bytes for them
- * (two slot bytes, two ordinal bytes, and the byte the bitset opens with).
+ * What a hold-free payload pays is **one byte per fill plus its bit** — the zero
+ * hold count and the emptied flag — and nothing else: measured, a one-fill
+ * payload goes from 224 bytes to 226, and an empty scene stays at 14, because
+ * both columns are per fill rather than two more empty columns of their own. A
+ * fill that does carry two holds pays 5 bytes for them (two slot bytes, two
+ * ordinal bytes, and the byte the hold bitset opens with).
  *
  * The nesting stops here, by the same construction the store uses
  * (`store/schema.ts#HoldFill`): a {@link WireHold} has no holds of its own, so a
- * second level is not refused by a check but unsayable in the type. What the wire
- * cannot say either is the store's difference between a fill that was *never
- * solved* and one that was *solved and holds nothing* — both are zero holds here.
- * `link.ts` chooses which of the two a decoded fill becomes, and says why.
+ * second level is not refused by a check but unsayable in the type.
+ *
+ * ## The emptied bitset: one bit for *solved, and holds nothing*
+ *
+ * Zero holds is two different states of a fill — `holds === undefined` (**never
+ * solved**, which the receiver's default-hold pass fills in) and `holds === {}`
+ * (**solved, and the user took the last torch out**, which it must not) — and a
+ * count alone cannot tell them apart. So one bit per **fill** says which, in a
+ * bitset after the hold columns, fill-major like the pinned one beside it.
+ *
+ * **A bit and not a sentinel count**, because the count is a length and lengths
+ * are read to size arrays: a reserved value there would be a second meaning for
+ * a number every reader already trusts. And it is the *last* column, so a format
+ * 5 payload still ends where it ends and reads back with every fill unsolved,
+ * which is what a link written before this bit existed actually meant.
+ *
+ * It costs **⅛ byte per fill** — one byte for the eight fills of two instances —
+ * and buys the one editing decision the format could not carry: a room whose
+ * accessories were deliberately cleared arrives cleared.
  *
  * ## The template and slot tables, and why they are text
  *
@@ -167,7 +184,7 @@
  * existed: a room is a handful of families repeated, so a table plus a one-byte
  * index per instance replaces 41 characters per instance. Measured on the room
  * shape, writing the three identities inline instead of interning them takes
- * 6,683 instances down to 1,670 — a factor of 4.0, and the largest single win
+ * 6,680 instances down to 1,666 — a factor of 4.0, and the largest single win
  * available here. It grew from 3.1x when the filter set joined the tables, which
  * is the same argument arriving a third time: a room repeats its filter position
  * exactly as it repeats its family.
@@ -217,16 +234,19 @@
  *
  * A byte column of 0/1 would be simpler, and the expectation was that it would
  * cost nothing on the room shape — a run of identical bytes is what deflate is
- * best at. **Measured, it costs something on both shapes**: 6,683 instances
- * against 6,283 with a byte per fill (+6.4%) on the room build, and 80 against 77
+ * best at. **Measured, it costs something on both shapes**: 6,680 instances
+ * against 6,070 with a byte per fill (+10.0%) on the room build, and 80 against 77
  * (+3.9%) on the scattered one. The room figure is the larger of the two because
  * a room build's `pinned` column is not constant — a room somebody has adjusted
  * has a pinned fill here and there — so a byte per fill is a byte deflate cannot
  * fold into the run beside it.
  *
- * The control switches **both** bitsets, so those figures price the hold bitset
- * beside the fill one; the fixtures fill no holds, so what they actually show is
- * the fill bitset, and the hold one is the same eight lines making the same trade
+ * The control switches **all three** bitsets, so those figures price the hold
+ * and emptied columns beside the fill one — the room figure grew from +6.4% to
+ * +10.0% when the emptied bit joined them, which is a second fill-major column
+ * of mostly-zero bits and exactly the shape a byte per value wastes most on.
+ * The fixtures fill no holds, so what they actually show is the fill and emptied
+ * bitsets, and the hold one is the same eight lines making the same trade
  * on a column that is empty until a room fits an accessory.
  *
  * Neither figure is large. What decides it is that the *scattered* build is the
@@ -386,10 +406,11 @@ export const SHARE_FORMAT_VERSION = 6
  *
  * Every bump before 6 moved a byte that a later reader would have read as
  * something else, so refusing the older layout was the version byte doing its
- * job. Format 6 is the first that **appends**: the hold columns sit after the
- * last of format 5's, so reading a v5 payload is reading a v6 payload and
- * stopping where the fill bitset ends. Nothing is guessed to do it — a v5 fill
- * holds nothing, which is what the bytes say and all they could have said.
+ * job. Format 6 is the first that **appends**: the hold columns and the emptied
+ * bitset sit after the last of format 5's, so reading a v5 payload is reading a
+ * v6 payload and stopping where the fill bitset ends. Nothing is guessed to do
+ * it — a v5 fill holds nothing and was never emptied, which is what the bytes
+ * say and all they could have said.
  *
  * A list rather than a floor, because that is the honest shape: 4 is not readable
  * and 7 is not yet written, and a `>= 5` test would quietly promise the second.
@@ -404,7 +425,7 @@ const FIRST_FORMAT_WITH_HOLDS = 6
 /**
  * Ceiling on the declared instance count.
  *
- * Not a product limit — the URL budget bites long before it (6,683 instances in
+ * Not a product limit — the URL budget bites long before it (6,680 instances in
  * a 2,000-character link for a room build, and a person will not build 100,000 of
  * them). It is an allocation guard: a hand-edited payload can claim any count,
  * and a reader that trusted it would size an array from a stranger's number. The
@@ -545,12 +566,24 @@ export interface WireHold {
  * `holds` is **nested here and flat in the bytes**, for {@link WireInstance}'s
  * reason one level down — nesting is what makes the type say that a hold belongs
  * to exactly one fill, while the encoder writes each field as its own column.
- * The empty array is the ordinary case and is not a missing value: a fill with no
- * accessories and a fill nobody has looked at are one thing on the wire, and
- * `link.ts` owns the choice of which one a decoded fill becomes.
+ * The empty array is the ordinary case and is not a missing value; {@link
+ * emptied} is what separates the two readings of it.
  */
 export interface WireFill extends WireHold {
   readonly holds: readonly WireHold[]
+  /**
+   * **This fill was solved and holds nothing** — as against never solved.
+   *
+   * The store keeps `holds: {}` apart from `holds: undefined` and the difference
+   * is a decision the user made: an emptied map is *I took the torch out*, and
+   * an absent one is *nobody has looked*, which the receiver's default-hold pass
+   * is meant to fill in. `holds.length === 0` says both, so this bit says which,
+   * and `link.ts` is where the two map onto the store's field.
+   *
+   * `false` for every fill of a format 5 payload, which is the honest reading:
+   * that format could not say *emptied*, so a link written in it never did.
+   */
+  readonly emptied: boolean
 }
 
 /**
@@ -794,6 +827,12 @@ export function encodePayload(payload: WirePayload): Uint8Array {
     writer,
     holds.map((hold) => hold.pinned),
   )
+  // Fill-major, and last: a format 5 payload ends before it and reads back with
+  // every fill unsolved, which is what a v5 link meant.
+  writeBits(
+    writer,
+    fills.map((fill) => fill.emptied),
+  )
 
   writeTable(writer, payload.recipes)
   writer.uvar(payload.generated.length)
@@ -973,6 +1012,7 @@ export function decodePayload(bytes: Uint8Array): WirePayload {
   const holdOrdinals: number[] = []
   for (let i = 0; i < heldTotal; i += 1) holdOrdinals.push(reader.uvar())
   const holdPinned = readBits(reader, heldTotal)
+  const emptied = format >= FIRST_FORMAT_WITH_HOLDS ? readBits(reader, total) : []
 
   const recipes = readTable(reader, 'recipes', MAX_SHARE_GENERATED)
 
@@ -1005,6 +1045,7 @@ export function decodePayload(bytes: Uint8Array): WirePayload {
       ordinals,
       pinned,
       holds: { counts: holdCounts, slotIndices: holdSlots, ordinals: holdOrdinals, pinned: holdPinned },
+      emptied,
       slots: slots.length,
       templates: templates.length,
       filters: filters.length,
@@ -1036,6 +1077,8 @@ interface FlatColumns {
     readonly ordinals: readonly number[]
     readonly pinned: readonly boolean[]
   }
+  /** One per fill: *solved, and holds nothing*. Empty for a format 5 payload. */
+  readonly emptied: readonly boolean[]
   readonly slots: number
   readonly templates: number
   readonly filters: number
@@ -1091,7 +1134,14 @@ function assembleInstances(
       // Before the cursor moves on, because the holds of *this* fill are the next
       // `holds.counts[cursor]` entries of the hold columns.
       const holds = takeHolds(flat, cursors, flat.holds.counts[cursor] ?? 0, i)
-      fills.push({ slot, ordinal: flat.ordinals[cursor] ?? 0, pinned: flat.pinned[cursor] ?? false, holds })
+      fills.push({
+        slot,
+        ordinal: flat.ordinals[cursor] ?? 0,
+        pinned: flat.pinned[cursor] ?? false,
+        holds,
+        // Absent for a format 5 payload, which could not say it: `false`.
+        emptied: flat.emptied[cursor] ?? false,
+      })
       cursors.fill += 1
     }
     const template = columns.templateIndices[i] ?? 0

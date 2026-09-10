@@ -47,8 +47,10 @@
  * says where accessories attach and is what `CatalogRecord.mounts` and
  * `CatalogRecord.anchor` come from. `npm run mounts` is the only producer,
  * because answering the question means downloading and measuring 16.34 GB of
- * mesh. An absent inventory is not an error and today's committed one is empty,
- * so no record carries either key; the report prints the count either way. The
+ * mesh. An absent inventory is not an error — the report prints the count either
+ * way — and the committed one is the 2026-09-10 run: 995 hosts carrying 1,301
+ * mounts and 139 anchored inserts, which the join puts on **972** records'
+ * `mounts` and **285** records' `anchor`. The
  * unresolved slots of measured hosts go to **stderr** as a fixture lint, since
  * each is a mesh that does not carry the feature its tags declare.
  */

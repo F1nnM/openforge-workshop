@@ -110,6 +110,9 @@ function instance(arity: number, ordinal: number, x: number, z: number, rotation
       // and the byte boundary falls inside an instance at arity 3 and 5 both.
       pinned: (ordinal + index) % 3 === 0,
       holds: [],
+      // Every fourth fill emptied, for the same reason one byte over: the second
+      // fill-major bitset has to be neither constant nor a copy of the first.
+      emptied: (ordinal + index) % 4 === 1,
     })),
   }
 }
@@ -120,8 +123,14 @@ function hold(slot: number, ordinal: number, pinned = false): WireHold {
 }
 
 /** A fill carrying `holds` — the shape format 6 exists for. */
-function filled(slot: number, ordinal: number, holds: readonly WireHold[], pinned = false): WireFill {
-  return { slot, ordinal, pinned, holds }
+function filled(
+  slot: number,
+  ordinal: number,
+  holds: readonly WireHold[],
+  pinned = false,
+  emptied = false,
+): WireFill {
+  return { slot, ordinal, pinned, holds, emptied }
 }
 
 /** One instance holding exactly the fills given. */
@@ -265,6 +274,7 @@ describe('payload round trip', () => {
         ordinal: index,
         pinned: index % 5 === 1 || index % 7 === 3,
         holds: [],
+        emptied: index % 3 === 2,
       }))
       const source = payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }])
       expect(decodePayload(encodePayload(source)).instances[0]?.fills).toEqual(fills)
@@ -396,14 +406,18 @@ describe('holds, the second level of the same three columns', () => {
     const bare = encodePayload(payload([holding([filled(0, 7, [])])]))
     const one = encodePayload(payload([holding([filled(0, 7, [hold(1, 8)])])]))
     const two = encodePayload(payload([holding([filled(0, 7, [hold(1, 8), hold(2, 9, true)])])]))
-    expect(bare.length).toBe(225)
+    expect(bare.length).toBe(226)
     // A hold is a slot byte and an ordinal byte; the first one also opens the
-    // bitset, which the second then shares.
+    // hold bitset, which the second then shares.
     expect(one.length).toBe(bare.length + 3)
     expect(two.length).toBe(bare.length + 5)
     // Format 5 wrote the same fill in 224 bytes: the whole difference on a
-    // hold-free payload is the fill's own zero hold count.
-    expect(bare.length).toBe(224 + 1)
+    // hold-free payload is the fill's own zero hold count and the byte its
+    // emptied bit opens — the second is one byte per *eight* fills, so it is the
+    // one-fill case that pays for it in full.
+    expect(bare.length).toBe(224 + 2)
+    // The bit is a *fill* column, so emptying one costs nothing at all.
+    expect(encodePayload(payload([holding([filled(0, 7, [], false, true)])])).length).toBe(bare.length)
   })
 })
 
@@ -414,7 +428,7 @@ describe('payload refuses input it cannot represent', () => {
   })
 
   it('rejects a negative ordinal', () => {
-    const fills = [{ slot: 0, ordinal: -1, pinned: false, holds: [] }]
+    const fills = [{ slot: 0, ordinal: -1, pinned: false, holds: [], emptied: false }]
     expect(() => encodePayload(payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
       MalformedPayloadError,
     )
@@ -426,7 +440,7 @@ describe('payload refuses input it cannot represent', () => {
     // stale index here is a bug in the caller and not user data.
     const bad = { template: TEMPLATES.length, filters: 0, x: 0, z: 0, rotation: 0, fills: [] }
     expect(() => encodePayload(payload([bad]))).toThrow(MalformedPayloadError)
-    const fills = [{ slot: SLOTS.length, ordinal: 1, pinned: false, holds: [] }]
+    const fills = [{ slot: SLOTS.length, ordinal: 1, pinned: false, holds: [], emptied: false }]
     expect(() => encodePayload(payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
       MalformedPayloadError,
     )
@@ -591,9 +605,10 @@ describe('payload decode is total under corruption', () => {
     expect(decodePayload(bytes)).toEqual(source)
 
     // The bitset is followed by the three zero hold counts of a three-fill
-    // instance — no hold columns at all, since none of them holds anything — and
-    // then the two zero counts that open the generated half.
-    const pinnedAt = bytes.length - 6
+    // instance — no hold columns at all, since none of them holds anything —
+    // then the one byte of the emptied bitset, and then the two zero counts that
+    // open the generated half.
+    const pinnedAt = bytes.length - 7
     const wrong = Uint8Array.from(bytes)
     wrong[pinnedAt] = (wrong[pinnedAt] ?? 0) | 0b1000_0000
     expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
@@ -607,11 +622,26 @@ describe('payload decode is total under corruption', () => {
     const bytes = encodePayload(source)
     expect(decodePayload(bytes)).toEqual(source)
 
-    // The hold bitset is the byte before the two zero counts that open the
-    // generated half.
-    const holdPinnedAt = bytes.length - 3
+    // The hold bitset is two bytes before the two zero counts that open the
+    // generated half: the emptied bitset's own byte sits between them.
+    const holdPinnedAt = bytes.length - 4
     const wrong = Uint8Array.from(bytes)
     wrong[holdPinnedAt] = (wrong[holdPinnedAt] ?? 0) | 0b1000_0000
+    expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
+  })
+
+  it('rejects padding bits above the last emptied flag', () => {
+    // The third bitset gets the same check as the other two, for the same
+    // reason: five padding bits over three fills is five bits that must be zero,
+    // or one scene has thirty-two encodings.
+    const source = payload([instance(3, 1, 0, 0, 0)])
+    const bytes = encodePayload(source)
+    expect(decodePayload(bytes)).toEqual(source)
+
+    // The last column before the two zero counts that open the generated half.
+    const emptiedAt = bytes.length - 3
+    const wrong = Uint8Array.from(bytes)
+    wrong[emptiedAt] = (wrong[emptiedAt] ?? 0) | 0b1000_0000
     expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
   })
 
@@ -673,8 +703,8 @@ describe('payload decode is total under corruption', () => {
         z: -2,
         rotation: 90,
         fills: [
-          { slot: 0, ordinal: 1, pinned: false, holds: [] },
-          { slot: 1, ordinal: 2, pinned: true, holds: [] },
+          { slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false },
+          { slot: 1, ordinal: 2, pinned: true, holds: [], emptied: false },
         ],
       },
       { template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills: [] },

@@ -290,10 +290,20 @@ changed.
 
 **Share payload.** `SHARE_FORMAT_VERSION` 5 → 6. Per fill, one more uvar (hold count),
 then flat hold columns instance-major: hold-name index into the existing slot-name table
-(hold names are words like slot names), file ordinal, and the pinned bit joins the existing
-bitset. A v5 link decodes as before with zero holds. `payload.test.ts`'s exact-byte
-assertions are updated, and the price-table tests are re-run rather than gated (they are
-the accepted cost of that file).
+(hold names are words like slot names), file ordinal, and the holds' pinned bits as a
+bitset of their own. A v5 link decodes as before with zero holds. `payload.test.ts`'s
+exact-byte assertions are updated, and the price-table tests are re-run rather than gated
+(they are the accepted cost of that file).
+
+Amended after review (2026-09-10): **one further bitset, one bit per fill**, after the hold
+pinned bitset, saying that the fill carried an explicit `holds` map with **nothing in it**.
+Zero holds is two states of a fill — `{}` (*the user took the last torch out*) and
+`undefined` (*never solved*, which the recipient's default-hold pass fills in) — and a
+count cannot tell them apart, so a deliberately emptied wall arrived with its accessory put
+back. Format 6 is unshipped, so it is extended in place rather than bumped. It is the last
+column, so v5 decode is unchanged: no bit, `undefined`. It costs ⅛ byte per fill, which
+takes the room-shaped capacity from 6,956 instances under format 5 to **6,680** (a one-fill
+payload from 224 bytes to 226) and leaves the scattered figure at 80.
 
 ### 4. Assembly, bill, download
 

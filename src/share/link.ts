@@ -63,19 +63,22 @@
  * as `placement 3, slot wall, hold torch: …`. Dropping the fill over a missing
  * accessory would throw away the wall to report the torch.
  *
- * What does **not** survive the round trip is the store's distinction between
- * `holds === undefined` (*never solved*) and `holds === {}` (*solved, and holds
- * nothing*). The wire says how many holds a fill carries and cannot say which of
- * those two zero means, so this module picks one: **a decoded fill gets `holds`
- * only when at least one hold survived, and is left `undefined` otherwise.**
+ * The store's distinction between `holds === undefined` (*never solved*) and
+ * `holds === {}` (*solved, and holds nothing*) survives too, and it takes a bit
+ * of the format to do it: `WireFill.emptied`, one per fill. Without it a link
+ * had to pick a reading of zero, and the repairable direction was *never
+ * solved* — a room whose accessories the user had deliberately cleared arrived
+ * with them all put back by the receiver's default-hold pass, and there was no
+ * way to say otherwise. So the three states map exactly:
  *
- * That is the repairable direction, and it is the same choice
- * `migrations.ts#salvageHolds` makes about the same field. *Never solved* is a
- * state the default-hold pass fixes the moment the room opens, so a shared link
- * arrives with its accessories re-solved from the receiver's own catalog. The
- * other reading would freeze an emptiness nobody chose into every shared room —
- * and a sharer who really did take the last torch out loses that one decision,
- * against every recipient of every link losing all of them.
+ *   - **some holds survived** → the map, whatever the bit says;
+ *   - **none, and the bit is set** → `{}`. The sharer emptied it, and the
+ *     receiver's default-hold pass leaves an explicit empty map alone;
+ *   - **none, and the bit is clear** → `undefined`, which is every fill of a
+ *     format 5 link and every fill whose holds were all *dropped* — a fill that
+ *     lost its accessory to a retired file arrives unsolved and is repaired
+ *     rather than frozen, which is still the repairable direction where the
+ *     choice is still ours to make.
  */
 import type { TileId } from '@/catalog'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
@@ -133,7 +136,7 @@ export const SHARE_PARAM = 's'
  * than breaks.
  *
  * **Gate on {@link shareUrlFits}, never on a placement count.** Measured capacity
- * at this budget ranges from **80 template instances to 6,683** depending only on
+ * at this budget ranges from **80 template instances to 6,680** depending only on
  * how repetitive the build is — a factor of 84, so any count-based rule is wrong
  * in one direction or the other by nearly two orders of magnitude. The encoded
  * length is known before the link is shown, and it is the only honest test.
@@ -143,9 +146,9 @@ export const SHARE_PARAM = 's'
  * comparable. Per *file* the range moved much less than the instance counts
  * suggest: the 80-instance scattered link carries 240 to 400 files, against 243
  * before. Format 6 took the pair from format 5's 81 and 6,956 on fixtures that
- * fill no holds, which is the hold count column and nothing else — `payload.ts`
- * prices it — so the *shape* of the argument is what it was and only the numbers
- * moved.
+ * fill no holds, which is the hold count column and the emptied bit and nothing
+ * else — `payload.ts` prices both — so the *shape* of the argument is what it
+ * was and only the numbers moved.
  */
 export const SHARE_URL_BUDGET = 2000
 
@@ -432,6 +435,11 @@ function collectInstances(
         ordinal,
         pinned: fill.pinned,
         holds: collectHolds(fill.holds, `placement ${String(index)}, slot ${slot}`, slots.intern, manifest, dropped),
+        /* **The map was there and had nothing in it** — read off the store's own
+           field rather than off the wire holds above, which are also empty when
+           every hold was dropped. Those two are different rooms: one was
+           emptied on purpose and one lost its accessory to a retired file. */
+        emptied: fill.holds !== undefined && filledSlots(fill.holds).length === 0,
       })
     }
     instances.push({
@@ -930,13 +938,13 @@ function assembleFills(
     (tile, fill, slot): SlotFill => {
       const where = `placement ${String(index)}, slot ${slot}`
       const holds = assembleHolds(fill.holds, where, names.holdNames, tiles, dropped)
-      /* **The field is present only when something is in it**, which is the
-         module docblock's ruling: an empty map would say *solved, and holds
-         nothing* — a decision nobody on this side of the link made — where
-         absence says *never solved* and lets the default-hold pass fill it in
-         when the room opens. A fill whose every hold was dropped therefore
-         arrives unsolved, and is repaired rather than frozen. */
-      return holds === undefined ? { tile, pinned: fill.pinned } : { tile, pinned: fill.pinned, holds }
+      /* **Three states, and the bit is what separates the last two**: the map
+         when something survived, `{}` when the sharer had emptied it, and
+         absence otherwise — a format 5 link, or a fill whose every hold was
+         dropped, both of which the default-hold pass should fill in when the
+         room opens. See the module docblock. */
+      if (holds !== undefined) return { tile, pinned: fill.pinned, holds }
+      return fill.emptied ? { tile, pinned: fill.pinned, holds: {} } : { tile, pinned: fill.pinned }
     },
     {
       unsafe: (slot) => `placement ${String(index)}: slot ${slot} names an unsafe key, dropping the fill`,

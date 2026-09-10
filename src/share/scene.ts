@@ -82,11 +82,13 @@
  * exists to prevent one level up.
  *
  * The `holds` map travels as a file and a bit **per hold**, share format 6, and
- * the one thing it cannot carry is the difference between *never solved* and
- * *solved and empty*: the wire says how many accessories a fill has, and zero is
- * zero. A link therefore arrives as *never solved* wherever nothing survived, so
- * the receiver's default-hold pass fills it in against the receiver's own
- * catalog. `link.ts` has the argument for choosing that direction.
+ * *solved and empty* travels too — one more bit, per **fill**, because the two
+ * readings of zero holds are two different rooms: `holds === {}` is *the user
+ * took the last torch out* and `holds === undefined` is *nobody has looked*,
+ * which the receiver's default-hold pass fills in against the receiver's own
+ * catalog. Without the bit a deliberately cleared wall arrived with its torch put
+ * back. A fill whose holds were all *dropped* — a retired accessory — still
+ * arrives unsolved and is repaired; `link.ts` maps the three states.
  *
  * `pinned` travels for the reason it is not defaulted in the schema: it is the
  * difference between "the solver picked this, follow my lock" and "the user chose
