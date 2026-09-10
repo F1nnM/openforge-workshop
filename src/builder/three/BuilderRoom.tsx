@@ -109,7 +109,7 @@ import { useCallback, useMemo, useState } from 'react'
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
 import { useAnnouncer } from '@/builder/canvas/hooks'
 import type { UndoControls } from '@/builder/canvas/useHistory'
-import type { CatalogAssets, CatalogRecord } from '@/catalog'
+import type { CatalogAssets, CatalogFile, CatalogRecord } from '@/catalog'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
 import type { PlacementId, SlotName } from '@/store'
@@ -123,6 +123,7 @@ import type { SurfaceStatus } from './edits'
 import { describeSurface } from './edits'
 import type { FillAuthorities } from './fills'
 import { createPlacementFiller } from './fills'
+import { useHoldSolver } from './holds'
 import type { Room3D } from './instances'
 import { buildRoom3D, roomBlobs } from './instances'
 import { meshoptSupported } from './loadLod'
@@ -206,6 +207,22 @@ export interface BuilderRoomProps {
    */
   readonly fill: FillAuthorities
   /**
+   * The parsed catalog index, for the default-hold pass and nothing else.
+   *
+   * Not derivable from anything else this component holds, which is why it is a
+   * prop: `PlanCatalog` is a memoised lookup over the file and keeps none of it,
+   * and a `CompositionIndex` is built *from* the file rather than carrying one.
+   * `compositionIndexFor` is a `WeakMap` on this same object, so passing the
+   * screen's own parsed file means the pass shares the index the bill and the
+   * slots panel already built rather than building a second one.
+   *
+   * **Optional, because the index arrives asynchronously.** The surface mounts
+   * while the 5.9 MB catalog is still loading and every test that mounts a room
+   * over the eleven-record fixture has no reason to supply one; without it the
+   * pass does not run, which is `useHoldSolver`'s documented `undefined` case.
+   */
+  readonly file?: CatalogFile
+  /**
    * Row **C8**: the owner's right click, passed straight through to the surface.
    *
    * Nothing is done to it here and nothing can be — the dialog it opens is
@@ -233,6 +250,7 @@ export function BuilderRoom({
   tools,
   assets,
   fill,
+  file,
   history,
   onEditSlots,
   onStatus,
@@ -342,6 +360,24 @@ export function BuilderRoom({
     enabled: decodable,
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   })
+
+  /**
+   * The default-hold pass, beside the mesh store for the same reason it is a
+   * hook at all: it is work derived from the room's placements, it writes to the
+   * store rather than to this component, and it must run wherever the room runs.
+   *
+   * The files a template's slots are filled with declare composition slots of
+   * their own — a torch socket in a wall — and row 8 made an empty **required**
+   * one an incomplete bill and a refused download. {@link filler} above answers
+   * for the template's slots at the moment of the click; this answers for the
+   * mounts of the files it chose, once per fill, and `holds.ts` carries the
+   * argument for *once*.
+   *
+   * `file` is optional and the pass simply does not run without it, which is the
+   * ordinary state while the 5.9 MB index is still in flight rather than a
+   * defensive branch.
+   */
+  useHoldSolver(file)
 
   const resolve = useMemo(() => memoisedResolutions(catalog), [catalog])
   const room = useMemo(

@@ -803,6 +803,15 @@ function Builder({ index }: { index: CatalogIndex }) {
           */
           fill={{ index: assembly, templates, composition }}
           /*
+            The parsed index itself, for the room's default-hold pass — the same
+            object `composition` above was built from, so `compositionIndexFor`'s
+            `WeakMap` hands the pass the index this screen has already paid for
+            rather than a second one. Without it the room places walls whose torch
+            sockets stay empty, and row 8's bill refuses the download for a slot
+            nobody was asked about.
+          */
+          file={index.file}
+          /*
             The plan's route to the editor, from the action bar over the
             selected piece: `RoomSurface` resolves the pick to a placement and to
             the slot whose part it hit, and this screen turns that into the open

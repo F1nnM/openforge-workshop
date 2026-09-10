@@ -55,11 +55,21 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import type * as StageModule from '@/three/Stage'
 import type { ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { planCatalogFromFile } from '@/builder/canvas'
 import * as loadLod from './loadLod'
-import { FIXTURE_IDS, FIXTURE_TEMPLATE, OTHER_FIXTURE_TEMPLATE, fixtureCatalogFile } from '@/builder/canvas/fixture'
+import {
+  FIXTURE_IDS,
+  FIXTURE_SLOTS,
+  FIXTURE_TEMPLATE,
+  OTHER_FIXTURE_TEMPLATE,
+  fixtureCatalogFile,
+  fixtureFills,
+  fixtureInstance,
+} from '@/builder/canvas/fixture'
+import type { PlacementId } from '@/store'
+import { clearPlacements, restorePlacements, useWorkshopStore } from '@/store'
 
 import type { PlacementFiller } from './fills'
 
@@ -159,7 +169,12 @@ const { fixtureAuthorities, planHistory, planTools, sceneOf } = await import('./
 const { readFileSync } = await import('node:fs')
 const { join } = await import('node:path')
 
-const CATALOG = planCatalogFromFile(fixtureCatalogFile())
+/* One parsed file for the whole test file, because two of the room's props are
+   built from it and they have to be the *same* archive: `planCatalogFromFile`
+   answers what a part looks like and `file` is what the default-hold pass reads
+   a part's own mounts out of. */
+const FILE = fixtureCatalogFile()
+const CATALOG = planCatalogFromFile(FILE)
 /* Row C5's required prop: the three authorities the click's fill solve walks,
    real ones over the same eleven records this file's catalog is built from. Built
    once for the file — eleven records, but `buildAssemblyIndex` is not free and
@@ -716,5 +731,71 @@ describe('the keyboard path exists in the document', () => {
     const live = document.querySelector('[aria-live="polite"]')
     expect(live).not.toBeNull()
     expect(live?.getAttribute('aria-atomic')).toBe('true')
+  })
+})
+
+describe('the accessories the placed files hold', () => {
+  afterEach(() => {
+    clearPlacements()
+  })
+
+  it('fits the default holds once, without the user opening the slot editor', async () => {
+    /* The room reads the **store's** placements for this and not the `scene`
+       prop: the pass writes holds, and what it writes them to is the instance
+       the store holds. Every other test here drives the surface through `scene`
+       alone, which is why this one seeds the store instead. */
+    const id = 'p-holds' as PlacementId
+    restorePlacements({
+      [id]: fixtureInstance(id, fixtureFills([[FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2]])),
+    })
+
+    render(
+      <BuilderRoom
+        catalog={CATALOG}
+        scene={scene([FIXTURE_IDS.wall2])}
+        tools={planTools()}
+        history={HISTORY}
+        assets={ASSETS}
+        fill={AUTHORITIES}
+        file={FILE}
+        fetchImpl={notFound}
+      />,
+    )
+
+    /* `{}` and not `undefined` is the whole assertion, and it is the tri-state
+       `schema.ts#SlotFill` turns on: the fixture's one accessory slot is
+       **optional**, so the correct answer for this wall is *nothing goes in it* —
+       and the transition from *never solved* to *solved* is what proves the pass
+       ran at all. A room that never mounted the hook would leave `undefined`
+       here and be asked again on every reload. */
+    await waitFor(() => {
+      expect(
+        useWorkshopStore.getState().placements[id]?.fills[FIXTURE_SLOTS.rightWall]?.holds,
+      ).toEqual({})
+    })
+  })
+
+  it('does nothing without a catalog file, which is the state while the index loads', async () => {
+    const id = 'p-unsolved' as PlacementId
+    restorePlacements({
+      [id]: fixtureInstance(id, fixtureFills([[FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2]])),
+    })
+
+    render(
+      <BuilderRoom
+        catalog={CATALOG}
+        scene={scene([FIXTURE_IDS.wall2])}
+        tools={planTools()}
+        history={HISTORY}
+        assets={ASSETS}
+        fill={AUTHORITIES}
+        fetchImpl={notFound}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('surface').length).toBeGreaterThan(0)
+    })
+    expect(useWorkshopStore.getState().placements[id]?.fills[FIXTURE_SLOTS.rightWall]?.holds).toBeUndefined()
   })
 })
