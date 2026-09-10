@@ -529,6 +529,7 @@ const socket = {
   slot: 'torch',
   kind: 'socket',
   face: '-y',
+  normal: [0, -1, 0],
   at: [0, -6.35, 38.1],
   axis: [0, -0.4226, 0.9063],
   section: [5.5, 3],
@@ -540,6 +541,7 @@ const opening = {
   slot: 'door',
   kind: 'opening',
   face: '-y',
+  normal: [0, -1, 0],
   at: [0, -6.35, 20],
   width: 25,
   sill: 0,
@@ -569,11 +571,54 @@ describe('Mount and InsertAnchor', () => {
   it('discriminates the five kinds on `kind`, and refuses a sixth', () => {
     expect(Mount.parse(opening).kind).toBe('opening')
     expect(Mount.parse({ ...socket, kind: 'pocket' }).kind).toBe('pocket')
-    expect(Mount.parse({ slot: 'grate', kind: 'hole', face: '+z', at: [0, 0, 0], size: [19.5, 18] }).kind).toBe(
-      'hole',
-    )
-    expect(Mount.parse({ slot: 'statue', kind: 'surface', face: '+z', at: [0, 0, 12.7] }).kind).toBe('surface')
+    expect(
+      Mount.parse({
+        slot: 'grate',
+        kind: 'hole',
+        face: '+z',
+        normal: [0, 0, 1],
+        at: [0, 0, 0],
+        size: [19.5, 18],
+      }).kind,
+    ).toBe('hole')
+    expect(
+      Mount.parse({ slot: 'statue', kind: 'surface', face: '+z', normal: [0, 0, 1], at: [0, 0, 12.7] })
+        .kind,
+    ).toBe('surface')
     expect(Mount.safeParse({ ...socket, kind: 'wormhole' }).success).toBe(false)
+  })
+
+  it('requires an outward normal on every kind, so an insert can always be oriented', () => {
+    const kinds: readonly Record<string, unknown>[] = [
+      socket,
+      opening,
+      { slot: 'grate', kind: 'hole', face: '+z', normal: [0, 0, 1], at: [0, 0, 0], size: [19.5, 18] },
+      { slot: 'statue', kind: 'surface', face: '+z', normal: [0, 0, 1], at: [0, 0, 12.7] },
+    ]
+    const without = kinds.map((mount) =>
+      Mount.safeParse(Object.fromEntries(Object.entries(mount).filter(([key]) => key !== 'normal'))).success,
+    )
+
+    expect(kinds.map((mount) => Mount.safeParse(mount).success)).toEqual([true, true, true, true])
+    expect(without).toEqual([false, false, false, false])
+  })
+
+  it('carries the arc host normal `face` cannot express', () => {
+    // A sector's `face` is named in the unrolled frame, so `-y` there is the
+    // inner *radius*. The same torch socket on a wall running at 45° keeps its
+    // 65° tilt against `normal` and reads 72.6° against `faceVector(face)` —
+    // the flat/arc split the field was measured to close.
+    const arcSocket = Mount.parse({
+      ...socket,
+      normal: [-Math.SQRT1_2, -Math.SQRT1_2, 0],
+      axis: [-0.29886, -0.29886, 0.90631],
+    })
+    if (arcSocket.kind !== 'socket') throw new Error('socket')
+    const angle = (a: readonly [number, number, number], b: readonly [number, number, number]): number =>
+      (Math.acos(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) * 180) / Math.PI
+
+    expect(angle(arcSocket.axis, arcSocket.normal)).toBeCloseTo(65, 1)
+    expect(angle(arcSocket.axis, faceVector(arcSocket.face))).toBeCloseTo(72.6, 1)
   })
 
   it('holds each kind to its own fields, so a socket cannot arrive without an axis', () => {

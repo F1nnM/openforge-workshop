@@ -17,6 +17,17 @@
  * cosine of a socket's tilt — cos 65° for the measured torch socket, and −cos
  * 65° for anybody who got the sign convention backwards.
  *
+ * ## Orient by `mount.normal`, not by this
+ *
+ * That identity is a *flat* host's. A sector is measured in the unrolled frame,
+ * where `face` names the inner or the outer radius, so `faceVector(face)` there
+ * is a chord normal: the same torch sockets read 59.7–65.5° from it on flat
+ * hosts and 62–81° on arcs. `Mount.normal` carries the re-rolled surface normal
+ * for exactly that reason, it equals `faceVector(face)` wherever the host is
+ * flat, and it is what a renderer must align an insert to. This function stays
+ * for the six axis-aligned constants themselves — a footprint's own facing, a
+ * hole read from above — not as a substitute for the measured field.
+ *
  * ## Absence folds to empty, once
  *
  * `record.mounts` is absent both when the tile has no accessory slot and when

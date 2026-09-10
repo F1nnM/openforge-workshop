@@ -25,7 +25,7 @@ function temp(): string {
 
 const HOST: HostMeasurement = {
   bbox: { min: [0, 0, 0], max: [50.8, 6.35, 50.8] },
-  mounts: [{ slot: 'door', kind: 'surface', face: '+z', at: [0.5, 0.5, 1] }],
+  mounts: [{ slot: 'door', kind: 'surface', face: '+z', normal: [0, 0, 1], at: [0.5, 0.5, 1] }],
   unresolved: [{ slot: 'window', reason: 'no-opening' }],
 }
 

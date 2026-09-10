@@ -133,6 +133,14 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * because the wall has no socket, which is the confusion `thumb`'s own docblock
  * refuses one level down.
  *
+ * Row 5b then added the required {@link Mount} `normal` — the outward surface
+ * normal in the mesh frame, which a curved host's `face` cannot supply — and did
+ * **not** bump again. Nothing has shipped between the two: the committed
+ * inventory is still the empty shell, so no index anywhere carries a `mounts`
+ * array to be read under either shape, and a version whose only consumer is a
+ * field that has never had a value distinguishes nothing. The pair of them is
+ * schema 5.
+ *
  * `PIPELINE_VERSION` deliberately stays 3, and here the biconditional needs the
  * escape hatch rather than the rule: with the committed inventory empty, the
  * emitted `{tags, records}` are **byte-identical** to schema 4's — no record
@@ -890,6 +898,14 @@ export type Vec3 = z.infer<typeof Vec3>
  *
  * See {@link mountsFor}'s companion `faceVector` in `./mounts` for the unit
  * normal, which points **out of** the host.
+ *
+ * **On a curved host this is a label, not a direction.** `tools/mounts/arcs.ts`
+ * unrolls a sector about its arc centre and reads it flat, so `-y` and `+y` name
+ * the inner and the outer *radius* rather than two parallel planes, and
+ * `faceVector(face)` is a chord normal that misses the real one by half the
+ * sweep — measured, the same torch sockets read 59.7–65.5° from `faceVector` on
+ * flat hosts and 62–81° on arcs. Every mount therefore carries its own
+ * {@link Mount} `normal`, and that is the field an orientation must come from.
  */
 export const Face = z.enum(['-x', '+x', '-y', '+y', '-z', '+z'])
 export type Face = z.infer<typeof Face>
@@ -910,6 +926,8 @@ export const OpeningMount = z.object({
   slot: z.string().min(1),
   kind: z.literal('opening'),
   face: Face,
+  /** Outward unit normal at the mount, in the host's mesh frame. See {@link Mount}. */
+  normal: Vec3,
   at: Vec3,
   width: z.number().positive(),
   sill: z.number(),
@@ -929,7 +947,9 @@ export type OpeningMount = z.infer<typeof OpeningMount>
  * **5.5 × 3 mm** section (a 5.5 × 2.5 mm variant exists), entering at
  * **62–65° from the face normal** — 25° off vertical, tilting up and out — and
  * at least 12 mm deep. `axis` is that entry direction, pointing *into* the host,
- * so `dot(axis, faceVector(face))` is cos of the tilt.
+ * so `dot(axis, normal)` is cos of the tilt — `normal` and not
+ * `faceVector(face)`, which is the same vector on a flat host and a chord normal
+ * on a curved one.
  *
  * `pocket` is the same record for a treasure niche, which is square to its face
  * by construction and swept at θ = 0 only.
@@ -938,6 +958,8 @@ export const SocketMount = z.object({
   slot: z.string().min(1),
   kind: z.enum(['socket', 'pocket']),
   face: Face,
+  /** Outward unit normal at the mount, in the host's mesh frame. See {@link Mount}. */
+  normal: Vec3,
   at: Vec3,
   axis: Vec3,
   /** The mouth, `[width, height]` in the face's own plane. */
@@ -951,6 +973,8 @@ export const HoleMount = z.object({
   slot: z.string().min(1),
   kind: z.literal('hole'),
   face: Face,
+  /** Outward unit normal at the mount, in the host's mesh frame. See {@link Mount}. */
+  normal: Vec3,
   at: Vec3,
   size: z.tuple([z.number().positive(), z.number().positive()]).readonly(),
 })
@@ -961,6 +985,8 @@ export const SurfaceMount = z.object({
   slot: z.string().min(1),
   kind: z.literal('surface'),
   face: Face,
+  /** Outward unit normal at the mount, in the host's mesh frame. See {@link Mount}. */
+  normal: Vec3,
   at: Vec3,
 })
 export type SurfaceMount = z.infer<typeof SurfaceMount>
@@ -973,6 +999,23 @@ export type SurfaceMount = z.infer<typeof SurfaceMount>
  * would let a consumer read a socket's `depth` off a doorway. `slot` is the
  * composition slot name — `torch`, `door`, `lintel`, `grate` — so the tags say
  * *what* fits and this says *where*.
+ *
+ * ## `normal` is the orientation, and `face` is only a label
+ *
+ * Every kind carries `normal`: the **unit normal of the host surface at the
+ * mount, in the host's mesh frame (Z-up), pointing out of the host**. On a flat
+ * host it is exactly `faceVector(face)`. On a curved one it is the re-rolled
+ * radial direction at the mount's own bearing, and `faceVector(face)` is not:
+ * `face` is named in the *unrolled* frame `tools/mounts/arcs.ts#unroll` reads a
+ * sector in, where `-y` and `+y` are the inner and the outer radius rather than
+ * two parallel planes. So a consumer orienting a door leaf or a torch — and on a
+ * curved wall there is nothing else to orient one by — reads `normal`, and reads
+ * `face` only to know which side of the host is being talked about.
+ *
+ * A socket's `axis` points *into* the host, so `dot(axis, normal)` is the cosine
+ * of its tilt on every host. Against `faceVector(face)` that holds on a flat host
+ * only: the measured torch sockets read 59.7–65.5° from `faceVector` on flat
+ * hosts and 62–81° on arcs, which is the measurement this field exists for.
  *
  * `tools/mounts/` is the only producer; `pipeline/mounts.ts` is the artefact it
  * writes and `pipeline/build.ts` the join onto the record.

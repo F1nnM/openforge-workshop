@@ -9,8 +9,21 @@
 
 import type { Vec3 } from './sockets'
 
-/** Below this fraction of mid-height vertices on a nominal radius, the fit is not an arc. */
-export const ARC_FIT_MIN_ON_RADIUS = 0.4
+/**
+ * Below this fraction of mid-height vertices on a nominal radius, the fit is not
+ * an arc.
+ *
+ * **0.4 → 0.35 after the full run.** Measuring all 995 host blobs refused 25 slot
+ * declarations as `arc-fit-refused`, and 11 of them — grate walls — scored
+ * 0.36–0.40, just under the old floor, with a fitted centre inside 0.1 mm of the
+ * origin every time. That is the fit succeeding: a grate opening removes much of
+ * the slab, so fewer mid-height points are left lying on either nominal radius,
+ * and the score measures how much of the *slice* the answer explains rather than
+ * how well it explains it. The remaining 14 refusals sit at 0.16–0.30 and stay
+ * refused, so the floor still separates the two populations — there is nothing
+ * measured between 0.30 and 0.36.
+ */
+export const ARC_FIT_MIN_ON_RADIUS = 0.35
 
 export interface ArcFit {
   readonly centre: readonly [number, number]

@@ -72,7 +72,10 @@
  *
  * Curved hosts are read in `arcs.ts`'s unrolled frame and every pose is rolled
  * back onto the arc before that conversion, so a consumer never sees an
- * unrolled coordinate.
+ * unrolled coordinate. `face` is the one thing that stays in the unrolled frame
+ * — it is a label, and on a sector `-y` is the inner radius rather than a plane
+ * — so every mount also carries {@link outwardNormal}'s `normal`, the re-rolled
+ * outward surface normal, which is what an insert is actually oriented by.
  */
 
 import type {
@@ -86,7 +89,7 @@ import type {
   SurfaceMount,
   Vec3,
 } from '../../src/catalog'
-import { GRID_UNIT_MM } from '../../src/catalog'
+import { GRID_UNIT_MM, faceVector } from '../../src/catalog'
 import type { ArcFit } from './arcs'
 import { ARC_FIT_MIN_ON_RADIUS, fitArcCentre, reroll, rerollVector, unroll } from './arcs'
 import type { Axis, Columns, Opening } from './geometry'
@@ -471,6 +474,23 @@ function place(frame: Frame, u: number, w: number, z: number): Vec3 {
 }
 
 /**
+ * The outward unit normal of the host surface at a mount, in the **mesh** frame.
+ *
+ * `face` names the frame the mount was *read* in, so on a flat host this is
+ * `faceVector(face)` and nothing more. On a curved one the unrolled `-y` and
+ * `+y` are the inner and the outer radius, and the answer is that face normal
+ * rolled back at the mount's own bearing — through the same `rerollVector` a
+ * socket's `axis` goes through, so the two stay in one frame and
+ * `dot(axis, normal)` is the cosine of the socket's tilt on an arc as it is on a
+ * plane. `-y` is the inner face, so its normal points at the arc centre.
+ *
+ * `p` is the mount's own point in the work frame; a flat frame ignores it.
+ */
+function outwardNormal(face: Face, p: Vec3, frame: Frame): Vec3 {
+  return frame.backVec(p, faceVector(face))
+}
+
+/**
  * The host's outline and its enclosed voids, in one pass over the cast.
  *
  * The top of each column and the ends of each row are all that "inside the
@@ -626,13 +646,16 @@ function findHoles(frame: Frame, triangles: number, bbox: Bounds): readonly Foun
 
 function openingMount(slot: HostSlot, o: Opening, ctx: Context): OpeningMount {
   const { frame, bbox } = ctx
+  // Openings go through the host, so the face is informational: name the one the
+  // thin axis points away from.
+  const face = faceName(frame.thin, -1)
+  const work = place(frame, o.at[0], frame.mid, o.at[1])
   return {
     slot: slot.name,
     kind: 'opening',
-    // Openings go through the host, so the face is informational: name the one
-    // the thin axis points away from.
-    face: faceName(frame.thin, -1),
-    at: toBboxCoordinates(frame.back(place(frame, o.at[0], frame.mid, o.at[1])), bbox),
+    face,
+    normal: outwardNormal(face, work, frame),
+    at: toBboxCoordinates(frame.back(work), bbox),
     width: o.width,
     sill: o.sill - bbox.min[2],
     head: o.head - bbox.min[2],
@@ -652,6 +675,7 @@ function socketMount(
     slot: slot.name,
     kind,
     face: found.face,
+    normal: outwardNormal(found.face, pocket.entrance, ctx.frame),
     at: toBboxCoordinates(ctx.frame.back(pocket.entrance), ctx.bbox),
     axis: ctx.frame.backVec(pocket.entrance, pocket.axis),
     section: pocket.entranceSize,
@@ -664,6 +688,9 @@ function holeMount(slot: HostSlot, hole: FoundHole, ctx: Context): HoleMount {
     slot: slot.name,
     kind: 'hole',
     face: '+z',
+    // Read from above, and only ever on a flat floor: the top face's normal is
+    // +z in the mesh frame with no re-rolling owed.
+    normal: faceVector('+z'),
     at: toBboxCoordinates(hole.at, ctx.bbox),
     size: hole.size,
   }
@@ -674,6 +701,9 @@ function surfaceMount(slot: HostSlot, bbox: Bounds): SurfaceMount {
     slot: slot.name,
     kind: 'surface',
     face: '+z',
+    // The accessory stands on the top face, whose normal is +z on a curved host
+    // too — the roll turns the (x, y) plane and leaves z alone.
+    normal: faceVector('+z'),
     at: toBboxCoordinates(faceCentre(bbox, 2, 1), bbox),
   }
 }

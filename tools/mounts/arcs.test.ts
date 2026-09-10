@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fitArcCentre, reroll, rerollVector, unroll } from './arcs'
+import { ARC_FIT_MIN_ON_RADIUS, fitArcCentre, reroll, rerollVector, unroll } from './arcs'
 import { columns, throughOpenings } from './geometry'
 
 /** A 90° arc wall, r 50.8..63.5, centred at the origin, 44 tall, with a 24 mm gap at 45°, as 40 trapezoid-ish box segments. */
@@ -49,6 +49,17 @@ describe('fitArcCentre', () => {
     expect(Math.hypot(fit.centre[0], fit.centre[1])).toBeLessThan(0.5)
     expect(fit.onRadius).toBeGreaterThan(0.4)
   })
+
+  it('scores a clean sector well clear of the acceptance floor', () => {
+    // The floor is 0.35 and a whole sector scores about 0.5, so the 11 grate
+    // walls the full run measured at 0.36–0.40 are between the two rather than
+    // near this fixture: lowering it admits them and nothing at 0.16–0.30.
+    const { positions, triangles } = arcWallPositions()
+    const fit = fitArcCentre(positions, triangles, 50.8, 63.5)
+    expect(fit.onRadius).toBeGreaterThan(ARC_FIT_MIN_ON_RADIUS)
+    expect(ARC_FIT_MIN_ON_RADIUS).toBeLessThan(0.36)
+    expect(ARC_FIT_MIN_ON_RADIUS).toBeGreaterThan(0.3)
+  })
 })
 
 describe('unroll', () => {
@@ -66,5 +77,20 @@ describe('unroll', () => {
     const v = rerollVector([57.15 * (Math.PI / 4), 0, 20], [0, 1, 0], [0, 0], 57.15)
     expect(v[0]).toBeCloseTo(Math.SQRT1_2, 2)
     expect(v[1]).toBeCloseTo(Math.SQRT1_2, 2)
+  })
+
+  it('sends the two unrolled faces to the two radial directions', () => {
+    // Which is the whole of `Mount.normal` on a sector: the unrolled `+y` is the
+    // outer radius and points away from the centre, `-y` the inner one and points
+    // at it. Both at the mount's own bearing, here 45°.
+    const at: [number, number, number] = [57.15 * (Math.PI / 4), 0, 20]
+    const outer = rerollVector(at, [0, 1, 0], [0, 0], 57.15)
+    const inner = rerollVector(at, [0, -1, 0], [0, 0], 57.15)
+    outer.forEach((c, i) => {
+      expect(-(inner[i] as number)).toBeCloseTo(c, 12)
+    })
+    expect(Math.hypot(...inner)).toBeCloseTo(1, 6)
+    expect(inner[0]).toBeCloseTo(-Math.SQRT1_2, 2)
+    expect(inner[1]).toBeCloseTo(-Math.SQRT1_2, 2)
   })
 })

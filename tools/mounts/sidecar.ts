@@ -116,6 +116,15 @@ export function readLog(logPath: string): Map<string, LogEntry> {
  *
  * Keys are md5-sorted so two runs over the same corpus produce the same bytes
  * and the committed file diffs only where a measurement changed.
+ *
+ * **A measurement is passed through, never patched.** Whatever `classify.ts`
+ * wrote into the log is what reaches the file, so a log written before a field
+ * was added carries entries the pipeline's Zod now refuses — row 5b's required
+ * `Mount.normal` is the first of those, and a pre-5b line has no outward normal
+ * to infer on a curved host, only a `face` that was never one. The answer is to
+ * purge `tools/mounts/.cache/` and measure again, not a default here: a
+ * back-filled `faceVector(face)` would be silently wrong on exactly the sector
+ * walls the field was added for.
  */
 export function buildInventory(
   entries: Iterable<LogEntry>,

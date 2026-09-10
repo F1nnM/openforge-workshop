@@ -84,11 +84,15 @@ export type Bounds = z.infer<typeof Bounds>
 
 /**
  * The circle a curved host was unrolled about — centre in the mesh frame, and
- * how many mid-slice vertices sat on a nominal radius. See `tools/mounts/arcs.ts`.
+ * the **fraction** of mid-slice vertices that sat on a nominal radius. See
+ * `tools/mounts/arcs.ts`, whose `ARC_FIT_MIN_ON_RADIUS` is the floor a host has
+ * to clear to be unrolled at all: 0.35, against the 0.49–0.58 a clean sector
+ * scores. Declared `int` until row 5b, which no arc host has ever satisfied —
+ * the shell inventory holds no hosts, so nothing had yet been parsed through it.
  */
 export const ArcFit = z.object({
   centre: z.tuple([z.number(), z.number()]).readonly(),
-  onRadius: z.number().int().nonnegative(),
+  onRadius: z.number().min(0).max(1),
 })
 export type ArcFit = z.infer<typeof ArcFit>
 

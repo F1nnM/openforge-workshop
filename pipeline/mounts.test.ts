@@ -74,6 +74,7 @@ const SOCKET: Mount = {
   slot: 'torch',
   kind: 'socket',
   face: '-y',
+  normal: [0, -1, 0],
   at: [0, -6.35, 38.1],
   axis: [0, -0.4226, 0.9063],
   section: [5.5, 3],

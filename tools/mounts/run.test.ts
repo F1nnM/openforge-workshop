@@ -244,7 +244,10 @@ describe('MeasurePool', () => {
       expect(answer.triangles).toBe(12)
       const mount = answer.host?.mounts[0]
       expect(answer.host?.mounts).toHaveLength(1)
-      expect(mount).toMatchObject({ slot: 'top', kind: 'surface', face: '+z' })
+      // `normal` crosses the worker boundary with everything else: a mount that
+      // arrived without one could not be oriented, and the pipeline's Zod would
+      // refuse the inventory built from it.
+      expect(mount).toMatchObject({ slot: 'top', kind: 'surface', face: '+z', normal: [0, 0, 1] })
       // The mesh's vertices are `float32`, so the top of a 25.4 mm wall comes
       // back as 25.399999618530273 — compared with a tolerance rather than
       // rounded, because rounding here would hide a real millimetre error.

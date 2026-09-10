@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { faceVector } from '../../src/catalog'
 import { parseStl } from '../../src/three/stl/parse'
 import { analyseHost, analyseInsert, isDupontSocket, toBboxCoordinates } from './classify'
 import { syntheticStl } from './synthetic'
@@ -84,6 +85,10 @@ describe('analyseHost', () => {
     expect(door.openTop).toBe(true)
     expect(door.leaves).toBe(1)
     expect(door.face).toBe('-y')
+    // Flat host: the outward normal is the face's own, and the two are the same
+    // vector — which is the identity `Mount.normal` breaks only on an arc.
+    expect(door.normal).toEqual(faceVector('-y'))
+    expect(lintel?.normal).toEqual(faceVector('-y'))
     expect(door.at[0]).toBeCloseTo(0, 0)
     expect(door.at[1]).toBeCloseTo(0, 0) // y is from the bbox centre, so the 60 mm offset is gone
     expect(m.unresolved).toEqual([])
@@ -172,7 +177,7 @@ describe('analyseHost', () => {
       stl.positions,
       stl.triangles,
     )
-    expect(m.mounts[0]).toMatchObject({ kind: 'hole', face: '+z' })
+    expect(m.mounts[0]).toMatchObject({ kind: 'hole', face: '+z', normal: [0, 0, 1] })
     if (m.mounts[0]?.kind !== 'hole') throw new Error('hole')
     expect(m.mounts[0].size[0]).toBeCloseTo(20, 0)
     expect(m.mounts[0].size[1]).toBeCloseTo(18, 0)
@@ -197,7 +202,13 @@ describe('analyseHost', () => {
       stl.positions,
       stl.triangles,
     )
-    expect(m.mounts[0]).toEqual({ slot: 'statue', kind: 'surface', face: '+z', at: [0, 0, 5] })
+    expect(m.mounts[0]).toEqual({
+      slot: 'statue',
+      kind: 'surface',
+      face: '+z',
+      normal: [0, 0, 1],
+      at: [0, 0, 5],
+    })
   })
 
   it('finds a treasure pocket square to the thin face', () => {
@@ -217,6 +228,7 @@ describe('analyseHost', () => {
     const pocket = m.mounts[0]
     if (pocket?.kind !== 'pocket') throw new Error('pocket')
     expect(pocket.face).toBe('-y')
+    expect(pocket.normal).toEqual(faceVector('-y'))
     expect(pocket.section[0]).toBeCloseTo(8.5, 1)
     expect(pocket.depth).toBeCloseTo(8, 0)
     expect(pocket.axis[1]).toBeCloseTo(1, 3)
@@ -319,6 +331,40 @@ describe('analyseHost', () => {
       cy = (m.bbox.min[1] + m.bbox.max[1]) / 2
     expect(Math.atan2(door.at[1] + cy, door.at[0] + cx)).toBeCloseTo(Math.PI / 4, 1)
     expect(Math.hypot(door.at[0] + cx, door.at[1] + cy)).toBeCloseTo(57.15, 0)
+  })
+
+  it('gives an arc host a radial normal, which its face cannot supply', () => {
+    const wall = arcWall()
+    const m = analyseHost(
+      { foot: arcFoot, slots: [{ name: 'door', require: [] }] },
+      wall.positions,
+      wall.triangles,
+    )
+    const door = m.mounts[0]
+    if (door?.kind !== 'opening') throw new Error('door')
+
+    // The mount's mesh position, from the fitted centre — which this fixture is
+    // authored about, so it is the origin to within the fit's half-millimetre.
+    const cx = (m.bbox.min[0] + m.bbox.max[0]) / 2,
+      cy = (m.bbox.min[1] + m.bbox.max[1]) / 2
+    const x = door.at[0] + cx,
+      y = door.at[1] + cy
+    const r = Math.hypot(x, y)
+
+    expect(Math.hypot(...door.normal)).toBeCloseTo(1, 5)
+    expect(door.normal[2]).toBeCloseTo(0, 6)
+    // Radial: parallel to the position vector, so the cross product vanishes.
+    expect((x / r) * door.normal[1] - (y / r) * door.normal[0]).toBeCloseTo(0, 3)
+    // `-y` is the inner face of an unrolled sector, so it points at the centre.
+    expect(door.face).toBe('-y')
+    expect((x / r) * door.normal[0] + (y / r) * door.normal[1]).toBeCloseTo(-1, 3)
+
+    // And this is why the field exists: at a 45° bearing the unrolled face
+    // normal is 45° away from the real one, so a renderer using `faceVector`
+    // would hang the door across the wall rather than in it.
+    const flat = faceVector(door.face)
+    const off = Math.acos(door.normal[0] * flat[0] + door.normal[1] * flat[1]) * (180 / Math.PI)
+    expect(off).toBeCloseTo(45, 0)
   })
 
   it('refuses every slot of an arc host whose radii do not fit the mesh', () => {
