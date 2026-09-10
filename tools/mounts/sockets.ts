@@ -13,10 +13,13 @@
  * threshold on 4 of 68 sample hosts. The local median makes each its own zero.
  */
 
+import type { Vec3 } from '../../src/catalog'
+
 import { CELL_MM, columns, label, localBaseline, rotateAbout } from './geometry'
 import type { Axis, Columns } from './geometry'
 
-export type Vec3 = readonly [number, number, number]
+/** The catalog contract owns the millimetre triple; see `src/catalog/schema.ts`. */
+export type { Vec3 }
 
 /** Below this a dip in the surface is texture, not the mouth of anything. */
 export const POCKET_MIN_DEPTH_MM = 3.5

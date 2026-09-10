@@ -16,6 +16,7 @@ import { basename, dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
+import { faceVector, mountsFor } from './mounts'
 import {
   ARC_BAND_EVIDENCE,
   ArcBand,
@@ -26,12 +27,15 @@ import {
   CompositionConfig,
   DEFAULT_ROTATION_STEP_DEG,
   DesignId,
+  Face,
   Footprint,
   GRID_UNIT_MM,
+  InsertAnchor,
   Layer,
   MAX_SECTOR_SWEEP_DEG,
   MEASURED_SPRITE_SHEET,
   ManifestOrdinal,
+  Mount,
   SCHEMA_VERSION,
   TagId,
   TileId,
@@ -515,6 +519,120 @@ describe('CompositionConfig', () => {
     expect(CompositionConfig.parse({ fulfills: [{ part: 'column' }] }).fulfills).toEqual([
       { part: 'column' },
     ])
+  })
+})
+
+/* --------------------------------------------------------------- mount points */
+
+/** The measured torch socket: 5.5 × 3 mm, 65° from the face normal, on `-y`. */
+const socket = {
+  slot: 'torch',
+  kind: 'socket',
+  face: '-y',
+  at: [0, -6.35, 38.1],
+  axis: [0, -0.4226, 0.9063],
+  section: [5.5, 3],
+  depth: 14,
+} as const
+
+/** The single-door opening: a 25 mm gap, one leaf, sill and head off the bbox floor. */
+const opening = {
+  slot: 'door',
+  kind: 'opening',
+  face: '-y',
+  at: [0, -6.35, 20],
+  width: 25,
+  sill: 0,
+  head: 40,
+  openTop: true,
+  leaves: 1,
+} as const
+
+describe('Mount and InsertAnchor', () => {
+  it('carries a socket and an anchor on one record', () => {
+    const record = aRecord({
+      mounts: [Mount.parse(socket)],
+      anchor: InsertAnchor.parse({ kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] }),
+    })
+
+    expect(record.mounts?.[0]).toEqual(socket)
+    expect(record.anchor?.kind).toBe('peg')
+  })
+
+  it('leaves both absent on a tile nobody has measured', () => {
+    const record = aRecord()
+
+    expect(record.mounts).toBeUndefined()
+    expect(record.anchor).toBeUndefined()
+  })
+
+  it('discriminates the five kinds on `kind`, and refuses a sixth', () => {
+    expect(Mount.parse(opening).kind).toBe('opening')
+    expect(Mount.parse({ ...socket, kind: 'pocket' }).kind).toBe('pocket')
+    expect(Mount.parse({ slot: 'grate', kind: 'hole', face: '+z', at: [0, 0, 0], size: [19.5, 18] }).kind).toBe(
+      'hole',
+    )
+    expect(Mount.parse({ slot: 'statue', kind: 'surface', face: '+z', at: [0, 0, 12.7] }).kind).toBe('surface')
+    expect(Mount.safeParse({ ...socket, kind: 'wormhole' }).success).toBe(false)
+  })
+
+  it('holds each kind to its own fields, so a socket cannot arrive without an axis', () => {
+    const axisless = Object.fromEntries(Object.entries(socket).filter(([key]) => key !== 'axis'))
+    expect(Mount.safeParse(axisless).success).toBe(false)
+    // Two leaves is the wide/double rule; three is not a door.
+    expect(Mount.safeParse({ ...opening, leaves: 2 }).success).toBe(true)
+    expect(Mount.safeParse({ ...opening, leaves: 3 }).success).toBe(false)
+  })
+
+  it('takes only the six axis-aligned faces', () => {
+    expect(Face.parse('-y')).toBe('-y')
+    expect(Face.safeParse('-w').success).toBe(false)
+  })
+})
+
+describe('mountsFor', () => {
+  it('returns only the named slot, in the order the host was measured', () => {
+    const record = aRecord({
+      mounts: [
+        Mount.parse(socket),
+        Mount.parse({ ...socket, at: [25.2, -6.35, 38.1] }),
+        Mount.parse(opening),
+      ],
+    })
+
+    expect(mountsFor(record, 'torch').map((mount) => mount.at)).toEqual([
+      [0, -6.35, 38.1],
+      [25.2, -6.35, 38.1],
+    ])
+    expect(mountsFor(record, 'door')).toHaveLength(1)
+  })
+
+  it('is empty for a slot with no mount, and for a record with no measurement', () => {
+    expect(mountsFor(aRecord({ mounts: [Mount.parse(socket)] }), 'door')).toEqual([])
+    expect(mountsFor(aRecord(), 'torch')).toEqual([])
+  })
+})
+
+describe('faceVector', () => {
+  it('points out of the host, Z-up, one unit long', () => {
+    expect(faceVector('-y')).toEqual([0, -1, 0])
+    expect(faceVector('+y')).toEqual([0, 1, 0])
+    expect(faceVector('-x')).toEqual([-1, 0, 0])
+    expect(faceVector('+x')).toEqual([1, 0, 0])
+    expect(faceVector('-z')).toEqual([0, 0, -1])
+    expect(faceVector('+z')).toEqual([0, 0, 1])
+  })
+
+  it('agrees with the socket axis it has to be compared against', () => {
+    // The measured socket tilts 65° off the face normal, up and out — so the
+    // dot product of the two is cos 65°, and a reader that mixed the sign
+    // convention up would get −cos 65° here.
+    const mount = Mount.parse(socket)
+    const normal = faceVector(mount.face)
+    const axis = mount.kind === 'socket' ? mount.axis : [0, 0, 0]
+    const dot = normal.reduce<number>((total, value, i) => total + value * (axis[i] ?? 0), 0)
+
+    expect((Math.acos(dot) * 180) / Math.PI).toBeCloseTo(65, 1)
   })
 })
 

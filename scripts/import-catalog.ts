@@ -42,6 +42,15 @@
  * fresh clone has none — and it means every record emits `thumb: false`, which
  * is the truth today. The report below prints the count either way, so a stale
  * inventory after a backfill reads as `0 of 8,352` rather than as nothing.
+ *
+ * It reads a fourth on the same terms, `pipeline/mounts/inventory.json`, which
+ * says where accessories attach and is what `CatalogRecord.mounts` and
+ * `CatalogRecord.anchor` come from. `npm run mounts` is the only producer,
+ * because answering the question means downloading and measuring 16.34 GB of
+ * mesh. An absent inventory is not an error and today's committed one is empty,
+ * so no record carries either key; the report prints the count either way. The
+ * unresolved slots of measured hosts go to **stderr** as a fixture lint, since
+ * each is a mesh that does not carry the feature its tags declare.
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -51,6 +60,7 @@ import {
   buildCatalog,
   deriveAssemblySizes,
   deriveFamilies,
+  emptyMountInventory,
   foldRecipes,
   fixturesDir,
   formatBytes,
@@ -58,6 +68,7 @@ import {
   loadManifest,
   loadTemplateFixtures,
   printTemplateModule,
+  readMountInventory,
   readThumbInventory,
   resolveFixturesRef,
   serialiseCatalog,
@@ -75,11 +86,13 @@ function main(): number {
   const rows = loadFixtureRows(dir)
   const templates = loadTemplateFixtures(dir)
   const inventory = readThumbInventory()
+  const mounts = readMountInventory()
   const result = buildCatalog({
     rows,
     manifest: loadManifest(),
     fixturesRef: resolveFixturesRef(dir),
     thumbs: thumbBlobs(inventory),
+    mounts: mounts ?? emptyMountInventory(),
   })
 
   const json = serialiseCatalog(result.file)
@@ -89,7 +102,7 @@ function main(): number {
      emitting an assembly no position can place. */
   const assemblies = deriveAssemblySizes(foldRecipes(templates), result.file)
   const module = printTemplateModule(templates, families, assemblies)
-  report(dir, result, dryRun, inventory, templates, families, module)
+  report(dir, result, dryRun, inventory, mounts, templates, families, module)
 
   if (!dryRun) {
     mkdirSync(OUT_DIR, { recursive: true })
@@ -106,6 +119,7 @@ function report(
   result: ReturnType<typeof buildCatalog>,
   dryRun: boolean,
   inventory: ReturnType<typeof readThumbInventory>,
+  mounts: ReturnType<typeof readMountInventory>,
   templates: ReturnType<typeof loadTemplateFixtures>,
   families: ReturnType<typeof deriveFamilies>,
   module: string,
@@ -128,6 +142,11 @@ function report(
           ? 'no inventory on disk; run `npm run thumbs -- --inventory`'
           : `${String(inventory.counted.present)} of ${String(inventory.counted.probed)} blobs, probed ${inventory.probed}`
       }`,
+    `mounts        ${String(stats.withMounts)} records carry a mount and ${String(stats.withAnchor)} an anchor — ${
+      mounts === undefined
+        ? 'no inventory on disk; run `npm run mounts`'
+        : `${String(mounts.counted.hosts)} hosts and ${String(mounts.counted.inserts)} inserts measured ${mounts.measured}`
+    }`,
     `names         ${String(stats.distinctNames)} distinct over ${String(stats.records)} records`,
     `ordinals      ${String(result.manifest.ids.length)} issued · ${String(stats.newOrdinals)} new · ${String(stats.retiredOrdinals)} retired`,
     `templates     ${String(templates.length)} recipes over ${String(new Set(templates.map((entry) => entry.source)).size)} yaml fixtures · ` +
@@ -145,6 +164,11 @@ function report(
       : `output        ${OUT_DIR}/catalog.json · ${TEMPLATES_MODULE_PATH}`,
   ]
   process.stdout.write(`${lines.join('\n')}\n`)
+  /* The fixture lint, on stderr rather than in the report above: every line is a
+     mesh that was measured and gave nothing back for a slot its tags declare, so
+     it is a finding about the corpus a person can act on — and stderr is what
+     survives a caller piping the report somewhere. See `BuildStats.mountLint`. */
+  if (stats.mountLint.length > 0) process.stderr.write(`${stats.mountLint.join('\n')}\n`)
 }
 
 function describe(counts: Record<string, number>, total: number): string {

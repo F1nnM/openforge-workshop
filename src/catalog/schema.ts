@@ -115,8 +115,34 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * `pipeline/build.ts` reads one new input and writes one new key, and every
  * other value in the record is byte-identical to schema 3's. The two numbers
  * answer different questions and only one of them moved.
+ *
+ * **5** — {@link CatalogRecord.mounts} and {@link CatalogRecord.anchor},
+ * measured at build time by `tools/mounts/`; both optional, both keyed off the
+ * blob. This is the *opposite* half of P3's case and the pair is worth reading
+ * together. P3's `thumb` is required, so a schema-3 index fails
+ * `CatalogFile.parse` on its first record and the bump announces nothing the
+ * parse did not; these two are optional, so a schema-4 index reads cleanly under
+ * this shape and a schema-5 index reads cleanly under schema 4 — Zod strips the
+ * two keys and the reader sees the index it always saw.
+ *
+ * So what is the bump for? For the consumer that asks *"has this index been
+ * measured?"* and gets `undefined` from a record. Absent `mounts` has exactly
+ * two meanings — nobody measured this blob, and this shape has no such field —
+ * and without the stamp they are the same bytes. A builder that placed no torch
+ * because the fields do not exist yet looks identical to one that placed none
+ * because the wall has no socket, which is the confusion `thumb`'s own docblock
+ * refuses one level down.
+ *
+ * `PIPELINE_VERSION` deliberately stays 3, and here the biconditional needs the
+ * escape hatch rather than the rule: with the committed inventory empty, the
+ * emitted `{tags, records}` are **byte-identical** to schema 4's — no record
+ * gains a key — so `tools/stamp/lock.ts` reports *"a check is not a
+ * derivation"* until the lock is re-taken at schema 5. It was, deliberately, and
+ * `pipeline/mounts.test.ts` holds the digest against the lock so the claim is
+ * checked rather than asserted. The bump is a statement about the *shape* on
+ * offer; the payload moves in the row that fills the inventory.
  */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 /* ---------------------------------------------------------------- identities */
 
@@ -839,6 +865,138 @@ export const CompositionConfig = z.object({
 })
 export type CompositionConfig = z.infer<typeof CompositionConfig>
 
+/* --------------------------------------------------------------- mount points */
+
+/**
+ * A point or a direction in the host's own bounding box, millimetres.
+ *
+ * **The coordinate contract, and it is the whole of it.** x and y are measured
+ * from the bbox *centre*, z from the bbox *floor*, Z-up, in the mesh's
+ * millimetres before any placement transform. Nothing here is in the modeller's
+ * authored frame: the cut-stone door wall sits at y 53.5..66.5 in its own STL
+ * and the room places a tile by its footprint, so a consumer that read authored
+ * coordinates would hang every door thirteen centimetres off its wall.
+ * `tools/mounts/classify.ts#toBboxCoordinates` is where the conversion happens,
+ * once, and a curved host is rolled back onto its arc before it.
+ *
+ * Axes are unit vectors in the same frame, so they need no origin.
+ */
+export const Vec3 = z.tuple([z.number(), z.number(), z.number()]).readonly()
+export type Vec3 = z.infer<typeof Vec3>
+
+/**
+ * Which side of the host a mount opens through — the outward face, never the
+ * direction the accessory travels.
+ *
+ * See {@link mountsFor}'s companion `faceVector` in `./mounts` for the unit
+ * normal, which points **out of** the host.
+ */
+export const Face = z.enum(['-x', '+x', '-y', '+y', '-z', '+z'])
+export type Face = z.infer<typeof Face>
+
+/**
+ * A through-hole an accessory hangs in: a doorway, a window, an archway.
+ *
+ * Measured convention (227 sample hosts, 2026-09-09): a rectangular door wall is
+ * open-topped with a ~33 mm notch that is the lintel seat, and a single door
+ * slab of 27–28 mm sits in a 1.5 mm rebate over a **25 mm opening**. A `wide` or
+ * `double` opening takes **two leaves** — 2 × 24.6 ≈ 47.5 mm — which is why
+ * `leaves` is a field rather than a width threshold a consumer re-derives.
+ *
+ * `sill` and `head` are z in the same frame {@link Vec3} describes, so a
+ * lintel's height and a mount's `at[2]` can be compared directly.
+ */
+export const OpeningMount = z.object({
+  slot: z.string().min(1),
+  kind: z.literal('opening'),
+  face: Face,
+  at: Vec3,
+  width: z.number().positive(),
+  sill: z.number(),
+  head: z.number(),
+  /** No lintel modelled: the opening runs to the top of the silhouette. */
+  openTop: z.boolean(),
+  /** One leaf, or the two a `wide`/`double` opening is authored for. */
+  leaves: z.union([z.literal(1), z.literal(2)]),
+})
+export type OpeningMount = z.infer<typeof OpeningMount>
+
+/**
+ * A bored socket or a square niche: a pose, plus the mouth it presents.
+ *
+ * The torch socket is a 2-pin Dupont connector pocket (OpenForge's *New Torch
+ * Wall*, 2022-03-31), and its signature is tight enough to detect on: a
+ * **5.5 × 3 mm** section (a 5.5 × 2.5 mm variant exists), entering at
+ * **62–65° from the face normal** — 25° off vertical, tilting up and out — and
+ * at least 12 mm deep. `axis` is that entry direction, pointing *into* the host,
+ * so `dot(axis, faceVector(face))` is cos of the tilt.
+ *
+ * `pocket` is the same record for a treasure niche, which is square to its face
+ * by construction and swept at θ = 0 only.
+ */
+export const SocketMount = z.object({
+  slot: z.string().min(1),
+  kind: z.enum(['socket', 'pocket']),
+  face: Face,
+  at: Vec3,
+  axis: Vec3,
+  /** The mouth, `[width, height]` in the face's own plane. */
+  section: z.tuple([z.number().positive(), z.number().positive()]).readonly(),
+  depth: z.number().positive(),
+})
+export type SocketMount = z.infer<typeof SocketMount>
+
+/** A hole through a floor, read from above: a trapdoor, a grate, a brazier. */
+export const HoleMount = z.object({
+  slot: z.string().min(1),
+  kind: z.literal('hole'),
+  face: Face,
+  at: Vec3,
+  size: z.tuple([z.number().positive(), z.number().positive()]).readonly(),
+})
+export type HoleMount = z.infer<typeof HoleMount>
+
+/** Nothing to measure — the accessory stands on top of the host. */
+export const SurfaceMount = z.object({
+  slot: z.string().min(1),
+  kind: z.literal('surface'),
+  face: Face,
+  at: Vec3,
+})
+export type SurfaceMount = z.infer<typeof SurfaceMount>
+
+/**
+ * Where one accessory slot attaches, measured off the host mesh at build time.
+ *
+ * Five kinds, discriminated on `kind`, because the five carry genuinely
+ * different information and a union of every field with everything optional
+ * would let a consumer read a socket's `depth` off a doorway. `slot` is the
+ * composition slot name — `torch`, `door`, `lintel`, `grate` — so the tags say
+ * *what* fits and this says *where*.
+ *
+ * `tools/mounts/` is the only producer; `pipeline/mounts.ts` is the artefact it
+ * writes and `pipeline/build.ts` the join onto the record.
+ */
+export const Mount = z.discriminatedUnion('kind', [OpeningMount, SocketMount, HoleMount, SurfaceMount])
+export type Mount = z.infer<typeof Mount>
+
+/**
+ * How an *insert* plugs in — the accessory's half of the pair, in the
+ * accessory's own frame rather than the host's.
+ *
+ * A torch is a 7 × 7 × 12 mm `peg` at its origin; a door is a `leaf`; a grate
+ * half is a `plate`; anything that simply sits in a hole is a `block`. Doors are
+ * authored with an inconsistent `z_min`, which is exactly why this is measured
+ * from the mesh and not assumed.
+ */
+export const InsertAnchor = z.object({
+  kind: z.enum(['peg', 'leaf', 'plate', 'block']),
+  at: Vec3,
+  axis: Vec3,
+  size: Vec3,
+})
+export type InsertAnchor = z.infer<typeof InsertAnchor>
+
 /* -------------------------------------------------------------------- record */
 
 /**
@@ -1049,6 +1207,28 @@ export const CatalogRecord = z.object({
 
   /** Composition slots, carried through unresolved. See {@link CompositionConfig}. */
   config: CompositionConfig.optional(),
+
+  /**
+   * Where this tile's accessory slots attach, measured off the mesh. See
+   * {@link Mount}.
+   *
+   * Absent means **nobody has measured this blob**, not "this tile holds
+   * nothing": a host whose slots all came back unresolved carries an empty
+   * measurement in `pipeline/mounts/inventory.json` and still emits no key
+   * here, because an empty array would cost 8,702 × 12 B to say what absence
+   * already says. `mountsFor` folds both into `[]`.
+   *
+   * Keyed off `file_metadata.md5` upstream, so the 520 rows sharing 171 meshes
+   * all carry the same answer.
+   */
+  mounts: z.array(Mount).optional(),
+
+  /**
+   * How this tile plugs into a host, when it is an accessory rather than a
+   * host. See {@link InsertAnchor}. Absent on every tile that is not an insert,
+   * and on every insert nobody has measured.
+   */
+  anchor: InsertAnchor.optional(),
 })
 export type CatalogRecord = z.infer<typeof CatalogRecord>
 

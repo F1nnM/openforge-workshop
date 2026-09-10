@@ -102,6 +102,27 @@ import type { CatalogAssets } from '../src/catalog'
  * run of the wall*. What changed is that on 245 records it is now **true**. A
  * consumer needs no new code to read this index; it needs its caches
  * invalidated, which is precisely what this number is for.
+ *
+ * ## The mount join declines it, and takes the escape hatch the rule offers
+ *
+ * `CatalogRecord.mounts` and `CatalogRecord.anchor` add a **derivation** —
+ * `pipeline/build.ts` joins `pipeline/mounts/inventory.json` on md5 — but the
+ * committed inventory is the empty shell, so the derivation produces nothing
+ * and the emitted `{tags, records}` are byte-identical. Under rule two that is
+ * *a check is not a derivation*, and it is right: no consumer can observe a
+ * difference, and moving this number would invalidate every cached aggregate
+ * and search index to announce a join that has joined zero rows.
+ *
+ * `SCHEMA_VERSION` moved to 5 anyway, which is the half rule two complains
+ * about, and the complaint is answered rather than dismissed. The two numbers
+ * ask different questions and this row is the case that separates them
+ * hardest: the record *shape* now offers two fields, so a consumer can ask "has
+ * this index been measured?" and get an answer — and the record *content* has
+ * not moved a byte. `src/catalog/schema.ts`'s version history argues it in
+ * full, the lock was re-taken at schema 5 deliberately, and
+ * `pipeline/mounts.test.ts` holds the digest against the lock so the
+ * byte-identity claim is checked rather than asserted. The row that fills the
+ * inventory moves this number, because that one is a derivation with output.
  */
 export const PIPELINE_VERSION = 3
 

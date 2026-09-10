@@ -30,6 +30,7 @@ import { buildCatalog } from './build'
 import { LOCK_SYSTEMS } from './facets'
 import type { FixtureRow } from './fixtures'
 import { fixturesDir, loadFixtureRows } from './fixtures'
+import { emptyMountInventory } from './mounts'
 import { emptyManifest } from './ordinals'
 import { PIPELINE_VERSION } from './version'
 
@@ -49,6 +50,7 @@ describeCorpus(title, () => {
     rows,
     manifest: emptyManifest(),
     thumbs: new Set(),
+    mounts: emptyMountInventory(),
     fixturesRef: 'test',
     builtAt: '2026-01-01T00:00:00.000Z',
   })

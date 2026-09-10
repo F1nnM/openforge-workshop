@@ -77,6 +77,7 @@ import {
   familySlug,
 } from './families'
 import { fixturesDir, loadFixtureRows } from './fixtures'
+import { emptyMountInventory } from './mounts'
 import { emptyManifest } from './ordinals'
 import { resolveGridSize } from './size'
 import { loadTemplateFixtures, printTemplateModule, templateSlug } from './templates'
@@ -99,6 +100,7 @@ describeCorpus(title, () => {
         rows: loadFixtureRows(FIXTURES_DIR),
         manifest: emptyManifest(),
         thumbs: new Set(),
+        mounts: emptyMountInventory(),
         fixturesRef: 'test',
         /* The payload epoch, so the byte figures below are the quotable ones. */
         builtAt: PAYLOAD_TIMESTAMP,

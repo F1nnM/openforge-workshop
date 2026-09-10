@@ -75,7 +75,17 @@
  * unrolled coordinate.
  */
 
-import type { Footprint } from '../../src/catalog'
+import type {
+  Face,
+  Footprint,
+  HoleMount,
+  InsertAnchor,
+  Mount,
+  OpeningMount,
+  SocketMount,
+  SurfaceMount,
+  Vec3,
+} from '../../src/catalog'
 import { GRID_UNIT_MM } from '../../src/catalog'
 import type { ArcFit } from './arcs'
 import { ARC_FIT_MIN_ON_RADIUS, fitArcCentre, reroll, rerollVector, unroll } from './arcs'
@@ -84,60 +94,25 @@ import { CELL_MM, columns, throughOpenings } from './geometry'
 import type { Pocket, SweepOptions } from './sockets'
 import { POCKET_MIN_DEPTH_MM, socketPoses } from './sockets'
 
-export type Vec3 = readonly [number, number, number]
-
-export type MountKind = 'opening' | 'socket' | 'pocket' | 'hole' | 'surface'
-
-export type Face = '-x' | '+x' | '-y' | '+y' | '-z' | '+z'
+/**
+ * The five kinds of mount, the six faces and the millimetre triple they are
+ * spelled in all come from the **catalog contract**, not from this file.
+ *
+ * They used to be declared here and inferred from Zod there, which is two
+ * declarations of one shape with a build step between them: this tool writes
+ * `pipeline/mounts/inventory.json`, the pipeline parses it, and a field renamed
+ * on one side would have surfaced as a parse failure over 16 GB of measurement
+ * rather than as a compile error. `src/catalog/schema.ts` owns them, and its
+ * `Vec3` docblock owns the coordinate contract {@link toBboxCoordinates}
+ * enforces.
+ */
+export type { Face, HoleMount, InsertAnchor, Mount, OpeningMount, SocketMount, SurfaceMount, Vec3 }
 
 /** An axis-aligned box in mesh millimetres. */
 export interface Bounds {
   readonly min: Vec3
   readonly max: Vec3
 }
-
-/** A through-hole an accessory hangs in: a doorway, a window, an archway. */
-export interface OpeningMount {
-  readonly slot: string
-  readonly kind: 'opening'
-  readonly face: Face
-  readonly at: Vec3
-  readonly width: number
-  readonly sill: number
-  readonly head: number
-  readonly openTop: boolean
-  readonly leaves: 1 | 2
-}
-
-/** A bored socket or a square niche: a pose, plus the mouth it presents. */
-export interface SocketMount {
-  readonly slot: string
-  readonly kind: 'socket' | 'pocket'
-  readonly face: Face
-  readonly at: Vec3
-  readonly axis: Vec3
-  readonly section: readonly [number, number]
-  readonly depth: number
-}
-
-/** A hole through a floor, read from above. */
-export interface HoleMount {
-  readonly slot: string
-  readonly kind: 'hole'
-  readonly face: Face
-  readonly at: Vec3
-  readonly size: readonly [number, number]
-}
-
-/** Nothing to measure — the accessory stands on top. */
-export interface SurfaceMount {
-  readonly slot: string
-  readonly kind: 'surface'
-  readonly face: Face
-  readonly at: Vec3
-}
-
-export type Mount = OpeningMount | SocketMount | HoleMount | SurfaceMount
 
 /**
  * Why a slot got no mount. Each is a different thing to do about it.
@@ -184,15 +159,6 @@ export interface HostMeasurement {
   readonly arc?: ArcFit
   readonly mounts: readonly Mount[]
   readonly unresolved: readonly Unresolved[]
-}
-
-export type AnchorKind = 'peg' | 'leaf' | 'plate' | 'block'
-
-export interface InsertAnchor {
-  readonly kind: AnchorKind
-  readonly at: Vec3
-  readonly axis: Vec3
-  readonly size: Vec3
 }
 
 export interface InsertMeasurement {

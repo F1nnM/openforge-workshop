@@ -24,6 +24,7 @@ export type {
   VariantVerdict,
 } from './aggregate'
 export { aggregateAddress, buildAggregateIndex, selectVariant, variantsByPreference } from './aggregate'
+export { faceVector, mountsFor } from './mounts'
 export type { ArcBandEvidence, ArcFootprint } from './schema'
 export {
   ARC_BAND_EVIDENCE,
@@ -38,19 +39,27 @@ export {
   ConstrainRef,
   DEFAULT_ROTATION_STEP_DEG,
   DesignId,
+  Face,
   Footprint,
   GRID_UNIT_MM,
+  HoleMount,
+  InsertAnchor,
   Layer,
   MAX_SECTOR_SWEEP_DEG,
   MEASURED_SPRITE_SHEET,
   MEASURED_THUMB,
   ManifestOrdinal,
+  Mount,
+  OpeningMount,
   PartSlot,
   SCHEMA_VERSION,
+  SocketMount,
   SpriteSheet,
+  SurfaceMount,
   TagId,
   TagRef,
   TileId,
+  Vec3,
   VersionStamp,
   WALL_THICKNESS_MM,
   WALL_THICKNESS_UNITS,

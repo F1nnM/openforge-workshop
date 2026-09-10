@@ -46,6 +46,7 @@ import { fixturesDir, liveRows, loadFixtureRows } from './fixtures'
 import { TAG_ALIASES, normaliseTags } from './normalise'
 import { FORMS, ROLES } from './role'
 import { hasTagPrefix, hasTagSegment } from './tags'
+import { emptyMountInventory } from './mounts'
 import { emptyManifest } from './ordinals'
 import { CURVED_INTERFACE_TAG, radiusIsFeature } from './footprint'
 import {
@@ -86,6 +87,7 @@ describeCorpus(title, () => {
     rows,
     manifest: emptyManifest(),
     thumbs: new Set(),
+    mounts: emptyMountInventory(),
     fixturesRef: 'test',
     builtAt: BUILT_AT,
   })
@@ -1178,6 +1180,7 @@ describeCorpus(title, () => {
       rows,
       manifest: emptyManifest(),
       thumbs: new Set(),
+      mounts: emptyMountInventory(),
       fixturesRef: 'test',
       builtAt: BUILT_AT,
     })
@@ -1189,6 +1192,7 @@ describeCorpus(title, () => {
       rows: [...rows].reverse(),
       manifest: emptyManifest(),
       thumbs: new Set(),
+      mounts: emptyMountInventory(),
       fixturesRef: 'test',
       builtAt: BUILT_AT,
     })
@@ -1202,6 +1206,7 @@ describeCorpus(title, () => {
       rows,
       manifest: emptyManifest(),
       thumbs: new Set(),
+      mounts: emptyMountInventory(),
       fixturesRef: 'test',
       builtAt: BUILT_AT,
     })
@@ -1223,6 +1228,7 @@ describeCorpus(title, () => {
       rows: [...rows.filter((row) => row.file_metadata.full_name !== dropped?.id), ...invented],
       manifest: first.manifest,
       thumbs: new Set(),
+      mounts: emptyMountInventory(),
       fixturesRef: 'test',
       builtAt: BUILT_AT,
     })
@@ -1274,6 +1280,7 @@ describeCorpus(title, () => {
         fixturesRef: 'test',
         builtAt: BUILT_AT,
         thumbs: new Set([first.blob]),
+        mounts: emptyMountInventory(),
       })
       const flipped = rebuilt.file.records.filter((record) => record.thumb)
       expect(flipped.length).toBeGreaterThan(0)
@@ -1303,6 +1310,7 @@ describeCorpus(title, () => {
         fixturesRef: 'test',
         builtAt: BUILT_AT,
         thumbs: new Set([pick]),
+        mounts: emptyMountInventory(),
       })
       const rows_ = rebuilt.file.records.filter((record) => record.blob === pick)
       expect(rows_.length).toBeGreaterThan(1)

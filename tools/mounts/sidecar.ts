@@ -22,22 +22,21 @@
  * `counted.failed` is how many such blobs the log knows about, so the absence is
  * visible in the artefact rather than only in a terminal that has scrolled away.
  *
- * `MountInventory` is a plain interface here. Task 5 adds the Zod schema in
- * `pipeline/mounts.ts` and this type becomes the inferred one; the shape below is
- * what that schema is written against, member order included, because the
- * artefact is committed and a reordering would be a diff of the whole file.
+ * `MountInventory` is **not declared here**. `pipeline/mounts.ts` owns the Zod
+ * schema — the file is a build input, so the shape belongs to the thing that
+ * parses it — and this module imports the inferred type, the version, the tool
+ * name and the serialiser from there. One declaration, so a field this tool
+ * writes and the pipeline does not model is a compile error rather than a
+ * silently stripped key over 16 GB of measurement.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+import type { MountInventory } from '../../pipeline'
+import { MOUNT_INVENTORY_VERSION, MOUNT_TOOL, serialiseMountInventory } from '../../pipeline'
+
 import type { MountTarget, TargetKind } from './catalog'
 import type { HostMeasurement, InsertMeasurement } from './classify'
-
-/** The inventory's format version. Task 5's Zod schema pins the same number. */
-export const MOUNT_INVENTORY_VERSION = 1
-
-/** Names this tool in the artefact it writes, so a stale file is traceable. */
-export const MOUNT_TOOL = 'openforge-workshop-mounts'
 
 /** What the committed inventory says about itself. */
 const NOTE =
@@ -70,28 +69,6 @@ export interface FailedEntry {
 }
 
 export type LogEntry = MeasuredEntry | FailedEntry
-
-/** How many of each thing the inventory holds. */
-export interface MountCounts {
-  readonly hosts: number
-  readonly inserts: number
-  readonly failed: number
-  readonly mounts: number
-}
-
-/** The committed artefact. See the module docblock for the member order. */
-export interface MountInventory {
-  readonly note: string
-  readonly version: typeof MOUNT_INVENTORY_VERSION
-  /** ISO stamp of the run that produced it. */
-  readonly measured: string
-  /** The index it was measured against — `CatalogFile.version.fixtures`. */
-  readonly catalog: { readonly fixtures: string }
-  readonly tool: typeof MOUNT_TOOL
-  readonly hosts: Record<string, HostMeasurement>
-  readonly inserts: Record<string, InsertMeasurement>
-  readonly counted: MountCounts
-}
 
 /* -------------------------------------------------------------------- the log */
 
@@ -173,10 +150,13 @@ export function buildInventory(
   }
 }
 
-/** The committed form: 2-space JSON, one trailing newline, git-diffable. */
-export function serialise(inventory: MountInventory): string {
-  return `${JSON.stringify(inventory, null, 2)}\n`
-}
+/**
+ * The committed form: a 2-space header, one line per host and insert.
+ *
+ * `pipeline/mounts.ts` owns it, because the build has to read back exactly what
+ * this writes; the alias stays so a caller here reads one module.
+ */
+export const serialise = serialiseMountInventory
 
 /* ---------------------------------------------------------------- sampling */
 

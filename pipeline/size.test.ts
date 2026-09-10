@@ -32,6 +32,7 @@ import {
 import { buildCatalog } from './build'
 import { fixturesDir, loadFixtureRows } from './fixtures'
 import { formatUnit, sizeToken } from './footprint'
+import { emptyMountInventory } from './mounts'
 import { emptyManifest } from './ordinals'
 import { cellExtentUnits, resolveGridSize, sizeRefusalOf } from './size'
 import type { SizeRefusal } from './size'
@@ -61,6 +62,7 @@ describeCorpus(title, () => {
         rows: loadFixtureRows(FIXTURES_DIR),
         manifest: emptyManifest(),
         thumbs: new Set(),
+        mounts: emptyMountInventory(),
         fixturesRef: 'test',
         /* A fixed clock, so two builds of two branches are comparable. */
         builtAt: PAYLOAD_TIMESTAMP,

@@ -32,6 +32,7 @@ import { buildShareManifest } from '../../src/share/manifest'
 import type { BuildResult } from '../../pipeline'
 import {
   buildCatalog,
+  emptyMountInventory,
   buildTimestamp,
   fixturesDir,
   loadFixtureRows,
@@ -39,6 +40,7 @@ import {
   readThumbInventory,
   resolveFixturesRef,
   serialiseCatalog,
+  readMountInventory,
   thumbBlobs,
 } from '../../pipeline'
 import { meshTargets } from '../lod/catalog'
@@ -108,6 +110,9 @@ export function runStamp(options: StampOptions = {}): StampRun {
     // are right: the lock digests a derivation, and a bucket's contents are not
     // one. This function writes the artefact.
     thumbs: thumbBlobs(readThumbInventory()),
+    // The committed mount inventory, joined, and for the same reason: this is
+    // the index CI ships, and an unjoined one places no accessory anywhere.
+    mounts: readMountInventory() ?? emptyMountInventory(),
   })
   const file = built.file
   const json = serialiseCatalog(file)

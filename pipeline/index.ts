@@ -97,6 +97,15 @@ export {
   resolveFootprint,
   sizeToken,
 } from './footprint'
+export {
+  MOUNT_INVENTORY_PATH,
+  MOUNT_INVENTORY_VERSION,
+  MOUNT_TOOL,
+  MountInventory,
+  emptyMountInventory,
+  readMountInventory,
+  serialiseMountInventory,
+} from './mounts'
 export { displayName, fallbackName } from './naming'
 export { NOT_COLLAPSED, TAG_ALIASES, normaliseTag, normaliseTags } from './normalise'
 export {

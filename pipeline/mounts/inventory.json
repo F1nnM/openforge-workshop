@@ -1,0 +1,17 @@
+{
+  "note": "Where accessories attach, measured from the host meshes by `npm run mounts -- --inventory`. Empty until the first run.",
+  "version": 1,
+  "measured": "1970-01-01T00:00:00.000Z",
+  "catalog": {
+    "fixtures": ""
+  },
+  "tool": "openforge-workshop-mounts",
+  "hosts": {},
+  "inserts": {},
+  "counted": {
+    "hosts": 0,
+    "inserts": 0,
+    "failed": 0,
+    "mounts": 0
+  }
+}

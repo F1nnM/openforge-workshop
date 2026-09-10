@@ -56,6 +56,8 @@ import { fileURLToPath } from 'node:url'
 import type { BlobId, CatalogFile, CatalogRecord, Footprint, TileId } from '../../src/catalog'
 import { CatalogFile as CatalogFileSchema, shardedPath } from '../../src/catalog'
 
+import { MOUNT_INVENTORY_PATH } from '../../pipeline'
+
 import type { HostSlot } from './classify'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -69,8 +71,8 @@ export const CATALOG_PATH = join(REPO_ROOT, 'public', 'catalog', 'catalog.json')
 /** Where the incremental result log lives between runs. Gitignored. */
 export const DEFAULT_LOG_PATH = join(HERE, '.cache', 'mounts.jsonl')
 
-/** The committed inventory the build reads. See `sidecar.ts`. */
-export const DEFAULT_INVENTORY_PATH = join(REPO_ROOT, 'pipeline', 'mounts', 'inventory.json')
+/** The committed inventory the build reads. `pipeline/mounts.ts` owns the path. */
+export const DEFAULT_INVENTORY_PATH = MOUNT_INVENTORY_PATH
 
 /** The one slot name that is joinery rather than an accessory. See the docblock. */
 const JOINERY_SLOT = 'base'
