@@ -44,15 +44,18 @@ import { describe, expect, it } from 'vitest'
 
 import { buildPlanScene, createStyleResolver, planCatalogFromFile } from '@/builder/canvas'
 import type { PlanCatalog } from '@/builder/canvas'
-import type { BlobId, CatalogFile, CatalogRecord } from '@/catalog'
+import type { BlobId, CatalogFile, CatalogRecord, InsertAnchor, Mount } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
 import {
+  FIXTURE_HOLDS,
   FIXTURE_SLOTS,
   FIXTURE_IDS,
   fixtureCatalogFile,
   fixtureFills,
+  fixtureHolds,
   fixtureInstance,
   fixtureSlotLayout,
+  fixtureUnmeasuredCatalogFile,
 } from '@/builder/canvas/fixture'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
@@ -60,6 +63,7 @@ import type { PlacementId, TemplateInstance, WorkshopState } from '@/store'
 import { filledSlots } from '@/store'
 import { VIEW_RADIUS } from '@/three/geometry'
 
+import { recordOf } from './fixture'
 import { REPORT_DELTA_OVER_UNITS, buildRoom3D, instanceKey, roomBlobs } from './instances'
 import type { LodGeometry } from './loadLod'
 import { parseLodGlb } from './loadLod'
@@ -796,5 +800,172 @@ describe('fifty placements across twenty real designs', () => {
     const shared = [...byBlob.values()].filter((set) => set.size > 1)
     expect(shared).toHaveLength(102)
     expect(Math.max(...shared.map((set) => set.size))).toBe(4)
+  })
+})
+
+/* -------------------------------------------------- one instance per mount */
+
+/**
+ * The fixture, with the torch **measured** — and optionally the wall's mounts
+ * replaced.
+ *
+ * `src/builder/canvas/fixture.ts` carries the host's two torch sockets and the
+ * insert record, but no {@link InsertAnchor}: an anchor is this row's own input
+ * and nothing before it needed one. It is added here rather than there because
+ * the canvas fixture is not this row's to widen — see the report.
+ */
+function measuredCatalog(anchor: InsertAnchor, mounts?: readonly Mount[]): CatalogFile {
+  const file = fixtureCatalogFile()
+  return {
+    ...file,
+    records: file.records.map((record) => {
+      if (record.id === FIXTURE_IDS.torch) return { ...record, anchor }
+      if (record.id === FIXTURE_IDS.wall2 && mounts !== undefined) return { ...record, mounts: [...mounts] }
+      return record
+    }),
+  }
+}
+
+/** A 7 × 7 × 12 mm peg at its own origin — the measured torch. */
+const TORCH_PEG: InsertAnchor = { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] }
+
+/** A door leaf: 28 wide, 3 thin, 55 tall, anchored on its thin axis. */
+const DOOR_LEAF: InsertAnchor = { kind: 'leaf', at: [0, 0, 0], axis: [0, 1, 0], size: [28, 3, 55] }
+
+/** One `wide` doorway in the host wall, authored for two leaves. */
+const WIDE_DOORWAY: readonly Mount[] = [
+  {
+    slot: 'torch',
+    kind: 'opening',
+    face: '-y',
+    normal: [0, -1, 0],
+    at: [0, -6.5, 30],
+    width: 47.5,
+    sill: 1.5,
+    head: 61.5,
+    openTop: false,
+    leaves: 2,
+  },
+]
+
+/** A one-instance placements map: the host wall in a slot, holding one insert. */
+function holding(id: string, hold: string, tile: string): WorkshopState['placements'] {
+  const fills = fixtureHolds(
+    fixtureFills([[FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2]]),
+    FIXTURE_SLOTS.leftWall,
+    [[hold, tile]],
+  )
+  const map: Record<string, TemplateInstance> = { [id]: fixtureInstance(id, fills) }
+  return map
+}
+
+describe('buildRoom3D draws an accessory at every measured mount', () => {
+  it('adds one instance per mount, in the insert’s own group', async () => {
+    const room = await roomFrom(measuredCatalog(TORCH_PEG), holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    // The host is one part and the wall carries **two** sockets, so the torch is
+    // two draws out of one geometry — the same count `assembly/bill.ts` prices,
+    // because a user with a two-socket wall has to print two.
+    expect(room.groups).toHaveLength(2)
+    expect(room.instances).toBe(3)
+    const torch = room.groups.find((group) => group.blob !== room.groups[0]?.blob) ?? room.groups[1]
+    expect(torch?.count).toBe(2)
+    // Every accessory instance is addressed to the **placement**, so a click on
+    // a torch reaches the piece it hangs off.
+    expect(torch?.placements).toEqual(['p1', 'p1'])
+  })
+
+  it('puts the torches where the mounts are, 50.4 mm apart on the wall’s face', async () => {
+    const room = await roomFrom(measuredCatalog(TORCH_PEG), holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    const torch = room.groups.find((group) => group.count === 2)
+    const seats = (torch?.matrices ?? []).map((matrix) => new Vector3().setFromMatrixPosition(matrix))
+    // The fixture's sockets sit at x = ±25.2 in the host's bbox frame, and the
+    // host is a 2-unit wall placed at the origin.
+    expect((seats[1]?.x ?? 0) - (seats[0]?.x ?? 0)).toBeCloseTo(50.4, 6)
+    // Up the wall and out of its face — not on the plan at y = 0.
+    for (const seat of seats) expect(seat.y).toBeGreaterThan(30)
+  })
+
+  it('asks for the insert’s object as well as the parts’ — contract C-d', () => {
+    const file = measuredCatalog(TORCH_PEG)
+    const catalog = planCatalogFromFile(file)
+    const scene = buildPlanScene(
+      holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch),
+      catalog,
+      createStyleResolver(catalog),
+    )
+    const insert = scene.pieces[0]?.accessories[0]?.record.blob
+    expect(insert).toBeDefined()
+    // The set fetched and the set drawn are one derivation: without the insert
+    // in it, `BuilderRoom` would never load the mesh the room is asking to draw.
+    expect(roomBlobs(scene).has(insert as BlobId)).toBe(true)
+    expect(roomBlobs(scene).size).toBe(2)
+  })
+
+  it('gaps an insert the store does not hold, exactly as it gaps a part', async () => {
+    const file = measuredCatalog(TORCH_PEG)
+    const catalog = planCatalogFromFile(file)
+    const wall = recordOf(catalog, FIXTURE_IDS.wall2)?.blob
+    const room = await roomFrom(file, holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch), {
+      blobs: wall === undefined ? [] : [wall],
+    })
+    expect(room.instances).toBe(1)
+    expect(room.absent).toHaveLength(1)
+    // Named once for the placement, however many mounts it has.
+    expect(room.absent[0]?.placements).toEqual(['p1'])
+    expect(room.absent[0]?.name).toBe('Cut stone torch')
+  })
+
+  it('never reports a footprint disagreement about an insert', async () => {
+    const file = measuredCatalog(TORCH_PEG)
+    const catalog = planCatalogFromFile(file)
+    const room = await roomFrom(file, holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    // An insert's footprint is `none` — it occupies no square and is not
+    // measured against one. The host, whose tagged 2 units meet a 1-unit fixture
+    // mesh, is the only thing there is a disagreement to report about.
+    expect(room.disagreements.map((one) => one.blob)).toEqual([recordOf(catalog, FIXTURE_IDS.wall2)?.blob])
+  })
+
+  it('hangs two leaves in a wide doorway and one lintel in the same opening', async () => {
+    const pair = await roomFrom(measuredCatalog(DOOR_LEAF, WIDE_DOORWAY), holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    const leaves = pair.groups.find((group) => group.count === 2)
+    expect(leaves).toBeDefined()
+    const seats = (leaves?.matrices ?? []).map((matrix) => new Vector3().setFromMatrixPosition(matrix))
+    // 47.5 mm of opening, split at ±width/4 — where two half-width slabs meet.
+    expect((seats[1]?.x ?? 0) - (seats[0]?.x ?? 0)).toBeCloseTo(47.5 / 2, 6)
+
+    // A lintel is one piece however many leaves the doorway takes.
+    const single = await roomFrom(measuredCatalog({ ...DOOR_LEAF, kind: 'plate' }, WIDE_DOORWAY), holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    expect(single.instances).toBe(2)
+  })
+
+  it('draws nothing for an insert nobody has measured, and does not fetch it', async () => {
+    // The fixture torch as it stands: an insert with no `anchor`. There is
+    // nowhere on its own mesh to plug it in by, so it cannot be placed — and it
+    // is not asked for either, which is what keeps the fetch set the draw set.
+    const file = fixtureCatalogFile()
+    const catalog = planCatalogFromFile(file)
+    const scene = buildPlanScene(
+      holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch),
+      catalog,
+      createStyleResolver(catalog),
+    )
+    expect(scene.pieces[0]?.accessories).toHaveLength(2)
+    expect(roomBlobs(scene).size).toBe(1)
+
+    const room = await roomFrom(file, holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    expect(room.instances).toBe(1)
+    expect(room.absent).toHaveLength(0)
+  })
+
+  it('counts the scene’s unplaceable accessories rather than re-deriving them', async () => {
+    // The same host with its sockets **unmeasured**: the hold is real, it is in
+    // the bill, and there is nowhere to draw it. `PlanScene.unplaced` is the
+    // scene's own answer and this is a count of it, not a second opinion.
+    const room = await roomFrom(fixtureUnmeasuredCatalogFile(), holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    expect(room.unplaced).toBe(1)
+    expect(room.instances).toBe(1)
+
+    const measured = await roomFrom(measuredCatalog(TORCH_PEG), holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    expect(measured.unplaced).toBe(0)
   })
 })

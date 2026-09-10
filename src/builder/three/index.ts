@@ -174,5 +174,5 @@ export type { FootprintDisagreement, LodGap, LodInstanceGroup, Room3D } from './
 export type { RoomSurfaceProps } from './RoomSurface'
 export type { Ndc, SurfaceFit, SurfacePick } from './surface'
 export type { LodGeometry } from './loadLod'
-export type { MeshBounds, RoomFit } from './place'
+export type { HostFrame, InsertFrame, MeshBounds, RoomFit } from './place'
 export type { LodStoreState } from './useLodStore'

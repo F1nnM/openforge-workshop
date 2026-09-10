@@ -35,11 +35,13 @@ import { describe, expect, it } from 'vitest'
 
 import { footprintShape, planBox, planGeometry, rotatedExtent } from '@/builder/canvas'
 import type { Extent, PlanGeometry } from '@/builder/canvas'
-import type { Footprint } from '@/catalog'
-import { GRID_UNIT_MM } from '@/catalog'
+import type { Footprint, HoleMount, InsertAnchor, OpeningMount, SocketMount } from '@/catalog'
+import { GRID_UNIT_MM, faceVector } from '@/catalog'
 
+import type { HostFrame } from './place'
 import {
   Z_UP_TO_Y_UP_RADIANS,
+  accessoryMatrix,
   fitRoom,
   footprintDelta,
   liftMatrix,
@@ -48,6 +50,7 @@ import {
   roomBounds,
   tileMatrix,
   uprightBounds,
+  zUpToYUp,
 } from './place'
 
 /**
@@ -382,5 +385,203 @@ describe('this row reads the plan view’s geometry rather than restating it', (
     const extent: Extent = { w: 2, d: 0.5 }
     expect(rotatedExtent(extent, 90)).toEqual({ w: 0.5, d: 2 })
     expect(planBox(extent, 90, 1, 2)).toEqual({ x: 1, z: 2, w: 0.5, d: 2 })
+  })
+})
+
+/* --------------------------------------------------------------- accessories */
+
+/**
+ * One accessory instance, checked as points and directions rather than as a
+ * matrix.
+ *
+ * A 4×4 has no readable failure message, and the two things that can be wrong
+ * here are *where the anchor lands* and *which way the insert points* — so every
+ * assertion below is one of those two, at the brief's 0.1 mm and 1°.
+ *
+ * The insert meshes are deliberately **off the origin in all three axes**, for
+ * `meshFor`'s reason one level down: the anchor's `at` is in the insert's bbox
+ * coordinates, so a composition that forgot the insert's own normalisation would
+ * pass against a mesh that happened to be centred and fail on every real one.
+ */
+const PEG_MESH = new Box3(new Vector3(100, -50, 7), new Vector3(107, -43, 19))
+/** The peg's base centre and its tip, as points of that mesh. 7 × 7 × 12 mm. */
+const PEG_BASE = new Vector3(103.5, -46.5, 7)
+const PEG_TIP = new Vector3(103.5, -46.5, 19)
+const PEG: InsertAnchor = { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] }
+
+/** The measured torch socket: a 5.5 × 3 mm mouth entering at the 62–65° lean. */
+const SOCKET: SocketMount = {
+  slot: 'torch',
+  kind: 'socket',
+  face: '-y',
+  normal: [0, -1, 0],
+  at: [0, -6.5, 28],
+  axis: [0, 0.45, -0.89],
+  section: [5.5, 3],
+  depth: 14,
+}
+
+const LEAF_MESH = new Box3(new Vector3(-214, 60, 33), new Vector3(-186, 63, 88))
+/** The leaf's bottom centre, as a point of that mesh. 28 × 3 × 55 mm. */
+const LEAF_SEAT = new Vector3(-200, 61.5, 33)
+const LEAF: InsertAnchor = { kind: 'leaf', at: [0, 0, 0], axis: [0, 1, 0], size: [28, 3, 55] }
+
+/** A `wide` doorway: two leaves over a 28 mm opening, sill 1.5, head 61.5. */
+const DOORWAY: OpeningMount = {
+  slot: 'door',
+  kind: 'opening',
+  face: '-y',
+  normal: [0, -1, 0],
+  at: [0, -6.5, 30],
+  width: 28,
+  sill: 1.5,
+  head: 61.5,
+  openTop: false,
+  leaves: 2,
+}
+
+/**
+ * A host part whose plan box is centred on the world origin, at `rotation`.
+ *
+ * Centred so that the mount's own bbox coordinates and the world ones agree at
+ * rotation 0 — which is what makes the expected numbers below readable — and a
+ * real 2-unit wall rather than a synthetic box, so the yaw the rotated case
+ * checks is the plan's own.
+ */
+function hostFrame(rotation: number, elevationMm = 0): HostFrame {
+  const shape = footprintShape({ shape: 'wall', length: 2 })
+  if (shape === undefined) throw new Error('a wall has no plan shape')
+  const turned = rotatedExtent(shape.extent, rotation)
+  return { geometry: planGeometry(shape, rotation, -turned.w / 2, -turned.d / 2), elevationMm }
+}
+
+/** Where a point of the insert's own mesh lands, in world millimetres. */
+function landsAt(matrix: Matrix4, mesh: Vector3): Vector3 {
+  return mesh.clone().applyMatrix4(matrix)
+}
+
+/** The world direction from one mesh point to another, once placed. */
+function pointsAlong(matrix: Matrix4, from: Vector3, to: Vector3): Vector3 {
+  return landsAt(matrix, to).sub(landsAt(matrix, from)).normalize()
+}
+
+function expectAt(got: Vector3, x: number, y: number, z: number): void {
+  expect(got.x).toBeCloseTo(x, 1)
+  expect(got.y).toBeCloseTo(y, 1)
+  expect(got.z).toBeCloseTo(z, 1)
+}
+
+/** Degrees between two directions. The brief's tolerance is 1°. */
+function degreesBetween(a: Vector3, b: Vector3): number {
+  return (a.angleTo(b) * 180) / Math.PI
+}
+
+describe('zUpToYUp', () => {
+  it('is the same swap uprightBounds applies, on a vector', () => {
+    expect(zUpToYUp([1, 2, 3]).toArray()).toEqual([1, 3, -2])
+    // The archive's up — the host's own +z — becomes three's +y, which is what
+    // makes "the flame points up" a statement about the mesh's own axes.
+    expect(zUpToYUp([0, 0, 1]).equals(new Vector3(0, 1, 0))).toBe(true)
+  })
+})
+
+describe('accessoryMatrix seats a peg in a socket', () => {
+  const insert = { bounds: PEG_MESH, anchor: PEG }
+
+  it('lands the peg’s base centre on the socket’s own bbox point', () => {
+    const matrix = accessoryMatrix(hostFrame(0), SOCKET, insert, 'torch', 0)
+    // (x, y, z) → (x, z, −y): the mount's [0, −6.5, 28] is 28 mm up the wall and
+    // 6.5 mm out of its centre plane.
+    expectAt(landsAt(matrix, PEG_BASE), 0, 28, 6.5)
+  })
+
+  it('points the peg up the socket’s 62–65° lean, out of the wall', () => {
+    const matrix = accessoryMatrix(hostFrame(0), SOCKET, insert, 'torch', 0)
+    // The socket's `axis` enters the host; the torch leaves along its negation,
+    // which in Y-up is up and away from the face.
+    const out = zUpToYUp(SOCKET.axis).negate().normalize()
+    expect(degreesBetween(pointsAlong(matrix, PEG_BASE, PEG_TIP), out)).toBeLessThan(1)
+    expect(out.y).toBeGreaterThan(0)
+  })
+
+  it('carries the point round with the host’s own yaw', () => {
+    const matrix = accessoryMatrix(hostFrame(90), SOCKET, insert, 'torch', 0)
+    // R_y(−90°) sends (x, z) to (−z, x): the wall now runs along z and its face
+    // looks down −x, so the 6.5 mm stand-off does too.
+    expectAt(landsAt(matrix, PEG_BASE), -6.5, 28, 0)
+  })
+
+  it('raises the whole seat by the host part’s elevation and nothing else', () => {
+    const matrix = accessoryMatrix(hostFrame(0, 6.002), SOCKET, insert, 'torch', 0)
+    expectAt(landsAt(matrix, PEG_BASE), 0, 28 + 6.002, 6.5)
+  })
+})
+
+describe('accessoryMatrix hangs leaves in an opening', () => {
+  const insert = { bounds: LEAF_MESH, anchor: LEAF }
+
+  it('splits a two-leaf opening at ± a quarter of its width', () => {
+    const left = accessoryMatrix(hostFrame(0), DOORWAY, insert, 'door', 0)
+    const right = accessoryMatrix(hostFrame(0), DOORWAY, insert, 'door', 1)
+    // 28 mm of opening, two leaves: each is centred a quarter of the width off
+    // the mount, which is where two 14 mm halves meet in the middle.
+    expectAt(landsAt(left, LEAF_SEAT), -7, 1.5, 6.5)
+    expectAt(landsAt(right, LEAF_SEAT), 7, 1.5, 6.5)
+  })
+
+  it('turns the second leaf 180° about the vertical', () => {
+    const left = accessoryMatrix(hostFrame(0), DOORWAY, insert, 'door', 0)
+    const right = accessoryMatrix(hostFrame(0), DOORWAY, insert, 'door', 1)
+    const across = new Vector3(LEAF_MESH.max.x, LEAF_SEAT.y, LEAF_SEAT.z)
+    const one = pointsAlong(left, LEAF_SEAT, across)
+    const other = pointsAlong(right, LEAF_SEAT, across)
+    expect(degreesBetween(one, other.clone().negate())).toBeLessThan(1)
+    // About the vertical and not about anything else: both leaves still stand up.
+    for (const matrix of [left, right]) {
+      const up = pointsAlong(matrix, LEAF_SEAT, new Vector3(LEAF_SEAT.x, LEAF_SEAT.y, LEAF_MESH.max.z))
+      expect(degreesBetween(up, new Vector3(0, 1, 0))).toBeLessThan(1)
+    }
+  })
+
+  it('seats a lintel at the head and everything else at the sill', () => {
+    const single: OpeningMount = { ...DOORWAY, leaves: 1 }
+    const lintel = accessoryMatrix(hostFrame(0), single, insert, 'lintel', 0)
+    const door = accessoryMatrix(hostFrame(0), single, insert, 'door', 0)
+    // The slot name decides, not the insert's shape: the same leaf hung under
+    // `lintel` sits on the head and under `door` on the sill.
+    expectAt(landsAt(lintel, LEAF_SEAT), 0, 61.5, 6.5)
+    expectAt(landsAt(door, LEAF_SEAT), 0, 1.5, 6.5)
+  })
+
+  it('faces the leaf along the measured normal, not along the face label', () => {
+    // A sector host is measured unrolled, where `face` names the inner radius
+    // rather than a plane — so `faceVector('-y')` is a chord normal that can
+    // miss the real one by half the sweep. Here the surface at the mount is
+    // turned 30°, and the leaf has to turn with it.
+    const turned = (30 * Math.PI) / 180
+    const curved: OpeningMount = { ...DOORWAY, leaves: 1, normal: [Math.sin(turned), -Math.cos(turned), 0] }
+    const matrix = accessoryMatrix(hostFrame(0), curved, insert, 'door', 0)
+    const facing = pointsAlong(matrix, LEAF_SEAT, new Vector3(LEAF_SEAT.x, LEAF_MESH.max.y, LEAF_SEAT.z))
+    expect(degreesBetween(facing, zUpToYUp(curved.normal))).toBeLessThan(1)
+    expect(degreesBetween(facing, zUpToYUp(faceVector('-y')))).toBeCloseTo(30, 1)
+  })
+})
+
+describe('accessoryMatrix stands a block in a hole', () => {
+  it('points the anchor axis at world up, whatever the mount’s own face', () => {
+    const hole: HoleMount = {
+      slot: 'grate',
+      kind: 'hole',
+      face: '+z',
+      normal: [0, 0, 1],
+      at: [3, -4, 6],
+      size: [20, 20],
+    }
+    const block: InsertAnchor = { kind: 'block', at: [0, 0, 0], axis: [0, 0, 1], size: [20, 20, 8] }
+    const mesh = new Box3(new Vector3(-10, -10, 0), new Vector3(10, 10, 8))
+    const matrix = accessoryMatrix(hostFrame(0), hole, { bounds: mesh, anchor: block }, 'grate', 0)
+    expectAt(landsAt(matrix, new Vector3(0, 0, 0)), 3, 6, 4)
+    const up = pointsAlong(matrix, new Vector3(0, 0, 0), new Vector3(0, 0, 8))
+    expect(degreesBetween(up, new Vector3(0, 1, 0))).toBeLessThan(1)
   })
 })

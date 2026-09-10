@@ -64,10 +64,11 @@
  * shape carries it — a `TemplateInstance` has an `x`, a `z` and one rotation, and
  * the lift follows from the recipe.
  */
-import { Box3, Matrix4, Vector3 } from 'three'
+import { Box3, Matrix4, Quaternion, Vector3 } from 'three'
 
 import type { PlanGeometry } from '@/builder/canvas'
 import { boxCentre } from '@/builder/canvas'
+import type { InsertAnchor, Mount, OpeningMount, Vec3 } from '@/catalog'
 import { GRID_UNIT_MM } from '@/catalog'
 
 /**
@@ -114,22 +115,38 @@ export function uprightBounds(bounds: MeshBounds): Box3 {
  * placements costs no allocations per frame.
  */
 export function tileMatrix(bounds: MeshBounds, geometry: PlanGeometry, target = new Matrix4()): Matrix4 {
-  const upright = uprightBounds(bounds)
   const centre = boxCentre(geometry.box)
 
   // Radians of yaw. Negative: see the module note's third coordinate fact.
   const yaw = (-geometry.angle * Math.PI) / 180
 
-  const stand = new Matrix4().makeRotationX(Z_UP_TO_Y_UP_RADIANS)
+  const turn = new Matrix4().makeRotationY(yaw)
+  const toPlan = new Matrix4().makeTranslation(centre.x * GRID_UNIT_MM, 0, centre.z * GRID_UNIT_MM)
+
+  return target.copy(toPlan).multiply(turn).multiply(standUpright(bounds))
+}
+
+/**
+ * `T(−bboxCentre) · R_x(−90°)`: a mesh's own bytes into its **bbox frame**, Y-up.
+ *
+ * The half of {@link tileMatrix} that is about the mesh rather than about the
+ * placement, extracted because {@link accessoryMatrix} needs exactly the same
+ * step for the *insert* and the two must not be able to drift apart.
+ *
+ * What comes out is the frame `src/catalog/schema.ts#Vec3` describes, swapped to
+ * Y-up: a mesh point at bbox coordinates `(x, y, z)` — x and y from the bbox
+ * centre, z from its floor, Z-up — lands at `(x, z, −y)`, which is
+ * {@link zUpToYUp} of it. That identity is the whole reason a `Mount.at` and an
+ * `InsertAnchor.at` can be used as points here without any further conversion.
+ */
+function standUpright(bounds: MeshBounds): Matrix4 {
+  const upright = uprightBounds(bounds)
   const toOrigin = new Matrix4().makeTranslation(
     -(upright.min.x + upright.max.x) / 2,
     -upright.min.y,
     -(upright.min.z + upright.max.z) / 2,
   )
-  const turn = new Matrix4().makeRotationY(yaw)
-  const toPlan = new Matrix4().makeTranslation(centre.x * GRID_UNIT_MM, 0, centre.z * GRID_UNIT_MM)
-
-  return target.copy(toPlan).multiply(turn).multiply(toOrigin).multiply(stand)
+  return toOrigin.multiply(new Matrix4().makeRotationX(Z_UP_TO_Y_UP_RADIANS))
 }
 
 /**
@@ -196,6 +213,209 @@ export function footprintDelta(
   const w = mesh.w - extent.w
   const d = mesh.d - extent.d
   return { w, d, worst: Math.max(Math.abs(w), Math.abs(d)) }
+}
+
+/* ---------------------------------------------------------- accessories */
+
+/**
+ * The host part an accessory hangs off, as much of it as a mount needs.
+ *
+ * A {@link PlanGeometry} and an elevation, which is exactly what
+ * {@link tileMatrix} and {@link liftMatrix} take for the part itself — so the
+ * host's frame here and the host's own instance matrix are built from one pair
+ * of numbers and cannot disagree about where the wall is.
+ */
+export interface HostFrame {
+  readonly geometry: PlanGeometry
+  readonly elevationMm: number
+}
+
+/** The insert's own mesh and the anchor measured on it. */
+export interface InsertFrame {
+  readonly bounds: MeshBounds
+  readonly anchor: InsertAnchor
+}
+
+/**
+ * A bbox vector into three's Y-up: `(x, y, z) → (x, z, −y)`.
+ *
+ * The same swap {@link uprightBounds} applies to a box and `R_x(−90°)` applies
+ * to a mesh, written out for the one-off vectors that arrive as plain triples —
+ * a mount's `at`, its `normal`, a socket's `axis`, an anchor's. Exact on the
+ * quarter turn, for {@link uprightBounds}' reason: `Math.cos(-Math.PI / 2)` is
+ * 6.1e-17, and a normal that is 6.1e-17 off vertical is a torch that leans.
+ */
+export function zUpToYUp(v: Vec3): Vector3 {
+  return new Vector3(v[0], v[2], -v[1])
+}
+
+/**
+ * The world matrix of **one accessory instance** — one insert, at one mount.
+ *
+ * `M = hostFrame · T(seat) · R(align) · T(−anchor) · T(−bboxCentre) · R_x(−90°)`,
+ * read right to left: stand the insert up in its own bbox frame, bring its
+ * anchor point to the origin, turn the anchor's axis to face the way the mount
+ * wants, move it to the seat, and carry the lot round with the host.
+ *
+ * `hostFrame` is {@link tileMatrix} **without** its `standUpright` — because the
+ * mount's coordinates are already in the host's bbox frame, so applying the
+ * host's own normalisation a second time would offset every torch by the host's
+ * bbox centre. It keeps the elevation, which {@link liftMatrix} applies to the
+ * host part: an accessory in a wall that stands 6 mm up stands 6 mm up too.
+ *
+ * ## Orientation comes from `mount.normal`, never from `faceVector(mount.face)`
+ *
+ * On a curved host `face` is a label in the *unrolled* frame
+ * `tools/mounts/arcs.ts` reads a sector in — `-y` and `+y` are the inner and the
+ * outer radius rather than two parallel planes — so `faceVector(face)` there is a
+ * chord normal. Measured, the same torch sockets read 59.7–65.5° from it on flat
+ * hosts and 62–81° on arcs. `Mount.normal` is the re-rolled surface normal and
+ * equals `faceVector(face)` wherever the host is flat, so it is right in both
+ * cases and the face label is right in one.
+ *
+ * ## What each kind aims the anchor axis at
+ *
+ *   - **socket / pocket** — at `−mount.axis`. The axis enters the host, so its
+ *     negation leaves it, and for the measured torch socket that is up the
+ *     **62–65° lean**: a 5.5 × 3 mm mouth tilting 25° off vertical, up and out.
+ *     Aiming at the normal instead would bury the torch's tail in the wall.
+ *   - **opening** — at the normal. A leaf faces out of the doorway.
+ *   - **hole / surface** — at world up. A trapdoor or a brazier is read from
+ *     above and stands on the floor; nothing in the mount fixes its yaw, so the
+ *     roll below leaves it wherever the alignment put it.
+ *
+ * ## The **slot name** decides the seat in an opening
+ *
+ * `lintel` sits at the `head` and everything else — `door`, `portcullis`,
+ * `frame`, `shutters`, `window`, `archway`, `grate door` — at the `sill`. It is
+ * the slot and not the insert's shape, because the shape does not say: a lintel
+ * and a door leaf are both a slab of about the same section, and the only thing
+ * that distinguishes *the piece that spans the top* from *the piece that fills
+ * the hole* is what the host called the slot it goes in.
+ *
+ * `slot` is an argument rather than `mount.slot` read off the record. The two are
+ * equal by construction — `catalog/mounts.ts#mountsFor` selects a host's mounts
+ * *by* the hold name — and taking it explicitly is what puts the dependency at
+ * the call site: the caller is placing a named hold, and the seat rule reads the
+ * name the caller is placing rather than a field it never looks at.
+ */
+export function accessoryMatrix(
+  host: HostFrame,
+  mount: Mount,
+  insert: InsertFrame,
+  slot: string,
+  leaf: 0 | 1,
+  target = new Matrix4(),
+): Matrix4 {
+  const seat = mountSeat(mount, insert.anchor, slot, leaf)
+  const align = alignToAxis(zUpToYUp(insert.anchor.axis).normalize(), seat.axis, seat.halfTurn)
+  const anchor = zUpToYUp(insert.anchor.at)
+
+  return target
+    .copy(hostMatrix(host))
+    .multiply(new Matrix4().makeTranslation(seat.point.x, seat.point.y, seat.point.z))
+    .multiply(new Matrix4().makeRotationFromQuaternion(align))
+    .multiply(new Matrix4().makeTranslation(-anchor.x, -anchor.y, -anchor.z))
+    .multiply(standUpright(insert.bounds))
+}
+
+/** Where one instance sits on the host and which way its anchor axis must point. */
+interface Seat {
+  /** The anchor's landing point, in the host's bbox frame, Y-up. */
+  readonly point: Vector3
+  /** The direction the insert's anchor axis is turned to. Unit. */
+  readonly axis: Vector3
+  /** A second leaf, turned 180° about the vertical so the pair meets in the middle. */
+  readonly halfTurn: boolean
+}
+
+/**
+ * `tileMatrix`'s placement half: where the host part is, and how it is turned.
+ *
+ * Deliberately **not** the host's whole instance matrix — see
+ * {@link accessoryMatrix} on why the host's own normalisation must not be
+ * applied to a mount.
+ */
+function hostMatrix(host: HostFrame): Matrix4 {
+  const centre = boxCentre(host.geometry.box)
+  return new Matrix4()
+    .makeTranslation(centre.x * GRID_UNIT_MM, host.elevationMm, centre.z * GRID_UNIT_MM)
+    .multiply(new Matrix4().makeRotationY((-host.geometry.angle * Math.PI) / 180))
+}
+
+/** One {@link Seat} per kind — {@link accessoryMatrix} states what each aims at. */
+function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, leaf: 0 | 1): Seat {
+  switch (mount.kind) {
+    case 'socket':
+    case 'pocket':
+      return { point: zUpToYUp(mount.at), axis: zUpToYUp(mount.axis).negate().normalize(), halfTurn: false }
+    case 'opening':
+      return openingSeat(mount, anchor, slot, leaf)
+    case 'hole':
+    case 'surface':
+      return { point: zUpToYUp(mount.at), axis: new Vector3(0, 1, 0), halfTurn: false }
+  }
+}
+
+/** The composition slot whose insert seats at the opening's head. See {@link accessoryMatrix}. */
+const LINTEL_SLOT = 'lintel'
+
+/**
+ * A leaf, a lintel or a grille in a doorway — and where two leaves go.
+ *
+ * A `wide` or `double` opening is authored for **two leaves** (the measured
+ * convention: 2 × 24.6 mm over a 47.5 mm opening), so the pair sits at
+ * `±width/4` along the face — which is where two half-width slabs meet in the
+ * middle — with the second turned 180° about the vertical. A **lintel** in the
+ * same opening is one piece however many leaves the doorway takes, which is why
+ * the split asks the anchor's kind and not only `leaves`.
+ */
+function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, leaf: 0 | 1): Seat {
+  const axis = zUpToYUp(mount.normal).normalize()
+  const point = zUpToYUp([mount.at[0], mount.at[1], slot === LINTEL_SLOT ? mount.head : mount.sill])
+  const pair = mount.leaves === 2 && anchor.kind === 'leaf'
+
+  if (pair) {
+    // Horizontal and in the face: `up × normal`. Degenerate only on an opening
+    // whose surface faces straight up, which is not a doorway.
+    const along = new Vector3(0, 1, 0).cross(axis)
+    if (along.lengthSq() > 1e-12) {
+      point.addScaledVector(along.normalize(), ((leaf === 0 ? -1 : 1) * mount.width) / 4)
+    }
+  }
+
+  return { point, axis, halfTurn: pair && leaf === 1 }
+}
+
+/**
+ * Turn `from` onto `to`, then roll about `to` so the insert's own up stays up.
+ *
+ * Aligning two axes leaves one degree of freedom, and nothing in the data fixes
+ * it: `setFromUnitVectors` resolves it with the shortest arc, which for a torch
+ * on a leaning socket rolls the flame sideways. So the roll is chosen rather
+ * than inherited — the insert's own **+Z**, which `standUpright` has already
+ * made `+Y`, is brought as close to world up as the alignment allows.
+ *
+ * Both projections vanish when the target axis *is* vertical (a hole, a
+ * surface) or when the insert's up is its anchor axis (a peg, whose yaw about
+ * its own pin nothing can see anyway). Then there is no roll to choose and the
+ * alignment stands.
+ */
+function alignToAxis(from: Vector3, to: Vector3, halfTurn: boolean): Quaternion {
+  const align = new Quaternion().setFromUnitVectors(from, to)
+
+  const up = new Vector3(0, 1, 0).applyQuaternion(align).projectOnPlane(to)
+  const worldUp = new Vector3(0, 1, 0).projectOnPlane(to)
+  if (up.lengthSq() > 1e-12 && worldUp.lengthSq() > 1e-12) {
+    const roll = Math.atan2(new Vector3().crossVectors(up, worldUp).dot(to), up.dot(worldUp))
+    align.premultiply(new Quaternion().setFromAxisAngle(to, roll))
+  }
+
+  // The vertical is the world's, not the insert's: a door leaf turns about the
+  // hinge line, and premultiplying is what keeps the axis out of the leaf's own
+  // frame — where it would be whichever way the leaf happens to lean.
+  if (halfTurn) align.premultiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI))
+  return align
 }
 
 /* ------------------------------------------------------------ the whole room */
