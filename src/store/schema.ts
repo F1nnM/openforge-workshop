@@ -286,8 +286,8 @@ export type HoldFill = z.infer<typeof HoldFill>
  *     existed is in, and the state a fresh fill starts in.
  *   - **`holds === {}` means *solved, or emptied by the user*.** Either the
  *     solver looked and this file's mounts admitted nothing, or the user took the
- *     last accessory out — {@link clearHold} of the last hold leaves the empty map
- *     rather than removing the field.
+ *     last accessory out — `workshopStore.ts#clearHold` of the last hold leaves
+ *     the empty map rather than removing the field.
  *
  * The distinction is what makes a default-hold solver safe to run on every
  * hydrate: it fills only the fills whose `holds` is `undefined`, so a room where

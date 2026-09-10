@@ -757,14 +757,20 @@ describe('holds — accessories fitted into a slot’s fill', () => {
     })
   })
 
-  it('keeps a pinned hold the wholesale write does not mention', () => {
+  it('keeps a pinned hold the wholesale write does not mention, object and all', () => {
     const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
     pinHold(id, WALL, DOOR, A_TILE)
     fillHold(id, WALL, TORCH, A_TILE)
+    const pinned = holdsOf(id)?.[DOOR]
 
     expect(fillHolds(id, WALL, {})).toBe('filled')
     // The unpinned torch is gone and the pinned door is not.
     expect(holdsOf(id)).toEqual({ [DOOR]: { tile: A_TILE, pinned: true } })
+    // The *same object*: only the incoming map is parsed, so a wholesale write
+    // does not replace an accessory it did not touch. Parsing the merged fill
+    // instead would clone this one and wake a subscriber that has nothing new
+    // to draw.
+    expect(holdsOf(id)?.[DOOR]).toBe(pinned)
   })
 
   it('never writes holds back to undefined, so a solved fill stays solved', () => {
@@ -878,6 +884,47 @@ describe('re-arming a placed instance', () => {
       setPlacementFilters(id, ['component|torch'], { [FLOOR]: { tile: ANOTHER_TILE, pinned: false } }),
     ).toBe('set')
     expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: ANOTHER_TILE, pinned: false })
+  })
+
+  it('carries the holds across a slot whose file did not change, and drops them where it did', () => {
+    /* The live path: `relock.ts#reSolveInstance` rebuilds every declared slot as
+       `{ tile, pinned }`, with no holds in it, so without this rule re-arming a
+       filter would strip every accessory in the instance — including from the
+       slots the new filters did not move. `writeFill` keeps holds on an
+       unchanged file one slot at a time; this is the same rule over the map. */
+    const id = placeTemplate(
+      aTemplateInstance({ fills: { [WALL]: { tile: A_TILE, pinned: false }, [FLOOR]: { tile: A_TILE, pinned: false } } }),
+    )
+    pinHold(id, WALL, TORCH, A_TILE)
+    fillHold(id, FLOOR, DOOR, A_TILE)
+
+    expect(
+      setPlacementFilters(id, ['component|door|arched'], {
+        // Same file: the torch stays, because the mounts it was fitted to are
+        // the same mounts.
+        [WALL]: { tile: A_TILE, pinned: false },
+        // Different file: different mounts, so the door goes and the slot reads
+        // as never solved again — which is what the next default-hold pass owns.
+        [FLOOR]: { tile: ANOTHER_TILE, pinned: false },
+      }),
+    ).toBe('set')
+
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: A_TILE, pinned: true } })
+    expect(holdsOf(id, FLOOR)).toBeUndefined()
+  })
+
+  it('stays a no-op on a re-arm to the same files, even when the fills carry holds', () => {
+    // `sameInstance` compares holds now, so without the carry-across this press
+    // would look like a change and write — turning what used to be a no-op into
+    // the write that erases the accessories. The caller's map is shaped the way
+    // `reSolveInstance` builds it: files and pins, no holds.
+    const id = placeTemplate(aTemplateInstance({ fills: { [WALL]: { tile: A_TILE, pinned: false } } }))
+    fillHold(id, WALL, TORCH, A_TILE)
+    const before = state().placements
+
+    expect(setPlacementFilters(id, [], { [WALL]: { tile: A_TILE, pinned: false } })).toBe('unchanged')
+    expect(state().placements).toBe(before)
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: A_TILE, pinned: false } })
   })
 
   it('is unchanged when the position and every fill are already there, and wakes no subscriber', () => {

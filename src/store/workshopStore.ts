@@ -44,8 +44,9 @@ import type {
   WorkshopState,
 } from './schema'
 import {
+  HoldFill as HoldFillSchema,
+  HoldName as HoldNameSchema,
   PlacementId as PlacementIdSchema,
-  SlotFill as SlotFillSchema,
   TemplateInstance as TemplateInstanceSchema,
   defaultWorkshopState,
   filledSlots,
@@ -825,20 +826,22 @@ export function fillHolds(
         keptPinned = true
         continue
       }
-      next[name] = held
+      /* Parsed entry by entry, and **only the incoming ones**. This is the one
+         hold action taking a caller-built map rather than a branded
+         {@link TileId} the type system has already vouched for, so a malformed
+         file id has to fail at the call that produced it — `placeTemplate`'s
+         reason. Parsing the *merged* fill instead would clone every kept pinned
+         hold, and a wholesale write would then replace objects it did not
+         touch: a subscriber to an untouched accessory would re-render, and
+         nothing in the type system would say why. */
+      next[HoldNameSchema.parse(name)] = HoldFillSchema.parse(held)
     }
     if (existing !== undefined && sameHolds(existing, next)) {
       outcome = keptPinned ? 'kept-pinned' : 'unchanged'
       return state
     }
     outcome = 'filled'
-    /* Parsed on the way in for {@link placeTemplate}'s reason, and only here
-       among the hold actions: this is the one that takes a caller-built map
-       rather than a branded {@link TileId} the type system has already vouched
-       for. A malformed file id should fail at the call that produced it, where
-       the stack still names the culprit. */
-    const written: SlotFill = SlotFillSchema.parse({ ...filled, holds: next })
-    return { placements: withFill(state, id, current, slot, written) }
+    return { placements: withFill(state, id, current, slot, { ...filled, holds: next }) }
   })
   return outcome
 }
@@ -907,6 +910,22 @@ export type FiltersOutcome = 'set' | 'unchanged' | 'unknown-placement'
  *
  * The `'unchanged'` case returns the identical state object, so pressing the chip
  * an instance is already on records no step either.
+ *
+ * ## The holds are carried across, slot by slot, on an unchanged file
+ *
+ * The rule {@link writeFill} applies to one slot, applied here to the whole map:
+ * a slot whose new fill names the **same file** keeps that file's holds, and a
+ * slot whose file changed loses them, because they were answers about the old
+ * file's mounts. Without it this action would be the one hole in that rule, and
+ * the hole would be the live path — `relock.ts#reSolveInstance` rebuilds every
+ * declared slot as `{ tile, pinned }`, so re-arming a filter would strip every
+ * accessory in the instance, including from the slots the change did not touch.
+ * Fixing it here rather than there is deliberate: the caller decides *files*, and
+ * what a file's holds survive is this module's invariant to keep.
+ *
+ * The carry-across is what keeps pressing the chip an instance is already on a
+ * genuine no-op, too — the holds-aware {@link sameInstance} would otherwise see a
+ * difference in every slot and write.
  */
 export function setPlacementFilters(
   id: PlacementId,
@@ -921,7 +940,11 @@ export function setPlacementFilters(
        handed over a malformed tag or slot name should fail at the call that
        produced it, where the stack still names the culprit, rather than at a
        hydration months later where it reads as storage corruption. */
-    const updated: TemplateInstance = TemplateInstanceSchema.parse({ ...current, filters, fills })
+    const updated: TemplateInstance = TemplateInstanceSchema.parse({
+      ...current,
+      filters,
+      fills: withKeptHolds(current.fills, fills),
+    })
     if (sameInstance(current, updated)) {
       outcome = 'unchanged'
       return state
@@ -930,6 +953,32 @@ export function setPlacementFilters(
     return { placements: { ...state.placements, [id]: updated } }
   })
   return outcome
+}
+
+/**
+ * A whole fills map with each unchanged file's holds carried over from the map
+ * it replaces.
+ *
+ * Same file, same mounts, same accessories — so the holds come across; a
+ * different file has different mounts and the incoming fill's own reading stands,
+ * which for every caller today is *never solved* and is what the next
+ * default-hold pass wants. A caller that does supply holds for a slot whose file
+ * it is not changing is honoured only where the current fill has none: the store
+ * will not overwrite an accessory the user can see with one a filter press
+ * carried in, and {@link fillHolds} is the action for writing them deliberately.
+ */
+function withKeptHolds(
+  current: TemplateInstance['fills'],
+  incoming: TemplateInstance['fills'],
+): TemplateInstance['fills'] {
+  const out: TemplateInstance['fills'] = {}
+  for (const slot of filledSlots(incoming)) {
+    const fill = incoming[slot]
+    if (fill === undefined) continue
+    const held = current[slot]?.tile === fill.tile ? (current[slot]?.holds ?? fill.holds) : fill.holds
+    out[slot] = held === undefined ? fill : { ...fill, holds: held }
+  }
+  return out
 }
 
 /**

@@ -18,8 +18,9 @@
  *      that the one shape which **did** reach a user is climbed instead.
  *   2. **The expiry, which has happened.** The licence to discard was a fact
  *      about deployment and the deployment exists, so the guard here is no
- *      longer a reminder but a mechanism: the version below the current one must
- *      stay readable.
+ *      longer a reminder but a mechanism: this build must read both the version
+ *      it writes and the one below it, and neither claim can be satisfied by a
+ *      readable set that follows the stamp around.
  *   3. **Garbage.** Every input below reached this list because it is something
  *      a browser can actually hand back. None may throw; all must produce a
  *      valid state.
@@ -33,7 +34,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { ANOTHER_TILE, A_TEMPLATE, A_TILE, aGeneratedBase } from './fixture'
-import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
+import { READABLE_VERSIONS, STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
 import {
   DEFAULT_LOCK_SYSTEM,
   HoldName,
@@ -274,8 +275,14 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
  * reached anyone, which is what the owner's licence was about, so their discard
  * is unchanged — see `migrations.ts`, including why a 5 → 6 rung would have to
  * *fabricate* a room rather than convert one.
+ *
+ * Derived from the reader's **own** list rather than from `STORE_VERSION - 1`,
+ * which would exempt whatever version happened to be one below the stamp and so
+ * would keep agreeing with the reader no matter how wrong the reader was. This
+ * asks the module which versions it climbs and holds every other one to the
+ * discard.
  */
-const DISCARDED_BLOBS = HISTORICAL_BLOBS.filter(([version]) => version !== STORE_VERSION - 1)
+const DISCARDED_BLOBS = HISTORICAL_BLOBS.filter(([version]) => !READABLE_VERSIONS.includes(version))
 
 /** Deep clone through JSON, the way `localStorage` round-trips a payload. */
 function throughJSON(value: unknown): unknown {
@@ -441,23 +448,51 @@ describe('the version gate', () => {
  * The `package.json` guard that used to stand here has gone with it. It was a
  * proxy for an event, the event has happened, and a reminder about something
  * that already occurred is the no-op this repo cleans up rather than keeps. What
- * replaces it is a guard with an actual mechanism: **the version below the
- * current one must still be readable.** Bump {@link STORE_VERSION} without
- * teaching the gate the rung and this suite goes red, which is the thing the
- * version-number proxy could never do.
+ * replaces it is a guard with an actual mechanism, and the mechanism is that
+ * `READABLE_VERSIONS` holds **literal** numbers rather than arithmetic on
+ * {@link STORE_VERSION}:
+ *
+ *   - Bump the stamp to 10 and leave the list at `[8, 9]` and the *current*
+ *     version is no longer readable, so the first test below fails — along with
+ *     every test in this file that reads a payload at the current version, and
+ *     the whole of `workshopStore.test.ts`' persistence block, because the app
+ *     now discards its own writes.
+ *   - Add 10 to the list without converting anything and the second test still
+ *     holds only if 9 is still there, which is the rung.
+ *
+ * A derived `[STORE_VERSION - 1, STORE_VERSION]` would pass both of those
+ * forever, which is exactly the shape of guard that reads as protection and is
+ * none: it agrees with the reader by construction, however wrong the reader is.
+ *
+ * **Measured rather than asserted:** editing `STORE_VERSION` to 10 and touching
+ * nothing else turns 13 tests red across three files — this one first, then the
+ * current-version reads in the gate block and the persistence block of
+ * `workshopStore.test.ts`. That is what the claim in `migrations.ts` rests on.
  */
 describe('the licence to discard persisted state', () => {
+  it('has expired, so this build reads the version it writes', () => {
+    // The half a bump breaks first. `READABLE_VERSIONS` does not follow
+    // `STORE_VERSION`, so moving the stamp without editing the list leaves the
+    // app unable to read its own blob, and this line is where that lands.
+    expect(
+      READABLE_VERSIONS,
+      'STORE_VERSION moved and READABLE_VERSIONS did not, so this build discards its own ' +
+        'writes. Read the "the licence has expired" section of src/store/migrations.ts: a bump ' +
+        'needs a rung, which means adding the new version to that list and converting the old one.',
+    ).toContain(STORE_VERSION)
+    expect(readPersistedState(throughJSON(SCENE), STORE_VERSION).state).not.toEqual(defaultWorkshopState())
+  })
+
   it('has expired, so the version below the current one is still readable', () => {
-    // The mechanism, not a reminder: a bump from 9 to 10 that forgets the rung
-    // fails here, because the version 9 shape stops being accepted the moment
-    // `STORE_VERSION` moves and nothing else changes.
-    const recovered = readPersistedState(throughJSON(SCENE), STORE_VERSION - 1)
+    // And the other half: the rung itself. A real user's browser holds the
+    // previous shape — the app is served at its public URL — so discarding it
+    // throws away their room.
+    const recovered = readPersistedState(asWrittenWithout({ holds: true }), STORE_VERSION - 1)
 
     expect(
       recovered.state,
-      'STORE_VERSION moved without a rung for the version below it. A real user’s browser holds ' +
-        'that shape — the app is served at its public URL — so discarding it throws away their ' +
-        'room. Read the "the licence has expired" section of src/store/migrations.ts.',
+      'STORE_VERSION moved without a rung for the version below it: add it to READABLE_VERSIONS ' +
+        'and convert it. See the "the licence has expired" section of src/store/migrations.ts.',
     ).not.toEqual(defaultWorkshopState())
   })
 

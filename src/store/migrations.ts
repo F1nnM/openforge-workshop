@@ -97,10 +97,13 @@
  *      rather than a policy: `holds` is additive and *absent* is a correct
  *      reading of every version 8 fill.
  *   3. **Every future shape change needs a rung**, written at the same time as
- *      the bump. `migrations.test.ts` fails on a bump without one, which is the
- *      mechanism that replaced the `package.json` major-version reminder that
- *      used to stand in for the expiry — a reminder about an event that has
- *      already happened is a no-op, and this repo cleans those up.
+ *      the bump, and the mechanism is {@link READABLE_VERSIONS} being a list of
+ *      **literal** numbers: moving {@link STORE_VERSION} without touching it
+ *      leaves the new current version outside the readable set, so the gate
+ *      discards the app's own writes and `migrations.test.ts` goes red at once.
+ *      That replaced the `package.json` major-version reminder that used to
+ *      stand in for the expiry — a reminder about an event that has already
+ *      happened is a no-op, and this repo cleans those up.
  *
  * **How to write the next rung**, so the next author does not have to rediscover
  * it: for anything less trivial than this one, reintroduce `MIGRATION_STEPS` as
@@ -206,13 +209,14 @@ import {
  * docblock.
  *
  * **To ship version N+1 now that discarding is no longer allowed:** change the
- * schema in `schema.ts`, bump this, and **write the rung from N** — teach
- * {@link readPersistedState} to accept N and convert it, which is the identity
- * only when the change is additive with a correct absent reading, as this one is.
- * `migrations.test.ts` fails if you bump without it: one test asserts that the
- * version below the current one still hydrates. A blob at any version older than
- * that is discarded by the gate below, which is licensed only because versions
- * 1–7 were never served to anyone.
+ * schema in `schema.ts`, bump this, and **write the rung from N** — add N+1 to
+ * {@link READABLE_VERSIONS} and convert N, which is the identity only when the
+ * change is additive with a correct absent reading, as this one is. You cannot
+ * forget: that list holds literal numbers rather than arithmetic on this
+ * constant, so a bump on its own leaves N+1 *unreadable*, the gate discards the
+ * app's own writes, and `migrations.test.ts` fails on the current version and on
+ * the one below it. A blob older than the list is discarded by the gate below,
+ * which is licensed only because versions 1–7 were never served to anyone.
  */
 export const STORE_VERSION = 9
 
@@ -767,18 +771,33 @@ export function salvageWorkshopState(input: unknown): RecoveredState {
  * Two entries rather than one, and the second is the rung: version 8 is the
  * shape that was served at the app's public URL, so a browser out there holds
  * one and discarding it would throw away a stranger's room. It needs no
- * conversion — see {@link STORE_VERSION} — so being in this set *is* the rung.
+ * conversion — see {@link STORE_VERSION} — so being in this list *is* the rung.
  *
- * A `Set<unknown>` because the argument is `unknown`: `storedVersion` comes out
- * of `localStorage` or a file and may be a string, `null` or `NaN`, and a
- * membership test that has to narrow first is a branch that can be got wrong.
- * Adding a version here without a conversion is only correct when the change is
- * additive *and* the absent reading is the right one; anything else needs a rung
- * that transforms, and the module docblock says how to write one.
+ * ## Written out, and **never** derived from {@link STORE_VERSION}
+ *
+ * `[STORE_VERSION - 1, STORE_VERSION]` would say the same thing today and would
+ * be a trap: it widens itself on the next bump, so a version 10 that forgot its
+ * rung would silently admit every version 9 blob and read it as a version 10
+ * one — which is the *half-read* failure this whole module exists to refuse, and
+ * it would arrive with no test failing anywhere. Literal numbers cannot do that.
+ * They stay where they are when the stamp moves, so a bump alone makes the
+ * **current** version unreadable and `migrations.test.ts` goes red on the spot,
+ * which is the mechanism the module docblock promises.
+ *
+ * So: adding a number here is a decision, and it is only correct when the change
+ * that version made is additive *and* the absent reading of the new field is the
+ * right one. Anything else needs a rung that transforms, and the module docblock
+ * says how to write one.
  */
-export const READABLE_VERSIONS: readonly number[] = [STORE_VERSION - 1, STORE_VERSION]
+export const READABLE_VERSIONS: readonly number[] = [8, 9]
 
-/** {@link READABLE_VERSIONS} as a set, so the membership test takes `unknown`. */
+/**
+ * {@link READABLE_VERSIONS} as a set, so the membership test takes `unknown`.
+ *
+ * The argument really is `unknown`: `storedVersion` comes out of `localStorage`
+ * or a file and may be a string, `null` or `NaN`, and a membership test that has
+ * to narrow before it can ask is a branch that can be got wrong.
+ */
 const READABLE_STAMPS: ReadonlySet<unknown> = new Set(READABLE_VERSIONS)
 
 /**
