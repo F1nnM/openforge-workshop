@@ -424,8 +424,8 @@ describe('md5 dedupe', () => {
   /**
    * An accessory is a file like any other, and the plan needs no new code for it.
    *
-   * The bill counts a hold **once per measured mount** — a wall carrying two
-   * torch sockets prints two torches — and a plan is built from `bill.lines`, so
+   * The bill counts a hold **once per copy drawn** — a wall carrying two torch
+   * sockets prints two torches — and a plan is built from `bill.lines`, so
    * the count arrives here as an ordinary `quantity` and the file is fetched
    * once. This test exists because nothing in `src/download` was changed for
    * holds, and a claim like that is worth an assertion rather than a sentence.

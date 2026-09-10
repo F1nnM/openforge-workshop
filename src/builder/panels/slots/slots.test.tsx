@@ -477,7 +477,7 @@ describe('AccessorySection', () => {
     // The structural reason it kept nothing is gone: `SlotFill.holds` is the key
     // for a slot of a *file*, so a press here is a store write like any other and
     // the line says what the write does rather than apologising for its absence.
-    expect(screen.getByText(/pinned to that piece and counted once per measured mount/)).toBeInTheDocument()
+    expect(screen.getByText(/pinned to that piece and counted for every copy it takes/)).toBeInTheDocument()
     expect(screen.queryByText(/Previews only/)).toBeNull()
   })
 

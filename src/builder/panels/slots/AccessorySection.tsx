@@ -113,8 +113,9 @@ export function AccessorySection({ catalog, placements }: AccessorySectionProps)
             }, ${outstanding(inventory)} `}
             {/* One line, and it now says what a press does rather than what it
                 cannot do: the pick is kept on the piece, and the parts list
-                charges for it once per mount measured on the host. */}
-            A pick here is kept &mdash; pinned to that piece and counted once per measured mount.
+                charges for every copy the room draws — one per measured mount,
+                and two where one opening takes a pair of leaves. */}
+            A pick here is kept &mdash; pinned to that piece and counted for every copy it takes.
           </p>
 
           {inventory.unfillable === 0 ? null : (
