@@ -13,8 +13,10 @@ batch that lands on the branch.
   tilted Dupont torch sockets, treasure pockets, floor holes, top-surface fallback; arcs
   unrolled about the mesh origin; insert anchors (`peg`/`leaf`/`plate`/`block`).
 - `pipeline/mounts/inventory.json` — the measurement: 1,130 objects, 995 host blobs, 139
-  insert blobs, 1,301 mounts, 0 failures; 1,183 / 1,230 slot declarations resolved.
-- Catalog schema 5 (`mounts`, `anchor`); store `holds` + `STORE_VERSION` 9 (first rung);
+  insert blobs, **1,298 mounts**, 0 failures; **1,180 / 1,230** slot declarations resolved
+  (batch A re-measured the three brazier floors and every insert).
+- Catalog schema 5 (`mounts`, `anchor`, and batch A's `anchor.bed` + `modelledIn`, all
+  optional so the version does not move again); store `holds` + `STORE_VERSION` 9 (first rung);
   share format 6 (holds + "emptied" bit); bill/download count copies drawn; `PlanPiece.
   accessories`; `buildRoom3D` draws one instance per mount; default holds via
   `writeSilently`; picker writes holds (currently in the sidebar's Accessory-slots section).
@@ -27,17 +29,27 @@ batch that lands on the branch.
 | # | Finding | Root cause | Fix | Status |
 | --- | --- | --- | --- | --- |
 | F1 | Torch rendered inverted (flange at the wall, tip out) | Peg anchored at its **wider** end; the real torch hangs tip-down with the LED legs leaving the tip into the socket, flange + flame on top | Pegs anchored at the **narrower** end (the end that enters); plate rule rejects an end-cap of a peg-shaped box so `torch.stl` is a peg again; inserts re-measured (3 of 139 anchors changed); tests pin tip-at-entrance | **done** — `34fe85b` |
-| F2 | "Leaves no base this piece can be printed on" on the Cut Stone door wall; doors all greyed, nothing filled by default | The accessory picker's dead-end check (`slotStates → consequences`) walks the host file's own `base` part; a door pick feeds its tags into the base's `constrain` and empties it. The room's base is the template's slot — a door cannot change it | `consequences`/`siblingsOf` ignore `base` for accessory slots; `deadEndReason`'s base branch retired | open (batch A) |
-| F3 | Lintel seated too high | Measured `head` of an open-topped doorway is the wall top (the opening runs up through the 33 mm notch) | On an `openTop` opening a `lintel`'s **top** sits at `head` (it fills the notch flush with the wall); closed openings keep bottom-at-head | open (batch A) |
-| F4 | Lintel upside down (curve on top) | `door_lintel.*.stl` is authored print-side down: flat top on the bed, decorative underside at +z | `InsertAnchor` gains `bed` (the flat z-face when exactly one is flat); lintels render bed-face up; inserts re-measured | open (batch A) |
+| F2 | "Leaves no base this piece can be printed on" on the Cut Stone door wall; doors all greyed, nothing filled by default | **Verified**: the picker's dead-end check (`slotStates → consequences`) walked the host file's own `base` part, whose `constrain` carries `texture`; the wall's base has 6 candidates and a door's `texture|metal`/`texture|wood` alone takes it to 0, so all five door items and the one lintel item greyed and `solveHolds` filled neither required slot. (The Towne curved wall is unaffected because *no curved base exists*: its base slot is already empty, so `consequences` sees no change. Corpus-wide, all 416 of the 4,330 dead-end item picks are the base and nothing else) | `consequences`/`siblingsOf` walk `pickerSlots`, so `base` is neither resolved nor read as a sibling; `deadEndReason`'s base branch retired with its test; fixture gained the accessory-to-accessory dead end and rescue | **done** — `7bfeeb1` |
+| F3 | Lintel seated too high | Measured `head` of an open-topped doorway is the wall top (the opening runs up through the 33 mm notch — corpus: `head` within 0.5 mm of the host bbox top on every `openTop` opening) | On an `openTop` opening a `lintel`'s **top** sits at `head` (it fills the notch flush with the wall); closed openings keep bottom-at-head | **done** — `6583ee2` |
+| F4 | Lintel upside down (curve on top) | `door_lintel.*.stl` is authored print-side down — measured on the real blob: **97.6 % of its `-z` face covered against 12.2 % of its `+z`** | `InsertAnchor` gains `bed` (the flat z-face when one is ≥ 90 % and the other < 50 %); lintels render bed-face up; inserts re-measured — 19 of 139 carry a `bed`, all `-z` | **done** — `6583ee2` |
 | F5 | Only one lintel offered | `door_lintel.1/2/3` are one catalog design (three sculpts); the picker shows one card per design | Picker renders one card per file when an item's files differ only by sculpt (no lock differences); a hold names a file anyway | open (batch B) |
-| F6 | "Cut Stone Small Brazier Floor 2x2" gets a second brazier | Fixture declares a `brazier` slot on a floor that already contains the brazier (33 mm tall) | A `surface`-class slot on a floor-footprint host taller than 15 mm is `modelled-in`; the join carries `modelledIn` slots onto the record; consumers treat them as satisfied by the host (no hold, no fault, no draw; picker says "built into this piece"); affected hosts re-measured; importer lint lists the data error | open (batch A) |
+| F6 | "Cut Stone Small Brazier Floor 2x2" gets a second brazier | Fixture declares a `brazier` slot on a floor that already contains the brazier (33.2 mm tall, against 4.5–5.5 mm for the `brazier+large` floors whose brazier really is separate) | A `surface`-class slot on a host the fixture calls a **floor** that stands ≥ 15 mm is `modelled-in`. **The declared kind and not the footprint**, because the literal footprint rule would also have silenced 39 legitimate surface mounts — 12 secret-door `top`s, 16 mine `brace`/`beam`s, 5 cave `fracture slope`s, 4 loculus slabs and 2 plinth `statue`s, one of them a 2×2 `rect` 44.8 mm tall. The join carries `modelledIn` onto the record; `isModelledIn` is the one test and every consumer treats the slot as satisfied by the host (no declaration, no hole, no bill line, no hold, no draw; panel says "built into this piece"); a hold saved in one is `hold-modelled-in`, info, zero copies. The three floors and every insert re-measured; the importer lint lists all 15 `modelled-in` slots | **done** — `4cfaaf9` |
 | F7 | Accessory choosing belongs in the slot editor, not the sidebar | Design decision (supersedes spec ruling 5 "accessories have one home" in the sidebar) | Slot editor shows each recipe slot's file's accessory slots with the picker; sidebar Accessory-slots section removed; bill hole rows get their Slots button back; refusal copy points at the editor | open (batch B) |
 
 ## Batches
 
 - **Batch 0 — torch pose** — done, `34fe85b` (pushed). No renderer change was needed: a socket already aligns the anchor axis with −`mount.axis` and lands `anchor.at` on the entrance.
-- **Batch A — data/geometry** (F2, F3, F4, F6): `src/screens/detail/slots/slotPicker.ts`, `src/builder/three/place.ts`, `tools/mounts/classify.ts`, `src/catalog/schema.ts`, `pipeline/mounts.ts`/`build.ts`, `src/assembly/resolve.ts`, `src/builder/canvas/scene.ts`, `src/builder/three/holds.ts`, targeted re-measures (inserts; brazier floors).
+- **Batch A — data/geometry** (F2, F3, F4, F6) — **done**, `7bfeeb1` · `6583ee2` (F3 and
+  F4 are one pose in one function, so they share a commit) · `4cfaaf9`. Touched
+  `src/screens/detail/slots/{slotPicker,fixture}.ts`, `src/builder/three/place.ts`,
+  `tools/mounts/{classify,catalog,run,worker}.ts`, `src/catalog/{schema,mounts,index}.ts`,
+  `pipeline/{mounts,build,version}.ts`, `src/assembly/{resolve,bill,notes}.ts`,
+  `src/builder/canvas/{scene,fixture}.ts`, `src/builder/three/holds.ts`,
+  `src/builder/panels/{billView.ts,slots/planSlots.ts,slots/AccessorySection.tsx}`, and the
+  re-measure: 142 blobs re-read (3 brazier floors, 135 inserts, 4 filed both ways), 0
+  failed, `pipeline/mounts/inventory.json` rewritten (1,298 mounts, 75 surface, 15
+  modelled-in, 19 beds) and the index re-imported (969 records with `mounts`, 285 with
+  `anchor`, 10 with `modelledIn`, 33 with a `bed`).
 - **Batch B — UI** (F5, F7): `src/builder/panels/slots/*`, `src/screens/detail/slots/SlotFills.tsx`, `src/builder/panels/BillPanel.tsx`, `useArchiveDownload.ts`, spec §6.
 
 Each batch: implement → review → push to the PR branch → update this file.
@@ -52,5 +64,15 @@ Each batch: implement → review → push to the PR branch → update this file.
 
 ## Upstream fixture errors found by the measurement
 
-- `dungeon_stone%eroded#wall,door+rectangular+narrow.A.openforge,side.stl` — declares `door` + `lintel`, door modelled in.
-- `cut-stone#floor,brazier+small.2x2.openforge.stl` and `dungeon_stone%eroded#floor,brazier+small.2x2.openforge.stl` — declare `brazier`, brazier modelled in.
+All of them reported as `modelled-in` by `npm run mounts`, printed by the importer's lint,
+and carried onto the record as `CatalogRecord.modelledIn` — **15 slots over 10 records**:
+
+- Five door walls declaring `door` + `lintel` with the door modelled in:
+  `dungeon_stone%eroded#wall,door+rectangular+narrow.A.openforge,side.stl`, its
+  `+dragonlock` sibling, both `%block` spellings of the same pair, and
+  `cut-stone#wall,door+rectangular.BA.openforge,side+dragonlock.stl`.
+- Three floors declaring `brazier` with the brazier sculpted on:
+  `cut-stone#floor,brazier+small.2x2.openforge.stl` and the `dungeon_stone` `%block` and
+  `%eroded` floors beside it (31.6–33.2 mm tall, where a floor is 4–6 mm of plate).
+- `catacombs#wall,loculus.S.openforge+split,bottom.stl` — declares `arch`, modelled in.
+- `rough_stone+ruined#archway+floor.2x2.openforge.stl` — declares `archway`, modelled in.

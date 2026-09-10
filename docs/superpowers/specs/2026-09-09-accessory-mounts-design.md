@@ -60,22 +60,33 @@ renderer step. Everything below that quotes a number was measured in the spike o
 - **Curved walls are authored with the arc centre at the mesh origin** (49–58 % of
   mid-height vertices sit on one of the two nominal radii from (0, 0); an algebraic circle
   fit lands in the slab and is wrong).
-- One fixture error found: `dungeon_stone%eroded#wall,door+rectangular+narrow.A.openforge,
-  side.stl` carries `door` + `lintel` slots but is one piece with the door modelled in.
+- Fixture errors found — slots asking for a piece the mesh already has, all of them
+  reported as `modelled-in` and carried onto the record as `CatalogRecord.modelledIn`
+  (15 slots over 10 records):
+  - `dungeon_stone%eroded#wall,door+rectangular+narrow.A.openforge,side.stl` and four
+    sibling door walls (`%block` and `%eroded`, plain and `+dragonlock`, plus
+    `cut-stone#wall,door+rectangular.BA.openforge,side+dragonlock.stl`) carry `door` +
+    `lintel` but are one piece with the door modelled in.
+  - `cut-stone#floor,brazier+small.2x2.openforge.stl` and the `dungeon_stone` `%block` and
+    `%eroded` floors beside it declare `brazier` and are **31.6–33.2 mm tall** because the
+    brazier is sculpted on. (The `brazier+large` floors are 4.5–5.5 mm and their brazier is
+    a real separate print, which is what makes the height the measurement.)
+  - `catacombs#wall,loculus.S.openforge+split,bottom.stl` (`arch`) and
+    `rough_stone+ruined#archway+floor.2x2.openforge.stl` (`archway`).
 
 Final detector hit rates **over the whole corpus** (1,130 objects, 16.34 GB, 0 read
-failures, 2026-09-10): 995 hosts yielding **1,301 mounts** — 702 opening, 438 socket, 55
-pocket, 78 surface, 28 hole — and 139 anchored inserts. Of the **1,230 slots** the host
-blobs declare, **1,183 resolved (96.2 %)**; torch sockets are **344 / 356**.
+failures, 2026-09-10): 995 hosts yielding **1,298 mounts** — 702 opening, 438 socket, 55
+pocket, 75 surface, 28 hole — and 139 anchored inserts, 19 of them with a measured `bed`.
+Of the **1,230 slots** the host blobs declare, **1,180 resolved (95.9 %)**; torch sockets
+are **344 / 356**.
 
-The 47 that did not resolve each say why, and they are five known shapes rather than a
-tail: **14 `arc-fit-refused`** (convex 2r45 and concave 2r90 walls whose mesh is not struck
-from the radii their tags name), **12 `no-socket`** — the ten round `dungeon_stone` and two
-square `cut-stone` full pillars, whose bore sits on a curved or chamfered face the 0.5 mm
-axis-aligned depth map cannot resolve into a clean 5.5 × 3 mm mouth — **12 `modelled-in`**
-(the fixture error above and four sibling door walls, `door` + `lintel` each, plus a
-catacombs loculus and a ruined archway), **6 `runs-off-end`** (the `dormer+window` roof
-run, which has no jamb to hinge against) and **3 `no-opening`**.
+The 50 that did not resolve each say why, and they are five known shapes rather than a
+tail: **15 `modelled-in`** (the fixture errors above), **14 `arc-fit-refused`** (convex
+2r45 and concave 2r90 walls whose mesh is not struck from the radii their tags name),
+**12 `no-socket`** — the ten round `dungeon_stone` and two square `cut-stone` full pillars,
+whose bore sits on a curved or chamfered face the 0.5 mm axis-aligned depth map cannot
+resolve into a clean 5.5 × 3 mm mouth — **6 `runs-off-end`** (the `dormer+window` roof run,
+which has no jamb to hinge against) and **3 `no-opening`**.
 
 ## Shape of the change
 
@@ -141,7 +152,19 @@ property of the bytes, and 171 md5s are shared by 520 rows.
    | `torch` | `socket` | 5–6.5 × 2–3.5 mm, 58–68° from the normal, ≥ 12 mm deep; **every** match is a mount |
    | `trapdoor`, `grate` on a floor | `hole` | the largest non-edge through-z component |
    | `treasure` | `pocket` | the deepest pocket on either big face at 0° tilt, 8–14 mm across |
-   | everything else (`statue`, `beam`, `brace`, `support`, `top`, `slab_*`, `fracture slope`, `broken_section`, `crosshead`, `brazier`, `brazier_base`) | `surface` | not measured: the host's top-face centre, axis +z |
+   | everything else (`statue`, `beam`, `brace`, `support`, `top`, `slab_*`, `fracture slope`, `broken_section`, `crosshead`, `brazier`, `brazier_base`) | `surface` | not measured: the host's top-face centre, axis +z — **unless the host is a floor 15 mm or taller**, which is `modelled-in` |
+
+   **A `surface` slot on a floor that stands up is `modelled-in`** (amended 2026-09-10,
+   F6). A floor tile is 4–6 mm of plate, so a floor 15 mm or taller is tall *because the
+   accessory is already standing on it*: `cut-stone#floor,brazier+small.2x2` is **33.2 mm**
+   and its brazier is part of the mesh, and a top-face mount there drew a second brazier on
+   the first and billed for it. The test is the fixture's declared **kind** and not the
+   footprint, because a 2×2 `rect` is both that floor and `dwarven_halls#wall,plinth.2x2`
+   (44.8 mm, whose `statue` is a separate print); every other tall `rect` host with a
+   surface slot — 12 secret-door `top`s, 16 mine `brace`/`beam`s, 5 cave `fracture slope`s,
+   4 loculus slabs, 2 plinth `statue`s — keeps its mount. The verdict is carried onto the
+   record as `CatalogRecord.modelledIn` and read as *satisfied by the host*: no mount, no
+   bill line, no hole in the print, and `catalog/mounts.ts#isModelledIn` is the one test.
 
    **`brazier` and `brazier_base` are `surface`, not `hole`, and `crosshead` appears once.**
    Both were amended to the code after review (2026-09-10). A brazier's bore is centred on
@@ -152,10 +175,17 @@ property of the bytes, and 171 md5s are shared by 520 rows.
 
    A slot with no match is **absent** from the inventory and present in the report with a
    reason: `no-opening`, `no-socket`, `no-hole`, `arc-fit-refused`, `runs-off-end` (an
-   opening touching the wall's end), `modelled-in` (an `opening`-class slot on a host with
-   no through-column at all — the fixture error).
+   opening touching the wall's end), `modelled-in` — an `opening`-class slot on a host with
+   no through-column at all, or a `surface`-class slot on a floor 15 mm or taller, both of
+   them the accessory being part of the host mesh. `modelled-in` is the one reason a
+   *consumer* acts on rather than a person, and the only one that reaches the record.
 
-**Per insert:** bbox and an **anchor** — `kind` and the point/axis the consumer aligns:
+**Per insert:** bbox and an **anchor** — `kind`, the point/axis the consumer aligns, and
+the optional `bed`: which of the two `z` faces the piece was **printed on**, when one is
+covered ≥ 90 % and the other under 50 %. 19 of the 139 inserts have one, all `-z`: 12
+lintels, four `burial_slab`s, a loculus top and `shutters.stl`. `door_lintel.1.stl`
+measures **0.976 on `-z` against 0.122 on `+z`** — authored print-side down — and for a
+lintel that flat face is the one the room sees, which is what §5's lintel row does with it.
 
 Tried in this order — **leaf, plate, peg, block** — because the tests are not exclusive
 and the earlier kinds are the more specific claims:
@@ -234,22 +264,27 @@ and a notch, a flat plate with a hole, a 90° arc segment with a slot — each w
 expected answer within 0.5 mm / 1°, so nothing needs the network. A corpus test over the
 checked-in inventory asserts the conventions: every torch host has ≥ 1 socket in 58–68°
 with |x| ≤ 0.5 mm; socket heights fall in three bands by `component|torch|{low,mid,high}`;
-door openings fall in the class bands; the fixture error is reported as `modelled-in`.
+door openings fall in the class bands; the fixture errors are reported as `modelled-in`,
+including the three brazier floors and the 19 measured `bed` faces.
 `docs/verify-catalog-facts.py` gains the four counts this document quotes (hosts, host
 blobs, insert blobs, slots by class).
 
-### 2. Pipeline join — `mounts` and `anchor` on the record
+### 2. Pipeline join — `mounts`, `anchor` and `modelledIn` on the record
 
 `pipeline/mounts.ts` reads and validates the inventory (Zod, like `thumbs.ts`) and
 `BuildOptions` gains a **required** `mounts: MountInventory` for the same reason `thumbs`
 is required there: "so that 'no mount' and 'nobody asked' cannot be confused".
 `tools/stamp/lock.ts` passes an empty inventory — a measurement is input, not derivation.
 
-`CatalogRecord` gains two optional fields, both keyed off the blob:
+`CatalogRecord` gains three optional fields, all keyed off the blob:
 
 - `mounts?: Mount[]` on hosts — the inventory's `mounts` with `at` already in bbox
   coordinates, so the browser never sees the raw bbox.
 - `anchor?: InsertAnchor` on inserts.
+- `modelledIn?: string[]` on hosts (amended 2026-09-10, F6) — the slot names whose
+  `unresolved` reason is `modelled-in`, 15 over 10 records. The other four reasons are
+  somebody's to go and measure; this one is a slot every consumer has to read as already
+  filled, so it is the one that leaves the lint and reaches the record.
 
 `SCHEMA_VERSION` 4 → 5 (fields were added). `PIPELINE_VERSION` is unchanged: the emitted
 `{tags, records}` with an empty inventory is byte-identical to today's, which is what the
@@ -323,7 +358,13 @@ is the only place one answer can live). A hold on a host with four sockets is fo
 in the bill and four files' worth of bytes — the print needs four — and a hold in a single
 `wide` doorway is **two**, because that one opening takes two half-leaves. Amended after
 review (2026-09-10): the mount count under-billed all 85 two-leaf doorways by one leaf
-each. A hold whose host has no measured mount for that
+each. A **modelled-in** slot is dropped from the declarations altogether (amended 2026-09-10,
+F6): the host was printed holding one, so it is not a hole in the print, not a line in the
+bill and not a copy in the download, and `resolve.ts#accessorySlots` cuts it beside `base`.
+A hold saved in one anyway is reported as `hold-modelled-in` — `info`, quantity 0, drawn
+nowhere, and the only one of the five hold notes that is not billed.
+
+A hold whose host has no measured mount for that
 slot counts once and is listed under `BillOfTiles.unplaced` (new; sibling of `unfilled`)
 so the room and the bill still agree about what will be drawn. Required accessory slots
 with no hold appear under the existing `unfilled` with `hold` set. The download plan builds
@@ -388,11 +429,25 @@ bury it upright and inverted. (The two `brazier+small` pegs are anchored at thei
 | `socket` | `plate` | plate centre on the entrance, normal into the wall — `torch_plate.stl` |
 | `opening`, 1 copy | `leaf` / `plate` / `block` | anchor point at `(at.x, sill, at.y)`, shorter horizontal extent through the wall |
 | `opening`, 2 copies | `leaf` | two instances at `at.x ± width/4`, the second turned 180° about vertical so its face shows |
-| `opening` + `lintel` | `leaf` / `plate` / `block` | anchor point at `(at.x, head, at.y)` — it sits on the head of the opening, one piece however many leaves the doorway takes |
+| `opening` + `lintel`, closed opening | `leaf` / `plate` / `block` | anchor point at `(at.x, head, at.y)` — it sits on the head, one piece however many leaves the doorway takes |
+| `opening` + `lintel`, `openTop` opening | `leaf` / `plate` / `block` | its **top** at `head`, which on an open-topped host is the wall's own top face: the opening runs up through the ~33 mm notch and the lintel drops into it flush |
+| `opening` + `lintel`, `bed: '-z'` | `leaf` | turned 180° about its **span** so the bed face is up — the flat side the piece was printed on is the side the room sees |
 | `opening` + `portcullis` | `leaf` | as a single leaf, bottom at `sill` |
 | `pocket` | `block` / `peg` | anchor point on the entrance, axis into the wall |
 | `hole` | any | bottom-centre at the hole centre on the top face, unturned — the anchor point is not used |
 | `surface` | any | bottom-centre at the top-face centre, unturned — the anchor point is not used |
+
+**A lintel is the one insert the slot name poses as well as seats** (amended 2026-09-10,
+F3 and F4). Two rules, both measured. `head` on an `openTop` opening is the **host's own
+top face** — `findOpenings` finds no soffit, so it reports the top line — and the corpus
+agrees within 0.5 mm on every one of them; seating the piece's bottom there left all 131
+lintel mounts hanging one thickness (6.09 mm) clear of the wall, so a lintel on an
+`openTop` opening puts its **top** at `head` and a closed one keeps bottom-at-head, where
+the head really is a seat cut into the host. And a lintel whose `bed` is `-z` is turned
+about its span, because it was printed flat-side down and that flat side is what shows in
+the room: the rule is *bed face up*, whichever face it is, and it is the **slot's** rule
+rather than the mesh's — a door leaf's bed is the bottom edge it stood on, and turning one
+over hangs the door upside down.
 
 **Two copies is `copiesOf`, not `leaves`.** `leaves: 2` says *the doorway is authored for
 two leaves*, which is not the claim *this insert is one of them*: the same 47.5 mm opening
@@ -451,7 +506,7 @@ surprise. Nothing is added to the right-click `SlotEditor`; accessories have one
 1. `npm run mounts -- --sample 40` reproduces the spike's numbers on the sample (angle
    band, heights, widths) — the corpus test asserts them.
 2. `npm run import:catalog` emits an index under budget with `mounts` on 1,005 records and
-   `anchor` on 285, and prints the `modelled-in` lint for the one known fixture error.
+   `anchor` on 285, `modelledIn` on 10, and prints the `modelled-in` lint for each.
 3. Place a `dungeon_stone` torch wall: a torch appears on the `−y` face, leaning out, at
    the height of the `low` / `mid` / `high` variant; the bill lists `torch.stl × 1`; the
    ZIP contains it. Place a 1×1 full pillar: four torches, bill × 4. Place a rectangular
