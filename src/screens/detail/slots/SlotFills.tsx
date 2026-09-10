@@ -349,7 +349,7 @@ function SlotFill({
         <>
           <ul className="of-slotfill-grid">
             {state.options.map((option) => (
-              <li key={String(option.address)}>
+              <li key={option.variant.id}>
                 <OptionCard
                   catalog={catalog}
                   material={materialOf(option.variant.id)}

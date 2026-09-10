@@ -77,14 +77,6 @@ export interface FillAccessories {
   /** Its accessory slots, resolved against what the fill already holds. Never empty. */
   readonly slots: readonly SlotState[]
   /**
-   * What the fill holds now — `SlotFill.holds`, straight through.
-   *
-   * `undefined` is *nobody has looked yet* and `{}` is *solved, and nothing is in
-   * it*; the two are different states of one fill and the schema keeps them
-   * apart, so this passes both on rather than folding them.
-   */
-  readonly holds: Readonly<Record<HoldName, HoldFill>> | undefined
-  /**
    * The same map as the picker's selection: accessory slot name to the file in
    * it.
    *
@@ -156,7 +148,6 @@ export function fillAccessories(file: CatalogFile, fill: SlotFill): FillAccessor
   return {
     parent: fill.tile,
     slots,
-    holds: fill.holds,
     selection,
     mounts: Object.fromEntries(slots.map((slot) => [slot.name, mountsFor(record, slot.name).length])),
     modelledIn,

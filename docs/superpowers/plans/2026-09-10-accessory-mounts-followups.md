@@ -66,7 +66,7 @@ Each batch: implement → review → push to the PR branch → update this file.
 
 - A door leaf's front/back is unknowable from geometry (a relief door may face into the room).
 - 10 round `%block` pillars and 2 cut-stone 2×2 pillars get no torch socket; 14 arc walls are refused; floor archways, loculus slabs mount on the top surface.
-- `catacombs…loculus,arch` plate is anchored off-centre if it ever fills an `arch` slot; `brazier+small.stl` is anchored at its top (inert on surface mounts).
+- `catacombs…loculus,arch` plate is anchored off-centre if it ever fills an `arch` slot.
 - Corpus-backed tests skip in CI (no `public/catalog/catalog.json` there), like every other corpus block.
 - No visual pass in the browser beyond the owner's spot checks above; the PR description asks for one before merge.
 

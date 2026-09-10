@@ -36,9 +36,6 @@
 export type { SlotEditTarget, SlotEditorProps } from './SlotEditor'
 export { SlotEditor } from './SlotEditor'
 
-export type { FillAccessories } from './slotAccessories'
-export { fillAccessories } from './slotAccessories'
-
 export type { DesignBucket, EditorSlot, Invalidation, SlotEditorModel } from './slotEditor'
 export {
   choiceOf,

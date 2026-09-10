@@ -164,6 +164,15 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * tell a reader to expect two spellings of `axis` in the wild, and there is only
  * ever one.
  *
+ * {@link CatalogRecord.modelledIn} is schema 5 too, for the same non-bump: it
+ * is optional, so an index without it reads cleanly under this shape and an
+ * index with it reads cleanly under schema 4, and the only consumer that can
+ * tell the two apart is `mounts.ts#isModelledIn` asking whether a *given*
+ * blob was measured — which the presence of `mounts` on that record already
+ * answers. It names 15 slots over the 10 records in the 2026-09-10 run: five
+ * door walls each carrying `door` and `lintel`, three `brazier+small` floors,
+ * a catacombs `arch`, and a rough_stone `archway`.
+ *
  * `PIPELINE_VERSION` deliberately stays 3, and it stays 3 now that the
  * measurement has landed. `tools/stamp/lock.ts` digests a build made with
  * `emptyMountInventory()` — 16.34 GB of somebody else's bucket is an *input*,
@@ -1360,7 +1369,7 @@ export const CatalogRecord = z.object({
    * one test, and `resolve.ts`, `scene.ts`, `holds.ts` and
    * `slotAccessories.ts` all ask it rather than each re-reading this array.
    *
-   * Absent on 8,698 of 8,702 rows, so it is optional for `mounts`' reason.
+   * Absent on 8,692 of 8,702 rows, so it is optional for `mounts`' reason.
    */
   modelledIn: z.array(z.string().min(1)).optional(),
 })

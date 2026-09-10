@@ -524,6 +524,35 @@ export function fixtureModelledInCatalogFile(): CatalogFile {
 }
 
 /**
+ * The same fixture with {@link FIXTURE_IDS.wall2}'s torch **built into the
+ * mesh, and never declared as a slot at all** — `modelledIn: ['torch']` with
+ * `config.parts` carrying no `torch` entry.
+ *
+ * A blob-keyed measurement does not guarantee the name it reports also appears
+ * on the record's own `config.parts` — the two are read off different halves
+ * of the pipeline — so this is the case {@link fixtureModelledInCatalogFile}
+ * cannot exercise: there, `torch` is both declared *and* built in, and a scene
+ * that checked the declaration first would still reach the right answer by
+ * accident. Here there is no declaration to fall back on, which is what
+ * `scene.ts#partAccessories` and `assembly/resolve.ts#holdNotes` have to agree
+ * on checking `isModelledIn` *before* `declaresHold`/`hasDeclaration` for.
+ */
+export function fixtureModelledInUndeclaredCatalogFile(): CatalogFile {
+  return CatalogFileSchema.parse({
+    ...FIXTURE_CATALOG,
+    records: FIXTURE_CATALOG.records.map((record) =>
+      record.id === FIXTURE_IDS.wall2
+        ? {
+            ...record,
+            modelledIn: ['torch'],
+            config: { parts: (record.config?.parts ?? []).filter((part) => part.name !== 'torch') },
+          }
+        : record,
+    ),
+  })
+}
+
+/**
  * The same fixture with the **insert** unmeasured — {@link FIXTURE_IDS.torch}
  * without its `anchor`.
  *

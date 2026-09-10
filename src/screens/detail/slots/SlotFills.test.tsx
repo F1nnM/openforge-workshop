@@ -15,7 +15,8 @@
  * the thing tested.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import type { MockInstance } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { TileId } from '@/catalog'
 
@@ -23,6 +24,24 @@ import { FILL, PARENT, SLOT_CATALOG } from './fixture'
 import { SlotFills } from './SlotFills'
 
 const tile = (id: string): TileId => id as unknown as TileId
+
+/*
+  A duplicate React key (two cards sharing one `<li key>`) fails silently in
+  the rendered DOM — the second card just doesn't mount — and only shows up as
+  a `console.error` warning. Guarding it here is what turned "one card per
+  print" (`option.variant.id` as the key, not `option.address`) from a visual
+  regression nobody would notice into a test failure.
+*/
+let consoleError: MockInstance<(...args: unknown[]) => void>
+
+beforeEach(() => {
+  consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+})
+
+afterEach(() => {
+  expect(consoleError).not.toHaveBeenCalled()
+  consoleError.mockRestore()
+})
 
 /** `onPick` is spread rather than passed as `undefined`: `exactOptionalPropertyTypes`. */
 function mount(parent: string, onPick?: (slot: string, picked: TileId | undefined) => void) {

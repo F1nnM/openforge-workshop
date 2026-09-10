@@ -520,12 +520,12 @@ function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, co
  * Three answers, and only the third is new:
  *
  *   - anything but a `lintel` seats its anchor point on the `sill`;
- *   - a `lintel` on a **closed** opening seats its anchor point on the `head`,
+ *   - a `lintel` on a **closed** opening seats its **bottom** on the `head`,
  *     which is the lintel's own seat cut into the host;
  *   - a `lintel` on an **`openTop`** opening puts its **top** at the `head`,
  *     because on those hosts `head` *is* the top of the wall.
  *
- * That last one is the fix for a lintel floating a lintel's height above the
+ * The second one is the fix for a lintel floating a lintel's height above the
  * wall. The measured convention is a rectangular door wall with a ~33 mm notch
  * running up through the silhouette: the opening reaches the top line, so
  * `findOpenings` reads `openTop` and `head` comes back as the wall's own top
@@ -534,10 +534,17 @@ function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, co
  * `door_lintel.1.stl` — instead of flush into the notch.
  *
  * `above` is the insert's vertical extent **above the held point after the
- * pose**, which is why the flip has to be decided first: {@link bedFlip} turns
- * the box about a horizontal axis through that very point, so a leaf held at its
- * bottom centre hangs entirely below it once flipped and entirely above it
- * otherwise.
+ * pose**, and `below` the complementary extent under it (the two sum to the
+ * anchor's own height) — which is why the flip has to be decided first:
+ * {@link bedFlip} turns the box about a horizontal axis through the held point
+ * itself, so a leaf held at its bottom centre hangs entirely below it once
+ * flipped and entirely above it otherwise. Both branches read off the same
+ * `above`/`below` pair rather than the anchor's raw fields, because a closed
+ * opening's seat is the mirror of an open-topped one's — bottom instead of
+ * top — and a bedded lintel has to land the same way round on either: the
+ * held point itself never moves under the flip, only which extent is on top
+ * of it does, so a closed opening's bottom-at-`head` needs the flipped `below`
+ * exactly where the open-topped branch needs the flipped `above`.
  */
 function openingRise(
   mount: OpeningMount,
@@ -546,8 +553,10 @@ function openingRise(
   flipped: boolean,
 ): number {
   if (slot !== LINTEL_SLOT) return mount.sill
-  if (!mount.openTop) return mount.head
-  return mount.head - (flipped ? anchor.at[2] : anchor.size[2] - anchor.at[2])
+  const above = flipped ? anchor.at[2] : anchor.size[2] - anchor.at[2]
+  if (mount.openTop) return mount.head - above
+  const below = anchor.size[2] - above
+  return mount.head + below
 }
 
 /**

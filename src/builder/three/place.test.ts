@@ -630,6 +630,28 @@ describe('accessoryMatrix hangs leaves in an opening', () => {
     )
   })
 
+  it('turns a bedded lintel over on a closed opening too, bottom still at the head', () => {
+    /*
+      `openingRise`'s `openTop` branch is the only one exercised by the measured
+      corpus — all 131 lintel mounts are open-topped — but the closed branch has
+      to keep the same invariant once a bed flip is in play: the piece's bottom,
+      not its held point, lands on `head`. Before this the closed branch ignored
+      the flip outright and would have hung the leaf 55 mm (`size[2] − at[2]`)
+      below the head instead.
+    */
+    const single: OpeningMount = { ...DOORWAY, leaves: 1 }
+    const bedded = { bounds: LEAF_MESH, anchor: { ...LEAF, bed: '-z' } as const }
+    const matrix = accessoryMatrix(hostFrame(0), single, bedded, 'lintel', 0)
+
+    // The mesh's own top corner is now the bottom in world space — flipped —
+    // so it is the one that lands on the head.
+    const top = new Vector3(LEAF_SEAT.x, LEAF_SEAT.y, LEAF_MESH.max.z)
+    expect(landsAt(matrix, top).y).toBeCloseTo(61.5, 3)
+    // The held point (the leaf's authored bottom centre) is now on top of it,
+    // one leaf-height (55 mm) above the head.
+    expectAt(landsAt(matrix, LEAF_SEAT), 0, 61.5 + 55, 6.5)
+  })
+
   it('leaves a door standing the way it was authored, bed face or not', () => {
     // The rule is the lintel's, not the mesh's: a door leaf's bed face is the
     // bottom edge it was printed on, and turning one over hangs it upside down.

@@ -78,10 +78,11 @@ export function mountsFor(record: CatalogRecord, slot: string): readonly Mount[]
  * Whether the host's own mesh already contains what this slot asks for.
  *
  * `CatalogRecord.modelledIn` is the measurement's `modelled-in` verdict —
- * `tools/mounts/classify.ts`, joined by `pipeline/build.ts` — and it names four
- * slots in the archive: one `door` sculpted into a narrow eroded door wall, and
- * the `brazier` of the three 31.6–33.2 mm `floor,brazier+small.2x2` floors,
- * whose brazier is part of the floor.
+ * `tools/mounts/classify.ts`, joined by `pipeline/build.ts` — and it names 15
+ * slots over 10 records in the archive: five door walls each carrying `door`
+ * and `lintel`, the `brazier` of three 31.6–33.2 mm `floor,brazier+small.2x2`
+ * floors whose brazier is part of the floor, a catacombs `arch`, and a
+ * rough_stone `archway`.
  *
  * **Satisfied by the host, and that is one sentence four consumers say.** The
  * slot is not an accessory slot the room can fill: `assembly/resolve.ts` leaves

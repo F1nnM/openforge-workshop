@@ -642,19 +642,23 @@ function declaresHold(host: CatalogRecord, hold: HoldName): boolean {
  *   1. **The file is gone.** An `unknown` omission, exactly as for a stranded
  *      slot fill — with the hold named, because *"the left wall is retired"* and
  *      *"the torch in the left wall is retired"* are different repairs.
- *   2. **The host declares no such slot.** `hold-off-slot`: it prints and it
+ *   2. **The host has it built in.** `hold-modelled-in`: the mesh already
+ *      carries what the slot asks for — a floor whose brazier is sculpted on —
+ *      so the accessory is not needed, not drawn, and (alone among these) not
+ *      in the bill either. Before 3, because a modelled-in slot is one
+ *      {@link isModelledIn} can answer without asking whether the host declares
+ *      it: `assembly/resolve.ts#accessorySlots` drops a modelled-in slot from
+ *      the declarations it hands the bill, so an off-slot check run first would
+ *      call a slot the host declares and has already filled *undeclared*.
+ *   3. **The host declares no such slot.** `hold-off-slot`: it prints and it
  *      will not fit. Nothing about mounts is added, because an undeclared slot
  *      has none by construction and the second sentence would be a consequence
  *      of the first rather than a second fact.
- *   2b. **The host has it built in.** `hold-modelled-in`: the slot is declared
- *      and the mesh already carries what it asks for — a floor whose brazier is
- *      sculpted on — so the accessory is not needed, not drawn, and (alone among
- *      these) not in the bill either.
- *   3. **Nobody has measured where it attaches.** `hold-unplaced`. The host may
+ *   4. **Nobody has measured where it attaches.** `hold-unplaced`. The host may
  *      well have the socket; this build has no coordinates for it.
- *   4. **Nobody has measured how it plugs in.** `hold-unanchored`: the *insert*
+ *   5. **Nobody has measured how it plugs in.** `hold-unanchored`: the *insert*
  *      carries no {@link CatalogRecord.anchor}, so there is no point on its own
- *      mesh to seat on the host's mount. The mirror image of 3, and it gets a
+ *      mesh to seat on the host's mount. The mirror image of 4, and it gets a
  *      row for the same reason: `three/instances.ts#addAccessory` skips an
  *      anchorless insert and `roomBlobs` does not even fetch it, so without this
  *      the file would be billed, drawn nowhere, and reported by nothing.
@@ -693,21 +697,23 @@ function partAccessories(
       continue
     }
     const address = { id, slot: part.slot, hold: held.hold, tile: held.fill.tile }
-    if (!declaresHold(part.record, held.hold)) {
-      unplaced.push({
-        ...address,
-        reason: `${part.record.name} declares no ${held.hold} slot, so ${record.name} will print and will not fit.`,
-      })
-      continue
-    }
-    // Before the mounts, because a modelled-in slot has none by construction and
-    // *nobody measured where it attaches* would be the wrong sentence: nothing
-    // attaches, the piece was printed holding one. `resolve.ts#holdNotes` decides
-    // it in this order too, and this is the same sentence read off the room.
+    // Before `hold-off-slot`, because `accessorySlots` drops a modelled-in slot
+    // from the host's own declarations: an off-slot check run first would call
+    // a slot the host declares and has already filled *undeclared*, of a slot
+    // that is real and has somewhere to go — the piece was printed holding it.
+    // `resolve.ts#holdNotes` decides it in this order for the same reason, and
+    // this is the same sentence read off the room.
     if (isModelledIn(part.record, held.hold)) {
       unplaced.push({
         ...address,
         reason: `${part.record.name} has its ${held.hold} built in, so ${record.name} is not needed and is not drawn.`,
+      })
+      continue
+    }
+    if (!declaresHold(part.record, held.hold)) {
+      unplaced.push({
+        ...address,
+        reason: `${part.record.name} declares no ${held.hold} slot, so ${record.name} will print and will not fit.`,
       })
       continue
     }

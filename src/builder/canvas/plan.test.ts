@@ -45,6 +45,7 @@ import {
   fixtureHolds,
   fixtureInstance,
   fixtureModelledInCatalogFile,
+  fixtureModelledInUndeclaredCatalogFile,
   fixtureSlotLayout,
   fixtureTemplateParts,
   fixtureUnanchoredCatalogFile,
@@ -1848,6 +1849,31 @@ describe('accessories: what a fill holds, projected onto the host s measured mou
     expect(anchorBill.unplaced).toEqual([
       { placement: 'p1', slot: FIXTURE_SLOTS.leftWall, hold: FIXTURE_HOLDS.torch, tile: FIXTURE_IDS.torch },
     ])
+  })
+
+  it('calls a built-in slot built in even when the record never declares it', () => {
+    // `CatalogRecord.modelledIn` is read off the mesh and `config.parts` off the
+    // filename — a blob-keyed measurement does not guarantee the two name the
+    // same slot. `fixtureModelledInCatalogFile` above cannot catch a scene that
+    // checks the declaration first, because there `torch` is declared *and*
+    // built in: this fixture removes the declaration, so the only way to reach
+    // *built in* is to ask `isModelledIn` before asking whether the host
+    // declares the slot at all — which is the order `resolve.ts#holdNotes`
+    // already used and `scene.ts#partAccessories` did not.
+    const undeclaredFile = fixtureModelledInUndeclaredCatalogFile()
+    const undeclared = planCatalogFromFile(undeclaredFile, fixtureSlotLayout)
+    const fitted = holding([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]])
+    const room = sceneOfFills(fitted, undeclared, createStyleResolver(undeclared))
+    const bill = billFor(fitted, undeclaredFile)
+
+    expect(room.unplaced).toHaveLength(1)
+    expect(room.unplaced[0]?.reason).toContain('built in')
+    expect(room.unplaced[0]?.reason).not.toContain('declares no')
+    expect(room.pieces[0]?.accessories).toEqual([])
+    expect(room.unplaced[0]?.reason).toBe(asSentence(billSays(bill, 'hold-modelled-in')))
+    // Alone among the unplaced faults, built-in bills nothing.
+    expect(bill.unplaced).toEqual([])
+    expect(bill.complete).toBe(true)
   })
 
   it('re-points an accessory at the re-anchored host, so a move carries its torches', () => {
