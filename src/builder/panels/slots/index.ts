@@ -1,15 +1,23 @@
 /**
- * The plan's pieces and their slots, as one import.
+ * A placed piece's slots, as one import.
  *
- * `planSlots` is the pure accessory inventory over a drawing's placements;
- * `slotEditor.ts` is the editor's own model, `SlotEditor` its dialog, and
- * `AccessorySection` renders the inventory — reusing the drawer's picker whole
- * from `@/screens/detail/slots` and the guided-assembly walk from
- * `@/screens/assemblies` rather than restating dead-end greying twice.
+ * `slotEditor.ts` is the editor's own model and `SlotEditor` its dialog;
+ * `slotAccessories.ts` is the pure derivation of what the file in one filled
+ * slot holds, which the dialog renders under that slot with the drawer's own
+ * picker from `@/screens/detail/slots` and the guided-assembly walk from
+ * `@/screens/assemblies` — rather than restating dead-end greying twice.
  *
- * **There is no panel here any more.** `SlotsPanel` rendered a second list of
- * every piece on the plan above the accessory inventory, in the same fixed-height
- * column as the bill of tiles — and the bill already expands each file row into
+ * **There is no sidebar section here any more.** `AccessorySection` listed every
+ * placed piece that opened an accessory slot, at the foot of the bill column, and
+ * was the app's one surface for choosing an accessory. The owner's ruling moved
+ * that choice into this dialog (F7): the file whose socket a torch goes into is
+ * the file in a row of the editor's own slot list, so the grid for it belongs
+ * under that row and not a column away. The plan-wide inventory the section read
+ * went with it; what the dialog needs is one fill's worth of it.
+ *
+ * **There is no panel here either.** `SlotsPanel` rendered a second list of
+ * every piece on the plan, in the same fixed-height column as the bill of
+ * tiles — and the bill already expands each file row into
  * the placements behind it. The two things that list alone could do are a `Slots`
  * press on those rows now: it is tab-reachable where the plan's route is only
  * reachable through a `role="application"` canvas, and it reaches a piece that
@@ -25,14 +33,11 @@
  * a bill row — so neither can hold the other's. {@link SlotEditTarget} is the
  * shape they agree on, and it lives with the dialog they both open.
  */
-export type { AccessorySectionProps } from './AccessorySection'
-export { AccessorySection } from './AccessorySection'
-
 export type { SlotEditTarget, SlotEditorProps } from './SlotEditor'
 export { SlotEditor } from './SlotEditor'
 
-export type { PlanSlotHolder, PlanSlotInventory } from './planSlots'
-export { planSlots } from './planSlots'
+export type { FillAccessories } from './slotAccessories'
+export { fillAccessories } from './slotAccessories'
 
 export type { DesignBucket, EditorSlot, Invalidation, SlotEditorModel } from './slotEditor'
 export {

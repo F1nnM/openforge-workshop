@@ -127,7 +127,7 @@ import {
   useArchiveDownload,
 } from '@/builder/panels'
 import type { SlotEditTarget } from '@/builder/panels/slots'
-import { AccessorySection, SlotEditor } from '@/builder/panels/slots'
+import { SlotEditor } from '@/builder/panels/slots'
 import { Builder3DPanel } from '@/builder/three'
 // Deep, and not through the barrel: `@/builder/three/index.ts` exports only
 // `Builder3DPanel` and `lod.ts` as values, and its `boundary.test.ts` walks that
@@ -830,14 +830,14 @@ function Builder({ index }: { index: CatalogIndex }) {
         grid whose `1fr` row was the bill and whose implicit `auto` rows were the
         slots panel and the backup panel — so a fixed-height column was shared
         three ways and the parts list, the one thing a reader came for, paid for
-        both of the others. The two survivors are inside the bill's own three
-        bands now: the accessory inventory at the foot of the scrolling one, the
-        backup line in the footer. See `BillPanel.tsx` for the argument, and
-        `builder.css` for the track that is left.
+        both of the others. Only the backup line survived into the bill's own
+        footer: the accessory inventory that sat at the foot of its scrolling band
+        is gone with F7, which moved choosing an accessory into the slot editor,
+        under the recipe slot whose file holds it. See `BillPanel.tsx` for the
+        argument, and `builder.css` for the track that is left.
       */}
       <div className="of-builder-bill">
         <BillPanel
-          accessories={<AccessorySection catalog={index.file} placements={placements} />}
           backup={<BackupPanel />}
           bill={bill}
           placements={placements}

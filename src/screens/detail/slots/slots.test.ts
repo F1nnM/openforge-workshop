@@ -2,7 +2,7 @@
  * Row C2's figures against the real corpus.
  *
  * Every number in `slotPicker.ts`, `SlotFills.tsx` and
- * `../../../builder/panels/slots/planSlots.ts` is re-measured here, so a docblock
+ * `../../../builder/panels/slots/slotAccessories.ts` is re-measured here, so a docblock
  * that goes stale fails the suite instead of sitting there being quoted. That
  * includes the three the plan row got wrong, which are asserted as *refutations*
  * rather than merely replaced:
@@ -392,7 +392,7 @@ describeCorpus(title, () => {
         ['top', 4],
       ])
 
-      // 9 of the 1,244 accessory slots. `planSlots`'s `unfillable` counts these.
+      // 9 of the 1,244 accessory slots — the archive gaps a picker can only report.
       expect(total - 517).toBe(9)
     })
   })

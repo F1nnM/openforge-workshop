@@ -159,8 +159,9 @@ function solveFor(
  * none — it works in `TileId`s and tag postings — so this is the join, and it is
  * a `WeakMap` for `compositionIndexFor`'s reason: the map is 8,702 entries, this
  * pass runs on every store write, and keying on the parsed file pays for it once
- * and lets it be collected with the file. `builder/panels/slots/planSlots.ts`
- * keeps the same memo for the same join; the two are not shared because
+ * and lets it be collected with the file.
+ * `builder/panels/slots/slotAccessories.ts` keeps the same memo for the same
+ * join; the two are not shared because
  * `@/builder/three` must not import from a panel.
  */
 const RECORDS = new WeakMap<CatalogFile, ReadonlyMap<string, CatalogRecord>>()

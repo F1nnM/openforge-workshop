@@ -1389,13 +1389,12 @@ function BillHarness({ download }: { download?: ArchiveDownload }) {
         edited.push(placement)
       }}
       /*
-        Sentinels rather than the real components: what this panel owns about
-        them is *which band each one lands in* — the accessory inventory inside
-        the scrolling container, the backup line in the pinned footer — and the
-        two real components are asserted in their own files. A node the test can
-        find by name is the whole of the contract.
+        A sentinel rather than the real component: what this panel owns about it
+        is *which band it lands in* — the pinned footer, where a fifty-row room
+        cannot push the app's only backup path off screen — and `BackupPanel` is
+        asserted in its own file. A node the test can find by name is the whole
+        of the contract.
       */
-      accessories={<p>accessory sentinel</p>}
       backup={<p>backup sentinel</p>}
     />
   )
@@ -1623,14 +1622,15 @@ describe('the bill of tiles', () => {
     // The file in the slot is printable and printed, so the row above stays.
     expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
 
-    // **And no `Slots` button.** The editor fills a *recipe's* slots and an
-    // accessory is a slot of a file, so a press would open a dialog with nothing
-    // in it about the door — and its accessible name would have promised
-    // otherwise. The sentence names the surface that can do it; Remove stays,
-    // because taking the piece off the grid is still an answer.
-    expect(within(row).queryByRole('button', { name: /^Slots/ })).toBeNull()
+    // **And a `Slots` button, which this row lost and F7 gave back.** The editor
+    // filled a *recipe's* slots alone, so a press opened a dialog with nothing in
+    // it about the door; the accessory picker is in that dialog now, under the
+    // recipe slot whose file opens the hole, so the press reaches the one control
+    // that fills it. Remove stays, because taking the piece off the grid is still
+    // an answer.
+    expect(within(row).getByRole('button', { name: /^Slots/ })).toBeInTheDocument()
     expect(within(row).getByRole('button', { name: /^Remove/ })).toBeInTheDocument()
-    expect(screen.getByText(/Fill it under Accessory slots, below the parts list/)).toBeInTheDocument()
+    expect(screen.getByText(/Fill it in the piece's slot editor/)).toBeInTheDocument()
   })
 
   it('faults a required accessory naming a file this build no longer holds', () => {
@@ -1796,20 +1796,19 @@ describe('the bill of tiles', () => {
   })
 
   /**
-   * **The column is this panel now, so the two things under it are inside it.**
+   * **The column is this panel now, so the thing under it is inside it.**
    *
-   * They were siblings in the column's grid, in implicit `auto` rows that took
-   * their height from the parts list. The bands they land in are not
-   * interchangeable: the accessory inventory grows with the plan and belongs
-   * where a fifty-row room already scrolls, and the backup line is the app's
-   * only path to a saved room, which a fifty-row room must not be able to push
-   * off screen.
+   * The backup line was a sibling in the column's grid, in an implicit `auto`
+   * row that took its height from the parts list. The band it lands in is not
+   * interchangeable with the scrolling one: it is the app's only path to a saved
+   * room, which a fifty-row room must not be able to push off screen. (The
+   * accessory inventory that used to scroll with the rows is gone — F7 moved
+   * choosing an accessory into the slot editor.)
    */
-  it('scrolls the accessory inventory with the rows and pins the backup line', () => {
+  it('pins the backup line outside the scrolling rows', () => {
     place('floor1')
     render(<BillHarness />)
 
-    expect(screen.getByText('accessory sentinel').closest('.of-bill-scroll')).not.toBeNull()
     expect(screen.getByText('backup sentinel').closest('.of-bill-foot')).not.toBeNull()
     expect(screen.getByText('backup sentinel').closest('.of-bill-scroll')).toBeNull()
   })
@@ -2312,7 +2311,7 @@ describe('the download action', () => {
     expect(alert).toHaveTextContent(/1,047 of the 1,244 accessory slots/)
     // The repair names the one surface that can make it: the slot editor fills a
     // recipe's own slots and an accessory is not one of them.
-    expect(alert).toHaveTextContent(/an accessory under Accessory slots, below the parts list/)
+    expect(alert).toHaveTextContent(/an accessory in the piece's slot editor/)
     expect(opened).toBe(0)
     expect(saved).toHaveLength(0)
   })

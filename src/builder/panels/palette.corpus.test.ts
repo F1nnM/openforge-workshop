@@ -222,7 +222,7 @@ describeCorpus('the row shows one file and the build prints another', () => {
   it('always arms a variant of the item it was asked about', () => {
     // `selectVariantForLock` is total — `variants` is a non-empty tuple — and it
     // must never reach outside the item, because every consumer of it (the bill's
-    // rule 0, `PlanCatalog.record`, `planSlots`) looks the answer up in an index
+    // rule 0, `PlanCatalog.record`, `slotAccessories`) looks the answer up in an index
     // and then reports the item it came from. A file from another item would put
     // somebody else's mesh under this tile's name.
     for (const lock of LOCKS) {

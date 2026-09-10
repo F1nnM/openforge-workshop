@@ -491,9 +491,9 @@ export function slotFaultCopy(fault: SlotFault): SlotFaultCopy {
         reason:
           fault.tile === undefined
             ? 'The file in this slot opens an accessory slot it does not mark optional, and nothing is in it. ' +
-              'Fill it under Accessory slots, below the parts list.'
+              "Fill it in the piece's slot editor, under the slot that holds the file."
             : 'The accessory in this required slot names a file this build no longer holds — pick another ' +
-              'under Accessory slots, below the parts list.',
+              "in the piece's slot editor, under the slot that holds the file.",
       }
     case 'no-recipe':
       return { subject, reason: 'This build ships no recipe by that name, so the piece has no slots to fill.' }

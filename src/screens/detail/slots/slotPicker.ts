@@ -261,7 +261,7 @@ export interface SlotState {
  * The composition index for a file, built once per file and shared.
  *
  * A `WeakMap` rather than a `useMemo`, because the drawer, the variants table and
- * the builder's slots panel are three mounts over one catalog and
+ * the builder's slot editor are three mounts over one catalog and
  * `createCompositionIndex` measures **10.7 ms cold / 5.3 ms warm** with a
  * 409,432-byte inverted index behind it. Memoising per component would pay that
  * per mount; keying on the parsed file object pays it once and lets the whole

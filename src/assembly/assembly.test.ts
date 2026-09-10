@@ -1760,7 +1760,7 @@ describeCorpus(corpusSuite, () => {
     // placement named a `DesignId` and this layer was the only thing that could
     // turn one into a record; a fill names a file, so `byId` is the whole lookup.
     // Verified rather than assumed: the one reader outside this directory,
-    // `builder/panels/slots/planSlots.ts`, reads it as
+    // `builder/panels/slots/slotAccessories.ts` (`planSlots.ts` then), read it as
     // `index.aggregates.byDesign.get(placement.design)` — and `placement.design`
     // is a field A1 deleted, so that line is a compile error either way.
     expect(index).not.toHaveProperty('aggregates')

@@ -217,7 +217,8 @@ export interface AssemblyIndex {
  *
  * Verified before removing it rather than assumed: the only reader of
  * `index.aggregates` outside this directory is
- * `builder/panels/slots/planSlots.ts`, which reads it as
+ * `builder/panels/slots/slotAccessories.ts` (`planSlots.ts` when this was
+ * written), which read it as
  * `index.aggregates.byDesign.get(placement.design)` — and `placement.design` is
  * a field row A1 deleted, so that line is a compile error under the new schema
  * either way. (`src/mesh/warm.ts` reads `context.aggregates`, which is its own

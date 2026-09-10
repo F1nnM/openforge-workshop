@@ -3,8 +3,9 @@
 **Date:** 2026-09-09
 **Status:** implemented 2026-09-10
 **Closes:** the "Previews only — a fill can name a recipe's slot, not a file's" line in
-`src/builder/panels/slots/AccessorySection.tsx`, and the disagreement it refuses to create
-between the room and the parts list.
+the builder's accessory picker (`src/builder/panels/slots/AccessorySection.tsx` when this
+was written; the picker lives in `SlotEditor.tsx` since F7), and the disagreement it
+refuses to create between the room and the parts list.
 
 ## The problem
 
@@ -96,7 +97,7 @@ on their own (a linted inventory and a richer index).
 ```
 tools/mounts/  ──▶  pipeline/mounts/inventory.json  ──▶  pipeline join  ──▶  catalog.json
                                                                                 │
-                            store `holds` ◀── AccessorySection picker           │ mounts / anchor
+                            store `holds` ◀── the slot editor's picker         │ mounts / anchor
                                   │                                             ▼
                      resolve/bill/download ◀── PlanPiece.accessories ◀── canvas/catalog.ts
                                                        │
@@ -467,12 +468,40 @@ The footprint-disagreement report is skipped for inserts (they have no footprint
 disagree with). `Room3D` gains `unplaced`: holds drawn nowhere for lack of a mount — the
 same list the bill shows, derived once in `canvas/catalog.ts` and consumed by both.
 
-### 6. Editing
+### 6. Editing — in the slot editor, under the file that holds the accessory
 
-`AccessorySection` keeps its inventory and its picker; the picker's `onPick` now writes
-`pinHold` / `clearHold` and the "Previews only" line is deleted. The holder rows show the
-mount count when it is more than one ("× 4 faces") so the quantity in the bill is not a
-surprise. Nothing is added to the right-click `SlotEditor`; accessories have one home.
+**Amended 2026-09-10 (F7), and it supersedes this section's original ruling.** It read
+*"`AccessorySection` keeps its inventory and its picker … nothing is added to the
+right-click `SlotEditor`; accessories have one home"*, and the home it chose was the wrong
+one. The owner: *"move the accessory choosing out of the sidebar and into the tile/slots
+editing popup."* An accessory is a slot of a **file**, and the file is the one in a row of
+the editor's own slot list — so the grid for it belongs under that row, where the user is
+already looking at the wall whose torch they are choosing, rather than in a section at the
+foot of the bill column.
+
+So:
+
+- **`SlotEditor` renders each filled recipe slot's accessory slots underneath that slot's
+  row**, with the drawer's own `SlotFills` controlled by the fill's `holds`
+  (`selection = { [hold]: fill.tile }`), writing `pinHold` / `clearHold`. The picker stays
+  headless — `@/screens/detail/slots` may not import `@/store` — so the press is reported
+  and the editor puts it away, which is the division the recipe grid above it already keeps.
+- **`slotAccessories.ts#fillAccessories` is the one derivation** per (instance, slot): the
+  resolved slots, the holds, the mount counts, the modelled-in names and the required slots
+  still holding nothing. Three things the editor says that the picker cannot — the **copies**
+  a hold costs ("× 4 mounts", because a four-socket pillar bills four torches for one press),
+  that nothing has **measured** where the accessory goes ("no measured mount — counted once,
+  not drawn"), and that the host was **printed holding** one ("built into this piece", with
+  `SlotFills`' `omit` dropping the grid so nothing offers a second brazier). A **required**
+  accessory slot holding nothing reads *needs a choice*, in the same accent weight the editor
+  gives an empty recipe slot, because it is the same hole in the same print.
+- **The sidebar's *Accessory slots* section is gone**, and the plan-wide inventory behind it
+  (`planSlots`) with it: it enumerated the placements a second time beside a bill that
+  already expands into them, and nothing else read it.
+- **The bill's `hole` fault rows carry their `Slots` button again.** It was withheld because
+  the editor could not fix a hole one level down; it can now, and the copy on the row and on
+  the download's refusal names it — *"Fill it in the piece's slot editor, under the slot
+  that holds the file."*
 
 ## What is deliberately not in this design
 

@@ -401,8 +401,8 @@ export interface ResolvedInstance {
  * It takes an aggregate and returns a selection, and it never sees a placement —
  * which is why it outlived the rule it came from. Its callers are
  * `builder/canvas/catalog.ts` (so the canvas draws the file the bill lists),
- * `builder/panels/slots/planSlots.ts` (a composition slot is a property of a
- * *file*), `screens/builder/BuilderScreen.tsx`, and row C2's fill solver, which
+ * `builder/panels/slots/slotAccessories.ts` (a composition slot is a property of
+ * a *file*), `screens/builder/BuilderScreen.tsx`, and row C2's fill solver, which
  * needs it for the same two-step every candidate grid uses: pick the item, then
  * pick the file.
  */

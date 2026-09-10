@@ -45,7 +45,7 @@
  * **file** plus the slot name, unique within a record over all 8,702 of them —
  * and narrows the remaining slots and nothing else.
  *
- * The builder's accessory section does have somewhere: `SlotFill.holds` is the
+ * The builder's slot editor does have somewhere: `SlotFill.holds` is the
  * store's key for a slot of a *file*, so the room, the bill and this grid all
  * read one value. There it passes {@link SlotFillsProps.selection} and this
  * component keeps no opinion of its own — a local copy that could disagree with
@@ -94,23 +94,40 @@ export interface SlotFillsProps {
    *
    * Present makes this a controlled component: the map shown is this one, the
    * local copy is not written and a press moves nothing until the owner comes
-   * back with a new value. `builder/panels/slots/AccessorySection.tsx` builds it
-   * from the placed fill's `holds`, which is what makes the grid and the room
-   * one answer rather than two.
+   * back with a new value. `builder/panels/slots/SlotEditor.tsx` builds it from
+   * the placed fill's `holds` — `slotAccessories.ts#fillAccessories` is the one
+   * derivation — which is what makes the grid and the room one answer rather
+   * than two.
    *
    * Absent leaves the drawer's own behaviour exactly as it was — a pick is held
    * here and persisted nowhere.
    */
   readonly selection?: SlotSelection
   /**
+   * Slot names to leave out of the grid list, because the owner has something
+   * truer to say about them.
+   *
+   * One caller and one reason: the builder's slot editor omits a slot the host
+   * mesh was **printed holding** — `CatalogRecord.modelledIn`, measured on the
+   * three `floor,brazier+small.2x2` floors that stand 31.6–33.2 mm tall because
+   * the brazier is sculpted on — where a grid would offer a second brazier for a
+   * floor that already has one, and the editor says *built into this piece*
+   * instead. The drawer passes none.
+   *
+   * They are still **resolved**: an omitted slot contributes its tags to its
+   * siblings' `constrain` like any other, so what is left on screen is narrowed
+   * by what the mesh already holds. Only the rendering is dropped.
+   */
+  readonly omit?: readonly string[]
+  /**
    * Told which **file** a slot now contributes, with `undefined` for "cleared".
    *
    * The picker's report of its own state rather than its write, and the
    * distinction is the module rule: `@/screens/detail/slots` must not import
    * `@/store`, so the surface that has somewhere to put a pick is the surface
-   * that puts it there. The builder's accessory section answers this by pinning
-   * the hold onto the placed fill; the drawer answers it by narrowing the
-   * remaining slots and nothing else.
+   * that puts it there. The builder's slot editor answers this by pinning the
+   * hold onto the placed fill, under the recipe slot that holds the host file;
+   * the drawer answers it by narrowing the remaining slots and nothing else.
    *
    * The `TileId` is the other half of what it carries, and it is the one fact
    * the DOM states only inside an accessible name: **which of an item's files** a
@@ -127,7 +144,7 @@ export interface SlotFillsProps {
  * declare no config and a further 2,451 declare only a `base` slot, so the
  * common case for this component is to render nothing.
  */
-export function SlotFills({ catalog, parent, onPick, selection }: SlotFillsProps) {
+export function SlotFills({ catalog, omit, parent, onPick, selection }: SlotFillsProps) {
   const index = useMemo(() => (catalog === undefined ? undefined : compositionIndexFor(catalog)), [catalog])
   const materialOf = useMemo(() => (catalog === undefined ? null : tileMaterials(catalog)), [catalog])
   const [held, setHeld] = useState<SlotSelection>({})
@@ -140,9 +157,15 @@ export function SlotFills({ catalog, parent, onPick, selection }: SlotFillsProps
   // Recomputed on every pick, because that is the row: `constrain` reads sibling
   // selections, so a candidate set is correct only until the next click. The
   // whole pass measures 0.09 ms mean and 2.3 ms worst over the real corpus.
-  const states = useMemo(
+  const resolved = useMemo(
     () => (index === undefined ? [] : slotStates(index, parent, picked)),
     [index, parent, picked],
+  )
+  /* Filtered after the resolution and not before it: an omitted slot is still a
+     sibling, so its tags still narrow the ones on screen. See `omit`. */
+  const states = useMemo(
+    () => (omit === undefined ? resolved : resolved.filter((state) => !omit.includes(state.name))),
+    [omit, resolved],
   )
   // `materialOf` is null exactly when `catalog` is undefined, so this narrows
   // both at once rather than leaving a fallback resolver that cannot be reached.

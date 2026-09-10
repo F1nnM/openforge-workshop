@@ -1357,8 +1357,8 @@ export const CatalogRecord = z.object({
    * **A consumer reads it as *the host satisfies this slot*.** Nothing is drawn
    * into it, nothing is added to the bill for it, and it is not a hole in the
    * print: the piece is complete as it stands. `mounts.ts#isModelledIn` is the
-   * one test, and `resolve.ts`, `scene.ts`, `holds.ts` and `planSlots.ts` all
-   * ask it rather than each re-reading this array.
+   * one test, and `resolve.ts`, `scene.ts`, `holds.ts` and
+   * `slotAccessories.ts` all ask it rather than each re-reading this array.
    *
    * Absent on 8,698 of 8,702 rows, so it is optional for `mounts`' reason.
    */

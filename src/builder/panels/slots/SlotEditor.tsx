@@ -67,6 +67,29 @@
  * name has to carry the item, the file and what the card costs. `aria-disabled`
  * and never `disabled`, so a greyed card keeps its place in the tab order and
  * its reason stays reachable.
+ *
+ * ## The accessories are chosen here too, under the file that holds them
+ *
+ * The owner's ruling, and it supersedes the design's fifth one: *"move the
+ * accessory choosing out of the sidebar and into the tile/slots editing
+ * popup."* An accessory is a slot of a **file** — one level below a recipe's own
+ * slots — and the sidebar's *Accessory slots* section listed every placed piece
+ * that opened one, a second enumeration of the scene beside a bill that already
+ * expands into it. The file whose socket a torch goes into is the file in a row
+ * of *this* list, so the grid for it belongs under that row: the user is looking
+ * at the wall when they choose its torch, and there is one surface for *what
+ * goes in this piece* rather than two a column apart.
+ *
+ * `slotAccessories.ts#fillAccessories` is the derivation — one per filled slot,
+ * against what that fill already holds — and the picker is the drawer's own
+ * `SlotFills`, controlled by the fill's `holds`. Three things the editor says
+ * that the picker cannot: how many **copies** a hold costs (a four-socket pillar
+ * bills four torches for one press), that nothing has **measured** where an
+ * accessory goes, and that the host was **printed holding** one — where the grid
+ * is omitted rather than offering a second brazier for a floor that has one. The
+ * writes are `pinHold` / `clearHold`, because `@/screens/detail/slots` must not
+ * import `@/store`: the picker reports a press and this file puts it away, the
+ * same division the card grid above already keeps.
  */
 import { useMemo, useState } from 'react'
 
@@ -82,9 +105,9 @@ import {
   narrowingSentence,
   stepCountSentence,
 } from '@/assembly'
-import { compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
+import { SlotFills, compositionIndexFor, tileMaterials } from '@/screens/detail/slots'
 import type { PlacementId, SlotName, TemplateInstance } from '@/store'
-import { clearFill, pinFill, useLockSystem, useRoomDesign } from '@/store'
+import { HoldName, clearFill, clearHold, pinFill, pinHold, useLockSystem, useRoomDesign } from '@/store'
 import type { BaseGap } from '@/assembly'
 import type { DroppedPin } from '@/template'
 import { slotDoubtSentence } from '@/template'
@@ -93,6 +116,8 @@ import { TileThumb } from '@/ui/thumb'
 
 import { AxisControl } from '../AxisControl'
 
+import type { FillAccessories } from './slotAccessories'
+import { fillAccessories } from './slotAccessories'
 import type { EditorSlot } from './slotEditor'
 import {
   editorAxes,
@@ -176,9 +201,9 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
   /* Read here rather than passed, and it is one primitive: `handSlotToLock`
      re-solves the instance the moment a pin is released, so the preference is an
      argument to that call and not a prop this dialog's two openers would both
-     have to thread. `planSlots` takes no `lock` for its own reason — a fill
-     names an exact file — so threading one through a caller for this would say
-     the caller depends on the preference when only this press does. */
+     have to thread. `slotAccessories.ts` takes no `lock` for its own reason — a
+     fill names an exact file — so threading one through a caller for this would
+     say the caller depends on the preference when only this press does. */
   const lock = useLockSystem()
   /*
     The room's design, read beside the lock and for the same reason: both are
@@ -199,6 +224,22 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
     () => slotEditorModel(catalog, index, instance, template, recipes),
     [catalog, index, instance, template, recipes],
   )
+
+  /* The accessory slots of each filled slot's file, keyed by the recipe slot the
+     writes address. One resolution per fill — 0.09 ms each, and only 11.5% of
+     files declare a slot at all — memoised on the instance, because a hold write
+     lands on that instance and the grid below it must re-resolve against the new
+     holds. `undefined` for a fill whose file declares nothing or has left the
+     archive, which is the common case and renders no block. */
+  const accessories = useMemo(() => {
+    const held = new Map<string, FillAccessories>()
+    for (const [slot, fill] of Object.entries(instance.fills)) {
+      if (fill === undefined) continue
+      const found = fillAccessories(catalog, fill)
+      if (found !== undefined) held.set(slot, found)
+    }
+    return held
+  }, [catalog, instance.fills])
 
   const [openSlot, setOpenSlot] = useState<string | null>(initialSlot ?? null)
   const [design, setDesign] = useState<string | undefined | null>(null)
@@ -298,6 +339,15 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
               }}
               slot={slot}
             />
+            {/* Under the row and not in the candidate grid below: what a torch
+                goes into is the *file in this slot*, and the grid below is about
+                replacing that file. See the module note. */}
+            <SlotHolds
+              accessories={accessories.get(slot.name)}
+              catalog={catalog}
+              instance={instance}
+              slot={slot.name}
+            />
           </li>
         ))}
       </ul>
@@ -350,6 +400,89 @@ export function SlotEditor({ catalog, index, instance, template, initialSlot, on
         />
       )}
     </Dialog>
+  )
+}
+
+/* ------------------------------------------------------- what a file holds */
+
+/**
+ * The accessory slots of the file in one recipe slot, with the picker for each.
+ *
+ * Three things are said here rather than in the picker, and each is a fact about
+ * the **print** rather than about the candidates — which is why they are the
+ * builder's to say and not `@/screens/detail/slots`':
+ *
+ *   - **What a hold costs.** A host is billed one copy per measured mount, so a
+ *     wall with four torch sockets is four torches for one press and a `wide`
+ *     doorway's single opening is two leaves. A slot with more than one mount
+ *     says so *before* the press rather than in the parts list after it.
+ *   - **That nothing has measured it.** A slot with no mount is billed once and
+ *     drawn nowhere, which is the state of every host `npm run mounts` has not
+ *     walked and is not something the user can repair.
+ *   - **That the host was printed holding one.** `CatalogRecord.modelledIn` —
+ *     the fixture asks for a brazier the floor is already carrying, so there is
+ *     nothing to fill, nothing to count and nothing missing. The grid is omitted
+ *     for such a slot: offering one would offer a second brazier.
+ *
+ * A **required** accessory slot holding nothing carries the weight the editor
+ * gives an empty recipe slot — *needs a choice*, in the accent — because it is
+ * the same fact one level down: the piece is on the plan and will print
+ * incomplete until it is filled, and the download says so either way.
+ */
+function SlotHolds({
+  accessories,
+  catalog,
+  instance,
+  slot,
+}: {
+  accessories: FillAccessories | undefined
+  catalog: CatalogFile
+  instance: TemplateInstance
+  slot: SlotName
+}) {
+  if (accessories === undefined) return null
+
+  const notes = accessories.slots.flatMap((state) => {
+    if (accessories.modelledIn.includes(state.name)) return [`${state.name}: built into this piece`]
+    const mounts = accessories.mounts[state.name] ?? 0
+    if (mounts === 0) return [`${state.name}: no measured mount — counted once, not drawn`]
+    // One mount says nothing: one press, one copy, where the drawing puts it, is
+    // what a slot already reads as.
+    return mounts === 1 ? [] : [`${state.name} × ${String(mounts)} mounts`]
+  })
+
+  return (
+    <div className="of-sloted-holds">
+      <Eyebrow as="p" className="of-sloted-holdhead">
+        Accessory slots
+      </Eyebrow>
+
+      {accessories.gaps.length === 0 ? null : (
+        <p className="of-sloted-holdgap">
+          {`${accessories.gaps.join(' and ')} ${
+            accessories.gaps.length === 1 ? 'needs' : 'need'
+          } a choice — this piece will print incomplete until ${
+            accessories.gaps.length === 1 ? 'it is' : 'they are'
+          } filled.`}
+        </p>
+      )}
+
+      {notes.length === 0 ? null : <p className="of-sloted-holdnote">{notes.join(' · ')}</p>}
+
+      <SlotFills
+        catalog={catalog}
+        omit={accessories.modelledIn}
+        onPick={(hold, tile) => {
+          const name = HoldName.parse(hold)
+          // The picker's own toggle: `undefined` is a second press on the card
+          // already in the slot, which is *take it out*.
+          if (tile === undefined) clearHold(instance.id, slot, name)
+          else pinHold(instance.id, slot, name, tile)
+        }}
+        parent={accessories.parent}
+        selection={accessories.selection}
+      />
+    </div>
   )
 }
 
