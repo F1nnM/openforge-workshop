@@ -203,10 +203,15 @@ export interface PlanPiecePart {
  * A hold is a single entry in the store — *there is a torch in this wall* — and
  * the host may present several places to put one: a 4-unit s_system wall carries
  * two torch sockets and a full pillar four. `assembly/bill.ts` prices that hold
- * at **one copy per measured mount**, because that is how many the user has to
- * print. So the room draws one per mount too, and the two agree by construction
+ * at **the copies drawn**, because that is how many the user has to print. So
+ * the room draws one accessory per mount too, and the two agree by construction
  * rather than by a comment: a projection that produced one accessory per *hold*
  * would show one torch on a pillar the bill charges four for.
+ *
+ * A `PlanAccessory` is still one per *(hold, mount)* rather than per copy: the
+ * two half-leaves of a wide doorway are one measured opening, and `copiesOf` —
+ * which both the bill and `buildRoom3D` read — is what turns that one entry into
+ * the two instances and the quantity of 2.
  *
  * {@link index} is the position in `mountsFor(host.record, hold)` — the host's
  * own measurement order, which `catalog/mounts.ts` keeps stable so that *"the

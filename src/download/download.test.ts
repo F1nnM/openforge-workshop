@@ -69,8 +69,10 @@ interface RawRow {
   bytes: number
   /** The accessory slots this file declares, for the hold case below. */
   config?: CatalogRecord['config']
-  /** Where they attach, measured — one entry per copy the bill will ask for. */
+  /** Where they attach, measured — the mounts the bill counts copies over. */
   mounts?: CatalogRecord['mounts']
+  /** How an insert plugs in, measured. A `wide` doorway's copies depend on it. */
+  anchor?: CatalogRecord['anchor']
 }
 
 /**
@@ -122,6 +124,7 @@ function catalogOf(rows: readonly RawRow[]): CatalogFile {
         foot: { shape: 'wall', length: 1 },
         ...(row.config === undefined ? {} : { config: row.config }),
         ...(row.mounts === undefined ? {} : { mounts: row.mounts }),
+        ...(row.anchor === undefined ? {} : { anchor: row.anchor }),
       }
     }),
   })
@@ -468,6 +471,65 @@ describe('md5 dedupe', () => {
     expect(plan.files).toHaveLength(2)
     // Two torches to print, one torch to fetch.
     expect(plan.download.bytes).toBe(7_000)
+  })
+
+  /**
+   * The other way a hold reaches two prints, and the one a mount count misses.
+   *
+   * A `wide` doorway is a **single** measured opening authored for two 24.6 mm
+   * leaves, so the plan has to carry two prints of one file off one mount —
+   * `catalog/mounts.ts#copiesOf` is what says so, and it is the same function
+   * `buildRoom3D` draws the pair by, which is what keeps the pack able to fill
+   * the room it came from.
+   */
+  it('carries both leaves of a wide doorway into the plan, on one mount', () => {
+    const catalog = catalogOf([
+      {
+        id: 'tiles/x/wall+door.stl',
+        blob: md5(43),
+        bytes: 6_000,
+        config: { parts: [{ name: 'door', tags: { require: [{ tag: 'part|door' }] } }] },
+        mounts: [
+          {
+            slot: 'door',
+            kind: 'opening' as const,
+            face: '-y' as const,
+            normal: [0, -1, 0] as const,
+            at: [0, -6.35, 24] as const,
+            width: 47.5,
+            sill: 4.5,
+            head: 44,
+            openTop: true,
+            leaves: 2 as const,
+          },
+        ],
+      },
+      {
+        id: 'tiles/x/door.stl',
+        blob: md5(44),
+        bytes: 1_500,
+        // 24.6 mm of leaf in a 47.5 mm opening: half of a pair.
+        anchor: { kind: 'leaf' as const, at: [0, 0, 0] as const, axis: [0, 1, 0] as const, size: [24.6, 3.9, 35.5] as const },
+      },
+    ])
+    const host = place('tiles/x/wall+door.stl', 1)
+    const holding: TemplateInstance = {
+      ...host,
+      fills: {
+        [FIXTURE_SLOT]: {
+          tile: 'tiles/x/wall+door.stl' as TileId,
+          pinned: false,
+          holds: { ['door' as HoldName]: { tile: 'tiles/x/door.stl' as TileId, pinned: false } },
+        },
+      },
+    }
+    const bill = buildBillOfTiles([holding], buildAssemblyIndex(catalog), contextFor(catalog))
+    const plan = buildArchivePlan(bill, { assets: ASSETS, generatedAt: GENERATED_AT })
+
+    const leaf = plan.files.find((file) => file.tileIds.includes('tiles/x/door.stl' as TileId))
+    expect(leaf?.quantity).toBe(2)
+    expect(plan.files).toHaveLength(2)
+    expect(plan.download.bytes).toBe(7_500)
   })
 })
 

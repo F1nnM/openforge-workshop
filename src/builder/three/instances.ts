@@ -127,13 +127,14 @@ import { Box3 } from 'three'
 
 import type { PlanAccessory, PlanGeometry, PlanPiece, PlanPiecePart, PlanScene } from '@/builder/canvas'
 import type { BlobId, CatalogRecord, InsertAnchor, Mount } from '@/catalog'
+import { copiesOf } from '@/catalog'
 import type { Resolution } from '@/materials'
 import type { PlacementId } from '@/store'
 
 import type { LodGeometry } from './loadLod'
 import { lodBudgetRefusal, lodObjectBudget } from './lod'
 import type { RoomFit } from './place'
-import { accessoryMatrix, fitRoom, isLeafPair, liftMatrix, placedBounds, roomBounds, tileMatrix } from './place'
+import { accessoryMatrix, fitRoom, liftMatrix, placedBounds, roomBounds, tileMatrix } from './place'
 
 /**
  * The instancing key: content address, then material variant.
@@ -485,22 +486,23 @@ function addAccessory(
   }
   const insert = { bounds: lod.bounds, anchor }
   const resolution = options.resolve(accessory.record)
-  for (const leaf of accessoryLeaves(accessory.mount, anchor)) {
-    const matrix = accessoryMatrix(host, accessory.mount, insert, accessory.hold, leaf)
+  for (const copy of accessoryLeaves(accessory.mount, anchor)) {
+    const matrix = accessoryMatrix(host, accessory.mount, insert, accessory.hold, copy)
     addInstance(groups, accessory.record, lod, resolution, matrix, piece.id)
   }
 }
 
 /**
- * How many copies of one insert this mount takes: **two leaves, or one of
- * anything else.**
+ * How many copies of one insert this mount takes, as the indices to draw.
  *
- * The rule itself is `place.ts#isLeafPair` and is deliberately not restated
- * here: it decides the offset and the half turn as well as the count, and a
- * second copy that drifted would draw the second leaf on top of the first.
+ * The rule itself is `catalog/mounts.ts#copiesOf` and is deliberately not
+ * restated here: it decides the offset and the half turn in `place.ts` and the
+ * quantity in `assembly/bill.ts` as well as the count, and a second copy that
+ * drifted from any of those would draw the second leaf on top of the first or
+ * bill one leaf for a doorway that needs two.
  */
 function accessoryLeaves(mount: Mount, anchor: InsertAnchor): readonly (0 | 1)[] {
-  return isLeafPair(mount, anchor) ? [0, 1] : [0]
+  return copiesOf(mount, anchor) === 2 ? [0, 1] : [0]
 }
 
 function finish(groups: Map<string, MutableGroup>): LodInstanceGroup[] {

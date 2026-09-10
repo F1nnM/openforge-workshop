@@ -118,9 +118,12 @@ export interface PlanSlotHolder {
   /**
    * Measured mounts on this file, by accessory slot name.
    *
-   * `mountsFor(record, slot).length`, which is exactly the `quantity`
-   * `resolveInstance` bills for a hold — so a row that says *× 4 mounts* and the
-   * bill's `×4` are one number read twice rather than two counts that can drift.
+   * `mountsFor(record, slot).length` — the *places* an accessory attaches, which
+   * is the `quantity` `resolveInstance` bills for a hold on every mount but one:
+   * a `wide` doorway is one opening authored for two leaves, so a bill sums
+   * `catalog/mounts.ts#copiesOf` over these rather than counting them. The row
+   * says *how many mounts*, which is what it is named for and what the drawing
+   * shows.
    * `0` is the ordinary reading rather than an error: `CatalogRecord.mounts` is
    * absent both for an unmeasured host and for one with no accessory slot, and
    * the archive carries no measurement until `npm run mounts` has walked it.

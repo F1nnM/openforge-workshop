@@ -30,13 +30,25 @@
  * to the plan's depth direction, so these tests pin the choice rather than
  * validate it. `geometry.ts` makes the same disclosure about `tri` and `diag`.
  */
+import { existsSync, readFileSync } from 'node:fs'
+
 import { Box3, Matrix4, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { footprintShape, planBox, planGeometry, rotatedExtent } from '@/builder/canvas'
 import type { Extent, PlanGeometry } from '@/builder/canvas'
-import type { Footprint, HoleMount, InsertAnchor, OpeningMount, SocketMount } from '@/catalog'
-import { GRID_UNIT_MM, faceVector } from '@/catalog'
+import type {
+  CatalogRecord,
+  Footprint,
+  HoleMount,
+  InsertAnchor,
+  Mount,
+  OpeningMount,
+  SocketMount,
+  SurfaceMount,
+  Vec3,
+} from '@/catalog'
+import { CatalogFile, GRID_UNIT_MM, copiesOf, faceVector } from '@/catalog'
 
 import type { HostFrame } from './place'
 import {
@@ -44,7 +56,6 @@ import {
   accessoryMatrix,
   fitRoom,
   footprintDelta,
-  isLeafPair,
   liftMatrix,
   meshFootprintUnits,
   placedBounds,
@@ -422,24 +433,35 @@ const SOCKET: SocketMount = {
   depth: 14,
 }
 
-const LEAF_MESH = new Box3(new Vector3(-214, 60, 33), new Vector3(-186, 63, 88))
-/** The leaf's bottom centre, as a point of that mesh. 28 × 3 × 55 mm. */
-const LEAF_SEAT = new Vector3(-200, 61.5, 33)
-const LEAF: InsertAnchor = { kind: 'leaf', at: [0, 0, 0], axis: [0, 1, 0], size: [28, 3, 55] }
+/**
+ * A **half**-leaf: 24.6 × 3.9 × 55 mm, the measured convention for one of a pair.
+ *
+ * The span matters and is not decoration. `copiesOf` reads it — a leaf spanning
+ * under 80 % of its opening is half of a pair, and one spanning all of it is the
+ * whole door — so a fixture leaf as wide as its doorway would have made every
+ * pair test assert the single-leaf answer.
+ */
+const LEAF_MESH = new Box3(new Vector3(-212.3, 60, 33), new Vector3(-187.7, 63.9, 88))
+/** The leaf's bottom centre, as a point of that mesh. */
+const LEAF_SEAT = new Vector3(-200, 61.95, 33)
+const LEAF: InsertAnchor = { kind: 'leaf', at: [0, 0, 0], axis: [0, 1, 0], size: [24.6, 3.9, 55] }
 
-/** A `wide` doorway: two leaves over a 28 mm opening, sill 1.5, head 61.5. */
+/** A `wide` doorway: two leaves over the measured 47.5 mm opening, sill 1.5, head 61.5. */
 const DOORWAY: OpeningMount = {
   slot: 'door',
   kind: 'opening',
   face: '-y',
   normal: [0, -1, 0],
   at: [0, -6.5, 30],
-  width: 28,
+  width: 47.5,
   sill: 1.5,
   head: 61.5,
   openTop: false,
   leaves: 2,
 }
+
+/** Where two 24.6 mm half-leaves meet in a 47.5 mm opening: ±width/4. */
+const HALF_WIDTH_OFFSET = 47.5 / 4
 
 /**
  * A host part whose plan box is centred on the world origin, at `rotation`.
@@ -524,10 +546,10 @@ describe('accessoryMatrix hangs leaves in an opening', () => {
   it('splits a two-leaf opening at ± a quarter of its width', () => {
     const left = accessoryMatrix(hostFrame(0), DOORWAY, insert, 'door', 0)
     const right = accessoryMatrix(hostFrame(0), DOORWAY, insert, 'door', 1)
-    // 28 mm of opening, two leaves: each is centred a quarter of the width off
-    // the mount, which is where two 14 mm halves meet in the middle.
-    expectAt(landsAt(left, LEAF_SEAT), -7, 1.5, 6.5)
-    expectAt(landsAt(right, LEAF_SEAT), 7, 1.5, 6.5)
+    // 47.5 mm of opening, two leaves: each is centred a quarter of the width off
+    // the mount, which is where two 24.6 mm halves meet in the middle.
+    expectAt(landsAt(left, LEAF_SEAT), -HALF_WIDTH_OFFSET, 1.5, 6.5)
+    expectAt(landsAt(right, LEAF_SEAT), HALF_WIDTH_OFFSET, 1.5, 6.5)
   })
 
   it('turns the second leaf 180° about the vertical', () => {
@@ -596,8 +618,8 @@ describe('accessoryMatrix on a measurement that is not a direction', () => {
     // slabs z-fighting — an error that looks like a rendering artefact rather
     // than like bad data, which is why the pair rule refuses it outright.
     const level: OpeningMount = { ...DOORWAY, normal: [0, 0, 1] }
-    expect(isLeafPair(level, LEAF)).toBe(false)
-    expect(isLeafPair(DOORWAY, LEAF)).toBe(true)
+    expect(copiesOf(level, LEAF)).toBe(1)
+    expect(copiesOf(DOORWAY, LEAF)).toBe(2)
 
     const first = accessoryMatrix(hostFrame(0), level, insert, 'door', 0)
     const second = accessoryMatrix(hostFrame(0), level, insert, 'door', 1)
@@ -624,5 +646,223 @@ describe('accessoryMatrix on a measurement that is not a direction', () => {
     const matrix = accessoryMatrix(hostFrame(0), SOCKET, { bounds: PEG_MESH, anchor: axisless }, 'torch', 0)
     expect(matrix.elements.every((n) => Number.isFinite(n))).toBe(true)
     expectAt(landsAt(matrix, PEG_BASE), 0, 28, 6.5)
+  })
+})
+
+/* ------------------------------------------- the corpus's own inserts, posed */
+
+/**
+ * The measured archive, or `undefined` when nothing has been imported.
+ *
+ * `public/catalog/catalog.json` is the join of `pipeline/mounts/inventory.json`
+ * onto the records — `tools/mounts/corpus.test.ts` asserts that every one of the
+ * 972 `mounts` rows and 285 `anchor` rows is the inventory's own entry for that
+ * blob — so reading the index here is reading the measurement, without this
+ * module reaching across a project boundary into the build's own directory.
+ * Skips loudly, as every other corpus block in this repo does.
+ */
+const CATALOG = 'public/catalog/catalog.json'
+const emitted = existsSync(CATALOG) ? CatalogFile.parse(JSON.parse(readFileSync(CATALOG, 'utf8'))) : undefined
+const describeCorpus = emitted === undefined ? describe.skip : describe
+
+/** A rectangular cut-stone door wall: one 25 mm opening, sill 4.497, head 43.997. */
+const DOOR_WALL_ID =
+  'tiles/cut-stone/separate_wall/primary_walls/door+rectangular/openforge/cut-stone#wall,door+rectangular.A.openforge.stl'
+/** The lintel that spans it: **32.84 × 12.99 × 6.09 mm**, thin axis = its height. */
+const LINTEL_ID = 'tiles/cut-stone/separate_wall/primary_walls/door+rectangular/doors/door_lintel.1.stl'
+/** The leaf that fills it: 27 × 3.9 × 35.49 mm, thin axis = its depth. */
+const DOOR_LEAF_ID = 'tiles/cut-stone/separate_wall/primary_walls/door+rectangular/doors/door.metal.stl'
+/** A brazier base anchored as a `plate` on its **+z** face, axis `[0, 0, −1]`. */
+const BRAZIER_BASE_ID = 'tiles/cut-stone/floors/floor+brazier+large/brazier+large,base.stl'
+/** The floor it stands on, whose `brazier_base` slot is a measured `surface`. */
+const BRAZIER_FLOOR_ID =
+  'tiles/cut-stone/floors/floor+brazier+large/cut-stone#floor,brazier+large.2x2.openforge.stl'
+
+/**
+ * An insert's mesh bounds from its measured `anchor.size`.
+ *
+ * The extents are the measurement; where the mesh sits in its own authored frame
+ * is not, and doors are authored with an inconsistent `z_min` (0, 5, 7, 9, 11.5
+ * and negative). So the box is put somewhere arbitrary and awkward on purpose:
+ * every answer below is in **bbox coordinates**, and a composition that forgot
+ * the insert's own normalisation would pass against a mesh that happened to sit
+ * at the origin.
+ */
+function boundsFrom(size: Vec3, offset = new Vector3(-311, 47, 13)): Box3 {
+  return new Box3(offset.clone(), offset.clone().add(new Vector3(size[0], size[1], size[2])))
+}
+
+/** The point of that mesh which `at: [0, 0, 0]` names — bottom centre. */
+function bottomCentre(bounds: Box3): Vector3 {
+  return new Vector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, bounds.min.z)
+}
+
+/** The point `at: [0, 0, h]` names on a plate anchored on its own top face. */
+function topCentre(bounds: Box3): Vector3 {
+  return new Vector3((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, bounds.max.z)
+}
+
+/** Where one of the insert's own bbox axes points once placed, and how long it is. */
+function placedAxis(
+  matrix: Matrix4,
+  bounds: Box3,
+  index: 0 | 1 | 2,
+): { readonly direction: Vector3; readonly lengthMm: number } {
+  const to = bounds.min.clone().setComponent(index, bounds.max.getComponent(index))
+  const vector = landsAt(matrix, to).sub(landsAt(matrix, bounds.min))
+  return { direction: vector.clone().normalize(), lengthMm: vector.length() }
+}
+
+describeCorpus('accessoryMatrix poses a measured insert by its extents', () => {
+  /* Non-null by `describeCorpus`; vitest still constructs a skipped body. */
+  const file = emitted as CatalogFile
+
+  const recordOf = (id: string): CatalogRecord => {
+    const record = file.records.find((row) => row.id === id)
+    if (record === undefined) throw new Error(`${id} is not in this catalog build`)
+    return record
+  }
+
+  const anchorOf = (id: string): InsertAnchor => {
+    const anchor = recordOf(id).anchor
+    if (anchor === undefined) throw new Error(`${id} carries no measured anchor`)
+    return anchor
+  }
+
+  const openingOf = (id: string, slot: string): OpeningMount => {
+    const mount = (recordOf(id).mounts ?? []).find((one) => one.slot === slot)
+    if (mount?.kind !== 'opening') throw new Error(`${id} has no ${slot} opening`)
+    return mount
+  }
+
+  const anchorEndingIn = (suffix: string): InsertAnchor => {
+    const anchor = file.records.find((row) => row.id.endsWith(suffix))?.anchor
+    if (anchor === undefined) throw new Error(`no anchored ${suffix} in this catalog build`)
+    return anchor
+  }
+
+  /**
+   * The defect this whole pose rule exists for, on the real numbers.
+   *
+   * `door_lintel.1.stl`'s thin axis is its **6.09 mm height**, so aiming
+   * `anchor.axis` at the surface normal — right for a door, whose thin axis is
+   * its depth — laid the lintel on its side with its height pointing out of the
+   * wall, on all 131 measured `lintel` mounts.
+   */
+  it('keeps a lintel’s height vertical, its depth through the wall and its span across it', () => {
+    const mount = openingOf(DOOR_WALL_ID, 'lintel')
+    const anchor = anchorOf(LINTEL_ID)
+    expect(anchor).toMatchObject({ kind: 'leaf', axis: [0, 0, 1] })
+    const bounds = boundsFrom(anchor.size)
+    const matrix = accessoryMatrix(hostFrame(0), mount, { bounds, anchor }, 'lintel', 0)
+
+    const height = placedAxis(matrix, bounds, 2)
+    expect(height.lengthMm).toBeCloseTo(6.086, 2)
+    expect(degreesBetween(height.direction, new Vector3(0, 1, 0))).toBeLessThan(1)
+
+    const depth = placedAxis(matrix, bounds, 1)
+    expect(depth.lengthMm).toBeCloseTo(12.986, 2)
+    expect(degreesBetween(depth.direction, zUpToYUp(mount.normal))).toBeLessThan(1)
+
+    const span = placedAxis(matrix, bounds, 0)
+    expect(span.lengthMm).toBeCloseTo(32.84, 2)
+    // Across the face, either way round: which end of a lintel faces which jamb
+    // is not in the data, and the piece is symmetric about it.
+    const across = new Vector3(0, 1, 0).cross(zUpToYUp(mount.normal)).normalize()
+    expect(Math.abs(span.direction.dot(across))).toBeCloseTo(1, 3)
+
+    // And it sits on the **head** of the opening, which is the slot's own rule.
+    expect(landsAt(matrix, bottomCentre(bounds)).y).toBeCloseTo(mount.head, 3)
+  })
+
+  /**
+   * The same rule on the piece the old one was right about, unchanged.
+   *
+   * A door leaf's thin axis *is* its through-wall axis, so the extent rule and
+   * the axis rule agree here — and `anchor.axis` still decides the sign, which
+   * is what puts the leaf's declared front face out of the doorway.
+   */
+  it('keeps a door leaf standing, 3.9 mm through the wall, seated on the sill', () => {
+    const mount = openingOf(DOOR_WALL_ID, 'door')
+    const anchor = anchorOf(DOOR_LEAF_ID)
+    expect(anchor).toMatchObject({ kind: 'leaf', axis: [0, 1, 0] })
+    const bounds = boundsFrom(anchor.size)
+    const matrix = accessoryMatrix(hostFrame(0), mount, { bounds, anchor }, 'door', 0)
+
+    const height = placedAxis(matrix, bounds, 2)
+    expect(height.lengthMm).toBeCloseTo(35.485, 2)
+    expect(degreesBetween(height.direction, new Vector3(0, 1, 0))).toBeLessThan(1)
+
+    const through = placedAxis(matrix, bounds, 1)
+    expect(through.lengthMm).toBeCloseTo(3.9, 2)
+    // `+thin` is the leaf's declared front, and it faces out of the doorway.
+    expect(degreesBetween(through.direction, zUpToYUp(mount.normal))).toBeLessThan(1)
+
+    expect(placedAxis(matrix, bounds, 0).lengthMm).toBeCloseTo(27, 2)
+    expect(landsAt(matrix, bottomCentre(bounds)).y).toBeCloseTo(mount.sill, 3)
+    // One leaf, not two: a 27 mm leaf spans the whole 25 mm opening.
+    expect(copiesOf(mount, anchor)).toBe(1)
+  })
+
+  /**
+   * A `plate` anchored on its **+z** face, which the axis rule turned upside
+   * down.
+   *
+   * `brazier+large,base.stl`'s anchor axis is `[0, 0, −1]` — into the body, off
+   * the top face it lies on — so aiming it at world up stood the brazier on its
+   * head. Nothing about a hole or a top face asks for a turn at all.
+   *
+   * Both mount kinds are asserted because the corpus's own `brazier_base` mounts
+   * are `surface` rather than `hole`: a brazier's bore is centred on the top face
+   * anyway, and `surface` is the kind that always resolves.
+   */
+  it('leaves a brazier base the right way up on a hole and on a surface', () => {
+    const anchor = anchorOf(BRAZIER_BASE_ID)
+    expect(anchor).toMatchObject({ kind: 'plate', axis: [0, 0, -1] })
+    const bounds = boundsFrom(anchor.size)
+
+    const measured = (recordOf(BRAZIER_FLOOR_ID).mounts ?? []).find((one) => one.slot === 'brazier_base')
+    expect(measured?.kind).toBe('surface')
+    const hole: HoleMount = {
+      slot: 'brazier_base',
+      kind: 'hole',
+      face: '+z',
+      normal: [0, 0, 1],
+      at: [0, 0, 4.5],
+      size: [39.8, 39.9],
+    }
+
+    const mounts: readonly Mount[] = [hole, measured as SurfaceMount]
+    for (const mount of mounts) {
+      const matrix = accessoryMatrix(hostFrame(0), mount, { bounds, anchor }, 'brazier_base', 0)
+      const up = placedAxis(matrix, bounds, 2)
+      expect(up.lengthMm).toBeCloseTo(11.01, 2)
+      expect(degreesBetween(up.direction, new Vector3(0, 1, 0))).toBeLessThan(1)
+      // The plate's own anchor point — its top-face centre, 11.01 mm up its own
+      // box — is the point that lands on the mount, so the seat is read off the
+      // measurement rather than guessed.
+      expect(landsAt(matrix, topCentre(bounds)).y).toBeCloseTo(mount.at[2], 3)
+    }
+  })
+
+  /**
+   * A `size|double` lintel is **one** piece, and a half-leaf is two.
+   *
+   * The two share a `leaves: 2` opening and a `leaf` anchor, so only the span
+   * separates them: `door_lintel.double.1.stl` is a 60.85 mm slab over a 47.5 mm
+   * opening and drawing it twice at ±11.9 mm was the visible defect on 47 mounts.
+   */
+  it('counts one copy of a double lintel or portcullis, and two of a half-leaf', () => {
+    const double = anchorEndingIn('/door_lintel.double.1.stl')
+    expect(double.kind).toBe('leaf')
+    expect(double.size[0]).toBeCloseTo(60.85, 1)
+    expect(copiesOf(DOORWAY, double)).toBe(1)
+
+    const portcullis = anchorEndingIn('/portcullis.wide.stl')
+    expect(portcullis.size[0]).toBeCloseTo(55.77, 1)
+    expect(copiesOf({ ...DOORWAY, width: 51 }, portcullis)).toBe(1)
+
+    // 24.6 mm in 47.5: the genuine pair, and the only shape that reaches two.
+    expect(copiesOf(DOORWAY, LEAF)).toBe(2)
   })
 })

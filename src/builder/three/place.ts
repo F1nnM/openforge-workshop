@@ -69,7 +69,7 @@ import { Box3, Matrix4, Quaternion, Vector3 } from 'three'
 import type { PlanGeometry } from '@/builder/canvas'
 import { boxCentre } from '@/builder/canvas'
 import type { InsertAnchor, Mount, OpeningMount, Vec3 } from '@/catalog'
-import { GRID_UNIT_MM } from '@/catalog'
+import { copiesOf, GRID_UNIT_MM } from '@/catalog'
 
 /**
  * The archive's Z-up into three.js's Y-up: −90° about X.
@@ -273,16 +273,45 @@ export function zUpToYUp(v: Vec3): Vector3 {
  * equals `faceVector(face)` wherever the host is flat, so it is right in both
  * cases and the face label is right in one.
  *
- * ## What each kind aims the anchor axis at
+ * ## Two ways to pose an insert, and the kind chooses between them
  *
- *   - **socket / pocket** — at `−mount.axis`. The axis enters the host, so its
- *     negation leaves it, and for the measured torch socket that is up the
- *     **62–65° lean**: a 5.5 × 3 mm mouth tilting 25° off vertical, up and out.
- *     Aiming at the normal instead would bury the torch's tail in the wall.
- *   - **opening** — at the normal. A leaf faces out of the doorway.
- *   - **hole / surface** — at world up. A trapdoor or a brazier is read from
- *     above and stands on the floor; nothing in the mount fixes its yaw, so the
- *     roll below leaves it wherever the alignment put it.
+ * **`socket` and `pocket` pose by the anchor's axis**, because a peg's axis *is*
+ * its pose: the pin has one direction it can go in, the mouth was measured, and
+ * the insert's own body has to lie along it. The axis is aimed at `−mount.axis`
+ * — the axis enters the host, so its negation leaves it, and for the measured
+ * torch socket that is up the **62–65° lean**: a 5.5 × 3 mm mouth tilting 25°
+ * off vertical, up and out. Aiming at the normal instead would bury the torch's
+ * tail in the wall. {@link alignToAxis} then chooses the remaining roll so the
+ * flame stands as near upright as the lean allows.
+ *
+ * **`opening`, `hole` and `surface` pose by the insert's bbox extents**, and the
+ * anchor's axis is used for nothing but a sign. The reason is a measurement: a
+ * `leaf`'s axis is its *thinnest* bbox axis, which is the through-wall direction
+ * for a door (28 × 4 × 35.5 mm — thin is the depth) and the **height** for a
+ * lintel (`door_lintel.1.stl` is 32.84 × 12.99 × 6.09 mm — thin is the 6.1 mm
+ * height). Aiming that axis at the surface normal laid all 131 lintel mounts on
+ * their side, height pointing out of the wall, and did the same to the two
+ * `block` inserts on openings and to any `plate` anchored on its `+z` face
+ * (`brazier+large,base.stl`, axis `[0, 0, −1]`, which came out upside down).
+ *
+ * The extents cannot be wrong that way, because an insert is authored **Z-up**
+ * like every other file in the archive:
+ *
+ *   - the insert's mesh `+z` stays world up, which {@link standUpright} has
+ *     already done — so there is no vertical alignment step at all;
+ *   - of the two horizontal mesh axes, the **longer is the span** and the
+ *     **shorter is the through-wall axis**. For an `opening` the through axis is
+ *     turned onto `±mount.normal` and the span therefore lands across the face;
+ *     the sign is the anchor axis's when the anchor axis *is* that mesh axis —
+ *     a door's declared `+thin`, so its relief faces out — and `+normal`
+ *     otherwise, a lintel's `at` being on its mid-plane where the choice costs
+ *     nothing;
+ *   - `hole` and `surface` take **no rotation whatever**: the accessory stands on
+ *     a floor, nothing in the mount fixes its yaw, and the host's own `x` is as
+ *     good an answer as any invented one.
+ *
+ * There is no roll step on these three kinds because there is no freedom left to
+ * spend on one: the vertical is fixed by the extents and the yaw by the normal.
  *
  * ## The **slot name** decides the seat in an opening
  *
@@ -304,36 +333,33 @@ export function accessoryMatrix(
   mount: Mount,
   insert: InsertFrame,
   slot: string,
-  leaf: 0 | 1,
+  copy: 0 | 1,
   target = new Matrix4(),
 ): Matrix4 {
-  const seat = mountSeat(mount, insert.anchor, slot, leaf)
-  // The insert's own up is the fallback for an anchor with no axis — see
-  // {@link EPSILON} for what a zero vector does to the alignment.
-  const from = zUpToYUp(insert.anchor.axis)
-  const align = alignToAxis(
-    from.lengthSq() > EPSILON ? from.normalize() : new Vector3(0, 1, 0),
-    seat.axis,
-    seat.halfTurn,
-  )
+  const seat = mountSeat(mount, insert.anchor, slot, copy)
   const anchor = zUpToYUp(insert.anchor.at)
 
   return target
     .copy(hostMatrix(host))
     .multiply(new Matrix4().makeTranslation(seat.point.x, seat.point.y, seat.point.z))
-    .multiply(new Matrix4().makeRotationFromQuaternion(align))
+    .multiply(new Matrix4().makeRotationFromQuaternion(seat.align))
     .multiply(new Matrix4().makeTranslation(-anchor.x, -anchor.y, -anchor.z))
     .multiply(standUpright(insert.bounds))
 }
 
-/** Where one instance sits on the host and which way its anchor axis must point. */
+/** Where one instance sits on the host, and how it is turned to get there. */
 interface Seat {
   /** The anchor's landing point, in the host's bbox frame, Y-up. */
   readonly point: Vector3
-  /** The direction the insert's anchor axis is turned to. Unit. */
-  readonly axis: Vector3
-  /** A second leaf, turned 180° about the vertical so the pair meets in the middle. */
-  readonly halfTurn: boolean
+  /**
+   * The turn applied to the insert **after** {@link standUpright}.
+   *
+   * A whole quaternion rather than a target axis, because the two kinds of pose
+   * {@link accessoryMatrix} describes do not both reduce to *aim this axis
+   * there*: a socket aims the anchor axis and then rolls, an opening yaws the
+   * insert's own box onto the face, and a hole does not turn it at all.
+   */
+  readonly align: Quaternion
 }
 
 /**
@@ -350,34 +376,8 @@ function hostMatrix(host: HostFrame): Matrix4 {
     .multiply(new Matrix4().makeRotationY((-host.geometry.angle * Math.PI) / 180))
 }
 
-/**
- * Does this mount take **two** of this insert? The one place that decides.
- *
- * `buildRoom3D` asks it to know how many instances to add and
- * {@link accessoryMatrix} asks it to know whether to offset and turn them; if
- * the two answered separately they could disagree, and the way they would
- * disagree is a *second* leaf drawn at the *first* leaf's seat — two coplanar
- * slabs z-fighting rather than a visible error. So it is exported, and both read
- * it.
- *
- * A `wide` or `double` opening is authored for two leaves (the measured
- * convention: 2 × 24.6 mm over a 47.5 mm opening), which is why
- * `OpeningMount.leaves` is a field rather than a width threshold a consumer
- * re-derives. The anchor's kind is asked as well, because a **lintel** in the
- * same doorway is one piece however many leaves it takes.
- *
- * **A face with no horizontal direction is not a pair.** The two seats are
- * `±width/4` along `up × normal`, so an opening whose measured normal is
- * vertical — degenerate data, not a doorway — has nowhere to put the second one.
- * One leaf, unturned, is the honest answer there; two at one seat is not.
- */
-export function isLeafPair(mount: Mount, anchor: InsertAnchor): boolean {
-  if (mount.kind !== 'opening' || mount.leaves !== 2 || anchor.kind !== 'leaf') return false
-  return faceAcross(outwardAxis(mount.normal)) !== null
-}
-
-/** One {@link Seat} per kind — {@link accessoryMatrix} states what each aims at. */
-function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, leaf: 0 | 1): Seat {
+/** One {@link Seat} per kind — {@link accessoryMatrix} states how each is posed. */
+function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, copy: 0 | 1): Seat {
   switch (mount.kind) {
     case 'socket':
     case 'pocket': {
@@ -386,13 +386,20 @@ function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, leaf: 0 | 1
       // straight out of the face, with none of the lean.
       const entry = zUpToYUp(mount.axis)
       const axis = entry.lengthSq() > EPSILON ? entry.negate().normalize() : outwardAxis(mount.normal)
-      return { point: zUpToYUp(mount.at), axis, halfTurn: false }
+      // The insert's own up is the fallback for an anchor with no axis — see
+      // {@link EPSILON} for what a zero vector does to the alignment.
+      const from = zUpToYUp(anchor.axis)
+      const align = alignToAxis(from.lengthSq() > EPSILON ? from.normalize() : WORLD_UP.clone(), axis)
+      return { point: zUpToYUp(mount.at), align }
     }
     case 'opening':
-      return openingSeat(mount, anchor, slot, leaf)
+      return openingSeat(mount, anchor, slot, copy)
     case 'hole':
     case 'surface':
-      return { point: zUpToYUp(mount.at), axis: new Vector3(0, 1, 0), halfTurn: false }
+      // No turn at all: `standUpright` has already put the insert's own +z up,
+      // and nothing in a hole or a top face fixes a yaw to spend the remaining
+      // freedom on. See {@link accessoryMatrix}.
+      return { point: zUpToYUp(mount.at), align: new Quaternion() }
   }
 }
 
@@ -410,6 +417,15 @@ const LINTEL_SLOT = 'lintel'
 const EPSILON = 1e-12
 
 /**
+ * Three's up, shared rather than allocated per call.
+ *
+ * Every use below either clones it or reads it — `setFromAxisAngle` and `cross`
+ * do not write through their argument — because this runs once per accessory
+ * per frame.
+ */
+const WORLD_UP = new Vector3(0, 1, 0)
+
+/**
  * A measured triple as a unit direction out of the host, in Y-up.
  *
  * World up when the measurement is degenerate, so nothing downstream is handed a
@@ -417,29 +433,112 @@ const EPSILON = 1e-12
  */
 function outwardAxis(normal: Vec3): Vector3 {
   const out = zUpToYUp(normal)
-  return out.lengthSq() > EPSILON ? out.normalize() : new Vector3(0, 1, 0)
+  return out.lengthSq() > EPSILON ? out.normalize() : WORLD_UP.clone()
 }
 
 /** The horizontal direction lying in a face: `up × out`, unit — or `null` on a level face. */
 function faceAcross(out: Vector3): Vector3 | null {
-  const along = new Vector3(0, 1, 0).cross(out)
+  const along = WORLD_UP.clone().cross(out)
   return along.lengthSq() > EPSILON ? along.normalize() : null
 }
 
-/** A leaf, a lintel or a grille in a doorway — and where two leaves go. */
-function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, leaf: 0 | 1): Seat {
-  const axis = outwardAxis(mount.normal)
+/**
+ * A leaf, a lintel or a grille in a doorway — posed by its own extents.
+ *
+ * The seat is the slot's: `lintel` on the `head`, everything else on the `sill`,
+ * at the opening's `at` in the other two axes. The turn is the yaw that lays the
+ * insert's **shorter horizontal extent** through the wall and therefore its
+ * **longer** one across the face; see {@link accessoryMatrix} for why the
+ * anchor's axis cannot be asked instead, and {@link copiesOf} for the second
+ * leaf's offset.
+ */
+function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, copy: 0 | 1): Seat {
+  const out = outwardAxis(mount.normal)
   const point = zUpToYUp([mount.at[0], mount.at[1], slot === LINTEL_SLOT ? mount.head : mount.sill])
 
-  // `±width/4` is where two half-width slabs meet in the middle of the opening.
-  const along = isLeafPair(mount, anchor) ? faceAcross(axis) : null
-  if (along !== null) point.addScaledVector(along, ((leaf === 0 ? -1 : 1) * mount.width) / 4)
+  const through = throughIndex(anchor.size)
+  const align = yawOnto(meshAxis(through), out.clone().multiplyScalar(throughSign(anchor, through)))
 
-  return { point, axis, halfTurn: along !== null && leaf === 1 }
+  // `±width/4` is where two half-width slabs meet in the middle of the opening.
+  // Non-null whenever `copiesOf` says two — it is the same `up × normal` test.
+  const along = copiesOf(mount, anchor) === 2 ? faceAcross(out) : null
+  if (along !== null) {
+    point.addScaledVector(along, ((copy === 0 ? -1 : 1) * mount.width) / 4)
+    // The vertical is the world's, not the leaf's: a door leaf turns about the
+    // hinge line, and premultiplying is what keeps the axis out of the leaf's
+    // own frame — where it would be whichever way the leaf happens to lean.
+    if (copy === 1) align.premultiply(new Quaternion().setFromAxisAngle(WORLD_UP, Math.PI))
+  }
+
+  return { point, align }
+}
+
+/**
+ * Which of the insert's two horizontal bbox axes runs **through** the host.
+ *
+ * The shorter one, `0` for the mesh's own x and `1` for its y — an insert being
+ * authored Z-up, so its third extent is the height and is never a candidate. A
+ * tie goes to x, which is arbitrary and unreachable in the corpus: no measured
+ * insert has two equal horizontal extents.
+ */
+function throughIndex(size: Vec3): 0 | 1 {
+  return size[0] <= size[1] ? 0 : 1
+}
+
+/** One of the insert's own horizontal mesh axes as a Y-up direction. */
+function meshAxis(index: 0 | 1): Vector3 {
+  return zUpToYUp(index === 0 ? [1, 0, 0] : [0, 1, 0])
+}
+
+/**
+ * Which way round the through axis goes: **out of the host, or into it.**
+ *
+ * `+1` unless the anchor's own axis *is* that mesh axis and points the other
+ * way. A `leaf`'s axis is `+thin` by declaration and a door's thin axis is its
+ * depth, so this is what makes a door leaf's declared front face out of the
+ * doorway. For a lintel — whose axis is its height, not its depth — there is
+ * nothing to read, and `+normal` is free: its `at` sits on the opening's
+ * mid-plane, where the choice costs nothing but which side the relief faces.
+ */
+function throughSign(anchor: InsertAnchor, index: 0 | 1): 1 | -1 {
+  const component = anchor.axis[index]
+  if (Math.abs(component) < 1 - AXIS_TOLERANCE) return 1
+  return component > 0 ? 1 : -1
+}
+
+/** How near ±1 a component must be for the anchor's axis to *be* a bbox axis. */
+const AXIS_TOLERANCE = 1e-6
+
+/**
+ * The rotation **about world up** that turns `from` onto `to`.
+ *
+ * Written as an explicit yaw rather than `setFromUnitVectors`, and both halves
+ * of that matter. The shortest arc between two horizontal vectors is not about
+ * the vertical: at 180° — an opposite-facing wall, which is half of them —
+ * `setFromUnitVectors` picks an arbitrary perpendicular axis and can hand back a
+ * turn that lays the insert on its face. And when `to` leans off horizontal, the
+ * honest answer is still a yaw: the vertical is fixed by the insert's extents,
+ * so what is being chosen here is only which way round the box faces.
+ *
+ * `to` is projected onto the horizontal plane by construction — the two dot
+ * products below use its x and z alone. A `to` that is purely vertical leaves
+ * both at zero, and the identity is the honest answer: nothing about a level
+ * face says which way an insert should turn.
+ */
+function yawOnto(from: Vector3, to: Vector3): Quaternion {
+  // `R_y(φ)` sends `(x, z)` to `(x cos φ + z sin φ, −x sin φ + z cos φ)`, so
+  // these two are the cosine and sine of the angle that lands `from` on `to`.
+  const cos = from.x * to.x + from.z * to.z
+  const sin = from.z * to.x - from.x * to.z
+  if (cos * cos + sin * sin < EPSILON) return new Quaternion()
+  return new Quaternion().setFromAxisAngle(WORLD_UP, Math.atan2(sin, cos))
 }
 
 /**
  * Turn `from` onto `to`, then roll about `to` so the insert's own up stays up.
+ *
+ * A socket's pose and nothing else — see {@link accessoryMatrix} for why the
+ * other three kinds do not go through here.
  *
  * Aligning two axes leaves one degree of freedom, and nothing in the data fixes
  * it: `setFromUnitVectors` resolves it with the shortest arc, which for a torch
@@ -447,25 +546,19 @@ function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, le
  * than inherited — the insert's own **+Z**, which `standUpright` has already
  * made `+Y`, is brought as close to world up as the alignment allows.
  *
- * Both projections vanish when the target axis *is* vertical (a hole, a
- * surface) or when the insert's up is its anchor axis (a peg, whose yaw about
- * its own pin nothing can see anyway). Then there is no roll to choose and the
- * alignment stands.
+ * Both projections vanish when the target axis *is* vertical or when the
+ * insert's up is its anchor axis (a peg, whose yaw about its own pin nothing can
+ * see anyway). Then there is no roll to choose and the alignment stands.
  */
-function alignToAxis(from: Vector3, to: Vector3, halfTurn: boolean): Quaternion {
+function alignToAxis(from: Vector3, to: Vector3): Quaternion {
   const align = new Quaternion().setFromUnitVectors(from, to)
 
-  const up = new Vector3(0, 1, 0).applyQuaternion(align).projectOnPlane(to)
-  const worldUp = new Vector3(0, 1, 0).projectOnPlane(to)
-  if (up.lengthSq() > 1e-12 && worldUp.lengthSq() > 1e-12) {
+  const up = WORLD_UP.clone().applyQuaternion(align).projectOnPlane(to)
+  const worldUp = WORLD_UP.clone().projectOnPlane(to)
+  if (up.lengthSq() > EPSILON && worldUp.lengthSq() > EPSILON) {
     const roll = Math.atan2(new Vector3().crossVectors(up, worldUp).dot(to), up.dot(worldUp))
     align.premultiply(new Quaternion().setFromAxisAngle(to, roll))
   }
-
-  // The vertical is the world's, not the insert's: a door leaf turns about the
-  // hinge line, and premultiplying is what keeps the axis out of the leaf's own
-  // frame — where it would be whichever way the leaf happens to lean.
-  if (halfTurn) align.premultiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), Math.PI))
   return align
 }
 

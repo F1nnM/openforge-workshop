@@ -208,9 +208,10 @@ const NOTHING_HELD: SlotSelection = {}
  * What a holder's slots cost, wherever that is not the obvious one copy.
  *
  * Two facts, and both are about a number the user meets later in the parts list.
- * A host is billed **one copy per measured mount** — a wall with four torch
- * sockets is four torches for one press — so a slot with more than one says so
- * before the press rather than after it. And a slot with **no** measured mount is
+ * A host is billed **at least one copy per measured mount** — a wall with four
+ * torch sockets is four torches for one press, and a `wide` doorway's single
+ * opening is two leaves — so a slot with more than one mount says so before the
+ * press rather than after it. And a slot with **no** measured mount is
  * billed once and drawn nowhere, which is the state of the whole archive until
  * `npm run mounts` has walked it and is not something the user can repair.
  *

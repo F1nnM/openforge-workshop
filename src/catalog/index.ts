@@ -24,7 +24,7 @@ export type {
   VariantVerdict,
 } from './aggregate'
 export { aggregateAddress, buildAggregateIndex, selectVariant, variantsByPreference } from './aggregate'
-export { faceVector, mountsFor } from './mounts'
+export { copiesOf, faceVector, mountsFor } from './mounts'
 export type { ArcBandEvidence, ArcFootprint } from './schema'
 export {
   ARC_BAND_EVIDENCE,

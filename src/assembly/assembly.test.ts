@@ -1347,6 +1347,95 @@ describe('the holds', () => {
     expect(bill.unplaced).toEqual([])
   })
 
+  /**
+   * A `wide` doorway: **one** measured opening, authored for two leaves.
+   *
+   * 47.5 mm is the measured convention (2 × 24.6 mm of leaf), and the `door`
+   * slot is what a leaf and a lintel both fill — the same opening, two slots,
+   * which is why the bill cannot read the copies off the mount count.
+   */
+  const DOORWAY_MOUNT: Mount = {
+    slot: 'door',
+    kind: 'opening',
+    face: '-y',
+    normal: [0, -1, 0],
+    at: [0, -6.35, 24],
+    width: 47.5,
+    sill: 4.5,
+    head: 44,
+    openTop: true,
+    leaves: 2,
+  }
+
+  const DOOR = 'tiles/hold/door.stl'
+  const LINTEL = 'tiles/hold/lintel.stl'
+
+  /** A wide door wall declaring both slots the one opening serves. */
+  const DOORWAY_ROW: Row = {
+    id: WALL,
+    tags: ['shape|wall'],
+    layer: 'topper',
+    build: 'separate wall',
+    bytes: 4_096,
+    config: {
+      parts: [
+        { name: 'door', tags: { require: [{ tag: 'kind|door' }] } },
+        { name: 'lintel', tags: { require: [{ tag: 'kind|lintel' }] }, optional: true },
+      ],
+    },
+    mounts: [DOORWAY_MOUNT, { ...DOORWAY_MOUNT, slot: 'lintel' }],
+  }
+
+  /** One of a pair: 24.6 mm of leaf in a 47.5 mm opening, 52 % of it. */
+  const HALF_LEAF_ROW: Row = {
+    id: DOOR,
+    tags: ['kind|door'],
+    layer: 'insert',
+    build: 'separate wall',
+    bytes: 2_048,
+    anchor: { kind: 'leaf', at: [0, 0, 0], axis: [0, 1, 0], size: [24.6, 3.9, 35.5] },
+  }
+
+  /** `door_lintel.double.1.stl`'s measurement: one 60.85 mm slab, 128 % of it. */
+  const DOUBLE_LINTEL_ROW: Row = {
+    id: LINTEL,
+    tags: ['kind|lintel'],
+    layer: 'insert',
+    build: 'separate wall',
+    bytes: 1_024,
+    anchor: { kind: 'leaf', at: [0, 0, 0], axis: [0, 0, 1], size: [60.85, 12.99, 7.09] },
+  }
+
+  /**
+   * The count the bill was short by: **two** leaves on one measured opening.
+   *
+   * A doorway `require`-ing `size|wide` is one mount and two prints, so a
+   * quantity read off `mountsFor(...).length` under-counted all 85 of them — a
+   * download that cannot fill the doorway it was built from. The lintel over the
+   * same opening is one piece, and the two are told apart by their span alone:
+   * `catalog/mounts.ts#copiesOf`, which is what `buildRoom3D` draws by.
+   */
+  it('bills two leaves and one lintel for one wide doorway', () => {
+    const { index, context } = worldOf([DOORWAY_ROW, HALF_LEAF_ROW, DOUBLE_LINTEL_ROW], HOST)
+    const scene = holding(instanceOf(HOST, { wall: WALL }), 'wall', { door: DOOR, lintel: LINTEL })
+    const bill = buildBillOfTiles([scene], index, context)
+
+    expect(bill.lines.find((entry) => entry.tile.id === DOOR)?.quantity).toBe(2)
+    expect(bill.lines.find((entry) => entry.tile.id === LINTEL)?.quantity).toBe(1)
+    // The wall, two leaves and one lintel: four prints of three files.
+    expect(bill.files).toBe(3)
+    expect(bill.copies).toBe(4)
+    expect(bill.download.bytes).toBe(4_096 + 2_048 + 1_024)
+    expect(bill.complete).toBe(true)
+    expect(bill.unplaced).toEqual([])
+
+    const held = bill.resolved[0]?.holds ?? []
+    expect(held.map((one) => [one.hold, one.mounts, one.copies])).toEqual([
+      ['door', 1, 2],
+      ['lintel', 1, 1],
+    ])
+  })
+
   it('resolves one entry per declared accessory slot, filled or not', () => {
     const { index, context } = worldOf([hostRow({ sockets: 4 }), TORCH_ROW], HOST)
     const resolved = resolveInstance(scene({ torch: TORCH }), index, context)
@@ -1359,6 +1448,9 @@ describe('the holds', () => {
         fill: { tile: TORCH, pinned: false },
         record: index.byId.get(TORCH as TileId),
         mounts: 4,
+        // Four sockets, one torch each: `copies` and `mounts` part company only
+        // on a `wide` doorway's pair of leaves.
+        copies: 4,
       },
     ])
     // The hold is a part like any other, and it is the part that carries the
@@ -1426,6 +1518,9 @@ describe('the holds', () => {
       fill: undefined,
       record: undefined,
       mounts: 4,
+      // No insert, so nothing to count copies of: one per mount is the answer
+      // `mounts` alone always gave.
+      copies: 4,
     })
   })
 

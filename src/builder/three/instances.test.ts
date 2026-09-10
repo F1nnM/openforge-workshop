@@ -830,8 +830,28 @@ function measuredCatalog(anchor: InsertAnchor, mounts?: readonly Mount[]): Catal
 /** A 7 × 7 × 12 mm peg at its own origin — the measured torch. */
 const TORCH_PEG: InsertAnchor = { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] }
 
-/** A door leaf: 28 wide, 3 thin, 55 tall, anchored on its thin axis. */
-const DOOR_LEAF: InsertAnchor = { kind: 'leaf', at: [0, 0, 0], axis: [0, 1, 0], size: [28, 3, 55] }
+/**
+ * One of a pair: **24.6 mm** of leaf, 3.9 thin, 35.5 tall, on its thin axis.
+ *
+ * The measured half-leaf, and the span is what makes it one: `copiesOf` calls a
+ * leaf half of a pair only under 80 % of its opening, so a fixture leaf as wide
+ * as the doorway would draw one instance and pass nothing.
+ */
+const DOOR_LEAF: InsertAnchor = { kind: 'leaf', at: [0, 0, 0], axis: [0, 1, 0], size: [24.6, 3.9, 35.5] }
+
+/**
+ * `door_lintel.double.1.stl`'s own measurement: a **60.85 mm** slab, one piece.
+ *
+ * The same `leaf` kind and the same `leaves: 2` doorway as {@link DOOR_LEAF},
+ * which is the whole point of having both here: the kind cannot separate them
+ * and the span can.
+ */
+const DOUBLE_LINTEL: InsertAnchor = {
+  kind: 'leaf',
+  at: [0, 0, 0],
+  axis: [0, 0, 1],
+  size: [60.85, 12.99, 7.09],
+}
 
 /** One `wide` doorway in the host wall, authored for two leaves. */
 const WIDE_DOORWAY: readonly Mount[] = [
@@ -926,7 +946,7 @@ describe('buildRoom3D draws an accessory at every measured mount', () => {
     expect(room.disagreements.map((one) => one.blob)).toEqual([recordOf(catalog, FIXTURE_IDS.wall2)?.blob])
   })
 
-  it('hangs two leaves in a wide doorway and one lintel in the same opening', async () => {
+  it('hangs two half-leaves in a wide doorway and one double lintel in the same opening', async () => {
     const pair = await roomFrom(measuredCatalog(DOOR_LEAF, WIDE_DOORWAY), holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
     const leaves = pair.groups.find((group) => group.count === 2)
     expect(leaves).toBeDefined()
@@ -934,15 +954,23 @@ describe('buildRoom3D draws an accessory at every measured mount', () => {
     // 47.5 mm of opening, split at ±width/4 — where two half-width slabs meet.
     expect((seats[1]?.x ?? 0) - (seats[0]?.x ?? 0)).toBeCloseTo(47.5 / 2, 6)
 
-    // A lintel is one piece however many leaves the doorway takes.
-    const single = await roomFrom(measuredCatalog({ ...DOOR_LEAF, kind: 'plate' }, WIDE_DOORWAY), holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch))
+    // **A real double lintel**, in the same `leaves: 2` opening and with the
+    // same `leaf` kind: one piece, one instance. Drawing it twice at ±11.9 mm is
+    // the defect this asserts against, and asserting it with a `plate` — as this
+    // test used to — proved only that a plate is not a leaf.
+    const single = await roomFrom(
+      measuredCatalog(DOUBLE_LINTEL, WIDE_DOORWAY),
+      holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch),
+    )
     expect(single.instances).toBe(2)
+    expect(single.groups.find((group) => group.count === 2)).toBeUndefined()
   })
 
   it('draws one leaf, not two at one seat, when the opening’s normal is vertical', async () => {
-    // The count and the offset come from the same predicate — `place.ts#isLeafPair`
-    // — so a face with no horizontal direction cannot produce a second instance
-    // that the matrix would then place on top of the first.
+    // The count and the offset come from the same predicate —
+    // `catalog/mounts.ts#copiesOf` — so a face with no horizontal direction
+    // cannot produce a second instance that the matrix would then place on top
+    // of the first.
     const level = WIDE_DOORWAY.map((mount) => ({ ...mount, normal: [0, 0, 1] as const }))
     const room = await roomFrom(
       measuredCatalog(DOOR_LEAF, level),

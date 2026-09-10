@@ -47,7 +47,7 @@
  * There is nothing left for it to warn about: the app inserts no base, so it
  * cannot ask for a second print of one.
  *
- * ## Accessories are counted per mount, and that is a fourth way to reach 2
+ * ## Accessories are counted per copy drawn, and that is a fourth way to reach 2
  *
  * A fill may carry **holds** — the torch in the wall's socket — and a hold is
  * one file in as many places as the host has measured mounts for that slot: a
@@ -55,6 +55,12 @@
  * one {@link BillSlotRef} and a `quantity` of 4, which is the md5 dedupe's own
  * argument one level down (one download, four prints) and the reason
  * {@link accumulate} adds `AssemblyPart.quantity` rather than 1.
+ *
+ * One mount is not always one copy, either: a `wide` doorway is a single
+ * measured opening that takes **two** half-leaves, so the quantity is the sum of
+ * `catalog/mounts.ts#copiesOf` over the mounts rather than their count. That is
+ * the function `buildRoom3D` draws by, which is what keeps the pack able to fill
+ * the room it was built from.
  *
  * Two lists come with it, and both exist so the bill and the plan agree about
  * what is in the room. {@link BillOfTiles.unfilled} gains the **required**
@@ -249,10 +255,11 @@ export interface BillLine {
    * Counts every part occurrence, so two slots of one instance naming the same
    * file give 2. Contract **C-c**; see the module docblock.
    *
-   * An accessory counts **once per measured mount** rather than once per hold —
-   * a 1×1 full pillar carries a torch socket on each of its four faces, so one
+   * An accessory counts **once per copy drawn** rather than once per hold — a
+   * 1×1 full pillar carries a torch socket on each of its four faces, so one
    * `torch` hold in it is a quantity of 4 against a single entry in
-   * {@link slots}. `AssemblyPart.quantity` is where that number is decided.
+   * {@link slots}, and one `wide` doorway is a quantity of 2 against a single
+   * opening. `AssemblyPart.quantity` is where that number is decided.
    */
   quantity: number
 
@@ -351,7 +358,7 @@ export interface BillOfTiles {
    * each, 128 over 40. It counts fills and not slots, so an instance with a hole
    * in it contributes less than its recipe asks for, and `unfilled` says where.
    *
-   * **A hold counts once per measured mount**, the same as {@link copies}: it is
+   * **A hold counts once per copy drawn**, the same as {@link copies}: it is
    * the number the panel renders as *"N parts to print"*, and one torch in a
    * four-socket pillar is four things to print. Summing `AssemblyPart.quantity`
    * rather than counting the array is what keeps the two agreeing, which they
@@ -546,8 +553,9 @@ function accumulate(groups: Map<BlobId, Group>, placement: PlacementId, part: As
   })
   // **`part.quantity`, not `1`** — the one arithmetic change holds made to this
   // module. A template slot is one place on the grid and always contributes 1; a
-  // hold contributes one copy per measured mount, so the torch of a four-socket
-  // pillar is a single ask worth four prints of one download.
+  // hold contributes the copies the room draws, so the torch of a four-socket
+  // pillar is a single ask worth four prints of one download, and the pair of
+  // leaves in a wide doorway is one ask worth two.
   group.quantity += part.quantity
 }
 

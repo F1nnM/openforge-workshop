@@ -137,11 +137,18 @@ property of the bytes, and 171 md5s are shared by 520 rows.
 
    | slot names | class | signature |
    | --- | --- | --- |
-   | `door`, `lintel`, `portcullis`, `archway`, `frame`, `shutters`, `window`, `grate door`, `grate` on a wall, `arch`, `crosshead`, `grate (left/right)` | `opening` | **every** opening on the thin axis (a double window wall has two, and `frame` / `shutters` fill both); a `lintel` shares the `door`'s opening(s) |
+   | `door`, `lintel`, `portcullis`, `archway`, `frame`, `shutters`, `window`, `grate door`, `grate` on a wall, `arch`, `grate (left/right)` | `opening` | **every** opening on the thin axis (a double window wall has two, and `frame` / `shutters` fill both); a `lintel` shares the `door`'s opening(s) |
    | `torch` | `socket` | 5–6.5 × 2–3.5 mm, 58–68° from the normal, ≥ 12 mm deep; **every** match is a mount |
-   | `trapdoor`, `grate` on a floor, `brazier`, `brazier_base` | `hole` | the largest non-edge through-z component |
+   | `trapdoor`, `grate` on a floor | `hole` | the largest non-edge through-z component |
    | `treasure` | `pocket` | the deepest pocket on either big face at 0° tilt, 8–14 mm across |
-   | everything else (`statue`, `beam`, `brace`, `support`, `top`, `slab_*`, `fracture slope`, `broken_section`, `crosshead` on a floor) | `surface` | not measured: the host's top-face centre, axis +z |
+   | everything else (`statue`, `beam`, `brace`, `support`, `top`, `slab_*`, `fracture slope`, `broken_section`, `crosshead`, `brazier`, `brazier_base`) | `surface` | not measured: the host's top-face centre, axis +z |
+
+   **`brazier` and `brazier_base` are `surface`, not `hole`, and `crosshead` appears once.**
+   Both were amended to the code after review (2026-09-10). A brazier's bore is centred on
+   the top face of its floor, so the `hole` detector's answer and the top-face centre are
+   the same point to within the plate's thickness — and `surface` is the one class that
+   always resolves, where a `hole` that the depth map misses drops the mount altogether.
+   `crosshead` was listed under both `opening` and `surface`; it is a `surface`.
 
    A slot with no match is **absent** from the inventory and present in the report with a
    reason: `no-opening`, `no-socket`, `no-hole`, `arc-fit-refused`, `runs-off-end` (an
@@ -150,15 +157,28 @@ property of the bytes, and 171 md5s are shared by 520 rows.
 
 **Per insert:** bbox and an **anchor** — `kind` and the point/axis the consumer aligns:
 
+Tried in this order — **leaf, plate, peg, block** — because the tests are not exclusive
+and the earlier kinds are the more specific claims:
+
 | kind | rule | anchor point | axis |
 | --- | --- | --- | --- |
-| `peg` | two smaller axes within 1.5×, long axis ≥ 1.4× the middle and ≤ 40 mm | base-flange centre (the wide end) | the long axis, base → tip |
 | `leaf` | one axis ≤ 10 mm, both others ≥ 10 mm | bottom-centre of the slab | the thin axis |
 | `plate` | triangles flat on one bbox face cover ≥ 50 % of it and ≤ half that on the opposite face | that face's centre | that face's normal, into the plate |
+| `peg` | two smaller axes within 1.5×, long axis ≥ 1.4× the middle and ≤ 40 mm | base-flange centre (the wide end) | the long axis, base → tip |
 | `block` | the rest | bottom-centre | +z |
 
+**`plate` before `peg`** was amended after review (2026-09-10): `torch_plate.stl` is
+7.5 × 8.9 × 13.5 mm and satisfies both rules, and peg-first anchored it on the end of its
+long axis rather than on the flat back it presses against the wall — which left the
+`socket` + `plate` row below with nothing in the corpus to exercise. Measured over all 139
+inserts the order moves two of them: `torch_plate.stl` becomes a `plate`, and `torch.stl`
+— a flat base under an unflat head — becomes one too, with the **identical** `at` and
+`axis` it carried as a peg, so nothing about the 354 torch slots renders differently. The
+remaining two pegs are the `brazier+small` blobs.
+
 (The insert subagent's measurement: at ≤ 10 mm every `part|door` file is a `leaf`; 33 of
-33 lintels are `plate` or `leaf`; `torch.stl` is a `peg`; `torch_plate.stl` is a `plate`.)
+33 lintels are `plate` or `leaf`. Final kinds over the corpus: **117 leaf, 13 block,
+7 plate, 2 peg**.)
 
 **Run mechanics.** Fetch and parse on the main thread; the depth-map work — ~40 s per
 host on one core for the sweep — in `worker_threads`, one per core. ≈ 1 h for the whole
@@ -279,9 +299,15 @@ the accepted cost of that file).
 
 `resolve.ts#readFills` walks `template.parts` today; it additionally walks each fill's
 `holds`, producing an `AssemblyPart` per hold with `slot` = the recipe slot and a new
-`hold: HoldName`. `BillSlotRef` gains the same optional `hold`. **Quantity is the mount
-count**: a hold on a host with four sockets is four torches in the bill and four files'
-worth of bytes — the print needs four. A hold whose host has no measured mount for that
+`hold: HoldName`. `BillSlotRef` gains the same optional `hold`. **Quantity is the number
+of copies drawn** — `Σ copiesOf(mount, insert.anchor)` over `mountsFor(host, hold)`, and
+`copiesOf` lives in `catalog/mounts.ts` because the renderer and the bill must not count
+separately (`@/assembly` may not import from `@/builder`, so a shared module in `@/catalog`
+is the only place one answer can live). A hold on a host with four sockets is four torches
+in the bill and four files' worth of bytes — the print needs four — and a hold in a single
+`wide` doorway is **two**, because that one opening takes two half-leaves. Amended after
+review (2026-09-10): the mount count under-billed all 85 two-leaf doorways by one leaf
+each. A hold whose host has no measured mount for that
 slot counts once and is listed under `BillOfTiles.unplaced` (new; sibling of `unfilled`)
 so the room and the bill still agree about what will be drawn. Required accessory slots
 with no hold appear under the existing `unfilled` with `hold` set. The download plan builds
@@ -316,22 +342,44 @@ where `M_host_room = lift · toPlan · turn` — the host's `tileMatrix` without
 `toOrigin · stand` (already folded into the mount frame), plus the host's `liftMatrix`
 elevation, so an accessory rides on a base-lifted wall, `mountLocal = (at.x, at.z,
 −at.y)` — the mount's bbox coordinates through the same axis swap `uprightBounds` applies —
-`R(mountAxis)` takes +Y to the mount axis (socket) or aligns the anchor axis with the face
-normal (leaf, plate) with the remaining roll chosen so the insert's own +z stays as close
-to world up as possible (the torch flame points up), and `A⁻¹` brings the insert's anchor
-point to the origin and its anchor axis onto +Y. Per kind:
+`R(mountAxis)` is **two rules, not one**, and `A⁻¹` brings the insert's anchor point to
+the origin.
+
+**A `socket` or a `pocket` is posed by the anchor's axis**, because a peg's axis is its
+pose: +Y goes to the reversed socket axis, and the remaining roll is chosen so the insert's
+own +z stays as close to world up as possible (the torch flame points up).
+
+**An `opening`, a `hole` or a `surface` is posed by the insert's bbox extents**
+(`anchor.size`), and this was amended after review (2026-09-10): a `leaf`'s axis is its
+*thinnest* bbox axis, which is the through-wall direction for a door (28 × 4 × 35.5 — thin
+is the depth) and the **height** for a lintel (`door_lintel.1.stl` is 32.84 × 12.99 × 6.09
+— thin is the height), so aiming it at the surface normal laid all 131 `lintel` mounts on
+their side. An insert is authored Z-up, so the extents cannot be wrong that way: the mesh's
++z stays world up, the **longer** of its two horizontal extents is the span and the
+**shorter** is the through-wall axis. For an `opening` the through axis is yawed onto
+±`normal` — the sign from `anchor.axis` when the anchor axis *is* that mesh axis (a door's
+declared `+thin`), else `+normal` — and the span therefore lands across the face. A `hole`
+or a `surface` takes no rotation at all. There is no roll step on these three: the vertical
+is fixed by the extents and the yaw by the normal.
 
 | mount | anchor | where |
 | --- | --- | --- |
 | `socket` | `peg` | base-flange centre on the entrance, axis along the socket axis (the torch leans 25–28° out) |
-| `socket` | `plate` | plate centre on the entrance, normal into the wall |
-| `opening`, `leaves: 1` | `leaf` | bottom-centre at `(at.x, sill, at.y)`, thin axis along the face axis |
-| `opening`, `leaves: 2` | `leaf` | two instances at `at.x ± width/4`, the second turned 180° about vertical so its face shows |
-| `opening` + `lintel` | `plate` / `leaf` / `block` | bottom-centre at `(at.x, head, at.y)` — it sits on the head of the opening |
+| `socket` | `plate` | plate centre on the entrance, normal into the wall — `torch.stl` and `torch_plate.stl` are both `plate`s |
+| `opening`, 1 copy | `leaf` / `plate` / `block` | anchor point at `(at.x, sill, at.y)`, shorter horizontal extent through the wall |
+| `opening`, 2 copies | `leaf` | two instances at `at.x ± width/4`, the second turned 180° about vertical so its face shows |
+| `opening` + `lintel` | `leaf` / `plate` / `block` | anchor point at `(at.x, head, at.y)` — it sits on the head of the opening, one piece however many leaves the doorway takes |
 | `opening` + `portcullis` | `leaf` | as a single leaf, bottom at `sill` |
 | `pocket` | `block` / `peg` | anchor point on the entrance, axis into the wall |
-| `hole` | any | bottom-centre at the hole centre on the top face |
-| `surface` | any | bottom-centre at the top-face centre |
+| `hole` | any | anchor point at the hole centre on the top face, unturned |
+| `surface` | any | anchor point at the top-face centre, unturned |
+
+**Two copies is `copiesOf`, not `leaves`.** `leaves: 2` says *the doorway is authored for
+two leaves*, which is not the claim *this insert is one of them*: the same 47.5 mm opening
+takes two 24.6 mm leaves or **one** 60.85 mm `door_lintel.double.1.stl`, both `leaf`-kind.
+So the second copy is drawn only for a `leaf` whose span is under 80 % of the opening — the
+measured gap is 52 % against 109–128 % — and the count, the offset and the bill's quantity
+are all that one function.
 
 Blob groups are what they are today, so an insert used on twenty walls is one
 `InstancedMesh`; `roomBlobs` includes accessory blobs so `useLodStore` fetches their

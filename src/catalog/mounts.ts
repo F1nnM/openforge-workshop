@@ -1,9 +1,11 @@
 /**
  * Reading the measured mount points off a record.
  *
- * Two functions, and both exist because the alternative is the same three lines
- * written slightly differently in the builder, the assembly resolver and the
- * detail drawer.
+ * Three functions, and every one of them exists because the alternative is the
+ * same few lines written slightly differently in the builder, the assembly
+ * resolver and the detail drawer. {@link copiesOf} is the one where "slightly
+ * differently" would be a silent disagreement rather than a duplicate: it is
+ * read by the renderer and by the bill, and they must count the same copies.
  *
  * ## The frame, in one place
  *
@@ -34,7 +36,7 @@
  * nobody has measured its mesh — see {@link CatalogRecord.mounts} for why the
  * schema does not distinguish them — and every caller wants a list either way.
  */
-import type { CatalogRecord, Face, Mount, Vec3 } from './schema'
+import type { CatalogRecord, Face, InsertAnchor, Mount, Vec3 } from './schema'
 
 /**
  * The outward unit normal of a face, Z-up, in the host's own frame.
@@ -70,4 +72,71 @@ export function faceVector(face: Face): Vec3 {
  */
 export function mountsFor(record: CatalogRecord, slot: string): readonly Mount[] {
   return (record.mounts ?? []).filter((mount) => mount.slot === slot)
+}
+
+/**
+ * How many copies of one insert a mount takes: **two half-leaves, or one of
+ * anything else.**
+ *
+ * The one place that decides, and three consumers read it — `buildRoom3D` to
+ * know how many instances to add, `place.ts#accessoryMatrix` to know whether to
+ * offset and turn them, and `assembly/resolve.ts` to price the bill. If any two
+ * of those answered separately they could disagree, and the ways they would
+ * disagree are both invisible: a second leaf drawn at the first leaf's seat is
+ * two coplanar slabs z-fighting rather than a visible error, and a bill one leaf
+ * short is a download that cannot fill the doorway it came with.
+ *
+ * It lives here, next to {@link mountsFor}, because `@/assembly` must not import
+ * from `@/builder` — the dependency runs the other way — and both need this
+ * answer. It is a fact about a mount and an anchor, which is what this module
+ * is for.
+ *
+ * ## `leaves: 2` is a property of the doorway, not of what goes in it
+ *
+ * `OpeningMount.leaves` is 2 when the host's `require` carries `size|wide` or
+ * `size|double` — 85 `door` mounts, 47 `lintel` and 15 `portcullis` over the
+ * measured corpus — and it says *the doorway is authored for two leaves*. That
+ * is not the same claim as *this insert is one of them*: the same wide doorway
+ * takes **one** `door_lintel.double.1.stl` (a 60.85 mm slab over a 47.5 mm
+ * opening) and **two** 24.6 mm door leaves. Both are `leaf`-kind anchors, so the
+ * kind alone cannot separate them, and drawing every leaf twice put a 60.9 mm
+ * lintel at ±11.9 mm on 47 openings and a one-piece portcullis on 15.
+ *
+ * The measurement that does separate them is the **span** — the longer of the
+ * two horizontal bbox extents, an insert being authored Z-up. A genuine
+ * half-leaf is about half its opening (24.6 in 47.5, 52 %); a one-piece lintel or
+ * portcullis over-spans it (60.85 in 47.5, 128 %; 55.8 in 51, 109 %). The 0.8
+ * threshold sits in the empty middle of that gap, nearer the pieces it must not
+ * split.
+ *
+ * **A face with no horizontal direction is not a pair.** The two seats are
+ * `±width/4` along `up × normal`, so an opening whose measured normal is
+ * vertical — degenerate data, not a doorway — has nowhere to put the second one.
+ * One copy is the honest answer there; two at one seat is not.
+ */
+export function copiesOf(mount: Mount, anchor: InsertAnchor | undefined): 1 | 2 {
+  if (mount.kind !== 'opening' || mount.leaves !== 2) return 1
+  if (anchor === undefined || anchor.kind !== 'leaf') return 1
+  if (!hasHorizontalNormal(mount.normal)) return 1
+  const span = Math.max(anchor.size[0], anchor.size[1])
+  return span < HALF_LEAF_SPAN_FRACTION * mount.width ? 2 : 1
+}
+
+/**
+ * The share of its opening a leaf may span and still be half of a pair.
+ *
+ * Measured: half-leaves run 52 % of their opening, and the one-piece slabs that
+ * share the `leaves: 2` flag run 109–128 %. See {@link copiesOf}.
+ */
+const HALF_LEAF_SPAN_FRACTION = 0.8
+
+/**
+ * Whether a normal has a horizontal component to lay two seats along.
+ *
+ * The same `1e-12` floor `place.ts` states: under a squared length of that, a
+ * measurement is not a direction, and `up × normal` is a zero vector rather than
+ * a short one.
+ */
+function hasHorizontalNormal(normal: Vec3): boolean {
+  return normal[0] * normal[0] + normal[1] * normal[1] > 1e-12
 }

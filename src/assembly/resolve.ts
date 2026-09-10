@@ -58,7 +58,7 @@
  * `@/catalog`'s aggregate layer is still named in this file.
  */
 import type { CatalogRecord, PartSlot, TileAggregate, VariantSelection } from '@/catalog'
-import { mountsFor, selectVariant } from '@/catalog'
+import { copiesOf, mountsFor, selectVariant } from '@/catalog'
 import type { CompositionIndex, SlotTags } from '@/composition'
 import { resolveSlotTags } from '@/composition'
 import type {
@@ -223,13 +223,17 @@ export interface AssemblyPart {
   /**
    * Copies to print of {@link record}.
    *
-   * **1 for a recipe part, and one per measured mount for a hold.** A slot is
-   * one place on the grid, so a template part is always a single print; an
-   * accessory slot is not — a 1×1 full pillar carries a torch socket on each of
-   * its four faces, and one `torch` hold in it is four torches. `mountsFor`
-   * returns the measured list and this is `max(1, …)` of its length, so a host
-   * nobody has measured still bills the accessory once rather than dropping the
-   * file the user chose — see `notes.ts#hold-unplaced`.
+   * **1 for a recipe part, and the copies drawn for a hold.** A slot is one
+   * place on the grid, so a template part is always a single print; an accessory
+   * slot is not — a 1×1 full pillar carries a torch socket on each of its four
+   * faces, and one `torch` hold in it is four torches, while a single `wide`
+   * doorway takes two door leaves.
+   *
+   * So it is `max(1, Σ copiesOf(mount, anchor))` over the host's measured mounts
+   * for that slot, and not their count: `catalog/mounts.ts#copiesOf` is the same
+   * answer `buildRoom3D` draws, so the bill charges for what the room shows. The
+   * `max` is for a host nobody has measured, which still bills the accessory once
+   * rather than dropping the file the user chose — see `notes.ts#hold-unplaced`.
    */
   quantity: number
 }
@@ -274,6 +278,21 @@ export interface ResolvedHold {
    * archive.
    */
   readonly mounts: number
+  /**
+   * **Copies to print** — `Σ copiesOf(mount, record.anchor)` over those mounts.
+   *
+   * Not `mounts` and not always equal to it: a `wide` doorway is one measured
+   * opening that takes **two** door leaves, so a bill counting mounts was one
+   * leaf short on all 85 of them, while the room — which asks the same
+   * `copiesOf` — drew both. `catalog/mounts.ts#copiesOf` is the single answer
+   * both read, because the two disagreeing is a download that cannot fill the
+   * doorway it came with.
+   *
+   * Equal to `mounts` for every unanchored insert, whose copies cannot be
+   * counted any other way: one per mount is what {@link ResolvedHold.mounts}
+   * already meant, and an insert nobody has measured is billed and not drawn.
+   */
+  readonly copies: number
 }
 
 /**
@@ -474,7 +493,7 @@ export function resolveInstance(
           record: held.record,
           pinned: held.fill?.pinned === true,
           hold: held.hold,
-          quantity: Math.max(1, held.mounts),
+          quantity: Math.max(1, held.copies),
         })
       } else if (!held.optional) {
         complete = false
@@ -537,13 +556,16 @@ function resolvedHold(
   index: AssemblyIndex,
 ): ResolvedHold {
   const held = fill.holds?.[hold]
+  const record = held === undefined ? undefined : index.byId.get(held.tile)
+  const mounts = mountsFor(host, hold)
   return {
     slot,
     hold,
     optional,
     fill: held,
-    record: held === undefined ? undefined : index.byId.get(held.tile),
-    mounts: mountsFor(host, hold).length,
+    record,
+    mounts: mounts.length,
+    copies: mounts.reduce((total, mount) => total + copiesOf(mount, record?.anchor), 0),
   }
 }
 
