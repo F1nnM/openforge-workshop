@@ -133,7 +133,7 @@ import type { PlacementId } from '@/store'
 import type { LodGeometry } from './loadLod'
 import { lodBudgetRefusal, lodObjectBudget } from './lod'
 import type { RoomFit } from './place'
-import { accessoryMatrix, fitRoom, liftMatrix, placedBounds, roomBounds, tileMatrix } from './place'
+import { accessoryMatrix, fitRoom, isLeafPair, liftMatrix, placedBounds, roomBounds, tileMatrix } from './place'
 
 /**
  * The instancing key: content address, then material variant.
@@ -489,14 +489,12 @@ function addAccessory(
  * How many copies of one insert this mount takes: **two leaves, or one of
  * anything else.**
  *
- * A `wide` or `double` opening is authored for two leaves — the measured
- * convention is 2 × 24.6 mm over a 47.5 mm opening, which is why
- * `OpeningMount.leaves` is a field rather than a width threshold read off here.
- * The anchor's kind is asked as well as the mount's `leaves`, because a
- * **lintel** in the same doorway is one piece however many leaves it takes.
+ * The rule itself is `place.ts#isLeafPair` and is deliberately not restated
+ * here: it decides the offset and the half turn as well as the count, and a
+ * second copy that drifted would draw the second leaf on top of the first.
  */
 function accessoryLeaves(mount: Mount, anchor: InsertAnchor): readonly (0 | 1)[] {
-  return mount.kind === 'opening' && mount.leaves === 2 && anchor.kind === 'leaf' ? [0, 1] : [0]
+  return isLeafPair(mount, anchor) ? [0, 1] : [0]
 }
 
 function finish(groups: Map<string, MutableGroup>): LodInstanceGroup[] {

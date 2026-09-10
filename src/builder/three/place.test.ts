@@ -44,6 +44,7 @@ import {
   accessoryMatrix,
   fitRoom,
   footprintDelta,
+  isLeafPair,
   liftMatrix,
   meshFootprintUnits,
   placedBounds,
@@ -583,5 +584,45 @@ describe('accessoryMatrix stands a block in a hole', () => {
     expectAt(landsAt(matrix, new Vector3(0, 0, 0)), 3, 6, 4)
     const up = pointsAlong(matrix, new Vector3(0, 0, 0), new Vector3(0, 0, 8))
     expect(degreesBetween(up, new Vector3(0, 1, 0))).toBeLessThan(1)
+  })
+})
+
+describe('accessoryMatrix on a measurement that is not a direction', () => {
+  const insert = { bounds: LEAF_MESH, anchor: LEAF }
+
+  it('draws one leaf and turns nothing when the opening’s normal is vertical', () => {
+    // `up × normal` is the only thing that says where the *second* leaf goes, so
+    // a level face has nowhere to put it. Two at one seat would be two coplanar
+    // slabs z-fighting — an error that looks like a rendering artefact rather
+    // than like bad data, which is why the pair rule refuses it outright.
+    const level: OpeningMount = { ...DOORWAY, normal: [0, 0, 1] }
+    expect(isLeafPair(level, LEAF)).toBe(false)
+    expect(isLeafPair(DOORWAY, LEAF)).toBe(true)
+
+    const first = accessoryMatrix(hostFrame(0), level, insert, 'door', 0)
+    const second = accessoryMatrix(hostFrame(0), level, insert, 'door', 1)
+    // One leaf: the count comes from the same predicate, so the second index is
+    // never asked for — and if it were, it is the identical instance rather than
+    // a flipped twin on top of the first.
+    expect(second.elements).toEqual(first.elements)
+    expectAt(landsAt(first, LEAF_SEAT), 0, 1.5, 6.5)
+  })
+
+  it('falls back to the face normal for a socket with no axis', () => {
+    const axisless: SocketMount = { ...SOCKET, axis: [0, 0, 0] }
+    const matrix = accessoryMatrix(hostFrame(0), axisless, { bounds: PEG_MESH, anchor: PEG }, 'torch', 0)
+    // Straight out of the face with none of the lean — and, above all, finite: a
+    // zero vector through `setFromUnitVectors` is a NaN quaternion, and a NaN
+    // matrix is a mesh that fails every frustum test and vanishes silently.
+    const out = pointsAlong(matrix, PEG_BASE, PEG_TIP)
+    expect(degreesBetween(out, zUpToYUp(axisless.normal))).toBeLessThan(1)
+    expect(matrix.elements.every((n) => Number.isFinite(n))).toBe(true)
+  })
+
+  it('falls back to the insert’s own up for an anchor with no axis', () => {
+    const axisless: InsertAnchor = { ...PEG, axis: [0, 0, 0] }
+    const matrix = accessoryMatrix(hostFrame(0), SOCKET, { bounds: PEG_MESH, anchor: axisless }, 'torch', 0)
+    expect(matrix.elements.every((n) => Number.isFinite(n))).toBe(true)
+    expectAt(landsAt(matrix, PEG_BASE), 0, 28, 6.5)
   })
 })

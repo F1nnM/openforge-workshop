@@ -308,7 +308,14 @@ export function accessoryMatrix(
   target = new Matrix4(),
 ): Matrix4 {
   const seat = mountSeat(mount, insert.anchor, slot, leaf)
-  const align = alignToAxis(zUpToYUp(insert.anchor.axis).normalize(), seat.axis, seat.halfTurn)
+  // The insert's own up is the fallback for an anchor with no axis — see
+  // {@link EPSILON} for what a zero vector does to the alignment.
+  const from = zUpToYUp(insert.anchor.axis)
+  const align = alignToAxis(
+    from.lengthSq() > EPSILON ? from.normalize() : new Vector3(0, 1, 0),
+    seat.axis,
+    seat.halfTurn,
+  )
   const anchor = zUpToYUp(insert.anchor.at)
 
   return target
@@ -343,12 +350,44 @@ function hostMatrix(host: HostFrame): Matrix4 {
     .multiply(new Matrix4().makeRotationY((-host.geometry.angle * Math.PI) / 180))
 }
 
+/**
+ * Does this mount take **two** of this insert? The one place that decides.
+ *
+ * `buildRoom3D` asks it to know how many instances to add and
+ * {@link accessoryMatrix} asks it to know whether to offset and turn them; if
+ * the two answered separately they could disagree, and the way they would
+ * disagree is a *second* leaf drawn at the *first* leaf's seat — two coplanar
+ * slabs z-fighting rather than a visible error. So it is exported, and both read
+ * it.
+ *
+ * A `wide` or `double` opening is authored for two leaves (the measured
+ * convention: 2 × 24.6 mm over a 47.5 mm opening), which is why
+ * `OpeningMount.leaves` is a field rather than a width threshold a consumer
+ * re-derives. The anchor's kind is asked as well, because a **lintel** in the
+ * same doorway is one piece however many leaves it takes.
+ *
+ * **A face with no horizontal direction is not a pair.** The two seats are
+ * `±width/4` along `up × normal`, so an opening whose measured normal is
+ * vertical — degenerate data, not a doorway — has nowhere to put the second one.
+ * One leaf, unturned, is the honest answer there; two at one seat is not.
+ */
+export function isLeafPair(mount: Mount, anchor: InsertAnchor): boolean {
+  if (mount.kind !== 'opening' || mount.leaves !== 2 || anchor.kind !== 'leaf') return false
+  return faceAcross(outwardAxis(mount.normal)) !== null
+}
+
 /** One {@link Seat} per kind — {@link accessoryMatrix} states what each aims at. */
 function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, leaf: 0 | 1): Seat {
   switch (mount.kind) {
     case 'socket':
-    case 'pocket':
-      return { point: zUpToYUp(mount.at), axis: zUpToYUp(mount.axis).negate().normalize(), halfTurn: false }
+    case 'pocket': {
+      // The entry direction reversed. A socket with no axis at all is not a
+      // direction to point along, and the surface normal is the honest fallback:
+      // straight out of the face, with none of the lean.
+      const entry = zUpToYUp(mount.axis)
+      const axis = entry.lengthSq() > EPSILON ? entry.negate().normalize() : outwardAxis(mount.normal)
+      return { point: zUpToYUp(mount.at), axis, halfTurn: false }
+    }
     case 'opening':
       return openingSeat(mount, anchor, slot, leaf)
     case 'hole':
@@ -361,30 +400,42 @@ function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, leaf: 0 | 1
 const LINTEL_SLOT = 'lintel'
 
 /**
- * A leaf, a lintel or a grille in a doorway — and where two leaves go.
+ * Below this a squared length is not a direction.
  *
- * A `wide` or `double` opening is authored for **two leaves** (the measured
- * convention: 2 × 24.6 mm over a 47.5 mm opening), so the pair sits at
- * `±width/4` along the face — which is where two half-width slabs meet in the
- * middle — with the second turned 180° about the vertical. A **lintel** in the
- * same opening is one piece however many leaves the doorway takes, which is why
- * the split asks the anchor's kind and not only `leaves`.
+ * A zero vector reaching `Quaternion.setFromUnitVectors` produces a **NaN**
+ * quaternion, and a NaN matrix is a mesh that fails every frustum test and
+ * disappears with no error anywhere — the failure mode `fitRoom` guards the same
+ * way, and for the same reason.
  */
+const EPSILON = 1e-12
+
+/**
+ * A measured triple as a unit direction out of the host, in Y-up.
+ *
+ * World up when the measurement is degenerate, so nothing downstream is handed a
+ * zero vector. See {@link EPSILON}.
+ */
+function outwardAxis(normal: Vec3): Vector3 {
+  const out = zUpToYUp(normal)
+  return out.lengthSq() > EPSILON ? out.normalize() : new Vector3(0, 1, 0)
+}
+
+/** The horizontal direction lying in a face: `up × out`, unit — or `null` on a level face. */
+function faceAcross(out: Vector3): Vector3 | null {
+  const along = new Vector3(0, 1, 0).cross(out)
+  return along.lengthSq() > EPSILON ? along.normalize() : null
+}
+
+/** A leaf, a lintel or a grille in a doorway — and where two leaves go. */
 function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, leaf: 0 | 1): Seat {
-  const axis = zUpToYUp(mount.normal).normalize()
+  const axis = outwardAxis(mount.normal)
   const point = zUpToYUp([mount.at[0], mount.at[1], slot === LINTEL_SLOT ? mount.head : mount.sill])
-  const pair = mount.leaves === 2 && anchor.kind === 'leaf'
 
-  if (pair) {
-    // Horizontal and in the face: `up × normal`. Degenerate only on an opening
-    // whose surface faces straight up, which is not a doorway.
-    const along = new Vector3(0, 1, 0).cross(axis)
-    if (along.lengthSq() > 1e-12) {
-      point.addScaledVector(along.normalize(), ((leaf === 0 ? -1 : 1) * mount.width) / 4)
-    }
-  }
+  // `±width/4` is where two half-width slabs meet in the middle of the opening.
+  const along = isLeafPair(mount, anchor) ? faceAcross(axis) : null
+  if (along !== null) point.addScaledVector(along, ((leaf === 0 ? -1 : 1) * mount.width) / 4)
 
-  return { point, axis, halfTurn: pair && leaf === 1 }
+  return { point, axis, halfTurn: along !== null && leaf === 1 }
 }
 
 /**

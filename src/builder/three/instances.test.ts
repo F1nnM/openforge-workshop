@@ -938,6 +938,19 @@ describe('buildRoom3D draws an accessory at every measured mount', () => {
     expect(single.instances).toBe(2)
   })
 
+  it('draws one leaf, not two at one seat, when the opening’s normal is vertical', async () => {
+    // The count and the offset come from the same predicate — `place.ts#isLeafPair`
+    // — so a face with no horizontal direction cannot produce a second instance
+    // that the matrix would then place on top of the first.
+    const level = WIDE_DOORWAY.map((mount) => ({ ...mount, normal: [0, 0, 1] as const }))
+    const room = await roomFrom(
+      measuredCatalog(DOOR_LEAF, level),
+      holding('p1', FIXTURE_HOLDS.torch, FIXTURE_IDS.torch),
+    )
+    expect(room.instances).toBe(2)
+    expect(room.groups.find((group) => group.count === 2)).toBeUndefined()
+  })
+
   it('draws nothing for an insert nobody has measured, and does not fetch it', async () => {
     // The fixture torch as it stands: an insert with no `anchor`. There is
     // nowhere on its own mesh to plug it in by, so it cannot be placed — and it

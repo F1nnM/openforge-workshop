@@ -539,26 +539,10 @@ function SurfaceNotice({
   }
 
   /*
-     The accessory's own gap, beside the part's and worded the same way. It is
-     not an outline like the one above, because there is nothing to outline: an
-     accessory with no measured mount has no coordinates at all, so the plan
-     cannot even say *where* the torch is missing from. `PlanScene.unplaced`
-     carries the bill's own sentence per row; this is the count, and the bill is
-     where the reason is read.
-  */
-  if (room.unplaced > 0) {
-    return (
-      <p className="of-b3d-plate" role="status">
-        {room.unplaced === 1 ? 'One accessory has' : `${String(room.unplaced)} accessories have`} no measured mount,
-        so {room.unplaced === 1 ? 'it is' : 'they are'} in the bill and draw nothing here.
-      </p>
-    )
-  }
-
-  /*
      Row A4b's own line, re-worded by row **C5** and kept last for the same
-     reason: it is the least alarming of the six and the only one the user can
-     act on from here.
+     reason: it is among the least alarming of the six and it is the last one on
+     the list the user can act on from here — the accessory line below it names a
+     gap in the build's own measurements, which nothing in this app can close.
 
      **What changed is how often it is true.** A4b wrote it as *"the state every
      placement lands in until row C2's fill solver runs"*, and it was — the click
@@ -577,6 +561,27 @@ function SurfaceNotice({
         {unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts the
         archive could fill, so {unfilled === 1 ? 'it draws' : 'they draw'} nothing. Open{' '}
         {unfilled === 1 ? 'its slots' : 'their slots'} to choose parts, or try another size.
+      </p>
+    )
+  }
+
+  /*
+     Last, and below the unfilled line, because the ordering rule this list is
+     written to is *least alarming last* and this is the one row on it the user
+     can do nothing at all about — the mount is missing from the build's
+     measurements, not from anything on screen.
+
+     There is nothing to outline either, which is what separates it from the
+     missing-mesh plate above: an accessory with no measured mount has no
+     coordinates, so the plan cannot even say *where* the torch is missing from.
+     `PlanScene.unplaced` carries the bill's own sentence per row; this is the
+     count, and the bill is where the reason is read.
+  */
+  if (room.unplaced > 0) {
+    return (
+      <p className="of-b3d-plate" role="status">
+        {room.unplaced === 1 ? 'One accessory has' : `${String(room.unplaced)} accessories have`} no measured mount,
+        so {room.unplaced === 1 ? 'it is' : 'they are'} in the bill and draw nothing here.
       </p>
     )
   }
