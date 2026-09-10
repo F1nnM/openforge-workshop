@@ -1309,7 +1309,7 @@ describe('the holds', () => {
     layer: 'insert',
     build: 'separate wall',
     bytes: 2_048,
-    // Measured: a 7 x 7 x 12 mm peg, the corpus's torch. An insert without one
+    // A 7 x 7 x 12 mm peg, anchored at the narrow end at `z = 0`. An insert without one
     // is `hold-unanchored` and cannot be drawn, which is its own case below.
     anchor: { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] },
   }

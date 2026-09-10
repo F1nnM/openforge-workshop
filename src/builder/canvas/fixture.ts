@@ -466,9 +466,11 @@ export const FIXTURE_CATALOG = {
       /* **Measured**, and it has to be: an insert with no `anchor` has no point
          on its own mesh to seat on a mount, so `scene.ts#partAccessories` reports
          it as unplaced and draws nothing — the same answer
-         `three/instances.ts#addAccessory` gives. A 7 x 7 x 12 mm peg standing on
-         its flange, which is what the corpus's torches measure as; `axis` runs
-         from `at` into the body, per `catalog/schema.ts#InsertAnchor`.
+         `three/instances.ts#addAccessory` gives. A 7 x 7 x 12 mm peg anchored at
+         the narrow end its author left at `z = 0`, which is how the corpus's two
+         `brazier+small` pegs measure — `torch.stl` itself is the other way up
+         (`at [0, 0, 12]`, `axis [0, 0, −1]`), and either way `axis` runs from
+         `at` into the body, per `catalog/schema.ts#InsertAnchor`.
          {@link fixtureUnanchoredCatalogFile} is the unmeasured half. */
       anchor: { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] },
     },

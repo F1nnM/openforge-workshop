@@ -416,10 +416,17 @@ describe('this row reads the plan view’s geometry rather than restating it', (
  * pass against a mesh that happened to be centred and fail on every real one.
  */
 const PEG_MESH = new Box3(new Vector3(100, -50, 7), new Vector3(107, -43, 19))
-/** The peg's base centre and its tip, as points of that mesh. 7 × 7 × 12 mm. */
-const PEG_BASE = new Vector3(103.5, -46.5, 7)
+/**
+ * The peg's tip and its flange, as points of that mesh. 7 × 7 × 12 mm.
+ *
+ * Authored the way `torch.stl` is: the 7 × 7 flange at the low end of the long
+ * axis and the 3 mm tip at the high one. The **tip** is the anchor point — it is
+ * the end that fits a 5.5 × 3 mm mouth — so `at` is the top face of this box and
+ * the body lies below it, which is what `axis: [0, 0, −1]` says.
+ */
 const PEG_TIP = new Vector3(103.5, -46.5, 19)
-const PEG: InsertAnchor = { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] }
+const PEG_FLANGE = new Vector3(103.5, -46.5, 7)
+const PEG: InsertAnchor = { kind: 'peg', at: [0, 0, 12], axis: [0, 0, -1], size: [7, 7, 12] }
 
 /** The measured torch socket: a 5.5 × 3 mm mouth entering at the 62–65° lean. */
 const SOCKET: SocketMount = {
@@ -511,32 +518,39 @@ describe('zUpToYUp', () => {
 describe('accessoryMatrix seats a peg in a socket', () => {
   const insert = { bounds: PEG_MESH, anchor: PEG }
 
-  it('lands the peg’s base centre on the socket’s own bbox point', () => {
+  it('lands the peg’s tip on the socket’s own bbox point', () => {
     const matrix = accessoryMatrix(hostFrame(0), SOCKET, insert, 'torch', 0)
     // (x, y, z) → (x, z, −y): the mount's [0, −6.5, 28] is 28 mm up the wall and
-    // 6.5 mm out of its centre plane.
-    expectAt(landsAt(matrix, PEG_BASE), 0, 28, 6.5)
+    // 6.5 mm out of its centre plane. The **tip** lands there: it is the end that
+    // enters the mouth, and the flange is the head that hangs off it.
+    expectAt(landsAt(matrix, PEG_TIP), 0, 28, 6.5)
   })
 
-  it('points the peg up the socket’s 62–65° lean, out of the wall', () => {
+  it('hangs the peg’s body up the socket’s 62–65° lean, out of the wall', () => {
     const matrix = accessoryMatrix(hostFrame(0), SOCKET, insert, 'torch', 0)
-    // The socket's `axis` enters the host; the torch leaves along its negation,
-    // which in Y-up is up and away from the face.
+    // The socket's `axis` enters the host; the body leaves along its negation,
+    // which in Y-up is up and away from the face. So tip → flange runs up the
+    // lean, and the flange ends up above the mouth and further out than the tip:
+    // the printed torch, hanging flange-up along the wall.
     const out = zUpToYUp(SOCKET.axis).negate().normalize()
-    expect(degreesBetween(pointsAlong(matrix, PEG_BASE, PEG_TIP), out)).toBeLessThan(1)
+    expect(degreesBetween(pointsAlong(matrix, PEG_TIP, PEG_FLANGE), out)).toBeLessThan(1)
     expect(out.y).toBeGreaterThan(0)
+    const tip = landsAt(matrix, PEG_TIP),
+      flange = landsAt(matrix, PEG_FLANGE)
+    expect(flange.y).toBeGreaterThan(tip.y)
+    expect(flange.z).toBeGreaterThan(tip.z)
   })
 
   it('carries the point round with the host’s own yaw', () => {
     const matrix = accessoryMatrix(hostFrame(90), SOCKET, insert, 'torch', 0)
     // R_y(−90°) sends (x, z) to (−z, x): the wall now runs along z and its face
     // looks down −x, so the 6.5 mm stand-off does too.
-    expectAt(landsAt(matrix, PEG_BASE), -6.5, 28, 0)
+    expectAt(landsAt(matrix, PEG_TIP), -6.5, 28, 0)
   })
 
   it('raises the whole seat by the host part’s elevation and nothing else', () => {
     const matrix = accessoryMatrix(hostFrame(0, 6.002), SOCKET, insert, 'torch', 0)
-    expectAt(landsAt(matrix, PEG_BASE), 0, 28 + 6.002, 6.5)
+    expectAt(landsAt(matrix, PEG_TIP), 0, 28 + 6.002, 6.5)
   })
 })
 
@@ -636,7 +650,7 @@ describe('accessoryMatrix on a measurement that is not a direction', () => {
     // Straight out of the face with none of the lean — and, above all, finite: a
     // zero vector through `setFromUnitVectors` is a NaN quaternion, and a NaN
     // matrix is a mesh that fails every frustum test and vanishes silently.
-    const out = pointsAlong(matrix, PEG_BASE, PEG_TIP)
+    const out = pointsAlong(matrix, PEG_TIP, PEG_FLANGE)
     expect(degreesBetween(out, zUpToYUp(axisless.normal))).toBeLessThan(1)
     expect(matrix.elements.every((n) => Number.isFinite(n))).toBe(true)
   })
@@ -645,7 +659,7 @@ describe('accessoryMatrix on a measurement that is not a direction', () => {
     const axisless: InsertAnchor = { ...PEG, axis: [0, 0, 0] }
     const matrix = accessoryMatrix(hostFrame(0), SOCKET, { bounds: PEG_MESH, anchor: axisless }, 'torch', 0)
     expect(matrix.elements.every((n) => Number.isFinite(n))).toBe(true)
-    expectAt(landsAt(matrix, PEG_BASE), 0, 28, 6.5)
+    expectAt(landsAt(matrix, PEG_TIP), 0, 28, 6.5)
   })
 })
 
@@ -677,6 +691,11 @@ const BRAZIER_BASE_ID = 'tiles/cut-stone/floors/floor+brazier+large/brazier+larg
 /** The floor it stands on, whose `brazier_base` slot is a measured `surface`. */
 const BRAZIER_FLOOR_ID =
   'tiles/cut-stone/floors/floor+brazier+large/cut-stone#floor,brazier+large.2x2.openforge.stl'
+/** The torch itself: a 7 × 7 × 12 mm `peg` anchored at its 3 mm tip. */
+const TORCH_ID = 'tiles/cut-stone/misc/full_pillar#torch/torch.stl'
+/** A 2-unit cut-stone torch wall, whose `torch` slot is a measured Dupont socket. */
+const TORCH_WALL_ID =
+  'tiles/cut-stone/separate_wall/primary_walls/torch/openforge/cut-stone#wall,torch+high.A.openforge.stl'
 
 /**
  * An insert's mesh bounds from its measured `anchor.size`.
@@ -732,6 +751,12 @@ describeCorpus('accessoryMatrix poses a measured insert by its extents', () => {
   const openingOf = (id: string, slot: string): OpeningMount => {
     const mount = (recordOf(id).mounts ?? []).find((one) => one.slot === slot)
     if (mount?.kind !== 'opening') throw new Error(`${id} has no ${slot} opening`)
+    return mount
+  }
+
+  const socketOf = (id: string, slot: string): SocketMount => {
+    const mount = (recordOf(id).mounts ?? []).find((one) => one.slot === slot)
+    if (mount?.kind !== 'socket') throw new Error(`${id} has no ${slot} socket`)
     return mount
   }
 
@@ -846,6 +871,45 @@ describeCorpus('accessoryMatrix poses a measured insert by its extents', () => {
       expect(landsAt(matrix, bottomCentre(bounds)).y).toBeCloseTo(mount.at[2], 3)
       expect(landsAt(matrix, topCentre(bounds)).y).toBeCloseTo(mount.at[2] + 11.01, 2)
     }
+  })
+
+  /**
+   * The real torch on a real torch wall — the defect a render caught against a
+   * photo of the printed piece.
+   *
+   * `torch.stl` is 7 × 7 × 12 mm with the flange (and the hot-glue flame) at
+   * `z = 0` and the shaft tapering to ~3 mm at `z = 12`, and the wall's socket is
+   * a 5.5 × 3 mm Dupont slot descending at ~63° from the face normal. Only the
+   * 3 mm tip fits that mouth, and the LED's legs leave the tip and go down into
+   * it — so the tip is at the entrance and the whole body hangs *above* it, out
+   * along `−socket.axis`. Anchoring the flange instead — which both the earlier
+   * peg rule and the plate rule did — stood the torch on the wall tip-up, flame
+   * buried at the mouth.
+   */
+  it('hangs the real torch flange-up on a real torch wall', () => {
+    const mount = socketOf(TORCH_WALL_ID, 'torch')
+    const anchor = anchorOf(TORCH_ID)
+    expect(anchor).toMatchObject({ kind: 'peg', at: [0, 0, 12], axis: [0, 0, -1] })
+    expect(anchor.size).toEqual([7, 7, 12])
+    const bounds = boundsFrom(anchor.size)
+    const matrix = accessoryMatrix(hostFrame(0), mount, { bounds, anchor }, 'torch', 0)
+
+    // `at: [0, 0, 12]` on a 12 mm box is its top face centre — the tip — and it
+    // lands in the mouth.
+    const tip = landsAt(matrix, topCentre(bounds))
+    expect(tip.distanceTo(zUpToYUp(mount.at))).toBeLessThan(0.1)
+
+    // The flange is the far end of the body: above the entrance, and further
+    // from the wall than the tip is, which is the printed piece.
+    const flange = landsAt(matrix, bottomCentre(bounds))
+    expect(flange.y).toBeGreaterThan(tip.y)
+    const out = zUpToYUp(mount.normal).normalize()
+    expect(flange.dot(out)).toBeGreaterThan(tip.dot(out))
+
+    // 12 mm of torch, leaning the socket's own 25–28° off vertical.
+    const body = new Vector3().subVectors(flange, tip)
+    expect(body.length()).toBeCloseTo(12, 3)
+    expect(degreesBetween(body, new Vector3(0, 1, 0))).toBeCloseTo(27.6, 0)
   })
 
   /**

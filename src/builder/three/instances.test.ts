@@ -827,7 +827,7 @@ function measuredCatalog(anchor: InsertAnchor, mounts?: readonly Mount[]): Catal
   }
 }
 
-/** A 7 × 7 × 12 mm peg at its own origin — the measured torch. */
+/** A 7 × 7 × 12 mm peg anchored at the narrow end its author left at `z = 0`. */
 const TORCH_PEG: InsertAnchor = { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] }
 
 /**

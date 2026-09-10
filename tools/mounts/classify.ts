@@ -887,11 +887,11 @@ function longestAxis(size: Vec3): Axis {
 }
 
 /**
- * Which end of `axis` carries the wider cross-section — the base a peg is meant
- * to be pushed in by. Ties go to the low end, which is how a peg standing on the
- * build plate is authored.
+ * Which end of `axis` carries the **narrower** cross-section — the end a peg
+ * goes in by, the only one that fits a hole. Ties go to the low end, which is
+ * how a peg standing on the build plate is authored.
  */
-function widerEnd(
+function narrowerEnd(
   positions: ArrayLike<number>,
   triangles: number,
   bbox: Bounds,
@@ -914,9 +914,11 @@ function widerEnd(
       if (pv < vMin) vMin = pv
       if (pv > vMax) vMax = pv
     }
-    span[end] = uMax > uMin && vMax > vMin ? (uMax - uMin) * (vMax - vMin) : 0
+    // `Infinity` rather than `0` for an end whose section could not be measured:
+    // that reads *no answer*, and no answer is not the narrower end.
+    span[end] = uMax > uMin && vMax > vMin ? (uMax - uMin) * (vMax - vMin) : Infinity
   }
-  return (span[1] as number) > (span[0] as number) ? 1 : -1
+  return (span[1] as number) < (span[0] as number) ? 1 : -1
 }
 
 /**
@@ -940,18 +942,26 @@ function leafAnchor(size: Vec3): InsertAnchor | undefined {
 }
 
 /**
- * A near-square prism, longer than it is thick: anchored on its wider end.
+ * A near-square prism, longer than it is thick: anchored on its **narrower** end.
  *
  * Tried **after** {@link plateAnchor} — see {@link analyseInsert} for the
  * measurement that ordering came from.
  *
+ * **A plug enters by its narrow end; the wider end is the head.** That is the
+ * measurement, not a convention: `torch.stl` is 7 × 7 × 12 mm with a 7 × 7 × 2 mm
+ * flange at `z = 0` and a shaft tapering to ~3 mm at `z = 12`, and the mouth it
+ * goes into is a 5.5 × 3 mm Dupont slot — so the 3 mm tip is the only end of it
+ * that fits. The printed piece confirms it: the torch hangs *along* the wall face
+ * with the flange (and the flame glued to it) uppermost and the LED legs leaving
+ * the tip into the socket. Anchoring the flange instead inverted every one of
+ * the 354 torch slots — flange in the mouth, tip sticking up out of the wall.
+ *
  * The axis runs **from that end towards the other one**, which is the whole of
  * {@link InsertAnchor}'s sign convention on the one kind that can be authored
- * either way up. `widerEnd` picks the flange and `at` is that end's face centre,
- * so the body lies at `−widerEnd` along the long axis and `+1` would point out
- * of the insert. `torch.stl` has its flange at the min end and read correctly
- * under either sign; the 356 torch files are not all authored that way, and one
- * that is not would have been seated *inside* the wall.
+ * either way up. `narrowerEnd` picks the tip and `at` is that end's face centre,
+ * so the body lies at `−narrowerEnd` along the long axis and the wrong sign would
+ * point out of the insert instead of into it. The 356 torch files are not all
+ * authored the same way up, which is why the end is measured rather than assumed.
  */
 function pegAnchor(
   positions: ArrayLike<number>,
@@ -959,13 +969,9 @@ function pegAnchor(
   bbox: Bounds,
   size: Vec3,
 ): InsertAnchor | undefined {
+  if (!isPegBox(size)) return undefined
   const long = longestAxis(size)
-  const [u, v] = otherAxes(long)
-  const thinner = Math.min(size[u], size[v]),
-    thicker = Math.max(size[u], size[v])
-  if (thicker > thinner * PEG_CROSS_RATIO) return undefined
-  if (size[long] < thicker * PEG_LENGTH_RATIO || size[long] > PEG_MAX_LENGTH_MM) return undefined
-  const end = widerEnd(positions, triangles, bbox, long)
+  const end = narrowerEnd(positions, triangles, bbox, long)
   return {
     kind: 'peg',
     at: toBboxCoordinates(faceCentre(bbox, long, end), bbox),
@@ -974,12 +980,46 @@ function pegAnchor(
   }
 }
 
+/** {@link pegAnchor}'s three bbox ratios, on their own: a near-square prism, longer than thick. */
+function isPegBox(size: Vec3): boolean {
+  const long = longestAxis(size)
+  const [u, v] = otherAxes(long)
+  const thinner = Math.min(size[u], size[v]),
+    thicker = Math.max(size[u], size[v])
+  if (thicker > thinner * PEG_CROSS_RATIO) return false
+  return size[long] >= thicker * PEG_LENGTH_RATIO && size[long] <= PEG_MAX_LENGTH_MM
+}
+
 /**
- * One face carries the surface, and its opposite carries under half of it.
+ * A face across the long axis of a peg-shaped box: that peg's foot or its tip.
+ *
+ * The one place the two rules would otherwise claim the same face, and the
+ * reason {@link plateAnchor} runs first is not a reason to let it: a peg
+ * standing on its foot has a **fully covered base** whose opposite end is a
+ * tapered tip covering almost nothing, which is exactly {@link plateAnchor}'s
+ * signature. `torch.stl` read `plate` on that face for a while and the
+ * measurement is what says it should not: the flat 7 × 7 base is the *head* of
+ * the torch, and a plate is anchored on the face it presses flat against the
+ * host. A plate's flat face has to be a **side** face.
+ *
+ * Only a box the peg rule would take at all is excluded, which is what keeps
+ * `catacombs#wall,loculus…` — 51.6 × 26.1 × 10.6 mm, flat on the +x face across
+ * its longest axis, and far too oblong in section to be a peg — the `plate` it
+ * is measured to be.
+ */
+function isPegEndCap(axis: Axis, size: Vec3): boolean {
+  return isPegBox(size) && axis === longestAxis(size)
+}
+
+/**
+ * One **side** face carries the surface, and its opposite carries under half of it.
  *
  * The axis is that face's **inward** normal, which is {@link InsertAnchor}'s
  * convention with nothing else to decide: `at` is the flat face and the body is
  * the only place left to point at.
+ *
+ * Side face, and that qualifier is the fix for an inverted torch — see
+ * {@link isPegEndCap}.
  */
 function plateAnchor(
   positions: ArrayLike<number>,
@@ -994,6 +1034,7 @@ function plateAnchor(
     const cover = covered[face] as number,
       opposite = covered[face ^ 1] as number
     if (cover < PLATE_MIN_COVERAGE || opposite > cover / 2) continue
+    if (isPegEndCap((face >> 1) as Axis, size)) continue
     if (cover > bestCover) {
       bestCover = cover
       best = face
@@ -1049,15 +1090,19 @@ function anchorOf(
  * row with nothing in the corpus to exercise it. A ≥ 50 % flat face whose
  * opposite carries under half of it is the *stronger* claim of the two: it is a
  * measurement of where the piece lies against the host, where the peg rule is an
- * inference from three bbox ratios. The plate rule's own asymmetry now also
- * catches `torch.stl` — a 7 × 7 × 12 mm prism with a flat 7 × 7 base and a
- * tapered head — which reads `plate` with a byte-identical anchor (`at [0,0,0]`,
- * `axis [0,0,1]`) to what {@link pegAnchor} gave it before. The render is
- * unchanged either way, because a socket mount aligns the anchor *axis*
- * regardless of `kind`, and the only place in `src/` that reads `anchor.kind`
- * is `copiesOf`'s `leaf` test. No corpus insert now exercises the spec's
- * `socket` + `peg` row — the `brazier+small` blobs and the synthetic fixtures
- * keep {@link pegAnchor} itself covered.
+ * inference from three bbox ratios.
+ *
+ * **The one face plate-first must not take is a peg's end cap**, and that is
+ * measured too: the plate rule's asymmetry test also fitted `torch.stl` — a
+ * 7 × 7 × 12 mm prism with a flat 7 × 7 base and a tapered head — whose flat
+ * base is the *head* of the torch rather than a face it presses against
+ * anything, so reading it as a plate anchored there hung all 354 torch slots
+ * upside down. {@link isPegEndCap} is the exclusion; `torch.stl` is a `peg`
+ * anchored at its 3 mm tip (`at [0,0,12]`, `axis [0,0,-1]`), which is the end
+ * that fits the 5.5 × 3 mm mouth, and `torch_plate.stl` is still a `plate` on
+ * the side face it lies flat against. So the corpus exercises both of the spec's
+ * `socket` rows: the three pegs are `torch.stl` and the two `brazier+small`
+ * blobs.
  *
  * **Every kind's `axis` runs from `at` into the insert's body** — the contract
  * `src/catalog/schema.ts#InsertAnchor` states and `place.ts#accessoryMatrix`

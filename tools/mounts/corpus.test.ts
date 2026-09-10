@@ -21,8 +21,8 @@
  * **4 blobs that are filed both ways** and answer both questions from one parse,
  * which is why 995 + 139 is 1,134 and not the number of objects. The hosts carry
  * **1,301 mounts** (702 opening, 438 socket, 55 pocket, 78 surface, 28 hole) and
- * every one of the **139 inserts** has an anchor (117 leaf, 13 block, 7 plate,
- * 2 peg). Of the 1,230 slots the host blobs declare, **1,183 resolved**; the 47
+ * every one of the **139 inserts** has an anchor (117 leaf, 13 block, 6 plate,
+ * 3 peg). Of the 1,230 slots the host blobs declare, **1,183 resolved**; the 47
  * that did not say why: 14 `arc-fit-refused`, 12 `no-socket`, 12 `modelled-in`,
  * 6 `runs-off-end`, 3 `no-opening`.
  *
@@ -119,6 +119,9 @@ const SOCKETLESS_PILLARS = [
   { pattern: 'dungeon_stone%block#full_pillar+round', count: 10 },
   { pattern: 'cut-stone#full_pillar+square+torch+', count: 2 },
 ] as const
+
+/** `torch.stl` — the 7 × 7 × 12 mm peg 354 of the corpus's torch slots take. */
+const TORCH_BLOB = 'f08add117e7e3161d69fd73c97211fc7'
 
 /** The one fixture whose doorway is sculpted into the solid rather than cut. */
 const MODELLED_IN_DOOR = 'dungeon_stone%eroded#wall,door+rectangular+narrow.A.openforge,side.stl'
@@ -323,20 +326,43 @@ describeCorpus(
     })
 
     /**
-     * The four anchor kinds, counted — `plate` before `peg` is what these are.
+     * The four anchor kinds, counted — `plate` before `peg`, minus end caps.
      *
-     * `analyseInsert` tries the plate rule first, and the two blobs that moved
-     * when it did are the point: `torch_plate.stl` was a `peg` anchored on the
-     * end of its long axis and is now a `plate` on the flat back it presses
-     * against the wall, and `torch.stl` — whose flat base and unflat head make
-     * it a plate by the same test — keeps the *identical* `at` and `axis` it had
-     * as a peg, so 354 torch slots render exactly as before under a different
-     * label. The two remaining pegs are the `brazier+small` blobs.
+     * `analyseInsert` tries the plate rule first, and `torch_plate.stl` is why:
+     * it was a `peg` anchored on the end of its long axis and is now a `plate`
+     * on the flat back it presses against the wall. But the plate rule must not
+     * take a face **across** a peg's long axis, and `torch.stl` is why: its flat
+     * 7 × 7 base is the head of the torch, not a face it lies against anything,
+     * and a plate anchored there hung all 354 torch slots upside down. So the
+     * three pegs are `torch.stl` — anchored at its 3 mm tip — and the two
+     * `brazier+small` blobs, and the six plates are `torch_plate.stl`,
+     * `brazier+large,base.stl`, three `cave%sandstone+3#wall,slope` tops and
+     * `catacombs#wall,loculus…`, whose flat face is across its longest axis but
+     * whose section is far too oblong to be a peg at all.
      */
     it('counts the four anchor kinds the plate-first order produces', () => {
       const kinds = { leaf: 0, block: 0, plate: 0, peg: 0 }
       for (const insert of Object.values(inv.inserts)) kinds[insert.anchor.kind] += 1
-      expect(kinds).toEqual({ leaf: 117, block: 13, plate: 7, peg: 2 })
+      expect(kinds).toEqual({ leaf: 117, block: 13, plate: 6, peg: 3 })
+    })
+
+    /**
+     * The torch, anchored at the end that fits the mouth.
+     *
+     * The socket is a 5.5 × 3 mm slot and the torch tapers from a 7 × 7 mm
+     * flange at `z = 0` to ~3 mm at `z = 12`, so the tip is the only end of it
+     * that goes in — and `at` is in the insert's own bbox frame, whose `z` runs
+     * from the box's bottom, which puts the anchor at the top of the box. The
+     * axis then runs back down through the body, so the renderer aims that at
+     * the direction out of the wall and the flange ends up uppermost, as it does
+     * on the printed piece.
+     */
+    it('anchors the torch peg at its narrow end', () => {
+      const torch = inv.inserts[TORCH_BLOB]
+      expect(torch?.anchor.kind).toBe('peg')
+      expect(torch?.anchor.size).toEqual([7, 7, 12])
+      expect(torch?.anchor.at[2]).toBeCloseTo(12, 6)
+      expect(torch?.anchor.axis).toEqual([0, 0, -1])
     })
 
     /**

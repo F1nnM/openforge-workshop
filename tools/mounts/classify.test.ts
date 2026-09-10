@@ -485,17 +485,15 @@ describe('analyseInsert', () => {
     const stl = parseStl(syntheticStl([{ min: [-3.5, -3.5, 0], max: [3.5, 3.5, 12] }]))
     const m = analyseInsert(stl.positions, stl.triangles)
     expect(m.anchor.kind).toBe('peg')
-    // A uniform prism ties, `widerEnd` takes the low end, and the body is above
-    // it — the flange-at-the-bottom case, which is how `torch.stl` is authored.
+    // A uniform prism has two ends of the same section: `narrowerEnd` ties and
+    // takes the low one, and the body is above it.
     expect(m.anchor.axis).toEqual([0, 0, 1])
     expect(m.anchor.at).toEqual([0, 0, 0])
   })
 
-  it('turns the peg axis round when the flange is at the far end of the long axis', () => {
-    // The same 12 mm peg with its 7 x 7 flange on top instead: `at` moves to the
-    // top face and the body is now *below* it, so the axis has to point down.
-    // `+1` regardless — what the producer used to emit — would have aimed the
-    // torch into the wall and hung it by its tip.
+  it('anchors a peg with its flange on top at the narrow end below it', () => {
+    // A 12 mm peg with its 7 x 7 flange on top: the narrow end is the bottom, so
+    // `at` is the bottom face centre and the body is above it.
     // The two boxes **abut** rather than overlap, and that is load-bearing:
     // `syntheticStl` emits every solid's six faces, so a flange sunk into the
     // shaft would put two coincident triangles on the +z bbox plane and read as
@@ -508,8 +506,35 @@ describe('analyseInsert', () => {
     )
     const m = analyseInsert(stl.positions, stl.triangles)
     expect(m.anchor.kind).toBe('peg')
+    expect(m.anchor.at).toEqual([0, 0, 0])
+    expect(m.anchor.axis).toEqual([0, 0, 1])
+  })
+
+  /**
+   * `torch.stl`'s shape, and the defect the whole change is about.
+   *
+   * 7 × 7 × 12 mm: a 7 × 7 × 2 mm flange at `z = 0` and a shaft narrowing to
+   * 3 × 3 mm at `z = 12`. Two answers were wrong about it and both put the flange
+   * in the socket: the plate rule fitted its fully covered 7 × 7 base (its
+   * opposite end covers 18 %), and the peg rule before this change anchored the
+   * *wider* end. The printed piece hangs flange-up along the wall with the LED
+   * legs leaving the 3 mm tip, and 3 mm is the only end that fits the measured
+   * 5.5 × 3 mm mouth — so the tip is `at` and the body is *below* it in the
+   * insert's own frame, which is what the negative axis says.
+   */
+  it('anchors a torch-shaped peg at its narrow tip, not at its flange', () => {
+    const stl = parseStl(
+      syntheticStl([
+        { min: [-3.5, -3.5, 0], max: [3.5, 3.5, 2] },
+        { min: [-2.5, -2.5, 2], max: [2.5, 2.5, 7] },
+        { min: [-1.5, -1.5, 7], max: [1.5, 1.5, 12] },
+      ]),
+    )
+    const m = analyseInsert(stl.positions, stl.triangles)
+    expect(m.anchor.kind).toBe('peg')
     expect(m.anchor.at).toEqual([0, 0, 12])
     expect(m.anchor.axis).toEqual([0, 0, -1])
+    expect(m.anchor.size).toEqual([7, 7, 12])
   })
 
   it('classes a cup with one flat face as a plate anchored on it', () => {
@@ -532,6 +557,10 @@ describe('analyseInsert', () => {
    * `socket` + `plate` renderer row had nothing in the corpus to exercise. The
    * flat face is the stronger claim: 100 % of `+y`, against 28 % on the face
    * opposite it.
+   *
+   * And it survives the end-cap exclusion that sends `torch.stl` back to `peg`,
+   * because its flat face is a genuine **side** face: `+y` across an 8.9 mm axis,
+   * where the box's longest axis is the 13.5 mm `z`.
    */
   it('reads a flat-backed plate with a protruding body as a plate, not a peg', () => {
     const stl = parseStl(

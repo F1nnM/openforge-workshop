@@ -163,22 +163,28 @@ and the earlier kinds are the more specific claims:
 | kind | rule | anchor point | axis |
 | --- | --- | --- | --- |
 | `leaf` | one axis ≤ 10 mm, both others ≥ 10 mm | bottom-centre of the slab | the thin axis |
-| `plate` | triangles flat on one bbox face cover ≥ 50 % of it and ≤ half that on the opposite face | that face's centre | that face's normal, into the plate |
-| `peg` | two smaller axes within 1.5×, long axis ≥ 1.4× the middle and ≤ 40 mm | base-flange centre (the wide end) | the long axis, base → tip |
+| `plate` | triangles flat on one bbox **side** face cover ≥ 50 % of it and ≤ half that on the opposite face — never a face across the long axis of a peg-shaped box, which is that peg's foot | that face's centre | that face's normal, into the plate |
+| `peg` | two smaller axes within 1.5×, long axis ≥ 1.4× the middle and ≤ 40 mm | the **narrower** end's face centre — the end that enters | the long axis, tip → head |
 | `block` | the rest | bottom-centre | +z |
 
 **`plate` before `peg`** was amended after review (2026-09-10): `torch_plate.stl` is
 7.5 × 8.9 × 13.5 mm and satisfies both rules, and peg-first anchored it on the end of its
 long axis rather than on the flat back it presses against the wall — which left the
-`socket` + `plate` row below with nothing in the corpus to exercise. Measured over all 139
-inserts the order moves two of them: `torch_plate.stl` becomes a `plate`, and `torch.stl`
-— a flat base under an unflat head — becomes one too, with the **identical** `at` and
-`axis` it carried as a peg, so nothing about the 354 torch slots renders differently. The
-remaining two pegs are the `brazier+small` blobs.
+`socket` + `plate` row below with nothing in the corpus to exercise.
+
+**But a plate's flat face has to be a *side* face**, amended again when the render was held
+against a photo of the printed piece (2026-09-10): the plate rule's asymmetry test also fits
+`torch.stl` — a fully covered 7 × 7 base under a tapered head that covers 18 % — and that
+base is the *head* of the torch rather than a face it presses against anything, so anchoring
+it there hung all 354 torch slots upside down. A candidate face across the long axis of a box
+the peg rule would take is that peg's foot or its tip, and is refused; `catacombs#wall,loculus…`
+(51.6 × 26.1 × 10.6 mm) keeps its own across-the-long-axis plate face because its section is
+far too oblong to be a peg at all. So `torch.stl` is a `peg` anchored at its 3 mm tip and
+`torch_plate.stl` is still a `plate`, and both `socket` rows below have corpus inserts.
 
 (The insert subagent's measurement: at ≤ 10 mm every `part|door` file is a `leaf`; 33 of
 33 lintels are `plate` or `leaf`. Final kinds over the corpus: **117 leaf, 13 block,
-7 plate, 2 peg**.)
+6 plate, 3 peg** — the pegs being `torch.stl` and the two `brazier+small` blobs.)
 
 **Run mechanics.** Fetch and parse on the main thread; the depth-map work — ~40 s per
 host on one core for the sweep — in `worker_threads`, one per core. ≈ 1 h for the whole
@@ -372,13 +378,14 @@ declared `+thin`), else `+normal` — and the span therefore lands across the fa
 or a `surface` takes no rotation at all. There is no roll step on these three: the vertical
 is fixed by the extents and the yaw by the normal. What lands on the mount for those two kinds is
 the insert's bottom centre — its bbox origin — rather than the point `anchor.at` names:
-`brazier+large,base.stl` is anchored on its +z face and `brazier+small.stl` at its top, and
-seating either by its anchor point would bury it upright and inverted.
+`brazier+large,base.stl` is anchored on its +z face, and seating it by its anchor point would
+bury it upright and inverted. (The two `brazier+small` pegs are anchored at their narrow
+*bottom* end, so they would survive it — a fact about those meshes, not about the rule.)
 
 | mount | anchor | where |
 | --- | --- | --- |
-| `socket` | `peg` | base-flange centre on the entrance, axis along the socket axis (the torch leans 25–28° out) |
-| `socket` | `plate` | plate centre on the entrance, normal into the wall — `torch.stl` and `torch_plate.stl` are both `plate`s |
+| `socket` | `peg` | narrow end (the end that enters) on the socket entrance, body along −axis — the torch hangs flange-up along the wall as in the printed piece (the lean is 25–28° off vertical) |
+| `socket` | `plate` | plate centre on the entrance, normal into the wall — `torch_plate.stl` |
 | `opening`, 1 copy | `leaf` / `plate` / `block` | anchor point at `(at.x, sill, at.y)`, shorter horizontal extent through the wall |
 | `opening`, 2 copies | `leaf` | two instances at `at.x ± width/4`, the second turned 180° about vertical so its face shows |
 | `opening` + `lintel` | `leaf` / `plate` / `block` | anchor point at `(at.x, head, at.y)` — it sits on the head of the opening, one piece however many leaves the doorway takes |

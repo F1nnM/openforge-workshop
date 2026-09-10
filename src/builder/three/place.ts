@@ -369,9 +369,10 @@ interface Seat {
    * Not `anchor.at` there, and the reason is measured: `brazier+large,base.stl`
    * is a `plate` anchored on its **+z** face, 11.01 mm up its own box, and
    * landing that point on the floor's top face buries the whole brazier in the
-   * floor. `brazier+small.stl` is a `peg` whose flange is its top and does the
-   * same. An anchor point says which face plugs in, which is a question a hole
-   * does not ask.
+   * floor. An anchor point says which face plugs in, which is a question a hole
+   * does not ask. (The two `brazier+small` blobs are `peg`s anchored at their
+   * narrow **bottom** end, so they would survive being caught by `anchor.at` —
+   * that is a fact about those two meshes, not about the rule.)
    */
   readonly hold: Vector3
   /**

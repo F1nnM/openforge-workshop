@@ -1053,10 +1053,15 @@ export type Mount = z.infer<typeof Mount>
  * face the direction **out of the host**: the reverse of a socket's entry axis,
  * or the mount's own outward normal. So the insert's body has to lie along
  * `+axis` from `at`, and the producer signs it that way for every kind: a peg's
- * runs from its flange towards its tip, a plate's is the inward normal of the
- * face it lies on, a block's is `+z` off its bottom face. Get it backwards and
- * the accessory is seated *inside* the host with its tip poking out, which is
- * the failure this sentence exists to prevent.
+ * runs from **the narrower end, the end that enters a socket**, towards its
+ * wider head; a plate's is the inward normal of the face it lies on; a block's
+ * is `+z` off its bottom face. Get it backwards and the accessory is seated
+ * *inside* the host with its tip poking out, which is the failure this sentence
+ * exists to prevent.
+ *
+ * A peg's `at` is therefore the tip and not the flange: `torch.stl`'s 3 mm tip
+ * is the only end of it that fits a 5.5 × 3 mm Dupont slot, and the printed
+ * piece hangs flange-up along the wall face.
  *
  * A `leaf` is the one kind that cannot be measured: a door slab straddles its
  * thin axis with a front and a back, and nothing in the mesh says which is
