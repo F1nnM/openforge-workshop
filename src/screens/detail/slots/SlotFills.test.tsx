@@ -57,6 +57,41 @@ describe('a file with nothing to choose', () => {
   })
 })
 
+/* ------------------------------------------------------- one card per sculpt */
+
+describe('an item whose files differ only by sculpt', () => {
+  it('renders a card per print, with the label that tells them apart', () => {
+    // **F5.** Three wood-grain sculpts of one lintel: three cards, and the label
+    // is the only thing on the card that differs, so it has to be rendered and
+    // not merely computed.
+    mount(PARENT.sculptWall)
+
+    const cards = within(group('lintel'))
+      .getAllByRole('button')
+      .filter((card) => (card.textContent ?? '').startsWith('Wood Door Lintel'))
+
+    expect(cards.map((card) => card.textContent)).toEqual([
+      'Wood Door Lintel1',
+      'Wood Door Lintel2',
+      'Wood Door Lintel3',
+    ])
+    // And in the accessible name, before the filename: a screen-reader user
+    // moving through the grid hears the name alone, and three cards called
+    // *Wood Door Lintel* would be three of the same thing.
+    expect(cards[0]).toHaveAccessibleName('Wood Door Lintel — 1 — door_lintel.1.stl')
+  })
+
+  it('names the file the pressed card stands for', () => {
+    const picks: [string, TileId | undefined][] = []
+    mount(PARENT.sculptWall, (slot, picked) => {
+      picks.push([slot, picked])
+    })
+
+    fireEvent.click(within(group('lintel')).getByRole('button', { name: /Wood Door Lintel — 2/ }))
+    expect(picks).toEqual([['lintel', FILL.lintelWoodTwo]])
+  })
+})
+
 /* ------------------------------------------------------------ the greyed card */
 
 describe('dead-end greying', () => {
@@ -114,7 +149,7 @@ describe('dead-end greying', () => {
 
   it('counts the greyed cards in the slot’s note', () => {
     mount(PARENT.wallSiblings)
-    expect(group('torch')).toHaveTextContent('2 items fit, over 3 files.')
+    expect(group('torch')).toHaveTextContent('2 to pick from, over 3 files.')
     expect(group('torch')).toHaveTextContent('1 of them would close another slot')
   })
 })
@@ -155,10 +190,10 @@ describe('a pick', () => {
     // narrows it. This is the capability C1 emitted 0 bytes for: the set is
     // correct only until the next click.
     mount(PARENT.archway)
-    expect(group('lintel')).toHaveTextContent('2 items fit, over 2 files.')
+    expect(group('lintel')).toHaveTextContent('2 to pick from, over 2 files.')
 
     fireEvent.click(screen.getByRole('button', { name: /Towne Torch/ }))
-    expect(group('lintel')).toHaveTextContent('1 item fits, over 1 file.')
+    expect(group('lintel')).toHaveTextContent('1 to pick from, over 1 file.')
   })
 
   it('leaves the others alone when the pick contributes nothing new', () => {
@@ -167,7 +202,7 @@ describe('a pick', () => {
     // in the live corpus and it has to look like nothing happening.
     mount(PARENT.archway)
     fireEvent.click(screen.getByRole('button', { name: /Dungeon Stone Torch/ }))
-    expect(group('lintel')).toHaveTextContent('2 items fit, over 2 files.')
+    expect(group('lintel')).toHaveTextContent('2 to pick from, over 2 files.')
   })
 
   it('offers to clear an optional slot once something is in it', () => {

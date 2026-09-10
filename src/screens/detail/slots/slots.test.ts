@@ -35,6 +35,7 @@ import { CatalogFile, buildAggregateIndex, selectVariant } from '@/catalog'
 import { slotRows } from '../variants'
 import {
   BASE_SLOT,
+  MAX_GRID_CARDS,
   MAX_GRID_ITEMS,
   compositionIndexFor,
   pickerSlots,
@@ -241,6 +242,77 @@ describeCorpus(title, () => {
     })
   })
 
+  /* ------------------------------------------------- one card per sculpt — F5 */
+
+  describe('the expansion', () => {
+    it('expands 1,389 of the 2,194 item groups and never labels two cards alike', () => {
+      let groups = 0
+      let expanded = 0
+      let cards = 0
+      let widest = 0
+      let labels = 0
+      let collisions = 0
+      let multiFile = 0
+      let claimSplit = 0
+
+      for (const record of file.records) {
+        for (const state of slotStates(index!, record.id)) {
+          cards += state.options.length
+          widest = Math.max(widest, state.options.length)
+
+          /* Back to item groups: an expanded item is several cards at one
+             address, which is exactly what this block is counting. */
+          const perItem = new Map<number, (typeof state.options)[number][]>()
+          for (const option of state.options) {
+            const at = option.address as unknown as number
+            perItem.set(at, [...(perItem.get(at) ?? []), option])
+          }
+
+          for (const options of perItem.values()) {
+            groups += 1
+            const tiles = options.flatMap((option) => option.tiles)
+            if (tiles.length > 1) multiFile += 1
+            const claims = new Set(
+              tiles.map((tile) => {
+                const variant = aggregates!.byTile.get(tile)
+                return [variant?.bottomConn ?? [], variant?.sideConn ?? [], variant?.options ?? []]
+                  .map((facet) => [...facet].sort().join(','))
+                  .join('|')
+              }),
+            )
+            if (claims.size > 1) claimSplit += 1
+            if (options.length === 1) continue
+            expanded += 1
+            labels += options.length
+            const named = options.map((option) => option.label)
+            if (new Set(named).size < named.length) collisions += 1
+          }
+        }
+      }
+
+      expect({ groups, cards, widest }).toEqual({
+        groups: 2194,
+        cards: 4491,
+        widest: MAX_GRID_CARDS,
+      })
+      /* **No accessory-slot item in this archive has files that differ by lock**,
+         over 1,861 multi-file groups — an accessory is an insert and an insert
+         publishes no connection system. So the collapse branch is a fact about
+         `constrain` and `selectVariant` rather than about today's fixtures, and
+         `slotPicker.test.ts` is where it is exercised. The 472 multi-file groups
+         that are still one card are one print filed under several paths. */
+      expect({ multiFile, claimSplit, expanded }).toEqual({
+        multiFile: 1861,
+        claimSplit: 0,
+        expanded: 1389,
+      })
+      // 3,686 labels, and not one collision within an item — which is what the
+      // path fallback exists for: 569 of these groups hold two prints under one
+      // filename.
+      expect({ labels, collisions }).toEqual({ labels: 3686, collisions: 0 })
+    }, SLOW_MS)
+  })
+
   /* --------------------------------------------------------- dead-end greying */
 
   describe('dead-end greying', () => {
@@ -300,10 +372,14 @@ describeCorpus(title, () => {
           }
         }
       }
-      expect({ options, dead }).toEqual({ options: 2194, dead: 0 })
+      /* 4,491 cards over the 2,194 item groups the block below counts, and the
+         difference is F5: 1,389 groups are an item whose files differ by no lock,
+         so each print gets a card. `dead` is the number this test is named for
+         and it is still zero. */
+      expect({ options, dead }).toEqual({ options: 4491, dead: 0 })
     }, SLOW_MS)
 
-    it('offers the cut-stone door wall s five doors and its lintel, all live', () => {
+    it('offers the cut-stone door wall s doors and lintels, all live', () => {
       const wall = file.records.find(
         (record) => record.file === 'cut-stone#wall,door+rectangular.A.openforge.stl',
       )
@@ -311,15 +387,31 @@ describeCorpus(title, () => {
 
       const states = slotStates(index!, wall.id)
       expect(states.map((state) => state.name)).toEqual(['door', 'lintel'])
-      expect(states.map((state) => state.options.length)).toEqual([5, 1])
-      expect(states.flatMap((state) => state.options.map((option) => option.deadEnd))).toEqual([
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
+      /* **F5, and this wall is where the owner found it.** Five door items and
+         one lintel item, over 22 and 12 candidate files — and that one lintel
+         item's 12 files are **6 prints**: `door_lintel.1/2/3.stl` and the three
+         `door.lintel.N.separate_wall.stl` beside them, each filed twice. One card
+         per print is 10 and 6; one card per item was 5 and 1, and the wall could
+         then be given a lintel but never *the* lintel. */
+      expect(states.map((state) => state.candidates)).toEqual([22, 12])
+      expect(states.map((state) => state.options.length)).toEqual([10, 6])
+      expect(states.flatMap((state) => state.options.map((option) => option.deadEnd))).toEqual(
+        Array.from({ length: 16 }, () => false),
+      )
+
+      const lintel = states[1]
+      expect(lintel?.options.map((option) => option.label)).toEqual([
+        'door_lintel.3',
+        'door_lintel.1',
+        'door_lintel.2',
+        'door.lintel.1.separate_wall',
+        'door.lintel.2.separate_wall',
+        'door.lintel.3.separate_wall',
       ])
+      // One card per **blob**, which is what makes it 6 and not 12: 171 md5s in
+      // this archive are shared by 520 rows, and the same bytes under two paths
+      // are one print to choose.
+      expect(new Set(lintel?.options.map((option) => option.variant.blob)).size).toBe(6)
 
       // And the base part it used to be greyed over: 6 candidates before any
       // pick, 0 after one — real, and not this picker's business.

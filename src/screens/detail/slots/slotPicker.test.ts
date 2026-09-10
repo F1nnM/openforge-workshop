@@ -88,19 +88,92 @@ describe('the accessory surface', () => {
     expect(states(PARENT.plainFloor)).toEqual([])
   })
 
-  it('grids items and not files, so two prints of one torch are one card', () => {
+  it('grids items and not files, so two files of one print are one card', () => {
     const torch = slot(PARENT.wallTowne, 'torch')
 
-    // Three candidate files — two dungeon_stone prints and one towne — over two
-    // items. C1's rule: the grid is an item grid and the file is chosen after.
+    // Three candidate files — two names for one dungeon_stone print and one
+    // towne — over two items. C1's rule: the grid is an item grid and the file is
+    // chosen after. The two stone files share a `blob`, so F5 has nothing to
+    // expand: one print filed twice is one card however it is named.
     expect(torch.candidates).toBe(3)
     expect(torch.options).toHaveLength(2)
     expect(torch.options.flatMap((option) => option.tiles)).toHaveLength(3)
+    expect(torch.options.every((option) => option.label === undefined)).toBe(true)
   })
 
   it('contributes a file that is itself a candidate for the slot', () => {
     const [stoneTorch] = slot(PARENT.wallTowne, 'torch').options
     expect(stoneTorch?.tiles).toContain(stoneTorch?.variant.id)
+  })
+})
+
+/* ------------------------------------------------- one card per sculpt — F5 */
+
+/**
+ * **The owner's finding: only one lintel was offered.**
+ *
+ * `door_lintel.1/2/3.stl` are three wood-grain sculpts of one catalog design, so
+ * an item grid showed one card — and the other two prints were not hidden behind
+ * a control, they were not on screen at all. An item whose candidate files make
+ * the **same connection claim** is therefore expanded to one card per print, and
+ * an item whose files differ by joinery still collapses, because there the choice
+ * is the lock preference's rather than the user's.
+ *
+ * `sculptWall` carries all three shapes: three sculpts, one lintel in two
+ * joineries, and two prints that share a filename. The corpus has **no** item of
+ * the second kind under an accessory slot, which is why the fixture must.
+ */
+describe('one card per print where only the mesh tells them apart', () => {
+  const lintel = () => slot(PARENT.sculptWall, 'lintel')
+  const named = (name: string) =>
+    lintel().options.filter((option) => option.aggregate.name === name)
+
+  it('offers a card per sculpt, each naming its own file', () => {
+    const sculpts = named('Wood Door Lintel')
+
+    expect(sculpts.map((option) => option.variant.id)).toEqual([
+      FILL.lintelWoodOne,
+      FILL.lintelWoodTwo,
+      FILL.lintelWoodThree,
+    ])
+    // Each card stands for its own file, so a pick names the sculpt that was
+    // pressed rather than the item's preferred print.
+    expect(sculpts.map((option) => option.tiles)).toEqual([
+      [FILL.lintelWoodOne],
+      [FILL.lintelWoodTwo],
+      [FILL.lintelWoodThree],
+    ])
+  })
+
+  it('labels each card with the part of the filename that differs', () => {
+    expect(named('Wood Door Lintel').map((option) => option.label)).toEqual(['1', '2', '3'])
+  })
+
+  it('labels from the path when two prints share a filename', () => {
+    // Both files are `lintel.stl`, so the filename cannot tell them apart and the
+    // cut is retried over the family. 569 of the corpus's expanded slots are this
+    // case — `shutters.stl` under two families, `door.metal.stl` under two.
+    const plain = named('Plain Door Lintel')
+    expect(plain.map((option) => option.variant.file)).toEqual(['lintel.stl', 'lintel.stl'])
+    expect(plain.map((option) => option.label)).toEqual(['cut_stone', 'towne'])
+  })
+
+  it('keeps an item whose files differ by joinery to one card', () => {
+    /* The reason the grid collapses files at all: `selectVariant` answers which
+       of these to print from the lock preference, so a card per file would ask
+       the user a question the app has already answered. */
+    const locked = named('Dungeon Stone Door Lintel')
+    expect(locked).toHaveLength(1)
+    expect(locked[0]?.label).toBeUndefined()
+    expect(locked[0]?.tiles).toEqual([FILL.lintelStone, FILL.lintelStoneLocked])
+  })
+
+  it('labels the same way twice, and never two cards alike', () => {
+    const once = lintel().options.map((option) => option.label)
+    expect(lintel().options.map((option) => option.label)).toEqual(once)
+
+    const labels = once.flatMap((label) => label ?? [])
+    expect(new Set(labels).size).toBe(labels.length)
   })
 })
 

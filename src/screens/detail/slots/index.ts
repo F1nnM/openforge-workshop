@@ -33,6 +33,7 @@ export { SlotFills, tileMaterials } from './SlotFills'
 export type { SlotOption, SlotSelection, SlotState } from './slotPicker'
 export {
   BASE_SLOT,
+  MAX_GRID_CARDS,
   MAX_GRID_ITEMS,
   compositionIndexFor,
   deadEndReason,

@@ -5,6 +5,15 @@
  * `slotPicker.ts` carries the corpus measurements and the semantics. This file is
  * the control, and three decisions in it are worth stating.
  *
+ * ## One card per item, and per **file** where only a sculpt tells them apart
+ *
+ * The grid is an item grid — an item's files are usually one print in several
+ * joineries, and `selectVariant` hands out the one the lock preference asks for.
+ * `door_lintel.1/2/3.stl` are three wood-grain sculpts of one design instead, so
+ * `slotPicker.ts#sculptsOf` expands such an item into one card per file, each
+ * carrying the part of the filename that differs as its label. Nothing else about
+ * this control changes: a card is still a press, and a press still names a file.
+ *
  * ## The grid is not virtualised, and does not need to be
  *
  * Hazard: a sprite sheet is 2,560×1,024 and decodes to roughly **10.5 MB**, so a
@@ -319,7 +328,10 @@ function SlotFill({
           emptySlotReason(state)
         ) : (
           <>
-            {`${String(state.options.length)} ${state.options.length === 1 ? 'item fits' : 'items fit'}, over `}
+            {/* *To pick from* and not *items*, since F5: a card is an item where
+                the lock preference chooses between its files and one **print**
+                where nothing does, so the two numbers are cards and files. */}
+            {`${String(state.options.length)} to pick from, over `}
             {`${String(state.candidates)} ${state.candidates === 1 ? 'file' : 'files'}.`}
             {dead === 0
               ? ''
@@ -421,6 +433,12 @@ function OptionCard({
         thumb={option.variant.thumb}
       />
       <span className="of-slotfill-cardname">{option.aggregate.name}</span>
+      {/* F5: what tells this card apart from the item's other cards, when one
+          item's files are offered one per card. `undefined` on every card that
+          stands for a whole item, which is most of them. */}
+      {option.label === undefined ? null : (
+        <span className="of-slotfill-cardvariant">{option.label}</span>
+      )}
       {option.deadEnd ? <span className="of-slotfill-why">{reason}</span> : null}
       {option.rescues.length === 0 ? null : (
         <span className="of-slotfill-why" data-tone="open">
@@ -433,7 +451,13 @@ function OptionCard({
 
 /** The accessible name of a card: what it is, which file, and what it costs. */
 function cardLabel(option: SlotOption, reason: string): string {
-  const parts = [option.aggregate.name, option.variant.file]
+  // The visible label rides in the name too, and before the filename: on the
+  // three lintel sculpts it is the only thing between *Wood Door Lintel* and
+  // *Wood Door Lintel*, and a screen-reader user hears the name alone.
+  const parts =
+    option.label === undefined
+      ? [option.aggregate.name, option.variant.file]
+      : [option.aggregate.name, option.label, option.variant.file]
   if (option.deadEnd) parts.push(`unavailable — ${reason}`)
   else if (option.rescues.length > 0) parts.push(`opens the ${option.rescues.join(' and ')} slot`)
   return parts.join(' — ')
