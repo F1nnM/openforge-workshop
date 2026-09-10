@@ -228,6 +228,30 @@ export const FIXTURE_CATALOG = {
       tags: [tag('shape|wall'), tag('texture|cave'), tag('connection|openforge'), tag('role|wall'), tag('form|straight')],
       foot: { shape: 'wall', length: 2 },
       sizeCode: 'ZZ',
+      /*
+        **The one host with an accessory slot, and it is deliberately optional.**
+        A required declaration would put a hole in every bill this fixture
+        produces from this record — 1,047 of the corpus's 1,244 declarations are
+        required and `BillOfTiles.complete` reads them — and every existing test
+        here that places a wall is about something else. Optional leaves every
+        total unchanged until a test actually holds something.
+
+        Two sockets rather than the full pillar's four: this is the multi-mount
+        case, and the number a panel renders is `quantity`, which two makes as
+        visible as four while keeping the byte totals below arithmetic anyone has
+        to check twice.
+      */
+      config: { parts: [{ name: 'torch', optional: true, tags: { require: [{ tag: 'part|torch' }] } }] },
+      mounts: [-1, 1].map((side) => ({
+        slot: 'torch',
+        kind: 'socket',
+        face: '-y',
+        normal: [0, -1, 0],
+        at: [side * 25.2, -6.35, 38.1],
+        axis: [0, 0.4226, 0.9063],
+        section: [5.5, 3],
+        depth: 14,
+      })),
     },
     {
       id: FIXTURE_IDS.arc,

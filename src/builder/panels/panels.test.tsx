@@ -62,14 +62,14 @@ import type { UndoControls } from '@/builder/canvas/useHistory'
    asserting against a shape neither of them takes. It is a test module and
    reaches no renderer — `panels/boundary.test.ts` walks production entries. */
 import { planHistory } from '@/builder/three/fixture'
-import type { CatalogFile, DesignId } from '@/catalog'
+import type { CatalogFile, DesignId, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, resolveTags, selectVariant } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
 import { BlobFetchError, PreviewMeshRefusedError } from '@/download'
 import { createSearchEngine, defaultFacetSearch } from '@/search'
 import { resolveMaterial } from '@/materials'
 import type { CatalogIndex } from '@/screens/catalog'
-import type { PlacementId } from '@/store'
+import type { HoldName, PlacementId } from '@/store'
 import {
   TemplateId,
   armTemplateInBuilder,
@@ -91,6 +91,7 @@ import {
   FIXTURE_IDS,
   FIXTURE_NAMES,
   MIXED_INTEGRAL,
+  ONE_SLOT,
   ONE_SLOT_TEMPLATE_ID,
   TWO_SLOTS,
   aStrictInstance,
@@ -189,6 +190,37 @@ function placeBoth(a: keyof typeof FIXTURE_IDS, b: keyof typeof FIXTURE_IDS, x =
 function placeHalf(a: keyof typeof FIXTURE_IDS, x = 0, z = 0): void {
   act(() => {
     placeTemplate(anInstance([FIXTURE_IDS[a], null], { x, z }))
+  })
+}
+
+/** The one accessory slot the fixture declares — on `wallNoBase`, two sockets deep. */
+const TORCH_HOLD = 'torch' as HoldName
+
+/**
+ * One instance of the one-slot recipe whose **file** holds an accessory.
+ *
+ * `wallNoBase` is the fixture's only host declaring an accessory slot, and it
+ * carries two measured torch sockets — so one hold is two prints of one file,
+ * which is the arithmetic a row's `×2` has to be able to account for.
+ */
+function placeHolding(
+  host: keyof typeof FIXTURE_IDS,
+  held: keyof typeof FIXTURE_IDS,
+  x = 0,
+  z = 0,
+): void {
+  const instance = anInstance([FIXTURE_IDS[host]], { x, z })
+  act(() => {
+    placeTemplate({
+      ...instance,
+      fills: {
+        [ONE_SLOT]: {
+          tile: FIXTURE_IDS[host] as TileId,
+          pinned: false,
+          holds: { [TORCH_HOLD]: { tile: FIXTURE_IDS[held] as TileId, pinned: false } },
+        },
+      },
+    })
   })
 }
 
@@ -1637,6 +1669,29 @@ describe('the bill of tiles', () => {
     fireEvent.click(row)
 
     expect(screen.getByText(/x 1, z 1 · floor \+ wall/)).toBeInTheDocument()
+  })
+
+  /**
+   * The same field, one level down: a ref may name an **accessory**.
+   *
+   * A hold is one ask worth one print per measured mount — the fixture wall
+   * carries two torch sockets, a 1×1 full pillar carries four — so a torch row
+   * reads `×2` with a single placement under it, which is exactly the number the
+   * pre-A3 panel could not account for. `wall › torch` says which of the piece's
+   * files asked and which socket of it, and it is named even when it asks alone
+   * because the alternative is an unexplained multiplier.
+   */
+  it('names the accessory a copy was asked for, and counts one per mount', () => {
+    placeHolding('wallNoBase', 'slab', 1, 1)
+    render(<BillHarness />)
+
+    // Two files: the wall once, and the torch it holds twice.
+    expect(screen.getByText('2 unique models')).toBeInTheDocument()
+    const row = screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.slab) })
+    expect(row).toHaveTextContent('×2')
+    fireEvent.click(row)
+
+    expect(screen.getByText(/x 1, z 1 · model › torch/)).toBeInTheDocument()
   })
 
   it('makes every placement reachable and removable from the panel', () => {

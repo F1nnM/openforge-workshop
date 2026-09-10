@@ -80,6 +80,7 @@ import type {
   BillLine,
   BillNote,
   BillOfTiles,
+  BillSlotRef,
   DownloadSize,
   NoteCode,
   ResolvedInstance,
@@ -228,9 +229,14 @@ function byCopiesThenName(a: BillRow, b: BillRow): number {
  * one placement under it was a number a user could not account for.
  *
  * Sorted already by `bill.ts#bySlotRef`, so this filters and does not reorder.
+ *
+ * **The refs themselves rather than their slot names**, since a ref may name an
+ * accessory: `{ slot: 'wall', hold: 'torch' }` is *the torch in the wall*, and a
+ * list of slot names would have said `wall` for both the wall and the torch in
+ * it. Formatting the pair is the panel's, beside the rest of the row's copy.
  */
-export function slotsAsking(line: BillLine, placement: PlacementId): readonly SlotName[] {
-  return line.slots.filter((ref) => ref.placement === placement).map((ref) => ref.slot)
+export function slotsAsking(line: BillLine, placement: PlacementId): readonly BillSlotRef[] {
+  return line.slots.filter((ref) => ref.placement === placement)
 }
 
 /* -------------------------------------------------------------- slot faults */
@@ -560,6 +566,36 @@ export function noteCopy(note: BillNote): NoteCopy {
           'True of a quarter of everything the recipes in this build admit — 3,610 of 14,241 candidate files — ' +
           'so it is a fact rather than a fault. It means nothing checked whether these interleave with the rest ' +
           'of the scene.',
+      }
+
+    case 'hold-unknown-tile':
+      return {
+        ...base,
+        headline: `${n} ${note.count === 1 ? 'accessory names a file' : 'accessories name files'} not in this catalog build`,
+        detail:
+          'A torch, a door or a grate fitted into one of your tiles names a file that has left the archive, so ' +
+          'there is nothing to print for it. It costs the accessory and not the piece: the tile holding it still ' +
+          'prints and still fits. Pick another for the slot, or take it out.',
+      }
+
+    case 'hold-off-slot':
+      return {
+        ...base,
+        headline: `${n} ${note.count === 1 ? 'accessory sits in a slot its tile does not have' : 'accessories sit in slots their tiles do not have'}`,
+        detail:
+          'The tile declares no such accessory slot, so the file will print and there is nowhere on the piece it ' +
+          'goes. Nothing in the app can put one there — a share link decoded against another build can, and so ' +
+          'can a saved room whose tile has changed since.',
+      }
+
+    case 'hold-unplaced':
+      return {
+        ...base,
+        headline: `${n} ${files} ${is} in the pack and not on the plan`,
+        detail:
+          'Nothing has measured where this accessory attaches to the tile holding it, so the plan cannot draw it. ' +
+          'It is still downloaded once: the file you chose is in the pack, and where it goes is a gap in the ' +
+          'measurement rather than in your room.',
       }
 
     case 'mixed-build-systems':

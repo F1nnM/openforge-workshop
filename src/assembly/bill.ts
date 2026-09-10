@@ -46,9 +46,25 @@
  * invisible to it and the bill would have stopped warning while still compiling.
  * There is nothing left for it to warn about: the app inserts no base, so it
  * cannot ask for a second print of one.
+ *
+ * ## Accessories are counted per mount, and that is a fourth way to reach 2
+ *
+ * A fill may carry **holds** — the torch in the wall's socket — and a hold is
+ * one file in as many places as the host has measured mounts for that slot: a
+ * 1×1 full pillar carries a torch socket on each of its four faces. So a hold is
+ * one {@link BillSlotRef} and a `quantity` of 4, which is the md5 dedupe's own
+ * argument one level down (one download, four prints) and the reason
+ * {@link accumulate} adds `AssemblyPart.quantity` rather than 1.
+ *
+ * Two lists come with it, and both exist so the bill and the plan agree about
+ * what is in the room. {@link BillOfTiles.unfilled} gains the **required**
+ * accessory slots nothing fills — 1,047 of the corpus's 1,244 declarations are
+ * required, so those are holes in the print and they refuse the download exactly
+ * as an empty template slot does. {@link BillOfTiles.unplaced} is the opposite
+ * case: the file is chosen and billed, and no measurement says where it goes.
  */
 import type { BlobId, CatalogRecord, TileId } from '@/catalog'
-import type { PlacementId, SlotName, TemplateInstance } from '@/store'
+import type { HoldName, PlacementId, SlotName, TemplateInstance } from '@/store'
 
 import type { AssemblyIndex } from './assemblyIndex'
 import type { BillNote, Note } from './notes'
@@ -178,6 +194,16 @@ export interface BillSlotRef {
   slot: SlotName
   /** The catalog id that slot named. Two slots may name different ids for one md5. */
   tile: TileId
+  /**
+   * The accessory slot of that slot's own file, when the asker is an accessory.
+   *
+   * Absent for a tile on the grid, so the pair `(slot, hold)` is the whole
+   * address of an ask: *the torch in the wall of this piece*. One ref per ask
+   * and not per copy — a four-socket pillar's torch is **one** ref carrying a
+   * `quantity` of 4 on the line, because naming the same wall four times would
+   * say four walls asked.
+   */
+  hold?: HoldName
 }
 
 /** One physical file to download, and every copy of it the scene asked for. */
@@ -222,6 +248,11 @@ export interface BillLine {
    *
    * Counts every part occurrence, so two slots of one instance naming the same
    * file give 2. Contract **C-c**; see the module docblock.
+   *
+   * An accessory counts **once per measured mount** rather than once per hold —
+   * a 1×1 full pillar carries a torch socket on each of its four faces, so one
+   * `torch` hold in it is a quantity of 4 against a single entry in
+   * {@link slots}. `AssemblyPart.quantity` is where that number is decided.
    */
   quantity: number
 
@@ -271,6 +302,38 @@ export interface UnfilledSlot {
    * has dropped.
    */
   slot: SlotName | undefined
+  /**
+   * The accessory slot of that slot's file, when the hole is one level down.
+   *
+   * Absent for an empty template slot, so the two are distinguishable without a
+   * second lookup — *the wall is missing* and *the wall's torch is missing* are
+   * different sentences and different repairs. Required accessory slots are the
+   * majority: 1,047 of the 1,244 declarations in the corpus omit `optional`, and
+   * absence means required.
+   */
+  hold?: HoldName
+}
+
+/**
+ * A hold this bill counts and the plan cannot draw.
+ *
+ * The accessory is billed — one copy, {@link AssemblyPart.quantity}'s
+ * `max(1, …)` — because the user chose the file and a pack without it is a pack
+ * short. What is missing is not the file but the **measurement**: nothing has
+ * read where a `torch` attaches to this host, so the room has nowhere to put it.
+ *
+ * It is listed rather than merely counted so the bill and the room agree about
+ * what is drawn: `builder/canvas`'s `PlanScene.unplaced` is the same population
+ * from the other side, and a bill that silently billed a file no surface renders
+ * would leave a user counting torches in a zip that never appeared on the plan.
+ */
+export interface UnplacedHold {
+  placement: PlacementId
+  /** The template slot whose file holds it. */
+  slot: SlotName
+  hold: HoldName
+  /** The accessory's own file. */
+  tile: TileId
 }
 
 export interface BillOfTiles {
@@ -281,12 +344,18 @@ export interface BillOfTiles {
   placements: number
 
   /**
-   * Parts those instances resolved to — one per **resolved** fill.
+   * Parts those instances resolved to — one per **copy to print**.
    *
    * Greater than `placements` for every instance with more than one filled slot,
    * which is all of them in practice: the 40 shipped templates declare 3-5 parts
    * each, 128 over 40. It counts fills and not slots, so an instance with a hole
    * in it contributes less than its recipe asks for, and `unfilled` says where.
+   *
+   * **A hold counts once per measured mount**, the same as {@link copies}: it is
+   * the number the panel renders as *"N parts to print"*, and one torch in a
+   * four-socket pillar is four things to print. Summing `AssemblyPart.quantity`
+   * rather than counting the array is what keeps the two agreeing, which they
+   * always did before a part could cost more than one print.
    */
   parts: number
 
@@ -326,8 +395,17 @@ export interface BillOfTiles {
    */
   complete: boolean
 
-  /** Where the holes are. Empty iff {@link complete}. */
+  /** Where the holes are — a template slot, or an accessory slot of one. Empty iff {@link complete}. */
   unfilled: UnfilledSlot[]
+
+  /**
+   * Holds with no measured mount on their host. See {@link UnplacedHold}.
+   *
+   * **Not a hole and not part of the gate**: the file is chosen and the download
+   * carries it. It is here so a caller can say why the plan is drawing fewer
+   * accessories than the bill lists.
+   */
+  unplaced: UnplacedHold[]
 
   /** Every instance, resolved — so the canvas and the panel share one pass. */
   resolved: ResolvedInstance[]
@@ -364,16 +442,20 @@ export function buildBillOfTiles(
   const groups = new Map<BlobId, Group>()
   const notes: Note[] = []
   const unfilled: UnfilledSlot[] = []
+  const unplaced: UnplacedHold[] = []
   let parts = 0
 
   for (const instance of instances) {
     const result = resolveInstance(instance, index, context)
     resolved.push(result)
     notes.push(...result.notes)
-    parts += result.parts.length
     unfilled.push(...holesIn(result))
+    unplaced.push(...undrawableIn(result))
 
-    for (const part of result.parts) accumulate(groups, instance.id, part)
+    for (const part of result.parts) {
+      parts += part.quantity
+      accumulate(groups, instance.id, part)
+    }
   }
 
   const lines = toLines(groups)
@@ -390,6 +472,7 @@ export function buildBillOfTiles(
     collisions: collisionsIn(lines),
     complete: unfilled.length === 0,
     unfilled,
+    unplaced,
     resolved,
   }
 }
@@ -404,9 +487,40 @@ export function buildBillOfTiles(
 function holesIn(result: ResolvedInstance): UnfilledSlot[] {
   const template = result.instance.template
   if (result.template === undefined) return [{ placement: result.instance.id, template, slot: undefined }]
-  return result.slots
-    .filter((slot) => !slot.optional && slot.record === undefined)
-    .map((slot) => ({ placement: result.instance.id, template, slot: slot.slot }))
+  const placement = result.instance.id
+  return [
+    ...result.slots
+      .filter((slot) => !slot.optional && slot.record === undefined)
+      .map((slot) => ({ placement, template, slot: slot.slot })),
+    // The same condition one level down, and `record === undefined` rather than
+    // `fill === undefined` for the same reason it is written that way above: an
+    // empty required accessory slot and one naming a file that has left the
+    // archive are the same missing print, and `hold-unknown-tile` beside it says
+    // which of the two happened.
+    ...result.holds
+      .filter((held) => !held.optional && held.record === undefined)
+      .map((held) => ({ placement, template, slot: held.slot, hold: held.hold })),
+  ]
+}
+
+/**
+ * The holds one instance bills and no surface can draw.
+ *
+ * Read off {@link ResolvedInstance.holds} rather than recomputed, for
+ * {@link holesIn}'s reason: the `hold-unplaced` note and this list are the same
+ * condition read twice from the same array, so they cannot disagree.
+ */
+function undrawableIn(result: ResolvedInstance): UnplacedHold[] {
+  const out: UnplacedHold[] = []
+  for (const held of result.holds) {
+    // A loop rather than `filter().map()`, and the reason is the same one
+    // `Filled` is a union for: this condition narrows `record` to a
+    // `CatalogRecord`, where a filtered array would need an assertion to read
+    // its `id`.
+    if (held.record === undefined || held.mounts > 0) continue
+    out.push({ placement: result.instance.id, slot: held.slot, hold: held.hold, tile: held.record.id })
+  }
+  return out
 }
 
 function accumulate(groups: Map<BlobId, Group>, placement: PlacementId, part: AssemblyPart): void {
@@ -418,8 +532,17 @@ function accumulate(groups: Map<BlobId, Group>, placement: PlacementId, part: As
   if (existing === undefined) groups.set(record.blob, group)
 
   group.records.set(record.id, record)
-  group.slots.push({ placement, slot: part.slot, tile: record.id })
-  group.quantity += 1
+  group.slots.push({
+    placement,
+    slot: part.slot,
+    tile: record.id,
+    ...(part.hold === undefined ? {} : { hold: part.hold }),
+  })
+  // **`part.quantity`, not `1`** — the one arithmetic change holds made to this
+  // module. A template slot is one place on the grid and always contributes 1; a
+  // hold contributes one copy per measured mount, so the torch of a four-socket
+  // pillar is a single ask worth four prints of one download.
+  group.quantity += part.quantity
 }
 
 /**
@@ -513,11 +636,19 @@ function byId(a: CatalogRecord, b: CatalogRecord): number {
   return ascending(a.id, b.id)
 }
 
-/** Total, so a line's provenance list is a function of the scene and not of iteration order. */
+/**
+ * Total, so a line's provenance list is a function of the scene and not of
+ * iteration order.
+ *
+ * The `hold` leg is what keeps it total now that one slot can ask twice: a wall
+ * holding a `torch` and a `lintel` cut from the same file is two refs agreeing
+ * on all three of the other keys.
+ */
 function bySlotRef(a: BillSlotRef, b: BillSlotRef): number {
   if (a.placement !== b.placement) return ascending(a.placement, b.placement)
   if (a.slot !== b.slot) return ascending(a.slot, b.slot)
-  return ascending(a.tile, b.tile)
+  if (a.tile !== b.tile) return ascending(a.tile, b.tile)
+  return ascending(a.hold ?? '', b.hold ?? '')
 }
 
 function ascending(a: string, b: string): number {

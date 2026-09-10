@@ -554,13 +554,22 @@ function PlacementRow({
   // resolve to the same md5 — and before this the row said `×2` with one
   // placement under it and no way to account for the second copy. Named only
   // when there is more than one, so the ordinary single-ask row stays quiet.
-  const asking = slotsAsking(line, entry.id)
+  //
+  // An accessory names the pair — `wall › torch`, *the torch in the wall* — and
+  // it is named even when it asks alone, because a single ask worth four prints
+  // is exactly the row a reader cannot otherwise account for: a four-socket
+  // pillar's torch is `×4` from one hold.
+  const refs = slotsAsking(line, entry.id)
+  const asking = refs.map((ref) =>
+    ref.hold === undefined ? String(ref.slot) : `${String(ref.slot)} › ${String(ref.hold)}`,
+  )
+  const named = refs.length > 1 || refs.some((ref) => ref.hold !== undefined)
   return (
     <li className="of-bill-place">
       <span className="of-bill-at">
         {describeCell(entry.instance.x, entry.instance.z)}
         {entry.instance.rotation === 0 ? '' : ` · ${formatUnits(entry.instance.rotation)}°`}
-        {asking.length > 1 ? ` · ${asking.join(' + ')}` : ''}
+        {named ? ` · ${asking.join(' + ')}` : ''}
       </span>
       <span className="of-bill-acts">
         {/*

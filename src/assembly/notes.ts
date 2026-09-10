@@ -55,6 +55,21 @@
  * Three arrived in their place, and all three are conditions the old resolver
  * was structurally unable to express: a fill can now be wrong, missing, or name
  * a template this build does not ship.
+ *
+ * ## Three more for the accessories, and only one of them is a warning
+ *
+ * A fill may carry **holds** — the torch in the wall's socket, the door in its
+ * opening — and 1,047 of the 1,244 accessory declarations in the corpus are
+ * required, so a hold is not a decoration the vocabulary can stay silent about.
+ * `hold-unknown-tile` and `hold-off-slot` are `unknown-tile` and `fill-off-slot`
+ * read one level down, and they are separate codes rather than a widening of
+ * those two because a roll-up that mixed the two levels would count a missing
+ * torch as a missing wall.
+ *
+ * `hold-unplaced` is `info` and that is the considered half: a host with no
+ * measured mount for the slot is a gap in `tools/mounts/`'s pass rather than a
+ * fault in the room, the accessory is still billed once, and *"in the bill, and
+ * not on the plan"* is the sentence `no-footprint` already carries at `info`.
  */
 import type { TileId } from '@/catalog'
 import type { PlacementId, SlotName } from '@/store'
@@ -156,6 +171,49 @@ export type NoteCode =
   /** The tile carries no `build|` tag — true of 25.35% of what the template slots admit. */
   | 'build-unspecified'
   /**
+   * A hold names a file that is not in this catalog build.
+   *
+   * {@link 'unknown-tile'} one level down, and a separate code rather than a
+   * reuse of it because the subject is not the same kind of thing: the slot's
+   * own fill is a *tile on the grid* and a hold is an accessory fitted into that
+   * tile, so a roll-up mixing the two would tell a user that "2 slots name files
+   * not in this build" when one of them is a torch inside a wall that is
+   * perfectly present. The message names the hold, because {@link Note} carries
+   * a `slot` and has no field for one — see {@link Note.slot}.
+   *
+   * Costs **one accessory, not the host**: the wall still prints and still fits,
+   * and its other holds are untouched.
+   */
+  | 'hold-unknown-tile'
+  /**
+   * A hold sits in a slot the host file does not declare.
+   *
+   * `fill-off-slot`'s reading for an accessory, and the same population: nothing
+   * the app writes can produce it — the accessory editor offers the host's own
+   * `config.parts` — so what reaches it is a hand-edited `localStorage` blob, a
+   * share link decoded against another manifest, or a host whose composition
+   * changed under a saved room. `warn`, because the file will print and there is
+   * nowhere on the host it goes.
+   *
+   * It is still counted in the bill. A hold this resolver dropped would be a
+   * file the room draws and the bill does not list, and the two disagreeing
+   * about what is in the scene is the failure this row is closing.
+   */
+  | 'hold-off-slot'
+  /**
+   * A hold's host has no measured mount for that slot: it prints, and nothing
+   * can draw it.
+   *
+   * `info` for exactly {@link 'no-footprint'}'s reason — *in the bill, not on
+   * the plan* — and not `warn`, because it is a gap in the **measurement** and
+   * not a fault in the user's room: `CatalogRecord.mounts` is absent both for a
+   * host with no accessory slot and for a host nobody has measured, and
+   * `mountsFor` folds the two together. The accessory is billed once, so a
+   * download taken before the measuring pass has caught up still holds the file
+   * the user chose.
+   */
+  | 'hold-unplaced'
+  /**
    * The scene mixes construction systems that do not physically go together.
    *
    * `separate wall` (3,351 tiles) and `wall on tile` (863) are different ways of
@@ -177,6 +235,9 @@ export const NOTE_SEVERITY: Readonly<Record<NoteCode, 'info' | 'warn'>> = Object
   'no-footprint': 'info',
   'insert-on-grid': 'info',
   'build-unspecified': 'info',
+  'hold-unknown-tile': 'warn',
+  'hold-off-slot': 'warn',
+  'hold-unplaced': 'info',
   'mixed-build-systems': 'warn',
 })
 
