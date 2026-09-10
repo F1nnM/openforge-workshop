@@ -88,6 +88,20 @@ turn into a surprise red build on an unrelated PR.
 Without the fixtures the corpus suites skip rather than fail — CI checks for that, because
 a green board that ran a fraction of the tests is worse than a red one.
 
+Where accessories attach is **measured off the meshes**, not derived from the fixtures, so
+it is checked in rather than rebuilt:
+
+```bash
+npm run mounts               # read and measure the host and insert meshes
+npm run mounts -- --inventory  # write pipeline/mounts/inventory.json from that log
+```
+
+The run reads ~16 GB out of the public bucket once (995 host and 139 insert blobs, ≈1.5 h
+on 16 threads) and is resumable at md5 granularity, so an interrupted run costs nothing to
+finish and a finished one is never repeated. `npm run stamp` and `npm run import:catalog`
+only *read* the committed inventory. Re-run the pair when a host or insert mesh changes —
+a re-export gets a new md5, which drops out of the inventory and takes its mounts with it.
+
 ## Repository layout
 
 | Path | What it holds |

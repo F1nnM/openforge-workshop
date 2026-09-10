@@ -8,18 +8,20 @@
  * on records whose hosts were measured, and "this wall has no torch socket" and
  * "nobody measured this wall" are the two states the whole tool exists to
  * distinguish. A silent empty read looks exactly like a corpus of unmeasured
- * meshes, which is the state the repository is in today — so it would look
- * correct.
+ * meshes, which is what a fresh clone with no `pipeline/mounts/inventory.json`
+ * legitimately is — so it would look correct.
  *
  * The **join** is keyed on the blob, not on the record, and that is the second
  * failure mode: 171 md5 values are shared by 520 catalog rows, so a join keyed
  * on `id` would measure one wall and light up one of the five records that are
  * that wall.
  *
- * The **empty build** is the third. `mounts` and `anchor` are optional, so an
- * empty inventory has to leave the emitted `{tags, records}` byte-identical —
- * otherwise this row moves 8,702 records for a measurement nobody has taken yet,
- * and `tools/stamp/lock.ts` would be right to fail it.
+ * The **empty build** is the third, and it is what keeps the derivation lock
+ * honest now that the inventory holds a real measurement. `mounts` and `anchor`
+ * are optional, so an empty inventory has to leave the emitted `{tags, records}`
+ * byte-identical: `tools/stamp/lock.ts` digests exactly that build, because
+ * 16.34 GB of somebody else's bucket is an input and not a derivation this tree
+ * performs, and a re-measurement must therefore not move the lock.
  */
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -188,14 +190,22 @@ describe('emptyMountInventory', () => {
 })
 
 describe('the committed inventory', () => {
-  it('is on disk, parses, and is still the empty shell', () => {
+  it('is on disk, parses, and holds the measured run', () => {
     expect(existsSync(MOUNT_INVENTORY_PATH)).toBe(true)
     const inventory = readMountInventory()
-    expect(inventory).toEqual(emptyMountInventory())
+    /* The four numbers the README, the spec and `docs/verify-catalog-facts.py`
+       quote. `tools/mounts/corpus.test.ts` is where the conventions behind them
+       are asserted; here they only have to be present and self-consistent. */
+    expect(inventory?.counted).toEqual({ hosts: 995, inserts: 139, mounts: 1301, failed: 0 })
+    expect(Object.keys(inventory?.hosts ?? {})).toHaveLength(995)
+    expect(Object.keys(inventory?.inserts ?? {})).toHaveLength(139)
   })
 
   it('holds exactly the bytes the serialiser writes, so a run diffs and nothing else does', () => {
-    expect(readFileSync(MOUNT_INVENTORY_PATH, 'utf8')).toBe(serialiseMountInventory(emptyMountInventory()))
+    const inventory = readMountInventory()
+    expect(inventory).toBeDefined()
+    if (inventory === undefined) return
+    expect(readFileSync(MOUNT_INVENTORY_PATH, 'utf8')).toBe(serialiseMountInventory(inventory))
   })
 })
 

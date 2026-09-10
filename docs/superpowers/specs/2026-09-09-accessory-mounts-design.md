@@ -1,7 +1,7 @@
 # Accessory mounts: placing torches, doors and lintels where the meshes say they go
 
 **Date:** 2026-09-09
-**Status:** design approved, implementation not started
+**Status:** implemented 2026-09-10
 **Closes:** the "Previews only — a fill can name a recipe's slot, not a file's" line in
 `src/builder/panels/slots/AccessorySection.tsx`, and the disagreement it refuses to create
 between the room and the parts list.

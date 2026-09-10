@@ -2771,13 +2771,12 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
       'torch',
     ])
 
-    // **Not one of the 20 has a measured mount**, which is the state of the
-    // shipped artefact rather than a property of these recipes: the mount
-    // inventory is the empty shell until the measuring pass has walked the
-    // archive, and `CatalogRecord.mounts` is absent for every live record.
+    // **Every one of the 20 has exactly one measured mount**, now that
+    // `pipeline/mounts/inventory.json` holds the real run — a doorway, a
+    // socket or a surface read off the host mesh, one place per declaration.
     // Nothing is `unplaced` all the same, because nothing is *held*: an accessory
     // reaches that list only once a file has been chosen for it.
-    expect(declared.every((held) => held.mounts === 0)).toBe(true)
+    expect(declared.map((held) => held.mounts)).toEqual(Array.from({ length: 20 }, () => 1))
 
     const bill = buildBillOfTiles(instances, index, context)
     expect(bill.placements).toBe(40)

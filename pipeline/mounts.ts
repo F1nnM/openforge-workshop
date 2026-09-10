@@ -26,11 +26,19 @@
  *
  * ## What it says today
  *
- * Nothing. The committed file is {@link emptyMountInventory}'s shell: 0 hosts,
- * 0 inserts, 0 mounts. The measuring run is the row after this one, and until
- * it lands every record emits neither key — which is why `PIPELINE_VERSION`
- * does not move here and why `pipeline/mounts.test.ts` asserts the emitted
- * `{tags, records}` still hash to the locked digest.
+ * The first full run, against fixtures `428289679a0c` on 2026-09-10: **995
+ * hosts** carrying **1,301 mounts** (702 opening, 438 socket, 55 pocket, 78
+ * surface, 28 hole), **139 inserts** each with an anchor, **0 failed**, 16.34 GB
+ * read in ≈1.5 h. Joined, that is **972 records with a `mounts` key and 285 with
+ * an `anchor`**, and 47 slots that resolved to nothing and say why — those print
+ * as a fixture lint out of `pipeline/build.ts`.
+ *
+ * `PIPELINE_VERSION` does not move for a re-measurement and
+ * `tools/stamp/lock.ts` still builds its digest against
+ * {@link emptyMountInventory}: a bucket full of meshes is an *input*, not a
+ * derivation this tree performs, so the lock must not be a function of it.
+ * `tools/mounts/corpus.test.ts` is what holds this file honest instead — it
+ * asserts the four counts above and the conventions they proved.
  *
  * The sequence to repeat when the corpus changes is the one `thumbs.ts` sets:
  *
@@ -87,8 +95,10 @@ export type Bounds = z.infer<typeof Bounds>
  * the **fraction** of mid-slice vertices that sat on a nominal radius. See
  * `tools/mounts/arcs.ts`, whose `ARC_FIT_MIN_ON_RADIUS` is the floor a host has
  * to clear to be unrolled at all: 0.35, against the 0.49–0.58 a clean sector
- * scores. Declared `int` until row 5b, which no arc host has ever satisfied —
- * the shell inventory holds no hosts, so nothing had yet been parsed through it.
+ * scores. Measured over the 206 arc hosts in the committed inventory the score
+ * runs 0.16–0.77, and the 14 slots below the floor are recorded as
+ * `arc-fit-refused` rather than measured off a circle the mesh is not struck
+ * from — which is why the bound here is `[0, 1]` and not the floor itself.
  */
 export const ArcFit = z.object({
   centre: z.tuple([z.number(), z.number()]).readonly(),
@@ -205,9 +215,10 @@ export function readMountInventory(path: string = MOUNT_INVENTORY_PATH): MountIn
  *
  * `BuildOptions.mounts` is required, so every caller states its intent;
  * this is how a caller says *"deliberately none"*. `tools/stamp/lock.ts` passes
- * it because a bucket full of meshes is an input and not a derivation, and the
- * checked-in file is its serialisation, byte for byte, so a run's diff is the
- * measurement and nothing else.
+ * it because a bucket full of meshes is an input and not a derivation: the lock
+ * digests a build that has never seen a mount, so a re-measurement changes the
+ * emitted index without breaking the lock, and a run's diff of the checked-in
+ * file is the measurement and nothing else.
  */
 export function emptyMountInventory(): MountInventory {
   return {

@@ -102,7 +102,11 @@ describe('socketPoses', () => {
     // the mouth, which is what a regression in `poseOf` would look like.
     expect(p.depth).toBeGreaterThan(12)
     expect(p.depth).toBeLessThan(22)
-  })
+    /* The one case that has to run the full 31-angle sweep, because the angle is
+       what it measures. ~21 s alone against the suite's 30 s default, and it
+       tipped over that under the parallel load of a whole-suite run, so it
+       carries its own budget rather than being a flake nobody can reproduce. */
+  }, 120_000)
 
   it('finds nothing on the +y face of the same wall', () => {
     const wall = slottedWall()
