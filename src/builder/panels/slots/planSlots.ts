@@ -65,7 +65,7 @@
  * the panel's count and the bill's `×4` one number rather than two.
  */
 import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
-import { mountsFor } from '@/catalog'
+import { isModelledIn, mountsFor } from '@/catalog'
 import type { SlotState } from '@/screens/detail/slots'
 import { compositionIndexFor, slotStates } from '@/screens/detail/slots'
 import type { HoldFill, HoldName, PlacementId, SlotName, TemplateInstance } from '@/store'
@@ -131,6 +131,17 @@ export interface PlanSlotHolder {
    * the archive carries no measurement until `npm run mounts` has walked it.
    */
   readonly mounts: Readonly<Record<string, number>>
+  /**
+   * Slots of this file whose accessory is **already part of its mesh** —
+   * `CatalogRecord.modelledIn`, measured.
+   *
+   * Still listed in {@link PlanSlotHolder.slots}, because a slot that offers
+   * nothing and says nothing is a grid the user cannot account for; the row says
+   * *built into this piece* instead. Not counted as a hole either:
+   * `assembly/resolve.ts` does not read one as a hole, and a panel that did
+   * would report an incomplete print the bill is happy with.
+   */
+  readonly modelledIn: readonly string[]
 }
 
 /** What a drawing's compositions add up to. */
@@ -254,9 +265,13 @@ export function planSlots(
         mounts: Object.fromEntries(
           states.map((state) => [state.name, mountsFor(record, state.name).length]),
         ),
+        modelledIn: states.filter((state) => isModelledIn(record, state.name)).map((state) => state.name),
       })
       for (const state of states) {
         slots += 1
+        // A slot the host has built in is not an open question: nothing fills
+        // it, nothing is missing from the print, and the bill agrees.
+        if (isModelledIn(record, state.name)) continue
         if (!state.optional) required += 1
         // **A hold this build cannot resolve is not a filled slot**, and the
         // condition is the resolver's rather than a second reading of it:

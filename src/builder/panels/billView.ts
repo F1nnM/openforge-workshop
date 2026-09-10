@@ -691,6 +691,18 @@ export function noteCopy(note: BillNote): NoteCopy {
           'gap is in the measurement rather than in your room.',
       }
 
+    case 'hold-modelled-in':
+      return {
+        ...base,
+        headline: `${n} ${files} ${is} already built into the tile holding ${
+          note.count === 1 ? 'it' : 'them'
+        }`,
+        detail:
+          'The tile was printed with this accessory as part of it — a floor whose brazier is sculpted on, ' +
+          'or a wall with its door modelled in — so nothing needs to be printed for it and nothing is drawn. ' +
+          'It is not in the pack, and the piece is complete without it.',
+      }
+
     case 'mixed-build-systems':
       return {
         ...base,

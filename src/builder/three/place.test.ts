@@ -721,7 +721,7 @@ describe('accessoryMatrix on a measurement that is not a direction', () => {
  *
  * `public/catalog/catalog.json` is the join of `pipeline/mounts/inventory.json`
  * onto the records — `tools/mounts/corpus.test.ts` asserts that every one of the
- * 972 `mounts` rows and 285 `anchor` rows is the inventory's own entry for that
+ * 969 `mounts` rows and 285 `anchor` rows is the inventory's own entry for that
  * blob — so reading the index here is reading the measurement, without this
  * module reaching across a project boundary into the build's own directory.
  * Skips loudly, as every other corpus block in this repo does.
@@ -828,22 +828,28 @@ describeCorpus('accessoryMatrix poses a measured insert by its extents', () => {
   it('keeps a lintel’s height vertical, its depth through the wall and its span across it', () => {
     const mount = openingOf(DOOR_WALL_ID, 'lintel')
     const anchor = anchorOf(LINTEL_ID)
-    expect(anchor).toMatchObject({ kind: 'leaf', axis: [0, 0, 1] })
+    // `bed: '-z'` is the measured face it was printed on: 97.6 % of its `-z`
+    // against 12.2 % of its `+z`, so the piece is turned over and its own `z`
+    // runs **down** once placed. The vertical is still the vertical.
+    expect(anchor).toMatchObject({ kind: 'leaf', axis: [0, 0, 1], bed: '-z' })
     const bounds = boundsFrom(anchor.size)
     const matrix = accessoryMatrix(hostFrame(0), mount, { bounds, anchor }, 'lintel', 0)
 
     const height = placedAxis(matrix, bounds, 2)
     expect(height.lengthMm).toBeCloseTo(6.086, 2)
-    expect(degreesBetween(height.direction, new Vector3(0, 1, 0))).toBeLessThan(1)
+    expect(degreesBetween(height.direction, new Vector3(0, -1, 0))).toBeLessThan(1)
 
     const depth = placedAxis(matrix, bounds, 1)
     expect(depth.lengthMm).toBeCloseTo(12.986, 2)
-    expect(degreesBetween(depth.direction, zUpToYUp(mount.normal))).toBeLessThan(1)
+    // Through the wall either way round — the flip reverses it, and a lintel's
+    // `at` sits on the opening's mid-plane where that costs nothing.
+    expect(Math.abs(depth.direction.dot(zUpToYUp(mount.normal)))).toBeCloseTo(1, 3)
 
     const span = placedAxis(matrix, bounds, 0)
     expect(span.lengthMm).toBeCloseTo(32.84, 2)
     // Across the face, either way round: which end of a lintel faces which jamb
-    // is not in the data, and the piece is symmetric about it.
+    // is not in the data, and the piece is symmetric about it. It is also the
+    // axis the flip turns about, so the span is exactly where it was.
     const across = new Vector3(0, 1, 0).cross(zUpToYUp(mount.normal)).normalize()
     expect(Math.abs(span.direction.dot(across))).toBeCloseTo(1, 3)
 
@@ -852,9 +858,12 @@ describeCorpus('accessoryMatrix poses a measured insert by its extents', () => {
     // 43.990 mm tall), the 33 mm notch runs up through it, and the 6.09 mm
     // lintel drops into it flush rather than perching on top of it.
     expect(mount.openTop).toBe(true)
-    const seat = landsAt(matrix, bottomCentre(bounds)).y
-    expect(seat).toBeCloseTo(mount.head - 6.086, 2)
-    expect(seat + height.lengthMm).toBeCloseTo(mount.head, 3)
+    // The bed face is the mesh's own `z` minimum and it is turned up, so it is
+    // the face that lands on the head — the flat side the room sees, with the
+    // moulding hanging into the notch under it.
+    const bed = landsAt(matrix, bottomCentre(bounds)).y
+    expect(bed).toBeCloseTo(mount.head, 3)
+    expect(landsAt(matrix, topCentre(bounds)).y).toBeCloseTo(mount.head - 6.086, 2)
   })
 
   /**

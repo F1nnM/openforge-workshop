@@ -27,11 +27,13 @@
  * ## What it says today
  *
  * The first full run, against fixtures `428289679a0c` on 2026-09-10: **995
- * hosts** carrying **1,301 mounts** (702 opening, 438 socket, 55 pocket, 78
+ * hosts** carrying **1,298 mounts** (702 opening, 438 socket, 55 pocket, 75
  * surface, 28 hole), **139 inserts** each with an anchor, **0 failed**, 16.34 GB
- * read in ≈1.5 h. Joined, that is **972 records with a `mounts` key and 285 with
- * an `anchor`**, and 47 slots that resolved to nothing and say why — those print
- * as a fixture lint out of `pipeline/build.ts`.
+ * read in ≈1.5 h. Joined, that is **969 records with a `mounts` key and 285 with
+ * an `anchor`**, and 50 slots that resolved to nothing and say why — those print
+ * as a fixture lint out of `pipeline/build.ts`, and the 15 `modelled-in` of them
+ * also reach the record as `CatalogRecord.modelledIn`, because *the host already
+ * holds one* is a fact a consumer has to act on rather than a person.
  *
  * `PIPELINE_VERSION` does not move for a re-measurement and
  * `tools/stamp/lock.ts` still builds its digest against

@@ -38,6 +38,14 @@
  * which is why an optional-only host comes back `{}` rather than being asked
  * about for ever.
  *
+ * A slot the host has **built in** is skipped as well — `CatalogRecord.modelledIn`,
+ * the measurement's verdict that the mesh already carries what the fixture asks
+ * for. The three `floor,brazier+small.2x2` floors declare a `brazier` slot and
+ * are 31.6–33.2 mm tall because the brazier is part of the print, so solving it
+ * put a second brazier on the first and charged for it. `assembly/resolve.ts`
+ * does not read such a slot as a hole either, so an unsolved one is a complete
+ * piece rather than a refused download.
+ *
  * `base` is not an accessory: it is A6's base *match*, `assembly/resolve.ts`
  * excludes it from `accessorySlots`, and a hold written for it would be read
  * back as `hold-off-slot` — a note about an accessory that does not fit a mount
@@ -79,7 +87,8 @@
  */
 import { useEffect } from 'react'
 
-import type { CatalogFile, TileId } from '@/catalog'
+import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
+import { isModelledIn } from '@/catalog'
 import type { CompositionIndex } from '@/composition'
 import type { SlotOption, SlotSelection } from '@/screens/detail/slots'
 import { compositionIndexFor, pickerSlots, slotStates } from '@/screens/detail/slots'
@@ -112,24 +121,56 @@ export interface MissingHold {
  * calling this in its loop.
  */
 export function solveHolds(catalog: CatalogFile, parent: TileId, design: string | undefined): SolvedHolds {
-  return solveFor(compositionIndexFor(catalog), parent, design)
+  return solveFor(compositionIndexFor(catalog), recordsOf(catalog), parent, design)
 }
 
 /** {@link solveHolds} over an index the caller has already resolved. */
-function solveFor(index: CompositionIndex, parent: TileId, design: string | undefined): SolvedHolds {
+function solveFor(
+  index: CompositionIndex,
+  records: ReadonlyMap<string, CatalogRecord>,
+  parent: TileId,
+  design: string | undefined,
+): SolvedHolds {
   const holds: Record<HoldName, HoldFill> = {}
   /* Mutated as the walk goes, so slot two is resolved against the file slot one
      chose — see the module note on `constrain`. */
   const selection: Record<string, TileId> = {}
+  const host = records.get(parent)
 
   for (const slot of pickerSlots(index, parent)) {
     if (slot.optional === true) continue
+    // The host was printed holding this one — a floor whose brazier is sculpted
+    // on. Solving it would put a second brazier on the first and bill for it;
+    // `assembly/resolve.ts` does not count it as a hole either, so leaving it
+    // empty completes the fill rather than refusing the download.
+    if (host !== undefined && isModelledIn(host, slot.name)) continue
     const pick = pickFor(index, parent, slot.name, selection, design)
     if (pick === undefined) continue
     selection[slot.name] = pick.variant.id
     holds[HoldName.parse(slot.name)] = { tile: pick.variant.id, pinned: false }
   }
   return holds
+}
+
+/**
+ * Records by catalog id, built once per parsed file.
+ *
+ * `isModelledIn` takes a {@link CatalogRecord} and a `CompositionIndex` holds
+ * none — it works in `TileId`s and tag postings — so this is the join, and it is
+ * a `WeakMap` for `compositionIndexFor`'s reason: the map is 8,702 entries, this
+ * pass runs on every store write, and keying on the parsed file pays for it once
+ * and lets it be collected with the file. `builder/panels/slots/planSlots.ts`
+ * keeps the same memo for the same join; the two are not shared because
+ * `@/builder/three` must not import from a panel.
+ */
+const RECORDS = new WeakMap<CatalogFile, ReadonlyMap<string, CatalogRecord>>()
+
+function recordsOf(file: CatalogFile): ReadonlyMap<string, CatalogRecord> {
+  const cached = RECORDS.get(file)
+  if (cached !== undefined) return cached
+  const built = new Map(file.records.map((record) => [record.id as string, record]))
+  RECORDS.set(file, built)
+  return built
 }
 
 /**
@@ -176,6 +217,7 @@ export function missingHolds(
   design: string | undefined,
 ): readonly MissingHold[] {
   const index = compositionIndexFor(catalog)
+  const records = recordsOf(catalog)
   const out: MissingHold[] = []
 
   for (const [id, instance] of Object.entries(placements)) {
@@ -184,7 +226,7 @@ export function missingHolds(
       if (fill === undefined) continue
       if (fill.holds !== undefined) continue
       if (pickerSlots(index, fill.tile).length === 0) continue
-      out.push({ id: id as PlacementId, slot, holds: solveFor(index, fill.tile, design) })
+      out.push({ id: id as PlacementId, slot, holds: solveFor(index, records, fill.tile, design) })
     }
   }
   return out

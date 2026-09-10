@@ -218,9 +218,17 @@ const NOTHING_HELD: SlotSelection = {}
  *
  * A slot with exactly one mount says nothing: one press, one copy, in the place
  * the drawing puts it, is what a row already reads as.
+ *
+ * A third fact, and it is not a fault at all: a slot the host has **built in**
+ * says so. The fixture asks for a brazier the floor was printed holding, so
+ * there is nothing to fill, nothing to count and nothing missing.
  */
 function MountLine({ holder }: { holder: PlanSlotHolder }) {
   const notes = holder.slots.flatMap((state) => {
+    // The host was printed holding this one, so there is nothing to count and
+    // nothing missing — `CatalogRecord.modelledIn`, and the row says so rather
+    // than reporting an unmeasured mount.
+    if (holder.modelledIn.includes(state.name)) return [`${state.name}: built into this piece`]
     const mounts = holder.mounts[state.name] ?? 0
     if (mounts === 0) return [`${state.name}: no measured mount — counted once, not drawn`]
     return mounts === 1 ? [] : [`${state.name} × ${String(mounts)} mounts`]

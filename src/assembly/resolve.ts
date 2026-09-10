@@ -58,7 +58,7 @@
  * `@/catalog`'s aggregate layer is still named in this file.
  */
 import type { CatalogRecord, PartSlot, TileAggregate, VariantSelection } from '@/catalog'
-import { copiesOf, mountsFor, selectVariant } from '@/catalog'
+import { copiesOf, isModelledIn, mountsFor, selectVariant } from '@/catalog'
 import type { CompositionIndex, SlotTags } from '@/composition'
 import { resolveSlotTags } from '@/composition'
 import type {
@@ -279,6 +279,17 @@ export interface ResolvedHold {
    */
   readonly mounts: number
   /**
+   * The host's own mesh already holds what this slot asks for —
+   * `catalog/mounts.ts#isModelledIn`.
+   *
+   * Only ever `true` for a hold somebody wrote into such a slot, because
+   * {@link accessorySlots} does not declare one: the walk's first pass never
+   * produces it and the second pass does. It is what keeps the accessory out of
+   * the bill and out of `BillOfTiles.unplaced` while still reporting it —
+   * `hold-modelled-in`, `info`, zero copies, drawn nowhere.
+   */
+  readonly modelledIn: boolean
+  /**
    * **Copies to print** — `Σ copiesOf(mount, record.anchor)` over those mounts.
    *
    * Not `mounts` and not always equal to it: a `wide` doorway is one measured
@@ -487,7 +498,7 @@ export function resolveInstance(
     for (const held of resolveHolds(slot, fill, record, index)) {
       holds.push(held)
       notes.push(...holdNotes(instance, record, held))
-      if (held.record !== undefined) {
+      if (held.record !== undefined && !held.modelledIn) {
         parts.push({
           slot,
           record: held.record,
@@ -495,7 +506,7 @@ export function resolveInstance(
           hold: held.hold,
           quantity: Math.max(1, held.copies),
         })
-      } else if (!held.optional) {
+      } else if (held.record === undefined && !held.optional) {
         complete = false
       }
     }
@@ -514,6 +525,15 @@ export function resolveInstance(
  * is a value rather than an absence; the second walks what the **fill holds**
  * and emits the entries the first could not name, which is the `hold-off-slot`
  * population.
+ *
+ * A **modelled-in** slot is dropped from the declarations too, and for the
+ * opposite reason: `base` is a slot nothing here can fill, and a modelled-in one
+ * is a slot the host has already filled. The fixture asks for a brazier the
+ * floor is holding — `CatalogRecord.modelledIn`, measured — so the piece is
+ * complete as it prints: no line in the bill, no copy in the download, and above
+ * all not an `unfilled` entry refusing one. A hold somebody wrote into it
+ * anyway still comes back through the second pass and is reported at `info`;
+ * see {@link holdNotes}.
  *
  * `base` is dropped from the declarations and it is not an accessory slot by any
  * reading: 2,451 of the 3,695 live file slots are `base`, the builder's base
@@ -564,6 +584,7 @@ function resolvedHold(
     optional,
     fill: held,
     record,
+    modelledIn: isModelledIn(host, hold),
     mounts: mounts.length,
     copies: mounts.reduce((total, mount) => total + copiesOf(mount, record?.anchor), 0),
   }
@@ -593,6 +614,20 @@ function holdNotes(instance: TemplateInstance, host: CatalogRecord, held: Resolv
   }
   if (held.record === undefined) return notes
 
+  // Before `hold-off-slot`, because `accessorySlots` drops a modelled-in slot and
+  // an off-slot note would then say *this host has no such slot* of a slot the
+  // host declares and has already filled. The accessory is real, it prints, and
+  // it has nowhere to go on a piece that does not need it.
+  if (isModelledIn(host, held.hold)) {
+    notes.push(
+      note(
+        'hold-modelled-in',
+        `${host.name} has its ${held.hold} built in, so ${held.record.name} is not needed and is not drawn.`,
+        { ...subject, tileId: held.record.id },
+      ),
+    )
+    return notes
+  }
   if (!hasDeclaration(host, held.hold)) {
     notes.push(
       note(
@@ -649,7 +684,9 @@ function hasDeclaration(host: CatalogRecord, hold: HoldName): boolean {
  * overwhelming case.
  */
 function accessorySlots(host: CatalogRecord): readonly PartSlot[] {
-  return (host.config?.parts ?? []).filter((part) => part.name !== BASE_SLOT)
+  return (host.config?.parts ?? []).filter(
+    (part) => part.name !== BASE_SLOT && !isModelledIn(host, part.name),
+  )
 }
 
 /**

@@ -505,6 +505,25 @@ export function fixtureUnmeasuredCatalogFile(): CatalogFile {
 }
 
 /**
+ * The same fixture with {@link FIXTURE_IDS.wall2}'s torch **built into the
+ * mesh** — `modelledIn: ['torch']`.
+ *
+ * The third of the pair above, and the one that is not a gap in the measurement:
+ * the host declares the slot, the measurement found the accessory already in the
+ * print (the corpus's three `floor,brazier+small.2x2` floors), and so nothing is
+ * drawn, nothing is billed and nothing is missing. A hold in one is reported —
+ * `hold-modelled-in` — which is the row this fixture exists to produce.
+ */
+export function fixtureModelledInCatalogFile(): CatalogFile {
+  return CatalogFileSchema.parse({
+    ...FIXTURE_CATALOG,
+    records: FIXTURE_CATALOG.records.map((record) =>
+      record.id === FIXTURE_IDS.wall2 ? { ...record, modelledIn: ['torch'] } : record,
+    ),
+  })
+}
+
+/**
  * The same fixture with the **insert** unmeasured — {@link FIXTURE_IDS.torch}
  * without its `anchor`.
  *

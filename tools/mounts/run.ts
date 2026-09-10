@@ -189,6 +189,7 @@ export async function measureTarget(
       bytes: detach(object.bytes),
       foot: target.foot,
       slots: target.slots,
+      floor: target.floor,
       alsoInsert: target.alsoInsert === true,
     })
     if (answer.error !== undefined) throw new Error(answer.error)

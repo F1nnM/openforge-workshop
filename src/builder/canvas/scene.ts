@@ -100,7 +100,7 @@
  *     lets {@link pieceAt} and `move.ts` take the union.
  */
 import type { CatalogRecord, Mount, TileId } from '@/catalog'
-import { DEFAULT_ROTATION_STEP_DEG, mountsFor } from '@/catalog'
+import { DEFAULT_ROTATION_STEP_DEG, isModelledIn, mountsFor } from '@/catalog'
 import type { GeneratedPiece } from '@/generator/placement/geometry'
 import { generatedPiece } from '@/generator/placement/geometry'
 import { GENERATED_SHAPES } from '@/generator/placement/scene'
@@ -636,7 +636,7 @@ function declaresHold(host: CatalogRecord, hold: HoldName): boolean {
 /**
  * The accessories of one drawn part, and the four ways a hold does not become one.
  *
- * Four answers per hold, in the order `assembly/resolve.ts#holdNotes` decides
+ * Five answers per hold, in the order `assembly/resolve.ts#holdNotes` decides
  * them, so the panel and the bill name one fault the same way and never both:
  *
  *   1. **The file is gone.** An `unknown` omission, exactly as for a stranded
@@ -646,6 +646,10 @@ function declaresHold(host: CatalogRecord, hold: HoldName): boolean {
  *      will not fit. Nothing about mounts is added, because an undeclared slot
  *      has none by construction and the second sentence would be a consequence
  *      of the first rather than a second fact.
+ *   2b. **The host has it built in.** `hold-modelled-in`: the slot is declared
+ *      and the mesh already carries what it asks for — a floor whose brazier is
+ *      sculpted on — so the accessory is not needed, not drawn, and (alone among
+ *      these) not in the bill either.
  *   3. **Nobody has measured where it attaches.** `hold-unplaced`. The host may
  *      well have the socket; this build has no coordinates for it.
  *   4. **Nobody has measured how it plugs in.** `hold-unanchored`: the *insert*
@@ -693,6 +697,17 @@ function partAccessories(
       unplaced.push({
         ...address,
         reason: `${part.record.name} declares no ${held.hold} slot, so ${record.name} will print and will not fit.`,
+      })
+      continue
+    }
+    // Before the mounts, because a modelled-in slot has none by construction and
+    // *nobody measured where it attaches* would be the wrong sentence: nothing
+    // attaches, the piece was printed holding one. `resolve.ts#holdNotes` decides
+    // it in this order too, and this is the same sentence read off the room.
+    if (isModelledIn(part.record, held.hold)) {
+      unplaced.push({
+        ...address,
+        reason: `${part.record.name} has its ${held.hold} built in, so ${record.name} is not needed and is not drawn.`,
       })
       continue
     }

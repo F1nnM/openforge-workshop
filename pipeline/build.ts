@@ -213,16 +213,18 @@ export interface BuildStats {
    */
   withThumb: number
   /**
-   * Records emitting `mounts` and `anchor` — **972 and 285 today**, from the
-   * 995 hosts and 139 inserts of the first full measuring run.
+   * Records emitting `mounts` and `anchor` — **969 and 285 today**, from the
+   * 995 hosts and 139 inserts of the measuring run.
    *
-   * The arithmetic to 972 is worth stating, because none of the obvious numbers
+   * The arithmetic to 969 is worth stating, because none of the obvious numbers
    * is it. **1,006** records sit over a measured host blob: the 1,005 that
    * declare an accessory slot, plus one `insert`-layer row on the `grate.doorway`
-   * mesh, which is filed both ways and therefore measured as a host too. **34**
-   * of those 1,006 are over one of the 34 host blobs whose every slot resolved
+   * mesh, which is filed both ways and therefore measured as a host too. **37**
+   * of those 1,006 are over one of the 37 host blobs whose every slot resolved
    * to nothing — measured, carrying an `unresolved` list, emitting no `mounts`
-   * key. 1,006 − 34 = 972.
+   * key. 1,006 − 37 = 969. (34 before the surface rule read a 33 mm brazier
+   * floor as holding its own brazier, which took the three `brazier+small`
+   * floors' last mount away.)
    *
    * Reported rather than asserted, and the two directions read the way
    * {@link BuildStats.withThumb}'s do. A drop to 0 after a measuring run means
@@ -237,10 +239,14 @@ export interface BuildStats {
    * record carries — `mounts: <file> — slot <name> <reason>`.
    *
    * A **fixture lint rather than a build error**, because every entry is a fact
-   * about a mesh and not about this code: `modelled-in` is a door sculpted into
-   * the wall (the corpus has one), `runs-off-end` a doorway with no jamb to
-   * hinge against, `arc-fit-refused` a sector whose mesh is not struck from the
-   * radii its tags claim. `scripts/import-catalog.ts` prints them to stderr, so
+   * about a mesh and not about this code: `modelled-in` is an accessory sculpted
+   * into the host — a door in a solid wall, or the brazier of a floor that
+   * stands 33 mm tall, 15 slots over 10 records — `runs-off-end` a doorway with
+   * no jamb to hinge against, `arc-fit-refused` a sector whose mesh is not
+   * struck from the radii its tags claim. The `modelled-in` lines are the only
+   * ones that also reach the record, as `CatalogRecord.modelledIn`: the others
+   * are somebody's to go and measure, that one is a slot every consumer has to
+   * treat as already filled. `scripts/import-catalog.ts` prints them to stderr, so
    * they arrive next to the person who just re-measured.
    *
    * Deduplicated by blob, not by record: 171 meshes are shared by 520 rows, and
@@ -360,6 +366,14 @@ export function buildCatalog(options: BuildOptions): BuildResult {
     const measured = options.mounts.hosts[row.file_metadata.md5]
     const mounts = measured === undefined || measured.mounts.length === 0 ? undefined : measured.mounts
     const anchor = options.mounts.inserts[row.file_metadata.md5]?.anchor
+    /* The one `unresolved` reason a *consumer* has to act on rather than a
+       person: `modelled-in` says the fixture asks for an accessory the mesh
+       already has, so the slot is satisfied by this print and nothing should
+       draw into it, bill for it or call it a hole. The other four reasons are
+       gaps in the measurement and stay in the lint alone. */
+    const modelledIn = (measured?.unresolved ?? [])
+      .filter((entry) => entry.reason === 'modelled-in')
+      .map((entry) => entry.slot)
 
     return {
       id,
@@ -392,6 +406,7 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       ...(row.config === undefined ? {} : { config: row.config }),
       ...(mounts === undefined ? {} : { mounts }),
       ...(anchor === undefined ? {} : { anchor }),
+      ...(modelledIn.length === 0 ? {} : { modelledIn }),
     }
   })
 

@@ -67,6 +67,7 @@ describe('analyseHost', () => {
     const m = analyseHost(
       {
         foot: wallFoot,
+        floor: false,
         slots: [
           { name: 'door', require: ['interface|door|rectangular', 'size|single'] },
           { name: 'lintel', require: ['interface|lintel'] },
@@ -99,6 +100,7 @@ describe('analyseHost', () => {
     const m = analyseHost(
       {
         foot: { shape: 'wall', length: 4 },
+        floor: false,
         slots: [{ name: 'door', require: ['interface|door|arched', 'size|wide'] }],
       },
       stl.positions,
@@ -111,7 +113,7 @@ describe('analyseHost', () => {
   it('reports a door slot on a solid wall as modelled-in', () => {
     const stl = parseStl(syntheticStl([WALL]))
     const m = analyseHost(
-      { foot: wallFoot, slots: [{ name: 'door', require: [] }] },
+      { foot: wallFoot, floor: false, slots: [{ name: 'door', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -131,7 +133,7 @@ describe('analyseHost', () => {
     // changing quietly: the expected answer then becomes one 48 mm opening.
     const stl = parseStl(syntheticStl([WALL], [{ min: [-24, 53, 10], max: [24, 67, 51] }]))
     const m = analyseHost(
-      { foot: { shape: 'wall', length: 2 }, slots: [{ name: 'door', require: [] }] },
+      { foot: { shape: 'wall', length: 2 }, floor: false, slots: [{ name: 'door', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -145,7 +147,7 @@ describe('analyseHost', () => {
     // `throughOpenings`' 8 mm and 60 mm² floors, so nothing qualifies.
     const stl = parseStl(syntheticStl([WALL], [{ min: [-2.5, 53, 20], max: [2.5, 67, 25] }]))
     const m = analyseHost(
-      { foot: wallFoot, slots: [{ name: 'door', require: [] }] },
+      { foot: wallFoot, floor: false, slots: [{ name: 'door', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -158,7 +160,7 @@ describe('analyseHost', () => {
     // silhouette leaves maskable: a door hung here has nothing to hinge against.
     const stl = parseStl(syntheticStl([WALL], [{ min: [-25, 53, 10], max: [-10, 67, 51] }]))
     const m = analyseHost(
-      { foot: wallFoot, slots: [{ name: 'door', require: [] }] },
+      { foot: wallFoot, floor: false, slots: [{ name: 'door', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -173,7 +175,7 @@ describe('analyseHost', () => {
     // bbox-relative answer with it.
     const stl = parseStl(syntheticStl([FLOOR], [{ min: [15, 16, 0], max: [35, 34, 5] }]))
     const m = analyseHost(
-      { foot: { shape: 'rect', w: 2, d: 2 }, slots: [{ name: 'trapdoor', require: [] }] },
+      { foot: { shape: 'rect', w: 2, d: 2 }, floor: true, slots: [{ name: 'trapdoor', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -187,7 +189,7 @@ describe('analyseHost', () => {
   it('reports a trapdoor slot on a solid floor as no-hole', () => {
     const stl = parseStl(syntheticStl([FLOOR]))
     const m = analyseHost(
-      { foot: { shape: 'rect', w: 2, d: 2 }, slots: [{ name: 'trapdoor', require: [] }] },
+      { foot: { shape: 'rect', w: 2, d: 2 }, floor: true, slots: [{ name: 'trapdoor', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -198,7 +200,7 @@ describe('analyseHost', () => {
   it('gives a surface-class slot the top-face centre', () => {
     const stl = parseStl(syntheticStl([FLOOR]))
     const m = analyseHost(
-      { foot: { shape: 'rect', w: 2, d: 2 }, slots: [{ name: 'statue', require: [] }] },
+      { foot: { shape: 'rect', w: 2, d: 2 }, floor: true, slots: [{ name: 'statue', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -219,7 +221,7 @@ describe('analyseHost', () => {
       syntheticStl([WALL], [{ min: [-4.25, 53.5, 20.75], max: [4.25, 61.5, 29.25] }]),
     )
     const m = analyseHost(
-      { foot: wallFoot, slots: [{ name: 'treasure', require: [] }] },
+      { foot: wallFoot, floor: false, slots: [{ name: 'treasure', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -247,7 +249,7 @@ describe('analyseHost', () => {
       syntheticStl([WALL], [{ min: [4.5, 53.5, 20.5], max: [13.5, 58.5, 29.5] }]),
     )
     const m = analyseHost(
-      { foot: wallFoot, slots: [{ name: 'treasure', require: [] }] },
+      { foot: wallFoot, floor: false, slots: [{ name: 'treasure', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -279,7 +281,7 @@ describe('analyseHost', () => {
       syntheticStl([WALL], [{ min: [-15, 53.5, 22], max: [15, 60.5, 28] }]),
     )
     const m = analyseHost(
-      { foot: wallFoot, slots: [{ name: 'treasure', require: [] }] },
+      { foot: wallFoot, floor: false, slots: [{ name: 'treasure', require: [] }] },
       stl.positions,
       stl.triangles,
     )
@@ -303,7 +305,7 @@ describe('analyseHost', () => {
     // inside the 30 s timeout on an idle machine is still worth shrinking.)
     const stl = parseStl(syntheticStl([{ min: [-6, -6.5, 0], max: [6, 6.5, 12] }]))
     const m = analyseHost(
-      { foot: wallFoot, slots: [{ name: 'torch', require: ['component|torch'] }] },
+      { foot: wallFoot, floor: false, slots: [{ name: 'torch', require: ['component|torch'] }] },
       stl.positions,
       stl.triangles,
     )
@@ -314,7 +316,7 @@ describe('analyseHost', () => {
   it('reads the doorway of an arc host through the unrolled frame', () => {
     const wall = arcWall()
     const m = analyseHost(
-      { foot: arcFoot, slots: [{ name: 'door', require: [] }] },
+      { foot: arcFoot, floor: false, slots: [{ name: 'door', require: [] }] },
       wall.positions,
       wall.triangles,
     )
@@ -336,7 +338,7 @@ describe('analyseHost', () => {
   it('gives an arc host a radial normal, which its face cannot supply', () => {
     const wall = arcWall()
     const m = analyseHost(
-      { foot: arcFoot, slots: [{ name: 'door', require: [] }] },
+      { foot: arcFoot, floor: false, slots: [{ name: 'door', require: [] }] },
       wall.positions,
       wall.triangles,
     )
@@ -372,6 +374,7 @@ describe('analyseHost', () => {
     const m = analyseHost(
       {
         foot: arcFoot,
+        floor: false,
         slots: [
           { name: 'door', require: [] },
           { name: 'torch', require: [] },
@@ -387,10 +390,44 @@ describe('analyseHost', () => {
     ])
   })
 
+  /**
+   * The second brazier, which is the fault this rule closes.
+   *
+   * `cut-stone#floor,brazier+small.2x2.openforge.stl` is **33.2 mm** tall and
+   * declares a `brazier` slot; the brazier is in the mesh. A floor is 4–6 mm of
+   * plate — the `brazier+large` floors that really do take a separate brazier
+   * measure 4.5 to 5.5 — so a floor this tall is tall because the accessory is
+   * already standing on it, and a surface mount put a second one on top.
+   */
+  it('reads a surface slot on a floor that stands up as modelled-in', () => {
+    const stl = parseStl(syntheticStl([{ min: [0, 0, 0], max: [50, 50, 33] }]))
+    const m = analyseHost(
+      { foot: { shape: 'rect', w: 2, d: 2 }, floor: true, slots: [{ name: 'brazier', require: [] }] },
+      stl.positions,
+      stl.triangles,
+    )
+    expect(m.mounts).toEqual([])
+    expect(m.unresolved).toEqual([{ slot: 'brazier', reason: 'modelled-in' }])
+  })
+
+  it('still mounts a surface slot on a wall of the same height and footprint', () => {
+    // The test is the declared kind, not the shape: `dwarven_halls#wall,plinth.2x2`
+    // is a 2×2 `rect` 44.8 mm tall whose `statue` is a separate print, and so are
+    // the mine walls' beams and the secret doors' tops.
+    const stl = parseStl(syntheticStl([{ min: [0, 0, 0], max: [50, 50, 33] }]))
+    const m = analyseHost(
+      { foot: { shape: 'rect', w: 2, d: 2 }, floor: false, slots: [{ name: 'statue', require: [] }] },
+      stl.positions,
+      stl.triangles,
+    )
+    expect(m.unresolved).toEqual([])
+    expect(m.mounts[0]).toMatchObject({ kind: 'surface', at: [0, 0, 33] })
+  })
+
   it('resolves a grate by the host it sits in', () => {
     const wall = parseStl(syntheticStl([WALL], [{ min: [-8, 53, 20], max: [8, 67, 40] }]))
     const inWall = analyseHost(
-      { foot: wallFoot, slots: [{ name: 'grate', require: [] }] },
+      { foot: wallFoot, floor: false, slots: [{ name: 'grate', require: [] }] },
       wall.positions,
       wall.triangles,
     )
@@ -398,7 +435,7 @@ describe('analyseHost', () => {
 
     const floor = parseStl(syntheticStl([FLOOR], [{ min: [15, 16, 0], max: [35, 34, 5] }]))
     const inFloor = analyseHost(
-      { foot: { shape: 'rect', w: 2, d: 2 }, slots: [{ name: 'grate', require: [] }] },
+      { foot: { shape: 'rect', w: 2, d: 2 }, floor: true, slots: [{ name: 'grate', require: [] }] },
       floor.positions,
       floor.triangles,
     )

@@ -139,6 +139,7 @@ describe('stratifiedSample', () => {
       ids: [TileId.parse(`tiles/${family}/${seed}.stl`)],
       family,
       foot: { shape: 'rect', w, d: 2 },
+      floor: false,
       slots: [{ name: slot, require: [] }],
     }
   }

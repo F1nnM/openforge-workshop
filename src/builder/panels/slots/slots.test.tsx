@@ -49,6 +49,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildAssemblyIndex } from '@/assembly'
 import type { TileId } from '@/catalog'
+import { CatalogFile as CatalogFileSchema } from '@/catalog'
 import type { RecipeTemplate } from '@/assembly'
 import { FILL, PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
 import type { TemplateInstance } from '@/store'
@@ -161,9 +162,24 @@ const FILTERED_TEMPLATE: RecipeTemplate = {
 const TEMPLATES = (id: string): RecipeTemplate | undefined =>
   [EDITOR_TEMPLATE, MITRE_TEMPLATE, FILTERED_TEMPLATE].find((one) => one.id === id)
 
+/**
+ * The same fixture with the archway's `lintel` **built into its mesh** —
+ * `CatalogRecord.modelledIn`, the measurement's verdict for the three
+ * `floor,brazier+small.2x2` floors whose brazier is sculpted on.
+ */
+const BUILT_IN_CATALOG = CatalogFileSchema.parse({
+  ...SLOT_CATALOG,
+  records: SLOT_CATALOG.records.map((record) =>
+    record.id === PARENT.archway ? { ...record, modelledIn: ['lintel'] } : record,
+  ),
+})
+
 /** The accessory inventory over a plan, which is all this section is now. */
-function accessories(placements: Record<string, TemplateInstance>) {
-  return render(<AccessorySection catalog={SLOT_CATALOG} placements={placements} />)
+function accessories(
+  placements: Record<string, TemplateInstance>,
+  catalog = SLOT_CATALOG,
+) {
+  return render(<AccessorySection catalog={catalog} placements={placements} />)
 }
 
 /**
@@ -319,6 +335,15 @@ describe('planSlots', () => {
     )
     expect(inventory).toMatchObject({ slots: 0, required: 0, unfillable: 0, holders: [] })
     expect(inventory.byName).toEqual([])
+  })
+
+  it('does not count a built-in slot as an open question', () => {
+    // The bill does not read one as a hole — `assembly/resolve.ts` drops it from
+    // the declarations — so a panel that did would report an incomplete print
+    // over a piece the bill is happy with.
+    const inventory = planSlots(BUILT_IN_CATALOG, plan({ a: at(PARENT.archway, 0, 0) }))
+    expect(inventory.holders[0]?.modelledIn).toEqual(['lintel'])
+    expect(inventory).toMatchObject({ slots: 2, required: 0, holes: 0 })
   })
 
   it('counts the slots a plan opens, and how many of them are required', () => {
@@ -554,9 +579,9 @@ describe('the accessory picker writes what it is given', () => {
    * The section over the **store's** scene, because the presses below write
    * there and `pinHold` addresses a placement by its key.
    */
-  function placed(placements: Record<string, TemplateInstance>) {
+  function placed(placements: Record<string, TemplateInstance>, catalog = SLOT_CATALOG) {
     useWorkshopStore.setState({ placements })
-    return accessories(useWorkshopStore.getState().placements)
+    return accessories(useWorkshopStore.getState().placements, catalog)
   }
 
   /** The holds of the one fill, as the store has them after a press. */
@@ -619,6 +644,15 @@ describe('the accessory picker writes what it is given', () => {
       'aria-pressed',
       'false',
     )
+  })
+
+  it('says a slot the host was printed holding is built into the piece', () => {
+    // **F6.** Not *no measured mount* — there is nothing to measure and nothing
+    // missing. The slot stays on screen, because a grid that offered nothing and
+    // said nothing would be a piece the user cannot account for.
+    placed(archway({}), BUILT_IN_CATALOG)
+    expect(screen.getByText(/lintel: built into this piece/)).toBeInTheDocument()
+    expect(screen.queryByText(/lintel: no measured mount/)).toBeNull()
   })
 
   it('says when nothing has measured where an accessory goes', () => {

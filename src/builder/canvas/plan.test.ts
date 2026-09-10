@@ -44,6 +44,7 @@ import {
   fixtureFills,
   fixtureHolds,
   fixtureInstance,
+  fixtureModelledInCatalogFile,
   fixtureSlotLayout,
   fixtureTemplateParts,
   fixtureUnanchoredCatalogFile,
@@ -1822,6 +1823,20 @@ describe('accessories: what a fill holds, projected onto the host s measured mou
     expect(bill.unplaced).toEqual([
       { placement: 'p1', slot: FIXTURE_SLOTS.leftWall, hold: FIXTURE_HOLDS.torch, tile: FIXTURE_IDS.torch },
     ])
+
+    // And the fourth, which is not a gap in the measurement at all: the host was
+    // printed holding one. Nothing is drawn and — alone among these — nothing is
+    // billed either, so the bill's `unplaced` stays empty while both sides say
+    // the same sentence about the same accessory.
+    const builtInFile = fixtureModelledInCatalogFile()
+    const builtIn = planCatalogFromFile(builtInFile, fixtureSlotLayout)
+    const included = sceneOfFills(fitted, builtIn, createStyleResolver(builtIn))
+    const includedBill = billFor(fitted, builtInFile)
+    expect(included.unplaced[0]?.reason).toBe(asSentence(billSays(includedBill, 'hold-modelled-in')))
+    expect(included.unplaced).toHaveLength(1)
+    expect(included.pieces.flatMap((piece) => piece.accessories)).toEqual([])
+    expect(includedBill.unplaced).toEqual([])
+    expect(includedBill.complete).toBe(true)
 
     // And the third: the insert's own half of the measurement.
     const unanchoredFile = fixtureUnanchoredCatalogFile()

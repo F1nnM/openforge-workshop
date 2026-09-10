@@ -560,7 +560,7 @@ describe('download verdict', () => {
 })
 
 describe('note vocabulary', () => {
-  it('is thirteen codes — nine for the tiles, four for the accessories in them', () => {
+  it('is fourteen codes — nine for the tiles, five for the accessories in them', () => {
     // The deletion, asserted rather than described. Every one of the eight was
     // about a part the app added on the user's behalf; a template declares its
     // base as a slot, so there is nothing for any of them to be about. The three
@@ -570,6 +570,7 @@ describe('note vocabulary', () => {
     expect(Object.keys(NOTE_SEVERITY).sort()).toEqual([
       'build-unspecified',
       'fill-off-slot',
+      'hold-modelled-in',
       'hold-off-slot',
       'hold-unanchored',
       'hold-unknown-tile',
@@ -693,6 +694,8 @@ interface Row {
   readonly mounts?: CatalogRecord['mounts']
   /** How an insert plugs in, measured. Absent is `hold-unanchored`'s case. */
   readonly anchor?: CatalogRecord['anchor']
+  /** Slots whose accessory is already in this mesh, measured. `isModelledIn`'s input. */
+  readonly modelledIn?: readonly string[]
 }
 
 function worldCatalog(rows: readonly Row[]): CatalogFile {
@@ -729,6 +732,7 @@ function worldCatalog(rows: readonly Row[]): CatalogFile {
         ...(row.config === undefined ? {} : { config: row.config }),
         ...(row.mounts === undefined ? {} : { mounts: row.mounts }),
         ...(row.anchor === undefined ? {} : { anchor: row.anchor }),
+        ...(row.modelledIn === undefined ? {} : { modelledIn: [...row.modelledIn] }),
       }
     }),
   })
@@ -1224,7 +1228,7 @@ describe('template instances', () => {
  * Holds: the accessories fitted into a slot's own file.
  *
  * Everything here is a fixture rather than a corpus measurement, and that is a
- * choice about *coverage*, not a gap in the data: 972 live records carry
+ * choice about *coverage*, not a gap in the data: 969 live records carry
  * `mounts` since the 2026-09-10 measuring run, and the corpus block at the foot
  * of this file exercises the counting rule against them — all 20 accessory
  * declarations across the 40 recipes resolve to exactly one measured mount.
@@ -1277,7 +1281,14 @@ describe('the holds', () => {
    * `optional` is absent by default, which is the corpus reading: 1,047 of the
    * 1,244 accessory declarations omit it and **absence means required**.
    */
-  function hostRow(options: { readonly sockets?: number; readonly optional?: boolean } = {}): Row {
+  function hostRow(
+    options: {
+      readonly sockets?: number
+      readonly optional?: boolean
+      /** The mesh already carries the torch — `CatalogRecord.modelledIn`. */
+      readonly modelledIn?: boolean
+    } = {},
+  ): Row {
     return {
       id: WALL,
       tags: ['shape|wall'],
@@ -1293,6 +1304,7 @@ describe('the holds', () => {
           },
         ],
       },
+      ...(options.modelledIn === true ? { modelledIn: ['torch'] } : {}),
       ...(options.sockets === undefined
         ? {}
         : {
@@ -1447,6 +1459,7 @@ describe('the holds', () => {
         optional: false,
         fill: { tile: TORCH, pinned: false },
         record: index.byId.get(TORCH as TileId),
+        modelledIn: false,
         mounts: 4,
         // Four sockets, one torch each: `copies` and `mounts` part company only
         // on a `wide` doorway's pair of leaves.
@@ -1517,11 +1530,48 @@ describe('the holds', () => {
       optional: false,
       fill: undefined,
       record: undefined,
+      modelledIn: false,
       mounts: 4,
       // No insert, so nothing to count copies of: one per mount is the answer
       // `mounts` alone always gave.
       copies: 4,
     })
+  })
+
+  it('asks nothing for a slot the host has built in, and refuses no download', () => {
+    /*
+      **F6.** The three `floor,brazier+small.2x2` blobs declare a `brazier` slot
+      and are 31.6–33.2 mm tall because the brazier is sculpted onto the floor.
+      The slot is *satisfied by the print*: not a declaration the room can fill,
+      so not an `unfilled` entry and not a refused download.
+    */
+    const { index, context } = worldOf([hostRow({ modelledIn: true }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([instanceOf(HOST, { wall: WALL })], index, context)
+
+    expect(bill.complete).toBe(true)
+    expect(bill.unfilled).toEqual([])
+    expect(bill.resolved[0]?.holds).toEqual([])
+    expect(bill.files).toBe(1)
+    expect(bill.notes.map((one) => one.code)).not.toContain('slot-unfilled')
+  })
+
+  it('reports a hold in a built-in slot at info, and bills nothing for it', () => {
+    // A share link or an older saved room can carry one, and dropping it would
+    // be the disagreement `hold-off-slot` exists to prevent — except that here
+    // *nothing* is printed for it, because the piece needs nothing.
+    const { index, context } = worldOf([hostRow({ modelledIn: true }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: TORCH })], index, context)
+
+    const held = bill.resolved[0]?.holds ?? []
+    expect(held.map((one) => [one.hold, one.modelledIn, one.copies])).toEqual([['torch', true, 0]])
+    expect(bill.complete).toBe(true)
+    // One file — the wall. The torch is neither a line nor a copy.
+    expect(bill.files).toBe(1)
+    expect(bill.copies).toBe(1)
+    expect(bill.unplaced).toEqual([])
+    const note = bill.notes.find((one) => one.code === 'hold-modelled-in')
+    expect(note?.severity).toBe('info')
+    expect(note?.message).toContain('built in')
   })
 
   it('leaves an optional accessory slot empty without refusing anything', () => {

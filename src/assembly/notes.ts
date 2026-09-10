@@ -56,7 +56,7 @@
  * was structurally unable to express: a fill can now be wrong, missing, or name
  * a template this build does not ship.
  *
- * ## Four more for the accessories, and only two of them are warnings
+ * ## Five more for the accessories, and only two of them are warnings
  *
  * A fill may carry **holds** — the torch in the wall's socket, the door in its
  * opening — and 1,047 of the 1,244 accessory declarations in the corpus are
@@ -76,6 +76,12 @@
  * Two codes rather than one, because the two are different halves of one pair
  * and a user who is told *"nothing measured this"* can do nothing with either;
  * whoever runs `tools/mounts/` needs to know which side came back empty.
+ *
+ * `hold-modelled-in` is the fifth and the odd one: the host's mesh already
+ * carries the accessory the slot asks for, so the hold is reported at `info`
+ * and — alone among the five — **not billed**. Nothing is drawn there and
+ * nothing is downloaded, which is what keeps the room and the bill agreeing
+ * about a piece that needs nothing.
  */
 import type { TileId } from '@/catalog'
 import type { PlacementId, SlotName } from '@/store'
@@ -231,6 +237,23 @@ export type NoteCode =
    */
   | 'hold-unanchored'
   /**
+   * A hold sits in a slot whose accessory is **already part of the host mesh**.
+   *
+   * `CatalogRecord.modelledIn`, measured: the fixture declares a `brazier` slot
+   * on a floor whose brazier is sculpted on, and a `door` on a wall with no
+   * opening cut through it. The slot is satisfied by the print, so
+   * `resolve.ts#accessorySlots` does not declare it, nothing solves it and
+   * nothing draws into it — this note is for the hold a share link or an older
+   * saved room already carries in one.
+   *
+   * `info`, and **zero copies**: unlike {@link 'hold-off-slot'} the accessory is
+   * not added to the bill, because the piece it would go on needs nothing. That
+   * is the one case where a hold is reported and not billed, and it is why the
+   * note exists rather than the hold being dropped silently — the room draws
+   * nothing there either, so the two still agree.
+   */
+  | 'hold-modelled-in'
+  /**
    * The scene mixes construction systems that do not physically go together.
    *
    * `separate wall` (3,351 tiles) and `wall on tile` (863) are different ways of
@@ -256,6 +279,7 @@ export const NOTE_SEVERITY: Readonly<Record<NoteCode, 'info' | 'warn'>> = Object
   'hold-off-slot': 'warn',
   'hold-unplaced': 'info',
   'hold-unanchored': 'info',
+  'hold-modelled-in': 'info',
   'mixed-build-systems': 'warn',
 })
 

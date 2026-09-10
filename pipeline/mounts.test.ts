@@ -196,7 +196,7 @@ describe('the committed inventory', () => {
     /* The four numbers the README, the spec and `docs/verify-catalog-facts.py`
        quote. `tools/mounts/corpus.test.ts` is where the conventions behind them
        are asserted; here they only have to be present and self-consistent. */
-    expect(inventory?.counted).toEqual({ hosts: 995, inserts: 139, mounts: 1301, failed: 0 })
+    expect(inventory?.counted).toEqual({ hosts: 995, inserts: 139, mounts: 1298, failed: 0 })
     expect(Object.keys(inventory?.hosts ?? {})).toHaveLength(995)
     expect(Object.keys(inventory?.inserts ?? {})).toHaveLength(139)
   })

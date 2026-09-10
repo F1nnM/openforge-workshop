@@ -530,6 +530,10 @@ function undrawableIn(result: ResolvedInstance): UnplacedHold[] {
     // `CatalogRecord`, where a filtered array would need an assertion to read
     // its `id`.
     if (held.record === undefined) continue
+    // A modelled-in slot is satisfied by the host: the accessory is not in the
+    // pack either, so *"in the pack and not on the plan"* is not what happened
+    // to it. `hold-modelled-in` is its report.
+    if (held.modelledIn) continue
     if (held.mounts > 0 && held.record.anchor !== undefined) continue
     out.push({ placement: result.instance.id, slot: held.slot, hold: held.hold, tile: held.record.id })
   }

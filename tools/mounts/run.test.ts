@@ -89,6 +89,7 @@ function target(blob: BlobId, bytes: number, ord: number): MountTarget {
     ids: [TileId.parse(`tiles/walls/w${String(ord)}.stl`)],
     family: 'tiles/walls',
     foot: { shape: 'wall', length: 1 },
+    floor: false,
     slots: [{ name: 'top', require: ['component|beam'] }],
   }
 }
@@ -236,6 +237,7 @@ describe('MeasurePool', () => {
         kind: 'host',
         bytes: bytes.slice().buffer,
         foot: { shape: 'wall', length: 1 },
+        floor: false,
         slots: [{ name: 'top', require: ['component|beam'] }],
         alsoInsert: false,
       })
@@ -269,6 +271,7 @@ describe('MeasurePool', () => {
         kind: 'insert',
         bytes: wall(1).slice().buffer,
         foot: { shape: 'none' },
+        floor: false,
         slots: [],
         alsoInsert: false,
       }),

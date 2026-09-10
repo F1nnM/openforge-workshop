@@ -1,7 +1,7 @@
 /**
  * Reading the measured mount points off a record.
  *
- * Three functions, and every one of them exists because the alternative is the
+ * Four functions, and every one of them exists because the alternative is the
  * same few lines written slightly differently in the builder, the assembly
  * resolver and the detail drawer. {@link copiesOf} is the one where "slightly
  * differently" would be a silent disagreement rather than a duplicate: it is
@@ -72,6 +72,32 @@ export function faceVector(face: Face): Vec3 {
  */
 export function mountsFor(record: CatalogRecord, slot: string): readonly Mount[] {
   return (record.mounts ?? []).filter((mount) => mount.slot === slot)
+}
+
+/**
+ * Whether the host's own mesh already contains what this slot asks for.
+ *
+ * `CatalogRecord.modelledIn` is the measurement's `modelled-in` verdict —
+ * `tools/mounts/classify.ts`, joined by `pipeline/build.ts` — and it names four
+ * slots in the archive: one `door` sculpted into a narrow eroded door wall, and
+ * the `brazier` of the three 31.6–33.2 mm `floor,brazier+small.2x2` floors,
+ * whose brazier is part of the floor.
+ *
+ * **Satisfied by the host, and that is one sentence four consumers say.** The
+ * slot is not an accessory slot the room can fill: `assembly/resolve.ts` leaves
+ * it out of the declarations, so it is neither a hole in the print nor a line in
+ * the bill; `builder/three/holds.ts` does not solve it; `builder/canvas/scene.ts`
+ * draws nothing into it; and the slots panel says *built into this piece*. A
+ * hold somebody wrote into one anyway is reported — `hold-modelled-in`, at
+ * `info` — rather than dropped, for `hold-off-slot`'s reason: a file the room
+ * shows and the bill omits is the disagreement all of this exists to prevent.
+ *
+ * It lives here beside {@link mountsFor} because it is the same question read
+ * the other way — *is there anywhere to put one* — and `@/assembly` may not
+ * import from `@/builder` while both need the answer.
+ */
+export function isModelledIn(record: CatalogRecord, slot: string): boolean {
+  return (record.modelledIn ?? []).includes(slot)
 }
 
 /**

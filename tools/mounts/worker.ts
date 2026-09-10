@@ -45,6 +45,8 @@ export interface MeasureRequest {
   readonly bytes: ArrayBuffer
   readonly foot: Footprint
   readonly slots: readonly HostSlot[]
+  /** `CatalogRecord.kinds` carrying `floor` — see `classify.ts#HostInput`. */
+  readonly floor: boolean
   /** A host that is also an insert: measure the anchor from the same parse. */
   readonly alsoInsert: boolean
 }
@@ -63,7 +65,11 @@ function measure(request: MeasureRequest): MeasureResponse {
   const { positions, triangles } = parseStl(new Uint8Array(request.bytes))
   const host =
     request.kind === 'host'
-      ? analyseHost({ foot: request.foot, slots: request.slots }, positions, triangles)
+      ? analyseHost(
+          { foot: request.foot, slots: request.slots, floor: request.floor },
+          positions,
+          triangles,
+        )
       : undefined
   const insert =
     request.kind === 'insert' || request.alsoInsert ? analyseInsert(positions, triangles) : undefined

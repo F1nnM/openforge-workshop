@@ -20,11 +20,17 @@
  * **1,130 objects read**, 16.34 GB, 0 failed — 995 hosts and 135 inserts, plus
  * **4 blobs that are filed both ways** and answer both questions from one parse,
  * which is why 995 + 139 is 1,134 and not the number of objects. The hosts carry
- * **1,301 mounts** (702 opening, 438 socket, 55 pocket, 78 surface, 28 hole) and
+ * **1,298 mounts** (702 opening, 438 socket, 55 pocket, 75 surface, 28 hole) and
  * every one of the **139 inserts** has an anchor (117 leaf, 13 block, 6 plate,
- * 3 peg). Of the 1,230 slots the host blobs declare, **1,183 resolved**; the 47
- * that did not say why: 14 `arc-fit-refused`, 12 `no-socket`, 12 `modelled-in`,
- * 6 `runs-off-end`, 3 `no-opening`.
+ * 3 peg), **19** of them carrying a `bed` — the face the piece was printed on,
+ * `-z` on all 19. Of the 1,230 slots the host blobs declare, **1,180 resolved**;
+ * the 50 that did not say why: 15 `modelled-in`, 14 `arc-fit-refused`, 12
+ * `no-socket`, 6 `runs-off-end`, 3 `no-opening`.
+ *
+ * The three `floor,brazier+small.2x2` floors moved into `modelled-in` when the
+ * surface rule learned that a floor standing 15 mm tall is standing on its own
+ * accessory, which is where 1,301 mounts and 12 modelled-in slots became 1,298
+ * and 15.
  *
  * ## The misses are counted, not hidden
  *
@@ -68,7 +74,7 @@ const describeCorpus = runnable ? describe : describe.skip
 /* ------------------------------------------------------- the measured numbers */
 
 /** What the run wrote, and what the README, the spec and the facts script quote. */
-const COUNTED = { hosts: 995, inserts: 139, mounts: 1301, failed: 0 } as const
+const COUNTED = { hosts: 995, inserts: 139, mounts: 1298, failed: 0 } as const
 
 /**
  * The Dupont socket's entry angle, `acos(dot(axis, −normal))` in degrees.
@@ -125,6 +131,20 @@ const TORCH_BLOB = 'f08add117e7e3161d69fd73c97211fc7'
 
 /** The one fixture whose doorway is sculpted into the solid rather than cut. */
 const MODELLED_IN_DOOR = 'dungeon_stone%eroded#wall,door+rectangular+narrow.A.openforge,side.stl'
+
+/**
+ * The floors that were printed holding their own brazier: 31.6 to 33.2 mm of
+ * floor where a floor is 4–6 mm of plate.
+ *
+ * The `brazier+large` floors beside them (4.5–5.5 mm) really do take a separate
+ * brazier and keep their surface mounts, which is what makes the height the
+ * measurement rather than the slot name.
+ */
+const MODELLED_IN_BRAZIERS = [
+  'cut-stone#floor,brazier+small.2x2.openforge.stl',
+  'dungeon_stone%block#floor,brazier+small.2x2.openforge.stl',
+  'dungeon_stone%eroded#floor,brazier+small.2x2.openforge.stl',
+] as const
 
 /* -------------------------------------------------------------------- vectors */
 
@@ -222,6 +242,57 @@ describeCorpus(
       expect(blob, MODELLED_IN_DOOR).toBeDefined()
       const unresolved = inv.hosts[blob ?? '']?.unresolved ?? []
       expect(unresolved).toContainEqual({ slot: 'door', reason: 'modelled-in' })
+    })
+
+    /**
+     * The second brazier, which the surface rule now refuses to place.
+     *
+     * The fixture declares a `brazier` slot on a floor whose brazier is part of
+     * the mesh, and a top-face mount put another one on top of it. The verdict
+     * has to reach the *record* as well as the lint, because every consumer —
+     * the bill, the renderer, the default-hold pass, the slots panel — has to
+     * read the slot as already filled rather than as a hole.
+     */
+    it('reads a brazier floor that stands 33 mm tall as holding its own brazier', () => {
+      for (const file_ of MODELLED_IN_BRAZIERS) {
+        const [blob] = [...rowsByBlob].find(([, rows]) => rows.some((row) => row.id.endsWith(file_))) ?? []
+        expect(blob, file_).toBeDefined()
+        const host = inv.hosts[blob ?? '']
+        expect(host?.unresolved, file_).toEqual([{ slot: 'brazier', reason: 'modelled-in' }])
+        expect(host?.mounts, file_).toEqual([])
+        const height = (host?.bbox.max[2] ?? 0) - (host?.bbox.min[2] ?? 0)
+        expect(height, file_).toBeGreaterThan(30)
+        /* And it is on the record, which is what a consumer reads. */
+        for (const record of rowsOf(blob ?? '')) {
+          expect(record.modelledIn, record.id).toEqual(['brazier'])
+          expect(record.mounts, record.id).toBeUndefined()
+        }
+      }
+      /* The large-brazier floors are the control: a real separate print, kept. */
+      const large = [...rowsByBlob].find(([, rows]) =>
+        rows.some((row) => row.id.endsWith('cut-stone#floor,brazier+large.2x2.openforge.stl')),
+      )
+      const largeHost = inv.hosts[large?.[0] ?? '']
+      expect(largeHost?.mounts.map((mount) => mount.slot).sort()).toEqual(['brazier', 'brazier_base'])
+    })
+
+    /**
+     * The face a piece was printed on, where the mesh says so unambiguously.
+     *
+     * 19 of the 139 inserts, every one of them `-z` and every one a slab: 12
+     * lintels, four `burial_slab`s, a loculus top and `shutters.stl`. A lintel is
+     * the one the renderer turns over — `place.ts#bedFlip` — because for a lintel
+     * that face is the top in situ; the rest keep the pose they were measured in.
+     */
+    it('reads the bed off the 19 inserts whose two z faces disagree', () => {
+      const bedded = Object.entries(inv.inserts).filter(([, insert]) => insert.anchor.bed !== undefined)
+      expect(bedded).toHaveLength(19)
+      for (const [blob, insert] of bedded) {
+        expect(insert.anchor.bed, nameOf(blob)).toBe('-z')
+        expect(insert.anchor.kind, nameOf(blob)).toBe('leaf')
+      }
+      const lintels = bedded.filter(([blob]) => nameOf(blob).includes('lintel'))
+      expect(lintels).toHaveLength(12)
     })
 
     /* -------------------------------------------------------- the socket rule */
@@ -403,7 +474,7 @@ describeCorpus(
     it('joins the measurement onto every row the archive shares a blob with', () => {
       const withMounts = file.records.filter((record) => record.mounts !== undefined)
       const withAnchor = file.records.filter((record) => record.anchor !== undefined)
-      expect(withMounts).toHaveLength(972)
+      expect(withMounts).toHaveLength(969)
       expect(withAnchor).toHaveLength(285)
       /* Every joined row's measurement is the one the inventory holds for its
          own blob — the join is a lookup and nothing else. */

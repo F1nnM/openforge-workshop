@@ -140,9 +140,9 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * carried a `mounts` array to be read under either shape, and a version whose
  * only consumer is a field that has never had a value distinguishes nothing. The
  * pair of them is schema 5, and **the first index to carry values under it is
- * the one this repository ships now** — 972 records with `mounts`, 285 with
+ * the one this repository ships now** — 969 records with `mounts`, 285 with
  * `anchor`, off the 995 hosts and 139 inserts of the 2026-09-10 run. Every one
- * of those 1,301 mounts carries a `normal`, so the field has never been absent
+ * of those 1,298 mounts carries a `normal`, so the field has never been absent
  * in the wild and never will be.
  *
  * The optional {@link InsertAnchor} `bed` — the face the piece was printed on —
@@ -1342,6 +1342,27 @@ export const CatalogRecord = z.object({
    * and on every insert nobody has measured.
    */
   anchor: InsertAnchor.optional(),
+
+  /**
+   * Accessory slots this file declares whose accessory is **already in its
+   * mesh** — the fixture asks for a piece the print already has.
+   *
+   * The measurement's `modelled-in` verdicts, by slot name: a `door` slot on a
+   * wall with no through-void (`dungeon_stone%eroded#wall,door+rectangular+narrow.A.openforge,side.stl`)
+   * and a `surface`-class slot on a floor that stands 15 mm tall — the three
+   * `floor,brazier+small.2x2` blobs, 31.6 to 33.2 mm, whose brazier is sculpted
+   * on. `tools/mounts/classify.ts` decides it and `pipeline/build.ts` joins it,
+   * beside the same lint line the importer prints.
+   *
+   * **A consumer reads it as *the host satisfies this slot*.** Nothing is drawn
+   * into it, nothing is added to the bill for it, and it is not a hole in the
+   * print: the piece is complete as it stands. `mounts.ts#isModelledIn` is the
+   * one test, and `resolve.ts`, `scene.ts`, `holds.ts` and `planSlots.ts` all
+   * ask it rather than each re-reading this array.
+   *
+   * Absent on 8,698 of 8,702 rows, so it is optional for `mounts`' reason.
+   */
+  modelledIn: z.array(z.string().min(1)).optional(),
 })
 export type CatalogRecord = z.infer<typeof CatalogRecord>
 

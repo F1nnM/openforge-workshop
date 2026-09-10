@@ -112,8 +112,8 @@ import type { CatalogAssets } from '../src/catalog'
  * committed inventory was the empty shell the join produced nothing and the
  * argument was easy — no consumer could observe a difference.
  *
- * **The inventory now holds the real run** — 995 hosts, 1,301 mounts, 139
- * anchors, so 972 records emit `mounts` and 285 emit `anchor` — and this number
+ * **The inventory now holds the real run** — 995 hosts, 1,298 mounts, 139
+ * anchors, so 969 records emit `mounts` and 285 emit `anchor` — and this number
  * still stays 3. The earlier draft of this docblock promised the opposite
  * ("the row that fills the inventory moves this number, because that one is a
  * derivation with output"), and that promise is **retracted**: the inventory is

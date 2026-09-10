@@ -286,6 +286,22 @@ describeCorpus('the default-hold pass over the live archive', () => {
       expect(holds[DOOR]?.pinned).toBe(false)
     })
 
+    it('leaves a slot the host has built in empty', () => {
+      /* **F6.** `modelledIn` is the measurement's verdict that the mesh already
+         carries the accessory — the three `floor,brazier+small.2x2` floors are
+         31.6–33.2 mm tall because the brazier is sculpted on. Solving it put a
+         second brazier on the first and billed for it; `assembly/resolve.ts`
+         does not read the slot as a hole, so empty is complete. */
+      const builtIn = CatalogFileSchema.parse({
+        ...TWO_SLOT_CATALOG,
+        records: TWO_SLOT_CATALOG.records.map((record) =>
+          record.id === TWO_SLOT_HOST ? { ...record, modelledIn: ['second'] } : record,
+        ),
+      })
+      const holds = solveHolds(builtIn, TWO_SLOT_HOST, undefined)
+      expect(Object.keys(holds)).toEqual(['torch'])
+    })
+
     it('prefers a candidate carrying the room design over the lowest address', () => {
       const none = solveHolds(file, ARCHED_CORNER, undefined)
       const wood = solveHolds(file, ARCHED_CORNER, 'wood')

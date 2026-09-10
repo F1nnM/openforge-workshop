@@ -123,11 +123,14 @@ export interface Bounds {
  *   - `no-opening` / `no-socket` / `no-hole` / `no-pocket` — the cast ran and
  *     found nothing that passes that class's rule. The host has *something*
  *     cut into it; it does not pass.
- *   - `modelled-in` — **no enclosed empty cell inside the silhouette on the thin
- *     axis**: the host is not cut through at all, so the feature is sculpted into
- *     the solid and there is nothing to fit an accessory into. See
- *     {@link silhouetteOf} for what "enclosed" means, and the docblock at the top
- *     of this file for the case it gets wrong.
+ *   - `modelled-in` — the accessory is part of the host mesh, so there is nothing
+ *     to fit into. Two classes reach it. An `opening`-class slot does when there
+ *     is **no enclosed empty cell inside the silhouette on the thin axis**: the
+ *     host is not cut through at all — see {@link silhouetteOf} for what
+ *     "enclosed" means, and the docblock at the top of this file for the case it
+ *     gets wrong. A `surface`-class slot does on a host the fixture calls a
+ *     **floor** that stands 15 mm or taller, which is {@link matchSurface}'s own
+ *     measurement.
  *   - `runs-off-end` — every opening reaches the end of the host, so there is no
  *     jamb to hinge against.
  *   - `arc-fit-refused` — the host is tagged as a sector but its mesh is not
@@ -155,6 +158,17 @@ export interface HostSlot {
 export interface HostInput {
   readonly foot: Footprint
   readonly slots: readonly HostSlot[]
+  /**
+   * Whether the fixture calls this a floor — `CatalogRecord.kinds` carrying
+   * `floor`.
+   *
+   * Read for one rule, {@link matchSurface}: a floor tile that stands 15 mm tall
+   * has its accessory sculpted into it. The footprint cannot answer that
+   * question — a 2×2 `rect` is both `cut-stone#floor,brazier+small.2x2` (33.2 mm,
+   * brazier modelled in) and `dwarven_halls#wall,plinth.2x2` (44.8 mm, whose
+   * `statue` is a separate print) — so the declared kind is what separates them.
+   */
+  readonly floor: boolean
 }
 
 export interface HostMeasurement {
@@ -420,6 +434,10 @@ interface Found {
 interface Context {
   readonly bbox: Bounds
   readonly frame: Frame
+  /** The mesh's own extent, for the rules that are about the host's shape. */
+  readonly size: Vec3
+  /** {@link HostInput.floor}, carried for {@link matchSurface}. */
+  readonly floor: boolean
 }
 
 interface Match {
@@ -775,6 +793,35 @@ function matchHole(slot: HostSlot, holes: readonly FoundHole[], ctx: Context): M
   return { mounts: holes.map((hole) => holeMount(slot, hole, ctx)) }
 }
 
+/**
+ * A surface slot: the host's top-face centre, unless the accessory is already in
+ * the mesh.
+ *
+ * **A floor that stands up has its accessory modelled in.** A floor tile is
+ * 4–6 mm of plate — the four `floor,brazier+large.2x2` blobs measure 4.5 to
+ * 5.5 mm and their `brazier` and `brazier_base` slots take real, separate prints
+ * — so a floor 15 mm tall is tall *because something is standing on it already*.
+ * The three `floor,brazier+small.2x2` blobs (cut-stone **33.2 mm**,
+ * `dungeon_stone%block` and `%eroded` 31.6 mm) are that case: the fixture
+ * declares a `brazier` slot on a floor whose brazier is part of the mesh, and a
+ * surface mount there put a second brazier on top of the first.
+ *
+ * The test is the declared **kind** and not the footprint, and that is measured
+ * too: every other tall `rect` host carrying a surface slot has a genuine
+ * separate piece to place — 12 secret-door `top`s, 16 mine `brace`/`beam`s, 5
+ * cave `fracture slope`s, 4 `catacombs` loculus slabs and the two
+ * `dwarven_halls#wall,plinth.2x2` `statue`s, one of which is a 2×2 `rect` 44.8 mm
+ * tall and indistinguishable from a brazier floor by shape alone.
+ *
+ * `modelled-in` rather than a mount, so the slot is reported as a fixture error
+ * by `pipeline/build.ts`'s lint and read as *satisfied by the host* by every
+ * consumer — `src/catalog/mounts.ts#isModelledIn`.
+ */
+function matchSurface(slot: HostSlot, ctx: Context): Match {
+  if (ctx.floor && isStanding(ctx.size)) return { mounts: [], reason: 'modelled-in' }
+  return { mounts: [surfaceMount(slot, ctx.bbox)] }
+}
+
 function matchSlot(slot: HostSlot, cls: ResolvedClass, found: Found, ctx: Context): Match {
   switch (cls) {
     case 'opening':
@@ -786,7 +833,7 @@ function matchSlot(slot: HostSlot, cls: ResolvedClass, found: Found, ctx: Contex
     case 'hole':
       return matchHole(slot, found.holes, ctx)
     case 'surface':
-      return { mounts: [surfaceMount(slot, ctx.bbox)] }
+      return matchSurface(slot, ctx)
   }
 }
 
@@ -833,7 +880,7 @@ export function analyseHost(
     holes: wants.has('hole') && isFloor(input.foot, size) ? findHoles(frame, triangles, bbox) : [],
   }
 
-  const ctx: Context = { bbox, frame }
+  const ctx: Context = { bbox, frame, size, floor: input.floor }
   const mounts: Mount[] = []
   const unresolved: Unresolved[] = []
   for (const { slot, cls } of slots) {

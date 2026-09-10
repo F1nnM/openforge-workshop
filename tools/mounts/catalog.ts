@@ -96,6 +96,14 @@ export interface MountTarget {
   readonly foot: Footprint
   /** Non-base slots, unioned across the rows sharing the blob. Empty for an insert. */
   readonly slots: readonly HostSlot[]
+  /**
+   * `true` when any row sharing this blob is filed as a floor.
+   *
+   * Unioned like the slots, and for the same reason: the rows sharing a mesh are
+   * describing one object, so a disagreement is an argument for taking the claim
+   * rather than dropping it. `classify.ts#HostInput` says what reads it.
+   */
+  readonly floor: boolean
   /** Set on a host that is also filed as an insert: measure its anchor too. */
   readonly alsoInsert?: true
 }
@@ -157,6 +165,7 @@ export function mountTargets(file: CatalogFile): MountTargetList {
     byBlob.set(record.blob, draft)
     draft.ids.push(record.id)
     draft.insert = draft.insert || insert
+    draft.floor = draft.floor || record.kinds.includes('floor')
     for (const slot of slots) {
       if (!draft.slots.some((seen) => seen.name === slot.name)) draft.slots.push(slot)
     }
@@ -189,6 +198,7 @@ interface Draft {
   readonly ids: TileId[]
   readonly slots: HostSlot[]
   insert: boolean
+  floor: boolean
 }
 
 function seed(record: CatalogRecord): Draft {
@@ -201,6 +211,7 @@ function seed(record: CatalogRecord): Draft {
     ids: [],
     slots: [],
     insert: false,
+    floor: false,
   }
 }
 
@@ -220,6 +231,7 @@ function finish(draft: Draft): MountTarget {
     family: draft.family,
     foot: draft.foot,
     slots: draft.slots,
+    floor: draft.floor,
     ...(host && draft.insert ? { alsoInsert: true as const } : {}),
   }
 }
