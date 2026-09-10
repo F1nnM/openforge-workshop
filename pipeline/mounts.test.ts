@@ -21,7 +21,6 @@
  * otherwise this row moves 8,702 records for a measurement nobody has taken yet,
  * and `tools/stamp/lock.ts` would be right to fail it.
  */
-import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,7 +30,7 @@ import { describe, expect, it } from 'vitest'
 import type { InsertAnchor, Mount } from '../src/catalog'
 import { CatalogRecord, SCHEMA_VERSION } from '../src/catalog'
 import type { HostMeasurement, InsertMeasurement } from '../tools/mounts/classify'
-import { readLock } from '../tools/stamp/lock'
+import { derivationDigests, readLock } from '../tools/stamp/lock'
 
 import { buildCatalog } from './build'
 import type { FixtureRow } from './fixtures'
@@ -313,11 +312,12 @@ describeCorpus(title, () => {
         thumbs: new Set(),
         mounts: emptyMountInventory(),
       })
-      const content = createHash('sha256')
-        .update(JSON.stringify({ tags: file.tags, records: file.records }))
-        .digest('hex')
 
-      expect(content).toBe(readLock().content)
+      // Through `derivationDigests` rather than a hand-rolled
+      // `JSON.stringify({ tags, records })`: the projection's byte order comes
+      // from `DIGEST_SLOTS`' declaration order, so a local copy would agree by
+      // coincidence and would go on agreeing after that order changed.
+      expect(derivationDigests(file).content).toBe(readLock().content)
     },
     120_000,
   )

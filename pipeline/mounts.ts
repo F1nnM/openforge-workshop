@@ -199,7 +199,7 @@ export function readMountInventory(path: string = MOUNT_INVENTORY_PATH): MountIn
  * The "nothing measured" inventory, and the exact contents of the committed
  * shell.
  *
- * {@link BuildOptions.mounts} is required, so every caller states its intent;
+ * `BuildOptions.mounts` is required, so every caller states its intent;
  * this is how a caller says *"deliberately none"*. `tools/stamp/lock.ts` passes
  * it because a bucket full of meshes is an input and not a derivation, and the
  * checked-in file is its serialisation, byte for byte, so a run's diff is the

@@ -74,7 +74,11 @@ const USAGE = `Usage: npm run mounts -- [options]
   --concurrency N       requests in flight (default ${String(DEFAULT_CONCURRENCY)}, capped at ${String(MAX_CONCURRENCY)})
   --retry-failed        re-read targets whose previous attempt failed
   --force               ignore the log entirely and re-read everything
-  --allow-failed        write the inventory even though the log holds failures
+  --allow-failed        write the inventory even though the log holds failures.
+                        The build REFUSES such an inventory — a non-zero failed
+                        count cannot tell "no mount here" from "no answer" — so
+                        this writes one for inspection only. Clear the failures
+                        with --retry-failed, or purge their lines from the log.
   --log PATH            result log (default tools/mounts/.cache/mounts.jsonl)
   --catalog PATH        index to read (default public/catalog/catalog.json)
   --dry-run             print the work list and exit; no network, nothing written
@@ -216,8 +220,12 @@ function inventory(args: Args, fixtures: string, list: MountTargetList): number 
   if (failed.length > 0 && !args.allowFailed) {
     process.stderr.write(
       `\n${String(failed.length)} blobs in the log failed to measure, so the inventory would be ` +
-        'silently short of them. Fix them with `--retry-failed`, or pass `--allow-failed` to ' +
-        'write the inventory anyway (the count is recorded in it either way).\n',
+        'silently short of them. Retry them with `--retry-failed`, or pass `--allow-failed` to ' +
+        'write one anyway — but `npm run import:catalog` and `npm run stamp` will **refuse** it: ' +
+        '`readMountInventory` throws on any non-zero `counted.failed`, because an inventory that ' +
+        'could not read every mesh cannot tell "no mount here" from "no answer". The only routes ' +
+        'to an inventory the build will read are retrying the failures until they measure, or ' +
+        `purging their lines from ${inRepo(args.log)}.\n`,
     )
     return 1
   }
@@ -231,6 +239,17 @@ function inventory(args: Args, fixtures: string, list: MountTargetList): number 
       `wrote         ${String(built.counted.hosts)} hosts, ${String(built.counted.inserts)} inserts, ` +
       `${String(built.counted.mounts)} mounts, ${String(built.counted.failed)} failed\n`,
   )
+  /* Written under `--allow-failed`, so say plainly what it is. The build refuses
+     a non-zero `counted.failed` unconditionally — see `pipeline/mounts.ts` — and
+     an artefact on disk that no build will read is worth one loud line. */
+  if (built.counted.failed > 0) {
+    process.stderr.write(
+      `\nthis inventory records ${String(built.counted.failed)} measurement failures, so ` +
+        '`npm run import:catalog` and `npm run stamp` will refuse to read it. It is for ' +
+        'inspection until the failures are retried (`--retry-failed`) or their lines are purged ' +
+        'from the log.\n',
+    )
+  }
   return 0
 }
 
