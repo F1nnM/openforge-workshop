@@ -765,7 +765,9 @@ function assembleInstances(
      against what it buys. */
   const holdNames = readStringTable(
     decoded.slots,
-    useCounts(decoded.instances.flatMap((instance) => instance.fills.flatMap((fill) => fill.holds.map((h) => h.slot)))),
+    useCounts(
+      decoded.instances.flatMap((instance) => instance.fills.flatMap((fill) => fill.holds.map((hold) => hold.slot))),
+    ),
     (entry) => HoldName.safeParse(entry).data,
     (index, count) => `hold name ${String(index)}: not a readable hold name, dropping ${plural(count, 'hold')}`,
     dropped,
@@ -896,7 +898,6 @@ function assembleHolds(
   dropped: string[],
 ): Record<HoldName, HoldFill> | undefined {
   const holds: Record<HoldName, HoldFill> = {}
-  let held = 0
   for (const hold of wire) {
     const name = names.get(hold.slot)
     if (name === undefined) continue
@@ -910,9 +911,13 @@ function assembleHolds(
       continue
     }
     holds[name] = { tile, pinned: hold.pinned }
-    held += 1
   }
-  return held === 0 ? undefined : holds
+  // Counted off the map rather than off a tally, so a name that cannot become an
+  // own property — `__proto__` parses as a `HoldName`, and assigning it writes no
+  // key — leaves the fill unsolved instead of carrying an empty map that claims
+  // it was looked at. The fill path above has the same hole and the same shape of
+  // outcome; this is not the row to widen it.
+  return Object.keys(holds).length === 0 ? undefined : holds
 }
 
 /**
