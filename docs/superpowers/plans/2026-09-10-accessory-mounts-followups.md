@@ -59,6 +59,18 @@ batch that lands on the branch.
   `src/screens/builder/BuilderScreen.tsx`, spec §6, and the stale `planSlots` /
   `AccessorySection` cross-references in `assembly/`, `catalog/`, `composition/` and
   `builder/three/holds.ts`. Whole suite green: 188 files, 4,417 tests.
+  **Review pass — done**, `832cfa1`. Fixed a duplicate React key in
+  `SlotFills.tsx` (one `<li>` per print, keyed by `option.variant.id`) with a
+  `console.error` guard added to its test; corrected the `isModelledIn`/
+  `modelledIn` counts in `catalog/{mounts,schema}.ts` docblocks (15 slots over 10
+  records, absent on 8,692 of 8,702 rows) and extended schema 5's version note;
+  dropped a stale followups-doc clause about `brazier+small.stl`'s anchor; made
+  `place.ts#openingRise`'s closed-opening branch respect a bed flip too, with a
+  unit test; reordered `scene.ts#partAccessories` to decide modelled-in before
+  off-slot, matching `resolve.ts#holdNotes`, with a fixture and test for a slot
+  that is modelled-in but undeclared; and deleted the unread
+  `FillAccessories.holds` field and the dead `fillAccessories` re-export from
+  `builder/panels/slots/index.ts`.
 
 Each batch: implement → review → push to the PR branch → update this file.
 
