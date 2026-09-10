@@ -76,28 +76,50 @@
  * discarding stops being allowed.** A real user's saved room is not disposable,
  * and there is no way to tell from inside the process whether the blob under
  * `STORAGE_KEY` belongs to a colleague or a stranger. So the expiry is a fact
- * about deployment, not about the code, and it will pass silently unless someone
- * remembers this paragraph. `migrations.test.ts` carries the closest in-repo
- * proxy for it — a guard on `package.json`'s major version, which fails the day
- * this repo calls itself 1.0.0 — and that guard exists to make the reminder
- * arrive by itself rather than to prove anything.
+ * about deployment, not about the code, and it would pass silently unless
+ * someone remembered this paragraph.
  *
- * **What to do when it expires**, so the next author does not have to rediscover
- * it: reintroduce `MIGRATION_STEPS` as `Readonly<Record<number, (input:
- * unknown) => unknown>>` keyed by the version each rung *produces*, walk it from
- * the stored version to {@link STORE_VERSION} inside the `try` that
- * {@link readPersistedState} already has, and keep {@link salvageWorkshopState}
- * as the step that runs afterwards either way. Every rung must take `unknown`
- * and return `unknown` — a typed signature is a lie about data that came from
- * `localStorage`, and it is what makes an author write `input.placements.map(…)`
- * and ship a `TypeError` to every user whose blob was truncated.
+ * ### The licence has expired, and this is what changed
+ *
+ * **The app is served at its public URL.** So the paragraph above is no longer a
+ * warning, it is history: from version 8 onwards a stored blob can belong to
+ * somebody this project has never met, and their room is not ours to throw away.
+ *
+ * The consequences are exactly three, and no more:
+ *
+ *   1. **Versions 1–7 are still discarded, and that is not a leftover.** None of
+ *      them was ever served to anyone — no browser outside a developer's holds
+ *      one — so the owner's decision still covers them, and a 5 → 6 rung would
+ *      still have to *fabricate* a room rather than convert one.
+ *   2. **Version 8 is climbed.** It is the shape that shipped, so
+ *      {@link readPersistedState} accepts its stamp. The rung is the identity
+ *      (see {@link STORE_VERSION}), which is a fact about this particular change
+ *      rather than a policy: `holds` is additive and *absent* is a correct
+ *      reading of every version 8 fill.
+ *   3. **Every future shape change needs a rung**, written at the same time as
+ *      the bump. `migrations.test.ts` fails on a bump without one, which is the
+ *      mechanism that replaced the `package.json` major-version reminder that
+ *      used to stand in for the expiry — a reminder about an event that has
+ *      already happened is a no-op, and this repo cleans those up.
+ *
+ * **How to write the next rung**, so the next author does not have to rediscover
+ * it: for anything less trivial than this one, reintroduce `MIGRATION_STEPS` as
+ * `Readonly<Record<number, (input: unknown) => unknown>>` keyed by the version
+ * each rung *produces*, walk it from the stored version to
+ * {@link STORE_VERSION} inside the `try` that {@link readPersistedState} already
+ * has, and keep {@link salvageWorkshopState} as the step that runs afterwards
+ * either way. Every rung must take `unknown` and return `unknown` — a typed
+ * signature is a lie about data that came from `localStorage`, and it is what
+ * makes an author write `input.placements.map(…)` and ship a `TypeError` to
+ * every user whose blob was truncated.
  *
  * **And know which of the two kinds of rung you are writing.** A 5 → 6 rung is
  * the underdetermined kind described above, and the honest answer for it is not
  * a rung at all: park the unconvertible placements somewhere the *user* can see
  * them and let them re-place, rather than guessing a family and a fill set on
  * their behalf. A future N → N+1 that adds a field, or renames one, is the
- * ordinary kind and needs none of that.
+ * ordinary kind — 8 → 9 is that kind at its easiest, an addition whose absent
+ * reading is already right.
  *
  * ## What did *not* go
  *
@@ -118,9 +140,10 @@
 import { TileId } from '@/catalog'
 import { GENERATED_ID_PREFIX, GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/placement/scene'
 
-import type { LockSystem, SlotFill, TemplateId, TemplateInstance, WorkshopState } from './schema'
+import type { HoldFill, HoldName, LockSystem, SlotFill, TemplateId, TemplateInstance, WorkshopState } from './schema'
 import {
   DEFAULT_LOCK_SYSTEM,
+  HoldName as HoldNameSchema,
   LockSystem as LockSystemSchema,
   PlacementId,
   SlotName as SlotNameSchema,
@@ -151,6 +174,15 @@ import {
  * | 6 | `library` is **deleted**; a placement is a {@link TemplateInstance} — a template id plus a fill per slot (row A1) |
  * | 7 | adds `design` — the room-wide design family, a `texture` root or absent (row D6) |
  * | 8 | a {@link TemplateInstance} adds `filters` — the control filters it was placed at |
+ * | 9 | a {@link SlotFill} adds `holds` — the accessories fitted into that file's own mounts |
+ *
+ * **Version 9 is the first bump with a rung under it, and 8 → 9 is the
+ * identity.** Not because writing one was too much trouble: `holds` is additive
+ * and an absent one means *never solved*, which is exactly and precisely what
+ * every version 8 fill is. There is nothing to convert, so the rung is the
+ * absence of a conversion rather than a missing one — and {@link readPersistedState}
+ * accepts the stamp instead of discarding it. That is the whole difference the
+ * expired licence makes; see the module docblock.
  *
  * **Row 8's bump is additive too, and bumps for the same reason.** `filters` is
  * one field with a defaulted absent reading — `[]`, which is *any* on every axis
@@ -168,20 +200,21 @@ import {
  * leaving it here would make `6` name two shapes and would put the next author
  * in the position the first commit's docblock describes — *"the first breaking
  * change has to guess at the shape of every blob already in every user's
- * browser"*. What the bump costs is a developer's own saved room, which is
- * precisely the licence row A1 relies on and which has not expired:
- * `package.json` still says `0.1.0` and `migrations.test.ts`' guard fires the
- * day it does not.
- *
- * **To ship version N+1 while discarding is still allowed:** change the schema in
- * `schema.ts` and bump this. Nothing else. A blob at any other version is
- * discarded by the gate below, and `migrations.test.ts` asserts that every
- * version in the table above is in fact discarded rather than half-read.
- *
- * **To ship version N+1 once it is not:** see the expiry note in the module
+ * browser"*. What that bump cost was a developer's own saved room, which is
+ * precisely the licence row A1 relied on — and which has since expired. A bump
+ * costs nobody's room now, because a bump comes with a rung; see the module
  * docblock.
+ *
+ * **To ship version N+1 now that discarding is no longer allowed:** change the
+ * schema in `schema.ts`, bump this, and **write the rung from N** — teach
+ * {@link readPersistedState} to accept N and convert it, which is the identity
+ * only when the change is additive with a correct absent reading, as this one is.
+ * `migrations.test.ts` fails if you bump without it: one test asserts that the
+ * version below the current one still hydrates. A blob at any version older than
+ * that is discarded by the gate below, which is licensed only because versions
+ * 1–7 were never served to anyone.
  */
-export const STORE_VERSION = 8
+export const STORE_VERSION = 9
 
 /** A state recovered from untrusted input, plus what had to be thrown away. */
 export interface RecoveredState {
@@ -314,7 +347,13 @@ function salvageTemplate(key: string, source: Record<string, unknown>, dropped: 
 }
 
 /**
- * Recover one slot fill.
+ * Recover **a file and who chose it** — the half a slot fill and a hold share.
+ *
+ * Called at two depths, which is why it takes a `path` instead of building one:
+ * `placements.…fills.floor` for a slot's own fill and
+ * `placements.…fills.floor.holds.torch` for what is fitted into it. One reader
+ * for both is not a tidiness argument — it is the only way the two levels cannot
+ * disagree about the fallback direction below.
  *
  * The two fields fail differently, and the asymmetry is the whole content of
  * this function:
@@ -332,22 +371,98 @@ function salvageTemplate(key: string, source: Record<string, unknown>, dropped: 
  *     permanently and invisibly. Contract **C-k** is about exactly that bit
  *     staying honest.
  */
-function salvageFill(key: string, slot: string, value: unknown, dropped: string[]): SlotFill | undefined {
+function salvageHoldFill(path: string, value: unknown, dropped: string[]): HoldFill | undefined {
   const source = asRecord(value)
   if (source === undefined) {
-    dropped.push(`placements.${key}.fills.${slot}: expected an object, found ${describeValue(value)}`)
+    dropped.push(`${path}: expected an object, found ${describeValue(value)}`)
     return undefined
   }
   const tile = TileId.safeParse(source.tile)
   if (!tile.success) {
-    dropped.push(`placements.${key}.fills.${slot}: tile is not a file id (${describeValue(source.tile)})`)
+    dropped.push(`${path}: tile is not a file id (${describeValue(source.tile)})`)
     return undefined
   }
   if (typeof source.pinned === 'boolean') return { tile: tile.data, pinned: source.pinned }
-  dropped.push(
-    `placements.${key}.fills.${slot}: pinned is not a boolean (${describeValue(source.pinned)}), read as auto`,
-  )
+  dropped.push(`${path}: pinned is not a boolean (${describeValue(source.pinned)}), read as auto`)
   return { tile: tile.data, pinned: false }
+}
+
+/**
+ * Recover one slot fill: a {@link HoldFill}, plus whatever is fitted into it.
+ *
+ * `path` is threaded through {@link salvageHoldFill} rather than rebuilt at each
+ * level, which is what lets one shape check serve both depths — a hold *is* a
+ * fill (`schema.ts#SlotFill`), so a second copy of the tile-and-pinned reading
+ * would be two places for the `pinned` fallback direction to drift apart.
+ */
+function salvageFill(key: string, slot: string, value: unknown, dropped: string[]): SlotFill | undefined {
+  const path = `placements.${key}.fills.${slot}`
+  const fill = salvageHoldFill(path, value, dropped)
+  if (fill === undefined) return undefined
+  const holds = salvageHolds(path, asRecord(value)?.holds, dropped)
+  return holds === undefined ? fill : { ...fill, holds }
+}
+
+/**
+ * Recover a fill's holds — the accessories fitted into the file it names.
+ *
+ * ## Three states in, three states out
+ *
+ * `undefined` means *never solved* and `{}` means *solved*, and `schema.ts` sets
+ * out why the app cannot do without the distinction. So this function has two
+ * ways of returning nothing and they mean opposite things, which decides both of
+ * its fallbacks:
+ *
+ *   - **An absent `holds` is `undefined`, silently.** It is what every version 8
+ *     fill and every fresh one looks like, so it is the ordinary state rather
+ *     than a drop.
+ *   - **An unreadable `holds` is `undefined`, and is named.** The repairable
+ *     direction, exactly as `pinned` falls back to `false`: *never solved* is
+ *     fixed by the next default-hold pass, where `{}` would tell that pass this
+ *     file had been considered and freeze an answer nobody gave. This is the one
+ *     place the reading differs from {@link salvageFills}, which has no such
+ *     tri-state and reads an unreadable map as empty.
+ *
+ * A **present** map whose entries are all corrupt still returns `{}`: the map
+ * being there is what says the fill was solved, and the entries are per-accessory
+ * for {@link salvageFills}' reason one level down — one unreadable torch costs
+ * that socket and not the wall.
+ *
+ * ## Nesting is refused by name
+ *
+ * {@link HoldFill} has no `holds` field, so a nested one cannot be *expressed* —
+ * but a blob can still carry it, and Zod would strip it in silence. It is
+ * reported instead, and the whole hold is dropped rather than flattened: a value
+ * shaped like something this build cannot read was written by something that is
+ * not this build, and quietly keeping half of it is how a shape mismatch turns
+ * into a room that is subtly not the user's.
+ */
+function salvageHolds(path: string, value: unknown, dropped: string[]): SlotFill['holds'] {
+  if (value === undefined) return undefined
+  const source = asRecord(value)
+  if (source === undefined) {
+    dropped.push(`${path}: holds is not an object (${describeValue(value)}), read as never solved`)
+    return undefined
+  }
+  const out: Record<HoldName, HoldFill> = {}
+  for (const [hold, held] of Object.entries(source)) {
+    if (UNSAFE_KEYS.has(hold)) {
+      dropped.push(`${path}.holds.${hold}: unsafe key`)
+      continue
+    }
+    const name = HoldNameSchema.safeParse(hold)
+    if (!name.success) {
+      dropped.push(`${path}.holds.${hold}: not a hold name`)
+      continue
+    }
+    if (asRecord(held)?.holds !== undefined) {
+      dropped.push(`${path}.holds.${hold}: a hold cannot carry holds of its own`)
+      continue
+    }
+    const fill = salvageHoldFill(`${path}.holds.${hold}`, held, dropped)
+    if (fill !== undefined) out[name.data] = fill
+  }
+  return out
 }
 
 /**
@@ -647,14 +762,54 @@ export function salvageWorkshopState(input: unknown): RecoveredState {
 /* --------------------------------------------------------------- version gate */
 
 /**
+ * The stamps this build reads, newest last.
+ *
+ * Two entries rather than one, and the second is the rung: version 8 is the
+ * shape that was served at the app's public URL, so a browser out there holds
+ * one and discarding it would throw away a stranger's room. It needs no
+ * conversion — see {@link STORE_VERSION} — so being in this set *is* the rung.
+ *
+ * A `Set<unknown>` because the argument is `unknown`: `storedVersion` comes out
+ * of `localStorage` or a file and may be a string, `null` or `NaN`, and a
+ * membership test that has to narrow first is a branch that can be got wrong.
+ * Adding a version here without a conversion is only correct when the change is
+ * additive *and* the absent reading is the right one; anything else needs a rung
+ * that transforms, and the module docblock says how to write one.
+ */
+export const READABLE_VERSIONS: readonly number[] = [STORE_VERSION - 1, STORE_VERSION]
+
+/** {@link READABLE_VERSIONS} as a set, so the membership test takes `unknown`. */
+const READABLE_STAMPS: ReadonlySet<unknown> = new Set(READABLE_VERSIONS)
+
+/**
+ * Whether this build reads a blob stamped `version`.
+ *
+ * Exported for `transfer.ts` and for nothing else. An imported *file* is checked
+ * before {@link readPersistedState} sees it, so that a foreign version is refused
+ * with a message rather than silently emptying the room — and that check has to
+ * ask this question rather than answer it again, or the two paths drift the day
+ * the readable set changes. It drifted here first: the 8 → 9 rung would have left
+ * a file exported yesterday refused while the same state in `localStorage` was
+ * read.
+ */
+export function readsStoredVersion(version: unknown): boolean {
+  return READABLE_STAMPS.has(version)
+}
+
+/**
  * Read a persisted blob that claims to be at `storedVersion`.
  *
- * One branch, and it is symmetric: **the stamp is {@link STORE_VERSION} or the
- * blob is discarded.** Older, newer, absent, `NaN`, a string, a float — all the
- * same answer, a fresh state and one line in `dropped` naming what the stamp
- * said. Symmetry is the reason it is written this way rather than as three cases:
- * a gate with a direction has a wrong side, and the wrong side of a shape
+ * One branch, and it is nearly symmetric: **the stamp is one this build reads,
+ * or the blob is discarded.** Older, newer, absent, `NaN`, a string, a float —
+ * all the same answer, a fresh state and one line in `dropped` naming what the
+ * stamp said. Symmetry is the reason it is written this way rather than as three
+ * cases: a gate with a direction has a wrong side, and the wrong side of a shape
  * mismatch is a screen full of pieces that resolve to nothing.
+ *
+ * The one asymmetry is {@link READABLE_VERSIONS}, and it is not a softening of
+ * that argument: the previous version is read because its shape is *known* and
+ * convertible, not because it is *close*. Every other stamp is still refused
+ * outright.
  *
  * **What this costs, stated rather than buried.** The reader it replaced
  * salvaged a *newer* blob best-effort, arguing that a downgrade is nearly always
@@ -713,21 +868,25 @@ export function salvageWorkshopState(input: unknown): RecoveredState {
  * field named is the right answer for both.
  */
 export function readPersistedState(input: unknown, storedVersion: unknown): RecoveredState {
-  if (storedVersion !== STORE_VERSION) {
+  if (!readsStoredVersion(storedVersion)) {
     return {
       state: defaultWorkshopState(),
       dropped: [
         `state was written at version ${describeValue(storedVersion)}, and this build reads only ` +
-          `${String(STORE_VERSION)}; discarded and started fresh`,
+          `${READABLE_VERSIONS.join(' or ')}; discarded and started fresh`,
       ],
     }
   }
   try {
+    /* The 8 → 9 rung is the identity, so there is no conversion to run before
+       this: a version 8 fill has no `holds`, and *absent* is the reading version
+       9 gives it. A rung that transformed would go here, ahead of the salvage,
+       and the module docblock says how to shape one. */
     return salvageWorkshopState(input)
   } catch (error) {
     return {
       state: defaultWorkshopState(),
-      dropped: [`reading version ${String(STORE_VERSION)} state threw (${String(error)}); discarded`],
+      dropped: [`reading version ${describeValue(storedVersion)} state threw (${String(error)}); discarded`],
     }
   }
 }

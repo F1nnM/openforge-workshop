@@ -21,13 +21,14 @@
  * ```
  *
  * `kind` exists so importing the wrong file says so instead of silently
- * producing an empty room; `version` is the store version, and a file whose
- * version is not this build's is **refused with a message**. It goes through the
- * same reader as a blob out of `localStorage` — the same total functions, the
- * same salvaging, the same version gate. There is deliberately no second
- * recovery path, and that is what makes this paragraph short: whatever
- * `migrations.ts` decides about a foreign version, an imported file gets the
- * same decision.
+ * producing an empty room; `version` is the store version, and a file at a
+ * version this build does not read is **refused with a message**. It goes
+ * through the same reader as a blob out of `localStorage` — the same total
+ * functions, the same salvaging, the same version gate, and the refusal asks
+ * that gate which versions it reads rather than deciding for itself. There is
+ * deliberately no second recovery path, and that is what keeps this paragraph
+ * short: whatever `migrations.ts` decides about a foreign version, an imported
+ * file gets the same decision.
  *
  * ## Why a foreign version is refused rather than read
  *
@@ -51,7 +52,7 @@
  */
 import { z } from 'zod'
 
-import { STORE_VERSION, readPersistedState } from './migrations'
+import { READABLE_VERSIONS, STORE_VERSION, readPersistedState, readsStoredVersion } from './migrations'
 import { WorkshopState } from './schema'
 import { useWorkshopStore } from './workshopStore'
 
@@ -147,17 +148,21 @@ export function importWorkshop(json: string): ImportResult {
   }
 
   const version = envelope.data.version
-  if (version !== STORE_VERSION) {
+  /* Asked of the reader rather than compared against {@link STORE_VERSION}, so
+     this path cannot be left behind when the readable set moves — which is
+     exactly what the 8 -> 9 rung would otherwise have done to a file exported
+     the day before. `readsStoredVersion` is the one answer to that question. */
+  if (!readsStoredVersion(version)) {
     return {
       ok: false,
       reason:
         `That file was exported at version ${version === undefined ? 'unknown' : String(version)}, ` +
-        `and this build reads version ${String(STORE_VERSION)}. Nothing was changed.`,
+        `and this build reads version ${READABLE_VERSIONS.join(' or ')}. Nothing was changed.`,
     }
   }
 
   // Through the same reader a `localStorage` blob goes through, version and
-  // all. The check above has already established the version matches, so the
+  // all. The check above asked the reader whether it accepts this stamp, so the
   // reader's own gate cannot fire here — that redundancy is the point rather
   // than something to tidy away: it is what keeps "there is deliberately no
   // second recovery path" literally true, so a change to the reader's policy

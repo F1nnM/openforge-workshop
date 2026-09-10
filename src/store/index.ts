@@ -36,6 +36,8 @@
  */
 export {
   DEFAULT_LOCK_SYSTEM,
+  HoldFill,
+  HoldName,
   LockSystem,
   PlacementId,
   Rotation,
@@ -63,11 +65,15 @@ export type {
 } from './workshopStore'
 export {
   clearFill,
+  clearHold,
   clearPlacements,
+  fillHold,
+  fillHolds,
   fillSlot,
   moveGeneratedPlacement,
   movePlacement,
   pinFill,
+  pinHold,
   placeGeneratedBase,
   placeTemplate,
   removeGeneratedPlacement,
@@ -87,6 +93,7 @@ export {
   setPlacementFilters,
   setRoomDesign,
   unpinFill,
+  unpinHold,
   useGeneratedPlacements,
   useLockChosen,
   useLockSystem,
