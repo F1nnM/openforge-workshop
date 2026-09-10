@@ -657,7 +657,7 @@ function SlotFaultBlock({
           <SlotFaultRow
             // The hold as well as the slot: a filled wall with an empty torch
             // socket is two entries under one placement and one slot name.
-            key={`${fault.placement}/${fault.slot ?? ''}/${fault.hold ?? ''}`}
+            key={`${fault.placement}/${fault.where?.slot ?? ''}/${fault.where?.hold ?? ''}`}
             fault={fault}
             onEditSlots={onEditSlots}
           />
@@ -678,6 +678,13 @@ function SlotFaultBlock({
  * no store action that empties a single slot. Row C3's slot editor is where a
  * fill is re-chosen in place, and the two surfaces are complementary — this one
  * says a slot is wrong from a panel that lists the whole scene, that one fixes it.
+ *
+ * **Except for a `hole`, which the editor cannot fix.** An accessory is a slot of
+ * a *file* and the editor fills a *recipe's* slots, so a `Slots` press on such a
+ * row would open a dialog with nothing in it about the door the row names. The
+ * row's own sentence sends the reader to the Accessory slots section instead, and
+ * offering a button that contradicts it is worse than offering no button: the
+ * accessible name would promise what the dialog cannot do.
  */
 function SlotFaultRow({
   fault,
@@ -690,7 +697,7 @@ function SlotFaultRow({
   const at = describeCell(fault.instance.x, fault.instance.z)
   // The accessory when the fault is one, because *the faulty door* is what the
   // user is looking for and *the faulty wall* is the part they already filled.
-  const what = fault.hold ?? fault.slot ?? 'recipe'
+  const what = fault.where?.hold ?? fault.where?.slot ?? 'recipe'
   return (
     <li className="of-bill-fault" data-blocking={fault.blocksDownload ? '' : undefined}>
       <span className="of-bill-fault-head">
@@ -698,16 +705,19 @@ function SlotFaultRow({
           {copy.subject} · {at}
         </span>
         <span className="of-bill-acts">
-          {/* The editor is the *fix* for every one of the three faults — an
-              empty slot, a retired fill and a fill the slot does not admit are
-              all answered by choosing a file — so this row is the one place in
-              the panel where it is the obvious next press rather than an
-              alternative to removing the piece. */}
-          <SlotsButton
-            onEditSlots={onEditSlots}
-            placement={fault.placement}
-            subject={`of the piece with the faulty ${what} at ${at}`}
-          />
+          {/* The editor is the *fix* for three of the four kinds — an empty
+              slot, a retired fill and a fill the slot does not admit are all
+              answered by choosing a file for a slot the recipe declares — so on
+              those this row is the one place in the panel where it is the obvious
+              next press rather than an alternative to removing the piece. A
+              `hole` is the fourth and is not one of them; see the docblock. */}
+          {fault.kind === 'hole' ? null : (
+            <SlotsButton
+              onEditSlots={onEditSlots}
+              placement={fault.placement}
+              subject={`of the piece with the faulty ${what} at ${at}`}
+            />
+          )}
           <button
             type="button"
             className="of-bill-remove"

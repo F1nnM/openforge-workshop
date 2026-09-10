@@ -403,7 +403,11 @@ describe('AccessorySection', () => {
 
   it('states what a pick here does, now that it keeps it', () => {
     accessories({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.wallLow, 2, 0) })
-    expect(screen.getByText(/2 slots open on 2 pieces, 1 of them required/)).toBeInTheDocument()
+    // The count that *moves*: `torch` is optional and `top` is not, and neither
+    // is held, so one slot is a hole. It used to read "1 of them required",
+    // which is a property of the archive and stayed put after the user had
+    // filled everything.
+    expect(screen.getByText(/2 slots on 2 pieces, 1 required and still empty/)).toBeInTheDocument()
     // The structural reason it kept nothing is gone: `SlotFill.holds` is the key
     // for a slot of a *file*, so a press here is a store write like any other and
     // the line says what the write does rather than apologising for its absence.
@@ -542,6 +546,22 @@ describe('the accessory picker writes what it is given', () => {
     // is a number a user cannot account for unless the picker says so first.
     placed(archway({}))
     expect(screen.getByText(/torch × 4 mounts/)).toBeInTheDocument()
+  })
+
+  it('stops asking for the slots once every one of them is filled', () => {
+    // The summary is about what is left to do, so a plan with nothing left says
+    // so. Both of the archway's slots are optional, so this is also the case
+    // where "required" was never the interesting number.
+    placed(archway({ torch: FILL.torchStone, lintel: FILL.topWall }))
+    expect(screen.getByText(/2 slots on 1 piece, all filled/)).toBeInTheDocument()
+  })
+
+  it('does not call a plan with an empty optional slot finished', () => {
+    // The third ending, and it is not pedantry: *all filled* is a claim about
+    // every slot, and an optional socket left empty on purpose has not been
+    // filled. What is true is that nothing required is outstanding.
+    placed(archway({ torch: FILL.torchStone }))
+    expect(screen.getByText(/2 slots on 1 piece, nothing required is still empty/)).toBeInTheDocument()
   })
 
   it('says when nothing has measured where an accessory goes', () => {

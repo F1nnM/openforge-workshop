@@ -1617,10 +1617,48 @@ describe('the bill of tiles', () => {
     // `slot › hold`, the same spelling the refusal uses: the fault is the door,
     // and the wall it is missing from is what locates it.
     const fault = screen.getByText(/panels-one-slot · model › door · x 0, z 0/)
-    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    const row = fault.closest<HTMLElement>('.of-bill-fault')!
+    expect(row).toHaveAttribute('data-blocking', '')
     expect(screen.getByText(/1 slot needs attention/)).toBeInTheDocument()
     // The file in the slot is printable and printed, so the row above stays.
     expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+
+    // **And no `Slots` button.** The editor fills a *recipe's* slots and an
+    // accessory is a slot of a file, so a press would open a dialog with nothing
+    // in it about the door — and its accessible name would have promised
+    // otherwise. The sentence names the surface that can do it; Remove stays,
+    // because taking the piece off the grid is still an answer.
+    expect(within(row).queryByRole('button', { name: /^Slots/ })).toBeNull()
+    expect(within(row).getByRole('button', { name: /^Remove/ })).toBeInTheDocument()
+    expect(screen.getByText(/Fill it under Accessory slots, below the parts list/)).toBeInTheDocument()
+  })
+
+  it('faults a required accessory naming a file this build no longer holds', () => {
+    /*
+      The other half of the same refusal. `resolveInstance` sets `complete =
+      false` for a required hold whose **record** is missing, which is one empty
+      socket *and* one accessory the archive has dropped — so a list that read
+      only the empty ones would still leave a refusal with nothing behind it.
+      The two are different repairs and the copy says which.
+    */
+    const instance = anInstance([FIXTURE_IDS.doorway], { x: 2, z: 0 })
+    act(() => {
+      placeTemplate({
+        ...instance,
+        fills: {
+          [ONE_SLOT]: {
+            tile: FIXTURE_IDS.doorway as TileId,
+            pinned: false,
+            holds: { ['door' as HoldName]: { tile: 'tiles/gone/away.stl' as TileId, pinned: true } },
+          },
+        },
+      })
+    })
+    render(<BillHarness />)
+
+    const fault = screen.getByText(/panels-one-slot · model › door · x 2, z 0/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/names a file this build no longer holds — pick another/)).toBeInTheDocument()
   })
 
   it('tells a retired fill apart from an empty slot, and blocks the download over both', () => {

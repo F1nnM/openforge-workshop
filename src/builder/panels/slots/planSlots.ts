@@ -143,6 +143,18 @@ export interface PlanSlotInventory {
    */
   readonly required: number
   /**
+   * Of the required ones, the ones **still holding nothing** — the plan-side
+   * count of `billView.ts`'s `hole` fault.
+   *
+   * The number the summary leads with, because it is the only one that changes
+   * as the user works: `required` is a property of the archive and cannot be
+   * worked down, and a panel that quoted it after every slot was filled would
+   * report a finished piece as an outstanding task.
+   */
+  readonly holes: number
+  /** Slots holding an accessory, required or not. `slots` when the plan is finished. */
+  readonly filled: number
+  /**
    * Slots no file in the archive can fill, before anything is picked.
    *
    * 9 corpus-wide. Counted separately from `required` because it is an archive
@@ -189,6 +201,8 @@ export function planSlots(
   const names = new Map<string, number>()
   let slots = 0
   let required = 0
+  let holes = 0
+  let filled = 0
   let unfillable = 0
 
   const ordered = Object.entries(placements).sort(
@@ -235,6 +249,11 @@ export function planSlots(
       for (const state of states) {
         slots += 1
         if (!state.optional) required += 1
+        // `chosen` is what the fill holds, because the states above were resolved
+        // against it — so this counts the holes rather than re-reading `holds`
+        // and risking a second answer.
+        if (state.chosen === undefined && !state.optional) holes += 1
+        if (state.chosen !== undefined) filled += 1
         if (state.deadEnd) unfillable += 1
         names.set(state.name, (names.get(state.name) ?? 0) + 1)
       }
@@ -246,6 +265,8 @@ export function planSlots(
     holders,
     slots,
     required,
+    holes,
+    filled,
     unfillable,
     byName: [...names.entries()]
       .map(([name, count]) => ({ name, count }))

@@ -58,7 +58,7 @@ import type { TemplateInstance } from '@/store'
 import { HoldName, clearHold, pinHold } from '@/store'
 import { Eyebrow } from '@/ui/primitives'
 
-import type { PlanSlotHolder } from './planSlots'
+import type { PlanSlotHolder, PlanSlotInventory } from './planSlots'
 import { holdSelection, planSlots } from './planSlots'
 
 import './slots.css'
@@ -107,10 +107,10 @@ export function AccessorySection({ catalog, placements }: AccessorySectionProps)
       {inventory.holders.length === 0 ? null : (
         <>
           <p className="of-planslots-note">
-            {`${String(inventory.slots)} ${inventory.slots === 1 ? 'slot' : 'slots'} open on `}
+            {`${String(inventory.slots)} ${inventory.slots === 1 ? 'slot' : 'slots'} on `}
             {`${String(inventory.holders.length)} ${
               inventory.holders.length === 1 ? 'piece' : 'pieces'
-            }, ${String(inventory.required)} of them required. `}
+            }, ${outstanding(inventory)} `}
             {/* One line, and it now says what a press does rather than what it
                 cannot do: the pick is kept on the piece, and the parts list
                 charges for it once per mount measured on the host. */}
@@ -168,9 +168,40 @@ export function AccessorySection({ catalog, placements }: AccessorySectionProps)
   )
 }
 
+/* --------------------------------------------------------------- the summary */
+
+/**
+ * What of the plan's accessory slots is still outstanding.
+ *
+ * **The count that moves, rather than the count that cannot.** This line used to
+ * end *"K of them required"*, which is a property of the archive — 1,047 of the
+ * corpus's 1,244 declarations omit `optional` — and stayed on screen unchanged
+ * after the user had filled every one of them, reporting a finished piece as an
+ * outstanding task. What a user of this panel is doing is closing holes, so the
+ * number is the holes.
+ *
+ * Three endings and the third is not pedantry: *all filled* is a claim about
+ * every slot, and a plan whose optional sockets are empty by choice has not
+ * filled them. Saying so would be wrong about the one state the panel is
+ * deliberately relaxed about.
+ */
+function outstanding(inventory: PlanSlotInventory): string {
+  if (inventory.holes > 0) {
+    return `${String(inventory.holes)} required and still empty.`
+  }
+  return inventory.filled === inventory.slots ? 'all filled.' : 'nothing required is still empty.'
+}
+
 /* ---------------------------------------------------------------- the mounts */
 
-/** Nothing held, shared so an unfilled holder's grid is not re-resolved per render. */
+/**
+ * The empty selection, and it exists to narrow `Map.get`.
+ *
+ * `selections` is built from the same holders this maps over, so the lookup
+ * cannot miss — but it returns `SlotSelection | undefined` and a literal `{}` in
+ * the fallback would be a new object per render, which is the one thing the memo
+ * above exists to avoid.
+ */
 const NOTHING_HELD: SlotSelection = {}
 
 /**
