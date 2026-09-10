@@ -234,7 +234,16 @@ export interface PlanAccessory {
   readonly host: PlanPiecePart
   /** Where on the host it attaches, measured off the host mesh. */
   readonly mount: Mount
-  /** Its position in the host's mounts for this hold: 0, 1, … in measurement order. */
+  /**
+   * Its position in the host's mounts for this hold: 0, 1, … in measurement order.
+   *
+   * **Not a key on its own.** It counts within one *(slot, hold)* pair, so a
+   * wall with a `torch` and a `door` has two accessories both at `index` 0, and
+   * an instance with two walls has four. A renderer keying its instances needs
+   * the triple `(slot, hold, index)` — unique within a piece, and stable across
+   * a re-projection because all three come off the store and the host's own
+   * measurement order rather than off the list position.
+   */
   readonly index: number
 }
 
@@ -594,9 +603,29 @@ function drawnShape(shape: PlanShape, layout: SlotLayout): PlanShape {
   return layout.residual === undefined ? shape : boxShape(layout.residual)
 }
 
-/** Whether the host file declares this accessory slot at all. */
+/**
+ * The one declared slot that is a base match and not an accessory.
+ *
+ * 2,451 of the 3,695 live file slots. `assembly/resolve.ts#accessorySlots` makes
+ * the same cut for the same reason — the builder's base comes from footprint
+ * congruence, not from the texture-inheriting slot — and the constant is
+ * restated rather than imported because `builder/canvas` must not depend on
+ * `@/assembly`. The *fact* is asserted in both places instead: `plan.test.ts`
+ * pins a `base` hold to the same sentence the bill gives it.
+ */
+const BASE_SLOT = 'base'
+
+/**
+ * Whether the host file declares this **accessory** slot.
+ *
+ * `base` is excluded, so a hold named `base` is off-slot here exactly as it is
+ * in the bill. Without the cut the two surfaces would word one fault
+ * differently: the bill would say *"declares no base slot"* and the room, having
+ * found the declaration and no mount under it, would say *"nothing has measured
+ * where a base attaches"* — of a slot that is not an attachment point at all.
+ */
 function declaresHold(host: CatalogRecord, hold: HoldName): boolean {
-  return (host.config?.parts ?? []).some((part) => part.name === hold)
+  return (host.config?.parts ?? []).some((part) => part.name !== BASE_SLOT && part.name === hold)
 }
 
 /**

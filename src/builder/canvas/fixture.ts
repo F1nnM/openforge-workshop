@@ -68,6 +68,9 @@ const TAGS = [
   /* What an accessory *is*, as the host's own `config.parts` asks for it — see
      {@link FIXTURE_IDS.torch}. */
   'part|torch',
+  /* What the host's *base* slot asks for — the declaration that is not an
+     accessory. See {@link FIXTURE_IDS.wall2}'s `config`. */
+  'shape|base',
 ]
 
 const tag = (name: string): number => {
@@ -181,7 +184,18 @@ export const FIXTURE_CATALOG = {
          a 5.5 x 3 mm mouth entering at 65° from the face, at x = ±25.2 on a
          2-unit wall — copied from `src/builder/panels/fixture.ts`, which reads
          the same convention for the bill. */
-      config: { parts: [{ name: 'torch', optional: true, tags: { require: [{ tag: 'part|torch' }] } }] },
+      config: {
+        parts: [
+          { name: 'torch', optional: true, tags: { require: [{ tag: 'part|torch' }] } },
+          /* **A second declaration that is not an accessory slot**, and the
+             commonest one there is: 2,451 of the 3,695 live file slots are
+             `base`. It is here so a hold named `base` has a declaration to be
+             found under — which is the case `scene.ts#BASE_SLOT` and
+             `assembly/resolve.ts#accessorySlots` both cut out, and which without
+             it no fixture could reach. */
+          { name: 'base', optional: true, tags: { require: [{ tag: 'shape|base' }] } },
+        ],
+      },
       mounts: [-1, 1].map((side) => ({
         slot: 'torch',
         kind: 'socket',

@@ -16,8 +16,11 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { CatalogRecord, TileId } from '@/catalog'
+import type { NoteCode } from '@/assembly'
+import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
+import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { resolveTags } from '@/catalog'
+import { createCompositionIndex } from '@/composition'
 import type { PlacementId, SlotName, TemplateId, TemplateInstance, WorkshopState } from '@/store'
 
 import {
@@ -1714,6 +1717,89 @@ describe('accessories: what a fill holds, projected onto the host s measured mou
     expect(scene.unknown[0]?.tile).toBe('tiles/gone/retired.stl')
     expect(scene.unplaced).toEqual([])
     expect(scene.pieces[0]?.accessories).toEqual([])
+  })
+
+
+  /**
+   * The same instance through `@/assembly`, so the two wordings can be compared.
+   *
+   * **A test may import the assembly where `scene.ts` may not** — `index.ts`
+   * keeps the canvas free of that dependency — so the agreement the two modules
+   * promise each other in prose is pinned here, where the import is legal,
+   * instead of being bought with a coupling.
+   *
+   * The template lookup is a two-slot recipe written out on the spot: the
+   * shipped 40-entry table lives beside a screen, and a bill needs no more than
+   * the part names the fill map uses.
+   */
+  const billFor = (fills: TemplateInstance['fills'], over: CatalogFile = file) =>
+    buildBillOfTiles([fixtureInstance('p1', fills)], buildAssemblyIndex(over), {
+      templates: (id) =>
+        id === FIXTURE_TEMPLATE
+          ? {
+              id,
+              tags: [],
+              parts: [{ name: FIXTURE_SLOTS.floor, tags: {} }, { name: FIXTURE_SLOTS.leftWall, tags: {} }],
+            }
+          : undefined,
+      composition: createCompositionIndex(over),
+    })
+
+  /** The message a bill rolled up under one code. */
+  const billSays = (bill: ReturnType<typeof billFor>, code: NoteCode) => {
+    const found = bill.notes.find((one) => one.code === code)
+    if (found === undefined) throw new Error(`the bill raised no ${code} note`)
+    return found.message
+  }
+
+  /**
+   * A note's message as a `PlanUnplaced.reason` spells it.
+   *
+   * One character, and it is the only difference the two are allowed: a note is
+   * a clause the panel prefixes with its subject, so it opens lower-case, where
+   * a reason is a standalone sentence in a list of its own and opens with a
+   * capital — which is what the four `PlanOmission` reasons beside it do. The
+   * rest is compared verbatim.
+   */
+  const asSentence = (message: string) => message.charAt(0).toUpperCase() + message.slice(1)
+
+  it('cuts `base` out of the host s declarations, so a base hold is off-slot and not unmeasured', () => {
+    // The host declares `base` — 2,451 of the corpus's 3,695 file slots do — and
+    // it is a base match rather than an attachment point. Reading it as an
+    // accessory slot would make the room say *nobody measured where a base
+    // attaches*, of a slot no measurement was ever going to cover.
+    const fills = holding([['base', FIXTURE_IDS.torch]])
+    const scene = sceneOfFills(fills)
+    expect(scene.pieces[0]?.accessories).toEqual([])
+    expect(scene.unplaced).toHaveLength(1)
+    expect(scene.unplaced[0]?.hold).toBe('base')
+    expect(scene.unplaced[0]?.reason).toContain('declares no base slot')
+    expect(scene.unplaced[0]?.reason).not.toContain('measured')
+    // And the bill makes the same cut, which is the whole reason this one is here.
+    expect(scene.unplaced[0]?.reason).toBe(asSentence(billSays(billFor(fills), 'hold-off-slot')))
+  })
+
+  it('words both unplaced faults exactly as the bill words them', () => {
+    // Copied sentences drift. Each test above asserts its own copy, which would
+    // hold just as well if `resolve.ts` had been reworded yesterday — so this is
+    // the one that reads both sides in one run.
+    const offSlot = holding([['lintel', FIXTURE_IDS.torch]])
+    expect(sceneOfFills(offSlot).unplaced[0]?.reason).toBe(
+      asSentence(billSays(billFor(offSlot), 'hold-off-slot')),
+    )
+
+    const fitted = holding([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]])
+    const unmeasuredFile = fixtureUnmeasuredCatalogFile()
+    const unmeasured = planCatalogFromFile(unmeasuredFile, fixtureSlotLayout)
+    const room = sceneOfFills(fitted, unmeasured, createStyleResolver(unmeasured))
+    const bill = billFor(fitted, unmeasuredFile)
+    expect(room.unplaced[0]?.reason).toBe(asSentence(billSays(bill, 'hold-unplaced')))
+    // Both sides really did report the same one accessory, rather than agreeing
+    // about a room in which nothing happened.
+    expect(room.unplaced).toHaveLength(1)
+    expect(bill.unplaced).toEqual([
+      { placement: 'p1', slot: FIXTURE_SLOTS.leftWall, hold: FIXTURE_HOLDS.torch, tile: FIXTURE_IDS.torch },
+    ])
   })
 
   it('re-points an accessory at the re-anchored host, so a move carries its torches', () => {
