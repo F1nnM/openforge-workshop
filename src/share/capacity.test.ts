@@ -331,6 +331,12 @@ function wireOf(scene: SharedScene): WirePayload {
           slot: intern(slots, slot),
           ordinal: fill === undefined ? 0 : (MANIFEST.ordinalOfTile(fill.tile) ?? 0),
           pinned: fill?.pinned ?? false,
+          /* The two shapes measured here fill no holds, so what format 6 costs
+             them is the zero hold count per fill and nothing else — which is
+             exactly what the byte-for-byte assertion below is checking the
+             control writes. What a hold itself costs is measured in
+             `payload.test.ts`, against the payload rather than against a URL. */
+          holds: [],
         }
       }),
   }))
@@ -422,6 +428,11 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
     for (const fill of fills) writeSlot(fill.slot)
     for (const fill of fills) writer.uvar(fill.ordinal)
     writePinned(writer, fills, layout)
+    const holds = fills.flatMap((fill) => fill.holds)
+    for (const fill of fills) writer.uvar(fill.holds.length)
+    for (const hold of holds) writeSlot(hold.slot)
+    for (const hold of holds) writer.uvar(hold.ordinal)
+    writePinned(writer, holds, layout)
   } else {
     for (const instance of payload.instances) {
       writeTemplate(instance.template)
@@ -434,6 +445,12 @@ function varintBytes(payload: WirePayload, layout: Layout): Uint8Array {
         writeSlot(fill.slot)
         writer.uvar(fill.ordinal)
         writer.u8(fill.pinned ? 1 : 0)
+        writer.uvar(fill.holds.length)
+        for (const hold of fill.holds) {
+          writeSlot(hold.slot)
+          writer.uvar(hold.ordinal)
+          writer.u8(hold.pinned ? 1 : 0)
+        }
       }
     }
   }
