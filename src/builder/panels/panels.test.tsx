@@ -1601,6 +1601,28 @@ describe('the bill of tiles', () => {
     expect(placementCount()).toBe(0)
   })
 
+  /**
+   * **The hole one level down, in the panel and not only on the refusal.**
+   *
+   * `doorway` fills every slot the recipe declares and is still one file short of
+   * a printable model: the file itself declares a required `door` accessory slot
+   * and nothing is in it. The download says so — `panels-one-slot: model › door`
+   * — and until this row the panel did not, so a user reading the bill saw a
+   * complete scene and a refusal with no entry behind it.
+   */
+  it('lists a required accessory hole beside the slots that are empty', () => {
+    place('doorway')
+    render(<BillHarness />)
+
+    // `slot › hold`, the same spelling the refusal uses: the fault is the door,
+    // and the wall it is missing from is what locates it.
+    const fault = screen.getByText(/panels-one-slot · model › door · x 0, z 0/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/1 slot needs attention/)).toBeInTheDocument()
+    // The file in the slot is printable and printed, so the row above stays.
+    expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+  })
+
   it('tells a retired fill apart from an empty slot, and blocks the download over both', () => {
     // The three states an explicitly-filled instance can be wrong in are
     // `empty`, `retired` and `off-slot`, and the first two look identical to
@@ -2250,7 +2272,9 @@ describe('the download action', () => {
     expect(alert).toHaveTextContent(/panels-one-slot: model › door/)
     // And the repair points at the accessory rather than at the wall.
     expect(alert).toHaveTextContent(/1,047 of the 1,244 accessory slots/)
-    expect(alert).toHaveTextContent(/an accessory in the slot editor of the piece holding it/)
+    // The repair names the one surface that can make it: the slot editor fills a
+    // recipe's own slots and an accessory is not one of them.
+    expect(alert).toHaveTextContent(/an accessory under Accessory slots, below the parts list/)
     expect(opened).toBe(0)
     expect(saved).toHaveLength(0)
   })

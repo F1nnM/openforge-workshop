@@ -37,17 +37,21 @@
  * `VisuallyHidden` is `position: fixed` with pinned offsets, and a grid cell is
  * the last place to discover what that does to a clipped span.
  *
- * ## The choice is state, and it is deliberately not persisted
+ * ## The choice is state here and a **prop** where an owner holds it
  *
- * `@/store`'s docblock is explicit that everything in `WorkshopState` is
- * persisted and that ephemeral UI state belongs in a component. A slot fill is
- * held here, keyed by {@link slotChoiceKey} — the parent **file** plus the slot
- * name, which is unique within a record over all 8,702 of them. There is no
- * channel to persist it through yet: the bill of tiles is built from placements
- * and row G5 owns the selection channel, so what this picker can honestly do
- * with a pick is put the file in the library, which is what the builder's panel
- * does. Here it narrows the remaining slots and nothing else, which is the
- * capability the row is about.
+ * Two modes, and the second is not a generalisation for its own sake. The
+ * drawer's use is uncontrolled: nothing in a catalog page has anywhere to put a
+ * pick, so the selection lives here, keyed by {@link slotChoiceKey} — the parent
+ * **file** plus the slot name, unique within a record over all 8,702 of them —
+ * and narrows the remaining slots and nothing else.
+ *
+ * The builder's accessory section does have somewhere: `SlotFill.holds` is the
+ * store's key for a slot of a *file*, so the room, the bill and this grid all
+ * read one value. There it passes {@link SlotFillsProps.selection} and this
+ * component keeps no opinion of its own — a local copy that could disagree with
+ * the room is the one failure mode a controlled prop removes. The picker still
+ * writes nothing itself: `@/screens/detail/slots` must not import `@/store`, so
+ * a press is reported through `onPick` and the owner decides.
  */
 import { useMemo, useState } from 'react'
 
@@ -86,24 +90,32 @@ export interface SlotFillsProps {
    */
   readonly parent: TileId
   /**
+   * The selection to display, when the owner holds it.
+   *
+   * Present makes this a controlled component: the map shown is this one, the
+   * local copy is not written and a press moves nothing until the owner comes
+   * back with a new value. `builder/panels/slots/AccessorySection.tsx` builds it
+   * from the placed fill's `holds`, which is what makes the grid and the room
+   * one answer rather than two.
+   *
+   * Absent leaves the drawer's own behaviour exactly as it was — a pick is held
+   * here and persisted nowhere.
+   */
+  readonly selection?: SlotSelection
+  /**
    * Told which **file** a slot now contributes, with `undefined` for "cleared".
    *
-   * The picker's report of its own state, and it is a report rather than a
-   * persistence hook. **No consumer persists a pick, and row C3 measured why
-   * rather than deferring it:** an accessory slot is a slot of a *file*, one
-   * level below a template's own slots, and `TemplateInstance.fills` is
-   * `Record<SlotName, SlotFill>` with `SlotFill` being `{ tile, pinned }` —
-   * flat, with no key for a fill of a fill. Writing one under its bare name
-   * would land it beside the template's slots, where `resolve.ts#readFills`
-   * walks `template.parts` and would not bill it, while
-   * `canvas/catalog.ts#parts` walks every key of `fills` and would draw it. So
-   * all three call sites deliberately decline, and each says so in its own copy.
+   * The picker's report of its own state rather than its write, and the
+   * distinction is the module rule: `@/screens/detail/slots` must not import
+   * `@/store`, so the surface that has somewhere to put a pick is the surface
+   * that puts it there. The builder's accessory section answers this by pinning
+   * the hold onto the placed fill; the drawer answers it by narrowing the
+   * remaining slots and nothing else.
    *
-   * What the callback is still for is the one fact the DOM states only inside an
-   * accessible name: **which of an item's files** a card contributes. The grid
-   * is an item grid and `selectVariant` picks the print (C1's two-step), so a
-   * caller composing a preview of a finished piece needs the `TileId` rather
-   * than the card.
+   * The `TileId` is the other half of what it carries, and it is the one fact
+   * the DOM states only inside an accessible name: **which of an item's files** a
+   * card contributes. The grid is an item grid and `selectVariant` picks the
+   * print (C1's two-step).
    */
   readonly onPick?: (slot: string, tile: TileId | undefined) => void
 }
@@ -115,18 +127,22 @@ export interface SlotFillsProps {
  * declare no config and a further 2,451 declare only a `base` slot, so the
  * common case for this component is to render nothing.
  */
-export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
+export function SlotFills({ catalog, parent, onPick, selection }: SlotFillsProps) {
   const index = useMemo(() => (catalog === undefined ? undefined : compositionIndexFor(catalog)), [catalog])
   const materialOf = useMemo(() => (catalog === undefined ? null : tileMaterials(catalog)), [catalog])
-  const [selection, setSelection] = useState<SlotSelection>({})
+  const [held, setHeld] = useState<SlotSelection>({})
   const [open, setOpen] = useState<string | null>(null)
+
+  // The owner's map when there is one, and this component's own otherwise. See
+  // the module note: a controlled picker keeps no second opinion.
+  const picked = selection ?? held
 
   // Recomputed on every pick, because that is the row: `constrain` reads sibling
   // selections, so a candidate set is correct only until the next click. The
   // whole pass measures 0.09 ms mean and 2.3 ms worst over the real corpus.
   const states = useMemo(
-    () => (index === undefined ? [] : slotStates(index, parent, selection)),
-    [index, parent, selection],
+    () => (index === undefined ? [] : slotStates(index, parent, picked)),
+    [index, parent, picked],
   )
   // `materialOf` is null exactly when `catalog` is undefined, so this narrows
   // both at once rather than leaving a fallback resolver that cannot be reached.
@@ -148,13 +164,18 @@ export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
           onPick={(tile) => {
             // A second press on the chosen card clears it, which is what makes
             // an optional slot reachable again without a separate control.
-            const next = tile === undefined || selection[state.name] === tile ? undefined : tile
-            setSelection((prev) => {
-              const merged = { ...prev }
-              if (next === undefined) delete merged[state.name]
-              else merged[state.name] = next
-              return merged
-            })
+            const next = tile === undefined || picked[state.name] === tile ? undefined : tile
+            // Controlled: the owner's value is what renders, so writing this one
+            // would be a second source of truth that a refused write leaves
+            // showing a pick the room does not hold.
+            if (selection === undefined) {
+              setHeld((prev) => {
+                const merged = { ...prev }
+                if (next === undefined) delete merged[state.name]
+                else merged[state.name] = next
+                return merged
+              })
+            }
             onPick?.(state.name, next)
           }}
           open={shown === state.name}

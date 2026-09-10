@@ -52,13 +52,21 @@
  * **A template's own slots are not these.** `resolveInstance` walks the recipe's
  * declared parts and reports the empty ones as `slot-unfilled`; this walks the
  * *composition* slots the already-chosen files declare, one level further in.
- * Row **C3** is what joins the two surfaces, and it owns whatever a pick here
- * writes.
+ *
+ * ## It now reports what is *in* them, and what each one costs
+ *
+ * A holder used to be the open question alone. Since the store grew
+ * `SlotFill.holds` it carries the answer too — {@link PlanSlotHolder.holds} is
+ * the accessory in each slot, and {@link PlanSlotHolder.mounts} is how many
+ * copies of it the bill charges for. Both are read off the same two values the
+ * assembly resolver reads (`SlotFill.holds` and `mountsFor`), which is what makes
+ * the panel's count and the bill's `×4` one number rather than two.
  */
-import type { CatalogFile, TileId } from '@/catalog'
+import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
+import { mountsFor } from '@/catalog'
 import type { SlotState } from '@/screens/detail/slots'
 import { compositionIndexFor, slotStates } from '@/screens/detail/slots'
-import type { PlacementId, SlotName, TemplateInstance } from '@/store'
+import type { HoldFill, HoldName, PlacementId, SlotName, TemplateInstance } from '@/store'
 import { filledSlots } from '@/store'
 
 /** One filled template slot whose file opens at least one accessory slot. */
@@ -95,8 +103,29 @@ export interface PlanSlotHolder {
    * and both misses are the same orphan.
    */
   readonly name: string
-  /** Its accessory slots, resolved with nothing picked. Never empty. */
+  /** Its accessory slots, resolved against what the fill already holds. Never empty. */
   readonly slots: readonly SlotState[]
+  /**
+   * What the fill holds now — `SlotFill.holds`, straight through.
+   *
+   * `undefined` is *nobody has looked yet* and `{}` is *solved, and nothing is in
+   * it*; the two are different states of one fill and the schema keeps them
+   * apart, so this passes both on rather than folding them. The panel reads it
+   * for one thing: the picker's displayed selection is what the piece holds, so
+   * the grid and the room cannot disagree.
+   */
+  readonly holds: Readonly<Record<HoldName, HoldFill>> | undefined
+  /**
+   * Measured mounts on this file, by accessory slot name.
+   *
+   * `mountsFor(record, slot).length`, which is exactly the `quantity`
+   * `resolveInstance` bills for a hold — so a row that says *× 4 mounts* and the
+   * bill's `×4` are one number read twice rather than two counts that can drift.
+   * `0` is the ordinary reading rather than an error: `CatalogRecord.mounts` is
+   * absent both for an unmeasured host and for one with no accessory slot, and
+   * the archive carries no measurement until `npm run mounts` has walked it.
+   */
+  readonly mounts: Readonly<Record<string, number>>
 }
 
 /** What a drawing's compositions add up to. */
@@ -154,6 +183,7 @@ export function planSlots(
   placements: Readonly<Record<string, TemplateInstance>>,
 ): PlanSlotInventory {
   const index = compositionIndexFor(file)
+  const records = recordsOf(file)
   const holders: PlanSlotHolder[] = []
   const orphans: string[] = []
   const names = new Map<string, number>()
@@ -172,15 +202,21 @@ export function planSlots(
       if (fill === undefined) continue
       const variant = index.aggregates.byTile.get(fill.tile)
       const aggregate = variant === undefined ? undefined : index.aggregates.byDesign.get(variant.design)
-      if (aggregate === undefined) {
-        // A fill this build has retired. One orphan entry per instance however
+      const record = records.get(fill.tile)
+      if (aggregate === undefined || record === undefined) {
+        // A fill this build has retired — the aggregate index and the record
+        // list are built from the same file, so a miss in either is one fill the
+        // index no longer holds. One orphan entry per instance however
         // many of its fills are stranded: the panel's sentence is about a
         // placement it cannot describe, and saying it twice for one piece would
         // over-count the scene.
         stranded = true
         continue
       }
-      const states = slotStates(index, fill.tile)
+      // Resolved against what is already in it, so a slot the piece has filled
+      // shows its pick rather than an empty grid — and so a sibling's candidates
+      // are narrowed by the accessory that is actually there.
+      const states = slotStates(index, fill.tile, holdSelection(fill.holds))
       if (states.length === 0) continue
 
       holders.push({
@@ -191,6 +227,10 @@ export function planSlots(
         parent: fill.tile,
         name: aggregate.name,
         slots: states,
+        holds: fill.holds,
+        mounts: Object.fromEntries(
+          states.map((state) => [state.name, mountsFor(record, state.name).length]),
+        ),
       })
       for (const state of states) {
         slots += 1
@@ -212,4 +252,39 @@ export function planSlots(
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
     orphans,
   }
+}
+
+/* ------------------------------------------------------------- the lookups */
+
+/**
+ * Records by catalog id, built once per file.
+ *
+ * `mountsFor` takes a {@link CatalogRecord} and `CompositionIndex` holds none —
+ * it works in `TileId`s and tag postings — so this is the join. A `WeakMap` for
+ * `compositionIndexFor`'s reason: the map is 8,702 entries, `planSlots` runs on
+ * every store write, and keying on the parsed file pays for it once and lets it
+ * be collected with the file.
+ */
+const RECORDS = new WeakMap<CatalogFile, ReadonlyMap<string, CatalogRecord>>()
+
+function recordsOf(file: CatalogFile): ReadonlyMap<string, CatalogRecord> {
+  const cached = RECORDS.get(file)
+  if (cached !== undefined) return cached
+  const built = new Map(file.records.map((record) => [record.id as string, record]))
+  RECORDS.set(file, built)
+  return built
+}
+
+/**
+ * A fill's holds as the picker's selection: slot name to the file in it.
+ *
+ * Exported because both readers of {@link PlanSlotHolder.holds} need exactly this
+ * shape — this module resolves each slot against it, and `AccessorySection.tsx`
+ * hands it to the picker as the selection to display. Two copies would be two
+ * chances for the grid to show something the resolution did not see.
+ */
+export function holdSelection(
+  holds: Readonly<Record<HoldName, HoldFill>> | undefined,
+): Readonly<Record<string, TileId>> {
+  return Object.fromEntries(Object.entries(holds ?? {}).map(([hold, held]) => [hold, held.tile]))
 }

@@ -87,7 +87,7 @@ import type {
   ResolvedSlotFill,
 } from '@/assembly'
 import type { BlobId, CatalogRecord, TileId } from '@/catalog'
-import type { PlacementId, SlotName, TemplateInstance } from '@/store'
+import type { HoldName, PlacementId, SlotName, TemplateInstance } from '@/store'
 import { countLabel } from '@/screens/catalog'
 
 /* --------------------------------------------------------------- inventory */
@@ -257,18 +257,21 @@ export function slotsAsking(line: BillLine, placement: PlacementId): readonly Bi
  *   - `retired` — the slot names a file that has left the archive. There is
  *     nothing to print and nothing to check.
  *   - `empty` — the slot has no entry at all.
+ *   - `hole` — the slot is filled and the **file in it** declares a required
+ *     accessory slot that holds nothing. One level below the other four: the
+ *     piece on the plan is complete and the print is not.
  *   - `no-recipe` — the whole template is not in this build, so it has no
  *     declared slots to fault. One entry per instance, with no slot. Emitted so
  *     this function is total over the scene, and dropped by the panel: an
  *     instance that resolved to no parts is `BillInventory.orphans`' to render,
  *     and two blocks for one piece would offer two Remove buttons for it.
  *
- * `retired`, `empty` and `no-recipe` all refuse the download
+ * `retired`, `empty`, `hole` and `no-recipe` all refuse the download
  * ({@link BillOfTiles.complete}); `off-slot` does not, and that split is §7's:
  * an unprintable pack is refused, a wrong build is disclosed. A user is told
  * which of the two they have.
  */
-export type SlotFaultKind = 'off-slot' | 'retired' | 'empty' | 'no-recipe'
+export type SlotFaultKind = 'off-slot' | 'retired' | 'empty' | 'hole' | 'no-recipe'
 
 /** One faulty slot, with everything needed to name it and reach it. */
 export interface SlotFault {
@@ -279,6 +282,12 @@ export interface SlotFault {
   readonly template: string
   /** The slot, or `undefined` for `no-recipe`. */
   readonly slot: SlotName | undefined
+  /**
+   * The accessory slot of the file in {@link slot}, for a `hole` and nothing
+   * else. The pair is what names the fault: `wall › torch` is *the torch socket
+   * in the wall*, and the slot alone would say `wall` for both.
+   */
+  readonly hold: HoldName | undefined
   readonly kind: SlotFaultKind
   /** The file the slot names, present for `off-slot` and `retired`. */
   readonly tile: TileId | undefined
@@ -308,7 +317,8 @@ export interface SlotFault {
  * "checked and wrong", and a boolean would have reported the first as the second.
  * `bill.notes` is the roll-up of the same conditions and stays the summary; this
  * is the list behind it, and the two cannot disagree because both are read off
- * `ResolvedInstance.slots`.
+ * `ResolvedInstance.slots` — and, for the `hole` kind, off `ResolvedInstance.holds`
+ * one level down.
  *
  * Ordered by plan reading order and then by the template's own declared slot
  * order, so the list reads down the drawing rather than in whatever order the
@@ -330,6 +340,7 @@ function faultsIn(resolved: ResolvedInstance): SlotFault[] {
       {
         ...shared,
         slot: undefined,
+        hold: undefined,
         kind: 'no-recipe',
         tile: undefined,
         record: undefined,
@@ -339,22 +350,64 @@ function faultsIn(resolved: ResolvedInstance): SlotFault[] {
     ]
   }
 
-  // In the template's declared order, which `ResolvedInstance.slots` already is.
+  // In the template's declared order, which `ResolvedInstance.slots` already is,
+  // and each slot followed by the holes in the file that fills it — so the list
+  // reads down the piece rather than listing every recipe slot and then coming
+  // back for the accessories.
   return resolved.slots.flatMap((slot) => {
     const kind = kindOf(slot)
-    if (kind === undefined) return []
-    return [
-      {
-        ...shared,
-        slot: slot.slot,
-        kind,
-        tile: slot.fill?.tile,
-        record: slot.record,
-        pinned: slot.fill?.pinned ?? false,
-        blocksDownload: kind !== 'off-slot',
-      },
-    ]
+    const own: SlotFault[] =
+      kind === undefined
+        ? []
+        : [
+            {
+              ...shared,
+              slot: slot.slot,
+              hold: undefined,
+              kind,
+              tile: slot.fill?.tile,
+              record: slot.record,
+              pinned: slot.fill?.pinned ?? false,
+              blocksDownload: kind !== 'off-slot',
+            },
+          ]
+    return [...own, ...holeFaults(resolved, slot.slot, shared)]
   })
+}
+
+/**
+ * The **required accessory slots of one filled slot's file that hold nothing** —
+ * the hole one level down.
+ *
+ * `resolveInstance` already refuses the download over these
+ * (`ResolvedInstance.complete`), and `useArchiveDownload` already names them, so
+ * before this the panel was the one surface that showed a scene with every slot
+ * filled beside a refusal with nothing behind it. A doorway with no door is the
+ * ordinary case rather than a contrived one: 1,047 of the archive's 1,244
+ * accessory declarations omit `optional` and absence means required.
+ *
+ * A hold naming a file the catalog no longer has is **not** here. It refuses the
+ * download too, and it is `hold-unknown-tile`'s to report: the fix is a different
+ * accessory rather than a first one, and this row's copy is about an empty
+ * socket. Widening it would put two sentences in one entry.
+ */
+function holeFaults(
+  resolved: ResolvedInstance,
+  slot: SlotName,
+  shared: { placement: PlacementId; instance: TemplateInstance; template: string },
+): SlotFault[] {
+  return resolved.holds
+    .filter((held) => held.slot === slot && !held.optional && held.fill === undefined)
+    .map((held) => ({
+      ...shared,
+      slot,
+      hold: held.hold,
+      kind: 'hole' as const,
+      tile: undefined,
+      record: undefined,
+      pinned: false,
+      blocksDownload: true,
+    }))
 }
 
 /**
@@ -394,7 +447,10 @@ export interface SlotFaultCopy {
  * that has gone inadmissible means the constraint moved under it.
  */
 export function slotFaultCopy(fault: SlotFault): SlotFaultCopy {
-  const subject = fault.slot === undefined ? fault.template : `${fault.template} · ${fault.slot}`
+  // `template · slot › hold`, the spelling the download's refusal uses for the
+  // same pair, so a user meets one name for one fault on both surfaces.
+  const where = fault.hold === undefined ? fault.slot : `${String(fault.slot)} › ${fault.hold}`
+  const subject = where === undefined ? fault.template : `${fault.template} · ${where}`
   switch (fault.kind) {
     case 'off-slot':
       return {
@@ -412,6 +468,13 @@ export function slotFaultCopy(fault: SlotFault): SlotFaultCopy {
       }
     case 'empty':
       return { subject, reason: 'Nothing is in this slot, and every slot of every recipe in this build is required.' }
+    case 'hole':
+      return {
+        subject,
+        reason:
+          'The file in this slot opens an accessory slot it does not mark optional, and nothing is in it. ' +
+          'Fill it under Accessory slots, below the parts list.',
+      }
     case 'no-recipe':
       return { subject, reason: 'This build ships no recipe by that name, so the piece has no slots to fill.' }
   }

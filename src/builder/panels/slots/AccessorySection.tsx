@@ -20,28 +20,27 @@
  * matters. It returns `null` instead. There is also nothing to virtualise when it
  * does render: the worst placed piece opens three slots.
  *
- * ## A pick here keeps nothing, and the one line says so
+ * ## A pick here is kept, and the room and the parts list read the same hold
  *
- * The picker is `@/screens/detail/slots`' whole, reused rather than restated, and
- * its selection is local to it. That is not a stub left for later — it is what
- * the destination schema admits:
+ * This section used to say *"previews only"*, and the reason was structural
+ * rather than unfinished: `TemplateInstance.fills` was `Record<SlotName,
+ * SlotFill>` with `SlotFill` being `{ tile, pinned }` — one level, with no key
+ * for a fill of a fill — so a pick written under its bare name would have landed
+ * beside the recipe's own slots, where `resolve.ts#readFills` walks
+ * `template.parts` and would not bill it while `canvas/catalog.ts#parts` walks
+ * every key of `fills` and would draw it.
  *
- *   - `TemplateInstance.fills` is `Record<SlotName, SlotFill>` and a `SlotFill`
- *     is `{ tile, pinned }` — **one level**. There is no key for a slot of a
- *     file.
- *   - Writing it under its bare name anyway would put it in `fills` beside the
- *     recipe's own slots, where the two readers disagree: `resolve.ts#readFills`
- *     walks `template.parts`, so the **bill would not count it**, and
- *     `canvas/catalog.ts#parts` walks every key of `fills`, so the **drawing
- *     would draw it**. The builder's own invariant is that *"the room and the
- *     parts list cannot disagree"*; a fill nothing prints is exactly that
- *     disagreement.
+ * **`SlotFill.holds` is that key, so the argument is gone.** A press here calls
+ * `pinHold` on the fill the picker is mounted under and a second press on the
+ * same card calls `clearHold`; `resolveInstance` walks the same map to bill the
+ * accessory and `canvas/scene.ts` walks it to place one per measured mount. So
+ * the builder's invariant — *"the room and the parts list cannot disagree"* —
+ * holds here by construction rather than by abstinence: **both surfaces read one
+ * hold, and this section is the only thing that writes it.**
  *
- * Closing that needs `resolve.ts` and `bill.ts` to walk non-declared fills, or a
- * nested fill in the store's schema. Until then the copy states what a pick is
- * in one line rather than accepting a press that persists something no bill can
- * see — a picker that silently kept nothing is the one thing worse than saying
- * so.
+ * The picker itself stays headless. `@/screens/detail/slots` must not import
+ * `@/store`, so it is handed the selection to display and reports a press; the
+ * write is this file's.
  *
  * ## A holder is a filled slot, not a placement
  *
@@ -53,11 +52,14 @@ import { useMemo } from 'react'
 
 import { describeCell } from '@/builder/canvas'
 import type { CatalogFile } from '@/catalog'
+import type { SlotSelection } from '@/screens/detail/slots'
 import { SlotFills } from '@/screens/detail/slots'
 import type { TemplateInstance } from '@/store'
+import { HoldName, clearHold, pinHold } from '@/store'
 import { Eyebrow } from '@/ui/primitives'
 
-import { planSlots } from './planSlots'
+import type { PlanSlotHolder } from './planSlots'
+import { holdSelection, planSlots } from './planSlots'
 
 import './slots.css'
 
@@ -76,6 +78,14 @@ export function AccessorySection({ catalog, placements }: AccessorySectionProps)
   // names an exact file, so which slots are open does not move when the
   // preference does.
   const inventory = useMemo(() => planSlots(catalog, placements), [catalog, placements])
+
+  // One selection per holder, built here rather than inside the map below:
+  // `SlotFills` memoises its resolution on the object it is handed, and a fresh
+  // literal per render would re-resolve every grid on every store write.
+  const selections = useMemo(
+    () => new Map(inventory.holders.map((holder) => [holder.id, holdSelection(holder.holds)])),
+    [inventory],
+  )
 
   // The empty state is the normal state, so it is nothing at all. See the
   // docblock: 88.5% of files declare no slot, and the orphan line below is the
@@ -101,10 +111,10 @@ export function AccessorySection({ catalog, placements }: AccessorySectionProps)
             {`${String(inventory.holders.length)} ${
               inventory.holders.length === 1 ? 'piece' : 'pieces'
             }, ${String(inventory.required)} of them required. `}
-            {/* One line, and it is the honest half of the four it replaced: what
-                a press here does. The structural reason it cannot persist is in
-                this file's docblock, where a reader who wants it will look. */}
-            Previews only — a fill can name a recipe&rsquo;s slot, not a file&rsquo;s.
+            {/* One line, and it now says what a press does rather than what it
+                cannot do: the pick is kept on the piece, and the parts list
+                charges for it once per mount measured on the host. */}
+            A pick here is kept &mdash; pinned to that piece and counted once per measured mount.
           </p>
 
           {inventory.unfillable === 0 ? null : (
@@ -126,7 +136,21 @@ export function AccessorySection({ catalog, placements }: AccessorySectionProps)
                     {holder.slot} · {describeCell(holder.instance.x, holder.instance.z)}
                   </span>
                 </p>
-                <SlotFills catalog={catalog} parent={holder.parent} />
+
+                <MountLine holder={holder} />
+
+                <SlotFills
+                  catalog={catalog}
+                  onPick={(hold, tile) => {
+                    const name = HoldName.parse(hold)
+                    // The picker's own toggle: `undefined` is a second press on
+                    // the card already in the slot, which is *take it out*.
+                    if (tile === undefined) clearHold(holder.placement, holder.slot, name)
+                    else pinHold(holder.placement, holder.slot, name, tile)
+                  }}
+                  parent={holder.parent}
+                  selection={selections.get(holder.id) ?? NOTHING_HELD}
+                />
               </li>
             ))}
           </ul>
@@ -142,4 +166,31 @@ export function AccessorySection({ catalog, placements }: AccessorySectionProps)
       )}
     </section>
   )
+}
+
+/* ---------------------------------------------------------------- the mounts */
+
+/** Nothing held, shared so an unfilled holder's grid is not re-resolved per render. */
+const NOTHING_HELD: SlotSelection = {}
+
+/**
+ * What a holder's slots cost, wherever that is not the obvious one copy.
+ *
+ * Two facts, and both are about a number the user meets later in the parts list.
+ * A host is billed **one copy per measured mount** — a wall with four torch
+ * sockets is four torches for one press — so a slot with more than one says so
+ * before the press rather than after it. And a slot with **no** measured mount is
+ * billed once and drawn nowhere, which is the state of the whole archive until
+ * `npm run mounts` has walked it and is not something the user can repair.
+ *
+ * A slot with exactly one mount says nothing: one press, one copy, in the place
+ * the drawing puts it, is what a row already reads as.
+ */
+function MountLine({ holder }: { holder: PlanSlotHolder }) {
+  const notes = holder.slots.flatMap((state) => {
+    const mounts = holder.mounts[state.name] ?? 0
+    if (mounts === 0) return [`${state.name}: no measured mount — counted once, not drawn`]
+    return mounts === 1 ? [] : [`${state.name} × ${String(mounts)} mounts`]
+  })
+  return notes.length === 0 ? null : <p className="of-planslots-mounts">{notes.join(' · ')}</p>
 }

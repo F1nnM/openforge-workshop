@@ -41,6 +41,9 @@
  *     fixture because the mechanism is the row's whole subject and a machine
  *     that only ever grey-outs would pass a test suite that never exercised the
  *     narrowing path. The measurement is in `slots.test.ts`, against the corpus.
+ *     It is also the fixture's **one measured host** — four torch sockets and an
+ *     unmeasured lintel — so a panel that prices a hold per mount has both a
+ *     multi-mount slot and an unmeasured one to say something about.
  */
 import type { CatalogFile as CatalogFileType } from '@/catalog'
 import { CatalogFile } from '@/catalog'
@@ -90,6 +93,27 @@ const T = {
   grate: 7,
   width2: 8,
 } as const
+
+/**
+ * One measured torch socket, the corpus's own signature.
+ *
+ * A 5.5 × 3 mm mouth entering 25° off vertical, tilting up and out — `axis`
+ * points *into* the host, so `dot(axis, normal)` is the cosine of that tilt.
+ * `outward` is the face's own normal component and `side` puts the socket at
+ * x = ∓25.2, where the archive's measured torch walls carry theirs.
+ */
+function torchSocket(face: '-y' | '+y', outward: -1 | 1, side: -1 | 1): Record<string, unknown> {
+  return {
+    slot: 'torch',
+    kind: 'socket',
+    face,
+    normal: [0, outward, 0],
+    at: [side * 25.2, outward * 6.35, 38.1],
+    axis: [0, -outward * 0.4226, 0.9063],
+    section: [5.5, 3],
+    depth: 14,
+  }
+}
 
 function tile(overrides: Record<string, unknown> & { design: string }): Record<string, unknown> {
   return {
@@ -259,6 +283,21 @@ export const SLOT_CATALOG: CatalogFileType = CatalogFile.parse({
           },
         ],
       },
+      /*
+        **The fixture's one measured host**, and the only place a mount count is
+        anything but zero. Four torch sockets — two per face of a 2x archway, at
+        x = ±25.2 the way the corpus's measured torch walls carry theirs — because
+        the panels bill one copy per mount and *four torches for one press* is the
+        arithmetic a user must be told about before they meet it. Its `lintel`
+        stays unmeasured, which is the ordinary state of the whole archive today
+        and is the other line the plan's accessory list has to be able to say.
+      */
+      mounts: [
+        torchSocket('-y', -1, -1),
+        torchSocket('-y', -1, 1),
+        torchSocket('+y', 1, -1),
+        torchSocket('+y', 1, 1),
+      ],
     }),
 
     /* ----------------------------------------------------- what fills them */

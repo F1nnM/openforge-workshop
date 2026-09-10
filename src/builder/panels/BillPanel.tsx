@@ -608,8 +608,9 @@ function PlacementRow({
 /* --------------------------------------------------------------- slot faults */
 
 /**
- * Every slot in the scene that is empty, retired, or holding a file it does not
- * admit — one line each, and a way to reach the piece.
+ * Every slot in the scene that is empty, retired, holding a file it does not
+ * admit, or leaving a required accessory socket of its own file unfilled — one
+ * line each, and a way to reach the piece.
  *
  * **This is the answer to the question row A3 left open and row A8 declined to
  * invent.** Three surfaces were deleted from this panel because the facts behind
@@ -654,7 +655,9 @@ function SlotFaultBlock({
       <ul className="of-bill-faults" role="list">
         {faults.map((fault) => (
           <SlotFaultRow
-            key={`${fault.placement}/${fault.slot ?? ''}`}
+            // The hold as well as the slot: a filled wall with an empty torch
+            // socket is two entries under one placement and one slot name.
+            key={`${fault.placement}/${fault.slot ?? ''}/${fault.hold ?? ''}`}
             fault={fault}
             onEditSlots={onEditSlots}
           />
@@ -685,6 +688,9 @@ function SlotFaultRow({
 }) {
   const copy = slotFaultCopy(fault)
   const at = describeCell(fault.instance.x, fault.instance.z)
+  // The accessory when the fault is one, because *the faulty door* is what the
+  // user is looking for and *the faulty wall* is the part they already filled.
+  const what = fault.hold ?? fault.slot ?? 'recipe'
   return (
     <li className="of-bill-fault" data-blocking={fault.blocksDownload ? '' : undefined}>
       <span className="of-bill-fault-head">
@@ -700,7 +706,7 @@ function SlotFaultRow({
           <SlotsButton
             onEditSlots={onEditSlots}
             placement={fault.placement}
-            subject={`of the piece with the faulty ${fault.slot ?? 'recipe'} at ${at}`}
+            subject={`of the piece with the faulty ${what} at ${at}`}
           />
           <button
             type="button"
@@ -710,7 +716,7 @@ function SlotFaultRow({
             }}
           >
             Remove{' '}
-            <VisuallyHidden>{`the piece with the faulty ${fault.slot ?? 'recipe'} at ${at}`}</VisuallyHidden>
+            <VisuallyHidden>{`the piece with the faulty ${what} at ${at}`}</VisuallyHidden>
           </button>
         </span>
       </span>

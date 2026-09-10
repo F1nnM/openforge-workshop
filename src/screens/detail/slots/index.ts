@@ -18,10 +18,13 @@
  *   - **The `base` slot** is D1's and A6's. It is *read* here, because it is the
  *     entire dead-end signal in this corpus, and never rendered as a choice.
  *     `slotPicker.ts` has the measurement and the reasoning.
- *   - **Persisting a pick.** There is no channel: `WorkshopState` holds a library
- *     and placements, row G5 owns the selection channel, and the bill of tiles
- *     is built from placements. A pick narrows the remaining slots and, in the
- *     builder, adds the file to the library.
+ *   - **Persisting a pick.** Not this row's, and deliberately not reachable from
+ *     it: nothing here imports `@/store`, so the picker reports a press and the
+ *     surface that has somewhere to put it writes it —
+ *     `builder/panels/slots/AccessorySection.tsx` pins the hold onto the placed
+ *     fill, and hands the current holds back as the selection to display. In the
+ *     drawer there is still nowhere to put a pick, and there it narrows the
+ *     remaining slots and nothing else.
  */
 export type { SlotFillsProps } from './SlotFills'
 export { SlotFills, tileMaterials } from './SlotFills'

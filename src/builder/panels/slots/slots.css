@@ -90,6 +90,17 @@
   letter-spacing: 0.04em;
 }
 
+/* How many copies a slot costs, and which slots nothing has measured. Mono for
+   `.of-planslots-at`'s reason: a mount count is a measured fact. */
+.of-planslots-mounts {
+  margin: 0 0 4px;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+}
+
 /* ── The slot editor ─────────────────────────────────────────────────────────
    A `Dialog` and not an anchored popover; `SlotEditor.tsx` has the argument.
    Wider than the 420px default because it holds a 48-card page: the primitive

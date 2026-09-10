@@ -53,6 +53,7 @@ import type { RecipeTemplate } from '@/assembly'
 import { FILL, PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
 import type { TemplateInstance } from '@/store'
 import {
+  HoldName,
   PlacementId,
   SlotName,
   TemplateId,
@@ -400,13 +401,14 @@ describe('AccessorySection', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('states what a pick here is, in one line, because it keeps nothing', () => {
+  it('states what a pick here does, now that it keeps it', () => {
     accessories({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.wallLow, 2, 0) })
     expect(screen.getByText(/2 slots open on 2 pieces, 1 of them required/)).toBeInTheDocument()
-    // The reason is structural — `TemplateInstance.fills` is one level, so there
-    // is no key for a slot of a *file* — and a picker that silently kept nothing
-    // would be the one thing worse than saying so. Cut to a line, not to zero.
-    expect(screen.getByText(/a fill can name a recipe’s slot, not a file’s/)).toBeInTheDocument()
+    // The structural reason it kept nothing is gone: `SlotFill.holds` is the key
+    // for a slot of a *file*, so a press here is a store write like any other and
+    // the line says what the write does rather than apologising for its absence.
+    expect(screen.getByText(/pinned to that piece and counted once per measured mount/)).toBeInTheDocument()
+    expect(screen.queryByText(/Previews only/)).toBeNull()
   })
 
   it('names each accessory holder with its slot and grid position', () => {
@@ -449,6 +451,106 @@ describe('AccessorySection', () => {
     expect(within(holders[0]!).getByRole('group', { name: 'Fill the torch slot' })).toBeInTheDocument()
     expect(
       within(holders[1]!).getByRole('group', { name: 'Fill the grate (left) slot' }),
+    ).toBeInTheDocument()
+  })
+})
+
+/* ------------------------------------------------------- the pick that lands */
+
+/**
+ * **Row C3's other half: a press here writes.**
+ *
+ * The section used to say *"previews only"* because `TemplateInstance.fills` was
+ * one level deep and had no key for a slot of a file. `SlotFill.holds` is that
+ * key, so the picker is now the app's editor for an accessory and these are the
+ * assertions that it is: what a piece holds is what the picker shows, a press
+ * pins, and a second press on the same card takes it out again.
+ *
+ * The archway rather than the torch wall, because a *write* needs a card that is
+ * not greyed: the towne torch closes `wallTowne`'s base slot and the picker
+ * declines it, while the archway's `{ filter }` entry means the same card only
+ * narrows the lintel. It is also the fixture's one measured host, which is what
+ * the mount lines below are read off.
+ */
+describe('the accessory picker writes what it is given', () => {
+  const SLOT0 = SlotName.parse('slot0')
+
+  /** One placed piece whose `slot0` fill is the archway, holding what it is told to. */
+  function archway(holds: Readonly<Record<string, string>>): Record<string, TemplateInstance> {
+    return {
+      [KEY]: {
+        id: KEY,
+        template: TemplateId.parse(A_RECIPE),
+        x: 0,
+        z: 0,
+        rotation: 0,
+        fills: {
+          [SLOT0]: {
+            tile: PARENT.archway as TileId,
+            pinned: false,
+            holds: Object.fromEntries(
+              Object.entries(holds).map(([hold, tile]) => [
+                HoldName.parse(hold),
+                { tile: tile as TileId, pinned: true },
+              ]),
+            ),
+          },
+        },
+        filters: [],
+      },
+    }
+  }
+
+  /**
+   * The section over the **store's** scene, because the presses below write
+   * there and `pinHold` addresses a placement by its key.
+   */
+  function placed(placements: Record<string, TemplateInstance>) {
+    useWorkshopStore.setState({ placements })
+    return accessories(useWorkshopStore.getState().placements)
+  }
+
+  /** The holds of the one fill, as the store has them after a press. */
+  const held = () => useWorkshopStore.getState().placements[KEY]?.fills[SLOT0]?.holds
+
+  it('shows what the piece already holds as the chosen card', () => {
+    placed(archway({ torch: FILL.torchStone }))
+    expect(screen.getByRole('button', { name: /Dungeon Stone Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
+  it('pins a pick onto the hold it names', () => {
+    placed(archway({}))
+    fireEvent.click(screen.getByRole('button', { name: /Towne Torch/ }))
+    // `pinned: true` — the user chose it, so contract C-k's default-hold pass
+    // must not overwrite it on the next hydrate.
+    expect(held()).toEqual({ torch: { tile: FILL.torchTowne, pinned: true } })
+  })
+
+  it('takes the accessory out again on a second press of the card it holds', () => {
+    placed(archway({ torch: FILL.torchStone }))
+    fireEvent.click(screen.getByRole('button', { name: /Dungeon Stone Torch/ }))
+    // `{}` and not `undefined`: *the user took it out* has to survive a reload as
+    // something other than *nobody has looked yet*. See `clearHold`.
+    expect(held()).toEqual({})
+  })
+
+  it('says how many mounts a slot fills, so the bill’s quantity is no surprise', () => {
+    // Row A8 bills one copy per measured mount, and four torches for one press
+    // is a number a user cannot account for unless the picker says so first.
+    placed(archway({}))
+    expect(screen.getByText(/torch × 4 mounts/)).toBeInTheDocument()
+  })
+
+  it('says when nothing has measured where an accessory goes', () => {
+    // `CatalogRecord.mounts` is absent both for a host with no accessory slot and
+    // for one nobody has measured, so *counted once, not drawn* is the honest
+    // reading of the archive today rather than an error state.
+    placed(archway({}))
+    expect(
+      screen.getByText(/lintel: no measured mount — counted once, not drawn/),
     ).toBeInTheDocument()
   })
 })

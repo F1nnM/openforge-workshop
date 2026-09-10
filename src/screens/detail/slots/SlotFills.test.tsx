@@ -170,6 +170,70 @@ describe('a pick', () => {
   })
 })
 
+/* ------------------------------------------------------ the owner's selection */
+
+/**
+ * The controlled mode row C3's builder panel needs.
+ *
+ * The drawer's own use is uncontrolled and stays that way — a pick there narrows
+ * the remaining slots and is not persisted anywhere — but the plan's accessory
+ * section holds the answer in `SlotFill.holds` and writes it to the store. So it
+ * hands the selection down, and what it hands down is what is shown: the picker
+ * must not keep a second copy that can disagree with the room.
+ */
+describe('a selection the owner holds', () => {
+  const controlled = (torch: string | undefined) => (
+    <SlotFills
+      catalog={SLOT_CATALOG}
+      parent={tile(PARENT.archway)}
+      selection={torch === undefined ? {} : { torch: tile(torch) }}
+    />
+  )
+
+  it('shows the owner’s pick, and follows it when the owner changes it', () => {
+    const { rerender } = render(controlled(FILL.torchStone))
+    expect(screen.getByRole('button', { name: /Dungeon Stone Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    rerender(controlled(FILL.torchTowne))
+    expect(screen.getByRole('button', { name: /Dungeon Stone Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+    expect(screen.getByRole('button', { name: /Towne Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
+  it('leaves a press to the owner rather than moving on its own', () => {
+    // The whole of *controlled*: the card reports the pick and waits. An owner
+    // that refuses the write leaves the grid where it was, which is the state
+    // the room is actually in.
+    const picks: [string, string | undefined][] = []
+    render(
+      <SlotFills
+        catalog={SLOT_CATALOG}
+        parent={tile(PARENT.archway)}
+        selection={{}}
+        onPick={(slot, picked) => {
+          picks.push([slot, picked])
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Dungeon Stone Torch/ }))
+
+    expect(picks).toEqual([['torch', FILL.torchStone]])
+    expect(screen.getByRole('button', { name: /Dungeon Stone Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+})
+
 /* -------------------------------------------------------------- the rescue */
 
 describe('a pick that opens a slot', () => {

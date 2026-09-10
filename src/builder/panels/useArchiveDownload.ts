@@ -678,8 +678,8 @@ function classify(
         'the end, so a short one still opens and nobody would find out until the print failed. Nothing was saved. ' +
         (accessories === 0
           ? 'Fill each slot, or take the piece off the grid.'
-          : 'Fill each one — an accessory in the slot editor of the piece holding it — or take the piece off the ' +
-            'grid.'),
+          : 'Fill each one — an accessory under Accessory slots, below the parts list — or take the piece off ' +
+            'the grid.'),
       retryable: false,
     }
   }
