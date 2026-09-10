@@ -164,6 +164,27 @@
  * has nothing to draw, so it is reported rather than dropped or turned into a
  * piece with an empty `parts` array.
  *
+ * ## The accessories: what a fill holds, on the mounts a host was measured at
+ *
+ * A `SlotFill` may carry **holds** — the torch fitted into the wall's socket —
+ * and a host record may carry **mounts**, the poses `tools/mounts/` measured off
+ * its mesh. `PlanPiece.accessories` is the join: one `PlanAccessory` per
+ * *(hold, mount)*, each naming the insert's record, the `PlanPiecePart` it hangs
+ * off and the `Mount` it sits in. `catalog.holds(instance, slot)` is the
+ * de-reference, one level below `catalog.parts`.
+ *
+ * **One per mount, because the bill prices one copy per mount.** A pillar with
+ * four sockets and one `torch` hold is four torches in the zip, so it is four
+ * torches in the room. `PlanScene.unplaced` is the other half of that agreement:
+ * an accessory whose host declares no such slot, or whose host nobody has
+ * measured, is still printed and cannot be drawn, so it is listed rather than
+ * dropped.
+ *
+ * **Inserts change no geometry.** They add no polygon, do not widen a box and
+ * take no part in the conflict sweep — an accessory hangs off a face and
+ * occupies no square. `accessories` is data for the 3D room and the panels, and
+ * is `[]` rather than absent when there are none.
+ *
  * The builder screen owns the bill of tiles and does **not** get it from here:
  * it comes from `buildBillOfTiles(Object.values(placements), assemblyIndex,
  * { lock })` in `@/assembly`, over the same store map the surface writes. The
@@ -189,6 +210,7 @@ export {
 } from './catalog'
 export type {
   PlanCatalog,
+  PlanHold,
   PlanSlotPart,
   PlanSlotPartBase,
   PlanStyle,
@@ -292,10 +314,12 @@ export {
 } from './scene'
 export type {
   GeneratedPlanPiece,
+  PlanAccessory,
   PlanOmission,
   PlanPiece,
   PlanPiecePart,
   PlanScene,
+  PlanUnplaced,
   ScenePiece,
 } from './scene'
 

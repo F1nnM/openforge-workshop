@@ -1,5 +1,5 @@
 /**
- * An eleven-record catalog for the canvas's tests.
+ * A fourteen-record catalog for the canvas's tests.
  *
  * Small on purpose, and every record is here to exercise one thing the plan
  * has to get right:
@@ -27,7 +27,11 @@
  *     the 75 tiles the footprint-first band rule moves from `area` to `edge`;
  *   - a **`tri`** and a **`diag`**, the two cases W4 split precisely because a
  *     filled triangle and a 45° strip need different collision geometry. Both
- *     carry `rotStep: 45`, as all 130 do in the corpus.
+ *     carry `rotStep: 45`, as all 130 do in the corpus;
+ *   - an **`insert` with a `none` footprint**, and the 2-unit wall carrying the
+ *     `config` slot and the **two** measured sockets it hangs in — the pair the
+ *     accessory projection needs, and the reason it is a pair: one mount could
+ *     not tell *one copy per mount* from *one copy per hold*.
  *
  * Exported as a plain object rather than a parsed `CatalogFile` so it travels the
  * real path through `CatalogFile.parse`, which is where a fixture that drifted
@@ -35,7 +39,7 @@
  */
 import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema } from '@/catalog'
-import type { PlacementId, SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
+import type { HoldFill, HoldName, PlacementId, SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
 
 import type { SlotRecords } from './catalog'
 import type { Extent, SlotLayout } from './geometry'
@@ -61,6 +65,9 @@ const TAGS = [
      0 of the 4,363 toppers lack it and 0 of the 2,091 integrals carry it, so it
      is the discriminator and not a correlate. */
   'connection|openforge',
+  /* What an accessory *is*, as the host's own `config.parts` asks for it — see
+     {@link FIXTURE_IDS.torch}. */
+  'part|torch',
 ]
 
 const tag = (name: string): number => {
@@ -162,6 +169,29 @@ export const FIXTURE_CATALOG = {
       texture: 'cut_stone',
       tags: [tag('shape|wall'), tag('texture|cut_stone'), tag('connection|openlock')],
       foot: { shape: 'wall', length: 2 },
+      /* **The fixture's one accessory host**, and the only record here that
+         carries a `config` or a `mount`. Optional, so every existing test that
+         places this wall — most of this file — is unchanged: an accessory slot
+         nothing fills contributes nothing to the plan.
+
+         Two sockets and not one, because the number is the point: an accessory
+         is drawn **once per measured mount** (`scene.ts#PlanPiece.accessories`),
+         so a host with a single mount could not tell that rule from one that
+         draws one copy per hold. The poses are the measured torch convention —
+         a 5.5 x 3 mm mouth entering at 65° from the face, at x = ±25.2 on a
+         2-unit wall — copied from `src/builder/panels/fixture.ts`, which reads
+         the same convention for the bill. */
+      config: { parts: [{ name: 'torch', optional: true, tags: { require: [{ tag: 'part|torch' }] } }] },
+      mounts: [-1, 1].map((side) => ({
+        slot: 'torch',
+        kind: 'socket',
+        face: '-y',
+        normal: [0, -1, 0],
+        at: [side * 25.2, -6.35, 38.1],
+        axis: [0, 0.4226, 0.9063],
+        section: [5.5, 3],
+        depth: 14,
+      })),
     },
     {
       id: 'tiles/wood/floor/2x1,45.openlock.stl',
@@ -396,12 +426,58 @@ export const FIXTURE_CATALOG = {
          made this file's corner assertions describe an over-run. */
       foot: { shape: 'wall', length: 1.5 },
     },
+    {
+      /* **An insert, not a tile**: the thing that goes *in* the wall above. It
+         is `layer: 'insert'` and its footprint is `none`, which is what an
+         accessory's is — it occupies no square on the plan, it hangs off a
+         host's mount. That is why an accessory is never a `PlanPiecePart` and
+         `PlanScene.undrawable` says nothing about it: nothing asks it for an
+         outline. */
+      id: 'tiles/cut_stone/torch/torch.stl',
+      ord: 13,
+      blob: blob(13),
+      file: 'torch.stl',
+      bytes: 262_144,
+      sprite: false,
+      thumb: false,
+      family: 'tiles/cut_stone/torch',
+      design: 'd-torch',
+      name: 'Cut stone torch',
+      kinds: ['torch'],
+      conn: [],
+      layer: 'insert',
+      texture: 'cut_stone',
+      tags: [tag('part|torch'), tag('texture|cut_stone')],
+      foot: { shape: 'none' },
+    },
   ],
 }
 
 /** The fixture, validated — the same parse the app's index goes through. */
 export function fixtureCatalogFile(): CatalogFile {
   return CatalogFileSchema.parse(FIXTURE_CATALOG)
+}
+
+/**
+ * The same fixture with {@link FIXTURE_IDS.wall2}'s sockets **unmeasured**.
+ *
+ * The host still declares the `torch` slot, so a room may legitimately hold one
+ * — and there is nowhere on the mesh to put it, which is the whole of
+ * `PlanScene.unplaced`. A whole second catalog rather than a mutated record,
+ * because the two must be able to appear in one test file: the measured host is
+ * what every other assertion here reads.
+ *
+ * `mounts: []` rather than the key removed, and `mounts.ts` is why: absent and
+ * empty are the same answer to `mountsFor` — *nobody has measured where this
+ * attaches* — so the shorter of the two spellings is the honest one.
+ */
+export function fixtureUnmeasuredCatalogFile(): CatalogFile {
+  return CatalogFileSchema.parse({
+    ...FIXTURE_CATALOG,
+    records: FIXTURE_CATALOG.records.map((record) =>
+      record.id === FIXTURE_IDS.wall2 ? { ...record, mounts: [] } : record,
+    ),
+  })
 }
 
 /**
@@ -430,6 +506,8 @@ export const FIXTURE_IDS = {
   cornerWall: 'tiles/cut_stone/wall/corner+right.2x.openlock.stl',
   /** A wall that brings its own base: `layer: 'integral'`. See its record. */
   integralWall: 'tiles/cut_stone/separate_wall/2.integral.stl',
+  /** The accessory {@link FIXTURE_IDS.wall2} holds — an `insert` with no footprint. */
+  torch: 'tiles/cut_stone/torch/torch.stl',
 } as const
 
 /* --------------------------------------------------------------- templates */
@@ -622,6 +700,37 @@ export function fixtureFills(rows: readonly (readonly [string, string])[]): Temp
   const fills: Record<string, SlotFill> = {}
   for (const [slot, tile] of rows) fills[slot as SlotName] = { tile: tile as TileId, pinned: false }
   return fills
+}
+
+/**
+ * The accessory slot {@link FIXTURE_IDS.wall2} declares and its two mounts name.
+ *
+ * A {@link HoldName} and not a {@link SlotName}: the two brands are deliberately
+ * distinct — `src/store/schema.ts#HoldName` says why — and a fixture that minted
+ * one from the other would let a consumer swap the two levels and still compile.
+ */
+export const FIXTURE_HOLDS = { torch: 'torch' as HoldName }
+
+/**
+ * The same fills, with accessories fitted into one slot's fill.
+ *
+ * A second function rather than a third element on {@link fixtureFills}' tuples:
+ * a hold hangs off *one* fill, every existing row in this file's tests has none,
+ * and widening the tuple would put an `undefined` tail on all of them.
+ *
+ * Every hold is `auto`, like every fill — which is the default solver's answer
+ * and the one a test that is not about pinning wants.
+ */
+export function fixtureHolds(
+  fills: TemplateInstance['fills'],
+  slot: string,
+  rows: readonly (readonly [string, string])[],
+): TemplateInstance['fills'] {
+  const fill = fills[slot as SlotName]
+  if (fill === undefined) throw new Error(`fixture slot ${slot} is not filled, so it can hold nothing`)
+  const holds: Record<string, HoldFill> = {}
+  for (const [hold, tile] of rows) holds[hold as HoldName] = { tile: tile as TileId, pinned: false }
+  return { ...fills, [slot as SlotName]: { ...fill, holds } }
 }
 
 /**

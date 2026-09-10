@@ -34,6 +34,10 @@
  *     per filled slot**, each carrying the slot it came from, the fill that
  *     filled it, the record that file resolves to, and the {@link SlotLayout}
  *     that says where inside the template it sits.
+ *   - {@link PlanCatalog.holds} is the same hop **one level further down**: what
+ *     a slot's fill holds in its *own* composition slots — the torch in the
+ *     wall — resolved the same way, because a hold is a fill of a fill and names
+ *     a file for the same reason a slot fill does.
  *
  * Keeping both hops *here* is what keeps the change cheap above: `buildPlanScene`
  * still takes `(placements, catalog, style, generated)`, and `PlanScene` still
@@ -69,7 +73,7 @@ import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { resolveTags } from '@/catalog'
 import type { ContourStyle, MaterialId } from '@/materials'
 import { resolveMaterial } from '@/materials'
-import type { SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
+import type { HoldFill, HoldName, SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
 import { filledSlots } from '@/store'
 
 import type { Footprint } from '@/catalog'
@@ -504,6 +508,30 @@ export interface UnplaceableSlotPart extends PlanSlotPartBase {
 /** One filled slot of an instance, de-referenced. */
 export type PlanSlotPart = ResolvedSlotPart | StrandedSlotPart | UnplaceableSlotPart
 
+/**
+ * One accessory a slot's fill holds, de-referenced.
+ *
+ * The hold's own half of {@link PlanSlotPart}, one level down: a
+ * {@link HoldFill} names a file the same way a {@link SlotFill} does, so this is
+ * the same lookup against the same map.
+ *
+ * **`record` is a plain `| undefined` here and a union member up there**, and the
+ * asymmetry is deliberate rather than an oversight of {@link StrandedSlotPart}'s
+ * argument. A slot part carries three further fields that only exist when it
+ * resolved — the layout, the refusal, the record — so a union is what stops a
+ * reader touching a layout that is not there. A hold carries none: the record is
+ * the *only* thing the lookup produces, `scene.ts` is its one consumer, and it
+ * branches on the miss in the line after the call. A three-member union for one
+ * nullable field would be ceremony over a two-state answer.
+ */
+export interface PlanHold {
+  readonly hold: HoldName
+  /** The hold as the store holds it — the file, and whether the user chose it. */
+  readonly fill: HoldFill
+  /** `undefined` when this build does not hold the file. `scene.ts` reports it. */
+  readonly record: CatalogRecord | undefined
+}
+
 /** The catalog, as the canvas sees it. */
 export interface PlanCatalog {
   /**
@@ -527,6 +555,24 @@ export interface PlanCatalog {
    * choice*. The canvas draws what is there.
    */
   parts(instance: TemplateInstance): readonly PlanSlotPart[]
+  /**
+   * Every accessory **fitted into** one slot's fill, in a deterministic order.
+   *
+   * One entry per key of `instance.fills[slot].holds`, resolved or not — the
+   * same walk {@link parts} makes over the fill map, one level down, because a
+   * hold is a fill of a fill (`src/store/schema.ts#SlotFill`).
+   *
+   * **Filled holds only, and that is the difference from the bill.**
+   * `assembly/resolve.ts#resolveHolds` also walks what the host *declares*, so
+   * an empty required accessory slot can make a bill incomplete. Nothing is
+   * drawn for an empty socket, so enumerating them here would produce a list of
+   * absences for a renderer to filter out again.
+   *
+   * Sorted by hold name, for {@link parts}' reason and no other: it is the
+   * determinism a projection recomputed on every store write needs, and the
+   * declared order would say nothing about paint order in a 3D scene.
+   */
+  holds(instance: TemplateInstance, slot: SlotName): readonly PlanHold[]
 }
 
 /**
@@ -630,6 +676,21 @@ export function planCatalogFromFile(file: CatalogFile, layout: SlotLayoutRule = 
         parts.push({ kind: 'resolved', slot, fill, record, layout: answer })
       }
       return parts
+    },
+    holds(instance, slot) {
+      const fill = instance.fills[slot]
+      if (fill === undefined) return []
+      const holds = fill.holds
+      if (holds === undefined) return []
+      // No memo, and none is wanted: this is one map lookup per hold, where
+      // `parts` memoises because a layout rule is arithmetic over a whole fill
+      // map. A cache keyed on the holds would cost more to key than to miss.
+      return filledSlots(holds)
+        .sort((a, b) => a.localeCompare(b))
+        .flatMap((hold) => {
+          const held = holds[hold]
+          return held === undefined ? [] : [{ hold, fill: held, record: view.record(held.tile) }]
+        })
     },
   }
   return view
