@@ -10,16 +10,20 @@
  * numbers, so a re-measurement that quietly moves one fails here rather than
  * surfacing as a torch hovering off a wall in the builder.
  *
- * Skips — loudly, in the block's own name — when there is no index or the
- * committed inventory is the empty shell, the precedent every other corpus
- * block in this repo sets.
+ * Skips — loudly, in the block's own name — when there is no index or when the
+ * inventory on disk is `emptyMountInventory`'s shell, which is what a fresh
+ * clone that has not fetched the artefact holds. That is the precedent every
+ * other corpus block in this repo sets.
  *
  * ## What the run found (fixtures 428289679a0c, measured 2026-09-10)
  *
- * 1,130 blobs read, 0 failed: **995 hosts** carrying **1,301 mounts** (702
- * opening, 438 socket, 55 pocket, 78 surface, 28 hole) and **139 inserts**, each
- * with an anchor (117 leaf, 13 block, 5 plate, 4 peg). 47 slots resolved to
- * nothing and say why: 14 `arc-fit-refused`, 12 `no-socket`, 12 `modelled-in`,
+ * **1,130 objects read**, 16.34 GB, 0 failed — 995 hosts and 135 inserts, plus
+ * **4 blobs that are filed both ways** and answer both questions from one parse,
+ * which is why 995 + 139 is 1,134 and not the number of objects. The hosts carry
+ * **1,301 mounts** (702 opening, 438 socket, 55 pocket, 78 surface, 28 hole) and
+ * every one of the **139 inserts** has an anchor (117 leaf, 13 block, 5 plate,
+ * 4 peg). Of the 1,230 slots the host blobs declare, **1,183 resolved**; the 47
+ * that did not say why: 14 `arc-fit-refused`, 12 `no-socket`, 12 `modelled-in`,
  * 6 `runs-off-end`, 3 `no-opening`.
  *
  * ## The misses are counted, not hidden
@@ -48,8 +52,8 @@ const CATALOG = 'public/catalog/catalog.json'
  * The inventory, or `undefined` when there is nothing measured to test.
  *
  * `readMountInventory` throws on a *broken* inventory and that must stay a
- * failure, so only the two legitimate "nothing here" states skip: no file, and
- * the committed empty shell.
+ * failure, so only the two legitimate "nothing here" states skip: no file at
+ * all, and `emptyMountInventory`'s shell.
  */
 function measured(): MountInventory | undefined {
   if (!existsSync(MOUNT_INVENTORY_PATH)) return undefined
@@ -227,9 +231,11 @@ describeCorpus(
         expect(angle, `${nameOf(blob)} ${String(mount.face)}`).toBeGreaterThanOrEqual(SOCKET_ANGLE_DEG.min)
         expect(angle, `${nameOf(blob)} ${String(mount.face)}`).toBeLessThanOrEqual(SOCKET_ANGLE_DEG.max)
       }
-      /* The arcs are the point: they are re-rolled, and they stay in band. */
-      const onArcs = sockets.filter(({ host }) => host.arc !== undefined)
-      expect(onArcs.length).toBeGreaterThan(0)
+      /* The arcs are the point: they are re-rolled, and they stay in band.
+         Pinned at 78 rather than `> 0`, because a re-roll that silently stopped
+         producing arc sockets would leave the band assertion above testing only
+         the flat hosts it was never in doubt on. */
+      expect(sockets.filter(({ host }) => host.arc !== undefined)).toHaveLength(78)
     })
 
     it('centres a straight wall’s torch on its run, and halves a four-unit wall', () => {
@@ -244,6 +250,9 @@ describeCorpus(
       )
       expect(single).toHaveLength(147)
       expect(paired).toHaveLength(30)
+      /* One or two, and nothing else: a wall torch host with zero or three
+         sockets would otherwise fall out of both buckets untested. */
+      expect(single.length + paired.length).toBe(wallTorch.length)
 
       for (const [blob, host] of single) {
         for (const mount of host.mounts) {
@@ -296,7 +305,7 @@ describeCorpus(
           .filter((mount) => mount.kind === 'opening' && mount.slot === 'door')
           .map((mount) => ({ name: nameOf(blob), width: mount.kind === 'opening' ? mount.width : 0 }))
       })
-      expect(widths.length).toBeGreaterThan(0)
+      expect(widths).toHaveLength(84)
       for (const { name, width } of widths) {
         expect(width, name).toBeGreaterThanOrEqual(SINGLE_DOOR_WIDTH_MM.min)
         expect(width, name).toBeLessThanOrEqual(SINGLE_DOOR_WIDTH_MM.max)
@@ -316,7 +325,12 @@ describeCorpus(
     it('anchors every insert on a unit axis, sized to its own box', () => {
       for (const [blob, insert] of Object.entries(inv.inserts)) {
         expect(length(insert.anchor.axis), nameOf(blob)).toBeCloseTo(1, 6)
-        for (const extent of insert.anchor.size) expect(extent, nameOf(blob)).toBeGreaterThan(0)
+        /* `size` is the insert's own bounding box, not a nominal or a clamped
+           one: all 139 match their `bbox` extent exactly, so the consumer that
+           scales a leaf to its opening can read either and get the same mesh. */
+        const extent = [0, 1, 2].map((axis) => (insert.bbox.max[axis] ?? 0) - (insert.bbox.min[axis] ?? 0))
+        expect(insert.anchor.size, nameOf(blob)).toEqual(extent)
+        for (const side of extent) expect(side, nameOf(blob)).toBeGreaterThan(0)
       }
     })
   },

@@ -78,7 +78,13 @@ export const MOUNT_INVENTORY_PATH = join(
   'inventory.json',
 )
 
-/** What the shell in this repository says about itself, and what it means. */
+/**
+ * What {@link emptyMountInventory}'s shell says about itself.
+ *
+ * Not what the committed file says — that one carries `tools/mounts/sidecar.ts`'s
+ * own note and a real measurement. This string is only ever read by a caller
+ * that has asked for "deliberately none", the lock among them.
+ */
 const EMPTY_NOTE =
   'Where accessories attach, measured from the host meshes by `npm run mounts -- --inventory`. ' +
   'Empty until the first run.'
@@ -210,15 +216,16 @@ export function readMountInventory(path: string = MOUNT_INVENTORY_PATH): MountIn
 }
 
 /**
- * The "nothing measured" inventory, and the exact contents of the committed
- * shell.
+ * The "nothing measured" inventory.
  *
- * `BuildOptions.mounts` is required, so every caller states its intent;
- * this is how a caller says *"deliberately none"*. `tools/stamp/lock.ts` passes
- * it because a bucket full of meshes is an input and not a derivation: the lock
- * digests a build that has never seen a mount, so a re-measurement changes the
- * emitted index without breaking the lock, and a run's diff of the checked-in
- * file is the measurement and nothing else.
+ * It is **no longer the contents of the committed file** — that holds the
+ * 2026-09-10 run — and the distinction is the point. `BuildOptions.mounts` is
+ * required, so every caller states its intent, and this is how a caller says
+ * *"deliberately none"*: `tools/stamp/lock.ts` passes it because a bucket full
+ * of meshes is an input and not a derivation, so the lock digests a build that
+ * has never seen a mount and a re-measurement changes the emitted index without
+ * moving the lock or `PIPELINE_VERSION`. It is also the state of a fresh clone
+ * that has not fetched the artefact.
  */
 export function emptyMountInventory(): MountInventory {
   return {

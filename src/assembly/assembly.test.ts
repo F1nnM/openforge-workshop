@@ -604,8 +604,8 @@ describe('note vocabulary', () => {
     expect(NOTE_SEVERITY['no-footprint']).toBe('info')
     expect(NOTE_SEVERITY['insert-on-grid']).toBe('info')
     // `hold-unplaced` is `no-footprint`'s reading for an accessory — in the
-    // bill, not on the plan — and no live record carries a measured mount yet,
-    // so at `warn` it would fire on every hold in the app.
+    // bill, not on the plan — and 34 measured host blobs resolved to no mount at
+    // all, so at `warn` it would fire on every hold over one of them.
     expect(NOTE_SEVERITY['hold-unplaced']).toBe('info')
     // Its mirror image — the insert unmeasured rather than the host — and `info`
     // for the same reason: the file is in the pack, the gap is in the pass.
@@ -1223,13 +1223,15 @@ describe('template instances', () => {
 /**
  * Holds: the accessories fitted into a slot's own file.
  *
- * Everything here is a fixture rather than a corpus measurement, and for once
- * that is not a compromise. **No live record carries `mounts` yet** —
- * `pipeline/mounts/inventory.json` is the empty shell until `npm run mounts` has
- * walked the archive — so the corpus can say what is *declared* (1,047 of the
- * 1,244 accessory declarations are required) and nothing at all about where an
- * accessory attaches. The counting rule is one copy per measured mount, and the
- * only place that rule can be exercised today is here.
+ * Everything here is a fixture rather than a corpus measurement, and that is a
+ * choice about *coverage*, not a gap in the data: 972 live records carry
+ * `mounts` since the 2026-09-10 measuring run, and the corpus block at the foot
+ * of this file exercises the counting rule against them — all 20 accessory
+ * declarations across the 40 recipes resolve to exactly one measured mount.
+ * What the corpus cannot supply is the *arithmetic's* edge cases, because it
+ * does not happen to contain them: a hold over a host with four mounts, one with
+ * none, one whose record is missing. Those are the cases the rule exists for, so
+ * they are built here rather than hunted for.
  *
  * The four-socket host is not a convenience either: a 1×1 full pillar carries
  * one torch socket per face, so a `quantity` of 4 from a single hold is the case

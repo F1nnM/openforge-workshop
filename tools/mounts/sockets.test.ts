@@ -18,6 +18,17 @@ const WALL = { min: [-25, -6.5, 0], max: [25, 6.5, 45] } as const
  */
 const COARSE = { angles: Array.from({ length: 11 }, (_, k) => -75 + 15 * k) }
 
+/**
+ * The budget for the one case that has to run the full 31-angle sweep.
+ *
+ * Measured standalone at 21–22 s against the suite's 30 s default, and it timed
+ * out under the parallel load of a whole-suite run — adding one more test file
+ * to the pool was enough. Its own budget rather than a flake nobody can
+ * reproduce; the angle is what this case measures, so {@link COARSE} is not
+ * available to it.
+ */
+const SLOW_SWEEP_MS = 120_000
+
 const TILT = (63 * Math.PI) / 180
 const HALF_WIDTH = 2.75,
   HALF_THICK = 1.5,
@@ -102,11 +113,7 @@ describe('socketPoses', () => {
     // the mouth, which is what a regression in `poseOf` would look like.
     expect(p.depth).toBeGreaterThan(12)
     expect(p.depth).toBeLessThan(22)
-    /* The one case that has to run the full 31-angle sweep, because the angle is
-       what it measures. ~21 s alone against the suite's 30 s default, and it
-       tipped over that under the parallel load of a whole-suite run, so it
-       carries its own budget rather than being a flake nobody can reproduce. */
-  }, 120_000)
+  }, SLOW_SWEEP_MS)
 
   it('finds nothing on the +y face of the same wall', () => {
     const wall = slottedWall()

@@ -96,9 +96,10 @@ npm run mounts               # read and measure the host and insert meshes
 npm run mounts -- --inventory  # write pipeline/mounts/inventory.json from that log
 ```
 
-The run reads ~16 GB out of the public bucket once (995 host and 139 insert blobs, ≈1.5 h
-on 16 threads) and is resumable at md5 granularity, so an interrupted run costs nothing to
-finish and a finished one is never repeated. `npm run stamp` and `npm run import:catalog`
+The run reads ~16 GB out of the public bucket once — **1,130 objects**, ≈1.5 h on 16
+threads — and is resumable at md5 granularity, so an interrupted run costs nothing to
+finish and a finished one is never repeated. Those 1,130 yield 995 measured hosts and 139
+anchored inserts; four blobs are filed both ways and answer both questions from one parse. `npm run stamp` and `npm run import:catalog`
 only *read* the committed inventory. Re-run the pair when a host or insert mesh changes —
 a re-export gets a new md5, which drops out of the inventory and takes its mounts with it.
 

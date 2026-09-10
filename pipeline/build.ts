@@ -213,8 +213,16 @@ export interface BuildStats {
    */
   withThumb: number
   /**
-   * Records emitting `mounts` and `anchor` — **0 and 0 today**, because the
-   * committed inventory is still the empty shell.
+   * Records emitting `mounts` and `anchor` — **972 and 285 today**, from the
+   * 995 hosts and 139 inserts of the first full measuring run.
+   *
+   * The arithmetic to 972 is worth stating, because none of the obvious numbers
+   * is it. **1,006** records sit over a measured host blob: the 1,005 that
+   * declare an accessory slot, plus one `insert`-layer row on the `grate.doorway`
+   * mesh, which is filed both ways and therefore measured as a host too. **34**
+   * of those 1,006 are over one of the 34 host blobs whose every slot resolved
+   * to nothing — measured, carrying an `unresolved` list, emitting no `mounts`
+   * key. 1,006 − 34 = 972.
    *
    * Reported rather than asserted, and the two directions read the way
    * {@link BuildStats.withThumb}'s do. A drop to 0 after a measuring run means

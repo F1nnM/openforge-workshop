@@ -135,28 +135,35 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  *
  * Row 5b then added the required {@link Mount} `normal` — the outward surface
  * normal in the mesh frame, which a curved host's `face` cannot supply — and did
- * **not** bump again. Nothing has shipped between the two: the committed
- * inventory is still the empty shell, so no index anywhere carries a `mounts`
- * array to be read under either shape, and a version whose only consumer is a
- * field that has never had a value distinguishes nothing. The pair of them is
- * schema 5.
+ * **not** bump again. Nothing had shipped between the two: the committed
+ * inventory was still the empty shell when `normal` landed, so no index anywhere
+ * carried a `mounts` array to be read under either shape, and a version whose
+ * only consumer is a field that has never had a value distinguishes nothing. The
+ * pair of them is schema 5, and **the first index to carry values under it is
+ * the one this repository ships now** — 972 records with `mounts`, 285 with
+ * `anchor`, off the 995 hosts and 139 inserts of the 2026-09-10 run. Every one
+ * of those 1,301 mounts carries a `normal`, so the field has never been absent
+ * in the wild and never will be.
  *
  * {@link InsertAnchor}'s `axis` sign convention — *from `at` into the insert's
  * body* — was pinned on the same footing and did **not** bump either. It names
  * what the producer always meant to emit rather than a new shape: the field is
- * `Vec3` under both readings, no shipped index carries an `anchor` at all, and
- * the one measured corpus was re-measured under the stated sign rather than left
- * to be reinterpreted. A version that moved here would tell a reader to expect
- * two spellings of `axis` in the wild, and there is only ever one.
+ * `Vec3` under both readings, no index had ever shipped an `anchor` when the
+ * sign was written down, and the measured corpus was measured under the stated
+ * sign rather than left to be reinterpreted. A version that moved here would
+ * tell a reader to expect two spellings of `axis` in the wild, and there is only
+ * ever one.
  *
- * `PIPELINE_VERSION` deliberately stays 3, and here the biconditional needs the
- * escape hatch rather than the rule: with the committed inventory empty, the
- * emitted `{tags, records}` are **byte-identical** to schema 4's — no record
- * gains a key — so `tools/stamp/lock.ts` reports *"a check is not a
- * derivation"* until the lock is re-taken at schema 5. It was, deliberately, and
- * `pipeline/mounts.test.ts` holds the digest against the lock so the claim is
+ * `PIPELINE_VERSION` deliberately stays 3, and it stays 3 now that the
+ * measurement has landed. `tools/stamp/lock.ts` digests a build made with
+ * `emptyMountInventory()` — 16.34 GB of somebody else's bucket is an *input*,
+ * not a derivation this tree performs — and under that build the emitted
+ * `{tags, records}` are **byte-identical** to schema 4's, so the lock reports
+ * *"a check is not a derivation"* and was re-taken at schema 5 deliberately.
+ * `pipeline/mounts.test.ts` holds that digest against the lock so the claim is
  * checked rather than asserted. The bump is a statement about the *shape* on
- * offer; the payload moves in the row that fills the inventory.
+ * offer; a re-measurement changes the payload without touching either number,
+ * which is what `pipeline/version.ts` means by an input.
  */
 export const SCHEMA_VERSION = 5
 

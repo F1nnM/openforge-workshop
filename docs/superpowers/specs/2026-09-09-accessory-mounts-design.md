@@ -44,9 +44,13 @@ renderer step. Everything below that quotes a number was measured in the spike o
   (5.5 × 2.5 on the "tight" variant), ≈ 17–19 mm deep along its axis, axis **62–65° from
   the face normal (≈ 25–28° from vertical), tilting up/out** — the peg goes *down* into the
   wall. Always the `−y` face of the authored wall (`+b` variants: `+y`; pillars: all four
-  faces), x centred on the run to ±0.2 mm, entrance **23.5 / 16.9 / 10.3 mm below the
-  wall top** for `low` / `mid` / `high`. Identical across dungeon_stone, cut-stone,
-  s_system, corners and every curve; 4-unit S-system walls carry **two** (x = ±25.2).
+  faces), x centred on the run to ±0.27 mm, entrance **24.5 / 16.2 / 6.85 mm below the
+  wall top** for `low` / `mid` / `high` (113 sockets per band over the whole corpus; the
+  40-host sample this spec was written from read 23.5 / 16.9 / **10.3**, and the `high`
+  figure was the one it got wrong — it over-drew from the taller `arc` hosts, which sit at
+  7.7 against a straight wall's 6.5). Identical across dungeon_stone, cut-stone, s_system,
+  corners and every curve; 4-unit S-system walls carry **two** (x = ±25.1…25.6) and are
+  `wall`-footprint, not `rect`.
 - **Openings.** Rectangular door walls are open-topped with a ≈ 33 mm notch = the lintel
   seat (lintels measure 32.8–33.4). The single door leaf (27–28 mm) sits in a 1.5 mm rebate
   on `−y` over a 25 mm opening; `wide` / `double` openings take **two leaves** (2 × 24.6 ≈
@@ -59,11 +63,19 @@ renderer step. Everything below that quotes a number was measured in the spike o
 - One fixture error found: `dungeon_stone%eroded#wall,door+rectangular+narrow.A.openforge,
   side.stl` carries `door` + `lintel` slots but is one piece with the door modelled in.
 
-Final detector hit rates on the sample: **torch sockets 68 / 68**, openings 157 / 167
-(94 %), floor holes 20 / 22. The remaining misses are slots with nothing cut into the host
-(floor archways, loculus slabs, small braziers → `surface`), one 1.5-unit corner door wall
-whose doorway runs off the end, one convex 2r45 `%block` arc whose centre fit is weak, and
-the fixture error above.
+Final detector hit rates **over the whole corpus** (1,130 objects, 16.34 GB, 0 read
+failures, 2026-09-10): 995 hosts yielding **1,301 mounts** — 702 opening, 438 socket, 55
+pocket, 78 surface, 28 hole — and 139 anchored inserts. Of the **1,230 slots** the host
+blobs declare, **1,183 resolved (96.2 %)**; torch sockets are **344 / 356**.
+
+The 47 that did not resolve each say why, and they are five known shapes rather than a
+tail: **14 `arc-fit-refused`** (convex 2r45 and concave 2r90 walls whose mesh is not struck
+from the radii their tags name), **12 `no-socket`** — the ten round `dungeon_stone` and two
+square `cut-stone` full pillars, whose bore sits on a curved or chamfered face the 0.5 mm
+axis-aligned depth map cannot resolve into a clean 5.5 × 3 mm mouth — **12 `modelled-in`**
+(the fixture error above and four sibling door walls, `door` + `lintel` each, plus a
+catacombs loculus and a ruined archway), **6 `runs-off-end`** (the `dormer+window` roof
+run, which has no jamb to hinge against) and **3 `no-opening`**.
 
 ## Shape of the change
 

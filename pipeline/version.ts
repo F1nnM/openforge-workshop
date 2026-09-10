@@ -103,26 +103,38 @@ import type { CatalogAssets } from '../src/catalog'
  * consumer needs no new code to read this index; it needs its caches
  * invalidated, which is precisely what this number is for.
  *
- * ## The mount join declines it, and takes the escape hatch the rule offers
+ * ## The mount join declines it, and keeps declining it now that it has output
  *
- * `CatalogRecord.mounts` and `CatalogRecord.anchor` add a **derivation** —
- * `pipeline/build.ts` joins `pipeline/mounts/inventory.json` on md5 — but the
- * committed inventory is the empty shell, so the derivation produces nothing
- * and the emitted `{tags, records}` are byte-identical. Under rule two that is
- * *a check is not a derivation*, and it is right: no consumer can observe a
- * difference, and moving this number would invalidate every cached aggregate
- * and search index to announce a join that has joined zero rows.
+ * `CatalogRecord.mounts` and `CatalogRecord.anchor` are a **join**, not a
+ * derivation this tree performs: `pipeline/build.ts` reads
+ * `pipeline/mounts/inventory.json` and files it onto records by md5, and that
+ * file is 16.34 GB of somebody else's bucket measured out of band. When the
+ * committed inventory was the empty shell the join produced nothing and the
+ * argument was easy — no consumer could observe a difference.
+ *
+ * **The inventory now holds the real run** — 995 hosts, 1,301 mounts, 139
+ * anchors, so 972 records emit `mounts` and 285 emit `anchor` — and this number
+ * still stays 3. The earlier draft of this docblock promised the opposite
+ * ("the row that fills the inventory moves this number, because that one is a
+ * derivation with output"), and that promise is **retracted**: the inventory is
+ * an *input*, on exactly the footing `tools/stamp/lock.ts`'s docblock states, so
+ * the lock digests a build made with {@link emptyMountInventory} and neither the
+ * lock nor this version is a function of what the bucket happened to hold when
+ * somebody last ran the tool. A measuring run that moved `PIPELINE_VERSION`
+ * would invalidate every cached aggregate and search index in the world to
+ * announce that a *different machine* had finished downloading, which is not
+ * what the number means. What does move it is a change to the *join* — a new
+ * field, a different key, a different rule for absence.
  *
  * `SCHEMA_VERSION` moved to 5 anyway, which is the half rule two complains
  * about, and the complaint is answered rather than dismissed. The two numbers
  * ask different questions and this row is the case that separates them
- * hardest: the record *shape* now offers two fields, so a consumer can ask "has
- * this index been measured?" and get an answer — and the record *content* has
- * not moved a byte. `src/catalog/schema.ts`'s version history argues it in
+ * hardest: the record *shape* offers two fields, so a consumer can ask "has
+ * this index been measured?" and get an answer — and the *derivation* behind
+ * them is unchanged. `src/catalog/schema.ts`'s version history argues it in
  * full, the lock was re-taken at schema 5 deliberately, and
- * `pipeline/mounts.test.ts` holds the digest against the lock so the
- * byte-identity claim is checked rather than asserted. The row that fills the
- * inventory moves this number, because that one is a derivation with output.
+ * `pipeline/mounts.test.ts` holds the empty-inventory digest against the lock so
+ * the byte-identity claim is checked rather than asserted.
  */
 export const PIPELINE_VERSION = 3
 
