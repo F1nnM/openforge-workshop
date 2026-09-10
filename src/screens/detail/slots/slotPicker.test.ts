@@ -8,9 +8,36 @@
  *
  * `fixture.ts` carries which corpus branch each record stands for.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import type { TileId } from '@/catalog'
+import type * as CatalogModule from '@/catalog'
+import type { CatalogFile, TileId } from '@/catalog'
+
+/**
+ * How many times the aggregate index has actually been built.
+ *
+ * The module is wrapped rather than replaced — every export is the real one and
+ * `buildAggregateIndex` delegates — because the fact under test is a *cost*, and
+ * a cost is invisible to a test that only checks the answer.
+ * {@link compositionIndexFor} used to take `aggregates = buildAggregateIndex(file)`
+ * as a **default argument**, which JavaScript evaluates before the function body
+ * and therefore before the `WeakMap` was consulted: every hit rebuilt 8,702
+ * records (38–48 ms) and discarded the result. Identity alone could not see it.
+ */
+const builds = { count: 0 }
+
+vi.mock('@/catalog', async (importOriginal) => {
+  const actual = await importOriginal<typeof CatalogModule>()
+  return {
+    ...actual,
+    buildAggregateIndex: (file: CatalogFile) => {
+      builds.count += 1
+      return actual.buildAggregateIndex(file)
+    },
+  }
+})
+
+import { CatalogFile as CatalogFileSchemaForTest } from '@/catalog'
 
 import { FILL, PARENT, SLOT_CATALOG } from './fixture'
 import {
@@ -225,5 +252,21 @@ describe('the composition index', () => {
   it('is built once per parsed file and shared', () => {
     // Three mounts over one catalog pay 10.7 ms once, not three times.
     expect(compositionIndexFor(SLOT_CATALOG)).toBe(compositionIndexFor(SLOT_CATALOG))
+  })
+
+  it('builds no aggregate index on a hit, and exactly one on a miss', () => {
+    // The module-scope `index` above has already paid for this file, so a hit is
+    // all that is left to make.
+    const before = builds.count
+    compositionIndexFor(SLOT_CATALOG)
+    compositionIndexFor(SLOT_CATALOG)
+    expect(builds.count).toBe(before)
+
+    /* A second parsed object over the same bytes: a different file to the
+       `WeakMap`, which is the miss the fallback exists for. One build, not two —
+       the caller that already holds an aggregate index still passes it. */
+    const other = CatalogFileSchemaForTest.parse(structuredClone(SLOT_CATALOG))
+    compositionIndexFor(other)
+    expect(builds.count).toBe(before + 1)
   })
 })

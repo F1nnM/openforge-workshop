@@ -83,10 +83,10 @@ import type { CompositionIndex } from '@/composition'
 import type { SlotOption, SlotSelection } from '@/screens/detail/slots'
 import { compositionIndexFor, pickerSlots, slotStates } from '@/screens/detail/slots'
 import type { HoldFill, PlacementId, SlotName, TemplateInstance } from '@/store'
-import { HoldName, fillHolds, filledSlots, usePlacements, useRoomDesign } from '@/store'
+import { HoldName, fillHolds, filledSlots, usePlacements, useRoomDesign, writeSilently } from '@/store'
 
 /** The accessories one file's required mounts should arrive holding. */
-export type SolvedHolds = Record<HoldName, HoldFill>
+export type SolvedHolds = Readonly<Record<HoldName, HoldFill>>
 
 /** One fill that has never been solved, and the answer for it. */
 export interface MissingHold {
@@ -103,14 +103,20 @@ export interface MissingHold {
  * are the same answer, *this fill is solved*, and telling them apart is the
  * bill's job rather than the solver's.
  *
- * The index is `compositionIndexFor`'s, which is a `WeakMap` on the parsed file,
- * so calling this once per placed fill builds the 409,432-byte inverted index
- * once for the whole room and shares it with the drawer, the variants table and
- * the slots panel.
+ * The index is `compositionIndexFor`'s `WeakMap` on the parsed file, so a second
+ * call for a second fill of the same archive is a map lookup and shares the
+ * 409,432-byte inverted index with the drawer, the variants table and the slots
+ * panel. It is still **one lookup per call**, which is why {@link missingHolds}
+ * resolves the index once and walks {@link solveFor} directly rather than
+ * calling this in its loop.
  */
 export function solveHolds(catalog: CatalogFile, parent: TileId, design: string | undefined): SolvedHolds {
-  const index = compositionIndexFor(catalog)
-  const holds: SolvedHolds = {}
+  return solveFor(compositionIndexFor(catalog), parent, design)
+}
+
+/** {@link solveHolds} over an index the caller has already resolved. */
+function solveFor(index: CompositionIndex, parent: TileId, design: string | undefined): SolvedHolds {
+  const holds: Record<HoldName, HoldFill> = {}
   /* Mutated as the walk goes, so slot two is resolved against the file slot one
      chose — see the module note on `constrain`. */
   const selection: Record<string, TileId> = {}
@@ -177,7 +183,7 @@ export function missingHolds(
       if (fill === undefined) continue
       if (fill.holds !== undefined) continue
       if (pickerSlots(index, fill.tile).length === 0) continue
-      out.push({ id: id as PlacementId, slot, holds: solveHolds(catalog, fill.tile, design) })
+      out.push({ id: id as PlacementId, slot, holds: solveFor(index, fill.tile, design) })
     }
   }
   return out
@@ -200,9 +206,15 @@ export function missingHolds(
  * it wrote one fill or forty, with no ref and no guard flag to get out of step
  * with the store.
  *
- * Does nothing without a catalog, which is an ordinary state and not a defensive
- * branch: the 5.9 MB index arrives asynchronously and the surface mounts before
- * it does.
+ * **Its writes are silent** — `@/store#writeSilently` — because they are the app
+ * finishing a placement rather than a gesture of the user's, and an undo history
+ * that recorded them could not step past them. That is the mechanism's whole
+ * argument and it is written down there.
+ *
+ * `undefined` for the catalog is tolerated and does nothing. `BuilderRoom` takes
+ * the file as a **required** prop, so the branch is not the app's state; it is
+ * what lets the pass be mounted by anything holding an index it may not have
+ * parsed yet, and it is asserted rather than assumed.
  */
 export function useHoldSolver(catalog: CatalogFile | undefined): void {
   const placements = usePlacements()
@@ -210,8 +222,18 @@ export function useHoldSolver(catalog: CatalogFile | undefined): void {
 
   useEffect(() => {
     if (catalog === undefined) return
-    for (const missing of missingHolds(placements, catalog, design)) {
-      fillHolds(missing.id, missing.slot, missing.holds)
-    }
+    const missing = missingHolds(placements, catalog, design)
+    if (missing.length === 0) return
+    /* **Not an edit**, and `@/store#writeSilently` is where the argument lives:
+       recorded as one, the write deadlocks undo rather than merely cluttering
+       it — `Ctrl`+`Z` restores the unsolved fill, this effect re-solves it, and
+       that change clears the redo branch and buries the placement underneath.
+       The whole loop is wrapped rather than each call, because a room whose
+       forty fills are solved on one hydrate is one non-gesture, not forty. */
+    writeSilently(() => {
+      for (const one of missing) {
+        fillHolds(one.id, one.slot, one.holds)
+      }
+    })
   }, [placements, catalog, design])
 }

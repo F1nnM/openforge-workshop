@@ -235,6 +235,7 @@ describe('the room with an empty store — today’s real state', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={notFound}
       />,
     )
@@ -270,6 +271,7 @@ describe('the room with an empty store — today’s real state', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={notFound}
       />,
     )
@@ -293,6 +295,7 @@ describe('the room with an empty store — today’s real state', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={fetchImpl as unknown as typeof fetch}
       />,
     )
@@ -327,6 +330,7 @@ describe('the armed family', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={fetchImpl as unknown as typeof fetch}
       />,
     )
@@ -351,6 +355,7 @@ describe('the armed family', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={fetchImpl as unknown as typeof fetch}
       />,
     )
@@ -378,6 +383,7 @@ describe('when an object is there and broken', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={broken as unknown as typeof fetch}
       />,
     )
@@ -406,6 +412,7 @@ describe('when the browser cannot decode meshopt', () => {
           history={HISTORY}
           assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
             fetchImpl={fetchImpl as unknown as typeof fetch}
         />,
       )
@@ -433,6 +440,7 @@ describe('the room with a store object', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={glbResponder()}
       />,
     )
@@ -485,6 +493,7 @@ describe('the room with a store object', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={glbResponder()}
       />,
     )
@@ -503,6 +512,7 @@ describe('the room with a store object', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={glbResponder()}
       />,
     )
@@ -528,6 +538,7 @@ describe('what a click would place — row C5', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={notFound}
       />,
     )
@@ -558,6 +569,7 @@ describe('what a click would place — row C5', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={notFound}
       />,
     )
@@ -582,6 +594,7 @@ describe('what a click would place — row C5', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={notFound}
       />,
     )
@@ -598,6 +611,7 @@ describe('what a click would place — row C5', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={notFound}
       />,
     )
@@ -621,6 +635,7 @@ describe('the keyboard path exists in the document', () => {
         catalog={CATALOG}
         fetchImpl={notFound}
         fill={AUTHORITIES}
+        file={FILE}
         onEditSlots={() => undefined}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
@@ -641,6 +656,7 @@ describe('the keyboard path exists in the document', () => {
         catalog={CATALOG}
         fetchImpl={notFound}
         fill={AUTHORITIES}
+        file={FILE}
         scene={scene([FIXTURE_IDS.floor1])}
         tools={planTools()}
         history={HISTORY}
@@ -665,6 +681,7 @@ describe('the keyboard path exists in the document', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
         fetchImpl={notFound}
       />,
     )
@@ -773,29 +790,5 @@ describe('the accessories the placed files hold', () => {
         useWorkshopStore.getState().placements[id]?.fills[FIXTURE_SLOTS.rightWall]?.holds,
       ).toEqual({})
     })
-  })
-
-  it('does nothing without a catalog file, which is the state while the index loads', async () => {
-    const id = 'p-unsolved' as PlacementId
-    restorePlacements({
-      [id]: fixtureInstance(id, fixtureFills([[FIXTURE_SLOTS.rightWall, FIXTURE_IDS.wall2]])),
-    })
-
-    render(
-      <BuilderRoom
-        catalog={CATALOG}
-        scene={scene([FIXTURE_IDS.wall2])}
-        tools={planTools()}
-        history={HISTORY}
-        assets={ASSETS}
-        fill={AUTHORITIES}
-        fetchImpl={notFound}
-      />,
-    )
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId('surface').length).toBeGreaterThan(0)
-    })
-    expect(useWorkshopStore.getState().placements[id]?.fills[FIXTURE_SLOTS.rightWall]?.holds).toBeUndefined()
   })
 })

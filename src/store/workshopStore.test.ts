@@ -41,6 +41,7 @@ import {
   fillHold,
   fillHolds,
   fillSlot,
+  isSilentWrite,
   movePlacement,
   pinFill,
   pinHold,
@@ -57,6 +58,7 @@ import {
   unpinFill,
   unpinHold,
   useWorkshopStore,
+  writeSilently,
 } from './workshopStore'
 
 const FLOOR = SlotNameSchema.parse('floor')
@@ -1147,6 +1149,50 @@ describe('selector granularity', () => {
     // user put down; row C4 owns the count of parts, which needs the templates.
     placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
     expect(selectPlacementCount(state())).toBe(1)
+  })
+})
+
+/* -------------------------------------------------------------- silent writes */
+
+describe('writes nobody made', () => {
+  it('is off by default, on for the length of the call, and off again after', () => {
+    expect(isSilentWrite()).toBe(false)
+    let seen = false
+    writeSilently(() => {
+      seen = isSilentWrite()
+    })
+    expect(seen).toBe(true)
+    expect(isSilentWrite()).toBe(false)
+  })
+
+  it('a subscriber sees the flag during the write itself, which is the whole point', () => {
+    const seen: boolean[] = []
+    const stop = useWorkshopStore.subscribe(() => seen.push(isSilentWrite()))
+
+    placeTemplate(aTemplateInstance())
+    writeSilently(() => {
+      placeTemplate(aTemplateInstance({ x: 1 }))
+    })
+    stop()
+
+    // Zustand notifies synchronously inside `setState`, so a history subscriber
+    // can tell an edit from a write the app made on the user's behalf.
+    expect(seen).toEqual([false, true])
+  })
+
+  it('stays nested and survives a throw, so one bad write cannot silence a session', () => {
+    writeSilently(() => {
+      writeSilently(() => undefined)
+      // The inner call finishing must not un-silence the outer one.
+      expect(isSilentWrite()).toBe(true)
+    })
+
+    expect(() => {
+      writeSilently(() => {
+        throw new Error('boom')
+      })
+    }).toThrow('boom')
+    expect(isSilentWrite()).toBe(false)
   })
 })
 

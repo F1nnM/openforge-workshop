@@ -31,6 +31,25 @@
  * applies after the handler returns — would be read as `false` by the listener
  * it exists to silence.
  *
+ * ## The other write that is not an edit: the default-hold pass
+ *
+ * *"Any mutation of that map is undoable"* is the right default and it has
+ * exactly one exception, which is `@/store#writeSilently` and is checked here
+ * beside `applying`. `builder/three/holds.ts` fits the accessories a placed
+ * file's required mounts ask for — the app finishing a placement the user has
+ * already made, not a gesture of their own — and recorded as an edit it does
+ * not merely add a spurious entry, it **deadlocks undo**: the press restores
+ * the unsolved fill, the solver re-solves it on the next commit, and that
+ * change both records over the undo and clears `future` (`history.ts#record`),
+ * so the placement underneath can never be reached and redo is destroyed on the
+ * first press.
+ *
+ * The store owns the flag rather than this hook for the reason the hook owns
+ * nothing else: a writer that is not a gesture has to be able to say so without
+ * knowing that a history exists. `applying` stays a ref of this hook's own
+ * because it is about *this* hook re-entering, which is not a fact about the
+ * write.
+ *
  * ## What is *not* covered, stated rather than left to be discovered
  *
  * The `generated` map. A generated base owns a mesh hold (`retainGeneratedMeshes`),
@@ -50,7 +69,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { restorePlacements, useWorkshopStore } from '@/store'
+import { isSilentWrite, restorePlacements, useWorkshopStore } from '@/store'
 
 import type { History, Placements } from './history'
 import { EMPTY_HISTORY, describeChange, record, redo, undo } from './history'
@@ -93,7 +112,10 @@ export function useHistory(): UndoControls {
       if (next === previous) return
       const before = previous
       previous = next
-      if (applying.current) return
+      // Two ways a placements write is not an edit: this hook applying one, and
+      // a writer that has declared itself silent. The second is not a tidy-up —
+      // see the docblock, it is what keeps undo reachable at all.
+      if (applying.current || isSilentWrite()) return
       history.current = record(history.current, before)
       publish()
     })

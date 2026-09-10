@@ -70,6 +70,7 @@ export {
   fillHold,
   fillHolds,
   fillSlot,
+  isSilentWrite,
   moveGeneratedPlacement,
   movePlacement,
   pinFill,
@@ -102,6 +103,7 @@ export {
   usePlacements,
   useRoomDesign,
   useWorkshopStore,
+  writeSilently,
 } from './workshopStore'
 
 export type { GeneratedMeshState } from './meshes'

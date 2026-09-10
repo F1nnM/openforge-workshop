@@ -216,12 +216,13 @@ export interface BuilderRoomProps {
    * screen's own parsed file means the pass shares the index the bill and the
    * slots panel already built rather than building a second one.
    *
-   * **Optional, because the index arrives asynchronously.** The surface mounts
-   * while the 5.9 MB catalog is still loading and every test that mounts a room
-   * over the eleven-record fixture has no reason to supply one; without it the
-   * pass does not run, which is `useHoldSolver`'s documented `undefined` case.
+   * **Required, for {@link BuilderRoomProps.fill}'s reason and not a weaker
+   * one.** `BuilderScreen` renders this surface only with a resolved index, so
+   * there is no loading state for an optional prop to model — what an optional
+   * one would model is a forgotten wiring, silently, as a room whose walls hold
+   * no torches and whose bill then refuses the download.
    */
-  readonly file?: CatalogFile
+  readonly file: CatalogFile
   /**
    * Row **C8**: the owner's right click, passed straight through to the surface.
    *
@@ -373,9 +374,9 @@ export function BuilderRoom({
    * mounts of the files it chose, once per fill, and `holds.ts` carries the
    * argument for *once*.
    *
-   * `file` is optional and the pass simply does not run without it, which is the
-   * ordinary state while the 5.9 MB index is still in flight rather than a
-   * defensive branch.
+   * Its writes are marked silent, because a default hold is not an edit — see
+   * `@/store#writeSilently`, and `canvas/useHistory.ts` for what recording one
+   * as an edit does to undo.
    */
   useHoldSolver(file)
 

@@ -88,7 +88,10 @@ vi.mock('./BuilderRoom', () => ({
   ),
 }))
 
-const CATALOG = planCatalogFromFile(fixtureCatalogFile())
+/* One parsed file, because the panel now threads it through as well as the plan
+   view built from it — see `Builder3DPanelProps.file`. */
+const FILE = fixtureCatalogFile()
+const CATALOG = planCatalogFromFile(FILE)
 /* Row C5's required prop. The mocked room ignores it — this file's subject is
    the `lazy` boundary — but the panel's type demands it, which is the point:
    nothing can mount the surface without saying what fills a placement. */
@@ -112,7 +115,7 @@ describe('with an empty plan', () => {
     // The inverse of the assertion this file used to make. A surface that
     // refused to open until something had been placed could never be the thing
     // the first placement happened on.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(0)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(0)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} file={FILE} />)
     expect(await screen.findByTestId('room')).toHaveTextContent('room of 0')
     expect(screen.queryByRole('button', { name: /build in 3d/i })).toBe(null)
   })
@@ -133,7 +136,7 @@ describe('the boundary', () => {
     // fail on test order. The mechanism is asserted where it is stable, by
     // reading the source: `boundary.test.ts` checks the `lazy(() => import(…))`
     // and checks that `BuilderRoom` is outside the static closure.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} file={FILE} />)
     expect(await screen.findByTestId('room')).toBeInTheDocument()
   })
 })
@@ -143,7 +146,7 @@ describe('what reaches the room', () => {
     // The room never sees a `TemplateInstance` map: every piece of geometry,
     // every conflict and every omission arrives already projected, so a change
     // to what a placement *is* reaches the canvas and stops there.
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(4)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(4)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} file={FILE} />)
     expect(await screen.findByTestId('room')).toHaveTextContent('room of 4')
   })
 
@@ -156,6 +159,7 @@ describe('what reaches the room', () => {
         history={HISTORY}
         assets={ASSETS}
         fill={AUTHORITIES}
+        file={FILE}
       />,
     )
     // The **family**, not a file and not a design: since row A1 the tool state
@@ -181,6 +185,7 @@ describe('row C8’s handler crosses the lazy line', () => {
         assets={ASSETS}
         catalog={CATALOG}
         fill={AUTHORITIES}
+        file={FILE}
         history={HISTORY}
         onEditSlots={() => undefined}
         scene={scene(1)}
@@ -190,14 +195,14 @@ describe('row C8’s handler crosses the lazy line', () => {
     expect(await screen.findByTestId('edits')).toHaveTextContent('yes')
     unmount()
 
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(1)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(1)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} file={FILE} />)
     expect(await screen.findByTestId('edits')).toHaveTextContent('no')
   })
 })
 
 describe('what row R4 took away', () => {
   it('offers no control that leaves the surface, because there is nowhere to go', async () => {
-    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} />)
+    render(<Builder3DPanel catalog={CATALOG} scene={scene(3)} tools={planTools()} history={HISTORY} assets={ASSETS} fill={AUTHORITIES} file={FILE} />)
     await screen.findByTestId('room')
 
     // The three names the retired plate and its button went by. Queried rather

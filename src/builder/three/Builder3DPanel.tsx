@@ -122,11 +122,11 @@ export interface Builder3DPanelProps {
    *
    * A **type-only** import, `FillAuthorities`' reason exactly: the value is the
    * screen's own parsed file and nothing about this prop puts a solver or an
-   * index on this side of the lazy line. Optional, because the 5.9 MB index
-   * arrives asynchronously and the surface mounts before it does —
-   * `BuilderRoom`'s own prop says what the room does without it.
+   * index on this side of the lazy line. Required for that prop's reason too —
+   * the screen renders this only with a resolved index, and a forgotten wiring
+   * should be a compile error rather than a room of empty torch sockets.
    */
-  readonly file?: CatalogFile
+  readonly file: CatalogFile
   /**
    * Row **C8**: open the slot editor on one placed instance, with the slot the
    * pointer was over pre-selected.
@@ -180,7 +180,7 @@ export function Builder3DPanel({
           assets={assets}
           fill={fill}
           history={history}
-          {...(file === undefined ? {} : { file })}
+          file={file}
           {...(onEditSlots === undefined ? {} : { onEditSlots })}
           {...(onStatus === undefined ? {} : { onStatus })}
           {...(fetchImpl === undefined ? {} : { fetchImpl })}

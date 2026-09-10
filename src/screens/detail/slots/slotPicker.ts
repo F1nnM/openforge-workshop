@@ -89,6 +89,7 @@
  */
 import type {
   AggregateAddress,
+  AggregateIndex,
   CatalogFile,
   PartSlot,
   TileAggregate,
@@ -247,16 +248,24 @@ export interface SlotState {
  * built one and addresses must be A1's rather than recomputed. When it is
  * omitted the composition index derives its own, which is 86.8 ms of work a
  * caller holding a `SearchEngine` should not pay.
+ *
+ * **The fallback is evaluated on a miss and not on a call**, which is the whole
+ * of the memo rather than a refinement of it. As a default *argument* —
+ * `aggregates = buildAggregateIndex(file)` — it ran before the `WeakMap` was
+ * consulted, so every cache hit still rebuilt the aggregate index over 8,702
+ * records (**38–48 ms**) and threw it away. Nothing was wrong with the answer,
+ * which is why it survived: the cost was invisible to every test and paid once
+ * per call by callers written to call freely — `builder/three/holds.ts` resolves
+ * one index per placed fill on every gesture. The `??` is the fix and the shape
+ * is the guard: a default argument cannot be lazy, so the parameter is
+ * explicitly optional and the fallback lives on the miss path.
  */
 const INDEXES = new WeakMap<CatalogFile, CompositionIndex>()
 
-export function compositionIndexFor(
-  file: CatalogFile,
-  aggregates = buildAggregateIndex(file),
-): CompositionIndex {
+export function compositionIndexFor(file: CatalogFile, aggregates?: AggregateIndex): CompositionIndex {
   const cached = INDEXES.get(file)
   if (cached !== undefined) return cached
-  const built = createCompositionIndex(file, aggregates)
+  const built = createCompositionIndex(file, aggregates ?? buildAggregateIndex(file))
   INDEXES.set(file, built)
   return built
 }

@@ -258,6 +258,67 @@ export function restorePlacements(placements: WorkshopState['placements']): void
   useWorkshopStore.setState({ placements })
 }
 
+/* ------------------------------------------------------- writes nobody made */
+
+/**
+ * How many silent writes are in flight. A counter and not a boolean, so a
+ * nested {@link writeSilently} cannot un-silence the outer one on its way out.
+ *
+ * Module-level and **transient**: it is not part of `WorkshopState`, is never
+ * persisted, and is never read during a render. It exists for the length of one
+ * synchronous call, which is exactly as long as a zustand subscriber has to be
+ * able to see it.
+ */
+let silentWrites = 0
+
+/**
+ * Run a store write that **no user gesture asked for**, so that history-shaped
+ * subscribers can tell it apart from an edit.
+ *
+ * ## The state this exists to make unreachable
+ *
+ * `canvas/useHistory.ts` records an undo entry on every change of `placements`,
+ * by subscription, and that is deliberately unconditional: fourteen actions
+ * write that map and a hook that had to be told about each of them would rot.
+ * The default-hold pass (`builder/three/holds.ts`) is the first writer that is
+ * **not** an edit — it is the app finishing a placement the user already made —
+ * and left unmarked it deadlocks undo outright: placing a host records one
+ * entry, the solver's write records a second, and `Ctrl`+`Z` then restores the
+ * unsolved state, which the solver immediately re-solves. That re-solve is a
+ * fresh change, so `record` pushes it and `history.ts#record` **clears
+ * `future`** — the press undoes nothing, the redo branch is destroyed, and the
+ * placement itself can never be reached.
+ *
+ * ## Why here, and why a flag rather than a parameter
+ *
+ * This generalises the `applying` ref `useHistory` already keeps for its own
+ * restore, which exists for exactly the same reason and cannot be reused
+ * because the solver is not the thing applying an undo. Putting it in the store
+ * rather than in the hook keeps *one* mechanism for *"this write is not a
+ * gesture"* and puts it where every writer can reach it, and a flag rather than
+ * a parameter is what lets it stay true across the fourteen existing actions
+ * without changing one of their signatures.
+ *
+ * Zustand notifies subscribers **synchronously inside `setState`**, so a
+ * subscriber reading {@link isSilentWrite} during the notification sees `true`
+ * for a write made inside `fn` and `false` for everything else. `finally`, so a
+ * throw inside `fn` cannot silence the rest of the session — the same reason
+ * `useHistory` clears `applying` in one.
+ */
+export function writeSilently(fn: () => void): void {
+  silentWrites += 1
+  try {
+    fn()
+  } finally {
+    silentWrites -= 1
+  }
+}
+
+/** Whether the write being notified came from {@link writeSilently}. */
+export function isSilentWrite(): boolean {
+  return silentWrites > 0
+}
+
 /** Clear the builder scene, keeping the lock preference. */
 export function clearPlacements(): void {
   useWorkshopStore.setState({ placements: {}, generated: {} })
