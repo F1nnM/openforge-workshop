@@ -28,12 +28,13 @@
  * answers the sprite-sheet memory question rather than a policy: see
  * {@link MAX_GRID_ITEMS}.
  *
- * ## Dead-end greying, and why the `base` slot is read but never shown
+ * ## Dead-end greying, and why the `base` slot is not read at all
  *
- * A pick is a dead end when it empties a sibling slot that currently has
- * candidates. Measured over the **535 files that declare two or more slots**:
+ * A pick is a dead end when it empties a **sibling accessory slot** that
+ * currently has candidates. Measured over the **535 files that declare two or
+ * more slots**:
  *
- *   - **416 of 4,330 item picks (9.6%) are dead ends.**
+ *   - **416 of 4,330 item picks (9.6%) empty a sibling.**
  *   - **0 of them are partial** — for every one of the 4,330, either every
  *     candidate file of the item empties a sibling or none does. So an item card
  *     is honestly a single greyed thing, and {@link SlotOption.deadEnd} does not
@@ -41,23 +42,36 @@
  *   - **Every single one empties the `base` slot. Zero empty an accessory
  *     sibling.**
  *
- * That last line decides the shape of this module. The `base` slot is D1's and
- * A6's and A5 keeps it out of the accessory list — correctly, it restates
- * `needsBase`. But it is also *the entire dead-end signal in this corpus*: a
- * `texture|towne` wall inherits `texture|towne` into its base slot, and picking
- * an accessory that pushes an inherited `shape` or `texture` tag into that slot
- * is what leaves a piece with nothing printable underneath it. So this module
- * **resolves the base slot and never renders it**: it is a constraint, not a
- * choice. {@link SlotOption.empties} names it, so the greyed card says *which*
- * slot it closed rather than just going dim.
+ * That last line used to decide the shape of this module: the base slot was
+ * resolved, never rendered, and its emptying *was* the dead-end signal. It was
+ * wrong, and the Cut Stone rectangular door wall is where it showed. **`base` is
+ * not a sibling of an accessory slot.** The base under a placed piece is the
+ * *room's* own slot — A6's base match, chosen by footprint congruence against
+ * the template — and a door leaf dropped into the wall's doorway cannot change
+ * it. Measured on `cut-stone#wall,door+rectangular.A.openforge.stl`: its `base`
+ * part carries `constrain: [shape, size|width, texture]` and has 6 candidates
+ * untouched, and **the door's `texture|metal` / `texture|wood` alone takes it to
+ * 0** — so all five door items and the single lintel item greyed, the whole
+ * family's doors read *"Leaves no base this piece can be printed on"*, and
+ * `builder/three/holds.ts` filled neither slot by default. (The Towne curved
+ * door wall was never greyed for the opposite reason: no curved base exists at
+ * all, so its base slot is *already* empty and {@link consequences} reports only
+ * a change.)
+ *
+ * So {@link consequences} and {@link siblingsOf} both skip {@link BASE_SLOT} —
+ * `pickerSlots` already did — and nothing in this module resolves it. On this
+ * corpus that leaves **no greyed card anywhere**, because all 416 were the base;
+ * the machinery stays because it is a fact about `constrain` rather than about
+ * today's fixtures, and `slots.test.ts` measures both halves against the corpus.
  *
  * The two routes to the base gap are different measurements and are not
  * reconciled here. `docs/corpus-base-gap.md` counts **385 of 4,363 openforge
  * toppers with no base line item**, keyed on size codes through A6's lock. This
- * one counts **517 base slots already empty before any interaction** plus
+ * one counted **517 base slots already empty before any interaction** plus
  * **416 item picks that empty one**, keyed on inherited tags through C1's port.
- * Neither is the other, and the plan row's "385 of 1,608 wall picks" was the
- * first of those numbers used as if it were the second.
+ * Neither is the other, neither is a thing this picker shows any more, and the
+ * plan row's "385 of 1,608 wall picks" was the first of those numbers used as if
+ * it were the second.
  *
  * ## A sibling pick can also *un*-dead-end a slot
  *
@@ -68,8 +82,11 @@
  * than the parent alone. On
  * `dungeon_stone#secret_door+low.A.bottom,openforge,magnetic+imperial.stl` the
  * base slot has **0** candidates untouched and **7** once the `top` slot is
- * filled. {@link SlotOption.rescues} carries it, because a picker that only ever
- * greyed would be describing a monotone narrowing the semantics do not have.
+ * filled. {@link SlotOption.rescues} carries it between two *accessory* slots,
+ * because a picker that only ever greyed would be describing a monotone
+ * narrowing the semantics do not have — and it is silent about the base for the
+ * reason above: all three of the corpus's rescues are the room's slot rather
+ * than a sibling of the pick.
  *
  * ## The key a choice is held under
  *
@@ -103,8 +120,9 @@ import { createCompositionIndex } from '@/composition'
 /**
  * The slot name that is a base match and not an accessory.
  *
- * 1,560 of 2,112 aggregate slots and 2,451 of 3,695 file slots. Read for
- * dead-end detection, never offered as a grid — see the module docblock.
+ * 1,560 of 2,112 aggregate slots and 2,451 of 3,695 file slots. Never offered as
+ * a grid, never resolved, and never read as a sibling — the room chooses the
+ * base and an accessory cannot move it. See the module docblock.
  */
 export const BASE_SLOT = 'base'
 
@@ -176,19 +194,24 @@ export interface SlotOption {
   /** Every candidate file of this item for this slot, in catalog-id order. */
   readonly tiles: readonly TileId[]
   /**
-   * Sibling slots this pick would empty, by name — including `base`.
+   * Sibling **accessory** slots this pick would empty, by name — never `base`.
    *
-   * Non-empty is the dead end. 416 of 4,330 item picks corpus-wide, every one of
-   * them naming `base` and nothing else.
+   * Non-empty is the dead end. **Empty for every pick in this corpus**: all 416
+   * of the 4,330 item picks that empty a sibling empty the base slot, which is
+   * not a sibling — see the module docblock.
    */
   readonly empties: readonly string[]
   /** `empties.length > 0`. Never partial across an item's variants — 0 of 4,330. */
   readonly deadEnd: boolean
   /**
-   * Sibling slots this pick would **open**, currently empty and non-empty after.
+   * Sibling **accessory** slots this pick would open, currently empty and
+   * non-empty after.
    *
    * Three picks corpus-wide, all of them a `shape|wall|low` parent whose `top`
-   * slot contributes the more general `shape|wall`. See the module docblock.
+   * slot contributes the more general `shape|wall` — and all three open the
+   * *base*, so like {@link SlotOption.empties} this is empty everywhere on
+   * today's corpus. The mechanism is symmetric with the greying and is kept for
+   * the same reason. See the module docblock.
    */
   readonly rescues: readonly string[]
 }
@@ -291,7 +314,10 @@ function siblingsOf(
   exclude: string,
 ): readonly SiblingSelection[] {
   const out: SiblingSelection[] = []
-  for (const slot of index.slotsOf(parent)) {
+  /* `pickerSlots` and not `slotsOf`: the base is not a sibling in either
+     direction — it is the room's own slot, so it neither reads an accessory's
+     tags nor contributes its own. See the module docblock. */
+  for (const slot of pickerSlots(index, parent)) {
     if (slot.name === exclude) continue
     const tile = selection[slot.name]
     if (tile === undefined) continue
@@ -350,7 +376,11 @@ function consequences(
   const rescues: string[] = []
   const withPick: SlotSelection = { ...selection, [slot.name]: tile }
 
-  for (const other of index.slotsOf(parent)) {
+  /* The accessory slots only. The host's own `base` part is not one of them and
+     is not a sibling of one: it is the template's slot in the room, matched on
+     footprint, and no accessory pick can empty it. Walking it here is what
+     greyed every door on the cut-stone door wall — see the module docblock. */
+  for (const other of pickerSlots(index, parent)) {
     if (other.name === slot.name) continue
     // Already filled: its candidate set is settled and re-narrowing it would be
     // describing a choice the user has made rather than one they face.
@@ -458,18 +488,19 @@ export function slotStates(
  *
  * A sentence rather than a word, because the fact is not "unavailable" — the
  * file exists, it fits this slot, and printing it is fine. What it does is close
- * a *different* slot, and on this corpus that slot is always the base match. A
- * card that only dimmed would be telling the user the archive is missing
- * something it is not.
+ * a *different* accessory slot of the same piece. A card that only dimmed would
+ * be telling the user the archive is missing something it is not.
+ *
+ * **There is no base branch.** It said *"Leaves no base this piece can be
+ * printed on"* and it was the only sentence this function ever produced on the
+ * live corpus, over a slot the room fills by footprint congruence rather than
+ * from this grid — see the module docblock. `empties` cannot name `base` now, so
+ * the branch was unreachable rather than merely unused.
  */
 export function deadEndReason(option: SlotOption): string {
   const [first] = option.empties
   if (first === undefined) return ''
-  if (option.empties.length === 1) {
-    return first === BASE_SLOT
-      ? 'Leaves no base this piece can be printed on.'
-      : `Leaves the ${first} slot with nothing to fill it.`
-  }
+  if (option.empties.length === 1) return `Leaves the ${first} slot with nothing to fill it.`
   return `Leaves ${option.empties.join(' and ')} with nothing to fill them.`
 }
 

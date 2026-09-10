@@ -10,18 +10,32 @@
  * Each record exists for one branch, and the branches are the corpus's:
  *
  *   - **`wallTowne`** — a base slot alive in its initial state beside a torch
- *     slot with two candidate items, one of which *closes the base slot*. This
- *     is the corpus's dead end in miniature: `constrain: [{ tag: 'texture' }]`
- *     collects `texture|dungeon_stone` from the wall and `texture|towne` from the
- *     picked torch, keeps both because neither is a prefix of the other, and no
- *     base carries both. 416 of 4,330 item picks in the live archive do exactly
- *     this.
- *   - **`wallLow`** — the *rescue*. Its base slot is empty before anything is
- *     picked (the wall contributes `shape|wall|low` and no base is low), and
- *     filling its `top` slot with a piece carrying `shape|wall` makes the base
- *     slot resolvable: `filterSpecificTags` keeps the **most general** survivor,
- *     so `shape|wall|low` is dropped in favour of `shape|wall`. Three picks in
- *     the live archive behave this way.
+ *     slot with two candidate items, one of which *would close the base slot*:
+ *     `constrain: [{ tag: 'texture' }]` collects `texture|dungeon_stone` from the
+ *     wall and `texture|towne` from the picked torch, keeps both because neither
+ *     is a prefix of the other, and no base carries both. 416 of 4,330 item picks
+ *     in the live archive do exactly this — and **none of them is a dead end**,
+ *     because the base is the room's own slot rather than a sibling of the torch
+ *     (`slotPicker.ts`'s docblock, and the Cut Stone door wall it was measured
+ *     on). So this record is now the fixture's *not*-greyed case.
+ *   - **`wallSiblings`** — the dead end that is one: two **accessory** slots,
+ *     `torch` and `top`, where the towne torch pushes `texture|towne` into the
+ *     top's `constrain` beside the wall's own `texture|dungeon_stone` and empties
+ *     it. Nothing in the live archive does this — all 4,760 accessory-to-accessory
+ *     observations are inert — and the mechanism is the one thing the greying is
+ *     for, so it is exercised here rather than nowhere.
+ *   - **`wallLow`** — the corpus's *rescue*, which is the same shape as its dead
+ *     end and is dropped for the same reason. Its base slot is empty before
+ *     anything is picked (the wall contributes `shape|wall|low` and no base is
+ *     low) and filling its `top` slot with a piece carrying `shape|wall` makes
+ *     the base slot resolvable — `filterSpecificTags` keeps the **most general**
+ *     survivor, so `shape|wall|low` is dropped in favour of `shape|wall`. Three
+ *     picks in the live archive behave this way, all three on the base, so the
+ *     picker reports none of them.
+ *   - **`wallRescue`** — that mechanism between two **accessory** slots, so it is
+ *     exercised where the picker can still see it: a `shape|wall|low` wall whose
+ *     `crosshead` slot constrains on `shape` and is therefore empty until the
+ *     `top` slot contributes the more general `shape|wall`.
  *   - **`danglingRef`** — a slot naming a tag the table does not hold, which is
  *     `unknownRefs` and not "nothing matched". **0 live slots**, and the
  *     distinction is a different sentence to show a user.
@@ -58,6 +72,8 @@ export const ORD = {
   baseOnly: 105,
   plainFloor: 106,
   archway: 107,
+  wallSiblings: 108,
+  wallRescue: 109,
 
   torchStone: 200,
   torchStoneFlex: 201,
@@ -160,9 +176,36 @@ export const SLOT_CATALOG: CatalogFileType = CatalogFile.parse({
       config: {
         parts: [
           // Alive before anything is picked: one base carries
-          // `texture|dungeon_stone`. Closed by picking the towne torch.
+          // `texture|dungeon_stone`. The towne torch would empty it, and that is
+          // not a dead end — the base is the room's slot, not the torch's
+          // sibling. See `wallSiblings` for the pick that is one.
           { name: 'base', tags: { require: [{ tag: 'shape|base' }], constrain: [{ tag: 'texture' }] } },
           { name: 'torch', optional: true, tags: { require: [{ tag: 'component|torch' }] } },
+        ],
+      },
+    }),
+
+    tile({
+      id: 'tiles/dungeon_stone/walls/torchtop/stone%torchtop.2x.openforge.stl',
+      ord: ORD.wallSiblings,
+      design: 'd-torchtop',
+      file: 'stone%torchtop.2x.openforge.stl',
+      family: 'tiles/dungeon_stone/walls/torchtop',
+      name: 'Dungeon Stone Torch Top Wall 2x',
+      tags: [T.wall, T.stone, T.width2],
+      config: {
+        parts: [
+          { name: 'torch', optional: true, tags: { require: [{ tag: 'component|torch' }] } },
+          // One candidate before anything is picked — `stone%top.stl`, the only
+          // top carrying `texture|dungeon_stone` — and none once the towne torch
+          // contributes `texture|towne` beside the wall's own texture. Two
+          // accessory slots, so the emptied one is a sibling the picker resolves
+          // rather than the base the room chooses.
+          {
+            name: 'top',
+            optional: true,
+            tags: { require: [{ tag: 'component|top' }], constrain: [{ tag: 'texture' }] },
+          },
         ],
       },
     }),
@@ -181,6 +224,29 @@ export const SLOT_CATALOG: CatalogFileType = CatalogFile.parse({
           // base is. Opened by the `top` slot's only candidate.
           { name: 'base', tags: { require: [{ tag: 'shape|base' }], constrain: [{ tag: 'shape' }] } },
           { name: 'top', tags: { require: [{ tag: 'component|top' }] } },
+        ],
+      },
+    }),
+
+    tile({
+      id: 'tiles/dungeon_stone/walls/lowtop/stone%lowtop.2x.openforge.stl',
+      ord: ORD.wallRescue,
+      design: 'd-lowtop',
+      file: 'stone%lowtop.2x.openforge.stl',
+      family: 'tiles/dungeon_stone/walls/lowtop',
+      name: 'Dungeon Stone Low Top Wall 2x',
+      tags: [T.wallLow, T.stone, T.width2],
+      config: {
+        parts: [
+          { name: 'top', optional: true, tags: { require: [{ tag: 'component|top' }] } },
+          // Empty until `top` is filled: `constrain: [{ tag: 'shape' }]` inherits
+          // the wall's own `shape|wall|low`, which no insert carries, and a top's
+          // `shape|wall` generalises it away.
+          {
+            name: 'crosshead',
+            optional: true,
+            tags: { require: [{ tag: 'component|top' }], constrain: [{ tag: 'shape' }] },
+          },
         ],
       },
     }),
@@ -441,6 +507,8 @@ export const PARENT = {
   baseOnly: 'tiles/dungeon_stone/walls/plain/stone%plain.openforge.stl',
   plainFloor: 'tiles/dungeon_stone/floors/floor/stone%floor.1x1.stl',
   archway: 'tiles/dungeon_stone/arches/archway/stone%archway.2x.openforge.stl',
+  wallSiblings: 'tiles/dungeon_stone/walls/torchtop/stone%torchtop.2x.openforge.stl',
+  wallRescue: 'tiles/dungeon_stone/walls/lowtop/stone%lowtop.2x.openforge.stl',
 } as const
 
 /** What fills them. */

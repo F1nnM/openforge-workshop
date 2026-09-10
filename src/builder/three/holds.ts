@@ -48,21 +48,22 @@
  * ## Why the walk is in declared order, and why the pick is fed back
  *
  * `constrain` reads **sibling selections**: a `door` chosen in one slot narrows
- * the `lintel` in the next, and 416 of the corpus's 4,330 item picks empty a
- * sibling outright. A pass that resolved every slot against the empty selection
- * would therefore pick a pair that cannot coexist and hand the bill two files
- * that do not fit each other. So each pick is written into the selection before
- * the next slot is resolved, and the order is the **fixture's** — the same order
- * `slotPicker.ts#siblingsOf` reads, for the same reason it gives: C1's port
- * builds its `require` list from insertion-ordered sets, so an order derived
- * from anything but the declaration would make the answer a function of the walk
- * rather than of the file.
+ * the `lintel` in the next. A pass that resolved every slot against the empty
+ * selection would therefore pick a pair that cannot coexist and hand the bill
+ * two files that do not fit each other. So each pick is written into the
+ * selection before the next slot is resolved, and the order is the **fixture's**
+ * — the same order `slotPicker.ts#siblingsOf` reads, for the same reason it
+ * gives: C1's port builds its `require` list from insertion-ordered sets, so an
+ * order derived from anything but the declaration would make the answer a
+ * function of the walk rather than of the file.
  *
  * ## The ranking, in one sentence per clause
  *
- * The first option that is **not a dead end** (a dead end empties a sibling —
- * on this corpus, always the `base` slot, so picking one would leave the piece
- * with nothing printable underneath it), **preferring the room design**
+ * The first option that is **not a dead end** (a dead end empties a sibling
+ * *accessory* slot — no pick in this corpus does: the 416 that empty anything
+ * empty the host's own `base` part, which is the room's slot and not a sibling,
+ * and reading those as dead ends is what left every cut-stone door wall's
+ * doorway and lintel notch empty — F2), **preferring the room design**
  * (`WorkshopState.design`, matched against the item's hoisted `texture` — the
  * same preference `fills.ts` passes the template solver as `FillContext.family`,
  * so a room set to `wood` gets a wood door rather than the tudor one that sorts
@@ -73,8 +74,8 @@
  * A required slot with **no live option** is left out rather than forced. 9 of
  * the 1,244 declarations have no candidate at all and a dead-end-only slot is
  * the same situation one step in; the bill already reports the gap, and writing
- * a hold that empties the base to avoid an empty socket would trade a reported
- * hole for an unreported one.
+ * a hold that closes a sibling accessory slot to avoid an empty socket would
+ * trade a reported hole for an unreported one.
  */
 import { useEffect } from 'react'
 

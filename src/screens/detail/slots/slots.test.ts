@@ -244,7 +244,16 @@ describeCorpus(title, () => {
   /* --------------------------------------------------------- dead-end greying */
 
   describe('dead-end greying', () => {
-    it('greys 416 of 4,330 item picks, every one of them closing the base slot', () => {
+    /*
+      **This block measures the index, not the picker, and since F2 the two give
+      different answers on purpose.** `slotOptions` below resolves *every*
+      declared part, `base` included, which is what the 416 is a count of. The
+      picker resolves the accessory slots alone — the base under a placed piece is
+      the template's slot, matched on footprint congruence, and no accessory pick
+      can move it — so it greys none of these. Both halves are asserted here: the
+      emptying is real, and the greying is empty.
+    */
+    it('measures 416 of 4,330 item picks emptying the base slot', () => {
       let picks = 0
       let dead = 0
       let partial = 0
@@ -274,6 +283,54 @@ describeCorpus(title, () => {
         accessorySibling: 0,
       })
       expect([...blame.keys()]).toEqual([BASE_SLOT])
+    }, SLOW_MS)
+
+    it('greys nothing, because every one of the 416 is the room s own base slot', () => {
+      /* **F2.** `consequences` walked the host's `base` part as a sibling, so a
+         door's `texture|wood` emptied it and every door card on every cut-stone
+         door wall was a dead end — with `holds.ts` refusing to fill the doorway
+         or the lintel notch by default in consequence. */
+      let options = 0
+      let dead = 0
+      for (const record of file.records) {
+        for (const state of slotStates(index!, record.id)) {
+          for (const option of state.options) {
+            options += 1
+            if (option.deadEnd) dead += 1
+          }
+        }
+      }
+      expect({ options, dead }).toEqual({ options: 2194, dead: 0 })
+    }, SLOW_MS)
+
+    it('offers the cut-stone door wall s five doors and its lintel, all live', () => {
+      const wall = file.records.find(
+        (record) => record.file === 'cut-stone#wall,door+rectangular.A.openforge.stl',
+      )
+      if (wall === undefined) throw new Error('the corpus has no cut-stone rectangular door wall')
+
+      const states = slotStates(index!, wall.id)
+      expect(states.map((state) => state.name)).toEqual(['door', 'lintel'])
+      expect(states.map((state) => state.options.length)).toEqual([5, 1])
+      expect(states.flatMap((state) => state.options.map((option) => option.deadEnd))).toEqual([
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+      ])
+
+      // And the base part it used to be greyed over: 6 candidates before any
+      // pick, 0 after one — real, and not this picker's business.
+      const base = index!.slotsOf(wall.id).find((part) => part.name === BASE_SLOT)
+      if (base === undefined) throw new Error('the wall declares no base part')
+      const door = states[0]?.options[0]?.variant.id
+      if (door === undefined) throw new Error('the door slot offered nothing')
+      expect(index!.resolve(base, wall.id).tiles).toHaveLength(6)
+      expect(
+        index!.resolve(base, wall.id, [{ partName: 'door', tags: index!.tagsOf(door) }]).tiles,
+      ).toHaveLength(0)
     }, SLOW_MS)
 
     it('is either inert or fatal — a sibling pick narrows nothing in between', () => {

@@ -60,15 +60,21 @@ describe('a file with nothing to choose', () => {
 /* ------------------------------------------------------------ the greyed card */
 
 describe('dead-end greying', () => {
+  /*
+    `wallSiblings` and not `wallTowne`, and the swap is F2: the towne torch
+    empties `wallTowne`'s **base** slot, which is the room's own slot rather than
+    a sibling of the torch, so the picker no longer calls that a dead end. The
+    greyed card is the one that closes another *accessory* slot.
+  */
   it('greys the pick that closes another slot, and says what it closes', () => {
-    mount(PARENT.wallTowne)
+    mount(PARENT.wallSiblings)
 
     const towne = screen.getByRole('button', { name: /Towne Torch/ })
     expect(towne).toHaveAttribute('aria-disabled', 'true')
-    expect(towne).toHaveAccessibleName(/Leaves no base this piece can be printed on/)
+    expect(towne).toHaveAccessibleName(/Leaves the top slot with nothing to fill it/)
     // Rendered as well as announced: a sighted user needs the reason too, and a
     // tooltip would hide the row's whole point behind a hover.
-    expect(towne).toHaveTextContent('Leaves no base this piece can be printed on.')
+    expect(towne).toHaveTextContent('Leaves the top slot with nothing to fill it.')
 
     // The harmless sibling is an ordinary card.
     const stone = screen.getByRole('button', { name: /Dungeon Stone Torch/ })
@@ -76,8 +82,16 @@ describe('dead-end greying', () => {
     expect(stone).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('keeps a greyed card focusable, so its reason is reachable', () => {
+  it('greys nothing on a wall whose only closed slot is its base', () => {
     mount(PARENT.wallTowne)
+    const towne = screen.getByRole('button', { name: /Towne Torch/ })
+    expect(towne).not.toHaveAttribute('aria-disabled')
+    expect(towne).toHaveAttribute('aria-pressed', 'false')
+    expect(group('torch')).not.toHaveTextContent('would close another slot')
+  })
+
+  it('keeps a greyed card focusable, so its reason is reachable', () => {
+    mount(PARENT.wallSiblings)
     const towne = screen.getByRole('button', { name: /Towne Torch/ })
     towne.focus()
     expect(towne).toHaveFocus()
@@ -86,7 +100,7 @@ describe('dead-end greying', () => {
 
   it('declines the pick rather than preventing the press', () => {
     const picks: (string | undefined)[] = []
-    mount(PARENT.wallTowne, (_slot, picked) => {
+    mount(PARENT.wallSiblings, (_slot, picked) => {
       picks.push(picked)
     })
 
@@ -99,7 +113,7 @@ describe('dead-end greying', () => {
   })
 
   it('counts the greyed cards in the slot’s note', () => {
-    mount(PARENT.wallTowne)
+    mount(PARENT.wallSiblings)
     expect(group('torch')).toHaveTextContent('2 items fit, over 3 files.')
     expect(group('torch')).toHaveTextContent('1 of them would close another slot')
   })
@@ -238,10 +252,13 @@ describe('a selection the owner holds', () => {
 
 describe('a pick that opens a slot', () => {
   it('says so on the card', () => {
-    mount(PARENT.wallLow)
-    const top = screen.getByRole('button', { name: /Dungeon Stone Secret Door Top/ })
-    expect(top).toHaveTextContent('Opens the base slot.')
-    expect(top).toHaveAccessibleName(/opens the base slot/)
+    // `wallRescue`, for the greying's reason: the corpus's own rescues open the
+    // base, which the picker neither shows nor resolves, so the case it can
+    // still report is one accessory slot opening another.
+    mount(PARENT.wallRescue)
+    const top = screen.getAllByRole('button', { name: /Dungeon Stone Secret Door Top/ })[0]
+    expect(top).toHaveTextContent('Opens the crosshead slot.')
+    expect(top).toHaveAccessibleName(/opens the crosshead slot/)
     expect(top).not.toHaveAttribute('aria-disabled')
   })
 })

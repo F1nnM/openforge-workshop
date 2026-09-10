@@ -493,7 +493,10 @@ describe('AccessorySection', () => {
   })
 
   it('greys the dead-end accessory pick here too, because the picker is the same one', () => {
-    accessories({ a: at(PARENT.wallTowne, 0, 0) })
+    // `wallSiblings`: the pick that closes another *accessory* slot. A pick that
+    // only empties the host's base part is not a dead end — F2 — and
+    // `wallTowne`'s towne torch is exactly that one.
+    accessories({ a: at(PARENT.wallSiblings, 0, 0) })
     expect(screen.getByRole('button', { name: /Towne Torch/ })).toHaveAttribute(
       'aria-disabled',
       'true',
@@ -536,11 +539,10 @@ describe('AccessorySection', () => {
  * assertions that it is: what a piece holds is what the picker shows, a press
  * pins, and a second press on the same card takes it out again.
  *
- * The archway rather than the torch wall, because a *write* needs a card that is
- * not greyed: the towne torch closes `wallTowne`'s base slot and the picker
- * declines it, while the archway's `{ filter }` entry means the same card only
- * narrows the lintel. It is also the fixture's one measured host, which is what
- * the mount lines below are read off.
+ * The archway rather than the torch wall, because it is the fixture's one
+ * measured host and the mount lines below are read off it — the archway's
+ * `{ filter }` entry also means the towne torch merely narrows its lintel, where
+ * on `wallSiblings` the same card empties the `top` slot and is declined.
  */
 describe('the accessory picker writes what it is given', () => {
   /** One placed archway, holding what it is told to. */

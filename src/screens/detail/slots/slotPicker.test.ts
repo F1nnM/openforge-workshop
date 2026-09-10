@@ -107,52 +107,73 @@ describe('the accessory surface', () => {
 /* ------------------------------------------------------------ dead-end greying */
 
 describe('dead-end greying', () => {
-  it('greys the pick that would empty a sibling slot, and names the slot', () => {
-    const torch = slot(PARENT.wallTowne, 'torch')
+  it('greys the pick that would empty a sibling accessory slot, and names the slot', () => {
+    const torch = slot(PARENT.wallSiblings, 'torch')
     const towne = torch.options.find((option) => option.aggregate.name === 'Towne Torch')
     const stone = torch.options.find((option) => option.aggregate.name === 'Dungeon Stone Torch')
 
-    // `constrain: [{ tag: 'texture' }]` on the base slot collects the wall's
+    // `constrain: [{ tag: 'texture' }]` on the `top` slot collects the wall's
     // `texture|dungeon_stone` and the torch's `texture|towne`, keeps both
-    // because neither is a prefix of the other, and no base carries both.
+    // because neither is a prefix of the other, and no top carries both.
     expect(towne?.deadEnd).toBe(true)
-    expect(towne?.empties).toEqual([BASE_SLOT])
+    expect(towne?.empties).toEqual(['top'])
 
     // The same-texture torch changes nothing, so it is not greyed.
     expect(stone?.deadEnd).toBe(false)
     expect(stone?.empties).toEqual([])
   })
 
+  it('does not grey a pick that only empties the base — the room chooses that', () => {
+    /* `wallTowne` is the corpus's own case and all 416 of its item picks: the
+       towne torch pushes `texture|towne` into the wall's `base` part and empties
+       it. The base is not a sibling of an accessory — it is the template's slot,
+       matched on footprint — so nothing here is a dead end. This is F2: reading
+       it as one greyed every door on the Cut Stone door wall. */
+    const torch = slot(PARENT.wallTowne, 'torch')
+    expect(torch.options.map((option) => option.empties)).toEqual([[], []])
+    expect(torch.options.some((option) => option.deadEnd)).toBe(false)
+
+    // And the emptying itself is real, which is what makes the exclusion a
+    // decision rather than a measurement error: asked directly, the base slot
+    // does go empty under that pick.
+    const base = index.slotsOf(tile(PARENT.wallTowne))[0]!
+    expect(base.name).toBe(BASE_SLOT)
+    expect(
+      index.resolve(base, tile(PARENT.wallTowne), [
+        { partName: 'torch', tags: index.tagsOf(tile(FILL.torchTowne)) },
+      ]).deadEnd,
+    ).toBe(true)
+  })
+
   it('is computed before the pick, and the pick confirms it', () => {
     // The greying is a prediction. This is the assertion that it is a correct
     // one — the same slot, actually resolved with the towne torch in place.
-    expect(slot(PARENT.wallTowne, 'torch').options.some((option) => option.deadEnd)).toBe(true)
+    expect(slot(PARENT.wallSiblings, 'torch').options.some((option) => option.deadEnd)).toBe(true)
 
-    const after = index.resolve(index.slotsOf(tile(PARENT.wallTowne))[0]!, tile(PARENT.wallTowne), [
+    const top = index.slotsOf(tile(PARENT.wallSiblings))[1]!
+    expect(top.name).toBe('top')
+    const after = index.resolve(top, tile(PARENT.wallSiblings), [
       { partName: 'torch', tags: index.tagsOf(tile(FILL.torchTowne)) },
     ])
     expect(after.deadEnd).toBe(true)
 
-    const harmless = index.resolve(
-      index.slotsOf(tile(PARENT.wallTowne))[0]!,
-      tile(PARENT.wallTowne),
-      [{ partName: 'torch', tags: index.tagsOf(tile(FILL.torchStone)) }],
-    )
+    const harmless = index.resolve(top, tile(PARENT.wallSiblings), [
+      { partName: 'torch', tags: index.tagsOf(tile(FILL.torchStone)) },
+    ])
     expect(harmless.deadEnd).toBe(false)
   })
 
   it('says what a dead end costs rather than only dimming it', () => {
-    const towne = slot(PARENT.wallTowne, 'torch').options.find((option) => option.deadEnd)
-    expect(deadEndReason(towne!)).toBe('Leaves no base this piece can be printed on.')
+    const towne = slot(PARENT.wallSiblings, 'torch').options.find((option) => option.deadEnd)
+    expect(deadEndReason(towne!)).toBe('Leaves the top slot with nothing to fill it.')
   })
 
   it('stops greying a slot the user has already filled', () => {
-    // With the base slot notionally settled there is nothing left to close, so
-    // the towne torch is no longer a dead end. The picker never offers the base
-    // slot, so this is reached through the resolver rather than the UI — it is
-    // the property that keeps `empties` about *open* questions.
-    const withTop = slot(PARENT.wallLow, 'top', { base: FILL.torchStone })
-    expect(withTop.options.every((option) => option.empties.length === 0)).toBe(true)
+    // With the `top` slot settled there is nothing left to close, so the towne
+    // torch is no longer a dead end — the property that keeps `empties` about
+    // *open* questions.
+    const torch = slot(PARENT.wallSiblings, 'torch', { top: FILL.topWall })
+    expect(torch.options.every((option) => option.empties.length === 0)).toBe(true)
   })
 })
 
@@ -161,12 +182,14 @@ describe('dead-end greying', () => {
 describe('a sibling pick can open a slot as well as close one', () => {
   it('reports the slot a pick would open', () => {
     // `filterSpecificTags` keeps the most general survivor, so the parent's
-    // `shape|wall|low` is dropped in favour of the top's `shape|wall`.
-    const top = slot(PARENT.wallLow, 'top')
-    // Both tops carry `shape|wall`, and this slot's base sibling constrains on
+    // `shape|wall|low` is dropped in favour of the top's `shape|wall`. The
+    // rescued slot is an accessory and not the base, for `empties`' reason: the
+    // corpus's own three rescues are all the base, and the base is not a sibling.
+    const top = slot(PARENT.wallRescue, 'top')
+    // Both tops carry `shape|wall`, and the `crosshead` sibling constrains on
     // `shape` alone, so both of them open it.
     expect(top.options).toHaveLength(2)
-    expect(top.options.map((option) => option.rescues)).toEqual([[BASE_SLOT], [BASE_SLOT]])
+    expect(top.options.map((option) => option.rescues)).toEqual([['crosshead'], ['crosshead']])
     expect(top.options.some((option) => option.deadEnd)).toBe(false)
   })
 

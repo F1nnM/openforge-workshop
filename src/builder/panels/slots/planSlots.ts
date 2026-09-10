@@ -29,9 +29,11 @@
  * The same two failures the drawer's picker shows arrive here per fill:
  * **9 of the 1,244 accessory declarations have no candidate whatsoever** in
  * their initial state (5 `fracture slope`, 4 `top`), and a pick can empty a
- * sibling — 416 of 4,330 item picks corpus-wide, every one of them emptying the
- * `base` slot. {@link PlanSlotInventory.unfillable} counts the first; the
- * greying is the picker's and is shared rather than reimplemented, from
+ * sibling *accessory* slot — which nothing in this corpus does: all 416 of the
+ * 4,330 item picks that empty anything empty the host's own `base` part, and the
+ * base is the room's slot rather than a sibling of an accessory (F2).
+ * {@link PlanSlotInventory.unfillable} counts the first; the greying is the
+ * picker's and is shared rather than reimplemented, from
  * `@/screens/detail/slots`.
  *
  * ## A holder is a **filled template slot**, not a placement, since row A8

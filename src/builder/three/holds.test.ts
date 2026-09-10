@@ -85,8 +85,16 @@ const TREASURE_CORNER =
 const INFINITE_HALLWAY =
   'tiles/dungeon_stone/misc/infinite_hallway/dungeon_stone#infinite_hallway+torch.2x2.openforge.stl' as TileId
 
-/** Required `door` and `lintel` slots whose every option empties the base. */
-const DEAD_END_DOOR =
+/**
+ * Required `door` and `lintel` slots, and the piece F2 was found on.
+ *
+ * Every one of its six item picks empties the wall's own **base** part — its
+ * `constrain` carries `texture`, and a door is `texture|wood` or `texture|metal`
+ * — which the picker read as a dead end and this pass therefore refused to fill.
+ * The base is the room's slot rather than a sibling of the door, so both slots
+ * now solve.
+ */
+const CUT_STONE_DOOR_WALL =
   'tiles/cut-stone/separate_wall/primary_walls/door+rectangular/openforge/cut-stone#wall,door+rectangular.A.openforge.stl' as TileId
 
 /** A required `door` slot with a tudor and a wood option, both live. */
@@ -265,14 +273,17 @@ describeCorpus('the default-hold pass over the live archive', () => {
       expect(holds[SECOND]?.tile).toBe(WOOD_TORCH)
     })
 
-    it('leaves out a required slot whose every option would empty the base', () => {
-      /* A cut-stone rectangular door wall: `door` offers five items and `lintel`
-         one, and **every one of them empties the base slot** — 416 of the
-         corpus's 4,330 item picks do, all of them the base. Forcing one would
-         trade a socket the bill reports for a piece with nothing printable
-         underneath it, so the answer is the same `{}` a solved-and-empty fill
-         gets, and row 8's bill is what says the sockets are open. */
-      expect(solveHolds(file, DEAD_END_DOOR, undefined)).toEqual({})
+    it('fills the cut-stone door wall, whose picks only ever emptied its base', () => {
+      /* **F2.** `door` offers five items and `lintel` one, and every one of the
+         six empties the wall's own `base` part — 416 of the corpus's 4,330 item
+         picks do, all of them the base. Read as dead ends, that left this wall
+         and its whole family arriving with an empty doorway and an empty lintel
+         notch, both required, so the bill refused the download. The base is the
+         template's slot in the room, matched on footprint; a door cannot move
+         it, and both slots solve. */
+      const holds = solveHolds(file, CUT_STONE_DOOR_WALL, undefined)
+      expect(Object.keys(holds).sort()).toEqual(['door', 'lintel'])
+      expect(holds[DOOR]?.pinned).toBe(false)
     })
 
     it('prefers a candidate carrying the room design over the lowest address', () => {
