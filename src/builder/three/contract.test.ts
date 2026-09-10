@@ -63,6 +63,8 @@ import {
   POSTPROCESSING_THREE_RANGE,
   VERIFIED_THREE_VERSION,
 } from './lod'
+import { parseStl } from '@/three/stl/parse'
+
 import { LodAbsentError, LodLoadError, loadLodGeometry, parseLodGlb } from './loadLod'
 
 const FIXTURES = join(process.cwd(), 'src', 'builder', 'three', 'fixtures')
@@ -213,6 +215,62 @@ describe('loadLod honours node.matrixWorld', () => {
     expect(LOD_NODE_TRANSFORM).toBe('quantized')
     expect(lod.nodeScale).toBeCloseTo(1, 9)
     lod.dispose()
+  })
+
+  /**
+   * **The mount contract's own risk, measured.** A `Mount.at` and an
+   * `InsertAnchor.size` are taken off the *source* STL's bounding box and the
+   * renderer applies them to the *decimated* GLB's, so every accessory in the
+   * builder is placed on the assumption that decimation preserves extents. The
+   * spec's Risks section puts that at "within ~0.1 mm" and points here.
+   *
+   * The comparison is against the **source mesh these two GLBs were decimated
+   * from**, parsed with `src/three/stl/parse.ts` — which is the same parser
+   * `tools/mounts/classify.ts` opens every host and insert with — and its bbox
+   * is a min/max over the parsed positions, which is that module's own
+   * `meshBounds`. It is not against `pipeline/mounts/inventory.json`, and the
+   * reason is worth stating rather than skipping over:
+   *
+   *   - the fixture blob `8180da93…` is `plain#base.IA.openlock+topless.stl`, a
+   *     **base** tile. It declares no accessory slot and is not an `insert`, so
+   *     it is a target of neither half of the measuring pass and appears in
+   *     neither the `hosts` nor the `inserts` table;
+   *   - and no inventory blob's GLB can be loaded offline. The `/lod/` store is
+   *     remote (blocker B2 — it is empty), and the only GLBs in this repository
+   *     are the two in `fixtures/`, both of this one mesh.
+   *
+   * So this is the strongest form the check can take here, and it is the claim
+   * that matters: **the same millimetres come out of the decimated object as out
+   * of the mesh the measurement was taken from**, on both the compressed and the
+   * uncompressed path. Axis order is the same on both sides — the store carries
+   * the STL's own Z-up axes, which the test below pins — so the three extents
+   * compare component-wise.
+   */
+  it('agrees with the source mesh’s own bbox to 0.1 mm — the mount contract', async () => {
+    const stl = parseStl(new Uint8Array(readFileSync(join(process.cwd(), 'tools', 'lod', 'fixtures', 'wall-8180da93.stl'))))
+    const min = new Vector3(Infinity, Infinity, Infinity)
+    const max = new Vector3(-Infinity, -Infinity, -Infinity)
+    for (let i = 0; i < stl.positions.length; i += 3) {
+      const point = new Vector3(stl.positions[i], stl.positions[i + 1], stl.positions[i + 2])
+      min.min(point)
+      max.max(point)
+    }
+    const source = max.clone().sub(min)
+    // The mesh the two fixtures were made from, at its own measured size.
+    expect(source.toArray().map((mm) => Math.round(mm * 1000) / 1000)).toEqual([25.4, 12.7, 6])
+
+    for (const name of ['wall-8180da93.glb', 'wall-8180da93.plain.glb']) {
+      const lod = await parseLodGlb(BLOB, fixture(name))
+      const decoded = sizeOf(lod.bounds)
+      for (const axis of ['x', 'y', 'z'] as const) {
+        // 0.1 mm is the spec's figure. The compressed object's worst axis is
+        // 0.002 mm — the y extent reads 12.702 against the mesh's 12.700,
+        // which is the int16 quantization and nothing else; the uncompressed
+        // one is exact to six figures.
+        expect(Math.abs(decoded[axis] - source[axis]), `${name} ${axis}`).toBeLessThan(0.1)
+      }
+      lod.dispose()
+    }
   })
 
   it('rests on z = 0 with height on z, which is why place.ts rotates about X', async () => {
