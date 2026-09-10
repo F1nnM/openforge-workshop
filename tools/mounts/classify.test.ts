@@ -496,9 +496,13 @@ describe('analyseInsert', () => {
     // top face and the body is now *below* it, so the axis has to point down.
     // `+1` regardless — what the producer used to emit — would have aimed the
     // torch into the wall and hung it by its tip.
+    // The two boxes **abut** rather than overlap, and that is load-bearing:
+    // `syntheticStl` emits every solid's six faces, so a flange sunk into the
+    // shaft would put two coincident triangles on the +z bbox plane and read as
+    // 151 % of a face covered. A real peg is one closed shell.
     const stl = parseStl(
       syntheticStl([
-        { min: [-2.5, -2.5, 0], max: [2.5, 2.5, 12] },
+        { min: [-2.5, -2.5, 0], max: [2.5, 2.5, 11] },
         { min: [-3.5, -3.5, 11], max: [3.5, 3.5, 12] },
       ]),
     )
@@ -516,6 +520,33 @@ describe('analyseInsert', () => {
     expect(m.anchor.kind).toBe('plate')
     expect(m.anchor.axis).toEqual([0, 0, 1]) // into the body, off the face it lies on
     expect(m.anchor.at).toEqual([0, 0, 0])
+  })
+
+  /**
+   * `torch_plate.stl`'s shape, and the one the ordering was changed for.
+   *
+   * 7.5 × 8.9 × 13.5 mm — a flat back plate with a short body protruding from
+   * it. It satisfies the peg rule too (a near-square prism, 13.5 mm along its
+   * long axis against an 8.9 mm thickness, which is over the 1.4× floor), so
+   * peg-first anchored it on the *end* of that long axis and the spec's
+   * `socket` + `plate` renderer row had nothing in the corpus to exercise. The
+   * flat face is the stronger claim: 100 % of `+y`, against 28 % on the face
+   * opposite it.
+   */
+  it('reads a flat-backed plate with a protruding body as a plate, not a peg', () => {
+    const stl = parseStl(
+      syntheticStl([
+        { min: [-3.75, 0, -8.4], max: [3.75, 0.5, 5.1] },
+        { min: [-2, -8.4, -5], max: [2, 0, 2] },
+      ]),
+    )
+    const m = analyseInsert(stl.positions, stl.triangles)
+    expect(m.anchor.kind).toBe('plate')
+    // The back face's own centre, and the axis off it into the body — so the
+    // consumer that aims the axis out of the host lands the plate flat on it.
+    expect(m.anchor.at.map((value) => Math.round(value * 100) / 100)).toEqual([0, 4.45, 6.75])
+    expect(m.anchor.axis).toEqual([0, -1, 0])
+    expect(m.anchor.size.map((side) => Math.round(side * 10) / 10)).toEqual([7.5, 8.9, 13.5])
   })
 
   it('classes a cube as a block', () => {

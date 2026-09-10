@@ -21,8 +21,8 @@
  * **4 blobs that are filed both ways** and answer both questions from one parse,
  * which is why 995 + 139 is 1,134 and not the number of objects. The hosts carry
  * **1,301 mounts** (702 opening, 438 socket, 55 pocket, 78 surface, 28 hole) and
- * every one of the **139 inserts** has an anchor (117 leaf, 13 block, 5 plate,
- * 4 peg). Of the 1,230 slots the host blobs declare, **1,183 resolved**; the 47
+ * every one of the **139 inserts** has an anchor (117 leaf, 13 block, 7 plate,
+ * 2 peg). Of the 1,230 slots the host blobs declare, **1,183 resolved**; the 47
  * that did not say why: 14 `arc-fit-refused`, 12 `no-socket`, 12 `modelled-in`,
  * 6 `runs-off-end`, 3 `no-opening`.
  *
@@ -319,6 +319,48 @@ describeCorpus(
         for (const mount of host.mounts) {
           expect(length(mount.normal), `${nameOf(blob)} ${mount.slot}`).toBeCloseTo(1, 6)
         }
+      }
+    })
+
+    /**
+     * The four anchor kinds, counted — `plate` before `peg` is what these are.
+     *
+     * `analyseInsert` tries the plate rule first, and the two blobs that moved
+     * when it did are the point: `torch_plate.stl` was a `peg` anchored on the
+     * end of its long axis and is now a `plate` on the flat back it presses
+     * against the wall, and `torch.stl` — whose flat base and unflat head make
+     * it a plate by the same test — keeps the *identical* `at` and `axis` it had
+     * as a peg, so 354 torch slots render exactly as before under a different
+     * label. The two remaining pegs are the `brazier+small` blobs.
+     */
+    it('counts the four anchor kinds the plate-first order produces', () => {
+      const kinds = { leaf: 0, block: 0, plate: 0, peg: 0 }
+      for (const insert of Object.values(inv.inserts)) kinds[insert.anchor.kind] += 1
+      expect(kinds).toEqual({ leaf: 117, block: 13, plate: 7, peg: 2 })
+    })
+
+    /**
+     * What the *index* carries, which is the number the app actually reads.
+     *
+     * The inventory is blob-keyed and the catalog is row-keyed, so these are not
+     * the 995 and 139 above: 171 md5s are shared by 520 rows. Pinned because the
+     * join is the step where a measurement can be silently dropped — an empty
+     * inventory, a fixture-hash mismatch, a record whose blob moved — and every
+     * one of those failures looks like a smaller number here and like nothing at
+     * all anywhere else.
+     */
+    it('joins the measurement onto every row the archive shares a blob with', () => {
+      const withMounts = file.records.filter((record) => record.mounts !== undefined)
+      const withAnchor = file.records.filter((record) => record.anchor !== undefined)
+      expect(withMounts).toHaveLength(972)
+      expect(withAnchor).toHaveLength(285)
+      /* Every joined row's measurement is the one the inventory holds for its
+         own blob — the join is a lookup and nothing else. */
+      for (const record of withAnchor) {
+        expect(record.anchor, record.id).toEqual(inv.inserts[record.blob]?.anchor)
+      }
+      for (const record of withMounts) {
+        expect(record.mounts, record.id).toEqual(inv.hosts[record.blob]?.mounts)
       }
     })
 

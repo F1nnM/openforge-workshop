@@ -942,6 +942,9 @@ function leafAnchor(size: Vec3): InsertAnchor | undefined {
 /**
  * A near-square prism, longer than it is thick: anchored on its wider end.
  *
+ * Tried **after** {@link plateAnchor} — see {@link analyseInsert} for the
+ * measurement that ordering came from.
+ *
  * The axis runs **from that end towards the other one**, which is the whole of
  * {@link InsertAnchor}'s sign convention on the one kind that can be authored
  * either way up. `widerEnd` picks the flange and `at` is that end's face centre,
@@ -1018,8 +1021,8 @@ function anchorOf(
 ): InsertAnchor {
   return (
     leafAnchor(size) ??
-    pegAnchor(positions, triangles, bbox, size) ??
-    plateAnchor(positions, triangles, bbox, size) ?? {
+    plateAnchor(positions, triangles, bbox, size) ??
+    pegAnchor(positions, triangles, bbox, size) ?? {
       // The fallback: it stands on its own bottom face, so `+z` is up through
       // the body — the convention with the least measured about it.
       kind: 'block',
@@ -1033,9 +1036,23 @@ function anchorOf(
 /**
  * Measure one insert: the box it occupies and the anchor it presents.
  *
- * Ordered leaf → peg → plate → block, because the tests each shape passes are
- * not exclusive — a door leaf is also a one-sided plate — and the earlier kinds
- * are the more specific claims.
+ * Ordered leaf → **plate** → peg → block, because the tests each shape passes
+ * are not exclusive — a door leaf is also a one-sided plate — and the earlier
+ * kinds are the more specific claims.
+ *
+ * **Plate before peg, and that ordering is a measurement.** `torch_plate.stl` is
+ * 7.5 × 8.9 × 13.5 mm: a flat back plate with a short body protruding from it,
+ * and a near-square prism 1.4× longer than it is thick. It therefore satisfies
+ * {@link pegAnchor} as well as {@link plateAnchor}, and under peg-first it came
+ * back a `peg` anchored on the *end* of its longest axis — which hung the whole
+ * accessory off the wrong face and left the spec's `socket` + `plate` renderer
+ * row with nothing in the corpus to exercise it. A ≥ 50 % flat face whose
+ * opposite carries under half of it is the *stronger* claim of the two: it is a
+ * measurement of where the piece lies against the host, where the peg rule is an
+ * inference from three bbox ratios. A genuine peg is unaffected, and the reason
+ * is the plate rule's own asymmetry — `torch.stl` is a 7 × 7 × 12 mm prism whose
+ * six faces are all flat, so *every* face is refused for having a flat opposite,
+ * and it falls through to {@link pegAnchor} exactly as before.
  *
  * **Every kind's `axis` runs from `at` into the insert's body** — the contract
  * `src/catalog/schema.ts#InsertAnchor` states and `place.ts#accessoryMatrix`
