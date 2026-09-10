@@ -141,6 +141,14 @@ export const DEFAULT_ROTATION_STEP_DEG = 90
  * field that has never had a value distinguishes nothing. The pair of them is
  * schema 5.
  *
+ * {@link InsertAnchor}'s `axis` sign convention — *from `at` into the insert's
+ * body* — was pinned on the same footing and did **not** bump either. It names
+ * what the producer always meant to emit rather than a new shape: the field is
+ * `Vec3` under both readings, no shipped index carries an `anchor` at all, and
+ * the one measured corpus was re-measured under the stated sign rather than left
+ * to be reinterpreted. A version that moved here would tell a reader to expect
+ * two spellings of `axis` in the wild, and there is only ever one.
+ *
  * `PIPELINE_VERSION` deliberately stays 3, and here the biconditional needs the
  * escape hatch rather than the rule: with the committed inventory empty, the
  * emitted `{tags, records}` are **byte-identical** to schema 4's — no record
@@ -1031,10 +1039,31 @@ export type Mount = z.infer<typeof Mount>
  * half is a `plate`; anything that simply sits in a hole is a `block`. Doors are
  * authored with an inconsistent `z_min`, which is exactly why this is measured
  * from the mesh and not assumed.
+ *
+ * ## `axis` points into the body, and that is a sign convention
+ *
+ * The consumer — `src/builder/three/place.ts#accessoryMatrix` — turns `axis` to
+ * face the direction **out of the host**: the reverse of a socket's entry axis,
+ * or the mount's own outward normal. So the insert's body has to lie along
+ * `+axis` from `at`, and the producer signs it that way for every kind: a peg's
+ * runs from its flange towards its tip, a plate's is the inward normal of the
+ * face it lies on, a block's is `+z` off its bottom face. Get it backwards and
+ * the accessory is seated *inside* the host with its tip poking out, which is
+ * the failure this sentence exists to prevent.
+ *
+ * A `leaf` is the one kind that cannot be measured: a door slab straddles its
+ * thin axis with a front and a back, and nothing in the mesh says which is
+ * which. Its `axis` is `+thin` by declaration, and a leaf hung the wrong way
+ * round is a face-flip rather than a misplacement.
  */
 export const InsertAnchor = z.object({
   kind: z.enum(['peg', 'leaf', 'plate', 'block']),
+  /** The point on the insert that lands on the host's mount, in its bbox frame. */
   at: Vec3,
+  /**
+   * Unit vector **from `at` into the insert's body**; a consumer aligns it with
+   * the direction out of the host. See the note above.
+   */
   axis: Vec3,
   size: Vec3,
 })

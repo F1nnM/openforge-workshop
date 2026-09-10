@@ -919,7 +919,18 @@ function widerEnd(
   return (span[1] as number) > (span[0] as number) ? 1 : -1
 }
 
-/** A slab: thin one way, wide the other two. Its axis is the thin one. */
+/**
+ * A slab: thin one way, wide the other two. Its axis is the thin one.
+ *
+ * **Positive by convention, and that is a limitation rather than a
+ * measurement.** {@link InsertAnchor}'s `axis` runs from `at` into the body, and
+ * a leaf's body straddles the thin axis: a door is a slab with a front and a
+ * back, and nothing in the mesh says which is which. So `+thin` is chosen and
+ * declared, and a leaf hung the wrong way round is a face-flip the consumer
+ * cannot detect either — see `src/builder/three/place.ts#openingSeat`, which
+ * seats a leaf on the opening's mid-plane where the choice costs nothing but the
+ * side the relief faces.
+ */
 function leafAnchor(size: Vec3): InsertAnchor | undefined {
   const thin = thinnestAxis(size)
   const [u, v] = otherAxes(thin)
@@ -928,7 +939,17 @@ function leafAnchor(size: Vec3): InsertAnchor | undefined {
   return { kind: 'leaf', at: BOTTOM_CENTRE, axis: unitVector(thin, 1), size }
 }
 
-/** A near-square prism, longer than it is thick: anchored on its wider end. */
+/**
+ * A near-square prism, longer than it is thick: anchored on its wider end.
+ *
+ * The axis runs **from that end towards the other one**, which is the whole of
+ * {@link InsertAnchor}'s sign convention on the one kind that can be authored
+ * either way up. `widerEnd` picks the flange and `at` is that end's face centre,
+ * so the body lies at `−widerEnd` along the long axis and `+1` would point out
+ * of the insert. `torch.stl` has its flange at the min end and read correctly
+ * under either sign; the 356 torch files are not all authored that way, and one
+ * that is not would have been seated *inside* the wall.
+ */
 function pegAnchor(
   positions: ArrayLike<number>,
   triangles: number,
@@ -941,15 +962,22 @@ function pegAnchor(
     thicker = Math.max(size[u], size[v])
   if (thicker > thinner * PEG_CROSS_RATIO) return undefined
   if (size[long] < thicker * PEG_LENGTH_RATIO || size[long] > PEG_MAX_LENGTH_MM) return undefined
+  const end = widerEnd(positions, triangles, bbox, long)
   return {
     kind: 'peg',
-    at: toBboxCoordinates(faceCentre(bbox, long, widerEnd(positions, triangles, bbox, long)), bbox),
-    axis: unitVector(long, 1),
+    at: toBboxCoordinates(faceCentre(bbox, long, end), bbox),
+    axis: unitVector(long, end < 0 ? 1 : -1),
     size,
   }
 }
 
-/** One face carries the surface, and its opposite carries under half of it. */
+/**
+ * One face carries the surface, and its opposite carries under half of it.
+ *
+ * The axis is that face's **inward** normal, which is {@link InsertAnchor}'s
+ * convention with nothing else to decide: `at` is the flat face and the body is
+ * the only place left to point at.
+ */
 function plateAnchor(
   positions: ArrayLike<number>,
   triangles: number,
@@ -975,7 +1003,8 @@ function plateAnchor(
   return {
     kind: 'plate',
     at: toBboxCoordinates(faceCentre(bbox, axis, sign), bbox),
-    // Into the body, so a consumer aligns the host's own inward normal to it.
+    // Into the body, off the face it lies on: a consumer aligns the direction
+    // out of the host to it and the plate lands flat against the host.
     axis: unitVector(axis, sign < 0 ? 1 : -1),
     size,
   }
@@ -991,6 +1020,8 @@ function anchorOf(
     leafAnchor(size) ??
     pegAnchor(positions, triangles, bbox, size) ??
     plateAnchor(positions, triangles, bbox, size) ?? {
+      // The fallback: it stands on its own bottom face, so `+z` is up through
+      // the body — the convention with the least measured about it.
       kind: 'block',
       at: BOTTOM_CENTRE,
       axis: [0, 0, 1],
@@ -1005,6 +1036,11 @@ function anchorOf(
  * Ordered leaf → peg → plate → block, because the tests each shape passes are
  * not exclusive — a door leaf is also a one-sided plate — and the earlier kinds
  * are the more specific claims.
+ *
+ * **Every kind's `axis` runs from `at` into the insert's body** — the contract
+ * `src/catalog/schema.ts#InsertAnchor` states and `place.ts#accessoryMatrix`
+ * consumes by aligning it with the direction *out of* the host. Only `peg` has
+ * to measure which way that is; `leaf` cannot know and says so.
  */
 export function analyseInsert(positions: Float32Array, triangles: number): InsertMeasurement {
   const bbox = meshBounds(positions, triangles)

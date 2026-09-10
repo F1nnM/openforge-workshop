@@ -485,8 +485,27 @@ describe('analyseInsert', () => {
     const stl = parseStl(syntheticStl([{ min: [-3.5, -3.5, 0], max: [3.5, 3.5, 12] }]))
     const m = analyseInsert(stl.positions, stl.triangles)
     expect(m.anchor.kind).toBe('peg')
+    // A uniform prism ties, `widerEnd` takes the low end, and the body is above
+    // it — the flange-at-the-bottom case, which is how `torch.stl` is authored.
     expect(m.anchor.axis).toEqual([0, 0, 1])
     expect(m.anchor.at).toEqual([0, 0, 0])
+  })
+
+  it('turns the peg axis round when the flange is at the far end of the long axis', () => {
+    // The same 12 mm peg with its 7 x 7 flange on top instead: `at` moves to the
+    // top face and the body is now *below* it, so the axis has to point down.
+    // `+1` regardless — what the producer used to emit — would have aimed the
+    // torch into the wall and hung it by its tip.
+    const stl = parseStl(
+      syntheticStl([
+        { min: [-2.5, -2.5, 0], max: [2.5, 2.5, 12] },
+        { min: [-3.5, -3.5, 11], max: [3.5, 3.5, 12] },
+      ]),
+    )
+    const m = analyseInsert(stl.positions, stl.triangles)
+    expect(m.anchor.kind).toBe('peg')
+    expect(m.anchor.at).toEqual([0, 0, 12])
+    expect(m.anchor.axis).toEqual([0, 0, -1])
   })
 
   it('classes a cup with one flat face as a plate anchored on it', () => {
