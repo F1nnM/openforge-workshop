@@ -579,6 +579,11 @@ function holdNotes(instance: TemplateInstance, host: CatalogRecord, held: Resolv
         { ...subject, tileId: held.record.id },
       ),
     )
+    // **And nothing else.** An undeclared slot has no mount by construction, so
+    // `hold-unplaced` would fire beside this one on every off-slot hold and add
+    // *the plan cannot draw it* to *there is nowhere on the host it goes* — the
+    // second note being a consequence of the first rather than a second fact.
+    return notes
   }
   if (held.mounts === 0) {
     notes.push(

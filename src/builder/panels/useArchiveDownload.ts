@@ -647,17 +647,39 @@ function classify(
   }
 
   if (error instanceof IncompleteSceneError) {
+    /*
+      **An accessory hole is a different sentence and a different repair.** A
+      fill's own file can declare slots — the door of a doorway, the torch of a
+      socket — and 1,047 of the 1,244 declarations in the archive are required,
+      so a scene can be refused with every slot *on the plan* filled. Naming that
+      hole `wall` and telling the user to fill the wall points at the one thing
+      that is not empty; `unfilledSentence` names the pair instead, and the two
+      sentences below change with it.
+
+      Counted rather than switched on the first hole, because a scene can hold
+      both kinds at once: the noun narrows to "accessory slot" only when every
+      hole is one, and the repair clause is added whenever any hole is.
+    */
+    const accessories = error.unfilled.filter((hole) => hole.hold !== undefined).length
+    const onlyAccessories = accessories === error.unfilled.length
     return {
       kind: 'incomplete',
       headline:
         error.unfilled.length === 1
-          ? 'One slot on the plan is still empty'
-          : `${String(error.unfilled.length)} slots on the plan are still empty`,
+          ? `One ${onlyAccessories ? 'accessory slot' : 'slot on the plan'} is still empty`
+          : `${String(error.unfilled.length)} ${onlyAccessories ? 'accessory slots' : 'slots on the plan'} are still empty`,
       detail:
-        `${unfilledSentence(error.unfilled)} Every slot of every recipe in this build is required, so a pack ` +
-        'without them would be short of a printable model — and a streamed zip records its sizes at the end, so ' +
-        'a short one still opens and nobody would find out until the print failed. Nothing was saved. Fill each ' +
-        'slot, or take the piece off the grid.',
+        `${unfilledSentence(error.unfilled)} Every slot of every recipe in this build is required` +
+        (accessories === 0
+          ? ''
+          : ', and so is most of what the tiles themselves declare — 1,047 of the 1,244 accessory slots in the ' +
+            'archive') +
+        ', so a pack without them would be short of a printable model — and a streamed zip records its sizes at ' +
+        'the end, so a short one still opens and nobody would find out until the print failed. Nothing was saved. ' +
+        (accessories === 0
+          ? 'Fill each slot, or take the piece off the grid.'
+          : 'Fill each one — an accessory in the slot editor of the piece holding it — or take the piece off the ' +
+            'grid.'),
       retryable: false,
     }
   }
@@ -774,13 +796,24 @@ function shortfallOf(
  * unbounded: a fifty-instance room with one empty slot each would otherwise be a
  * hundred and fifty recipe names. A slot is `undefined` for an instance whose
  * whole recipe is unknown, which is a different sentence and is spelled as one.
+ *
+ * **A hole one level down names the pair** — `recipe: wall › door`, *the door of
+ * the wall of this piece*. Without it a doorway refused for its empty `door`
+ * slot would be reported as `recipe: wall`, which is a slot the user has
+ * filled, and the only actionable half of the sentence would be the wrong half.
  */
 function unfilledSentence(unfilled: readonly UnfilledSlot[]): string {
   const named = unfilled
     .slice(0, 3)
-    .map((hole) => (hole.slot === undefined ? `${hole.template} (no such recipe in this build)` : `${hole.template}: ${hole.slot}`))
+    .map((hole) => `${hole.template}${slotSuffix(hole)}`)
   const rest = unfilled.length - named.length
   return `${named.join('; ')}${rest > 0 ? `; and ${String(rest)} more` : ''}.`
+}
+
+/** ` (no such recipe in this build)`, `: wall`, or `: wall › door`. */
+function slotSuffix(hole: UnfilledSlot): string {
+  if (hole.slot === undefined) return ' (no such recipe in this build)'
+  return hole.hold === undefined ? `: ${hole.slot}` : `: ${hole.slot} › ${hole.hold}`
 }
 
 /** Bytes as the panel spells them. Decimal, one place — the corpus's own convention. */

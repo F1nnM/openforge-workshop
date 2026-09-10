@@ -1429,12 +1429,50 @@ describe('the holds', () => {
     const note = bill.notes.find((entry) => entry.code === 'hold-off-slot')
     expect(note?.severity).toBe('warn')
     expect(note?.message).toContain('lintel')
+    // **One note, not two.** An undeclared slot has no mount by construction, so
+    // `hold-unplaced` beside this would report the consequence as a second fact.
+    expect(bill.notes.map((entry) => entry.code)).toEqual(['hold-off-slot'])
     expect(bill.lines.find((entry) => entry.tile.id === TORCH)?.quantity).toBe(1)
     expect(bill.copies).toBe(2)
     expect(bill.resolved[0]?.holds.map((entry) => entry.hold)).toEqual(['torch', 'lintel'])
     // An undeclared slot has no declaration to be required by, so it can never
     // refuse a download.
     expect(bill.complete).toBe(true)
+  })
+
+  it('sums two accessory slots of one file onto one line, and keeps their order total', () => {
+    // The md5 dedupe's case at the accessory level, and the one that makes
+    // `bySlotRef`'s `hold` leg load-bearing: two holds of **one** slot of one
+    // instance naming one file agree on placement, slot and tile, so without the
+    // fourth key their order would be whatever the walk happened to produce.
+    const twoSlots: Row = {
+      ...hostRow({ sockets: 2, optional: true }),
+      config: {
+        parts: [
+          { name: 'torch', optional: true, tags: { require: [{ tag: 'kind|torch' }] } },
+          { name: 'lintel', optional: true, tags: { require: [{ tag: 'kind|torch' }] } },
+        ],
+      },
+      mounts: [
+        ...PILLAR_FACES.slice(0, 2).map(([face, normal]) => torchSocket(face, normal)),
+        { slot: 'lintel', kind: 'surface', face: '+z', normal: [0, 0, 1], at: [0, 0, 44] },
+      ],
+    }
+    const { index, context } = worldOf([twoSlots, TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: TORCH, lintel: TORCH })], index, context)
+
+    // One file, one download, three prints: two sockets and one surface.
+    const line = bill.lines.find((entry) => entry.tile.id === TORCH)
+    expect(line?.quantity).toBe(3)
+    expect(line?.tileIds).toEqual([TORCH])
+    expect(line?.slots).toEqual([
+      { placement: 'p1', slot: 'wall', tile: TORCH, hold: 'lintel' },
+      { placement: 'p1', slot: 'wall', tile: TORCH, hold: 'torch' },
+    ])
+    expect(bill.files).toBe(2)
+    expect(bill.copies).toBe(4)
+    expect(bill.parts).toBe(4)
+    expect(bill.download.bytes).toBe(4_096 + 2_048)
   })
 
   it('ignores the host’s `base` slot, which is a base match and not an accessory', () => {

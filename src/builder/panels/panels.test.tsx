@@ -2219,6 +2219,42 @@ describe('the download action', () => {
     expect(saved).toHaveLength(0)
   })
 
+  /**
+   * The same refusal, one level down — and the reason the sentence had to change.
+   *
+   * `doorway`'s own file declares a **required** `door` slot, so this scene has
+   * every slot on the plan filled and is still one file short of a printable
+   * model: 1,047 of the archive's 1,244 accessory declarations omit `optional`,
+   * and absence means required. Named as `model` alone it would point the user
+   * at the wall, which is the one thing they have already filled.
+   */
+  it('names the accessory slot, not the filled slot holding it', async () => {
+    place('doorway')
+    let opened = 0
+    render(
+      <DownloadHarness
+        environment={blobEnvironment()}
+        source={fakeSource(() => {
+          opened += 1
+          return 'ok'
+        }, sizesOf(file))}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
+
+    const alert = await failureText()
+    expect(alert).toHaveAttribute('data-kind', 'incomplete')
+    // The noun narrows: nothing on the plan is empty.
+    expect(alert).toHaveTextContent(/One accessory slot is still empty/)
+    expect(alert).toHaveTextContent(/panels-one-slot: model › door/)
+    // And the repair points at the accessory rather than at the wall.
+    expect(alert).toHaveTextContent(/1,047 of the 1,244 accessory slots/)
+    expect(alert).toHaveTextContent(/an accessory in the slot editor of the piece holding it/)
+    expect(opened).toBe(0)
+    expect(saved).toHaveLength(0)
+  })
+
   it('streams and saves a real archive', async () => {
     place('floor1')
     render(

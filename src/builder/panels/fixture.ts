@@ -98,6 +98,7 @@ export const FIXTURE_IDS = {
   twin: 'tiles/dungeon_stone/starter/floor/openlock/dungeon_stone#floor.1x1.openlock.stl',
   big: 'tiles/mines/floors/floor/openlock/mine#floor.4x4.openlock.stl',
   huge: 'tiles/mines/floors/floor/openforge/mine#floor.4x4.openforge.stl',
+  doorway: 'tiles/cave/separate_walls/door/openforge/cave#wall,door+arched.openforge.stl',
 } as const
 
 /**
@@ -118,6 +119,7 @@ export const FIXTURE_DESIGNS = {
   twin: 'd-floor-twin',
   big: 'd-big',
   huge: 'd-huge',
+  doorway: 'd-doorway',
 } as const
 
 /** The display names, so an assertion can name a row without repeating a string. */
@@ -131,6 +133,7 @@ export const FIXTURE_NAMES = {
   twin: 'Dungeon Stone Starter Floor 1x1',
   big: 'Mine Floor 4x4',
   huge: 'Mine Openforge Floor 4x4',
+  doorway: 'Cave Arched Door Wall',
 } as const
 
 export const FIXTURE_CATALOG = {
@@ -357,6 +360,42 @@ export const FIXTURE_CATALOG = {
       texture: 'mine',
       tags: [tag('shape|floor'), tag('connection|openlock'), tag('role|floor'), tag('form|straight')],
       foot: { shape: 'rect', w: 4, d: 4 },
+    },
+    {
+      /*
+        **The one host with a *required* accessory slot**, and it carries no
+        `role|` or `form|` tag so it joins none of the palette's generated
+        families and changes none of their counts.
+
+        It exists for one thing the optional slot on `wallNoBase` cannot express:
+        a scene whose every slot *on the plan* is filled and whose download is
+        refused all the same. 1,047 of the archive's 1,244 accessory
+        declarations omit `optional` and absence means required, so a doorway
+        with no door is the ordinary case rather than a contrived one — and the
+        failure copy has to name the door rather than the wall it is missing
+        from. No mount is measured for it: the hole is the point, and nothing in
+        this fixture fills it.
+      */
+      // 10, because `MIXED_INTEGRAL` holds 9 and the pair are parsed together
+      // in `mixedCatalogFile`, where a repeated ordinal is a schema error.
+      id: FIXTURE_IDS.doorway,
+      ord: 10,
+      blob: blob(10),
+      file: 'cave#wall,door+arched.openforge.stl',
+      bytes: 2_000_000,
+      sprite: true,
+      thumb: false,
+      family: 'tiles/cave/separate_walls/door/openforge',
+      design: 'd-doorway',
+      name: FIXTURE_NAMES.doorway,
+      kinds: ['wall'],
+      conn: ['openforge'],
+      layer: 'topper',
+      build: 'wall on tile',
+      texture: 'cave',
+      tags: [tag('shape|wall'), tag('texture|cave'), tag('connection|openforge')],
+      foot: { shape: 'wall', length: 1 },
+      config: { parts: [{ name: 'door', tags: { require: [{ tag: 'part|door' }] } }] },
     },
   ],
 }
