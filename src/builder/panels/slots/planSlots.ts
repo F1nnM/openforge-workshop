@@ -143,8 +143,9 @@ export interface PlanSlotInventory {
    */
   readonly required: number
   /**
-   * Of the required ones, the ones **still holding nothing** — the plan-side
-   * count of `billView.ts`'s `hole` fault.
+   * Of the required ones, the ones **holding nothing this build can print** —
+   * the plan-side count of `billView.ts`'s `hole` fault, on the same condition:
+   * the slot is empty, or the accessory in it has left the archive.
    *
    * The number the summary leads with, because it is the only one that changes
    * as the user works: `required` is a property of the archive and cannot be
@@ -152,7 +153,10 @@ export interface PlanSlotInventory {
    * report a finished piece as an outstanding task.
    */
   readonly holes: number
-  /** Slots holding an accessory, required or not. `slots` when the plan is finished. */
+  /**
+   * Slots holding an accessory **this build still has a record for**, required or
+   * not. Equal to {@link slots} when the plan is finished.
+   */
   readonly filled: number
   /**
    * Slots no file in the archive can fill, before anything is picked.
@@ -249,11 +253,20 @@ export function planSlots(
       for (const state of states) {
         slots += 1
         if (!state.optional) required += 1
-        // `chosen` is what the fill holds, because the states above were resolved
-        // against it — so this counts the holes rather than re-reading `holds`
-        // and risking a second answer.
-        if (state.chosen === undefined && !state.optional) holes += 1
-        if (state.chosen !== undefined) filled += 1
+        // **A hold this build cannot resolve is not a filled slot**, and the
+        // condition is the resolver's rather than a second reading of it:
+        // `resolveInstance` refuses the download for a required hold whose
+        // `record` is missing — empty *or* naming a retired file — and
+        // `billView.ts#holeFaults` faults exactly that. Counting a retired hold
+        // as filled here is how this panel came to say *all filled* over a scene
+        // the bill panel was refusing. The picker agrees: a retired id matches no
+        // card, so such a slot renders with nothing chosen.
+        //
+        // `chosen` rather than `holds` because the states above were resolved
+        // against the holds, so this cannot give a second answer.
+        const holding = state.chosen === undefined ? undefined : records.get(state.chosen)
+        if (holding === undefined && !state.optional) holes += 1
+        if (holding !== undefined) filled += 1
         if (state.deadEnd) unfillable += 1
         names.set(state.name, (names.get(state.name) ?? 0) + 1)
       }

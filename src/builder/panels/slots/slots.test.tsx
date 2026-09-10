@@ -260,6 +260,44 @@ function at(id: string, x: number, z: number): TemplateInstance {
   return instance({ fill: id as TileId, x, z })
 }
 
+/** The one slot {@link instance} names, branded once. */
+const SLOT0 = SlotName.parse('slot0')
+
+/**
+ * An instance whose one fill is `parent`, **holding** the accessories given.
+ *
+ * Keyed under {@link KEY} because the tests that press a card write to the store
+ * and `pinHold` addresses a placement by its map key. `pinned: true` throughout:
+ * these fixtures stand for a choice already made.
+ */
+function holding(
+  parent: string,
+  holds: Readonly<Record<string, string>>,
+  x = 0,
+  z = 0,
+): TemplateInstance {
+  return {
+    id: KEY,
+    template: TemplateId.parse(A_RECIPE),
+    x,
+    z,
+    rotation: 0,
+    fills: {
+      [SLOT0]: {
+        tile: parent as TileId,
+        pinned: false,
+        holds: Object.fromEntries(
+          Object.entries(holds).map(([hold, tile]) => [
+            HoldName.parse(hold),
+            { tile: tile as TileId, pinned: true },
+          ]),
+        ),
+      },
+    },
+    filters: [],
+  }
+}
+
 const plan = (entries: Record<string, TemplateInstance>) => entries
 
 beforeEach(() => {
@@ -345,6 +383,34 @@ describe('planSlots', () => {
       PARENT.wallTowne,
       PARENT.pairedGrate,
     ])
+  })
+
+  it('counts a required hold naming a retired file as a hole, not as filled', () => {
+    /*
+      The two surfaces have to agree. `resolveInstance` refuses the download for
+      a required hold whose record is missing — which is an empty socket *and* an
+      accessory the archive has dropped — and `billView.ts#holeFaults` faults
+      both, so counting the second as filled here made this panel say *all
+      filled* over a scene the bill panel was refusing.
+
+      `wallLow`'s `top` is the fixture's required accessory slot: `optional` is
+      absent, and absence means required.
+    */
+    const inventory = planSlots(
+      SLOT_CATALOG,
+      plan({ [KEY]: holding(PARENT.wallLow, { top: RETIRED_TILE }) }),
+    )
+    expect(inventory).toMatchObject({ slots: 1, required: 1, holes: 1, filled: 0 })
+  })
+
+  it('counts a hold this build still has as filled', () => {
+    // The control for the assertion above: the same slot, holding a file the
+    // fixture actually has.
+    const inventory = planSlots(
+      SLOT_CATALOG,
+      plan({ [KEY]: holding(PARENT.wallLow, { top: FILL.topWall }) }),
+    )
+    expect(inventory).toMatchObject({ slots: 1, required: 1, holes: 0, filled: 1 })
   })
 
   it('calls a fill the index has retired an orphan rather than dropping it', () => {
@@ -477,33 +543,10 @@ describe('AccessorySection', () => {
  * the mount lines below are read off.
  */
 describe('the accessory picker writes what it is given', () => {
-  const SLOT0 = SlotName.parse('slot0')
-
-  /** One placed piece whose `slot0` fill is the archway, holding what it is told to. */
-  function archway(holds: Readonly<Record<string, string>>): Record<string, TemplateInstance> {
-    return {
-      [KEY]: {
-        id: KEY,
-        template: TemplateId.parse(A_RECIPE),
-        x: 0,
-        z: 0,
-        rotation: 0,
-        fills: {
-          [SLOT0]: {
-            tile: PARENT.archway as TileId,
-            pinned: false,
-            holds: Object.fromEntries(
-              Object.entries(holds).map(([hold, tile]) => [
-                HoldName.parse(hold),
-                { tile: tile as TileId, pinned: true },
-              ]),
-            ),
-          },
-        },
-        filters: [],
-      },
-    }
-  }
+  /** One placed archway, holding what it is told to. */
+  const archway = (holds: Readonly<Record<string, string>>): Record<string, TemplateInstance> => ({
+    [KEY]: holding(PARENT.archway, holds),
+  })
 
   /**
    * The section over the **store's** scene, because the presses below write
@@ -562,6 +605,18 @@ describe('the accessory picker writes what it is given', () => {
     // filled. What is true is that nothing required is outstanding.
     placed(archway({ torch: FILL.torchStone }))
     expect(screen.getByText(/2 slots on 1 piece, nothing required is still empty/)).toBeInTheDocument()
+  })
+
+  it('does not call a retired accessory a filled slot', () => {
+    // Read as the user reads it: the summary counts the hole, and the picker
+    // shows nothing chosen — a retired id matches no card in the grid — so the
+    // two halves of the section say the same thing about the same slot.
+    placed({ [KEY]: holding(PARENT.wallLow, { top: RETIRED_TILE }) })
+    expect(screen.getByText(/1 slot on 1 piece, 1 required and still empty/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Dungeon Stone Secret Door Top/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
   })
 
   it('says when nothing has measured where an accessory goes', () => {
