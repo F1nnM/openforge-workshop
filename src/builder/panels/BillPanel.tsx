@@ -14,9 +14,14 @@
  * in a fixed-height column, each capping its own height, and the parts list — the
  * one thing a reader opens this column for — paid for both. The pieces list is
  * **deleted**: it was a second enumeration of the placements the rows below
- * already expand into. The other two are inside this panel's own three bands,
- * passed in as {@link BillPanelProps.accessories} and {@link
- * BillPanelProps.backup} so this file keeps one subject.
+ * already expand into. The backup section is inside this panel's own footer,
+ * passed in as {@link BillPanelProps.backup} so this file keeps one subject.
+ *
+ * An *Accessory slots* section stood at the foot of the scrolling band for the
+ * same reason and is **also gone** (F7): choosing an accessory now happens in the
+ * slot editor, under the recipe slot whose file opens it, so what this column
+ * says about one is what every other fault says — the row, and a `Slots` press
+ * that opens the surface that fixes it.
  *
  * **Two things only that list could do, and the rows below do both now**, each
  * through a `Slots` press ({@link SlotsButton}). The plan's own route to the slot
@@ -176,30 +181,14 @@ export interface BillPanelProps {
    */
   readonly onEditSlots: (placement: PlacementId) => void
   /**
-   * The accessory inventory, rendered at the foot of the scrolling band.
-   *
-   * A node and not a set of props, because what it needs — the catalog file and
-   * the placements — this panel has no other use for, and because it answers a
-   * question one level below the bill's: an accessory is a slot of a *file*, so
-   * nothing in `buildBillOfTiles` counts one. It is passed rather than mounted
-   * here so this file keeps one subject; `slots/AccessorySection.tsx` is the
-   * component and it renders `null` for the 88.5% of plans that open nothing.
-   *
-   * It was a sibling of this panel in the column's grid until the sidebar was
-   * cut back, in an implicit `auto` row that took its height from the parts
-   * list. Inside the scroll container it takes none: it is what a reader reaches
-   * after the files, which is also the order the two questions come in.
-   */
-  readonly accessories: ReactNode
-  /**
    * The JSON export/import line, rendered in the footer under the download.
    *
    * Here for the reason `BackupPanel.tsx` gives at length: what the envelope
    * carries *is* this room, so "take this room away as files" and "take this
-   * room away as a save file" are one question a step apart. A node for
-   * {@link accessories}' reason — it reads and writes the store itself and needs
-   * nothing from this panel — and in the footer rather than below the column so
-   * a fifty-row room cannot push the only backup path in the app off screen.
+   * room away as a save file" are one question a step apart. A node and not a
+   * set of props, because it reads and writes the store itself and needs nothing
+   * from this panel — and in the footer rather than below the column so a
+   * fifty-row room cannot push the only backup path in the app off screen.
    */
   readonly backup: ReactNode
   /**
@@ -222,7 +211,6 @@ export function BillPanel({
   download,
   templates,
   onEditSlots,
-  accessories,
   backup,
   generated,
 }: BillPanelProps) {
@@ -325,8 +313,6 @@ export function BillPanel({
         {generated === undefined ? null : (
           <GeneratedBillSection bill={generated.bill} placements={generated.placements} />
         )}
-
-        {accessories}
 
         {infos.length === 0 ? null : (
           <details className="of-bill-infos">
@@ -554,13 +540,22 @@ function PlacementRow({
   // resolve to the same md5 — and before this the row said `×2` with one
   // placement under it and no way to account for the second copy. Named only
   // when there is more than one, so the ordinary single-ask row stays quiet.
-  const asking = slotsAsking(line, entry.id)
+  //
+  // An accessory names the pair — `wall › torch`, *the torch in the wall* — and
+  // it is named even when it asks alone, because a single ask worth four prints
+  // is exactly the row a reader cannot otherwise account for: a four-socket
+  // pillar's torch is `×4` from one hold.
+  const refs = slotsAsking(line, entry.id)
+  const asking = refs.map((ref) =>
+    ref.hold === undefined ? String(ref.slot) : `${String(ref.slot)} › ${String(ref.hold)}`,
+  )
+  const named = refs.length > 1 || refs.some((ref) => ref.hold !== undefined)
   return (
     <li className="of-bill-place">
       <span className="of-bill-at">
         {describeCell(entry.instance.x, entry.instance.z)}
         {entry.instance.rotation === 0 ? '' : ` · ${formatUnits(entry.instance.rotation)}°`}
-        {asking.length > 1 ? ` · ${asking.join(' + ')}` : ''}
+        {named ? ` · ${asking.join(' + ')}` : ''}
       </span>
       <span className="of-bill-acts">
         {/*
@@ -599,8 +594,9 @@ function PlacementRow({
 /* --------------------------------------------------------------- slot faults */
 
 /**
- * Every slot in the scene that is empty, retired, or holding a file it does not
- * admit — one line each, and a way to reach the piece.
+ * Every slot in the scene that is empty, retired, holding a file it does not
+ * admit, or leaving a required accessory socket of its own file unfilled — one
+ * line each, and a way to reach the piece.
  *
  * **This is the answer to the question row A3 left open and row A8 declined to
  * invent.** Three surfaces were deleted from this panel because the facts behind
@@ -645,7 +641,9 @@ function SlotFaultBlock({
       <ul className="of-bill-faults" role="list">
         {faults.map((fault) => (
           <SlotFaultRow
-            key={`${fault.placement}/${fault.slot ?? ''}`}
+            // The hold as well as the slot: a filled wall with an empty torch
+            // socket is two entries under one placement and one slot name.
+            key={`${fault.placement}/${fault.where?.slot ?? ''}/${fault.where?.hold ?? ''}`}
             fault={fault}
             onEditSlots={onEditSlots}
           />
@@ -666,6 +664,14 @@ function SlotFaultBlock({
  * no store action that empties a single slot. Row C3's slot editor is where a
  * fill is re-chosen in place, and the two surfaces are complementary — this one
  * says a slot is wrong from a panel that lists the whole scene, that one fixes it.
+ *
+ * **A `hole` is one of them again.** An accessory is a slot of a *file* and the
+ * editor used to fill a *recipe's* slots alone, so a `Slots` press on such a row
+ * opened a dialog with nothing in it about the door the row named — no button was
+ * offered, and the row's sentence sent the reader to a section in the sidebar
+ * instead. F7 put the accessory picker in that dialog, under the recipe slot
+ * whose file opens the hole, so the press now reaches the one control that fills
+ * it and all four kinds are answered the same way.
  */
 function SlotFaultRow({
   fault,
@@ -676,6 +682,9 @@ function SlotFaultRow({
 }) {
   const copy = slotFaultCopy(fault)
   const at = describeCell(fault.instance.x, fault.instance.z)
+  // The accessory when the fault is one, because *the faulty door* is what the
+  // user is looking for and *the faulty wall* is the part they already filled.
+  const what = fault.where?.hold ?? fault.where?.slot ?? 'recipe'
   return (
     <li className="of-bill-fault" data-blocking={fault.blocksDownload ? '' : undefined}>
       <span className="of-bill-fault-head">
@@ -683,15 +692,16 @@ function SlotFaultRow({
           {copy.subject} · {at}
         </span>
         <span className="of-bill-acts">
-          {/* The editor is the *fix* for every one of the three faults — an
-              empty slot, a retired fill and a fill the slot does not admit are
-              all answered by choosing a file — so this row is the one place in
-              the panel where it is the obvious next press rather than an
-              alternative to removing the piece. */}
+          {/* The editor is the *fix* for all four kinds — an empty slot, a
+              retired fill and a fill the slot does not admit are answered by
+              choosing a file for a slot the recipe declares, and a `hole` by
+              choosing an accessory under the slot that holds it — so this row is
+              the one place in the panel where the press is the obvious next step
+              rather than an alternative to removing the piece. */}
           <SlotsButton
             onEditSlots={onEditSlots}
             placement={fault.placement}
-            subject={`of the piece with the faulty ${fault.slot ?? 'recipe'} at ${at}`}
+            subject={`of the piece with the faulty ${what} at ${at}`}
           />
           <button
             type="button"
@@ -701,7 +711,7 @@ function SlotFaultRow({
             }}
           >
             Remove{' '}
-            <VisuallyHidden>{`the piece with the faulty ${fault.slot ?? 'recipe'} at ${at}`}</VisuallyHidden>
+            <VisuallyHidden>{`the piece with the faulty ${what} at ${at}`}</VisuallyHidden>
           </button>
         </span>
       </span>

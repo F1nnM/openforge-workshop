@@ -62,14 +62,14 @@ import type { UndoControls } from '@/builder/canvas/useHistory'
    asserting against a shape neither of them takes. It is a test module and
    reaches no renderer — `panels/boundary.test.ts` walks production entries. */
 import { planHistory } from '@/builder/three/fixture'
-import type { CatalogFile, DesignId } from '@/catalog'
+import type { CatalogFile, DesignId, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, resolveTags, selectVariant } from '@/catalog'
 import type { BlobSource, SaveEnvironment } from '@/download'
 import { BlobFetchError, PreviewMeshRefusedError } from '@/download'
 import { createSearchEngine, defaultFacetSearch } from '@/search'
 import { resolveMaterial } from '@/materials'
 import type { CatalogIndex } from '@/screens/catalog'
-import type { PlacementId } from '@/store'
+import type { HoldName, PlacementId } from '@/store'
 import {
   TemplateId,
   armTemplateInBuilder,
@@ -91,6 +91,7 @@ import {
   FIXTURE_IDS,
   FIXTURE_NAMES,
   MIXED_INTEGRAL,
+  ONE_SLOT,
   ONE_SLOT_TEMPLATE_ID,
   TWO_SLOTS,
   aStrictInstance,
@@ -189,6 +190,37 @@ function placeBoth(a: keyof typeof FIXTURE_IDS, b: keyof typeof FIXTURE_IDS, x =
 function placeHalf(a: keyof typeof FIXTURE_IDS, x = 0, z = 0): void {
   act(() => {
     placeTemplate(anInstance([FIXTURE_IDS[a], null], { x, z }))
+  })
+}
+
+/** The one accessory slot the fixture declares — on `wallNoBase`, two sockets deep. */
+const TORCH_HOLD = 'torch' as HoldName
+
+/**
+ * One instance of the one-slot recipe whose **file** holds an accessory.
+ *
+ * `wallNoBase` is the fixture's only host declaring an accessory slot, and it
+ * carries two measured torch sockets — so one hold is two prints of one file,
+ * which is the arithmetic a row's `×2` has to be able to account for.
+ */
+function placeHolding(
+  host: keyof typeof FIXTURE_IDS,
+  held: keyof typeof FIXTURE_IDS,
+  x = 0,
+  z = 0,
+): void {
+  const instance = anInstance([FIXTURE_IDS[host]], { x, z })
+  act(() => {
+    placeTemplate({
+      ...instance,
+      fills: {
+        [ONE_SLOT]: {
+          tile: FIXTURE_IDS[host] as TileId,
+          pinned: false,
+          holds: { [TORCH_HOLD]: { tile: FIXTURE_IDS[held] as TileId, pinned: false } },
+        },
+      },
+    })
   })
 }
 
@@ -1357,13 +1389,12 @@ function BillHarness({ download }: { download?: ArchiveDownload }) {
         edited.push(placement)
       }}
       /*
-        Sentinels rather than the real components: what this panel owns about
-        them is *which band each one lands in* — the accessory inventory inside
-        the scrolling container, the backup line in the pinned footer — and the
-        two real components are asserted in their own files. A node the test can
-        find by name is the whole of the contract.
+        A sentinel rather than the real component: what this panel owns about it
+        is *which band it lands in* — the pinned footer, where a fifty-row room
+        cannot push the app's only backup path off screen — and `BackupPanel` is
+        asserted in its own file. A node the test can find by name is the whole
+        of the contract.
       */
-      accessories={<p>accessory sentinel</p>}
       backup={<p>backup sentinel</p>}
     />
   )
@@ -1569,6 +1600,67 @@ describe('the bill of tiles', () => {
     expect(placementCount()).toBe(0)
   })
 
+  /**
+   * **The hole one level down, in the panel and not only on the refusal.**
+   *
+   * `doorway` fills every slot the recipe declares and is still one file short of
+   * a printable model: the file itself declares a required `door` accessory slot
+   * and nothing is in it. The download says so — `panels-one-slot: model › door`
+   * — and until this row the panel did not, so a user reading the bill saw a
+   * complete scene and a refusal with no entry behind it.
+   */
+  it('lists a required accessory hole beside the slots that are empty', () => {
+    place('doorway')
+    render(<BillHarness />)
+
+    // `slot › hold`, the same spelling the refusal uses: the fault is the door,
+    // and the wall it is missing from is what locates it.
+    const fault = screen.getByText(/panels-one-slot · model › door · x 0, z 0/)
+    const row = fault.closest<HTMLElement>('.of-bill-fault')!
+    expect(row).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/1 slot needs attention/)).toBeInTheDocument()
+    // The file in the slot is printable and printed, so the row above stays.
+    expect(document.querySelectorAll('.of-bill-list > .of-bill-row')).toHaveLength(1)
+
+    // **And a `Slots` button, which this row lost and F7 gave back.** The editor
+    // filled a *recipe's* slots alone, so a press opened a dialog with nothing in
+    // it about the door; the accessory picker is in that dialog now, under the
+    // recipe slot whose file opens the hole, so the press reaches the one control
+    // that fills it. Remove stays, because taking the piece off the grid is still
+    // an answer.
+    expect(within(row).getByRole('button', { name: /^Slots/ })).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: /^Remove/ })).toBeInTheDocument()
+    expect(screen.getByText(/Fill it in the piece's slot editor/)).toBeInTheDocument()
+  })
+
+  it('faults a required accessory naming a file this build no longer holds', () => {
+    /*
+      The other half of the same refusal. `resolveInstance` sets `complete =
+      false` for a required hold whose **record** is missing, which is one empty
+      socket *and* one accessory the archive has dropped — so a list that read
+      only the empty ones would still leave a refusal with nothing behind it.
+      The two are different repairs and the copy says which.
+    */
+    const instance = anInstance([FIXTURE_IDS.doorway], { x: 2, z: 0 })
+    act(() => {
+      placeTemplate({
+        ...instance,
+        fills: {
+          [ONE_SLOT]: {
+            tile: FIXTURE_IDS.doorway as TileId,
+            pinned: false,
+            holds: { ['door' as HoldName]: { tile: 'tiles/gone/away.stl' as TileId, pinned: true } },
+          },
+        },
+      })
+    })
+    render(<BillHarness />)
+
+    const fault = screen.getByText(/panels-one-slot · model › door · x 2, z 0/)
+    expect(fault.closest('.of-bill-fault')).toHaveAttribute('data-blocking', '')
+    expect(screen.getByText(/names a file this build no longer holds — pick another/)).toBeInTheDocument()
+  })
+
   it('tells a retired fill apart from an empty slot, and blocks the download over both', () => {
     // The three states an explicitly-filled instance can be wrong in are
     // `empty`, `retired` and `off-slot`, and the first two look identical to
@@ -1639,6 +1731,29 @@ describe('the bill of tiles', () => {
     expect(screen.getByText(/x 1, z 1 · floor \+ wall/)).toBeInTheDocument()
   })
 
+  /**
+   * The same field, one level down: a ref may name an **accessory**.
+   *
+   * A hold is one ask worth one print per measured mount — the fixture wall
+   * carries two torch sockets, a 1×1 full pillar carries four — so a torch row
+   * reads `×2` with a single placement under it, which is exactly the number the
+   * pre-A3 panel could not account for. `wall › torch` says which of the piece's
+   * files asked and which socket of it, and it is named even when it asks alone
+   * because the alternative is an unexplained multiplier.
+   */
+  it('names the accessory a copy was asked for, and counts one per mount', () => {
+    placeHolding('wallNoBase', 'slab', 1, 1)
+    render(<BillHarness />)
+
+    // Two files: the wall once, and the torch it holds twice.
+    expect(screen.getByText('2 unique models')).toBeInTheDocument()
+    const row = screen.getByRole('button', { name: new RegExp(FIXTURE_NAMES.slab) })
+    expect(row).toHaveTextContent('×2')
+    fireEvent.click(row)
+
+    expect(screen.getByText(/x 1, z 1 · model › torch/)).toBeInTheDocument()
+  })
+
   it('makes every placement reachable and removable from the panel', () => {
     // Row 17 was explicit that the canvas is one tab stop with no linearly
     // readable drawing. This is where that gap closes.
@@ -1681,20 +1796,19 @@ describe('the bill of tiles', () => {
   })
 
   /**
-   * **The column is this panel now, so the two things under it are inside it.**
+   * **The column is this panel now, so the thing under it is inside it.**
    *
-   * They were siblings in the column's grid, in implicit `auto` rows that took
-   * their height from the parts list. The bands they land in are not
-   * interchangeable: the accessory inventory grows with the plan and belongs
-   * where a fifty-row room already scrolls, and the backup line is the app's
-   * only path to a saved room, which a fifty-row room must not be able to push
-   * off screen.
+   * The backup line was a sibling in the column's grid, in an implicit `auto`
+   * row that took its height from the parts list. The band it lands in is not
+   * interchangeable with the scrolling one: it is the app's only path to a saved
+   * room, which a fifty-row room must not be able to push off screen. (The
+   * accessory inventory that used to scroll with the rows is gone — F7 moved
+   * choosing an accessory into the slot editor.)
    */
-  it('scrolls the accessory inventory with the rows and pins the backup line', () => {
+  it('pins the backup line outside the scrolling rows', () => {
     place('floor1')
     render(<BillHarness />)
 
-    expect(screen.getByText('accessory sentinel').closest('.of-bill-scroll')).not.toBeNull()
     expect(screen.getByText('backup sentinel').closest('.of-bill-foot')).not.toBeNull()
     expect(screen.getByText('backup sentinel').closest('.of-bill-scroll')).toBeNull()
   })
@@ -2160,6 +2274,44 @@ describe('the download action', () => {
     expect(alert).toHaveTextContent(/a streamed zip records its sizes at the end/)
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
     // Nothing was fetched and nothing was saved.
+    expect(opened).toBe(0)
+    expect(saved).toHaveLength(0)
+  })
+
+  /**
+   * The same refusal, one level down — and the reason the sentence had to change.
+   *
+   * `doorway`'s own file declares a **required** `door` slot, so this scene has
+   * every slot on the plan filled and is still one file short of a printable
+   * model: 1,047 of the archive's 1,244 accessory declarations omit `optional`,
+   * and absence means required. Named as `model` alone it would point the user
+   * at the wall, which is the one thing they have already filled.
+   */
+  it('names the accessory slot, not the filled slot holding it', async () => {
+    place('doorway')
+    let opened = 0
+    render(
+      <DownloadHarness
+        environment={blobEnvironment()}
+        source={fakeSource(() => {
+          opened += 1
+          return 'ok'
+        }, sizesOf(file))}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Download tile pack/ }))
+
+    const alert = await failureText()
+    expect(alert).toHaveAttribute('data-kind', 'incomplete')
+    // The noun narrows: nothing on the plan is empty.
+    expect(alert).toHaveTextContent(/One accessory slot is still empty/)
+    expect(alert).toHaveTextContent(/panels-one-slot: model › door/)
+    // And the repair points at the accessory rather than at the wall.
+    expect(alert).toHaveTextContent(/1,047 of the 1,244 accessory slots/)
+    // The repair names the one surface that can make it: the slot editor fills a
+    // recipe's own slots and an accessory is not one of them.
+    expect(alert).toHaveTextContent(/an accessory in the piece's slot editor/)
     expect(opened).toBe(0)
     expect(saved).toHaveLength(0)
   })

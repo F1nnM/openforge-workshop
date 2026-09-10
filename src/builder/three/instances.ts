@@ -100,9 +100,9 @@
  * ## Contract C-d: the object set, and how it relates to A2's warming set
  *
  * {@link roomBlobs} states the derivation once. A2 warms
- * `{ blob(tile) | tile in filledSlots of every instance }`; this asks for
- * `{ part.record.blob | part in piece.parts of every piece }`, and the two differ
- * by exactly the parts `buildPlanScene` put in `PlanScene.undrawable` — a filled
+ * `{ blob(tile) | tile in filledSlots of every instance }`; this asks for the
+ * parts' blobs **and the accessories' anchored ones**, and the two differ by
+ * exactly the parts `buildPlanScene` put in `PlanScene.undrawable` — a filled
  * slot whose file has a `none` footprint has a blob and nothing to draw it on.
  * So **this set is a subset of A2's**, which is the safe direction and the one
  * that matters: every object this room asks for is an object A2 has warmed, so no
@@ -110,19 +110,31 @@
  * derivations. The reverse difference costs a conversion nobody looks at.
  * `state.generated` is in neither set: a generated base has no catalog record and
  * no blob, and `RoomSurface` plates it.
+ *
+ * ## An accessory is a third population, and it is drawn like the other two
+ *
+ * A {@link PlanPiece} carries an accessory per *(hold, measured mount)*: a torch
+ * in a wall, a leaf in a doorway. They join the **same** groups
+ * as the parts — an insert is a blob and a material like anything else, and two
+ * torches in one room are one draw — and they are addressed to the same
+ * placement, so a click on a torch reaches the piece it hangs off. What differs
+ * is only the matrix, which comes from `place.ts#accessoryMatrix` rather than
+ * from `tileMatrix`: an accessory has no footprint and no cell, it has a host's
+ * face and a measured pose on it.
  */
 import type { Matrix4 } from 'three';
 import { Box3 } from 'three'
 
-import type { PlanGeometry, PlanPiece, PlanPiecePart, PlanScene } from '@/builder/canvas'
-import type { BlobId, CatalogRecord } from '@/catalog'
+import type { PlanAccessory, PlanGeometry, PlanPiece, PlanPiecePart, PlanScene } from '@/builder/canvas'
+import type { BlobId, CatalogRecord, InsertAnchor, Mount } from '@/catalog'
+import { copiesOf } from '@/catalog'
 import type { Resolution } from '@/materials'
 import type { PlacementId } from '@/store'
 
 import type { LodGeometry } from './loadLod'
 import { lodBudgetRefusal, lodObjectBudget } from './lod'
 import type { RoomFit } from './place'
-import { fitRoom, liftMatrix, placedBounds, roomBounds, tileMatrix } from './place'
+import { accessoryMatrix, fitRoom, liftMatrix, placedBounds, roomBounds, tileMatrix } from './place'
 
 /**
  * The instancing key: content address, then material variant.
@@ -184,6 +196,16 @@ export interface Room3D {
   readonly fit: RoomFit
   /** Parts the store has no object for. Expected today — blocker B2. */
   readonly absent: readonly LodGap[]
+  /**
+   * Accessories with nowhere to go — `PlanScene.unplaced`, counted.
+   *
+   * A **count of the scene's own list and not a second opinion**: the hold is
+   * real, `assembly/resolve.ts` puts it in the zip, and nothing has measured
+   * where it attaches — so there are no coordinates to draw one at and not even
+   * a marker to put on the plan. The surface says so in a sentence because the
+   * alternative is silence about a tile the bill charges for.
+   */
+  readonly unplaced: number
   /** Distinct objects the room needs, loaded or not. What the budget counts. */
   readonly objects: number
   /**
@@ -212,6 +234,12 @@ export interface Room3D {
    * The bases are in it. R3 kept them on a line of their own because they were
    * a second population reached by inference; a declared `base` slot is an
    * ordinary part and there is nothing left to separate.
+   *
+   * **The accessories are in it too**, one per measured mount and two per
+   * two-leaf doorway, for the reason the counter exists at all: the readout puts
+   * this against `groups.length` to make the instancing claim, and a torch in a
+   * wall is a draw the frame pays for whether or not it fills a slot of the
+   * template.
    */
   readonly instances: number
   /**
@@ -270,6 +298,15 @@ export function roomBlobs(scene: PlanScene): ReadonlySet<BlobId> {
   const blobs = new Set<BlobId>()
   for (const piece of scene.pieces) {
     for (const part of piece.parts) blobs.add(part.record.blob)
+    // The accessories too, and **only the ones that can be drawn**: an insert
+    // with no measured `anchor` has nowhere on its own mesh to be plugged in by,
+    // so it is neither drawn nor asked for and the fetch set stays the draw set.
+    // `canvas/scene.ts#partAccessories` keeps one out of `accessories` and puts
+    // it in `unplaced` instead, so this narrows a type the scene has already
+    // decided rather than making a second decision about it.
+    for (const accessory of piece.accessories) {
+      if (accessory.record.anchor !== undefined) blobs.add(accessory.record.blob)
+    }
   }
   return blobs
 }
@@ -294,6 +331,7 @@ export function buildRoom3D(scene: PlanScene, options: BuildRoomOptions): Room3D
       bounds: new Box3(),
       fit: fitRoom(new Box3(), options.viewRadius),
       absent: [],
+      unplaced: scene.unplaced.length,
       objects: wanted.size,
       refusal: lodBudgetRefusal(wanted.size, budget),
       disagreements: [],
@@ -314,16 +352,12 @@ export function buildRoom3D(scene: PlanScene, options: BuildRoomOptions): Room3D
         push(gaps, part.record.blob, piece.id, part.record.name)
         continue
       }
-      const fresh = addInstance(
-        groups,
-        part.record,
-        lod,
-        options.resolve(part.record),
-        partGeometry(piece, part),
-        piece.id,
-        part.layout.elevationMm,
-      )
+      const matrix = liftMatrix(tileMatrix(lod.bounds, partGeometry(piece, part)), part.layout.elevationMm)
+      const fresh = addInstance(groups, part.record, lod, options.resolve(part.record), matrix, piece.id)
       if (fresh) recordDisagreement(disagreements, part, lod, threshold)
+    }
+    for (const accessory of piece.accessories) {
+      addAccessory(groups, gaps, piece, accessory, options)
     }
   }
 
@@ -340,6 +374,7 @@ export function buildRoom3D(scene: PlanScene, options: BuildRoomOptions): Room3D
     bounds,
     fit: fitRoom(bounds, options.viewRadius),
     absent: asGaps(gaps),
+    unplaced: scene.unplaced.length,
     objects: wanted.size,
     refusal: null,
     disagreements: disagreements.sort((a, b) => b.worst - a.worst),
@@ -374,6 +409,13 @@ function partGeometry(piece: PlanPiece, part: PlanPiecePart): PlanGeometry {
 /**
  * Add one instance to its group, creating the group on first sight.
  *
+ * **The matrix arrives built**, because the two populations that reach here
+ * compose theirs differently: a part is `tileMatrix` lifted by its slot
+ * elevation, and an accessory is `accessoryMatrix` over its host's frame and its
+ * own anchor. Deriving either one *inside* this function would need it to know
+ * which it was looking at, and the grouping is the same fact about a blob and a
+ * material either way.
+ *
  * Returns whether the group was created, which is what the footprint-disagreement
  * report keys on — it is a fact about a *mesh against its tags* and must be
  * recorded once per geometry rather than once per part.
@@ -383,9 +425,8 @@ function addInstance(
   record: CatalogRecord,
   lod: LodGeometry,
   resolution: Resolution,
-  geometry: PlanGeometry,
+  matrix: Matrix4,
   id: PlacementId,
-  elevationMm: number,
 ): boolean {
   const key = instanceKey(record.blob, resolution.variantKey)
   let group = into.get(key)
@@ -394,11 +435,74 @@ function addInstance(
     group = { key, blob: record.blob, lod, resolution, matrices: [], placements: [], bounds: new Box3() }
     into.set(key, group)
   }
-  const matrix = liftMatrix(tileMatrix(lod.bounds, geometry), elevationMm)
   group.matrices.push(matrix)
   group.placements.push(id)
   group.bounds.union(placedBounds(lod.bounds, matrix))
   return fresh
+}
+
+/**
+ * Draw one accessory: an instance per leaf, at the mount its host was measured
+ * at.
+ *
+ * Three things it does **not** do, each because something else already does:
+ *
+ *   - **No footprint disagreement.** An insert's footprint is `none` — it
+ *     occupies no square on the plan — so there is no tagged extent for its mesh
+ *     to disagree with. `recordDisagreement` is a part's report and stays one.
+ *   - **No second opinion about the mount.** `PlanAccessory` is already one per
+ *     *(hold, mount)*, which is also what `assembly/bill.ts` prices, so the
+ *     count of torches drawn and the count charged for agree by construction.
+ *   - **Nothing for an unmeasured insert.** `record.anchor` is absent on every
+ *     insert nobody has measured, and there is no way to seat one without it.
+ *     {@link roomBlobs} leaves those out of the fetch for the same reason, so
+ *     this is a skip and not a gap — and it is not a silent one either:
+ *     `canvas/scene.ts#partAccessories` reports the hold as `unplaced` and never
+ *     builds the `PlanAccessory`, so what reaches here is already anchored and
+ *     this narrows the optional field rather than deciding anything.
+ *
+ * The gap it *does* record is the ordinary one: an insert whose object the store
+ * does not hold is absent exactly as a part's is, named once per placement.
+ */
+function addAccessory(
+  groups: Map<string, MutableGroup>,
+  gaps: Map<string, MutableGap>,
+  piece: PlanPiece,
+  accessory: PlanAccessory,
+  options: BuildRoomOptions,
+): void {
+  const anchor = accessory.record.anchor
+  if (anchor === undefined) return
+
+  const lod = options.geometries.get(accessory.record.blob)
+  if (lod === undefined) {
+    push(gaps, accessory.record.blob, piece.id, accessory.record.name)
+    return
+  }
+
+  const host = {
+    geometry: partGeometry(piece, accessory.host),
+    elevationMm: accessory.host.layout.elevationMm,
+  }
+  const insert = { bounds: lod.bounds, anchor }
+  const resolution = options.resolve(accessory.record)
+  for (const copy of accessoryLeaves(accessory.mount, anchor)) {
+    const matrix = accessoryMatrix(host, accessory.mount, insert, accessory.hold, copy)
+    addInstance(groups, accessory.record, lod, resolution, matrix, piece.id)
+  }
+}
+
+/**
+ * How many copies of one insert this mount takes, as the indices to draw.
+ *
+ * The rule itself is `catalog/mounts.ts#copiesOf` and is deliberately not
+ * restated here: it decides the offset and the half turn in `place.ts` and the
+ * quantity in `assembly/bill.ts` as well as the count, and a second copy that
+ * drifted from any of those would draw the second leaf on top of the first or
+ * bill one leaf for a doorway that needs two.
+ */
+function accessoryLeaves(mount: Mount, anchor: InsertAnchor): readonly (0 | 1)[] {
+  return copiesOf(mount, anchor) === 2 ? [0, 1] : [0]
 }
 
 function finish(groups: Map<string, MutableGroup>): LodInstanceGroup[] {

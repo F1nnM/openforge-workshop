@@ -23,18 +23,27 @@
  *     follow, so the guards around it are the ones with a new failure mode behind
  *     them: a claimed count that nothing bounds, and a bitset whose last byte has
  *     bits nobody wrote.
+ *   - **The second level of that, which format 6 added.** A hold is a fill of a
+ *     fill, so the hold columns are re-split by a count column that is itself
+ *     per fill rather than per instance — two cursors over four flat columns,
+ *     and an off-by-one in either hands one wall's torch to the next wall.
+ *   - **Format 5 still reads**, from a byte fixture captured before the change
+ *     rather than from a helper that re-derives the old layout: a fixture a
+ *     regression cannot quietly move is the only kind worth keeping for a format
+ *     whose whole job is to be stable.
  */
 import { describe, expect, it } from 'vitest'
 
 import { LockSystem } from '@/store'
 
 import { ByteReader, ByteWriter, MalformedPayloadError, TruncatedPayloadError } from './bytes'
-import type { WireInstance, WirePayload } from './payload'
+import type { WireFill, WireHold, WireInstance, WirePayload } from './payload'
 import {
   LOCK_ORDER,
   MAX_SHARE_FILLS,
   MAX_SHARE_PLACEMENTS,
   MAX_SHARE_TABLE,
+  READABLE_SHARE_FORMATS,
   SHARE_FORMAT_VERSION,
   decodePayload,
   encodePayload,
@@ -100,8 +109,33 @@ function instance(arity: number, ordinal: number, x: number, z: number, rotation
       // Every third fill pinned, so the bitset is neither all zeros nor all ones
       // and the byte boundary falls inside an instance at arity 3 and 5 both.
       pinned: (ordinal + index) % 3 === 0,
+      holds: [],
+      // Every fourth fill emptied, for the same reason one byte over: the second
+      // fill-major bitset has to be neither constant nor a copy of the first.
+      emptied: (ordinal + index) % 4 === 1,
     })),
   }
+}
+
+/** A hold on the file a fill names: a slot-table index, a file ordinal and a bit. */
+function hold(slot: number, ordinal: number, pinned = false): WireHold {
+  return { slot, ordinal, pinned }
+}
+
+/** A fill carrying `holds` — the shape format 6 exists for. */
+function filled(
+  slot: number,
+  ordinal: number,
+  holds: readonly WireHold[],
+  pinned = false,
+  emptied = false,
+): WireFill {
+  return { slot, ordinal, pinned, holds, emptied }
+}
+
+/** One instance holding exactly the fills given. */
+function holding(fills: readonly WireFill[]): WireInstance {
+  return { template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }
 }
 
 /**
@@ -176,7 +210,10 @@ describe('payload round trip', () => {
     const empty = payload([], { templates: [], slots: [], filters: [] })
     expect(decodePayload(encodePayload(empty))).toEqual(empty)
     // Nine bytes of header, then the five zero counts that open the three string
-    // tables, the recipe table and the generated column.
+    // tables, the recipe table and the generated column. **Unchanged from format
+    // 5**, and that is the point of where the hold columns went: the hold count
+    // column is one entry per *fill*, so a payload with no fills carries no hold
+    // bytes at all rather than a fourth empty column.
     expect(encodePayload(empty).length).toBe(14)
   })
 
@@ -236,6 +273,8 @@ describe('payload round trip', () => {
         slot: index % SLOTS.length,
         ordinal: index,
         pinned: index % 5 === 1 || index % 7 === 3,
+        holds: [],
+        emptied: index % 3 === 2,
       }))
       const source = payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }])
       expect(decodePayload(encodePayload(source)).instances[0]?.fills).toEqual(fills)
@@ -297,6 +336,88 @@ describe('payload round trip', () => {
 
   it('stamps the current format version', () => {
     expect(encodePayload(payload(ROOM))[0]).toBe(SHARE_FORMAT_VERSION)
+    expect(SHARE_FORMAT_VERSION).toBe(6)
+  })
+})
+
+describe('holds, the second level of the same three columns', () => {
+  it('round-trips a fill carrying two holds beside a fill carrying none', () => {
+    // The shape the whole format bump is for: a wall with a torch in it and a
+    // floor with nothing in it, in one instance.
+    const source = payload([
+      holding([filled(5, 100, [hold(3, 200), hold(4, 201, true)], true), filled(2, 101, [])]),
+    ])
+    expect(decodePayload(encodePayload(source))).toEqual(source)
+  })
+
+  it('interns a hold name into the same table as the slot names', () => {
+    // A hold name is a string with no manifest ordinal, exactly like a slot
+    // name, and one table for both is what makes `torch` cost one byte on the
+    // ninetieth wall that carries one.
+    const source = payload([holding([filled(5, 100, [hold(0, 200)]), filled(0, 101, [hold(5, 202)])])])
+    const decoded = decodePayload(encodePayload(source))
+    expect(decoded.slots).toEqual(SLOTS)
+    expect(decoded.instances[0]?.fills.map((fill) => fill.holds.map((entry) => entry.slot))).toEqual([[0], [5]])
+  })
+
+  it('keeps each fill’s holds with that fill, across instances of mixed arity', () => {
+    // The format 6 version of the row A1 hazard, and the reason there are two
+    // cursors: the hold columns are re-split by a count column that is per
+    // *fill*, so an off-by-one hands one wall's torch to the next wall — a
+    // plausible wrong room, with no error anywhere.
+    const source = payload([
+      holding([filled(0, 10, [hold(1, 500), hold(2, 501)]), filled(3, 11, []), filled(4, 12, [hold(5, 502)])]),
+      holding([filled(0, 20, [])]),
+      holding([filled(1, 30, [hold(2, 600), hold(3, 601), hold(4, 602)]), filled(5, 31, [hold(0, 603)])]),
+    ])
+    const decoded = decodePayload(encodePayload(source))
+    expect(decoded.instances.map((entry) => entry.fills.map((fill) => fill.holds.map((one) => one.ordinal)))).toEqual([
+      [[500, 501], [], [502]],
+      [[]],
+      [[600, 601, 602], [603]],
+    ])
+    expect(decoded).toEqual(source)
+  })
+
+  it('carries the hold pinned bit across every byte boundary', () => {
+    // One instance per hold count from 1 to 20, spread two-per-fill so the hold
+    // bitset's last byte is partial at every width and the fill boundaries do
+    // not line up with the byte boundaries.
+    for (let holds = 1; holds <= 20; holds += 1) {
+      const fills = Array.from({ length: Math.ceil(holds / 2) }, (_unused, index) =>
+        filled(
+          index % SLOTS.length,
+          index,
+          Array.from({ length: Math.min(2, holds - index * 2) }, (_spare, at) =>
+            hold((index * 2 + at) % SLOTS.length, index * 2 + at, (index * 2 + at) % 3 === 1),
+          ),
+        ),
+      )
+      const source = payload([holding(fills)])
+      expect(decodePayload(encodePayload(source)).instances[0]?.fills).toEqual(fills)
+    }
+  })
+
+  it('costs one varint per fill and two varints plus a bit per hold', () => {
+    // Measured, not asserted from the layout: the same one-instance payload with
+    // no holds, one hold and two holds. The empty case is what a room that never
+    // solved a hold pays — one byte per fill — and it is the figure `payload.ts`
+    // quotes for what format 6 costs a room that uses none of it.
+    const bare = encodePayload(payload([holding([filled(0, 7, [])])]))
+    const one = encodePayload(payload([holding([filled(0, 7, [hold(1, 8)])])]))
+    const two = encodePayload(payload([holding([filled(0, 7, [hold(1, 8), hold(2, 9, true)])])]))
+    expect(bare.length).toBe(226)
+    // A hold is a slot byte and an ordinal byte; the first one also opens the
+    // hold bitset, which the second then shares.
+    expect(one.length).toBe(bare.length + 3)
+    expect(two.length).toBe(bare.length + 5)
+    // Format 5 wrote the same fill in 224 bytes: the whole difference on a
+    // hold-free payload is the fill's own zero hold count and the byte its
+    // emptied bit opens — the second is one byte per *eight* fills, so it is the
+    // one-fill case that pays for it in full.
+    expect(bare.length).toBe(224 + 2)
+    // The bit is a *fill* column, so emptying one costs nothing at all.
+    expect(encodePayload(payload([holding([filled(0, 7, [], false, true)])])).length).toBe(bare.length)
   })
 })
 
@@ -307,7 +428,7 @@ describe('payload refuses input it cannot represent', () => {
   })
 
   it('rejects a negative ordinal', () => {
-    const fills = [{ slot: 0, ordinal: -1, pinned: false }]
+    const fills = [{ slot: 0, ordinal: -1, pinned: false, holds: [], emptied: false }]
     expect(() => encodePayload(payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
       MalformedPayloadError,
     )
@@ -319,19 +440,51 @@ describe('payload refuses input it cannot represent', () => {
     // stale index here is a bug in the caller and not user data.
     const bad = { template: TEMPLATES.length, filters: 0, x: 0, z: 0, rotation: 0, fills: [] }
     expect(() => encodePayload(payload([bad]))).toThrow(MalformedPayloadError)
-    const fills = [{ slot: SLOTS.length, ordinal: 1, pinned: false }]
+    const fills = [{ slot: SLOTS.length, ordinal: 1, pinned: false, holds: [], emptied: false }]
     expect(() => encodePayload(payload([{ template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills }]))).toThrow(
       MalformedPayloadError,
     )
+  })
+
+  it('rejects a hold naming a slot off the end of the table it shares with the fills', () => {
+    // The hold names the *same* table, so the same check has to run one level
+    // down — a hold whose index the table cannot answer is the payload
+    // contradicting itself exactly as a fill's is.
+    expect(() => encodePayload(payload([holding([filled(0, 1, [hold(SLOTS.length, 2)])])]))).toThrow(
+      MalformedPayloadError,
+    )
+  })
+
+  it('rejects a negative hold ordinal', () => {
+    expect(() => encodePayload(payload([holding([filled(0, 1, [hold(1, -1)])])]))).toThrow(MalformedPayloadError)
   })
 })
 
 describe('payload decode is total under corruption', () => {
   const good = encodePayload(payload(ROOM))
 
-  it('fails, without hanging or reading out of bounds, at every truncation', () => {
-    for (let length = 0; length < good.length; length += 1) {
-      const cut = good.subarray(0, length)
+  /**
+   * The same realistic scene with accessories in it, so the sweep below cuts
+   * **inside** the four hold columns rather than only inside the fill ones.
+   *
+   * `ROOM`'s fills all hold nothing, which makes its hold count column a run of
+   * zeros and its other three columns empty — so every prefix of it stops before
+   * a hold slot, a hold ordinal or a hold bit, and none of the reads format 6
+   * added would ever be the one that runs off the end.
+   */
+  const HELD = encodePayload(
+    payload([
+      holding([filled(0, 10, [hold(1, 500), hold(2, 501, true)]), filled(3, 11, [])]),
+      holding([filled(4, 8697, [hold(5, 8698)], true)]),
+    ]),
+  )
+
+  it.each([
+    ['a room with no holds', good],
+    ['a room whose fills carry holds', HELD],
+  ])('fails, without hanging or reading out of bounds, at every truncation of %s', (_label, bytes) => {
+    for (let length = 0; length < bytes.length; length += 1) {
+      const cut = bytes.subarray(0, length)
       let thrown: unknown
       try {
         decodePayload(cut)
@@ -451,12 +604,122 @@ describe('payload decode is total under corruption', () => {
     const bytes = encodePayload(source)
     expect(decodePayload(bytes)).toEqual(source)
 
-    // The bitset is the byte before the two zero counts that open the generated
-    // half, which a three-fill scene reaches with no recipes.
-    const pinnedAt = bytes.length - 3
+    // The bitset is followed by the three zero hold counts of a three-fill
+    // instance — no hold columns at all, since none of them holds anything —
+    // then the one byte of the emptied bitset, and then the two zero counts that
+    // open the generated half.
+    const pinnedAt = bytes.length - 7
     const wrong = Uint8Array.from(bytes)
     wrong[pinnedAt] = (wrong[pinnedAt] ?? 0) | 0b1000_0000
     expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
+  })
+
+  it('rejects padding bits above the last hold pinned flag', () => {
+    // The fill bitset's padding is checked, so the hold bitset's has to be too,
+    // or format 6 hands back the one thing format 5 does not have: a scene with
+    // two encodings.
+    const source = payload([holding([filled(0, 1, [hold(1, 2), hold(2, 3)])])])
+    const bytes = encodePayload(source)
+    expect(decodePayload(bytes)).toEqual(source)
+
+    // The hold bitset is two bytes before the two zero counts that open the
+    // generated half: the emptied bitset's own byte sits between them.
+    const holdPinnedAt = bytes.length - 4
+    const wrong = Uint8Array.from(bytes)
+    wrong[holdPinnedAt] = (wrong[holdPinnedAt] ?? 0) | 0b1000_0000
+    expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
+  })
+
+  it('rejects padding bits above the last emptied flag', () => {
+    // The third bitset gets the same check as the other two, for the same
+    // reason: five padding bits over three fills is five bits that must be zero,
+    // or one scene has thirty-two encodings.
+    const source = payload([instance(3, 1, 0, 0, 0)])
+    const bytes = encodePayload(source)
+    expect(decodePayload(bytes)).toEqual(source)
+
+    // The last column before the two zero counts that open the generated half.
+    const emptiedAt = bytes.length - 3
+    const wrong = Uint8Array.from(bytes)
+    wrong[emptiedAt] = (wrong[emptiedAt] ?? 0) | 0b1000_0000
+    expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
+  })
+
+  it('rejects a hold count column that claims more holds than the format carries', () => {
+    // `MAX_SHARE_FILLS` counts holds as well as fills, for the reason it counts
+    // fills at all: neither the instance count nor the fill count bounds how
+    // many ordinals the payload claims, so the running total is the only guard.
+    const writer = new ByteWriter()
+    writer.u8(SHARE_FORMAT_VERSION)
+    writer.u8(0)
+    writer.uvar(1)
+    writer.u8(0)
+    writer.uvar(1)
+    for (let i = 0; i < 4; i += 1) writer.u8(0)
+    writer.uvar(1)
+    writer.utf8('family')
+    writer.uvar(1)
+    writer.utf8('floor')
+    writer.uvar(1)
+    writer.utf8('')
+    // One instance at the origin, filters 0, with two fills.
+    writer.uvar(0)
+    writer.uvar(0)
+    writer.zigzag(0)
+    writer.zigzag(0)
+    writer.uvar(0)
+    writer.uvar(2)
+    writer.uvar(0)
+    writer.uvar(0)
+    writer.uvar(1)
+    writer.uvar(1)
+    writer.u8(0)
+    // Two fills claiming half the ceiling each.
+    writer.uvar(MAX_SHARE_FILLS)
+    writer.uvar(MAX_SHARE_FILLS)
+    expect(() => decodePayload(writer.bytes())).toThrow(MalformedPayloadError)
+  })
+
+  it('reads a format 5 payload, giving every fill no holds at all', () => {
+    /* Captured from the format 5 encoder before this change rather than rebuilt
+       from a helper, because a fixture that re-derives the old layout moves with
+       the code it is meant to pin. Two instances of `family`: one with a `floor`
+       and a pinned `wall`, one with nothing filled.
+
+       The holds are `[]` and not the store's *never solved* — a v5 link cannot
+       say either, and `link.ts` is where the choice between them is made. */
+    const v5 =
+      '0500010102deadbeef010666616d696c790205666c6f6f720477616c6c0100' +
+      '0000000006000700e80200020000010102020000'
+    const bytes = Uint8Array.from(v5.match(/../g)?.map((byte) => parseInt(byte, 16)) ?? [])
+    const decoded = decodePayload(bytes)
+
+    expect(decoded.slots).toEqual(['floor', 'wall'])
+    expect(decoded.instances).toEqual([
+      {
+        template: 0,
+        filters: 0,
+        x: 1.5,
+        z: -2,
+        rotation: 90,
+        fills: [
+          { slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false },
+          { slot: 1, ordinal: 2, pinned: true, holds: [], emptied: false },
+        ],
+      },
+      { template: 0, filters: 0, x: 0, z: 0, rotation: 0, fills: [] },
+    ])
+    expect(decoded.lockIndex).toBe(1)
+    expect(decoded.digest).toBe(0xdeadbeef)
+  })
+
+  it('reads exactly the formats it says it reads', () => {
+    expect(READABLE_SHARE_FORMATS).toEqual([5, 6])
+    const wrong = Uint8Array.from(good)
+    for (const format of [0, 4, 7, 255]) {
+      wrong[0] = format
+      expect(() => decodePayload(wrong)).toThrow(MalformedPayloadError)
+    }
   })
 
   it('rejects trailing bytes rather than ignoring them', () => {

@@ -64,11 +64,12 @@
  * shape carries it — a `TemplateInstance` has an `x`, a `z` and one rotation, and
  * the lift follows from the recipe.
  */
-import { Box3, Matrix4, Vector3 } from 'three'
+import { Box3, Matrix4, Quaternion, Vector3 } from 'three'
 
 import type { PlanGeometry } from '@/builder/canvas'
 import { boxCentre } from '@/builder/canvas'
-import { GRID_UNIT_MM } from '@/catalog'
+import type { InsertAnchor, Mount, OpeningMount, Vec3 } from '@/catalog'
+import { copiesOf, GRID_UNIT_MM } from '@/catalog'
 
 /**
  * The archive's Z-up into three.js's Y-up: −90° about X.
@@ -114,22 +115,38 @@ export function uprightBounds(bounds: MeshBounds): Box3 {
  * placements costs no allocations per frame.
  */
 export function tileMatrix(bounds: MeshBounds, geometry: PlanGeometry, target = new Matrix4()): Matrix4 {
-  const upright = uprightBounds(bounds)
   const centre = boxCentre(geometry.box)
 
   // Radians of yaw. Negative: see the module note's third coordinate fact.
   const yaw = (-geometry.angle * Math.PI) / 180
 
-  const stand = new Matrix4().makeRotationX(Z_UP_TO_Y_UP_RADIANS)
+  const turn = new Matrix4().makeRotationY(yaw)
+  const toPlan = new Matrix4().makeTranslation(centre.x * GRID_UNIT_MM, 0, centre.z * GRID_UNIT_MM)
+
+  return target.copy(toPlan).multiply(turn).multiply(standUpright(bounds))
+}
+
+/**
+ * `T(−bboxCentre) · R_x(−90°)`: a mesh's own bytes into its **bbox frame**, Y-up.
+ *
+ * The half of {@link tileMatrix} that is about the mesh rather than about the
+ * placement, extracted because {@link accessoryMatrix} needs exactly the same
+ * step for the *insert* and the two must not be able to drift apart.
+ *
+ * What comes out is the frame `src/catalog/schema.ts#Vec3` describes, swapped to
+ * Y-up: a mesh point at bbox coordinates `(x, y, z)` — x and y from the bbox
+ * centre, z from its floor, Z-up — lands at `(x, z, −y)`, which is
+ * {@link zUpToYUp} of it. That identity is the whole reason a `Mount.at` and an
+ * `InsertAnchor.at` can be used as points here without any further conversion.
+ */
+function standUpright(bounds: MeshBounds): Matrix4 {
+  const upright = uprightBounds(bounds)
   const toOrigin = new Matrix4().makeTranslation(
     -(upright.min.x + upright.max.x) / 2,
     -upright.min.y,
     -(upright.min.z + upright.max.z) / 2,
   )
-  const turn = new Matrix4().makeRotationY(yaw)
-  const toPlan = new Matrix4().makeTranslation(centre.x * GRID_UNIT_MM, 0, centre.z * GRID_UNIT_MM)
-
-  return target.copy(toPlan).multiply(turn).multiply(toOrigin).multiply(stand)
+  return toOrigin.multiply(new Matrix4().makeRotationX(Z_UP_TO_Y_UP_RADIANS))
 }
 
 /**
@@ -196,6 +213,465 @@ export function footprintDelta(
   const w = mesh.w - extent.w
   const d = mesh.d - extent.d
   return { w, d, worst: Math.max(Math.abs(w), Math.abs(d)) }
+}
+
+/* ---------------------------------------------------------- accessories */
+
+/**
+ * The host part an accessory hangs off, as much of it as a mount needs.
+ *
+ * A {@link PlanGeometry} and an elevation, which is exactly what
+ * {@link tileMatrix} and {@link liftMatrix} take for the part itself — so the
+ * host's frame here and the host's own instance matrix are built from one pair
+ * of numbers and cannot disagree about where the wall is.
+ */
+export interface HostFrame {
+  readonly geometry: PlanGeometry
+  readonly elevationMm: number
+}
+
+/** The insert's own mesh and the anchor measured on it. */
+export interface InsertFrame {
+  readonly bounds: MeshBounds
+  readonly anchor: InsertAnchor
+}
+
+/**
+ * A bbox vector into three's Y-up: `(x, y, z) → (x, z, −y)`.
+ *
+ * The same swap {@link uprightBounds} applies to a box and `R_x(−90°)` applies
+ * to a mesh, written out for the one-off vectors that arrive as plain triples —
+ * a mount's `at`, its `normal`, a socket's `axis`, an anchor's. Exact on the
+ * quarter turn, for {@link uprightBounds}' reason: `Math.cos(-Math.PI / 2)` is
+ * 6.1e-17, and a normal that is 6.1e-17 off vertical is a torch that leans.
+ */
+export function zUpToYUp(v: Vec3): Vector3 {
+  return new Vector3(v[0], v[2], -v[1])
+}
+
+/**
+ * The world matrix of **one accessory instance** — one insert, at one mount.
+ *
+ * `M = hostFrame · T(seat) · R(align) · T(−hold) · T(−bboxCentre) · R_x(−90°)`,
+ * read right to left: stand the insert up in its own bbox frame, bring the point
+ * of it that plugs in to the origin, turn it to face the way the mount wants,
+ * move it to the seat, and carry the lot round with the host. {@link Seat} says
+ * which point that is — the anchor's for the three kinds that plug in, and the
+ * insert's bottom centre for the two it stands on.
+ *
+ * `hostFrame` is {@link tileMatrix} **without** its `standUpright` — because the
+ * mount's coordinates are already in the host's bbox frame, so applying the
+ * host's own normalisation a second time would offset every torch by the host's
+ * bbox centre. It keeps the elevation, which {@link liftMatrix} applies to the
+ * host part: an accessory in a wall that stands 6 mm up stands 6 mm up too.
+ *
+ * ## Orientation comes from `mount.normal`, never from `faceVector(mount.face)`
+ *
+ * On a curved host `face` is a label in the *unrolled* frame
+ * `tools/mounts/arcs.ts` reads a sector in — `-y` and `+y` are the inner and the
+ * outer radius rather than two parallel planes — so `faceVector(face)` there is a
+ * chord normal. Measured, the same torch sockets read 59.7–65.5° from it on flat
+ * hosts and 62–81° on arcs. `Mount.normal` is the re-rolled surface normal and
+ * equals `faceVector(face)` wherever the host is flat, so it is right in both
+ * cases and the face label is right in one.
+ *
+ * ## Two ways to pose an insert, and the kind chooses between them
+ *
+ * **`socket` and `pocket` pose by the anchor's axis**, because a peg's axis *is*
+ * its pose: the pin has one direction it can go in, the mouth was measured, and
+ * the insert's own body has to lie along it. The axis is aimed at `−mount.axis`
+ * — the axis enters the host, so its negation leaves it, and for the measured
+ * torch socket that is up the **62–65° lean**: a 5.5 × 3 mm mouth tilting 25°
+ * off vertical, up and out. Aiming at the normal instead would bury the torch's
+ * tail in the wall. {@link alignToAxis} then chooses the remaining roll so the
+ * flame stands as near upright as the lean allows.
+ *
+ * **`opening`, `hole` and `surface` pose by the insert's bbox extents**, and the
+ * anchor's axis is used for nothing but a sign. The reason is a measurement: a
+ * `leaf`'s axis is its *thinnest* bbox axis, which is the through-wall direction
+ * for a door (28 × 4 × 35.5 mm — thin is the depth) and the **height** for a
+ * lintel (`door_lintel.1.stl` is 32.84 × 12.99 × 6.09 mm — thin is the 6.1 mm
+ * height). Aiming that axis at the surface normal laid all 131 lintel mounts on
+ * their side, height pointing out of the wall, and did the same to the two
+ * `block` inserts on openings and to any `plate` anchored on its `+z` face
+ * (`brazier+large,base.stl`, axis `[0, 0, −1]`, which came out upside down).
+ *
+ * The extents cannot be wrong that way, because an insert is authored **Z-up**
+ * like every other file in the archive:
+ *
+ *   - the insert's mesh `+z` stays world up, which {@link standUpright} has
+ *     already done — so there is no vertical alignment step at all;
+ *   - of the two horizontal mesh axes, the **longer is the span** and the
+ *     **shorter is the through-wall axis**. For an `opening` the through axis is
+ *     turned onto `±mount.normal` and the span therefore lands across the face;
+ *     the sign is the anchor axis's when the anchor axis *is* that mesh axis —
+ *     a door's declared `+thin`, so its relief faces out — and `+normal`
+ *     otherwise, a lintel's `at` being on its mid-plane where the choice costs
+ *     nothing;
+ *   - `hole` and `surface` take **no rotation whatever** and no anchor offset
+ *     either — `standUpright` and the seat, and nothing else. The accessory
+ *     stands on a floor, nothing in the mount fixes its yaw, the host's own `x`
+ *     is as good an answer as any invented one, and the point that lands on the
+ *     mount is the insert's bottom centre rather than whichever face its anchor
+ *     names (see {@link Seat}: a brazier base anchored on its top face would
+ *     otherwise sink its whole height into the floor).
+ *
+ * There is no roll step on these three kinds because there is no freedom left to
+ * spend on one: the vertical is fixed by the extents and the yaw by the normal.
+ *
+ * ## The **slot name** decides the seat in an opening
+ *
+ * `lintel` sits at the `head` and everything else — `door`, `portcullis`,
+ * `frame`, `shutters`, `window`, `archway`, `grate door` — at the `sill`. It is
+ * the slot and not the insert's shape, because the shape does not say: a lintel
+ * and a door leaf are both a slab of about the same section, and the only thing
+ * that distinguishes *the piece that spans the top* from *the piece that fills
+ * the hole* is what the host called the slot it goes in.
+ *
+ * The slot name carries two further rules, both of them a lintel's and both
+ * measured — {@link openingRise} and {@link bedFlip}. On an **`openTop`**
+ * opening the lintel's *top* goes to the `head`, because `head` there is the top
+ * of the wall and the opening runs up through the notch the lintel fills; and a
+ * lintel whose `InsertAnchor.bed` is `-z` is turned over, because it is authored
+ * flat-side down on the build plate and that flat side is what the room sees.
+ *
+ * `slot` is an argument rather than `mount.slot` read off the record. The two are
+ * equal by construction — `catalog/mounts.ts#mountsFor` selects a host's mounts
+ * *by* the hold name — and taking it explicitly is what puts the dependency at
+ * the call site: the caller is placing a named hold, and the seat rule reads the
+ * name the caller is placing rather than a field it never looks at.
+ */
+export function accessoryMatrix(
+  host: HostFrame,
+  mount: Mount,
+  insert: InsertFrame,
+  slot: string,
+  copy: 0 | 1,
+  target = new Matrix4(),
+): Matrix4 {
+  const seat = mountSeat(mount, insert.anchor, slot, copy)
+
+  return target
+    .copy(hostMatrix(host))
+    .multiply(new Matrix4().makeTranslation(seat.point.x, seat.point.y, seat.point.z))
+    .multiply(new Matrix4().makeRotationFromQuaternion(seat.align))
+    .multiply(new Matrix4().makeTranslation(-seat.hold.x, -seat.hold.y, -seat.hold.z))
+    .multiply(standUpright(insert.bounds))
+}
+
+/** Where one instance sits on the host, and how it is turned to get there. */
+interface Seat {
+  /** The landing point, in the host's bbox frame, Y-up. */
+  readonly point: Vector3
+  /**
+   * The insert's **own** point that lands there, in its bbox frame, Y-up.
+   *
+   * `anchor.at` for the three kinds that plug in — a socket, a pocket and an
+   * opening all catch the insert by the part of it the measurement is about —
+   * and the **origin of the insert's bbox frame**, which is its bottom centre,
+   * for a `hole` and a `surface`. Those two are the kinds where the insert
+   * *stands on* the host rather than plugging into it, and it is what the spec's
+   * own table says: *bottom-centre at the hole centre on the top face*.
+   *
+   * Not `anchor.at` there, and the reason is measured: `brazier+large,base.stl`
+   * is a `plate` anchored on its **+z** face, 11.01 mm up its own box, and
+   * landing that point on the floor's top face buries the whole brazier in the
+   * floor. An anchor point says which face plugs in, which is a question a hole
+   * does not ask. (The two `brazier+small` blobs are `peg`s anchored at their
+   * narrow **bottom** end, so they would survive being caught by `anchor.at` —
+   * that is a fact about those two meshes, not about the rule.)
+   */
+  readonly hold: Vector3
+  /**
+   * The turn applied to the insert **after** {@link standUpright}.
+   *
+   * A whole quaternion rather than a target axis, because the two kinds of pose
+   * {@link accessoryMatrix} describes do not both reduce to *aim this axis
+   * there*: a socket aims the anchor axis and then rolls, an opening yaws the
+   * insert's own box onto the face, and a hole does not turn it at all.
+   */
+  readonly align: Quaternion
+}
+
+/**
+ * `tileMatrix`'s placement half: where the host part is, and how it is turned.
+ *
+ * Deliberately **not** the host's whole instance matrix — see
+ * {@link accessoryMatrix} on why the host's own normalisation must not be
+ * applied to a mount.
+ */
+function hostMatrix(host: HostFrame): Matrix4 {
+  const centre = boxCentre(host.geometry.box)
+  return new Matrix4()
+    .makeTranslation(centre.x * GRID_UNIT_MM, host.elevationMm, centre.z * GRID_UNIT_MM)
+    .multiply(new Matrix4().makeRotationY((-host.geometry.angle * Math.PI) / 180))
+}
+
+/** One {@link Seat} per kind — {@link accessoryMatrix} states how each is posed. */
+function mountSeat(mount: Mount, anchor: InsertAnchor, slot: string, copy: 0 | 1): Seat {
+  switch (mount.kind) {
+    case 'socket':
+    case 'pocket': {
+      // The entry direction reversed. A socket with no axis at all is not a
+      // direction to point along, and the surface normal is the honest fallback:
+      // straight out of the face, with none of the lean.
+      const entry = zUpToYUp(mount.axis)
+      const axis = entry.lengthSq() > EPSILON ? entry.negate().normalize() : outwardAxis(mount.normal)
+      // The insert's own up is the fallback for an anchor with no axis — see
+      // {@link EPSILON} for what a zero vector does to the alignment.
+      const from = zUpToYUp(anchor.axis)
+      const align = alignToAxis(from.lengthSq() > EPSILON ? from.normalize() : WORLD_UP.clone(), axis)
+      return { point: zUpToYUp(mount.at), hold: zUpToYUp(anchor.at), align }
+    }
+    case 'opening':
+      return openingSeat(mount, anchor, slot, copy)
+    case 'hole':
+    case 'surface':
+      // `standUpright` and the seat, and nothing else: no turn, because the
+      // insert's own +z is already up and nothing here fixes a yaw; and no
+      // anchor offset, because the insert stands on the host. See {@link Seat}.
+      return { point: zUpToYUp(mount.at), hold: new Vector3(), align: new Quaternion() }
+  }
+}
+
+/**
+ * The composition slot whose insert seats at the opening's head, is turned over
+ * when it was printed flat-side down, and fills the notch rather than sitting on
+ * it. See {@link accessoryMatrix}, {@link openingRise} and {@link bedFlip}.
+ */
+const LINTEL_SLOT = 'lintel'
+
+/**
+ * Below this a squared length is not a direction.
+ *
+ * A zero vector reaching `Quaternion.setFromUnitVectors` produces a **NaN**
+ * quaternion, and a NaN matrix is a mesh that fails every frustum test and
+ * disappears with no error anywhere — the failure mode `fitRoom` guards the same
+ * way, and for the same reason.
+ */
+const EPSILON = 1e-12
+
+/**
+ * Three's up, shared rather than allocated per call.
+ *
+ * Every use below either clones it or reads it — `setFromAxisAngle` and `cross`
+ * do not write through their argument — because this runs once per accessory
+ * per frame.
+ */
+const WORLD_UP = new Vector3(0, 1, 0)
+
+/**
+ * A measured triple as a unit direction out of the host, in Y-up.
+ *
+ * World up when the measurement is degenerate, so nothing downstream is handed a
+ * zero vector. See {@link EPSILON}.
+ */
+function outwardAxis(normal: Vec3): Vector3 {
+  const out = zUpToYUp(normal)
+  return out.lengthSq() > EPSILON ? out.normalize() : WORLD_UP.clone()
+}
+
+/** The horizontal direction lying in a face: `up × out`, unit — or `null` on a level face. */
+function faceAcross(out: Vector3): Vector3 | null {
+  const along = WORLD_UP.clone().cross(out)
+  return along.lengthSq() > EPSILON ? along.normalize() : null
+}
+
+/**
+ * A leaf, a lintel or a grille in a doorway — posed by its own extents.
+ *
+ * The seat is the slot's — {@link openingRise} — at the opening's `at` in the
+ * other two axes. The turn is the yaw that lays the insert's **shorter
+ * horizontal extent** through the wall and therefore its **longer** one across
+ * the face, with {@link bedFlip}'s half-turn folded in for a lintel authored
+ * print-side down; see {@link accessoryMatrix} for why the anchor's axis cannot
+ * be asked instead, and {@link copiesOf} for the second leaf's offset.
+ */
+function openingSeat(mount: OpeningMount, anchor: InsertAnchor, slot: string, copy: 0 | 1): Seat {
+  const out = outwardAxis(mount.normal)
+  const through = throughIndex(anchor.size)
+  const flip = bedFlip(anchor, slot, through)
+  const point = zUpToYUp([mount.at[0], mount.at[1], openingRise(mount, anchor, slot, flip !== null)])
+
+  const align = yawOnto(meshAxis(through), out.clone().multiplyScalar(throughSign(anchor, through)))
+  // Post-multiplied: the flip is in the insert's own upright frame, about an
+  // axis through the point that lands on the seat, and the yaw then carries the
+  // turned box round onto the face.
+  if (flip !== null) align.multiply(flip)
+  const hold = zUpToYUp(anchor.at)
+
+  // `±width/4` is where two half-width slabs meet in the middle of the opening.
+  // Non-null whenever `copiesOf` says two — it is the same `up × normal` test.
+  const along = copiesOf(mount, anchor) === 2 ? faceAcross(out) : null
+  if (along !== null) {
+    point.addScaledVector(along, ((copy === 0 ? -1 : 1) * mount.width) / 4)
+    // The vertical is the world's, not the leaf's: a door leaf turns about the
+    // hinge line, and premultiplying is what keeps the axis out of the leaf's
+    // own frame — where it would be whichever way the leaf happens to lean.
+    if (copy === 1) align.premultiply(new Quaternion().setFromAxisAngle(WORLD_UP, Math.PI))
+  }
+
+  return { point, hold, align }
+}
+
+/**
+ * The height in the host's bbox frame that the insert's **held point** lands on.
+ *
+ * Three answers, and only the third is new:
+ *
+ *   - anything but a `lintel` seats its anchor point on the `sill`;
+ *   - a `lintel` on a **closed** opening seats its **bottom** on the `head`,
+ *     which is the lintel's own seat cut into the host;
+ *   - a `lintel` on an **`openTop`** opening puts its **top** at the `head`,
+ *     because on those hosts `head` *is* the top of the wall.
+ *
+ * The second one is the fix for a lintel floating a lintel's height above the
+ * wall. The measured convention is a rectangular door wall with a ~33 mm notch
+ * running up through the silhouette: the opening reaches the top line, so
+ * `findOpenings` reads `openTop` and `head` comes back as the wall's own top
+ * rather than as a soffit. Seating the piece's bottom there hung all 131 lintel
+ * mounts one thickness clear of the wall they fill — 6.09 mm for
+ * `door_lintel.1.stl` — instead of flush into the notch.
+ *
+ * `above` is the insert's vertical extent **above the held point after the
+ * pose**, and `below` the complementary extent under it (the two sum to the
+ * anchor's own height) — which is why the flip has to be decided first:
+ * {@link bedFlip} turns the box about a horizontal axis through the held point
+ * itself, so a leaf held at its bottom centre hangs entirely below it once
+ * flipped and entirely above it otherwise. Both branches read off the same
+ * `above`/`below` pair rather than the anchor's raw fields, because a closed
+ * opening's seat is the mirror of an open-topped one's — bottom instead of
+ * top — and a bedded lintel has to land the same way round on either: the
+ * held point itself never moves under the flip, only which extent is on top
+ * of it does, so a closed opening's bottom-at-`head` needs the flipped `below`
+ * exactly where the open-topped branch needs the flipped `above`.
+ */
+function openingRise(
+  mount: OpeningMount,
+  anchor: InsertAnchor,
+  slot: string,
+  flipped: boolean,
+): number {
+  if (slot !== LINTEL_SLOT) return mount.sill
+  const above = flipped ? anchor.at[2] : anchor.size[2] - anchor.at[2]
+  if (mount.openTop) return mount.head - above
+  const below = anchor.size[2] - above
+  return mount.head + below
+}
+
+/**
+ * The half-turn that puts a lintel's **bed face** up, or `null` for every other
+ * insert and every unmeasured one.
+ *
+ * `InsertAnchor.bed` is the face the piece was printed on, and for a lintel that
+ * face is the one the room sees: `door_lintel.*.stl` is authored flat-side down
+ * on the build plate (`-z`, 97.6 % covered) with its moulding at `+z` (12.2 %),
+ * so the pose every other insert wants — mesh `+z` world up, which
+ * {@link standUpright} has already applied — showed the print's flat underside
+ * to the room and buried the carving in the wall's notch.
+ *
+ * About the **span** axis, which is the horizontal extent the yaw lays across
+ * the face, so the turn inverts the vertical and the through direction and
+ * leaves the span where it was. Inverting the through direction costs a lintel
+ * nothing — see {@link throughSign}: its `at` sits on the opening's mid-plane
+ * and its anchor axis is its height, so there is no declared front to lose.
+ *
+ * **Lintels only**, and that is a claim about the slot rather than about the
+ * mesh: a door leaf's bed face is not its top in situ, it is its bottom edge on
+ * the plate, and turning one over would hang the door upside down.
+ */
+function bedFlip(anchor: InsertAnchor, slot: string, through: 0 | 1): Quaternion | null {
+  if (slot !== LINTEL_SLOT || anchor.bed !== '-z') return null
+  return new Quaternion().setFromAxisAngle(meshAxis(through === 0 ? 1 : 0), Math.PI)
+}
+
+/**
+ * Which of the insert's two horizontal bbox axes runs **through** the host.
+ *
+ * The shorter one, `0` for the mesh's own x and `1` for its y — an insert being
+ * authored Z-up, so its third extent is the height and is never a candidate. A
+ * tie goes to x, which is arbitrary and unreachable in the corpus: no measured
+ * insert has two equal horizontal extents.
+ */
+function throughIndex(size: Vec3): 0 | 1 {
+  return size[0] <= size[1] ? 0 : 1
+}
+
+/** One of the insert's own horizontal mesh axes as a Y-up direction. */
+function meshAxis(index: 0 | 1): Vector3 {
+  return zUpToYUp(index === 0 ? [1, 0, 0] : [0, 1, 0])
+}
+
+/**
+ * Which way round the through axis goes: **out of the host, or into it.**
+ *
+ * `+1` unless the anchor's own axis *is* that mesh axis and points the other
+ * way. A `leaf`'s axis is `+thin` by declaration and a door's thin axis is its
+ * depth, so this is what makes a door leaf's declared front face out of the
+ * doorway. For a lintel — whose axis is its height, not its depth — there is
+ * nothing to read, and `+normal` is free: its `at` sits on the opening's
+ * mid-plane, where the choice costs nothing but which side the relief faces.
+ */
+function throughSign(anchor: InsertAnchor, index: 0 | 1): 1 | -1 {
+  const component = anchor.axis[index]
+  if (Math.abs(component) < 1 - AXIS_TOLERANCE) return 1
+  return component > 0 ? 1 : -1
+}
+
+/** How near ±1 a component must be for the anchor's axis to *be* a bbox axis. */
+const AXIS_TOLERANCE = 1e-6
+
+/**
+ * The rotation **about world up** that turns `from` onto `to`.
+ *
+ * Written as an explicit yaw rather than `setFromUnitVectors`, and both halves
+ * of that matter. The shortest arc between two horizontal vectors is not about
+ * the vertical: at 180° — an opposite-facing wall, which is half of them —
+ * `setFromUnitVectors` picks an arbitrary perpendicular axis and can hand back a
+ * turn that lays the insert on its face. And when `to` leans off horizontal, the
+ * honest answer is still a yaw: the vertical is fixed by the insert's extents,
+ * so what is being chosen here is only which way round the box faces.
+ *
+ * `to` is projected onto the horizontal plane by construction — the two dot
+ * products below use its x and z alone. A `to` that is purely vertical leaves
+ * both at zero, and the identity is the honest answer: nothing about a level
+ * face says which way an insert should turn.
+ */
+function yawOnto(from: Vector3, to: Vector3): Quaternion {
+  // `R_y(φ)` sends `(x, z)` to `(x cos φ + z sin φ, −x sin φ + z cos φ)`, so
+  // these two are the cosine and sine of the angle that lands `from` on `to`.
+  const cos = from.x * to.x + from.z * to.z
+  const sin = from.z * to.x - from.x * to.z
+  if (cos * cos + sin * sin < EPSILON) return new Quaternion()
+  return new Quaternion().setFromAxisAngle(WORLD_UP, Math.atan2(sin, cos))
+}
+
+/**
+ * Turn `from` onto `to`, then roll about `to` so the insert's own up stays up.
+ *
+ * A socket's pose and nothing else — see {@link accessoryMatrix} for why the
+ * other three kinds do not go through here.
+ *
+ * Aligning two axes leaves one degree of freedom, and nothing in the data fixes
+ * it: `setFromUnitVectors` resolves it with the shortest arc, which for a torch
+ * on a leaning socket rolls the flame sideways. So the roll is chosen rather
+ * than inherited — the insert's own **+Z**, which `standUpright` has already
+ * made `+Y`, is brought as close to world up as the alignment allows.
+ *
+ * Both projections vanish when the target axis *is* vertical or when the
+ * insert's up is its anchor axis (a peg, whose yaw about its own pin nothing can
+ * see anyway). Then there is no roll to choose and the alignment stands.
+ */
+function alignToAxis(from: Vector3, to: Vector3): Quaternion {
+  const align = new Quaternion().setFromUnitVectors(from, to)
+
+  const up = WORLD_UP.clone().applyQuaternion(align).projectOnPlane(to)
+  const worldUp = WORLD_UP.clone().projectOnPlane(to)
+  if (up.lengthSq() > EPSILON && worldUp.lengthSq() > EPSILON) {
+    const roll = Math.atan2(new Vector3().crossVectors(up, worldUp).dot(to), up.dot(worldUp))
+    align.premultiply(new Quaternion().setFromAxisAngle(to, roll))
+  }
+  return align
 }
 
 /* ------------------------------------------------------------ the whole room */

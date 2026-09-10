@@ -73,6 +73,7 @@ import {
 import { resolveFootprint } from './footprint'
 import type { FixtureRow } from './fixtures'
 import { liveRows } from './fixtures'
+import type { MountInventory } from './mounts'
 import { displayName } from './naming'
 import { normaliseTag, normaliseTags } from './normalise'
 import type { OrdinalManifest } from './ordinals'
@@ -121,6 +122,30 @@ export interface BuildOptions {
    * no longer compiles. See `pipeline/thumbs.ts`.
    */
   thumbs: ReadonlySet<string>
+  /**
+   * Where accessories attach, per blob — `readMountInventory() ?? emptyMountInventory()`.
+   *
+   * **Required, and for the reason {@link BuildOptions.thumbs} had to become
+   * required rather than for a new one.** An absent measurement emits no
+   * `mounts` and no `anchor`, which is precisely what an unmeasured corpus
+   * looks like — so a caller that forgot this argument would produce an index
+   * that is indistinguishable from a correct one until somebody wonders why no
+   * torch ever places. `thumbs`' own docblock records that exact failure
+   * happening in `tools/stamp/run.ts` and going unnoticed through every
+   * deployed build; the argument was carried up here on the first day rather
+   * than after.
+   *
+   * The two intents are the same two:
+   *
+   *   - `scripts/import-catalog.ts` and `tools/stamp/run.ts` pass the committed
+   *     inventory, because they write the index the app reads.
+   *   - `tools/stamp/lock.ts` passes `emptyMountInventory()`, because its digest
+   *     must be a function of the derivation code, the schema and the corpus,
+   *     and 16 GB of somebody else's meshes is input rather than derivation.
+   *
+   * See `pipeline/mounts.ts`.
+   */
+  mounts: MountInventory
   /** `version.built`. Defaults to {@link buildTimestamp}. */
   builtAt?: string
 }
@@ -187,6 +212,47 @@ export interface BuildStats {
    * build error, and both are invisible without a line in the import's report.
    */
   withThumb: number
+  /**
+   * Records emitting `mounts` and `anchor` — **969 and 285 today**, from the
+   * 995 hosts and 139 inserts of the measuring run.
+   *
+   * The arithmetic to 969 is worth stating, because none of the obvious numbers
+   * is it. **1,006** records sit over a measured host blob: the 1,005 that
+   * declare an accessory slot, plus one `insert`-layer row on the `grate.doorway`
+   * mesh, which is filed both ways and therefore measured as a host too. **37**
+   * of those 1,006 are over one of the 37 host blobs whose every slot resolved
+   * to nothing — measured, carrying an `unresolved` list, emitting no `mounts`
+   * key. 1,006 − 37 = 969. (34 before the surface rule read a 33 mm brazier
+   * floor as holding its own brazier, which took the three `brazier+small`
+   * floors' last mount away.)
+   *
+   * Reported rather than asserted, and the two directions read the way
+   * {@link BuildStats.withThumb}'s do. A drop to 0 after a measuring run means
+   * the inventory went missing, went stale against a re-export, or is keyed on
+   * blobs this corpus no longer carries — and the symptom is an app that simply
+   * never offers to place a torch, which nothing else would report.
+   */
+  withMounts: number
+  withAnchor: number
+  /**
+   * One line per measured slot that produced no mount, on a blob some live
+   * record carries — `mounts: <file> — slot <name> <reason>`.
+   *
+   * A **fixture lint rather than a build error**, because every entry is a fact
+   * about a mesh and not about this code: `modelled-in` is an accessory sculpted
+   * into the host — a door in a solid wall, or the brazier of a floor that
+   * stands 33 mm tall, 15 slots over 10 records — `runs-off-end` a doorway with
+   * no jamb to hinge against, `arc-fit-refused` a sector whose mesh is not
+   * struck from the radii its tags claim. The `modelled-in` lines are the only
+   * ones that also reach the record, as `CatalogRecord.modelledIn`: the others
+   * are somebody's to go and measure, that one is a slot every consumer has to
+   * treat as already filled. `scripts/import-catalog.ts` prints them to stderr, so
+   * they arrive next to the person who just re-measured.
+   *
+   * Deduplicated by blob, not by record: 171 meshes are shared by 520 rows, and
+   * five identical lines would read as five defects.
+   */
+  mountLint: string[]
   /**
    * How well `layer === 'topper'` predicts "needs a separately printed base",
    * scored against the filename's connection token. Measured 1.0 / 0.999 with 4
@@ -293,6 +359,21 @@ export function buildCatalog(options: BuildOptions): BuildResult {
     const texture = textureRoot(row.tags)
     const rotStep = rotationStep(row.tags)
     const sizeCode = openlockSizeCode(row.tags)
+    /* Keyed on the md5 for the reason `thumb` is: a measurement is a property of
+       the mesh, so the rows sharing one all read the same answer. An empty
+       `mounts` array is dropped rather than emitted — see `CatalogRecord.mounts`
+       on why absence and emptiness are deliberately the same thing here. */
+    const measured = options.mounts.hosts[row.file_metadata.md5]
+    const mounts = measured === undefined || measured.mounts.length === 0 ? undefined : measured.mounts
+    const anchor = options.mounts.inserts[row.file_metadata.md5]?.anchor
+    /* The one `unresolved` reason a *consumer* has to act on rather than a
+       person: `modelled-in` says the fixture asks for an accessory the mesh
+       already has, so the slot is satisfied by this print and nothing should
+       draw into it, bill for it or call it a hole. The other four reasons are
+       gaps in the measurement and stay in the lint alone. */
+    const modelledIn = (measured?.unresolved ?? [])
+      .filter((entry) => entry.reason === 'modelled-in')
+      .map((entry) => entry.slot)
 
     return {
       id,
@@ -323,6 +404,9 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       ...(rotStep === undefined ? {} : { rotStep }),
       ...(sizeCode === undefined ? {} : { sizeCode }),
       ...(row.config === undefined ? {} : { config: row.config }),
+      ...(mounts === undefined ? {} : { mounts }),
+      ...(anchor === undefined ? {} : { anchor }),
+      ...(modelledIn.length === 0 ? {} : { modelledIn }),
     }
   })
 
@@ -377,6 +461,9 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       ),
       withConfig: records.filter((record) => record.config !== undefined).length,
       withThumb: records.filter((record) => record.thumb).length,
+      withMounts: records.filter((record) => record.mounts !== undefined).length,
+      withAnchor: records.filter((record) => record.anchor !== undefined).length,
+      mountLint: mountLint(live, options.mounts),
       distinctNames: new Set(records.map((record) => record.name)).size,
       newOrdinals: added.length,
       retiredOrdinals: retired.length,
@@ -392,6 +479,33 @@ export function buildCatalog(options: BuildOptions): BuildResult {
       deadConfigFilters: configRefs.deadFilters,
     },
   }
+}
+
+/* ------------------------------------------------------------- the mount lint */
+
+/**
+ * Every measured-but-unresolved slot on a mesh some live row carries.
+ *
+ * Scoped to **live rows** deliberately: the inventory is measured against an
+ * index that may be a corpus older or newer than this build's, so it can hold
+ * hosts that are now deprecated or gone, and complaining about those would send
+ * a reader to a fixture that is not there. One line per blob per slot, in
+ * `full_name` order, so two runs produce the same report.
+ *
+ * @see BuildStats.mountLint for why this is a lint rather than a failure.
+ */
+function mountLint(live: readonly FixtureRow[], inventory: MountInventory): string[] {
+  const lines: string[] = []
+  const seen = new Set<string>()
+  for (const row of live) {
+    const blob = row.file_metadata.md5
+    if (seen.has(blob)) continue
+    seen.add(blob)
+    for (const { slot, reason } of inventory.hosts[blob]?.unresolved ?? []) {
+      lines.push(`mounts: ${basename(row.file_metadata.full_name)} — slot ${slot} ${reason}`)
+    }
+  }
+  return lines
 }
 
 /* ------------------------------------------------------ composition config refs */

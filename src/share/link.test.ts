@@ -24,7 +24,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { DesignId, ManifestOrdinal, TileId } from '@/catalog'
-import type { LockSystem, NewTemplateInstance, SlotFill, SlotName, TemplateId } from '@/store'
+import type { HoldFill, HoldName, LockSystem, NewTemplateInstance, SlotFill, SlotName, TemplateId } from '@/store'
 import { LockSystem as LockSystemSchema } from '@/store'
 
 import {
@@ -103,6 +103,13 @@ function fillsOf(entries: readonly (readonly [slot: string, ordinal: number, pin
     fills[slot as SlotName] = { tile: tileId(ordinal), pinned }
   }
   return fills
+}
+
+/** The accessories fitted into one filled file, by hold name. */
+function holdsOf(entries: readonly (readonly [hold: string, ordinal: number, pinned?: boolean])[]) {
+  const holds: Record<HoldName, HoldFill> = {}
+  for (const [name, ordinal, pinned = false] of entries) holds[name as HoldName] = { tile: tileId(ordinal), pinned }
+  return holds
 }
 
 /** An instance of `template`, its slots filled from the ordinals given. */
@@ -387,6 +394,364 @@ describe('round trip', () => {
   })
 })
 
+/**
+ * The level format 6 added: a hold is a fill of the file a slot is filled with,
+ * and it travels the same way — an interned name, a file ordinal and a bit.
+ *
+ * The two questions these answer are the ones the wire cannot answer for itself.
+ * A hold *fails* like a fill, one level down, so every salvage rule has to be
+ * restated at that level and reported at it. And the store's distinction between
+ * `holds === undefined` (never solved) and `holds === {}` (solved, and empty)
+ * has no room on the wire, where a fill simply carries zero or more holds; the
+ * link therefore carries the first and re-solves at the far end, which is the
+ * decision written down in `link.ts`'s docblock and pinned below.
+ */
+describe('holds travel with the fill they are fitted into', () => {
+  /** A wall carrying a torch and a pinned door, and a floor carrying nothing. */
+  function heldScene(
+    holds: readonly (readonly [hold: string, ordinal: number, pinned?: boolean])[] = [
+      ['torch', 7],
+      ['left door', 8, true],
+    ],
+  ): SharedScene {
+    return {
+      lock: 'openlock',
+      placements: [
+        {
+          template: FAMILY,
+          x: 1.5,
+          z: -2,
+          rotation: 90,
+          filters: [],
+          fills: {
+            ['floor' as SlotName]: { tile: tileId(2), pinned: false },
+            ['wall' as SlotName]: { tile: tileId(1), pinned: true, holds: holdsOf(holds) },
+          },
+        },
+      ],
+      generated: [],
+    }
+  }
+
+  it('round-trips a fill’s holds, each with its own file and pinned bit', async () => {
+    const manifest = manifestOf(16)
+    const scene = heldScene()
+    const decoded = await decodeShareFragment(await fragmentOf(scene, manifest), manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene).toEqual(scene)
+    expect(decoded.dropped).toEqual([])
+  })
+
+  it('produces the same link twice for a scene whose hold order differs', async () => {
+    // `holds` is a `z.record` exactly as `fills` is, so its key order is whatever
+    // the solver or the editor inserted. Two rooms that are the same room must be
+    // one link, which is what sorting the hold names buys.
+    const manifest = manifestOf(16)
+    const shuffled = heldScene([
+      ['left door', 8, true],
+      ['torch', 7],
+    ])
+    expect(await fragmentOf(shuffled, manifest)).toBe(await fragmentOf(heldScene(), manifest))
+  })
+
+  it('carries an emptied holds map as emptied, not as never solved', async () => {
+    /* `holds === {}` means *the user took the last torch out* and
+       `holds === undefined` means *nobody has looked*, which the recipient's
+       default-hold pass fills in. A count of zero says both, so format 6 carries
+       one bit per fill to say which — without it a deliberately cleared wall
+       arrived with its torch put back and there was no way to say otherwise. */
+    const manifest = manifestOf(16)
+    const scene: SharedScene = {
+      lock: 'openlock',
+      placements: [
+        {
+          template: FAMILY,
+          x: 0,
+          z: 0,
+          rotation: 0,
+          filters: [],
+          fills: { ['wall' as SlotName]: { tile: tileId(1), pinned: false, holds: {} } },
+        },
+      ],
+      generated: [],
+    }
+    const decoded = await decodeShareFragment(await fragmentOf(scene, manifest), manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    const fill = decoded.scene.placements[0]?.fills['wall' as SlotName]
+    expect(fill).toEqual({ tile: tileId(1), pinned: false, holds: {} })
+    expect(decoded.dropped).toEqual([])
+
+    /* And the *other* zero is untouched: a fill that never carried the field
+       arrives without it, so the default-hold pass still fills it in. The two
+       are one byte apart in the payload and could not be told apart at all
+       before the bit. */
+    const unsolved: SharedScene = {
+      ...scene,
+      placements: [
+        {
+          ...(scene.placements[0] as SharedScene['placements'][number]),
+          fills: { ['wall' as SlotName]: { tile: tileId(1), pinned: false } },
+        },
+      ],
+    }
+    const second = await decodeShareFragment(await fragmentOf(unsolved, manifest), manifest)
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    const bare = second.scene.placements[0]?.fills['wall' as SlotName]
+    expect(bare).toEqual({ tile: tileId(1), pinned: false })
+    expect(Object.hasOwn(bare ?? {}, 'holds')).toBe(false)
+  })
+
+  it('checksums the file a hold names, so renumbering it is caught as drift', async () => {
+    // A hold names a file exactly as a fill does, so it is in the digest for the
+    // same reason: the failure §13 exists for is two ordinals swapping the files
+    // they name, and a torch that silently becomes a brazier is that failure.
+    const manifest = manifestOf(16)
+    const fragment = await fragmentOf(heldScene(), manifest)
+    const drifted = buildShareManifest({
+      version: { manifest: 1 },
+      records: Array.from({ length: 16 }, (_unused, index) => {
+        const ord = index === 7 ? 9 : index === 9 ? 7 : index
+        return { id: tileId(index), ord: ord as ManifestOrdinal, design: designId(index) }
+      }),
+    })
+    const decoded = await decodeShareFragment(fragment, drifted)
+    expect(decoded.ok).toBe(false)
+    if (!decoded.ok) expect(decoded.reason).toBe('manifest-drift')
+  })
+
+  it('drops a hold whose file this build cannot encode, naming the slot and the hold', async () => {
+    const manifest = manifestOf(8)
+    const scene: SharedScene = {
+      lock: 'openlock',
+      placements: [
+        {
+          template: FAMILY,
+          x: 0,
+          z: 0,
+          rotation: 0,
+          filters: [],
+          fills: {
+            ['wall' as SlotName]: {
+              tile: tileId(1),
+              pinned: false,
+              holds: holdsOf([
+                ['torch', 2],
+                ['brazier', 99],
+              ]),
+            },
+          },
+        },
+      ],
+      generated: [],
+    }
+    const encoded = await encodeShareFragment(scene, manifest)
+    expect(encoded.ok).toBe(true)
+    if (!encoded.ok) return
+    expect(encoded.dropped).toEqual([
+      `placement 0, slot wall, hold brazier: ${tileId(99)} is not in this catalog build`,
+    ])
+
+    // The wall, the torch and the rest of the room travel; one accessory does not.
+    const decoded = await decodeShareFragment(encoded.fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.placements[0]?.fills['wall' as SlotName]).toEqual({
+      tile: tileId(1),
+      pinned: false,
+      holds: holdsOf([['torch', 2]]),
+    })
+  })
+
+  it('empties the hold whose file this build no longer carries and keeps the fill', async () => {
+    // The decode-side half of the same rule, at the level below the one row A1
+    // stated: a retired file drops its *hold* and leaves the fill intact, since
+    // an accessory that is gone is not a reason to unfill the wall it sat on.
+    // Tiles 7 and 8 — the torch and the door — have been retired; the wall this
+    // build still carries.
+    const fragment = await fragmentOf(heldScene(), manifestOf(16))
+    const decoded = await decodeShareFragment(fragment, manifestOf(7))
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    const fill = decoded.scene.placements[0]?.fills['wall' as SlotName]
+    expect(fill?.tile).toBe(tileId(1))
+    expect(fill?.holds).toBeUndefined()
+    expect(decoded.dropped.join('\n')).toContain('slot wall, hold torch: tile ordinal 7')
+    expect(decoded.dropped.join('\n')).toContain('slot wall, hold left door: tile ordinal 8')
+  })
+
+  it('drops the holds of a name it cannot read, keeping the fill they sat on', async () => {
+    // The hold names are interned into the slot table, so an unreadable entry is
+    // the same failure one level down — and it is reported once against the
+    // entry, in holds, rather than once per hold.
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        slots: ['floor', ''],
+        instances: [
+          {
+            template: 0,
+            filters: 0,
+            x: 0,
+            z: 0,
+            rotation: 0,
+            fills: [
+              {
+                slot: 0,
+                ordinal: 1,
+                pinned: false,
+                holds: [
+                  { slot: 1, ordinal: 2, pinned: false },
+                  { slot: 1, ordinal: 3, pinned: true },
+                ],
+                emptied: false,
+              },
+            ],
+          },
+        ],
+        digest: resolveOrdinals([1, 2, 3], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.placements[0]?.fills['floor' as SlotName]).toEqual({ tile: tileId(1), pinned: false })
+    expect(decoded.dropped).toEqual(['hold name 1: not a readable hold name, dropping 2 holds'])
+  })
+
+  it('refuses a hold named after a key no record may carry, keeping the rest', async () => {
+    /* `HoldName` is `z.string().min(1)`, so `__proto__` parses — the authority on
+       what a mount is called is the composition, not this module. It is refused
+       by name against the store's own `UNSAFE_KEYS`, because the decoded record
+       is handed to `placeTemplate` and walked with plain indexing from there. */
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        slots: ['floor', '__proto__', 'torch'],
+        instances: [
+          {
+            template: 0,
+            filters: 0,
+            x: 0,
+            z: 0,
+            rotation: 0,
+            fills: [
+              {
+                slot: 0,
+                ordinal: 1,
+                pinned: false,
+                holds: [
+                  { slot: 1, ordinal: 2, pinned: false },
+                  { slot: 2, ordinal: 3, pinned: false },
+                ],
+                emptied: false,
+              },
+            ],
+          },
+        ],
+        digest: resolveOrdinals([1, 2, 3], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    const fill = decoded.scene.placements[0]?.fills['floor' as SlotName]
+    expect(fill?.holds).toEqual(holdsOf([['torch', 3]]))
+    expect(Object.getPrototypeOf(fill?.holds)).toBe(Object.prototype)
+    expect(decoded.dropped).toEqual([
+      'placement 0, slot floor: hold __proto__ names an unsafe key, dropping the hold',
+    ])
+  })
+
+  it('keeps a hold whose name happens to be an Object.prototype member', async () => {
+    /* The bug the collector's `Map` exists for, and it is the *ordinary* half of
+       the prototype hazard rather than the exotic one: on a plain object
+       `record['toString'] !== undefined` is true before anything is written, so
+       the first hold named `toString` was discarded as a duplicate of a function
+       nobody put there — with a `dropped` line saying something untrue about
+       why. `toString` is a perfectly good mount name and it is kept. */
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        slots: ['floor', 'toString', 'hasOwnProperty'],
+        instances: [
+          {
+            template: 0,
+            filters: 0,
+            x: 0,
+            z: 0,
+            rotation: 0,
+            fills: [
+              {
+                slot: 0,
+                ordinal: 1,
+                pinned: false,
+                holds: [
+                  { slot: 1, ordinal: 2, pinned: false },
+                  { slot: 2, ordinal: 3, pinned: true },
+                ],
+                emptied: false,
+              },
+            ],
+          },
+        ],
+        digest: resolveOrdinals([1, 2, 3], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.placements[0]?.fills['floor' as SlotName]?.holds).toEqual(
+      holdsOf([
+        ['toString', 2],
+        ['hasOwnProperty', 3, true],
+      ]),
+    )
+    expect(decoded.dropped).toEqual([])
+  })
+
+  it('keeps the first of two holds naming one name, and says so', async () => {
+    // Unreachable from any encoder — `holds` is a map on both sides — so this is
+    // a hand-edited payload contradicting itself, and choosing silently between
+    // two files is the one thing this codec does not do, at either level.
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        slots: ['floor', 'torch'],
+        instances: [
+          {
+            template: 0,
+            filters: 0,
+            x: 0,
+            z: 0,
+            rotation: 0,
+            fills: [
+              {
+                slot: 0,
+                ordinal: 1,
+                pinned: false,
+                holds: [
+                  { slot: 1, ordinal: 2, pinned: false },
+                  { slot: 1, ordinal: 3, pinned: true },
+                ],
+                emptied: false,
+              },
+            ],
+          },
+        ],
+        digest: resolveOrdinals([1, 2, 3], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    expect(decoded.scene.placements[0]?.fills['floor' as SlotName]?.holds).toEqual(holdsOf([['torch', 2]]))
+    expect(decoded.dropped).toEqual(['placement 0, slot floor: hold torch is filled twice, keeping the first'])
+  })
+})
+
 describe('manifest drift', () => {
   it('is detected when the ordinals are renumbered without a version bump', async () => {
     const written = manifestOf(64)
@@ -486,7 +851,7 @@ describe('manifest drift', () => {
     const manifest = manifestOf(8)
     const fragment = await fragmentOfPayload(
       wire({
-        instances: [{ template: 0, filters: 0, x: 1, z: 1, rotation: 90, fills: [{ slot: 0, ordinal: 2, pinned: false }] }],
+        instances: [{ template: 0, filters: 0, x: 1, z: 1, rotation: 90, fills: [{ slot: 0, ordinal: 2, pinned: false, holds: [], emptied: false }] }],
         digest: 0,
       }),
     )
@@ -544,9 +909,9 @@ describe('salvage, at the three levels row A1 made different', () => {
       wire({
         templates: [FAMILY, 'Not A Template'],
         instances: [
-          { template: 1, filters: 0, x: 0, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
-          { template: 1, filters: 0, x: 1, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
-          { template: 0, filters: 0, x: 2, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
+          { template: 1, filters: 0, x: 0, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false }] },
+          { template: 1, filters: 0, x: 1, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false }] },
+          { template: 0, filters: 0, x: 2, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false }] },
         ],
         digest: resolveOrdinals([1], manifest).digest,
       }),
@@ -574,8 +939,8 @@ describe('salvage, at the three levels row A1 made different', () => {
             z: 0,
             rotation: 0,
             fills: [
-              { slot: 0, ordinal: 1, pinned: false },
-              { slot: 1, ordinal: 2, pinned: false },
+              { slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false },
+              { slot: 1, ordinal: 2, pinned: false, holds: [], emptied: false },
             ],
           },
         ],
@@ -608,9 +973,9 @@ describe('salvage, at the three levels row A1 made different', () => {
       wire({
         filters: ['', ['component|door|arched', ''].join('\u0000')],
         instances: [
-          { template: 0, filters: 1, x: 0, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
-          { template: 0, filters: 1, x: 1, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
-          { template: 0, filters: 0, x: 2, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false }] },
+          { template: 0, filters: 1, x: 0, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false }] },
+          { template: 0, filters: 1, x: 1, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false }] },
+          { template: 0, filters: 0, x: 2, z: 0, rotation: 0, fills: [{ slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false }] },
         ],
         digest: resolveOrdinals([1, 1, 1], manifest).digest,
       }),
@@ -624,6 +989,49 @@ describe('salvage, at the three levels row A1 made different', () => {
     // cost, not once per placement — `readStringTable`'s rule for all three.
     expect(decoded.dropped).toEqual([
       'filters 1: not a readable filter list, widening 2 placements to any',
+    ])
+  })
+
+  it('refuses a slot named after a key no record may carry, keeping the other fills', async () => {
+    /* The same defence as the hold level and through the same collector, because
+       it is the same loose key schema: `SlotName` is `z.string().min(1)`, so a
+       hand-edited table can name a slot `constructor` and a decoded `fills`
+       record must not carry it into `placeTemplate`. The rest of the instance is
+       untouched — an unsafe key costs its own fill, like a retired file does. */
+    const manifest = manifestOf(8)
+    const fragment = await fragmentOfPayload(
+      wire({
+        slots: ['floor', 'constructor', 'valueOf'],
+        instances: [
+          {
+            template: 0,
+            filters: 0,
+            x: 0,
+            z: 0,
+            rotation: 0,
+            fills: [
+              { slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false },
+              { slot: 1, ordinal: 2, pinned: false, holds: [], emptied: false },
+              // A legitimate name that only *looks* dangerous: it is an
+              // `Object.prototype` member and not an unsafe key, so it is kept.
+              { slot: 2, ordinal: 3, pinned: true, holds: [], emptied: false },
+            ],
+          },
+        ],
+        digest: resolveOrdinals([1, 2, 3], manifest).digest,
+      }),
+    )
+    const decoded = await decodeShareFragment(fragment, manifest)
+    expect(decoded.ok).toBe(true)
+    if (!decoded.ok) return
+    const fills = decoded.scene.placements[0]?.fills
+    expect(fills).toEqual({
+      ['floor' as SlotName]: { tile: tileId(1), pinned: false },
+      ['valueOf' as SlotName]: { tile: tileId(3), pinned: true },
+    })
+    expect(Object.getPrototypeOf(fills)).toBe(Object.prototype)
+    expect(decoded.dropped).toEqual([
+      'placement 0: slot constructor names an unsafe key, dropping the fill',
     ])
   })
 
@@ -642,8 +1050,8 @@ describe('salvage, at the three levels row A1 made different', () => {
             z: 0,
             rotation: 0,
             fills: [
-              { slot: 0, ordinal: 1, pinned: false },
-              { slot: 0, ordinal: 2, pinned: true },
+              { slot: 0, ordinal: 1, pinned: false, holds: [], emptied: false },
+              { slot: 0, ordinal: 2, pinned: true, holds: [], emptied: false },
             ],
           },
         ],
@@ -700,7 +1108,7 @@ describe('salvage, at the three levels row A1 made different', () => {
     const fragment = await fragmentOfPayload(
       wire({
         lockIndex: 7,
-        instances: [{ template: 0, filters: 0, x: 1, z: 1, rotation: 90, fills: [{ slot: 0, ordinal: 2, pinned: false }] }],
+        instances: [{ template: 0, filters: 0, x: 1, z: 1, rotation: 90, fills: [{ slot: 0, ordinal: 2, pinned: false, holds: [], emptied: false }] }],
         digest: resolveOrdinals([2], manifest).digest,
       }),
     )

@@ -1,6 +1,6 @@
 /* ────────────────────────────────────────────────────────────────────────────
-   OpenForge Workshop — the accessory slots the plan's files open, and the
-   editor that fills a recipe's own.
+   OpenForge Workshop — the slot editor: a recipe's own slots, and the accessory
+   slots the files in them open.
 
    Hand-written rather than Tailwind utilities, following `../panels.css` and the
    note at the top of `../../../ui/shell/shell.css`. Unlayered, same as the rest
@@ -9,86 +9,22 @@
    ## What this file does not restate
 
    The grid, the cards and the greying are `../../../screens/detail/slots/
-   slots.css`, which `SlotFills` imports itself — this reuses the whole picker,
-   so it reuses the picker's styling. Only the plan-side frame is here: the
-   heading, the one summary line, and one block per holder. Restating a
-   `.of-slotfill-*` rule would be two definitions of one class and a race over
-   which `<style>` Vite emits second, which is the mistake `../panels.css`
-   already records.
+   slots.css`, which `SlotFills` imports itself — the editor reuses the whole
+   picker, so it reuses the picker's styling. Only the frame around it is here.
+   Restating a `.of-slotfill-*` rule would be two definitions of one class and a
+   race over which `<style>` Vite emits second, which is the mistake
+   `../panels.css` already records.
 
-   ## It is inside the bill's scroll container, not beside it
+   ## There is no plan-side section any more
 
-   It was a sibling of `.of-bill` in `.of-builder-bill`'s grid, landing in an
-   implicit `auto` row — so it capped itself at `46vh` and scrolled inside that
-   cap, which is what stopped an eight-card grid from pushing the parts list down
-   to nothing. `AccessorySection` renders inside `.of-bill-scroll` now, after the
-   file rows, so both the cap and the nested scroller are gone: the one scroll
-   container the column has is the bill's, and this grows inside it like any other
-   block. A `max-height` here would now scroll a region inside a region.
+   `.of-planslots-*` styled an *Accessory slots* section at the foot of the bill
+   column, listing every placed piece that opened a composition slot — a second
+   enumeration of a scene the bill already expands into. Accessories are chosen
+   in the editor now, under the recipe slot whose file holds them (F7), so the
+   section's rules went with it and what is left is one dialog's worth of CSS.
 
    Light only. Parchment is the committed direction; see `tokens.css`.
    ──────────────────────────────────────────────────────────────────────────── */
-
-.of-planslots {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 0 0;
-  border-top: 1px solid var(--line);
-}
-
-.of-planslots-head {
-  margin: 0;
-  color: var(--ink);
-}
-
-.of-planslots-note {
-  margin: 0;
-  color: var(--mut);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-
-/* An archive gap, not a task. Stated in the accent so it is not read as a
-   count the user can work down. */
-.of-planslots-gap {
-  margin: 0;
-  color: var(--acc);
-  font-family: var(--face-mono);
-  font-size: 10.5px;
-  line-height: 1.4;
-}
-
-.of-planslots-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 4px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.of-planslots-piece {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 0 0 4px;
-  color: var(--ink);
-  font-family: var(--face-display);
-  font-size: 13px;
-  line-height: 1.2;
-}
-
-/* A grid position is a measured fact, so it is mono — the rule at the top of
-   `tokens.css`. */
-.of-planslots-at {
-  flex: none;
-  color: var(--mut);
-  font-family: var(--face-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-}
 
 /* ── The slot editor ─────────────────────────────────────────────────────────
    A `Dialog` and not an anchored popover; `SlotEditor.tsx` has the argument.
@@ -201,6 +137,45 @@
   color: var(--acc);
   font-family: var(--face-mono);
   font-size: 10.5px;
+}
+
+/* ── What the file in a slot holds ───────────────────────────────────────────
+   The accessory picker, under the recipe slot whose file opens it. Since F7 this
+   is where an accessory is chosen; the sidebar section that used to do it is
+   gone, and `SlotEditor.tsx` carries the argument.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.of-sloted-holds {
+  margin: 6px 0 2px;
+  padding: 8px 0 0 10px;
+  border-left: 1px solid var(--line);
+}
+
+.of-sloted-holdhead {
+  margin: 0 0 6px;
+  color: var(--mut);
+}
+
+/* How many copies a slot costs, and which slots nothing has measured. Mono
+   because a mount count is a measured fact — the rule at the top of
+   `tokens.css`. */
+.of-sloted-holdnote {
+  margin: 0 0 8px;
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+}
+
+/* *Needs a choice*, one level down — the weight `.of-sloted-slotfill[data-empty]`
+   gives an empty recipe slot, because it is the same hole in the same print. */
+.of-sloted-holdgap {
+  margin: 0 0 8px;
+  color: var(--acc);
+  font-family: var(--face-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
 /* ── The design filter ───────────────────────────────────────────────────────

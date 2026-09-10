@@ -26,7 +26,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { fixtureFills, fixtureInstance } from '@/builder/canvas/fixture'
 import type { PlacementId } from '@/store'
-import { clearPlacements, placeTemplate, removePlacement, useWorkshopStore } from '@/store'
+import { clearPlacements, placeTemplate, removePlacement, useWorkshopStore, writeSilently } from '@/store'
 
 import { FIXTURE_IDS, FIXTURE_SLOTS, FIXTURE_TEMPLATE } from './fixture'
 import { useHistory } from './useHistory'
@@ -87,6 +87,45 @@ describe('recording', () => {
     act(() => {
       result.current.undo()
     })
+    expect(ids()).toEqual([])
+  })
+})
+
+describe('writes that are not edits', () => {
+  it('records nothing for a write that declared itself silent', () => {
+    const { result } = renderHook(() => useHistory())
+
+    act(() => {
+      writeSilently(() => {
+        setPlacements([['a', 0]])
+      })
+    })
+
+    /* The default-hold pass is the one writer that is not a gesture, and it must
+       not merely avoid cluttering the ring: recorded, its write buries the
+       placement it followed, because undoing it restores the unsolved fill the
+       pass then re-solves — and that re-solve clears `future`. See the module
+       docblock and `@/store#writeSilently`. */
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  it('keeps recording the edits around one', () => {
+    const { result } = renderHook(() => useHistory())
+
+    act(() => {
+      setPlacements([['a', 0]])
+    })
+    act(() => {
+      writeSilently(() => {
+        setPlacements([['a', 0], ['b', 1]])
+      })
+    })
+    act(() => {
+      result.current.undo()
+    })
+
+    // The undo steps past the silent write to the state before the edit, which
+    // is what "not an edit" has to mean for the stack to stay legible.
     expect(ids()).toEqual([])
   })
 })

@@ -57,6 +57,7 @@ import { foldRecipes } from './fold'
 import type { FoldedAssembly } from './fold'
 import { deriveAssemblySizes } from './sizes'
 import { FixtureRow, fixtureFingerprint, fixturesDir, loadFixtureRows } from './fixtures'
+import { emptyMountInventory } from './mounts'
 import { emptyManifest } from './ordinals'
 import type { TemplateFixture } from './templates'
 import {
@@ -108,6 +109,7 @@ describeFixtures(title, () => {
       rows: loadFixtureRows(FIXTURES),
       manifest: emptyManifest(),
       thumbs: new Set(),
+      mounts: emptyMountInventory(),
       fixturesRef: 'test',
       builtAt: PAYLOAD_TIMESTAMP,
     }).file
@@ -353,6 +355,7 @@ describeFixtures(title, () => {
         rows: loadFixtureRows(FIXTURES),
         manifest: emptyManifest(),
         thumbs: new Set(),
+        mounts: emptyMountInventory(),
         fixturesRef: 'test',
         builtAt: PAYLOAD_TIMESTAMP,
       })

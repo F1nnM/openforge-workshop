@@ -52,27 +52,43 @@
  * The honest question was whether they *fit*, because a generated base is not a
  * catalog file and has no manifest ordinal to stand in for it: what identifies
  * one is its recipe, and a canonical recipe key is 85–242 characters. Measured
- * (`capacity.test.ts` prints the table; `payload.ts` carries it): the **first**
- * generated base costs 440 characters of the 2,000-character budget and the next
- * eighty-nine, sharing its recipe, cost 66 between them — because the table is
- * deduplicated and `deflate` eats the repetition, which is the same effect the
- * columnar layout was chosen for. The adversarial scene of ninety bases with
- * ninety *different* recipes reaches 89.2% of the budget and still fits, and
- * nobody builds that.
+ * (`capacity.test.ts` prints the table; `payload.ts` carries it, re-measured at
+ * format 6): the **first** generated base costs 435 characters of the
+ * 2,000-character budget and the next eighty-nine, sharing its recipe, cost 53
+ * between them — because the table is deduplicated and `deflate` eats the
+ * repetition, which is the same effect the columnar layout was chosen for.
+ *
+ * The adversarial scene of ninety bases with ninety *different* recipes now
+ * reaches 103.3% of the budget and **no longer fits**, where it was 89.2% when
+ * X9 asked the question. That is the room underneath growing — a placement
+ * became a template instance, and then a fill gained a hold count — and not the
+ * generated half, whose per-base cost has moved by single characters across both
+ * changes. It stays a warning rather than a defect for the reason `payload.ts`
+ * gives at length: the budget is a threshold, the link still works past it, and
+ * every shape anybody builds is at 52.8% or less.
  *
  * So they travel. The alternative end state — encode nothing and say so plainly
  * — was available and is the worse of the two: it would put a permanent "this
- * link cannot carry part of your room" in front of a user for 440 characters of
+ * link cannot carry part of your room" in front of a user for 435 characters of
  * URL, on the shape of scene the generator exists to produce.
  *
  * ## What a fill carries, and what it deliberately does not
  *
- * A slot's fill is a **file and one bit** — `{ tile, pinned }`, the store's whole
- * `SlotFill` — and both halves travel. The `tile` is not optional: D1 makes a
- * saved room deterministic by naming exact files, so a link that carried only the
- * template would open as a *different* room for a recipient whose lock preference
- * differs, which is the failure the lock byte already exists to prevent one level
- * up.
+ * A slot's fill is a **file, one bit, and the accessories fitted into that file**
+ * — the store's whole `SlotFill` — and all of it travels. The `tile` is not
+ * optional: D1 makes a saved room deterministic by naming exact files, so a link
+ * that carried only the template would open as a *different* room for a recipient
+ * whose lock preference differs, which is the failure the lock byte already
+ * exists to prevent one level up.
+ *
+ * The `holds` map travels as a file and a bit **per hold**, share format 6, and
+ * *solved and empty* travels too — one more bit, per **fill**, because the two
+ * readings of zero holds are two different rooms: `holds === {}` is *the user
+ * took the last torch out* and `holds === undefined` is *nobody has looked*,
+ * which the receiver's default-hold pass fills in against the receiver's own
+ * catalog. Without the bit a deliberately cleared wall arrived with its torch put
+ * back. A fill whose holds were all *dropped* — a retired accessory — still
+ * arrives unsolved and is repaired; `link.ts` maps the three states.
  *
  * `pinned` travels for the reason it is not defaulted in the schema: it is the
  * difference between "the solver picked this, follow my lock" and "the user chose

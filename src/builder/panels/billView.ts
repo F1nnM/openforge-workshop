@@ -80,13 +80,14 @@ import type {
   BillLine,
   BillNote,
   BillOfTiles,
+  BillSlotRef,
   DownloadSize,
   NoteCode,
   ResolvedInstance,
   ResolvedSlotFill,
 } from '@/assembly'
 import type { BlobId, CatalogRecord, TileId } from '@/catalog'
-import type { PlacementId, SlotName, TemplateInstance } from '@/store'
+import type { HoldName, PlacementId, SlotName, TemplateInstance } from '@/store'
 import { countLabel } from '@/screens/catalog'
 
 /* --------------------------------------------------------------- inventory */
@@ -228,9 +229,14 @@ function byCopiesThenName(a: BillRow, b: BillRow): number {
  * one placement under it was a number a user could not account for.
  *
  * Sorted already by `bill.ts#bySlotRef`, so this filters and does not reorder.
+ *
+ * **The refs themselves rather than their slot names**, since a ref may name an
+ * accessory: `{ slot: 'wall', hold: 'torch' }` is *the torch in the wall*, and a
+ * list of slot names would have said `wall` for both the wall and the torch in
+ * it. Formatting the pair is the panel's, beside the rest of the row's copy.
  */
-export function slotsAsking(line: BillLine, placement: PlacementId): readonly SlotName[] {
-  return line.slots.filter((ref) => ref.placement === placement).map((ref) => ref.slot)
+export function slotsAsking(line: BillLine, placement: PlacementId): readonly BillSlotRef[] {
+  return line.slots.filter((ref) => ref.placement === placement)
 }
 
 /* -------------------------------------------------------------- slot faults */
@@ -251,18 +257,31 @@ export function slotsAsking(line: BillLine, placement: PlacementId): readonly Sl
  *   - `retired` — the slot names a file that has left the archive. There is
  *     nothing to print and nothing to check.
  *   - `empty` — the slot has no entry at all.
+ *   - `hole` — the slot is filled and the **file in it** leaves a required
+ *     accessory slot with nothing printable in it: empty, or naming an accessory
+ *     this build no longer holds. One level below the other four — the piece on
+ *     the plan is complete and the print is not — and the only kind the slot
+ *     editor cannot repair, because a recipe's dialog does not reach a file's own
+ *     slots. `SlotFault.tile` tells the two apart.
  *   - `no-recipe` — the whole template is not in this build, so it has no
  *     declared slots to fault. One entry per instance, with no slot. Emitted so
  *     this function is total over the scene, and dropped by the panel: an
  *     instance that resolved to no parts is `BillInventory.orphans`' to render,
  *     and two blocks for one piece would offer two Remove buttons for it.
  *
- * `retired`, `empty` and `no-recipe` all refuse the download
+ * `retired`, `empty`, `hole` and `no-recipe` all refuse the download
  * ({@link BillOfTiles.complete}); `off-slot` does not, and that split is §7's:
  * an unprintable pack is refused, a wrong build is disclosed. A user is told
  * which of the two they have.
  */
-export type SlotFaultKind = 'off-slot' | 'retired' | 'empty' | 'no-recipe'
+export type SlotFaultKind = 'off-slot' | 'retired' | 'empty' | 'hole' | 'no-recipe'
+
+/** Where a fault is: a recipe's slot, and for a `hole` the accessory slot inside it. */
+export interface FaultSubject {
+  readonly slot: SlotName
+  /** The `config.parts` name of the accessory slot. Present for `hole` alone. */
+  readonly hold: HoldName | undefined
+}
 
 /** One faulty slot, with everything needed to name it and reach it. */
 export interface SlotFault {
@@ -271,8 +290,17 @@ export interface SlotFault {
   readonly instance: TemplateInstance
   /** The template id — the only identity a `no-recipe` instance is guaranteed to have. */
   readonly template: string
-  /** The slot, or `undefined` for `no-recipe`. */
-  readonly slot: SlotName | undefined
+  /**
+   * Which slot the fault is in, and — for a `hole` — which accessory slot of the
+   * file filling it. `undefined` for `no-recipe` alone, which has no slots.
+   *
+   * **One field rather than two**, so a hold cannot be present without the slot
+   * that carries it: the pair *is* the name of the fault (`wall › torch` is *the
+   * torch socket in the wall*, where the slot alone would say `wall` for both),
+   * and two independent optional fields would let a caller compose
+   * `undefined › torch`.
+   */
+  readonly where: FaultSubject | undefined
   readonly kind: SlotFaultKind
   /** The file the slot names, present for `off-slot` and `retired`. */
   readonly tile: TileId | undefined
@@ -302,7 +330,8 @@ export interface SlotFault {
  * "checked and wrong", and a boolean would have reported the first as the second.
  * `bill.notes` is the roll-up of the same conditions and stays the summary; this
  * is the list behind it, and the two cannot disagree because both are read off
- * `ResolvedInstance.slots`.
+ * `ResolvedInstance.slots` — and, for the `hole` kind, off `ResolvedInstance.holds`
+ * one level down.
  *
  * Ordered by plan reading order and then by the template's own declared slot
  * order, so the list reads down the drawing rather than in whatever order the
@@ -323,7 +352,7 @@ function faultsIn(resolved: ResolvedInstance): SlotFault[] {
     return [
       {
         ...shared,
-        slot: undefined,
+        where: undefined,
         kind: 'no-recipe',
         tile: undefined,
         record: undefined,
@@ -333,22 +362,64 @@ function faultsIn(resolved: ResolvedInstance): SlotFault[] {
     ]
   }
 
-  // In the template's declared order, which `ResolvedInstance.slots` already is.
+  // In the template's declared order, which `ResolvedInstance.slots` already is,
+  // and each slot followed by the holes in the file that fills it — so the list
+  // reads down the piece rather than listing every recipe slot and then coming
+  // back for the accessories.
   return resolved.slots.flatMap((slot) => {
     const kind = kindOf(slot)
-    if (kind === undefined) return []
-    return [
-      {
-        ...shared,
-        slot: slot.slot,
-        kind,
-        tile: slot.fill?.tile,
-        record: slot.record,
-        pinned: slot.fill?.pinned ?? false,
-        blocksDownload: kind !== 'off-slot',
-      },
-    ]
+    const own: SlotFault[] =
+      kind === undefined
+        ? []
+        : [
+            {
+              ...shared,
+              where: { slot: slot.slot, hold: undefined },
+              kind,
+              tile: slot.fill?.tile,
+              record: slot.record,
+              pinned: slot.fill?.pinned ?? false,
+              blocksDownload: kind !== 'off-slot',
+            },
+          ]
+    return [...own, ...holeFaults(resolved, slot.slot, shared)]
   })
+}
+
+/**
+ * The **required accessory slots of one filled slot's file with nothing
+ * printable in them** — the hole one level down.
+ *
+ * `resolveInstance` already refuses the download over these
+ * (`ResolvedInstance.complete`), and `useArchiveDownload` already names them, so
+ * before this the panel was the one surface that showed a scene with every slot
+ * filled beside a refusal with nothing behind it. A doorway with no door is the
+ * ordinary case rather than a contrived one: 1,047 of the archive's 1,244
+ * accessory declarations omit `optional` and absence means required.
+ *
+ * **The condition is `record === undefined`, not `fill === undefined`**, because
+ * that is exactly the condition `resolveInstance` refuses the download on. The
+ * two ways to reach it are one empty socket and one accessory this build has
+ * dropped, they are two different repairs, and {@link SlotFault.tile} carries
+ * which — the same split {@link kindOf} makes between `empty` and `retired` one
+ * level up.
+ */
+function holeFaults(
+  resolved: ResolvedInstance,
+  slot: SlotName,
+  shared: { placement: PlacementId; instance: TemplateInstance; template: string },
+): SlotFault[] {
+  return resolved.holds
+    .filter((held) => held.slot === slot && !held.optional && held.record === undefined)
+    .map((held) => ({
+      ...shared,
+      where: { slot, hold: held.hold },
+      kind: 'hole' as const,
+      tile: held.fill?.tile,
+      record: undefined,
+      pinned: held.fill?.pinned ?? false,
+      blocksDownload: true,
+    }))
 }
 
 /**
@@ -388,7 +459,15 @@ export interface SlotFaultCopy {
  * that has gone inadmissible means the constraint moved under it.
  */
 export function slotFaultCopy(fault: SlotFault): SlotFaultCopy {
-  const subject = fault.slot === undefined ? fault.template : `${fault.template} · ${fault.slot}`
+  // `template · slot › hold`, the spelling the download's refusal uses for the
+  // same pair, so a user meets one name for one fault on both surfaces.
+  const where =
+    fault.where === undefined
+      ? undefined
+      : fault.where.hold === undefined
+        ? fault.where.slot
+        : `${fault.where.slot} › ${fault.where.hold}`
+  const subject = where === undefined ? fault.template : `${fault.template} · ${where}`
   switch (fault.kind) {
     case 'off-slot':
       return {
@@ -406,6 +485,16 @@ export function slotFaultCopy(fault: SlotFault): SlotFaultCopy {
       }
     case 'empty':
       return { subject, reason: 'Nothing is in this slot, and every slot of every recipe in this build is required.' }
+    case 'hole':
+      return {
+        subject,
+        reason:
+          fault.tile === undefined
+            ? 'The file in this slot opens an accessory slot it does not mark optional, and nothing is in it. ' +
+              "Fill it in the piece's slot editor, under the slot that holds the file."
+            : 'The accessory in this required slot names a file this build no longer holds — pick another ' +
+              "in the piece's slot editor, under the slot that holds the file.",
+      }
     case 'no-recipe':
       return { subject, reason: 'This build ships no recipe by that name, so the piece has no slots to fill.' }
   }
@@ -560,6 +649,58 @@ export function noteCopy(note: BillNote): NoteCopy {
           'True of a quarter of everything the recipes in this build admit — 3,610 of 14,241 candidate files — ' +
           'so it is a fact rather than a fault. It means nothing checked whether these interleave with the rest ' +
           'of the scene.',
+      }
+
+    case 'hold-unknown-tile':
+      return {
+        ...base,
+        headline: `${n} ${note.count === 1 ? 'accessory names a file' : 'accessories name files'} not in this catalog build`,
+        detail:
+          'A torch, a door or a grate fitted into one of your tiles names a file that has left the archive, so ' +
+          'there is nothing to print for it. It costs the accessory and not the piece: the tile holding it still ' +
+          'prints and still fits. Pick another for the slot, or take it out.',
+      }
+
+    case 'hold-off-slot':
+      return {
+        ...base,
+        headline: `${n} ${note.count === 1 ? 'accessory sits in a slot its tile does not have' : 'accessories sit in slots their tiles do not have'}`,
+        detail:
+          'The tile declares no such accessory slot, so the file will print and there is nowhere on the piece it ' +
+          'goes. Nothing in the app can put one there — a share link decoded against another build can, and so ' +
+          'can a saved room whose tile has changed since.',
+      }
+
+    case 'hold-unplaced':
+      return {
+        ...base,
+        headline: `${n} ${files} ${is} in the pack and not on the plan`,
+        detail:
+          'Nothing has measured where this accessory attaches to the tile holding it, so the plan cannot draw it. ' +
+          'It is still downloaded once: the file you chose is in the pack, and where it goes is a gap in the ' +
+          'measurement rather than in your room.',
+      }
+
+    case 'hold-unanchored':
+      return {
+        ...base,
+        headline: `${n} ${files} ${is} in the pack and not on the plan`,
+        detail:
+          'Nothing has measured how this accessory plugs in — where its own peg, leaf or plate meets the tile — ' +
+          'so the plan cannot draw it. It is still downloaded once: the file you chose is in the pack, and the ' +
+          'gap is in the measurement rather than in your room.',
+      }
+
+    case 'hold-modelled-in':
+      return {
+        ...base,
+        headline: `${n} ${files} ${is} already built into the tile holding ${
+          note.count === 1 ? 'it' : 'them'
+        }`,
+        detail:
+          'The tile was printed with this accessory as part of it — a floor whose brazier is sculpted on, ' +
+          'or a wall with its door modelled in — so nothing needs to be printed for it and nothing is drawn. ' +
+          'It is not in the pack, and the piece is complete without it.',
       }
 
     case 'mixed-build-systems':

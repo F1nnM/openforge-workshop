@@ -18,12 +18,14 @@
    `@import` could go. `library.css` and `panels.css` also take
    `.of-empty-title` and `.of-search-input` respectively, and keep theirs.
 
-   ## The grid is three columns, because the largest one in the corpus is eight
+   ## The grid is three columns, because the largest one in the corpus is ten
 
    Measured over all 1,244 accessory slot declarations: median 1 item, mean 1.8,
-   max 8. Three columns puts the worst case in three rows inside a 442px drawer
-   and the common case on one line, so there is nothing here to virtualise and
-   no scroll container of its own. `slotPicker.ts` carries the measurement.
+   max 8 — and since F5 a card is a *print* where only a sculpt tells an item's
+   files apart, which takes the widest grid to **10 cards** and the median to 2.
+   Three columns puts that worst case in four rows inside a 442px drawer and the
+   common case on one line, so there is nothing here to virtualise and no scroll
+   container of its own. `slotPicker.ts` carries both measurements.
 
    Light only. Parchment is the committed direction; see `tokens.css`.
    ──────────────────────────────────────────────────────────────────────────── */
@@ -152,6 +154,20 @@
 
 .of-slotfill-card[data-dead] .of-slotfill-cardname {
   color: var(--mut);
+}
+
+/* F5's label: which of an item's files this card is, where only a sculpt tells
+   them apart — `1`, `2`, `3` on the three lintels. Mono and quiet: it is a
+   fragment of a filename beside a name, not a second name. */
+.of-slotfill-cardvariant {
+  color: var(--mut);
+  font-family: var(--face-mono);
+  font-size: 9.5px;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .of-slotfill-why {

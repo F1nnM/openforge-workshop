@@ -10,18 +10,32 @@
  * Each record exists for one branch, and the branches are the corpus's:
  *
  *   - **`wallTowne`** — a base slot alive in its initial state beside a torch
- *     slot with two candidate items, one of which *closes the base slot*. This
- *     is the corpus's dead end in miniature: `constrain: [{ tag: 'texture' }]`
- *     collects `texture|dungeon_stone` from the wall and `texture|towne` from the
- *     picked torch, keeps both because neither is a prefix of the other, and no
- *     base carries both. 416 of 4,330 item picks in the live archive do exactly
- *     this.
- *   - **`wallLow`** — the *rescue*. Its base slot is empty before anything is
- *     picked (the wall contributes `shape|wall|low` and no base is low), and
- *     filling its `top` slot with a piece carrying `shape|wall` makes the base
- *     slot resolvable: `filterSpecificTags` keeps the **most general** survivor,
- *     so `shape|wall|low` is dropped in favour of `shape|wall`. Three picks in
- *     the live archive behave this way.
+ *     slot with two candidate items, one of which *would close the base slot*:
+ *     `constrain: [{ tag: 'texture' }]` collects `texture|dungeon_stone` from the
+ *     wall and `texture|towne` from the picked torch, keeps both because neither
+ *     is a prefix of the other, and no base carries both. 416 of 4,330 item picks
+ *     in the live archive do exactly this — and **none of them is a dead end**,
+ *     because the base is the room's own slot rather than a sibling of the torch
+ *     (`slotPicker.ts`'s docblock, and the Cut Stone door wall it was measured
+ *     on). So this record is now the fixture's *not*-greyed case.
+ *   - **`wallSiblings`** — the dead end that is one: two **accessory** slots,
+ *     `torch` and `top`, where the towne torch pushes `texture|towne` into the
+ *     top's `constrain` beside the wall's own `texture|dungeon_stone` and empties
+ *     it. Nothing in the live archive does this — all 4,760 accessory-to-accessory
+ *     observations are inert — and the mechanism is the one thing the greying is
+ *     for, so it is exercised here rather than nowhere.
+ *   - **`wallLow`** — the corpus's *rescue*, which is the same shape as its dead
+ *     end and is dropped for the same reason. Its base slot is empty before
+ *     anything is picked (the wall contributes `shape|wall|low` and no base is
+ *     low) and filling its `top` slot with a piece carrying `shape|wall` makes
+ *     the base slot resolvable — `filterSpecificTags` keeps the **most general**
+ *     survivor, so `shape|wall|low` is dropped in favour of `shape|wall`. Three
+ *     picks in the live archive behave this way, all three on the base, so the
+ *     picker reports none of them.
+ *   - **`wallRescue`** — that mechanism between two **accessory** slots, so it is
+ *     exercised where the picker can still see it: a `shape|wall|low` wall whose
+ *     `crosshead` slot constrains on `shape` and is therefore empty until the
+ *     `top` slot contributes the more general `shape|wall`.
  *   - **`danglingRef`** — a slot naming a tag the table does not hold, which is
  *     `unknownRefs` and not "nothing matched". **0 live slots**, and the
  *     distinction is a different sentence to show a user.
@@ -32,6 +46,20 @@
  *   - **`baseOnly`** — a `base` slot and nothing else, so the picker must render
  *     nothing at all. **2,031 of 8,702 files** are this case.
  *   - **`plainFloor`** — no config whatsoever. **5,666 files.**
+ *   - **`sculptWall`** — F5's two branches, which no single corpus record carries
+ *     both of. Its one `lintel` slot admits **three items**: `Wood Door Lintel`,
+ *     whose three files are three *sculpts* — same connection claim, three
+ *     blobs, which is `door_lintel.1/2/3.stl` in the archive and is offered as
+ *     **three cards**; and `Stone Door Lintel`, whose two files differ by
+ *     `connection|side|dragonlock` and are therefore **one card** holding the
+ *     variant the lock preference picks. The corpus has **no** item of the second
+ *     kind under any accessory slot — all 1,861 multi-file groups make one claim —
+ *     so the collapse branch is exercised here or nowhere. It is also the only
+ *     place in this fixture where two records carry a `connection|` tag: `project`
+ *     reads the tags and not `CatalogRecord.conn`, so every other variant here
+ *     claims nothing. The third item, `Plain Door Lintel`, is **two prints under
+ *     one filename** in two families — 569 of the corpus's expanded slots — so the
+ *     labels have to come from the path.
  *   - **`archway`** — two accessory slots where filling one *narrows* the other
  *     without emptying it, and a `{ filter }` entry that decides which of the
  *     parent's tags is inherited. **This case does not occur in the live
@@ -41,6 +69,9 @@
  *     fixture because the mechanism is the row's whole subject and a machine
  *     that only ever grey-outs would pass a test suite that never exercised the
  *     narrowing path. The measurement is in `slots.test.ts`, against the corpus.
+ *     It is also the fixture's **one measured host** — four torch sockets and an
+ *     unmeasured lintel — so a panel that prices a hold per mount has both a
+ *     multi-mount slot and an unmeasured one to say something about.
  */
 import type { CatalogFile as CatalogFileType } from '@/catalog'
 import { CatalogFile } from '@/catalog'
@@ -55,6 +86,9 @@ export const ORD = {
   baseOnly: 105,
   plainFloor: 106,
   archway: 107,
+  wallSiblings: 108,
+  wallRescue: 109,
+  sculptWall: 110,
 
   torchStone: 200,
   torchStoneFlex: 201,
@@ -65,6 +99,13 @@ export const ORD = {
   grateLeft: 206,
   grateRight: 207,
   topTowne: 208,
+  lintelWoodOne: 209,
+  lintelWoodTwo: 210,
+  lintelWoodThree: 211,
+  lintelStone: 212,
+  lintelStoneLocked: 213,
+  lintelPlainTowne: 214,
+  lintelPlainStone: 215,
 } as const
 
 const TAGS = [
@@ -76,7 +117,14 @@ const TAGS = [
   'component|torch',
   'component|top',
   'component|grate',
+  'component|lintel',
   'size|width|2',
+  /* The only `connection|` tags in this fixture, and the only thing that makes
+     two variants' claims differ: `project` reads these rather than
+     `CatalogRecord.conn`, which is why every other record here claims nothing
+     however its `conn` field reads. */
+  'connection|openforge',
+  'connection|side|dragonlock',
 ]
 
 const T = {
@@ -88,8 +136,32 @@ const T = {
   torch: 5,
   top: 6,
   grate: 7,
-  width2: 8,
+  lintel: 8,
+  width2: 9,
+  openforge: 10,
+  dragonlock: 11,
 } as const
+
+/**
+ * One measured torch socket, the corpus's own signature.
+ *
+ * A 5.5 × 3 mm mouth entering 25° off vertical, tilting up and out — `axis`
+ * points *into* the host, so `dot(axis, normal)` is the cosine of that tilt.
+ * `outward` is the face's own normal component and `side` puts the socket at
+ * x = ∓25.2, where the archive's measured torch walls carry theirs.
+ */
+function torchSocket(face: '-y' | '+y', outward: -1 | 1, side: -1 | 1): Record<string, unknown> {
+  return {
+    slot: 'torch',
+    kind: 'socket',
+    face,
+    normal: [0, outward, 0],
+    at: [side * 25.2, outward * 6.35, 38.1],
+    axis: [0, -outward * 0.4226, 0.9063],
+    section: [5.5, 3],
+    depth: 14,
+  }
+}
 
 function tile(overrides: Record<string, unknown> & { design: string }): Record<string, unknown> {
   return {
@@ -136,9 +208,36 @@ export const SLOT_CATALOG: CatalogFileType = CatalogFile.parse({
       config: {
         parts: [
           // Alive before anything is picked: one base carries
-          // `texture|dungeon_stone`. Closed by picking the towne torch.
+          // `texture|dungeon_stone`. The towne torch would empty it, and that is
+          // not a dead end — the base is the room's slot, not the torch's
+          // sibling. See `wallSiblings` for the pick that is one.
           { name: 'base', tags: { require: [{ tag: 'shape|base' }], constrain: [{ tag: 'texture' }] } },
           { name: 'torch', optional: true, tags: { require: [{ tag: 'component|torch' }] } },
+        ],
+      },
+    }),
+
+    tile({
+      id: 'tiles/dungeon_stone/walls/torchtop/stone%torchtop.2x.openforge.stl',
+      ord: ORD.wallSiblings,
+      design: 'd-torchtop',
+      file: 'stone%torchtop.2x.openforge.stl',
+      family: 'tiles/dungeon_stone/walls/torchtop',
+      name: 'Dungeon Stone Torch Top Wall 2x',
+      tags: [T.wall, T.stone, T.width2],
+      config: {
+        parts: [
+          { name: 'torch', optional: true, tags: { require: [{ tag: 'component|torch' }] } },
+          // One candidate before anything is picked — `stone%top.stl`, the only
+          // top carrying `texture|dungeon_stone` — and none once the towne torch
+          // contributes `texture|towne` beside the wall's own texture. Two
+          // accessory slots, so the emptied one is a sibling the picker resolves
+          // rather than the base the room chooses.
+          {
+            name: 'top',
+            optional: true,
+            tags: { require: [{ tag: 'component|top' }], constrain: [{ tag: 'texture' }] },
+          },
         ],
       },
     }),
@@ -158,6 +257,45 @@ export const SLOT_CATALOG: CatalogFileType = CatalogFile.parse({
           { name: 'base', tags: { require: [{ tag: 'shape|base' }], constrain: [{ tag: 'shape' }] } },
           { name: 'top', tags: { require: [{ tag: 'component|top' }] } },
         ],
+      },
+    }),
+
+    tile({
+      id: 'tiles/dungeon_stone/walls/lowtop/stone%lowtop.2x.openforge.stl',
+      ord: ORD.wallRescue,
+      design: 'd-lowtop',
+      file: 'stone%lowtop.2x.openforge.stl',
+      family: 'tiles/dungeon_stone/walls/lowtop',
+      name: 'Dungeon Stone Low Top Wall 2x',
+      tags: [T.wallLow, T.stone, T.width2],
+      config: {
+        parts: [
+          { name: 'top', optional: true, tags: { require: [{ tag: 'component|top' }] } },
+          // Empty until `top` is filled: `constrain: [{ tag: 'shape' }]` inherits
+          // the wall's own `shape|wall|low`, which no insert carries, and a top's
+          // `shape|wall` generalises it away.
+          {
+            name: 'crosshead',
+            optional: true,
+            tags: { require: [{ tag: 'component|top' }], constrain: [{ tag: 'shape' }] },
+          },
+        ],
+      },
+    }),
+
+    /*
+      **F5's host**: one slot, two items, one of each kind. See the docblock.
+    */
+    tile({
+      id: 'tiles/dungeon_stone/walls/sculpted/stone%sculpted.2x.openforge.stl',
+      ord: ORD.sculptWall,
+      design: 'd-sculpted',
+      file: 'stone%sculpted.2x.openforge.stl',
+      family: 'tiles/dungeon_stone/walls/sculpted',
+      name: 'Dungeon Stone Sculpted Door Wall 2x',
+      tags: [T.wall, T.stone, T.width2],
+      config: {
+        parts: [{ name: 'lintel', optional: true, tags: { require: [{ tag: 'component|lintel' }] } }],
       },
     }),
 
@@ -259,6 +397,21 @@ export const SLOT_CATALOG: CatalogFileType = CatalogFile.parse({
           },
         ],
       },
+      /*
+        **The fixture's one measured host**, and the only place a mount count is
+        anything but zero. Four torch sockets — two per face of a 2x archway, at
+        x = ±25.2 the way the corpus's measured torch walls carry theirs — because
+        the panels bill one copy per mount and *four torches for one press* is the
+        arithmetic a user must be told about before they meet it. Its `lintel`
+        stays unmeasured, which is the ordinary state of the whole archive today
+        and is the other line the plan's accessory list has to be able to say.
+      */
+      mounts: [
+        torchSocket('-y', -1, -1),
+        torchSocket('-y', -1, 1),
+        torchSocket('+y', 1, -1),
+        torchSocket('+y', 1, 1),
+      ],
     }),
 
     /* ----------------------------------------------------- what fills them */
@@ -363,6 +516,134 @@ export const SLOT_CATALOG: CatalogFileType = CatalogFile.parse({
       config: { fulfills: [{ part: 'top' }] },
     }),
 
+    /*
+      **Three sculpts of one lintel**, the archive's `door_lintel.1/2/3.stl`:
+      three blobs, one design, and nothing but the mesh to tell them apart — so
+      the picker offers three cards and a pick names the file. Distinct `blob`s
+      are the whole of the fixture here: every other record in this file shares
+      one, which is exactly the case the expansion must *not* fire on (one print
+      filed under several paths).
+    */
+    tile({
+      id: 'tiles/wood/inserts/lintel/door_lintel.1.stl',
+      ord: ORD.lintelWoodOne,
+      design: 'd-lintel-wood',
+      blob: '11111111111111111111111111111111',
+      file: 'door_lintel.1.stl',
+      family: 'tiles/wood/inserts/lintel',
+      name: 'Wood Door Lintel',
+      kinds: [],
+      conn: [],
+      layer: 'insert',
+      tags: [T.lintel, T.stone],
+      foot: { shape: 'none' },
+      config: { fulfills: [{ part: 'lintel' }] },
+    }),
+    tile({
+      id: 'tiles/wood/inserts/lintel/door_lintel.2.stl',
+      ord: ORD.lintelWoodTwo,
+      design: 'd-lintel-wood',
+      blob: '22222222222222222222222222222222',
+      file: 'door_lintel.2.stl',
+      family: 'tiles/wood/inserts/lintel',
+      name: 'Wood Door Lintel',
+      kinds: [],
+      conn: [],
+      layer: 'insert',
+      tags: [T.lintel, T.stone],
+      foot: { shape: 'none' },
+      config: { fulfills: [{ part: 'lintel' }] },
+    }),
+    tile({
+      id: 'tiles/wood/inserts/lintel/door_lintel.3.stl',
+      ord: ORD.lintelWoodThree,
+      design: 'd-lintel-wood',
+      blob: '33333333333333333333333333333333',
+      file: 'door_lintel.3.stl',
+      family: 'tiles/wood/inserts/lintel',
+      name: 'Wood Door Lintel',
+      kinds: [],
+      conn: [],
+      layer: 'insert',
+      tags: [T.lintel, T.stone],
+      foot: { shape: 'none' },
+      config: { fulfills: [{ part: 'lintel' }] },
+    }),
+
+    /*
+      **One lintel in two joineries**, which is the shape the item grid exists
+      for: three distinct blobs would still be one card, because the choice
+      between them is the lock preference's and `selectVariant` makes it.
+    */
+    tile({
+      id: 'tiles/dungeon_stone/inserts/lintel/stone%lintel.openforge.stl',
+      ord: ORD.lintelStone,
+      design: 'd-lintel-stone',
+      blob: '44444444444444444444444444444444',
+      file: 'stone%lintel.openforge.stl',
+      family: 'tiles/dungeon_stone/inserts/lintel',
+      name: 'Dungeon Stone Door Lintel',
+      kinds: [],
+      layer: 'insert',
+      tags: [T.lintel, T.stone, T.openforge],
+      foot: { shape: 'none' },
+      config: { fulfills: [{ part: 'lintel' }] },
+    }),
+    tile({
+      id: 'tiles/dungeon_stone/inserts/lintel/stone%lintel.openforge+dragonlock.stl',
+      ord: ORD.lintelStoneLocked,
+      design: 'd-lintel-stone',
+      blob: '55555555555555555555555555555555',
+      file: 'stone%lintel.openforge+dragonlock.stl',
+      family: 'tiles/dungeon_stone/inserts/lintel',
+      name: 'Dungeon Stone Door Lintel',
+      kinds: [],
+      conn: ['openforge', 'dragonlock'],
+      layer: 'insert',
+      tags: [T.lintel, T.stone, T.openforge, T.dragonlock],
+      foot: { shape: 'none' },
+      config: { fulfills: [{ part: 'lintel' }] },
+    }),
+
+    /*
+      **Two prints of one lintel under one filename**, which is 569 of the
+      corpus's expanded slots — `shutters.stl` under two families, `door.metal.stl`
+      under `cut-stone` and `towne`. The label cannot come from the filename here,
+      so `distinguishingLabels` cuts the *paths* instead and the cards read
+      `towne` and `cut_stone`.
+    */
+    tile({
+      id: 'tiles/towne/inserts/plain/lintel.stl',
+      ord: ORD.lintelPlainTowne,
+      design: 'd-lintel-plain',
+      blob: '66666666666666666666666666666666',
+      file: 'lintel.stl',
+      family: 'tiles/towne/inserts/plain',
+      name: 'Plain Door Lintel',
+      kinds: [],
+      conn: [],
+      layer: 'insert',
+      texture: 'towne',
+      tags: [T.lintel, T.towne],
+      foot: { shape: 'none' },
+      config: { fulfills: [{ part: 'lintel' }] },
+    }),
+    tile({
+      id: 'tiles/cut_stone/inserts/plain/lintel.stl',
+      ord: ORD.lintelPlainStone,
+      design: 'd-lintel-plain',
+      blob: '77777777777777777777777777777777',
+      file: 'lintel.stl',
+      family: 'tiles/cut_stone/inserts/plain',
+      name: 'Plain Door Lintel',
+      kinds: [],
+      conn: [],
+      layer: 'insert',
+      tags: [T.lintel, T.stone],
+      foot: { shape: 'none' },
+      config: { fulfills: [{ part: 'lintel' }] },
+    }),
+
     tile({
       id: 'tiles/cut_stone/inserts/grate/grate%left.stl',
       ord: ORD.grateLeft,
@@ -402,6 +683,9 @@ export const PARENT = {
   baseOnly: 'tiles/dungeon_stone/walls/plain/stone%plain.openforge.stl',
   plainFloor: 'tiles/dungeon_stone/floors/floor/stone%floor.1x1.stl',
   archway: 'tiles/dungeon_stone/arches/archway/stone%archway.2x.openforge.stl',
+  wallSiblings: 'tiles/dungeon_stone/walls/torchtop/stone%torchtop.2x.openforge.stl',
+  wallRescue: 'tiles/dungeon_stone/walls/lowtop/stone%lowtop.2x.openforge.stl',
+  sculptWall: 'tiles/dungeon_stone/walls/sculpted/stone%sculpted.2x.openforge.stl',
 } as const
 
 /** What fills them. */
@@ -411,4 +695,12 @@ export const FILL = {
   torchTowne: 'tiles/towne/inserts/torch/towne%torch.stl',
   topWall: 'tiles/dungeon_stone/inserts/top/stone%top.stl',
   topTowne: 'tiles/towne/inserts/top/towne%top.stl',
+  lintelWoodOne: 'tiles/wood/inserts/lintel/door_lintel.1.stl',
+  lintelWoodTwo: 'tiles/wood/inserts/lintel/door_lintel.2.stl',
+  lintelWoodThree: 'tiles/wood/inserts/lintel/door_lintel.3.stl',
+  lintelStone: 'tiles/dungeon_stone/inserts/lintel/stone%lintel.openforge.stl',
+  lintelStoneLocked:
+    'tiles/dungeon_stone/inserts/lintel/stone%lintel.openforge+dragonlock.stl',
+  lintelPlainTowne: 'tiles/towne/inserts/plain/lintel.stl',
+  lintelPlainStone: 'tiles/cut_stone/inserts/plain/lintel.stl',
 } as const

@@ -28,6 +28,7 @@
     "stamp": "tsx tools/stamp/cli.ts",
     "thumbs": "tsx tools/thumbnails/cli.ts",
     "measure": "tsx tools/measure/cli.ts",
+    "mounts": "tsx tools/mounts/cli.ts",
     "lod": "tsx tools/lod/cli.ts",
     "scad-bench": "tsx tools/scad-bench/cli.ts",
     "refresh:scad": "tsx scripts/refresh-scad.ts",

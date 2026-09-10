@@ -13,10 +13,11 @@
  * **The right column is one panel.** `BillPanel` is the whole of it since the
  * sidebar cleanup: `BackupPanel` — the JSON export/import that was the deleted
  * library screen's and is the app's only backup path — is a line in its footer
- * rather than a section under it, and `slots/AccessorySection` sits at the foot
- * of its scroll band. Both are passed to it as nodes, so each keeps its own file
- * and none of them competes for the column's height. `BillPanel.tsx` carries the
- * argument, including why the pieces list that stood between them is gone.
+ * rather than a section under it, passed to it as a node so it keeps its own
+ * file and neither competes for the column's height. `BillPanel.tsx` carries the
+ * argument, including why the pieces list and the accessory inventory that stood
+ * under it are gone — the accessories are chosen in `slots/SlotEditor` now (F7),
+ * under the recipe slot whose file opens them.
  *
  * Row S5's generated bases reach two of these. `BillPanel` takes an optional
  * `generated` prop and renders `GeneratedBillSection` inside its scroll area;

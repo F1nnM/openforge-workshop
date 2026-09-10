@@ -404,8 +404,9 @@ export interface Invalidation {
  * {@link AssemblyOption.empties} is the same question asked of still-**open**
  * parts and is already on every card; this is the filled ones. C2 measured the
  * grammar that makes it real — a lock toggle moving **74 of 128 slots**, and 416
- * of 4,330 accessory item picks emptying a sibling — so it is reachable rather
- * than theoretical.
+ * of 4,330 accessory item picks emptying the host's own base part — so it is
+ * reachable rather than theoretical. (Those 416 are not *greyed*: the base is
+ * the room's slot and not a sibling of the accessory picked — F2.)
  *
  * One postings intersection per filled sibling, so at most four on the widest
  * shipped recipe. Empty for a pick that changes nothing, which is the common

@@ -23,10 +23,11 @@
  * cannot leave a stale type behind. Identities come from the catalog contract —
  * this module never invents its own {@link TileId}.
  *
- * This file describes the *current* shape only, and — for as long as nothing is
- * deployed — the *only* shape the app will read. `migrations.ts` holds the
- * version gate that discards every other one, and its docblock states the
- * moment that licence expires.
+ * This file describes the *current* shape, and `migrations.ts` holds the gate
+ * that decides which *stored* shapes reach it. That gate used to discard every
+ * shape but this one; the app is served at its public URL now, so it climbs from
+ * the version below as well, and its docblock states what a future shape change
+ * therefore owes a user's saved room.
  */
 import { z } from 'zod'
 
@@ -167,6 +168,29 @@ export type TemplateId = z.infer<typeof TemplateId>
 export const SlotName = z.string().min(1).brand<'SlotName'>()
 export type SlotName = z.infer<typeof SlotName>
 
+/**
+ * The name of one **hold** on the file a slot is filled with — `'torch'`,
+ * `'left door'`, `'brazier'`.
+ *
+ * A hold is a composition slot of the *filled file* rather than of the template:
+ * a wall that carries a torch socket declares somewhere to put a torch, and what
+ * goes there is a second file. So this is {@link SlotName} one level down, and it
+ * is `min(1)` for exactly {@link SlotName}'s reason: the authority on what a hold
+ * is called is the composition that declares it, so validation here is a shape
+ * check and **the meaning check belongs to whoever holds the config** — the
+ * measuring tool that named the mounts, and the editor that offers them.
+ *
+ * A separate brand rather than a reuse of {@link SlotName}, because the two name
+ * different things and are looked up in different tables: passing a slot name
+ * where a hold name belongs would be a silent lookup miss on a map that happens
+ * to have the same key type. The brand's limits are {@link SlotName}'s too —
+ * dropped in key position, load bearing at the argument positions of
+ * `fillHold(id, slot, hold, tile)`, where it is the only thing saying which of
+ * the three strings is which.
+ */
+export const HoldName = z.string().min(1).brand<'HoldName'>()
+export type HoldName = z.infer<typeof HoldName>
+
 /* ---------------------------------------------------------------- placements */
 
 /**
@@ -212,7 +236,71 @@ const coordinate = z
   .transform((value) => value + 0)
 
 /**
- * What fills one slot: an exact **file**, plus who chose it.
+ * **A file, plus who chose it** — the shape both a slot fill and a hold are made
+ * of.
+ *
+ * Named and extracted rather than written twice, because a hold is a fill of the
+ * file a slot is filled with (see {@link SlotFill}) and the two answer the same
+ * two questions: *which STL*, and *did the user say so*. Everything the pair have
+ * in common lives here; the one thing only the outer one has — the holds
+ * themselves — is added by {@link SlotFill}, which is also where the argument for
+ * both fields is written down.
+ *
+ * **This is the leaf, and that is the whole of the nesting rule.** A value of
+ * this type has nowhere to put a hold, so the recursion the shape could have had
+ * is closed by the type rather than by a check: `z.record(HoldName, HoldFill)`
+ * admits one level and cannot express a second.
+ */
+export const HoldFill = z.object({
+  /** The file this slot is filled with. A `TileId`, so it is one printable STL. */
+  tile: TileId,
+  /**
+   * `false` when the default solver chose it, `true` when the user did.
+   * A lock change re-solves every `auto` fill and never touches a `pinned` one.
+   */
+  pinned: z.boolean(),
+})
+export type HoldFill = z.infer<typeof HoldFill>
+
+/**
+ * What fills one slot: a {@link HoldFill}, plus the accessories fitted into that
+ * file's own composition slots.
+ *
+ * ## A hold is a fill of a fill, and it is exactly one level deep
+ *
+ * The wall a slot is filled with may declare a torch socket; the torch that goes
+ * in it is a second file, chosen the same way and pinnable the same way, so a
+ * hold *is* a fill and reuses the shape rather than paraphrasing it. What it is
+ * not is recursive: {@link HoldFill} has no `holds` field, so **a hold cannot
+ * carry holds by construction** — not by a check, not by a depth counter, and not
+ * by a `z.lazy` that would make the type infinite and the salvage unbounded. A
+ * torch in a wall in a corner is the whole of the modelled world, and the measured
+ * corpus has nothing deeper: an accessory's own composition slots, if it ever grew
+ * any, would be a change of shape here and a migration rung rather than data that
+ * quietly nests one more time.
+ *
+ * ## `undefined` and `{}` are different answers, and every reader depends on it
+ *
+ *   - **`holds === undefined` means *never solved*.** No default-hold pass has
+ *     looked at this fill. It is the state every fill written before this field
+ *     existed is in, and the state a fresh fill starts in.
+ *   - **`holds === {}` means *solved, or emptied by the user*.** Either the
+ *     solver looked and this file's mounts admitted nothing, or the user took the
+ *     last accessory out — `workshopStore.ts#clearHold` of the last hold leaves
+ *     the empty map rather than removing the field.
+ *
+ * The distinction is what makes a default-hold solver safe to run on every
+ * hydrate: it fills only the fills whose `holds` is `undefined`, so a room where
+ * the user deliberately emptied a socket does not sprout a torch again on the next
+ * reload. Collapsing the two would leave that user no way to say *nothing goes
+ * here* that survives a reload, which is the same failure `pinned` exists to
+ * prevent one level up.
+ *
+ * `migrations.ts#salvageHolds` reads an unreadable `holds` as `undefined` for that
+ * reason and names it: *never solved* is repaired by the next pass, where *solved
+ * and empty* would freeze an answer nobody gave.
+ *
+ * ## The rest is {@link HoldFill}'s docblock
  *
  * Decision **D1** (§2.1): a fill names a file rather than a design. That deletes
  * roughly 700 of `resolve.ts`'s 956 lines — rule 0, which guessed a variant out
@@ -238,20 +326,20 @@ const coordinate = z
  * surface. Making it explicit puts the decision at every call site, which is
  * what contract **C-k** turns on: `fillSlot` writes `false` and `pinFill` writes
  * `true`, and neither takes a boolean parameter that could be passed wrongly.
+ * The hold actions repeat the pair — `fillHold` and `pinHold` — for the same
+ * reason and with the same refusal of a boolean argument.
  *
  * `migrations.ts` supplies `false` for a blob whose `pinned` is missing, names
  * the drop, and the direction is deliberate: `false` is repaired by the next
  * lock change, while `true` would freeze a choice the user never made,
  * permanently and invisibly.
  */
-export const SlotFill = z.object({
-  /** The file this slot is filled with. A `TileId`, so it is one printable STL. */
-  tile: TileId,
+export const SlotFill = HoldFill.extend({
   /**
-   * `false` when the default solver chose it, `true` when the user did.
-   * A lock change re-solves every `auto` fill and never touches a `pinned` one.
+   * The accessories fitted into this file's own composition slots, by hold name.
+   * **Absent means never solved; empty means solved.** See the docblock above.
    */
-  pinned: z.boolean(),
+  holds: z.record(HoldName, HoldFill).optional(),
 })
 export type SlotFill = z.infer<typeof SlotFill>
 
@@ -557,6 +645,12 @@ export type WorkshopState = z.infer<typeof WorkshopState>
  * It lives here, beside the field it exists for, rather than in each consumer:
  * eight rows import {@link TemplateInstance} from this module and every one of
  * them walks a `fills` map, so the alternative is eight casts.
+ *
+ * **It serves {@link SlotFill.holds} too**, and needs no second copy to do it: a
+ * {@link HoldFill} is a {@link SlotFill} without the optional field, so a hold
+ * map satisfies the parameter and `K` comes back as {@link HoldName}. The name
+ * says *slots* because that is what it was written for; the fact it relies on is
+ * about brands in key position, which the two maps share exactly.
  *
  * This is the shape row V3 shipped as `libraryDesigns`, kept while the field it
  * was written for was deleted. The *lesson* was never about the library — it was

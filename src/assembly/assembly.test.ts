@@ -55,7 +55,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { PrintOption as BarrelPrintOption } from '@/assembly'
 import { PRINT_OPTIONS as BARREL_PRINT_OPTIONS, printOption as barrelPrintOption } from '@/assembly'
-import type { CatalogFile, CatalogRecord, Footprint, TileAggregate } from '@/catalog'
+import type { CatalogFile, CatalogRecord, Face, Footprint, Mount, TileAggregate, Vec3 } from '@/catalog'
 import {
   CatalogFile as CatalogFileSchema,
   CatalogRecord as CatalogRecordSchema,
@@ -67,7 +67,14 @@ import {
 } from '@/catalog'
 import { createCompositionIndex, resolveSlotTags } from '@/composition'
 import { RECIPE_TEMPLATES } from '@/assembly/templates'
-import type { LockSystem, PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
+import type {
+  LockSystem,
+  PlacementId,
+  SlotFill,
+  SlotName,
+  TemplateId,
+  TemplateInstance,
+} from '@/store'
 
 import type { AssemblyIndex, PrintOption } from './assemblyIndex'
 import { PRINT_OPTIONS, buildAssemblyIndex, printOption } from './assemblyIndex'
@@ -553,7 +560,7 @@ describe('download verdict', () => {
 })
 
 describe('note vocabulary', () => {
-  it('is nine codes — row A3 removed the eight about the base it used to insert', () => {
+  it('is fourteen codes — nine for the tiles, five for the accessories in them', () => {
     // The deletion, asserted rather than described. Every one of the eight was
     // about a part the app added on the user's behalf; a template declares its
     // base as a slot, so there is nothing for any of them to be about. The three
@@ -563,6 +570,11 @@ describe('note vocabulary', () => {
     expect(Object.keys(NOTE_SEVERITY).sort()).toEqual([
       'build-unspecified',
       'fill-off-slot',
+      'hold-modelled-in',
+      'hold-off-slot',
+      'hold-unanchored',
+      'hold-unknown-tile',
+      'hold-unplaced',
       'insert-on-grid',
       'lock-unavailable',
       'mixed-build-systems',
@@ -592,6 +604,21 @@ describe('note vocabulary', () => {
     expect(NOTE_SEVERITY['build-unspecified']).toBe('info')
     expect(NOTE_SEVERITY['no-footprint']).toBe('info')
     expect(NOTE_SEVERITY['insert-on-grid']).toBe('info')
+    // `hold-unplaced` is `no-footprint`'s reading for an accessory — in the
+    // bill, not on the plan — and 34 measured host blobs resolved to no mount at
+    // all, so at `warn` it would fire on every hold over one of them.
+    expect(NOTE_SEVERITY['hold-unplaced']).toBe('info')
+    // Its mirror image — the insert unmeasured rather than the host — and `info`
+    // for the same reason: the file is in the pack, the gap is in the pass.
+    expect(NOTE_SEVERITY['hold-unanchored']).toBe('info')
+  })
+
+  it('warns one level down for the two states a hold can be wrong in', () => {
+    // The accessory readings of `unknown-tile` and `fill-off-slot`. Separate
+    // codes rather than a widening of those two, because a roll-up mixing the
+    // levels would count a missing torch as a missing wall.
+    expect(NOTE_SEVERITY['hold-unknown-tile']).toBe('warn')
+    expect(NOTE_SEVERITY['hold-off-slot']).toBe('warn')
   })
 
   it('warns for the three states an explicitly-filled instance can be wrong in', () => {
@@ -661,6 +688,14 @@ interface Row {
   readonly conn?: readonly string[]
   readonly blob?: string
   readonly bytes?: number
+  /** The host's own composition slots — where a hold goes. See `the holds` below. */
+  readonly config?: CatalogRecord['config']
+  /** Where they attach, measured. Absent is what every live record carries today. */
+  readonly mounts?: CatalogRecord['mounts']
+  /** How an insert plugs in, measured. Absent is `hold-unanchored`'s case. */
+  readonly anchor?: CatalogRecord['anchor']
+  /** Slots whose accessory is already in this mesh, measured. `isModelledIn`'s input. */
+  readonly modelledIn?: readonly string[]
 }
 
 function worldCatalog(rows: readonly Row[]): CatalogFile {
@@ -694,6 +729,10 @@ function worldCatalog(rows: readonly Row[]): CatalogFile {
         tags: row.tags.map((tag) => tags.indexOf(tag)),
         foot: row.foot ?? { shape: 'rect', w: 2, d: 2 },
         ...(row.build === undefined ? {} : { build: row.build }),
+        ...(row.config === undefined ? {} : { config: row.config }),
+        ...(row.mounts === undefined ? {} : { mounts: row.mounts }),
+        ...(row.anchor === undefined ? {} : { anchor: row.anchor }),
+        ...(row.modelledIn === undefined ? {} : { modelledIn: [...row.modelledIn] }),
       }
     }),
   })
@@ -730,6 +769,35 @@ function instanceOf(
     // *Any* on every axis, which is what these fixtures mean: they are about the
     // fills and say nothing about a control position.
     filters: [],
+  }
+}
+
+/**
+ * The same instance, with accessories fitted into one slot's file.
+ *
+ * A second helper rather than a widening of {@link instanceOf}, because a hold
+ * is a fill *of a fill* — `SlotFill.holds` hangs off the slot's own entry — and
+ * threading a nested map through the flat `{ slot: tileId }` shape every other
+ * test in this file uses would make the common case read like the rare one.
+ */
+function holding(
+  instance: TemplateInstance,
+  slot: string,
+  holds: Readonly<Record<string, string>>,
+): TemplateInstance {
+  const fill = (instance.fills as Readonly<Record<string, SlotFill | undefined>>)[slot]
+  if (fill === undefined) throw new Error(`the fixture has no fill in ${slot} to hold anything`)
+  return {
+    ...instance,
+    fills: {
+      ...instance.fills,
+      [slot]: {
+        ...fill,
+        holds: Object.fromEntries(
+          Object.entries(holds).map(([name, tile]) => [name, { tile: tile as TileId, pinned: false }]),
+        ),
+      },
+    },
   }
 }
 
@@ -1154,6 +1222,483 @@ describe('template instances', () => {
   })
 })
 
+/* ------------------------------------------------------- the accessory holds */
+
+/**
+ * Holds: the accessories fitted into a slot's own file.
+ *
+ * Everything here is a fixture rather than a corpus measurement, and that is a
+ * choice about *coverage*, not a gap in the data: 969 live records carry
+ * `mounts` since the 2026-09-10 measuring run, and the corpus block at the foot
+ * of this file exercises the counting rule against them — all 20 accessory
+ * declarations across the 40 recipes resolve to exactly one measured mount.
+ * What the corpus cannot supply is the *arithmetic's* edge cases, because it
+ * does not happen to contain them: a hold over a host with four mounts, one with
+ * none, one whose record is missing. Those are the cases the rule exists for, so
+ * they are built here rather than hunted for.
+ *
+ * The four-socket host is not a convenience either: a 1×1 full pillar carries
+ * one torch socket per face, so a `quantity` of 4 from a single hold is the case
+ * the arithmetic exists for.
+ */
+describe('the holds', () => {
+  const WALL = 'tiles/hold/wall.stl'
+  const TORCH = 'tiles/hold/torch.stl'
+  const GONE = 'tiles/hold/retired-torch.stl'
+
+  /** A one-slot recipe, so an instance is one host file and its accessories. */
+  const HOST: AssemblyTemplate = {
+    id: 'fixture-host',
+    tags: ['object|tile'],
+    parts: [slot('wall', { require: [{ tag: 'shape|wall' }] })],
+  }
+
+  /** The measured torch socket on one face: 5.5 × 3 mm, 65° from the face normal. */
+  function torchSocket(face: Face, normal: Vec3): Mount {
+    return {
+      slot: 'torch',
+      kind: 'socket',
+      face,
+      normal,
+      at: [normal[0] * 6.35, normal[1] * 6.35, 38.1],
+      axis: [-normal[0] * 0.4226, -normal[1] * 0.4226, 0.9063],
+      section: [5.5, 3],
+      depth: 14,
+    }
+  }
+
+  /** The four faces of a full pillar, one socket each. */
+  const PILLAR_FACES: readonly (readonly [Face, Vec3])[] = [
+    ['-y', [0, -1, 0]],
+    ['+y', [0, 1, 0]],
+    ['-x', [-1, 0, 0]],
+    ['+x', [1, 0, 0]],
+  ]
+
+  /**
+   * A host declaring a `torch` accessory slot, with `sockets` of them measured.
+   *
+   * `optional` is absent by default, which is the corpus reading: 1,047 of the
+   * 1,244 accessory declarations omit it and **absence means required**.
+   */
+  function hostRow(
+    options: {
+      readonly sockets?: number
+      readonly optional?: boolean
+      /** The mesh already carries the torch — `CatalogRecord.modelledIn`. */
+      readonly modelledIn?: boolean
+    } = {},
+  ): Row {
+    return {
+      id: WALL,
+      tags: ['shape|wall'],
+      layer: 'topper',
+      build: 'separate wall',
+      bytes: 4_096,
+      config: {
+        parts: [
+          {
+            name: 'torch',
+            tags: { require: [{ tag: 'kind|torch' }] },
+            ...(options.optional === undefined ? {} : { optional: options.optional }),
+          },
+        ],
+      },
+      ...(options.modelledIn === true ? { modelledIn: ['torch'] } : {}),
+      ...(options.sockets === undefined
+        ? {}
+        : {
+            mounts: PILLAR_FACES.slice(0, options.sockets).map(([face, normal]) =>
+              torchSocket(face, normal),
+            ),
+          }),
+    }
+  }
+
+  const TORCH_ROW: Row = {
+    id: TORCH,
+    tags: ['kind|torch'],
+    layer: 'insert',
+    build: 'separate wall',
+    bytes: 2_048,
+    // A 7 x 7 x 12 mm peg, anchored at the narrow end at `z = 0`. An insert without one
+    // is `hold-unanchored` and cannot be drawn, which is its own case below.
+    anchor: { kind: 'peg', at: [0, 0, 0], axis: [0, 0, 1], size: [7, 7, 12] },
+  }
+
+  /** The same torch nobody has measured — the insert half of the pair. */
+  const UNANCHORED_TORCH_ROW: Row = {
+    id: TORCH,
+    tags: ['kind|torch'],
+    layer: 'insert',
+    build: 'separate wall',
+    bytes: 2_048,
+  }
+
+  /** One instance of {@link HOST} whose wall holds the named accessories. */
+  function scene(holds: Readonly<Record<string, string>>): TemplateInstance {
+    return holding(instanceOf(HOST, { wall: WALL }), 'wall', holds)
+  }
+
+  it('bills one copy of a hold per measured mount — a full pillar carries four sockets', () => {
+    const { index, context } = worldOf([hostRow({ sockets: 4 }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: TORCH })], index, context)
+
+    // One line for the torch, four prints of it, one download: the host's four
+    // sockets are four places the same file goes, which is the md5 dedupe's own
+    // case one level down.
+    const line = bill.lines.find((entry) => entry.tile.id === TORCH)
+    expect(line?.quantity).toBe(4)
+    expect(line?.slots).toEqual([{ placement: 'p1', slot: 'wall', tile: TORCH, hold: 'torch' }])
+    expect(bill.files).toBe(2)
+    expect(bill.copies).toBe(5)
+    expect(bill.download.bytes).toBe(4_096 + 2_048)
+    // Nothing missing and nothing undrawable: the host was measured.
+    expect(bill.complete).toBe(true)
+    expect(bill.unfilled).toEqual([])
+    expect(bill.unplaced).toEqual([])
+  })
+
+  /**
+   * A `wide` doorway: **one** measured opening, authored for two leaves.
+   *
+   * 47.5 mm is the measured convention (2 × 24.6 mm of leaf), and the `door`
+   * slot is what a leaf and a lintel both fill — the same opening, two slots,
+   * which is why the bill cannot read the copies off the mount count.
+   */
+  const DOORWAY_MOUNT: Mount = {
+    slot: 'door',
+    kind: 'opening',
+    face: '-y',
+    normal: [0, -1, 0],
+    at: [0, -6.35, 24],
+    width: 47.5,
+    sill: 4.5,
+    head: 44,
+    openTop: true,
+    leaves: 2,
+  }
+
+  const DOOR = 'tiles/hold/door.stl'
+  const LINTEL = 'tiles/hold/lintel.stl'
+
+  /** A wide door wall declaring both slots the one opening serves. */
+  const DOORWAY_ROW: Row = {
+    id: WALL,
+    tags: ['shape|wall'],
+    layer: 'topper',
+    build: 'separate wall',
+    bytes: 4_096,
+    config: {
+      parts: [
+        { name: 'door', tags: { require: [{ tag: 'kind|door' }] } },
+        { name: 'lintel', tags: { require: [{ tag: 'kind|lintel' }] }, optional: true },
+      ],
+    },
+    mounts: [DOORWAY_MOUNT, { ...DOORWAY_MOUNT, slot: 'lintel' }],
+  }
+
+  /** One of a pair: 24.6 mm of leaf in a 47.5 mm opening, 52 % of it. */
+  const HALF_LEAF_ROW: Row = {
+    id: DOOR,
+    tags: ['kind|door'],
+    layer: 'insert',
+    build: 'separate wall',
+    bytes: 2_048,
+    anchor: { kind: 'leaf', at: [0, 0, 0], axis: [0, 1, 0], size: [24.6, 3.9, 35.5] },
+  }
+
+  /** `door_lintel.double.1.stl`'s measurement: one 60.85 mm slab, 128 % of it. */
+  const DOUBLE_LINTEL_ROW: Row = {
+    id: LINTEL,
+    tags: ['kind|lintel'],
+    layer: 'insert',
+    build: 'separate wall',
+    bytes: 1_024,
+    anchor: { kind: 'leaf', at: [0, 0, 0], axis: [0, 0, 1], size: [60.85, 12.99, 7.09] },
+  }
+
+  /**
+   * The count the bill was short by: **two** leaves on one measured opening.
+   *
+   * A doorway `require`-ing `size|wide` is one mount and two prints, so a
+   * quantity read off `mountsFor(...).length` under-counted all 85 of them — a
+   * download that cannot fill the doorway it was built from. The lintel over the
+   * same opening is one piece, and the two are told apart by their span alone:
+   * `catalog/mounts.ts#copiesOf`, which is what `buildRoom3D` draws by.
+   */
+  it('bills two leaves and one lintel for one wide doorway', () => {
+    const { index, context } = worldOf([DOORWAY_ROW, HALF_LEAF_ROW, DOUBLE_LINTEL_ROW], HOST)
+    const scene = holding(instanceOf(HOST, { wall: WALL }), 'wall', { door: DOOR, lintel: LINTEL })
+    const bill = buildBillOfTiles([scene], index, context)
+
+    expect(bill.lines.find((entry) => entry.tile.id === DOOR)?.quantity).toBe(2)
+    expect(bill.lines.find((entry) => entry.tile.id === LINTEL)?.quantity).toBe(1)
+    // The wall, two leaves and one lintel: four prints of three files.
+    expect(bill.files).toBe(3)
+    expect(bill.copies).toBe(4)
+    expect(bill.download.bytes).toBe(4_096 + 2_048 + 1_024)
+    expect(bill.complete).toBe(true)
+    expect(bill.unplaced).toEqual([])
+
+    const held = bill.resolved[0]?.holds ?? []
+    expect(held.map((one) => [one.hold, one.mounts, one.copies])).toEqual([
+      ['door', 1, 2],
+      ['lintel', 1, 1],
+    ])
+  })
+
+  it('resolves one entry per declared accessory slot, filled or not', () => {
+    const { index, context } = worldOf([hostRow({ sockets: 4 }), TORCH_ROW], HOST)
+    const resolved = resolveInstance(scene({ torch: TORCH }), index, context)
+
+    expect(resolved.holds).toEqual([
+      {
+        slot: 'wall',
+        hold: 'torch',
+        optional: false,
+        fill: { tile: TORCH, pinned: false },
+        record: index.byId.get(TORCH as TileId),
+        modelledIn: false,
+        mounts: 4,
+        // Four sockets, one torch each: `copies` and `mounts` part company only
+        // on a `wide` doorway's pair of leaves.
+        copies: 4,
+      },
+    ])
+    // The hold is a part like any other, and it is the part that carries the
+    // count: `quantity` is where four sockets stop being one print.
+    const part = resolved.parts.find((entry) => entry.hold !== undefined)
+    expect(part?.slot).toBe('wall')
+    expect(part?.hold).toBe('torch')
+    expect(part?.quantity).toBe(4)
+    expect(resolved.parts.find((entry) => entry.hold === undefined)?.quantity).toBe(1)
+  })
+
+  it('bills an unmeasured host’s hold once, and says the plan cannot draw it', () => {
+    // `CatalogRecord.mounts` is absent both for a host with no accessory slot
+    // and for a host nobody has measured, and `mountsFor` folds the two
+    // together — so this is the state every live record is in today. The
+    // accessory still prints: a download taken before the measuring pass has
+    // caught up holds the file the user chose.
+    const { index, context } = worldOf([hostRow(), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: TORCH })], index, context)
+
+    expect(bill.lines.find((entry) => entry.tile.id === TORCH)?.quantity).toBe(1)
+    expect(bill.unplaced).toEqual([{ placement: 'p1', slot: 'wall', hold: 'torch', tile: TORCH }])
+    // `info`, for `no-footprint`'s reason: in the bill, not on the plan, and a
+    // gap in the measurement rather than a fault in the room.
+    const note = bill.notes.find((entry) => entry.code === 'hold-unplaced')
+    expect(note?.severity).toBe('info')
+    expect(note?.message).toContain('torch')
+    // It is filled, so it is not a hole: the download is not refused over it.
+    expect(bill.complete).toBe(true)
+  })
+
+  it('bills an unmeasured insert once, and says the plan cannot draw that either', () => {
+    // The host is measured to the millimetre and the *accessory* is not: no
+    // `anchor` means no point on its own mesh to seat on the socket, so
+    // `builder/three/instances.ts` neither draws nor fetches it. One row and one
+    // note, aimed at the other file of the pair than `hold-unplaced`'s.
+    const { index, context } = worldOf([hostRow({ sockets: 4 }), UNANCHORED_TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: TORCH })], index, context)
+
+    // Still four prints: the mounts are real and the user has to print one per
+    // socket whether or not anything can draw them.
+    expect(bill.lines.find((entry) => entry.tile.id === TORCH)?.quantity).toBe(4)
+    expect(bill.unplaced).toEqual([{ placement: 'p1', slot: 'wall', hold: 'torch', tile: TORCH }])
+    const note = bill.notes.find((entry) => entry.code === 'hold-unanchored')
+    expect(note?.severity).toBe('info')
+    expect(note?.message).toContain('plugs in')
+    // One fault, one note: the host's own measurement is not in question.
+    expect(bill.notes.map((entry) => entry.code)).toEqual(['hold-unanchored'])
+    expect(bill.complete).toBe(true)
+  })
+
+  it('refuses the download for a required accessory slot with no hold', () => {
+    const { index, context } = worldOf([hostRow({ sockets: 4 }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([instanceOf(HOST, { wall: WALL })], index, context)
+
+    expect(bill.complete).toBe(false)
+    expect(bill.unfilled).toEqual([
+      { placement: 'p1', template: 'fixture-host', slot: 'wall', hold: 'torch' },
+    ])
+    expect(bill.resolved[0]?.complete).toBe(false)
+    expect(bill.resolved[0]?.holds[0]).toEqual({
+      slot: 'wall',
+      hold: 'torch',
+      optional: false,
+      fill: undefined,
+      record: undefined,
+      modelledIn: false,
+      mounts: 4,
+      // No insert, so nothing to count copies of: one per mount is the answer
+      // `mounts` alone always gave.
+      copies: 4,
+    })
+  })
+
+  it('asks nothing for a slot the host has built in, and refuses no download', () => {
+    /*
+      **F6.** The three `floor,brazier+small.2x2` blobs declare a `brazier` slot
+      and are 31.6–33.2 mm tall because the brazier is sculpted onto the floor.
+      The slot is *satisfied by the print*: not a declaration the room can fill,
+      so not an `unfilled` entry and not a refused download.
+    */
+    const { index, context } = worldOf([hostRow({ modelledIn: true }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([instanceOf(HOST, { wall: WALL })], index, context)
+
+    expect(bill.complete).toBe(true)
+    expect(bill.unfilled).toEqual([])
+    expect(bill.resolved[0]?.holds).toEqual([])
+    expect(bill.files).toBe(1)
+    expect(bill.notes.map((one) => one.code)).not.toContain('slot-unfilled')
+  })
+
+  it('reports a hold in a built-in slot at info, and bills nothing for it', () => {
+    // A share link or an older saved room can carry one, and dropping it would
+    // be the disagreement `hold-off-slot` exists to prevent — except that here
+    // *nothing* is printed for it, because the piece needs nothing.
+    const { index, context } = worldOf([hostRow({ modelledIn: true }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: TORCH })], index, context)
+
+    const held = bill.resolved[0]?.holds ?? []
+    expect(held.map((one) => [one.hold, one.modelledIn, one.copies])).toEqual([['torch', true, 0]])
+    expect(bill.complete).toBe(true)
+    // One file — the wall. The torch is neither a line nor a copy.
+    expect(bill.files).toBe(1)
+    expect(bill.copies).toBe(1)
+    expect(bill.unplaced).toEqual([])
+    const note = bill.notes.find((one) => one.code === 'hold-modelled-in')
+    expect(note?.severity).toBe('info')
+    expect(note?.message).toContain('built in')
+  })
+
+  it('leaves an optional accessory slot empty without refusing anything', () => {
+    // 197 of the 1,244 declarations are optional, and an empty one of those is
+    // a decoration declined rather than a hole in the print.
+    const { index, context } = worldOf([hostRow({ sockets: 4, optional: true }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([instanceOf(HOST, { wall: WALL })], index, context)
+
+    expect(bill.complete).toBe(true)
+    expect(bill.unfilled).toEqual([])
+    expect(bill.resolved[0]?.holds[0]?.optional).toBe(true)
+    expect(bill.notes).toEqual([])
+  })
+
+  it('reports a hold naming a file this build does not hold, and bills nothing for it', () => {
+    const { index, context } = worldOf([hostRow({ sockets: 4 }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: GONE })], index, context)
+
+    expect(bill.lines.map((entry) => entry.tile.id)).toEqual([WALL])
+    const note = bill.notes.find((entry) => entry.code === 'hold-unknown-tile')
+    expect(note?.severity).toBe('warn')
+    expect(note?.tileIds).toEqual([GONE])
+    expect(note?.slots).toEqual(['wall'])
+    // The same missing-file reading the slot walk gives: nothing resolved for a
+    // required declaration, so the pack would be one file short.
+    expect(bill.complete).toBe(false)
+    expect(bill.unfilled).toEqual([
+      { placement: 'p1', template: 'fixture-host', slot: 'wall', hold: 'torch' },
+    ])
+  })
+
+  it('counts a hold on a slot the host does not declare, and says so', () => {
+    // Nothing the app writes can produce it — the editor offers the host's own
+    // `config.parts` — so what reaches it is a hand-edited blob or a share link
+    // decoded against another manifest. It is **counted anyway**, because a hold
+    // this resolver dropped would be a file the room draws and the bill does not
+    // list.
+    const { index, context } = worldOf([hostRow({ sockets: 4, optional: true }), TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ lintel: TORCH })], index, context)
+
+    const note = bill.notes.find((entry) => entry.code === 'hold-off-slot')
+    expect(note?.severity).toBe('warn')
+    expect(note?.message).toContain('lintel')
+    // **One note, not two.** An undeclared slot has no mount by construction, so
+    // `hold-unplaced` beside this would report the consequence as a second fact.
+    expect(bill.notes.map((entry) => entry.code)).toEqual(['hold-off-slot'])
+    expect(bill.lines.find((entry) => entry.tile.id === TORCH)?.quantity).toBe(1)
+    expect(bill.copies).toBe(2)
+    expect(bill.resolved[0]?.holds.map((entry) => entry.hold)).toEqual(['torch', 'lintel'])
+    // An undeclared slot has no declaration to be required by, so it can never
+    // refuse a download.
+    expect(bill.complete).toBe(true)
+  })
+
+  it('sums two accessory slots of one file onto one line, and keeps their order total', () => {
+    // The md5 dedupe's case at the accessory level, and the one that makes
+    // `bySlotRef`'s `hold` leg load-bearing: two holds of **one** slot of one
+    // instance naming one file agree on placement, slot and tile, so without the
+    // fourth key their order would be whatever the walk happened to produce.
+    const twoSlots: Row = {
+      ...hostRow({ sockets: 2, optional: true }),
+      config: {
+        parts: [
+          { name: 'torch', optional: true, tags: { require: [{ tag: 'kind|torch' }] } },
+          { name: 'lintel', optional: true, tags: { require: [{ tag: 'kind|torch' }] } },
+        ],
+      },
+      mounts: [
+        ...PILLAR_FACES.slice(0, 2).map(([face, normal]) => torchSocket(face, normal)),
+        { slot: 'lintel', kind: 'surface', face: '+z', normal: [0, 0, 1], at: [0, 0, 44] },
+      ],
+    }
+    const { index, context } = worldOf([twoSlots, TORCH_ROW], HOST)
+    const bill = buildBillOfTiles([scene({ torch: TORCH, lintel: TORCH })], index, context)
+
+    // One file, one download, three prints: two sockets and one surface.
+    const line = bill.lines.find((entry) => entry.tile.id === TORCH)
+    expect(line?.quantity).toBe(3)
+    expect(line?.tileIds).toEqual([TORCH])
+    expect(line?.slots).toEqual([
+      { placement: 'p1', slot: 'wall', tile: TORCH, hold: 'lintel' },
+      { placement: 'p1', slot: 'wall', tile: TORCH, hold: 'torch' },
+    ])
+    expect(bill.files).toBe(2)
+    expect(bill.copies).toBe(4)
+    expect(bill.parts).toBe(4)
+    expect(bill.download.bytes).toBe(4_096 + 2_048)
+  })
+
+  it('ignores the host’s `base` slot, which is a base match and not an accessory', () => {
+    // 2,451 of the 3,695 live file slots are `base`, and the builder's base
+    // comes from footprint congruence rather than from the texture-inheriting
+    // slot — so reading one as an accessory would put a required hole in 2,451
+    // hosts that nothing in the app can fill.
+    const withBase: Row = {
+      ...hostRow({ sockets: 4 }),
+      config: {
+        parts: [
+          { name: 'base', tags: { require: [{ tag: 'shape|base' }] } },
+          { name: 'torch', tags: { require: [{ tag: 'kind|torch' }] } },
+        ],
+      },
+    }
+    const { index, context } = worldOf([withBase, TORCH_ROW], HOST)
+    const resolved = resolveInstance(scene({ torch: TORCH }), index, context)
+
+    expect(resolved.holds.map((entry) => entry.hold)).toEqual(['torch'])
+    expect(resolved.complete).toBe(true)
+  })
+
+  it('holds nothing for a slot whose own file left the archive', () => {
+    // The host is what declares the accessory slots and what carries the
+    // mounts, so a fill this catalog cannot resolve has neither — and the slot
+    // already reports itself twice over.
+    const { index, context } = worldOf([hostRow({ sockets: 4 }), TORCH_ROW], HOST)
+    const resolved = resolveInstance(
+      holding(instanceOf(HOST, { wall: GONE }), 'wall', { torch: TORCH }),
+      index,
+      context,
+    )
+
+    expect(resolved.holds).toEqual([])
+    expect(resolved.parts).toEqual([])
+    expect(resolved.notes.map((entry) => entry.code).sort()).toEqual(['slot-unfilled', 'unknown-tile'])
+  })
+})
+
 /* ------------------------------------------------------------ the real corpus */
 
 const CATALOG_PATH = process.env.OPENFORGE_CATALOG ?? join(process.cwd(), 'public', 'catalog', 'catalog.json')
@@ -1215,7 +1760,7 @@ describeCorpus(corpusSuite, () => {
     // placement named a `DesignId` and this layer was the only thing that could
     // turn one into a record; a fill names a file, so `byId` is the whole lookup.
     // Verified rather than assumed: the one reader outside this directory,
-    // `builder/panels/slots/planSlots.ts`, reads it as
+    // `builder/panels/slots/slotAccessories.ts` (`planSlots.ts` then), read it as
     // `index.aggregates.byDesign.get(placement.design)` — and `placement.design`
     // is a field A1 deleted, so that line is a compile error either way.
     expect(index).not.toHaveProperty('aggregates')
@@ -2266,11 +2811,11 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
     expect(unspecified / pairs).toBeCloseTo(0.2535, 4)
   })
 
-  it('fills 24 of the 40 recipes greedily, and reports the other 16 rather than hiding them', () => {
+  it('fills 18 of the 40 recipes greedily, and reports all 30 holes rather than hiding them', () => {
     // **A finding for row C2, and it refutes the obvious solver.** Every one of
     // the 128 parts has candidates in isolation — asserted above, 0 dead ends —
-    // and yet a greedy first-candidate walk in declared order completes only
-    // **24 of the 40**. All 16 failures are the `base` slot of the 16
+    // and yet a greedy first-candidate walk in declared order leaves **16 of the
+    // 40** with an empty `base` slot. All 16 are the
     // `s2w-wall-on-tile-wall-*-modular` recipes, and in every case that slot had
     // candidates before its siblings were chosen (48 of them, 305 for the drain)
     // and was emptied by the picks in front of it.
@@ -2281,35 +2826,53 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
     // `base` first, reorders, or backtracks is C2's decision; what this row owes
     // it is that the corner is **visible** rather than silent.
     //
+    // **The accessory slots are the second corner, and six recipes fail on
+    // nothing else.** The walk fills template slots and knows nothing about the
+    // slots the *files* it picks declare: 15 of the 40 instances hold 20
+    // accessory declarations between them, 14 of those are required — absence of
+    // `optional` means required, and 1,047 of the corpus's 1,244 declarations
+    // omit it — and a doorway with no door is a hole in the print exactly as an
+    // empty `base` slot is. So 22 instances are incomplete over 30 holes: 10 on
+    // the base alone, 6 on accessories alone, 6 on both.
+    //
     // Which is the whole of hazard 6: the resolver does not refuse the instance
-    // (§3.2 places anyway), it reports the empty slot and fails the download
-    // gate. A bill that looked complete here would ship a zip one file short of
-    // a printable model.
+    // (§3.2 places anyway), it reports every hole and fails the download gate. A
+    // bill that looked complete here would ship a zip several files short of a
+    // printable model.
     const instances = templates.map((template, at) => defaultFilled(template, at))
     const resolved = instances.map((instance) => resolveInstance(instance, index, context))
 
     const complete = resolved.filter((entry) => entry.complete)
     const incomplete = resolved.filter((entry) => !entry.complete)
-    expect(complete).toHaveLength(24)
-    expect(incomplete).toHaveLength(16)
+    expect(complete).toHaveLength(18)
+    expect(incomplete).toHaveLength(22)
 
-    // Every hole is a `base` slot, and every one is reported by name.
     for (const entry of incomplete) {
-      const holes = entry.slots.filter((slot) => slot.record === undefined)
-      expect(holes.map((slot) => slot.slot), entry.instance.template).toEqual(['base'])
+      const holes = entry.slots.filter((slot) => slot.record === undefined).map((slot) => slot.slot)
+      const missing = entry.holds.filter((held) => !held.optional && held.record === undefined)
+      // Every *template* hole is a `base` slot, every one is reported by name,
+      // and an instance is here because of one, an accessory, or both.
+      expect(holes, entry.instance.template).toEqual(holes.length === 0 ? [] : ['base'])
+      expect(holes.length + missing.length, entry.instance.template).toBeGreaterThan(0)
       expect(
         entry.notes.filter((note) => note.code === 'slot-unfilled').map((note) => note.slot),
         entry.instance.template,
-      ).toEqual(['base'])
+      ).toEqual(holes)
       // And the fills that *were* made are still admissible and still billed —
       // one part lost, not the instance.
-      expect(entry.parts.length, entry.instance.template).toBe(entry.slots.length - 1)
+      expect(entry.parts.length, entry.instance.template).toBe(entry.slots.length - holes.length)
       expect(entry.slots.filter((slot) => slot.record !== undefined).every((slot) => slot.admissible === true)).toBe(
         true,
       )
     }
 
-    // The 24 that do complete resolve cleanly: every fill came from its own
+    // The six that are short of an accessory and nothing else. Their template
+    // slots are all filled, so before holds reached the gate these read as
+    // printable models with no door, no grate and no portcullis in them.
+    const accessoryOnly = incomplete.filter((entry) => entry.slots.every((slot) => slot.record !== undefined))
+    expect(accessoryOnly).toHaveLength(6)
+
+    // The 18 that do complete resolve cleanly: every fill came from its own
     // slot's candidate set, so `fill-off-slot` cannot fire.
     for (const entry of complete) {
       expect(entry.notes.filter((note) => note.code === 'fill-off-slot'), entry.instance.template).toEqual([])
@@ -2321,14 +2884,61 @@ describeCorpus(catalog === undefined ? 'the 40 recipes — SKIPPED' : 'the 40 re
     expect(resolved.reduce((sum, entry) => sum + entry.slots.length, 0)).toBe(128)
     expect(resolved.reduce((sum, entry) => sum + entry.parts.length, 0)).toBe(112)
 
+    // The accessory declarations those 112 files carry, and what is required of
+    // them. Six are optional — two `treasure`, two `frame`, two `shutters` — and
+    // an empty one of those refuses nothing.
+    const declared = resolved.flatMap((entry) => entry.holds)
+    expect(declared).toHaveLength(20)
+    expect(resolved.filter((entry) => entry.holds.length > 0)).toHaveLength(15)
+    expect(
+      declared
+        .filter((held) => held.optional)
+        .map((held) => held.hold)
+        .sort(),
+    ).toEqual(['frame', 'frame', 'shutters', 'shutters', 'treasure', 'treasure'])
+    expect(
+      declared
+        .filter((held) => !held.optional)
+        .map((held) => held.hold)
+        .sort(),
+    ).toEqual([
+      'door',
+      'door',
+      'door',
+      'door',
+      'grate',
+      'grate',
+      'lintel',
+      'lintel',
+      'portcullis',
+      'portcullis',
+      'top',
+      'top',
+      'torch',
+      'torch',
+    ])
+
+    // **Every one of the 20 has exactly one measured mount**, now that
+    // `pipeline/mounts/inventory.json` holds the real run — a doorway, a
+    // socket or a surface read off the host mesh, one place per declaration.
+    // Nothing is `unplaced` all the same, because nothing is *held*: an accessory
+    // reaches that list only once a file has been chosen for it.
+    expect(declared.map((held) => held.mounts)).toEqual(Array.from({ length: 20 }, () => 1))
+
     const bill = buildBillOfTiles(instances, index, context)
     expect(bill.placements).toBe(40)
     expect(bill.parts).toBe(112)
-    // The gate, over the whole scene: 16 instances short of a printable model,
+    // The gate, over the whole scene: 22 instances short of a printable model,
     // and the download must refuse rather than ship 40 recipes with holes.
     expect(bill.complete).toBe(false)
-    expect(bill.unfilled).toHaveLength(16)
-    expect(new Set(bill.unfilled.map((hole) => hole.slot))).toEqual(new Set(['base']))
+    expect(bill.unfilled).toHaveLength(30)
+    expect(new Set(bill.unfilled.filter((hole) => hole.hold === undefined).map((hole) => hole.slot))).toEqual(
+      new Set(['base']),
+    )
+    expect(new Set(bill.unfilled.filter((hole) => hole.hold !== undefined).map((hole) => hole.hold))).toEqual(
+      new Set(['door', 'grate', 'lintel', 'portcullis', 'top', 'torch']),
+    )
+    expect(bill.unplaced).toEqual([])
     // More parts than placements, which is §2's "parts list" reading — and now a
     // property of the recipe rather than of an inserted base.
     expect(bill.parts).toBeGreaterThan(bill.placements)

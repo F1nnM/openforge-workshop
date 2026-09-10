@@ -214,7 +214,6 @@ function Harness({
         download={download}
         templates={fixtureContext(index.file).templates}
         onEditSlots={() => undefined}
-        accessories={null}
         backup={null}
         generated={{ bill: generatedBill, placements: generatedPlacements }}
       />

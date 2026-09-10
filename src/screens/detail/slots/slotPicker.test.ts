@@ -8,9 +8,36 @@
  *
  * `fixture.ts` carries which corpus branch each record stands for.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import type { TileId } from '@/catalog'
+import type * as CatalogModule from '@/catalog'
+import type { CatalogFile, TileId } from '@/catalog'
+
+/**
+ * How many times the aggregate index has actually been built.
+ *
+ * The module is wrapped rather than replaced — every export is the real one and
+ * `buildAggregateIndex` delegates — because the fact under test is a *cost*, and
+ * a cost is invisible to a test that only checks the answer.
+ * {@link compositionIndexFor} used to take `aggregates = buildAggregateIndex(file)`
+ * as a **default argument**, which JavaScript evaluates before the function body
+ * and therefore before the `WeakMap` was consulted: every hit rebuilt 8,702
+ * records (38–48 ms) and discarded the result. Identity alone could not see it.
+ */
+const builds = { count: 0 }
+
+vi.mock('@/catalog', async (importOriginal) => {
+  const actual = await importOriginal<typeof CatalogModule>()
+  return {
+    ...actual,
+    buildAggregateIndex: (file: CatalogFile) => {
+      builds.count += 1
+      return actual.buildAggregateIndex(file)
+    },
+  }
+})
+
+import { CatalogFile as CatalogFileSchemaForTest } from '@/catalog'
 
 import { FILL, PARENT, SLOT_CATALOG } from './fixture'
 import {
@@ -61,14 +88,17 @@ describe('the accessory surface', () => {
     expect(states(PARENT.plainFloor)).toEqual([])
   })
 
-  it('grids items and not files, so two prints of one torch are one card', () => {
+  it('grids items and not files, so two files of one print are one card', () => {
     const torch = slot(PARENT.wallTowne, 'torch')
 
-    // Three candidate files — two dungeon_stone prints and one towne — over two
-    // items. C1's rule: the grid is an item grid and the file is chosen after.
+    // Three candidate files — two names for one dungeon_stone print and one
+    // towne — over two items. C1's rule: the grid is an item grid and the file is
+    // chosen after. The two stone files share a `blob`, so F5 has nothing to
+    // expand: one print filed twice is one card however it is named.
     expect(torch.candidates).toBe(3)
     expect(torch.options).toHaveLength(2)
     expect(torch.options.flatMap((option) => option.tiles)).toHaveLength(3)
+    expect(torch.options.every((option) => option.label === undefined)).toBe(true)
   })
 
   it('contributes a file that is itself a candidate for the slot', () => {
@@ -77,55 +107,146 @@ describe('the accessory surface', () => {
   })
 })
 
+/* ------------------------------------------------- one card per sculpt — F5 */
+
+/**
+ * **The owner's finding: only one lintel was offered.**
+ *
+ * `door_lintel.1/2/3.stl` are three wood-grain sculpts of one catalog design, so
+ * an item grid showed one card — and the other two prints were not hidden behind
+ * a control, they were not on screen at all. An item whose candidate files make
+ * the **same connection claim** is therefore expanded to one card per print, and
+ * an item whose files differ by joinery still collapses, because there the choice
+ * is the lock preference's rather than the user's.
+ *
+ * `sculptWall` carries all three shapes: three sculpts, one lintel in two
+ * joineries, and two prints that share a filename. The corpus has **no** item of
+ * the second kind under an accessory slot, which is why the fixture must.
+ */
+describe('one card per print where only the mesh tells them apart', () => {
+  const lintel = () => slot(PARENT.sculptWall, 'lintel')
+  const named = (name: string) =>
+    lintel().options.filter((option) => option.aggregate.name === name)
+
+  it('offers a card per sculpt, each naming its own file', () => {
+    const sculpts = named('Wood Door Lintel')
+
+    expect(sculpts.map((option) => option.variant.id)).toEqual([
+      FILL.lintelWoodOne,
+      FILL.lintelWoodTwo,
+      FILL.lintelWoodThree,
+    ])
+    // Each card stands for its own file, so a pick names the sculpt that was
+    // pressed rather than the item's preferred print.
+    expect(sculpts.map((option) => option.tiles)).toEqual([
+      [FILL.lintelWoodOne],
+      [FILL.lintelWoodTwo],
+      [FILL.lintelWoodThree],
+    ])
+  })
+
+  it('labels each card with the part of the filename that differs', () => {
+    expect(named('Wood Door Lintel').map((option) => option.label)).toEqual(['1', '2', '3'])
+  })
+
+  it('labels from the path when two prints share a filename', () => {
+    // Both files are `lintel.stl`, so the filename cannot tell them apart and the
+    // cut is retried over the family. 569 of the corpus's expanded slots are this
+    // case — `shutters.stl` under two families, `door.metal.stl` under two.
+    const plain = named('Plain Door Lintel')
+    expect(plain.map((option) => option.variant.file)).toEqual(['lintel.stl', 'lintel.stl'])
+    expect(plain.map((option) => option.label)).toEqual(['cut_stone', 'towne'])
+  })
+
+  it('keeps an item whose files differ by joinery to one card', () => {
+    /* The reason the grid collapses files at all: `selectVariant` answers which
+       of these to print from the lock preference, so a card per file would ask
+       the user a question the app has already answered. */
+    const locked = named('Dungeon Stone Door Lintel')
+    expect(locked).toHaveLength(1)
+    expect(locked[0]?.label).toBeUndefined()
+    expect(locked[0]?.tiles).toEqual([FILL.lintelStone, FILL.lintelStoneLocked])
+  })
+
+  it('labels the same way twice, and never two cards alike', () => {
+    const once = lintel().options.map((option) => option.label)
+    expect(lintel().options.map((option) => option.label)).toEqual(once)
+
+    const labels = once.flatMap((label) => label ?? [])
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+})
+
 /* ------------------------------------------------------------ dead-end greying */
 
 describe('dead-end greying', () => {
-  it('greys the pick that would empty a sibling slot, and names the slot', () => {
-    const torch = slot(PARENT.wallTowne, 'torch')
+  it('greys the pick that would empty a sibling accessory slot, and names the slot', () => {
+    const torch = slot(PARENT.wallSiblings, 'torch')
     const towne = torch.options.find((option) => option.aggregate.name === 'Towne Torch')
     const stone = torch.options.find((option) => option.aggregate.name === 'Dungeon Stone Torch')
 
-    // `constrain: [{ tag: 'texture' }]` on the base slot collects the wall's
+    // `constrain: [{ tag: 'texture' }]` on the `top` slot collects the wall's
     // `texture|dungeon_stone` and the torch's `texture|towne`, keeps both
-    // because neither is a prefix of the other, and no base carries both.
+    // because neither is a prefix of the other, and no top carries both.
     expect(towne?.deadEnd).toBe(true)
-    expect(towne?.empties).toEqual([BASE_SLOT])
+    expect(towne?.empties).toEqual(['top'])
 
     // The same-texture torch changes nothing, so it is not greyed.
     expect(stone?.deadEnd).toBe(false)
     expect(stone?.empties).toEqual([])
   })
 
+  it('does not grey a pick that only empties the base — the room chooses that', () => {
+    /* `wallTowne` is the corpus's own case and all 416 of its item picks: the
+       towne torch pushes `texture|towne` into the wall's `base` part and empties
+       it. The base is not a sibling of an accessory — it is the template's slot,
+       matched on footprint — so nothing here is a dead end. This is F2: reading
+       it as one greyed every door on the Cut Stone door wall. */
+    const torch = slot(PARENT.wallTowne, 'torch')
+    expect(torch.options.map((option) => option.empties)).toEqual([[], []])
+    expect(torch.options.some((option) => option.deadEnd)).toBe(false)
+
+    // And the emptying itself is real, which is what makes the exclusion a
+    // decision rather than a measurement error: asked directly, the base slot
+    // does go empty under that pick.
+    const base = index.slotsOf(tile(PARENT.wallTowne))[0]!
+    expect(base.name).toBe(BASE_SLOT)
+    expect(
+      index.resolve(base, tile(PARENT.wallTowne), [
+        { partName: 'torch', tags: index.tagsOf(tile(FILL.torchTowne)) },
+      ]).deadEnd,
+    ).toBe(true)
+  })
+
   it('is computed before the pick, and the pick confirms it', () => {
     // The greying is a prediction. This is the assertion that it is a correct
     // one — the same slot, actually resolved with the towne torch in place.
-    expect(slot(PARENT.wallTowne, 'torch').options.some((option) => option.deadEnd)).toBe(true)
+    expect(slot(PARENT.wallSiblings, 'torch').options.some((option) => option.deadEnd)).toBe(true)
 
-    const after = index.resolve(index.slotsOf(tile(PARENT.wallTowne))[0]!, tile(PARENT.wallTowne), [
+    const top = index.slotsOf(tile(PARENT.wallSiblings))[1]!
+    expect(top.name).toBe('top')
+    const after = index.resolve(top, tile(PARENT.wallSiblings), [
       { partName: 'torch', tags: index.tagsOf(tile(FILL.torchTowne)) },
     ])
     expect(after.deadEnd).toBe(true)
 
-    const harmless = index.resolve(
-      index.slotsOf(tile(PARENT.wallTowne))[0]!,
-      tile(PARENT.wallTowne),
-      [{ partName: 'torch', tags: index.tagsOf(tile(FILL.torchStone)) }],
-    )
+    const harmless = index.resolve(top, tile(PARENT.wallSiblings), [
+      { partName: 'torch', tags: index.tagsOf(tile(FILL.torchStone)) },
+    ])
     expect(harmless.deadEnd).toBe(false)
   })
 
   it('says what a dead end costs rather than only dimming it', () => {
-    const towne = slot(PARENT.wallTowne, 'torch').options.find((option) => option.deadEnd)
-    expect(deadEndReason(towne!)).toBe('Leaves no base this piece can be printed on.')
+    const towne = slot(PARENT.wallSiblings, 'torch').options.find((option) => option.deadEnd)
+    expect(deadEndReason(towne!)).toBe('Leaves the top slot with nothing to fill it.')
   })
 
   it('stops greying a slot the user has already filled', () => {
-    // With the base slot notionally settled there is nothing left to close, so
-    // the towne torch is no longer a dead end. The picker never offers the base
-    // slot, so this is reached through the resolver rather than the UI — it is
-    // the property that keeps `empties` about *open* questions.
-    const withTop = slot(PARENT.wallLow, 'top', { base: FILL.torchStone })
-    expect(withTop.options.every((option) => option.empties.length === 0)).toBe(true)
+    // With the `top` slot settled there is nothing left to close, so the towne
+    // torch is no longer a dead end — the property that keeps `empties` about
+    // *open* questions.
+    const torch = slot(PARENT.wallSiblings, 'torch', { top: FILL.topWall })
+    expect(torch.options.every((option) => option.empties.length === 0)).toBe(true)
   })
 })
 
@@ -134,12 +255,14 @@ describe('dead-end greying', () => {
 describe('a sibling pick can open a slot as well as close one', () => {
   it('reports the slot a pick would open', () => {
     // `filterSpecificTags` keeps the most general survivor, so the parent's
-    // `shape|wall|low` is dropped in favour of the top's `shape|wall`.
-    const top = slot(PARENT.wallLow, 'top')
-    // Both tops carry `shape|wall`, and this slot's base sibling constrains on
+    // `shape|wall|low` is dropped in favour of the top's `shape|wall`. The
+    // rescued slot is an accessory and not the base, for `empties`' reason: the
+    // corpus's own three rescues are all the base, and the base is not a sibling.
+    const top = slot(PARENT.wallRescue, 'top')
+    // Both tops carry `shape|wall`, and the `crosshead` sibling constrains on
     // `shape` alone, so both of them open it.
     expect(top.options).toHaveLength(2)
-    expect(top.options.map((option) => option.rescues)).toEqual([[BASE_SLOT], [BASE_SLOT]])
+    expect(top.options.map((option) => option.rescues)).toEqual([['crosshead'], ['crosshead']])
     expect(top.options.some((option) => option.deadEnd)).toBe(false)
   })
 
@@ -225,5 +348,21 @@ describe('the composition index', () => {
   it('is built once per parsed file and shared', () => {
     // Three mounts over one catalog pay 10.7 ms once, not three times.
     expect(compositionIndexFor(SLOT_CATALOG)).toBe(compositionIndexFor(SLOT_CATALOG))
+  })
+
+  it('builds no aggregate index on a hit, and exactly one on a miss', () => {
+    // The module-scope `index` above has already paid for this file, so a hit is
+    // all that is left to make.
+    const before = builds.count
+    compositionIndexFor(SLOT_CATALOG)
+    compositionIndexFor(SLOT_CATALOG)
+    expect(builds.count).toBe(before)
+
+    /* A second parsed object over the same bytes: a different file to the
+       `WeakMap`, which is the miss the fallback exists for. One build, not two —
+       the caller that already holds an aggregate index still passes it. */
+    const other = CatalogFileSchemaForTest.parse(structuredClone(SLOT_CATALOG))
+    compositionIndexFor(other)
+    expect(builds.count).toBe(before + 1)
   })
 })

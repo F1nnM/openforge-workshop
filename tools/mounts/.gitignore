@@ -1,0 +1,5 @@
+# The incremental result log. Rebuildable from the bucket, and the *inventory*
+# assembled from it (`pipeline/mounts/inventory.json`) is the artefact that
+# belongs in git — this is the append-only working state that makes an
+# interrupted 16.34 GB run resumable rather than repeated.
+.cache/

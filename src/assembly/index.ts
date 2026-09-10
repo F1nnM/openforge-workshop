@@ -59,6 +59,7 @@ export type {
   DownloadVerdict,
   FilenameCollision,
   UnfilledSlot,
+  UnplacedHold,
 } from './bill'
 export { DOWNLOAD_HUGE_BYTES, DOWNLOAD_LARGE_BYTES, buildBillOfTiles, downloadSize } from './bill'
 
@@ -72,6 +73,7 @@ export type {
   AssemblyPart,
   AssemblySlot,
   AssemblyTemplate,
+  ResolvedHold,
   ResolvedInstance,
   ResolvedSlotFill,
   TemplateLookup,

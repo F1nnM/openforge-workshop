@@ -23,16 +23,28 @@ import type { TileId } from '@/catalog'
 import { ANOTHER_TILE, A_TEMPLATE, A_TILE, aFullFillMap, aTemplateInstance } from './fixture'
 import { STORE_VERSION } from './migrations'
 import type { PlacementId, TemplateId } from './schema'
-import { DEFAULT_LOCK_SYSTEM, SlotName as SlotNameSchema, WorkshopState, filledSlots } from './schema'
+import {
+  DEFAULT_LOCK_SYSTEM,
+  HoldFill,
+  HoldName as HoldNameSchema,
+  SlotName as SlotNameSchema,
+  WorkshopState,
+  filledSlots,
+} from './schema'
 import { armTemplateInBuilder, claimPendingArm } from './selection'
 import { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 import { WORKSHOP_EXPORT_KIND, WorkshopExport, exportWorkshop, importWorkshop } from './transfer'
 import {
   clearFill,
+  clearHold,
   clearPlacements,
+  fillHold,
+  fillHolds,
   fillSlot,
+  isSilentWrite,
   movePlacement,
   pinFill,
+  pinHold,
   placeTemplate,
   removePlacement,
   resetWorkshop,
@@ -44,11 +56,23 @@ import {
   setPlacementFilters,
   setRoomDesign,
   unpinFill,
+  unpinHold,
   useWorkshopStore,
+  writeSilently,
 } from './workshopStore'
 
 const FLOOR = SlotNameSchema.parse('floor')
 const WALL = SlotNameSchema.parse('right wall')
+
+/** Two holds of a wall, named the way the measuring tool names a mount. */
+const TORCH = HoldNameSchema.parse('torch')
+const DOOR = HoldNameSchema.parse('left door')
+
+/** One slot filled with {@link A_TILE}, ready for a hold to go into. */
+const oneFilledSlot = () => ({ [WALL]: { tile: A_TILE, pinned: false } })
+
+/** The holds of one slot, or `undefined` when that fill was never solved. */
+const holdsOf = (id: PlacementId, slot = WALL) => state().placements[id]?.fills[slot]?.holds
 
 /**
  * An arm for the selection channel.
@@ -513,6 +537,316 @@ describe('clearing and unpinning a fill', () => {
   })
 })
 
+/* --------------------------------------------------------------------- holds */
+
+/**
+ * A **hold** is a fill of a fill: the torch fitted into the socket of the wall a
+ * slot is filled with.
+ *
+ * The three tests worth reading first are `refuses a slot with no fill` — the
+ * reason `FillOutcome` grew `'unknown-slot'`, since a hold has nowhere to live
+ * until the file that declares the mount is chosen; `clears the last hold to an
+ * empty map` — the `undefined` / `{}` distinction the whole feature turns on,
+ * because a later default-hold pass fills only the fills that were never solved;
+ * and `drops the holds when the slot takes a different file` — a hold belongs to
+ * the file, so a new file has different mounts and the old accessories are
+ * answers to a question nobody asked.
+ */
+describe('holds — accessories fitted into a slot’s fill', () => {
+  it('cannot carry holds of its own, by construction rather than by a check', () => {
+    // `HoldFill` has no `holds` field, so Zod strips one rather than nesting it.
+    // That is the whole of the depth rule: no `z.lazy`, no counter, and no
+    // salvage that has to walk an unbounded tree.
+    const parsed = HoldFill.parse({ tile: A_TILE, pinned: true, holds: { torch: { tile: A_TILE, pinned: true } } })
+    expect(parsed).toEqual({ tile: A_TILE, pinned: true })
+    expect('holds' in parsed).toBe(false)
+  })
+
+  it('refuses a slot with no fill, because a hold is a fill of that file', () => {
+    // Not `'unknown-placement'`: the piece is on the grid and the caller is not
+    // stale, the *slot* is simply empty — and there is no file to hang an
+    // accessory on. Writing anyway would mean inventing the slot's own fill.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    expect(fillHold(id, WALL, TORCH, A_TILE)).toBe('unknown-slot')
+    expect(pinHold(id, WALL, TORCH, A_TILE)).toBe('unknown-slot')
+    expect(fillHolds(id, WALL, {})).toBe('unknown-slot')
+    expect(state().placements[id]?.fills[WALL]).toBeUndefined()
+  })
+
+  it('reports an unknown placement rather than writing', () => {
+    const gone = 'not-on-the-grid' as PlacementId
+    expect(fillHold(gone, WALL, TORCH, A_TILE)).toBe('unknown-placement')
+    expect(pinHold(gone, WALL, TORCH, A_TILE)).toBe('unknown-placement')
+    expect(fillHolds(gone, WALL, {})).toBe('unknown-placement')
+    expect(clearHold(gone, WALL, TORCH)).toBe('unknown-placement')
+    expect(unpinHold(gone, WALL, TORCH)).toBe('unknown-placement')
+    expect(state().placements[gone]).toBeUndefined()
+  })
+
+  it('starts a fill out never solved, which is not the same as solved and empty', () => {
+    // The absent key is the state every fill written before this field existed
+    // is in, and it is what a later default-hold pass looks for.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    expect(holdsOf(id)).toBeUndefined()
+    expect('holds' in (state().placements[id]?.fills[WALL] ?? {})).toBe(false)
+  })
+
+  it('fills a hold auto, and reports that it wrote', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    expect(fillHold(id, WALL, TORCH, A_TILE)).toBe('filled')
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: A_TILE, pinned: false } })
+    // And the slot's own fill is untouched — the file and its pin are a
+    // different decision from what is fitted into it.
+    expect(state().placements[id]?.fills[WALL]?.tile).toBe(A_TILE)
+    expect(state().placements[id]?.fills[WALL]?.pinned).toBe(false)
+  })
+
+  it('keeps a hold the user pinned — contract C-k, one level down', () => {
+    // The same refusal `fillSlot` makes, for the same reason: a default-hold
+    // pass that overwrote a pinned hold would discard a deliberate choice with
+    // nothing failing and nothing on screen to say so.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    expect(pinHold(id, WALL, TORCH, A_TILE)).toBe('filled')
+    expect(fillHold(id, WALL, TORCH, ANOTHER_TILE)).toBe('kept-pinned')
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: A_TILE, pinned: true } })
+  })
+
+  it('lets the user override their own hold, and their own is the only thing that can', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    pinHold(id, WALL, TORCH, A_TILE)
+    expect(pinHold(id, WALL, TORCH, ANOTHER_TILE)).toBe('filled')
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: ANOTHER_TILE, pinned: true } })
+  })
+
+  it('is a no-op that wakes no subscriber when the hold is already what it would write', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    fillHold(id, WALL, TORCH, A_TILE)
+    const before = state().placements
+    expect(fillHold(id, WALL, TORCH, A_TILE)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('clears the last hold to an empty map, which reads as solved rather than never solved', () => {
+    // The headline. `{}` is *the user took the torch out*, and a default-hold
+    // pass must leave it alone; `undefined` is *nobody has looked yet*, and that
+    // pass owns it. Deleting the field here would put the torch back on the next
+    // reload.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    fillHold(id, WALL, TORCH, A_TILE)
+    expect(clearHold(id, WALL, TORCH)).toBe('cleared')
+    expect(holdsOf(id)).toEqual({})
+    expect(holdsOf(id)).not.toBeUndefined()
+  })
+
+  it('leaves the other holds alone when one is cleared', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    fillHold(id, WALL, TORCH, A_TILE)
+    pinHold(id, WALL, DOOR, ANOTHER_TILE)
+    expect(clearHold(id, WALL, TORCH)).toBe('cleared')
+    expect(holdsOf(id)).toEqual({ [DOOR]: { tile: ANOTHER_TILE, pinned: true } })
+  })
+
+  it('clears a hold the user pinned, because clearing is the user’s own action', () => {
+    // `clearFill`'s argument one level down: emptying a mount you chose is the
+    // strongest form of "I no longer want my choice", and no solver clears.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    pinHold(id, WALL, TORCH, A_TILE)
+    expect(clearHold(id, WALL, TORCH)).toBe('cleared')
+    expect(holdsOf(id)).toEqual({})
+  })
+
+  it('is unchanged when the hold is not there, whether the fill was solved or never was', () => {
+    // Both readings are *nothing to remove*, and neither is a caller bug worth a
+    // name of its own — `clearFill` gives an already-empty slot the same answer.
+    // A fill that was never solved stays never solved: clearing must not be a
+    // back door that marks it solved.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    let before = state().placements
+    expect(clearHold(id, WALL, TORCH)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+    expect(holdsOf(id)).toBeUndefined()
+
+    fillHold(id, WALL, DOOR, A_TILE)
+    before = state().placements
+    expect(clearHold(id, WALL, TORCH)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('is unchanged on a slot that has no fill, because there is no hold to give back', () => {
+    // The asymmetry with `fillHold` is deliberate: writing needs a file to write
+    // *into* and says so with `'unknown-slot'`, while removing what is not there
+    // has already happened.
+    const id = placeTemplate(aTemplateInstance({ fills: {} }))
+    const before = state().placements
+    expect(clearHold(id, WALL, TORCH)).toBe('unchanged')
+    expect(unpinHold(id, WALL, TORCH)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('hands a pinned hold back to the solver and keeps the file', () => {
+    // `unpinFill`'s difference from `clearFill`, one level down: the accessory
+    // stays printable and only the authority over it moves.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    pinHold(id, WALL, TORCH, A_TILE)
+    expect(fillHold(id, WALL, TORCH, ANOTHER_TILE)).toBe('kept-pinned')
+
+    expect(unpinHold(id, WALL, TORCH)).toBe('unpinned')
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: A_TILE, pinned: false } })
+    expect(fillHold(id, WALL, TORCH, ANOTHER_TILE)).toBe('filled')
+  })
+
+  it('is unchanged unpinning a hold the solver already owns', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    fillHold(id, WALL, TORCH, A_TILE)
+    const before = state().placements
+    expect(unpinHold(id, WALL, TORCH)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('drops the holds when the slot takes a different file', () => {
+    // A hold is a fill of *that file*: a different wall declares different
+    // mounts, so keeping the torch would hang it on a socket that may not exist.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    pinHold(id, WALL, TORCH, A_TILE)
+    expect(fillSlot(id, WALL, ANOTHER_TILE)).toBe('filled')
+    expect(state().placements[id]?.fills[WALL]).toEqual({ tile: ANOTHER_TILE, pinned: false })
+    // Dropped to *never solved*, so the next default-hold pass fits the new
+    // file's own mounts rather than treating the slot as already answered.
+    expect(holdsOf(id)).toBeUndefined()
+  })
+
+  it('keeps the holds when the same file is pinned, unpinned or rewritten unchanged', () => {
+    // The file is what the holds belong to, and none of these three changes it.
+    // `pinFill` on the file the solver already chose is the case that would hurt
+    // most: it is one press in the editor and it must not empty the sockets.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    fillHold(id, WALL, TORCH, A_TILE)
+    const held = holdsOf(id)
+
+    expect(pinFill(id, WALL, A_TILE)).toBe('filled')
+    expect(holdsOf(id)).toEqual(held)
+
+    expect(unpinFill(id, WALL)).toBe('unpinned')
+    expect(holdsOf(id)).toEqual(held)
+
+    const before = state().placements
+    expect(fillSlot(id, WALL, A_TILE)).toBe('unchanged')
+    expect(state().placements).toBe(before)
+    expect(holdsOf(id)).toEqual(held)
+  })
+
+  it('replaces every unpinned hold and keeps the pinned ones — the solver’s wholesale write', () => {
+    // One `setState` for a whole file's mounts, for `setPlacementFilters`'
+    // reason: the holds of one fill are one answer, and writing them one at a
+    // time would put a half-fitted wall on screen for a render. Wholesale means
+    // an unpinned hold the new answer does not name is *gone*, which is how the
+    // pass says "nothing fits here any more".
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    pinHold(id, WALL, DOOR, A_TILE)
+    fillHold(id, WALL, TORCH, A_TILE)
+
+    expect(
+      fillHolds(id, WALL, {
+        [TORCH]: { tile: ANOTHER_TILE, pinned: false },
+        [DOOR]: { tile: ANOTHER_TILE, pinned: false },
+      }),
+    ).toBe('filled')
+    expect(holdsOf(id)).toEqual({
+      [TORCH]: { tile: ANOTHER_TILE, pinned: false },
+      // Kept, and kept *pinned*: the write is the solver's and the pin is the
+      // user's.
+      [DOOR]: { tile: A_TILE, pinned: true },
+    })
+  })
+
+  it('keeps a pinned hold the wholesale write does not mention, object and all', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    pinHold(id, WALL, DOOR, A_TILE)
+    fillHold(id, WALL, TORCH, A_TILE)
+    const pinned = holdsOf(id)?.[DOOR]
+
+    expect(fillHolds(id, WALL, {})).toBe('filled')
+    // The unpinned torch is gone and the pinned door is not.
+    expect(holdsOf(id)).toEqual({ [DOOR]: { tile: A_TILE, pinned: true } })
+    // The *same object*: only the incoming map is parsed, so a wholesale write
+    // does not replace an accessory it did not touch. Parsing the merged fill
+    // instead would clone this one and wake a subscriber that has nothing new
+    // to draw.
+    expect(holdsOf(id)?.[DOOR]).toBe(pinned)
+  })
+
+  it('never writes holds back to undefined, so a solved fill stays solved', () => {
+    // `fillHolds(id, slot, {})` is the pass saying *I looked and nothing fits*,
+    // which is a result and not the absence of one. Writing `undefined` would
+    // make the pass run again on every hydrate, for ever.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    expect(holdsOf(id)).toBeUndefined()
+    expect(fillHolds(id, WALL, {})).toBe('filled')
+    expect(holdsOf(id)).toEqual({})
+
+    const before = state().placements
+    expect(fillHolds(id, WALL, {})).toBe('unchanged')
+    expect(state().placements).toBe(before)
+  })
+
+  it('reports kept-pinned when the pins are the only reason nothing moved', () => {
+    // The count §3.3 has to disclose, at the granularity the wholesale write
+    // has: a pass that wrote nothing because the user had chosen everything is
+    // not the same as a pass with nothing to do.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    pinHold(id, WALL, TORCH, A_TILE)
+    const before = state().placements
+    expect(fillHolds(id, WALL, { [TORCH]: { tile: ANOTHER_TILE, pinned: false } })).toBe('kept-pinned')
+    expect(state().placements).toBe(before)
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: A_TILE, pinned: true } })
+  })
+
+  it('rejects an unusable hold at the call that made it', () => {
+    // `placeTemplate`'s reason: the wholesale write takes a caller-built map, so
+    // a bad file id fails here where the stack names the culprit rather than at
+    // a hydration months later where it reads as storage corruption.
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    expect(() => fillHolds(id, WALL, { [TORCH]: { tile: 'nonsense' as TileId, pinned: false } })).toThrow()
+    expect(holdsOf(id)).toBeUndefined()
+  })
+
+  it('touches one hold, one slot and one instance', () => {
+    const first = placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
+    const second = placeTemplate(aTemplateInstance({ x: 4, fills: aFullFillMap() }))
+    fillHold(first, WALL, DOOR, A_TILE)
+    const otherInstance = state().placements[second]
+    const otherSlot = state().placements[first]?.fills[FLOOR]
+    const otherHold = holdsOf(first)?.[DOOR]
+
+    fillHold(first, WALL, TORCH, ANOTHER_TILE)
+
+    expect(state().placements[second]).toBe(otherInstance)
+    expect(state().placements[first]?.fills[FLOOR]).toBe(otherSlot)
+    expect(holdsOf(first)?.[DOOR]).toBe(otherHold)
+  })
+
+  it('survives a persist round trip with the holds and their pins intact', () => {
+    const id = placeTemplate(aTemplateInstance({ fills: oneFilledSlot() }))
+    fillHold(id, WALL, TORCH, A_TILE)
+    pinHold(id, WALL, DOOR, ANOTHER_TILE)
+    // A second slot solved to nothing, which is the state a JSON round trip is
+    // likeliest to lose: `{}` has to come back as `{}` rather than as absent.
+    fillSlot(id, FLOOR, A_TILE)
+    fillHolds(id, FLOOR, {})
+
+    const payload = storedPayload()
+    resetWorkshop()
+    writeStored(payload)
+    void useWorkshopStore.persist.rehydrate()
+
+    expect(holdsOf(id)).toEqual({
+      [TORCH]: { tile: A_TILE, pinned: false },
+      [DOOR]: { tile: ANOTHER_TILE, pinned: true },
+    })
+    expect(holdsOf(id, FLOOR)).toEqual({})
+  })
+})
+
 /* ------------------------------------------------------------------- filters */
 
 describe('re-arming a placed instance', () => {
@@ -552,6 +886,47 @@ describe('re-arming a placed instance', () => {
       setPlacementFilters(id, ['component|torch'], { [FLOOR]: { tile: ANOTHER_TILE, pinned: false } }),
     ).toBe('set')
     expect(state().placements[id]?.fills[FLOOR]).toEqual({ tile: ANOTHER_TILE, pinned: false })
+  })
+
+  it('carries the holds across a slot whose file did not change, and drops them where it did', () => {
+    /* The live path: `relock.ts#reSolveInstance` rebuilds every declared slot as
+       `{ tile, pinned }`, with no holds in it, so without this rule re-arming a
+       filter would strip every accessory in the instance — including from the
+       slots the new filters did not move. `writeFill` keeps holds on an
+       unchanged file one slot at a time; this is the same rule over the map. */
+    const id = placeTemplate(
+      aTemplateInstance({ fills: { [WALL]: { tile: A_TILE, pinned: false }, [FLOOR]: { tile: A_TILE, pinned: false } } }),
+    )
+    pinHold(id, WALL, TORCH, A_TILE)
+    fillHold(id, FLOOR, DOOR, A_TILE)
+
+    expect(
+      setPlacementFilters(id, ['component|door|arched'], {
+        // Same file: the torch stays, because the mounts it was fitted to are
+        // the same mounts.
+        [WALL]: { tile: A_TILE, pinned: false },
+        // Different file: different mounts, so the door goes and the slot reads
+        // as never solved again — which is what the next default-hold pass owns.
+        [FLOOR]: { tile: ANOTHER_TILE, pinned: false },
+      }),
+    ).toBe('set')
+
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: A_TILE, pinned: true } })
+    expect(holdsOf(id, FLOOR)).toBeUndefined()
+  })
+
+  it('stays a no-op on a re-arm to the same files, even when the fills carry holds', () => {
+    // `sameInstance` compares holds now, so without the carry-across this press
+    // would look like a change and write — turning what used to be a no-op into
+    // the write that erases the accessories. The caller's map is shaped the way
+    // `reSolveInstance` builds it: files and pins, no holds.
+    const id = placeTemplate(aTemplateInstance({ fills: { [WALL]: { tile: A_TILE, pinned: false } } }))
+    fillHold(id, WALL, TORCH, A_TILE)
+    const before = state().placements
+
+    expect(setPlacementFilters(id, [], { [WALL]: { tile: A_TILE, pinned: false } })).toBe('unchanged')
+    expect(state().placements).toBe(before)
+    expect(holdsOf(id)).toEqual({ [TORCH]: { tile: A_TILE, pinned: false } })
   })
 
   it('is unchanged when the position and every fill are already there, and wakes no subscriber', () => {
@@ -774,6 +1149,50 @@ describe('selector granularity', () => {
     // user put down; row C4 owns the count of parts, which needs the templates.
     placeTemplate(aTemplateInstance({ fills: aFullFillMap() }))
     expect(selectPlacementCount(state())).toBe(1)
+  })
+})
+
+/* -------------------------------------------------------------- silent writes */
+
+describe('writes nobody made', () => {
+  it('is off by default, on for the length of the call, and off again after', () => {
+    expect(isSilentWrite()).toBe(false)
+    let seen = false
+    writeSilently(() => {
+      seen = isSilentWrite()
+    })
+    expect(seen).toBe(true)
+    expect(isSilentWrite()).toBe(false)
+  })
+
+  it('a subscriber sees the flag during the write itself, which is the whole point', () => {
+    const seen: boolean[] = []
+    const stop = useWorkshopStore.subscribe(() => seen.push(isSilentWrite()))
+
+    placeTemplate(aTemplateInstance())
+    writeSilently(() => {
+      placeTemplate(aTemplateInstance({ x: 1 }))
+    })
+    stop()
+
+    // Zustand notifies synchronously inside `setState`, so a history subscriber
+    // can tell an edit from a write the app made on the user's behalf.
+    expect(seen).toEqual([false, true])
+  })
+
+  it('stays nested and survives a throw, so one bad write cannot silence a session', () => {
+    writeSilently(() => {
+      writeSilently(() => undefined)
+      // The inner call finishing must not un-silence the outer one.
+      expect(isSilentWrite()).toBe(true)
+    })
+
+    expect(() => {
+      writeSilently(() => {
+        throw new Error('boom')
+      })
+    }).toThrow('boom')
+    expect(isSilentWrite()).toBe(false)
   })
 })
 
@@ -1082,6 +1501,32 @@ describe('export and import', () => {
     expect(result.ok && result.dropped).toHaveLength(1)
     expect(Object.keys(state().placements)).toEqual(['keep'])
     expect(state().lock).toBe('magnetic')
+  })
+
+  it('imports a file exported at the version below, because the reader climbs that rung', () => {
+    // The import path asks the reader which versions it reads rather than
+    // comparing against `STORE_VERSION`, so the 8 → 9 rung reaches a *file* too.
+    // Without that, a room exported the day before the bump would be refused
+    // while the same state in `localStorage` came back fine — which is the
+    // "there is deliberately no second recovery path" claim broken in the one
+    // direction a user would notice.
+    const result = importWorkshop(
+      JSON.stringify({
+        kind: WORKSHOP_EXPORT_KIND,
+        version: STORE_VERSION - 1,
+        state: {
+          placements: {
+            keep: { id: 'keep', template: A_TEMPLATE, x: 0, z: 0, rotation: 0, fills: aFullFillMap() },
+          },
+          lock: 'magnetic',
+        },
+      }),
+    )
+
+    expect(result).toEqual({ ok: true, dropped: [] })
+    expect(Object.keys(state().placements)).toEqual(['keep'])
+    // A version 8 fill has no holds, and *never solved* is the right reading.
+    expect(state().placements['keep' as PlacementId]?.fills[FLOOR]?.holds).toBeUndefined()
   })
 
   it.each([

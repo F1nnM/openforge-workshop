@@ -377,6 +377,12 @@ export function reSolveScene(
     unchanged: 0,
     'kept-pinned': 0,
     'unknown-placement': 0,
+    /* Always 0 here, and tallied anyway. `'unknown-slot'` belongs to the store's
+       *hold* actions — a hold needs a filled slot to live in — and this driver
+       writes slots, which `fillSlot` creates rather than refuses. Spelled out
+       because the type is the whole tally and a missing key would be a silently
+       uncounted outcome the day a writer produces one. */
+    'unknown-slot': 0,
   }
   const unknownTemplates: PlacementId[] = []
   const unfilled: UnfilledReport[] = []

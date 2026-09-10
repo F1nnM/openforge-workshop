@@ -1,7 +1,7 @@
 {
   "note": "Row X4. The emitted {tags, records} change if and only if (schema, pipeline) change; see tools/stamp/lock.ts and pipeline/version.ts. Regenerate with `npx tsx tools/stamp/cli.ts --relock`.",
   "fixtures": "428289679a0c62ade992a51ef949f47cdc2b9aed",
-  "schema": 4,
+  "schema": 5,
   "pipeline": 3,
   "records": 8702,
   "tags": 930,

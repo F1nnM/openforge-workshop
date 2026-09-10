@@ -16,9 +16,12 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import type { CatalogRecord, TileId } from '@/catalog'
+import type { NoteCode } from '@/assembly'
+import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
+import type { CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { resolveTags } from '@/catalog'
-import type { PlacementId, SlotName, TemplateId, WorkshopState } from '@/store'
+import { createCompositionIndex } from '@/composition'
+import type { PlacementId, SlotName, TemplateId, TemplateInstance, WorkshopState } from '@/store'
 
 import {
   BASE_LIFT_MM,
@@ -32,15 +35,21 @@ import type { SlotLayoutAnswer } from './catalog'
 import type { SlotLayout } from './geometry'
 import {
   FIXTURE_CELL,
+  FIXTURE_HOLDS,
   FIXTURE_IDS,
   FIXTURE_SLOTS,
   FIXTURE_TEMPLATE,
   OTHER_FIXTURE_TEMPLATE,
   fixtureCatalogFile,
   fixtureFills,
+  fixtureHolds,
   fixtureInstance,
+  fixtureModelledInCatalogFile,
+  fixtureModelledInUndeclaredCatalogFile,
   fixtureSlotLayout,
   fixtureTemplateParts,
+  fixtureUnanchoredCatalogFile,
+  fixtureUnmeasuredCatalogFile,
 } from './fixture'
 import { SLOT_CONVENTIONS } from '@/template/rules'
 
@@ -48,7 +57,7 @@ import { computeGhost, ghostOverlaps } from './ghost'
 import { SNAP_STEP, planBox, planQuad } from './geometry'
 import { findConflicts, levelAt, partsOverlap, planBand, quadsOverlap, subjectsConflict } from './overlap'
 import type { OverlapCandidate } from './overlap'
-import { buildPlanScene, navigationOrder, partAt, pieceAt, pieceRotationStep } from './scene'
+import { buildPlanScene, navigationOrder, partAt, pieceAt, pieceRotationStep, reanchorPiece } from './scene'
 import type { PlanPiece } from './scene'
 import { sectorSlack } from './sector'
 
@@ -1589,6 +1598,296 @@ describe('scene', () => {
       styleOf,
     )
     expect(navigationOrder(scene).map((piece) => piece.id)).toEqual(['north', 'middle', 'south'])
+  })
+})
+
+describe('accessories: what a fill holds, projected onto the host s measured mounts', () => {
+  /** The two-part instance every case here starts from: a floor and a wall. */
+  const wallAndFloor = () =>
+    fixtureFills([
+      [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+      [FIXTURE_SLOTS.leftWall, FIXTURE_IDS.wall2],
+    ])
+
+  /** …with `rows` fitted into the wall fill's own composition slots. */
+  const holding = (rows: readonly (readonly [string, string])[]) =>
+    fixtureHolds(wallAndFloor(), FIXTURE_SLOTS.leftWall, rows)
+
+  const sceneOfFills = (fills: TemplateInstance['fills'], view = catalog, styleFor = styleOf) => {
+    const placements: Record<string, WorkshopState['placements'][PlacementId]> = {
+      p1: fixtureInstance('p1', fills),
+    }
+    return buildPlanScene(placements, view, styleFor)
+  }
+
+  const held = (rows: readonly (readonly [string, string])[]) => sceneOfFills(holding(rows))
+
+  it('fits one accessory per measured mount, and points each at its host part', () => {
+    const scene = held([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]])
+    const piece = scene.pieces[0]
+    expect(scene.unknown).toEqual([])
+    expect(scene.unplaced).toEqual([])
+    // **Two sockets, two torches.** The bill prices one copy per mount
+    // (`assembly/bill.ts`), so a room that drew one per *hold* would show one
+    // torch and charge for two — which is the disagreement this arity exists to
+    // prevent.
+    expect(piece?.accessories).toHaveLength(2)
+    expect(piece?.accessories.map((one) => one.index)).toEqual([0, 1])
+    // The host's own measurement order, which is what makes "the first one" mean
+    // the same thing on every render — `catalog/mounts.ts` says so.
+    expect(piece?.accessories.map((one) => one.mount.at[0])).toEqual([-25.2, 25.2])
+
+    const first = piece?.accessories[0]
+    expect(first?.slot).toBe(FIXTURE_SLOTS.leftWall)
+    expect(first?.hold).toBe(FIXTURE_HOLDS.torch)
+    expect(first?.fill).toEqual({ tile: FIXTURE_IDS.torch, pinned: false })
+    expect(first?.record.name).toBe('Cut stone torch')
+    // The host is the **part** and not the piece: a mount is in the host mesh's
+    // own frame, so an accessory can only be placed against one slot's box and
+    // angle. Identity, not equality — the renderer looks its host's transform up
+    // by reference.
+    expect(first?.host).toBe(piece?.parts.find((part) => part.slot === FIXTURE_SLOTS.leftWall))
+    expect(piece?.accessories[1]?.host).toBe(first?.host)
+  })
+
+  it('draws nothing on the plan: an insert changes no outline, no box and no conflict', () => {
+    const bare = sceneOfFills(wallAndFloor()).pieces[0]
+    const piece = held([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]]).pieces[0]
+    expect(piece?.parts).toHaveLength(bare?.parts.length ?? 0)
+    expect(piece?.box).toEqual(bare?.box)
+    expect(piece?.polygons).toEqual(bare?.polygons)
+    expect(piece?.conflict).toBe(false)
+    // Empty and never `undefined`, so a renderer maps it without a guard.
+    expect(bare?.accessories).toEqual([])
+  })
+
+  it('reports a hold whose host has no measured mount as unplaced, and still draws the host', () => {
+    // The host declares the slot and nobody has read its mesh — 0 of the corpus
+    // is measured until `npm run mounts` has run over it, so this is the state a
+    // real room reaches, not a corrupt one.
+    const unmeasured = planCatalogFromFile(fixtureUnmeasuredCatalogFile(), fixtureSlotLayout)
+    const scene = sceneOfFills(
+      holding([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]]),
+      unmeasured,
+      createStyleResolver(unmeasured),
+    )
+    expect(scene.pieces[0]?.parts.map((part) => part.slot)).toEqual(['floor', 'left wall'])
+    expect(scene.pieces[0]?.accessories).toEqual([])
+    expect(scene.unplaced).toHaveLength(1)
+    expect(scene.unplaced[0]?.id).toBe('p1')
+    expect(scene.unplaced[0]?.slot).toBe(FIXTURE_SLOTS.leftWall)
+    expect(scene.unplaced[0]?.hold).toBe(FIXTURE_HOLDS.torch)
+    expect(scene.unplaced[0]?.tile).toBe(FIXTURE_IDS.torch)
+    expect(scene.unplaced[0]?.reason).toContain('measured')
+  })
+
+  it('reports a hold whose own file has no measured anchor as unplaced, and draws none of it', () => {
+    // The other half of the pair: the host's two sockets are measured, the
+    // torch's own peg is not. `three/instances.ts#addAccessory` skips an insert
+    // with no anchor and `roomBlobs` does not fetch it, so a `PlanAccessory`
+    // here would be a row the room silently dropped.
+    const unanchored = planCatalogFromFile(fixtureUnanchoredCatalogFile(), fixtureSlotLayout)
+    const scene = sceneOfFills(
+      holding([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]]),
+      unanchored,
+      createStyleResolver(unanchored),
+    )
+    expect(scene.pieces[0]?.accessories).toEqual([])
+    // **One row, not one per mount.** The fault is a fact about the file.
+    expect(scene.unplaced).toHaveLength(1)
+    expect(scene.unplaced[0]?.hold).toBe(FIXTURE_HOLDS.torch)
+    expect(scene.unplaced[0]?.tile).toBe(FIXTURE_IDS.torch)
+    expect(scene.unplaced[0]?.reason).toContain('plugs in')
+    // Not the host's sentence: the wall was measured and says so.
+    expect(scene.unplaced[0]?.reason).not.toContain('attaches to')
+  })
+
+  it('reports a hold on a slot the host does not declare as unplaced, in the bill s words', () => {
+    const scene = held([['lintel', FIXTURE_IDS.torch]])
+    expect(scene.pieces[0]?.accessories).toEqual([])
+    expect(scene.unplaced).toHaveLength(1)
+    expect(scene.unplaced[0]?.hold).toBe('lintel')
+    // `hold-off-slot`'s sentence: it prints, and it will not fit. The bill says
+    // the same thing about the same hold, which is the point of saying it twice.
+    expect(scene.unplaced[0]?.reason).toContain('declares no lintel slot')
+  })
+
+  it('reports a hold naming a file this build does not hold as unknown, beside the stranded fills', () => {
+    const scene = held([[FIXTURE_HOLDS.torch, 'tiles/gone/torch.stl']])
+    expect(scene.pieces[0]?.accessories).toEqual([])
+    expect(scene.unplaced).toEqual([])
+    expect(scene.unknown).toHaveLength(1)
+    expect(scene.unknown[0]?.slot).toBe(FIXTURE_SLOTS.leftWall)
+    expect(scene.unknown[0]?.tile).toBe('tiles/gone/torch.stl')
+    // The hold is named, because the slot alone would read as the *wall* having
+    // been retired — which is a different repair.
+    expect(scene.unknown[0]?.reason).toContain('torch')
+    expect(scene.unknown[0]?.reason).toContain('retired')
+  })
+
+  it('says nothing extra about the holds of a host part that is not drawn', () => {
+    const fills = fixtureHolds(
+      fixtureFills([
+        [FIXTURE_SLOTS.floor, FIXTURE_IDS.floor2],
+        [FIXTURE_SLOTS.leftWall, 'tiles/gone/retired.stl'],
+      ]),
+      FIXTURE_SLOTS.leftWall,
+      [[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]],
+    )
+    const scene = sceneOfFills(fills)
+    // One row, for the wall. A second row about its torch would tell the user to
+    // repair a hole in a wall that is itself the hole.
+    expect(scene.unknown).toHaveLength(1)
+    expect(scene.unknown[0]?.tile).toBe('tiles/gone/retired.stl')
+    expect(scene.unplaced).toEqual([])
+    expect(scene.pieces[0]?.accessories).toEqual([])
+  })
+
+
+  /**
+   * The same instance through `@/assembly`, so the two wordings can be compared.
+   *
+   * **A test may import the assembly where `scene.ts` may not** — `index.ts`
+   * keeps the canvas free of that dependency — so the agreement the two modules
+   * promise each other in prose is pinned here, where the import is legal,
+   * instead of being bought with a coupling.
+   *
+   * The template lookup is a two-slot recipe written out on the spot: the
+   * shipped 40-entry table lives beside a screen, and a bill needs no more than
+   * the part names the fill map uses.
+   */
+  const billFor = (fills: TemplateInstance['fills'], over: CatalogFile = file) =>
+    buildBillOfTiles([fixtureInstance('p1', fills)], buildAssemblyIndex(over), {
+      templates: (id) =>
+        id === FIXTURE_TEMPLATE
+          ? {
+              id,
+              tags: [],
+              parts: [{ name: FIXTURE_SLOTS.floor, tags: {} }, { name: FIXTURE_SLOTS.leftWall, tags: {} }],
+            }
+          : undefined,
+      composition: createCompositionIndex(over),
+    })
+
+  /** The message a bill rolled up under one code. */
+  const billSays = (bill: ReturnType<typeof billFor>, code: NoteCode) => {
+    const found = bill.notes.find((one) => one.code === code)
+    if (found === undefined) throw new Error(`the bill raised no ${code} note`)
+    return found.message
+  }
+
+  /**
+   * A note's message as a `PlanUnplaced.reason` spells it.
+   *
+   * One character, and it is the only difference the two are allowed: a note is
+   * a clause the panel prefixes with its subject, so it opens lower-case, where
+   * a reason is a standalone sentence in a list of its own and opens with a
+   * capital — which is what the four `PlanOmission` reasons beside it do. The
+   * rest is compared verbatim.
+   */
+  const asSentence = (message: string) => message.charAt(0).toUpperCase() + message.slice(1)
+
+  it('cuts `base` out of the host s declarations, so a base hold is off-slot and not unmeasured', () => {
+    // The host declares `base` — 2,451 of the corpus's 3,695 file slots do — and
+    // it is a base match rather than an attachment point. Reading it as an
+    // accessory slot would make the room say *nobody measured where a base
+    // attaches*, of a slot no measurement was ever going to cover.
+    const fills = holding([['base', FIXTURE_IDS.torch]])
+    const scene = sceneOfFills(fills)
+    expect(scene.pieces[0]?.accessories).toEqual([])
+    expect(scene.unplaced).toHaveLength(1)
+    expect(scene.unplaced[0]?.hold).toBe('base')
+    expect(scene.unplaced[0]?.reason).toContain('declares no base slot')
+    expect(scene.unplaced[0]?.reason).not.toContain('measured')
+    // And the bill makes the same cut, which is the whole reason this one is here.
+    expect(scene.unplaced[0]?.reason).toBe(asSentence(billSays(billFor(fills), 'hold-off-slot')))
+  })
+
+  it('words both unplaced faults exactly as the bill words them', () => {
+    // Copied sentences drift. Each test above asserts its own copy, which would
+    // hold just as well if `resolve.ts` had been reworded yesterday — so this is
+    // the one that reads both sides in one run.
+    const offSlot = holding([['lintel', FIXTURE_IDS.torch]])
+    expect(sceneOfFills(offSlot).unplaced[0]?.reason).toBe(
+      asSentence(billSays(billFor(offSlot), 'hold-off-slot')),
+    )
+
+    const fitted = holding([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]])
+    const unmeasuredFile = fixtureUnmeasuredCatalogFile()
+    const unmeasured = planCatalogFromFile(unmeasuredFile, fixtureSlotLayout)
+    const room = sceneOfFills(fitted, unmeasured, createStyleResolver(unmeasured))
+    const bill = billFor(fitted, unmeasuredFile)
+    expect(room.unplaced[0]?.reason).toBe(asSentence(billSays(bill, 'hold-unplaced')))
+    // Both sides really did report the same one accessory, rather than agreeing
+    // about a room in which nothing happened.
+    expect(room.unplaced).toHaveLength(1)
+    expect(bill.unplaced).toEqual([
+      { placement: 'p1', slot: FIXTURE_SLOTS.leftWall, hold: FIXTURE_HOLDS.torch, tile: FIXTURE_IDS.torch },
+    ])
+
+    // And the fourth, which is not a gap in the measurement at all: the host was
+    // printed holding one. Nothing is drawn and — alone among these — nothing is
+    // billed either, so the bill's `unplaced` stays empty while both sides say
+    // the same sentence about the same accessory.
+    const builtInFile = fixtureModelledInCatalogFile()
+    const builtIn = planCatalogFromFile(builtInFile, fixtureSlotLayout)
+    const included = sceneOfFills(fitted, builtIn, createStyleResolver(builtIn))
+    const includedBill = billFor(fitted, builtInFile)
+    expect(included.unplaced[0]?.reason).toBe(asSentence(billSays(includedBill, 'hold-modelled-in')))
+    expect(included.unplaced).toHaveLength(1)
+    expect(included.pieces.flatMap((piece) => piece.accessories)).toEqual([])
+    expect(includedBill.unplaced).toEqual([])
+    expect(includedBill.complete).toBe(true)
+
+    // And the third: the insert's own half of the measurement.
+    const unanchoredFile = fixtureUnanchoredCatalogFile()
+    const unanchored = planCatalogFromFile(unanchoredFile, fixtureSlotLayout)
+    const plugless = sceneOfFills(fitted, unanchored, createStyleResolver(unanchored))
+    const anchorBill = billFor(fitted, unanchoredFile)
+    expect(plugless.unplaced[0]?.reason).toBe(asSentence(billSays(anchorBill, 'hold-unanchored')))
+    expect(plugless.unplaced).toHaveLength(1)
+    expect(anchorBill.unplaced).toEqual([
+      { placement: 'p1', slot: FIXTURE_SLOTS.leftWall, hold: FIXTURE_HOLDS.torch, tile: FIXTURE_IDS.torch },
+    ])
+  })
+
+  it('calls a built-in slot built in even when the record never declares it', () => {
+    // `CatalogRecord.modelledIn` is read off the mesh and `config.parts` off the
+    // filename — a blob-keyed measurement does not guarantee the two name the
+    // same slot. `fixtureModelledInCatalogFile` above cannot catch a scene that
+    // checks the declaration first, because there `torch` is declared *and*
+    // built in: this fixture removes the declaration, so the only way to reach
+    // *built in* is to ask `isModelledIn` before asking whether the host
+    // declares the slot at all — which is the order `resolve.ts#holdNotes`
+    // already used and `scene.ts#partAccessories` did not.
+    const undeclaredFile = fixtureModelledInUndeclaredCatalogFile()
+    const undeclared = planCatalogFromFile(undeclaredFile, fixtureSlotLayout)
+    const fitted = holding([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]])
+    const room = sceneOfFills(fitted, undeclared, createStyleResolver(undeclared))
+    const bill = billFor(fitted, undeclaredFile)
+
+    expect(room.unplaced).toHaveLength(1)
+    expect(room.unplaced[0]?.reason).toContain('built in')
+    expect(room.unplaced[0]?.reason).not.toContain('declares no')
+    expect(room.pieces[0]?.accessories).toEqual([])
+    expect(room.unplaced[0]?.reason).toBe(asSentence(billSays(bill, 'hold-modelled-in')))
+    // Alone among the unplaced faults, built-in bills nothing.
+    expect(bill.unplaced).toEqual([])
+    expect(bill.complete).toBe(true)
+  })
+
+  it('re-points an accessory at the re-anchored host, so a move carries its torches', () => {
+    const piece = held([[FIXTURE_HOLDS.torch, FIXTURE_IDS.torch]]).pieces[0]
+    if (piece === undefined) throw new Error('the scene drew no piece')
+    const moved = reanchorPiece(piece, [4, 6])
+    if (moved.kind !== 'catalog') throw new Error('a template instance re-anchors as one')
+    const host = moved.parts.find((part) => part.slot === FIXTURE_SLOTS.leftWall)
+    expect(moved.accessories).toHaveLength(2)
+    expect(moved.accessories[0]?.host).toBe(host)
+    // The whole reason the re-point is not optional: the old host is still at the
+    // origin, and a renderer reading it would leave the torches behind.
+    expect(host?.box.x).toBe(4)
+    expect(piece.accessories[0]?.host.box.x).toBe(0)
   })
 })
 

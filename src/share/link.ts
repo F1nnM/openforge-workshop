@@ -54,23 +54,56 @@
  *     stacking it on the origin reads as a builder bug.
  *
  * Every one of those is named in `dropped`, at the level it happened.
+ *
+ * ## Format 6 added a fourth level, and one thing the wire cannot carry
+ *
+ * A hold is a fill of the *file a slot is filled with* — the torch in the wall's
+ * socket — so it fails independently of the wall, and the rule reads the same one
+ * level down: **a retired file drops its hold and leaves the wall filled**, named
+ * as `placement 3, slot wall, hold torch: …`. Dropping the fill over a missing
+ * accessory would throw away the wall to report the torch.
+ *
+ * The store's distinction between `holds === undefined` (*never solved*) and
+ * `holds === {}` (*solved, and holds nothing*) survives too, and it takes a bit
+ * of the format to do it: `WireFill.emptied`, one per fill. Without it a link
+ * had to pick a reading of zero, and the repairable direction was *never
+ * solved* — a room whose accessories the user had deliberately cleared arrived
+ * with them all put back by the receiver's default-hold pass, and there was no
+ * way to say otherwise. So the three states map exactly:
+ *
+ *   - **some holds survived** → the map, whatever the bit says;
+ *   - **none, and the bit is set** → `{}`. The sharer emptied it, and the
+ *     receiver's default-hold pass leaves an explicit empty map alone;
+ *   - **none, and the bit is clear** → `undefined`, which is every fill of a
+ *     format 5 link and every fill whose holds were all *dropped* — a fill that
+ *     lost its accessory to a retired file arrives unsolved and is repaired
+ *     rather than frozen, which is still the repairable direction where the
+ *     choice is still ours to make.
  */
 import type { TileId } from '@/catalog'
 import type { GeneratedPlacement } from '@/generator/placement/scene'
-import type { LockSystem, NewTemplateInstance, SlotFill } from '@/store'
-import { DEFAULT_LOCK_SYSTEM, SlotName, TemplateId, filledSlots, normalizeRotation } from '@/store'
+import type { HoldFill, LockSystem, NewTemplateInstance, SlotFill } from '@/store'
+import {
+  DEFAULT_LOCK_SYSTEM,
+  HoldName,
+  SlotName,
+  TemplateId,
+  UNSAFE_KEYS,
+  filledSlots,
+  normalizeRotation,
+} from '@/store'
 import { parseCompactSearch, stringifyCompactSearch } from '@/search/searchSchema'
 
 import { MalformedPayloadError, TruncatedPayloadError } from './bytes'
 import type { ShareManifest } from './manifest'
 import { resolveOrdinals } from './manifest'
-import type { WireFill, WireGenerated, WireInstance, WirePayload } from './payload'
+import type { WireFill, WireGenerated, WireHold, WireInstance, WirePayload } from './payload'
 import {
   LOCK_ORDER,
   MAX_SHARE_FILLS,
   MAX_SHARE_GENERATED,
   MAX_SHARE_PLACEMENTS,
-  SHARE_FORMAT_VERSION,
+  READABLE_SHARE_FORMATS,
   decodePayload,
   encodePayload,
   payloadFormatVersion,
@@ -103,16 +136,19 @@ export const SHARE_PARAM = 's'
  * than breaks.
  *
  * **Gate on {@link shareUrlFits}, never on a placement count.** Measured capacity
- * at this budget ranges from **88 template instances to 7,358** depending only on
+ * at this budget ranges from **80 template instances to 6,680** depending only on
  * how repetitive the build is — a factor of 84, so any count-based rule is wrong
  * in one direction or the other by nearly two orders of magnitude. The encoded
  * length is known before the link is shown, and it is the only honest test.
  *
- * Both figures are row A5's, re-measured on A1's shape by `capacity.test.ts`; the
+ * Both figures are format 6's, measured on A1's shape by `capacity.test.ts`; the
  * pre-A1 pair (243 and 29,705) counted single-tile placements and is not
  * comparable. Per *file* the range moved much less than the instance counts
- * suggest: the 88-instance scattered link carries 264 to 440 files, against 243
- * before.
+ * suggest: the 80-instance scattered link carries 240 to 400 files, against 243
+ * before. Format 6 took the pair from format 5's 81 and 6,956 on fixtures that
+ * fill no holds, which is the hold count column and the emptied bit and nothing
+ * else — `payload.ts` prices both — so the *shape* of the argument is what it
+ * was and only the numbers moved.
  */
 export const SHARE_URL_BUDGET = 2000
 
@@ -147,7 +183,10 @@ export type ShareEncodeFailure =
    * A second ceiling rather than a redundant one: since row A1 the placement
    * count no longer bounds the number of ordinals in a payload, because an
    * instance carries a fill per slot and nothing in `@/store` caps the slots of
-   * a template. Reachable only from a scene no template table can produce.
+   * a template — and format 6 repeats that a level down, since a fill carries a
+   * hold per mount. **Holds count against the same ceiling**, for the reason
+   * `payload.ts` gives: what is bounded is files named, and a hold names one.
+   * Reachable only from a scene no template table can produce.
    */
   | 'too-many-fills'
   /** More generated bases than the format carries — see `MAX_SHARE_GENERATED`. */
@@ -236,7 +275,7 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
 
   const dropped: string[] = []
   const { templates, slots, filters, instances } = collectInstances(scene.placements, manifest, dropped)
-  const ordinals = fillOrdinals(instances)
+  const ordinals = fileOrdinals(instances)
 
   if (instances.length > MAX_SHARE_PLACEMENTS) {
     return {
@@ -252,7 +291,7 @@ export async function encodeShareFragment(scene: SharedScene, manifest: ShareMan
       ok: false,
       reason: 'too-many-fills',
       message:
-        `A share link carries at most ${String(MAX_SHARE_FILLS)} filled slots in total; ` +
+        `A share link carries at most ${String(MAX_SHARE_FILLS)} filled slots and holds in total; ` +
         `this scene has ${String(ordinals.length)}.`,
     }
   }
@@ -327,9 +366,25 @@ function stringTable(): { readonly entries: string[]; intern: (value: string) =>
   }
 }
 
-/** Every fill ordinal in the payload, in wire order. What the digest is taken over. */
-function fillOrdinals(instances: readonly WireInstance[]): number[] {
-  return instances.flatMap((instance) => instance.fills.map((fill) => fill.ordinal))
+/**
+ * Every file ordinal in the payload, in wire order — fills **and** holds. What
+ * the digest is taken over.
+ *
+ * A hold names a file exactly as a fill does, so it is checksummed exactly as a
+ * fill is: §13's failure is two ordinals swapping the files they name, and a
+ * torch that silently becomes a brazier is that failure at the size the user is
+ * least likely to notice. It is also what makes a hold *decodable* — the tile map
+ * the decoder reads a fill out of is the checksum's own view, and an ordinal
+ * outside it has no tile to resolve to.
+ *
+ * Order does not matter to the digest (`resolveOrdinals` sorts the distinct set)
+ * but is kept anyway, because this is also the count the {@link MAX_SHARE_FILLS}
+ * gate is taken over.
+ */
+function fileOrdinals(instances: readonly WireInstance[]): number[] {
+  return instances.flatMap((instance) =>
+    instance.fills.flatMap((fill) => [fill.ordinal, ...fill.holds.map((hold) => hold.ordinal)]),
+  )
 }
 
 /**
@@ -375,7 +430,17 @@ function collectInstances(
         dropped.push(`placement ${String(index)}, slot ${slot}: ${fill.tile} is not in this catalog build`)
         continue
       }
-      fills.push({ slot: slots.intern(slot), ordinal, pinned: fill.pinned })
+      fills.push({
+        slot: slots.intern(slot),
+        ordinal,
+        pinned: fill.pinned,
+        holds: collectHolds(fill.holds, `placement ${String(index)}, slot ${slot}`, slots.intern, manifest, dropped),
+        /* **The map was there and had nothing in it** — read off the store's own
+           field rather than off the wire holds above, which are also empty when
+           every hold was dropped. Those two are different rooms: one was
+           emptied on purpose and one lost its accessory to a retired file. */
+        emptied: fill.holds !== undefined && filledSlots(fill.holds).length === 0,
+      })
     }
     instances.push({
       template: templates.intern(instance.template),
@@ -394,6 +459,45 @@ function collectInstances(
   })
 
   return { templates: templates.entries, slots: slots.entries, filters: filters.entries, instances }
+}
+
+/**
+ * The accessories fitted into one filled file, as the wire carries them.
+ *
+ * **Sorted and interned into the slot table**, both for the reasons
+ * {@link collectInstances} gives one level up: `holds` is a `z.record` too, so
+ * its key order is the producer's accident and two rooms that are the same room
+ * must be the same link; and a hold name is a short string with no manifest
+ * ordinal, which is the argument the slot table already is.
+ *
+ * A hold whose file this build does not carry is dropped and named with the
+ * placement, the slot **and** the hold, because all three are needed to find it
+ * in a room — `slot wall` alone appears on ninety walls. The fill stays: an
+ * accessory that cannot be encoded is not a reason to unfill the wall it sat on.
+ *
+ * `where` is the caller's already-composed prefix rather than an index and a slot
+ * name, so the two levels cannot disagree about how a placement is named.
+ */
+function collectHolds(
+  holds: SlotFill['holds'],
+  where: string,
+  intern: (value: string) => number,
+  manifest: ShareManifest,
+  dropped: string[],
+): WireHold[] {
+  if (holds === undefined) return []
+  const wire: WireHold[] = []
+  for (const name of filledSlots(holds).sort()) {
+    const hold = holds[name]
+    if (hold === undefined) continue
+    const ordinal = manifest.ordinalOfTile(hold.tile)
+    if (ordinal === undefined) {
+      dropped.push(`${where}, hold ${name}: ${hold.tile} is not in this catalog build`)
+      continue
+    }
+    wire.push({ slot: intern(name), ordinal, pinned: hold.pinned })
+  }
+  return wire
 }
 
 /**
@@ -511,14 +615,14 @@ export async function decodeShareFragment(fragment: string, manifest: ShareManif
   }
 
   const format = payloadFormatVersion(raw)
-  if (format !== SHARE_FORMAT_VERSION) {
+  if (format === undefined || !READABLE_SHARE_FORMATS.includes(format)) {
     return {
       ok: false,
       reason: 'format-version',
       message:
         `This link was made with share format ${String(format ?? 'unknown')}, and this version reads ` +
-        `${String(SHARE_FORMAT_VERSION)}. Reload the page to pick up the current build, and if the link still ` +
-        'will not open, ask whoever sent it for a fresh one.',
+        `${READABLE_SHARE_FORMATS.join(' and ')}. Reload the page to pick up the current build, and if the link ` +
+        'still will not open, ask whoever sent it for a fresh one.',
     }
   }
 
@@ -557,7 +661,7 @@ export async function decodeShareFragment(fragment: string, manifest: ShareManif
  * and verification are one step, and the salvage loop reads the result of it.
  */
 function assembleScene(decoded: WirePayload, manifest: ShareManifest): ShareDecodeResult {
-  const resolved = resolveOrdinals(fillOrdinals(decoded.instances), manifest)
+  const resolved = resolveOrdinals(fileOrdinals(decoded.instances), manifest)
 
   if (resolved.unresolved.length === 0 && resolved.digest !== decoded.digest) {
     return {
@@ -668,6 +772,22 @@ function assembleInstances(
     (index, count) => `slot ${String(index)}: not a readable slot name, dropping ${plural(count, 'fill')}`,
     dropped,
   )
+  /* The **same table**, read a second time as hold names. Two passes rather than
+     one, because the two are different brands looked up in different maps
+     (`store/schema.ts#HoldName`), and because an entry that will not read must be
+     reported in the units it cost: an unreadable entry used by fills and by holds
+     is two losses and two lines, and an entry only one level names is only ever
+     reported once. Six entries and a `min(1)` parse, so the second pass is free
+     against what it buys. */
+  const holdNames = readStringTable(
+    decoded.slots,
+    useCounts(
+      decoded.instances.flatMap((instance) => instance.fills.flatMap((fill) => fill.holds.map((hold) => hold.slot))),
+    ),
+    (entry) => HoldName.safeParse(entry).data,
+    (index, count) => `hold name ${String(index)}: not a readable hold name, dropping ${plural(count, 'hold')}`,
+    dropped,
+  )
   const filters = readStringTable(
     decoded.filters,
     useCounts(decoded.instances.map((instance) => instance.filters)),
@@ -697,7 +817,7 @@ function assembleInstances(
       x: instance.x + 0,
       z: instance.z + 0,
       rotation: normalizeRotation(instance.rotation),
-      fills: assembleFills(instance.fills, index, slots, tiles, dropped),
+      fills: assembleFills(instance.fills, index, { slots, holdNames }, tiles, dropped),
     })
   })
   return placements
@@ -723,46 +843,155 @@ function readFilterSet(entry: string): readonly string[] | undefined {
   return tags.some((tag) => tag === '') ? undefined : tags
 }
 
+/** What {@link collectFilled} says when it discards an entry. One phrasing per level. */
+interface DropReasons<K extends string> {
+  /** The name is one no record may be keyed by — see `store/migrations.ts#UNSAFE_KEYS`. */
+  readonly unsafe: (name: K) => string
+  /** The ordinal names no file this build carries. */
+  readonly missing: (name: K, ordinal: number) => string
+  /** A second entry names a name already taken. */
+  readonly duplicate: (name: K) => string
+}
+
 /**
- * The fills of one instance, as the schema's map.
+ * Collect wire entries into a map keyed by their names, reporting what it drops.
+ *
+ * **One helper for both levels, because the hazard is one hazard.** A slot name
+ * and a hold name are both `z.string().min(1)` — the loosest key schema in the
+ * store, because the authority on what a part is called is the template
+ * (`store/schema.ts#SlotName`) — so a payload out of a URL can name a slot
+ * `__proto__`, `toString` or `hasOwnProperty`, and every one of those parses.
+ *
+ * Two things make that safe here, and neither is a check against a list of the
+ * names anyone thought of:
+ *
+ *   1. **The accumulator is a `Map`.** `has` is an own-key test, where
+ *      `record[name] !== undefined` reads the *prototype chain* — so on a plain
+ *      object `toString` is already "taken" before anything is written and the
+ *      **first** hold named `toString` is discarded as a duplicate of a function
+ *      nobody put there. That was the real bug: not the exotic key, but every
+ *      ordinary member of `Object.prototype` silently costing a fill with a
+ *      dropped line that says something untrue about why.
+ *   2. **{@link UNSAFE_KEYS} is refused outright**, and named. `Object.fromEntries`
+ *      would define `__proto__` as an honest own property rather than invoking the
+ *      setter, so the map alone would already be sound — but the result is handed
+ *      to `placeTemplate` and thence to code that walks these records with plain
+ *      indexing, and a `constructor` key surviving that far is a hazard this
+ *      module has no business exporting. The store's salvager refuses the same
+ *      three keys reading the same two schemas out of `localStorage`; sharing the
+ *      set is what keeps the two readers from drifting apart.
  *
  * `tiles` is the *checksum's* own view — the (ordinal, tile id) pairs
  * `resolveOrdinals` resolved, because §13's failure is two ordinals swapping the
- * files they name — so reading the fill out of it rather than calling `tileOf`
+ * files they name — so reading a fill out of it rather than calling `tileOf`
  * again is what keeps the room and the digest describing the same files by
  * construction rather than by two lookups agreeing.
  */
+function collectFilled<E extends WireHold, K extends string, V>(
+  wire: readonly E[],
+  names: ReadonlyMap<number, K>,
+  tiles: ReadonlyMap<number, TileId>,
+  build: (tile: TileId, entry: E, name: K) => V,
+  reasons: DropReasons<K>,
+  dropped: string[],
+): Map<K, V> {
+  const filled = new Map<K, V>()
+  for (const entry of wire) {
+    const name = names.get(entry.slot)
+    // Reported once against the table entry, not once per use.
+    if (name === undefined) continue
+    if (UNSAFE_KEYS.has(name)) {
+      dropped.push(reasons.unsafe(name))
+      continue
+    }
+    const tile = tiles.get(entry.ordinal)
+    if (tile === undefined) {
+      dropped.push(reasons.missing(name, entry.ordinal))
+      continue
+    }
+    if (filled.has(name)) {
+      // Unreachable from any encoder — both levels are maps on both sides — so
+      // this is a hand-edited payload contradicting itself. First writer wins,
+      // which is deterministic rather than correct, and it is named because
+      // silently choosing between two files is the one thing this codec does not
+      // do.
+      dropped.push(reasons.duplicate(name))
+      continue
+    }
+    filled.set(name, build(tile, entry, name))
+  }
+  return filled
+}
+
+/** The fills of one instance, as the schema's map. */
 function assembleFills(
   wire: readonly WireFill[],
   index: number,
-  slots: ReadonlyMap<number, SlotName>,
+  names: { slots: ReadonlyMap<number, SlotName>; holdNames: ReadonlyMap<number, HoldName> },
   tiles: ReadonlyMap<number, TileId>,
   dropped: string[],
 ): Record<SlotName, SlotFill> {
-  const fills: Record<SlotName, SlotFill> = {}
-  for (const fill of wire) {
-    const slot = slots.get(fill.slot)
-    // Reported once against the table entry, not once per fill.
-    if (slot === undefined) continue
-    const tile = tiles.get(fill.ordinal)
-    if (tile === undefined) {
-      dropped.push(
-        `placement ${String(index)}, slot ${slot}: tile ordinal ${String(fill.ordinal)} is not in this ` +
-          'catalog build',
-      )
-      continue
-    }
-    if (fills[slot] !== undefined) {
-      // Unreachable from any encoder — `fills` is a map on both sides — so this
-      // is a hand-edited payload contradicting itself. First writer wins, which
-      // is deterministic rather than correct, and it is named because silently
-      // choosing between two files is the one thing this codec does not do.
-      dropped.push(`placement ${String(index)}: slot ${slot} is filled twice, keeping the first`)
-      continue
-    }
-    fills[slot] = { tile, pinned: fill.pinned }
-  }
-  return fills
+  const fills = collectFilled(
+    wire,
+    names.slots,
+    tiles,
+    (tile, fill, slot): SlotFill => {
+      const where = `placement ${String(index)}, slot ${slot}`
+      const holds = assembleHolds(fill.holds, where, names.holdNames, tiles, dropped)
+      /* **Three states, and the bit is what separates the last two**: the map
+         when something survived, `{}` when the sharer had emptied it, and
+         absence otherwise — a format 5 link, or a fill whose every hold was
+         dropped, both of which the default-hold pass should fill in when the
+         room opens. See the module docblock. */
+      if (holds !== undefined) return { tile, pinned: fill.pinned, holds }
+      return fill.emptied ? { tile, pinned: fill.pinned, holds: {} } : { tile, pinned: fill.pinned }
+    },
+    {
+      unsafe: (slot) => `placement ${String(index)}: slot ${slot} names an unsafe key, dropping the fill`,
+      missing: (slot, ordinal) =>
+        `placement ${String(index)}, slot ${slot}: tile ordinal ${String(ordinal)} is not in this catalog build`,
+      duplicate: (slot) => `placement ${String(index)}: slot ${slot} is filled twice, keeping the first`,
+    },
+    dropped,
+  )
+  return Object.fromEntries(fills)
+}
+
+/**
+ * The holds of one fill, as the schema's map — or `undefined` when none survived.
+ *
+ * The same failures as {@link assembleFills} through the same collector, named
+ * one level down: a name the table cannot read is reported once against the
+ * entry, an unsafe key and a file this build does not carry each drop their hold
+ * and say which, and two holds naming one mount keep the first.
+ *
+ * `undefined` rather than `{}` for the empty result, for the reason written into
+ * the caller and the module docblock — and returning it from here rather than
+ * letting the caller test emptiness keeps the two spellings of *no holds* from
+ * being decided in two places. The size is the collector's own key count, so it
+ * counts what actually survived rather than what was attempted.
+ */
+function assembleHolds(
+  wire: readonly WireHold[],
+  where: string,
+  names: ReadonlyMap<number, HoldName>,
+  tiles: ReadonlyMap<number, TileId>,
+  dropped: string[],
+): Record<HoldName, HoldFill> | undefined {
+  const holds = collectFilled(
+    wire,
+    names,
+    tiles,
+    (tile, hold): HoldFill => ({ tile, pinned: hold.pinned }),
+    {
+      unsafe: (name) => `${where}: hold ${name} names an unsafe key, dropping the hold`,
+      missing: (name, ordinal) =>
+        `${where}, hold ${name}: tile ordinal ${String(ordinal)} is not in this catalog build`,
+      duplicate: (name) => `${where}: hold ${name} is filled twice, keeping the first`,
+    },
+    dropped,
+  )
+  return holds.size === 0 ? undefined : Object.fromEntries(holds)
 }
 
 /**

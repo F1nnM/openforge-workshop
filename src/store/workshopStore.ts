@@ -33,8 +33,19 @@ import { GeneratedPlacement as GeneratedPlacementSchema } from '@/generator/plac
 import { clearGeneratedMeshes, retainGeneratedMeshes } from './meshes'
 import type { RecoveredState } from './migrations'
 import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
-import type { LockSystem, PlacementId, SlotFill, SlotName, TemplateInstance, WorkshopState } from './schema'
+import type {
+  HoldFill,
+  HoldName,
+  LockSystem,
+  PlacementId,
+  SlotFill,
+  SlotName,
+  TemplateInstance,
+  WorkshopState,
+} from './schema'
 import {
+  HoldFill as HoldFillSchema,
+  HoldName as HoldNameSchema,
   PlacementId as PlacementIdSchema,
   TemplateInstance as TemplateInstanceSchema,
   defaultWorkshopState,
@@ -247,6 +258,67 @@ export function restorePlacements(placements: WorkshopState['placements']): void
   useWorkshopStore.setState({ placements })
 }
 
+/* ------------------------------------------------------- writes nobody made */
+
+/**
+ * How many silent writes are in flight. A counter and not a boolean, so a
+ * nested {@link writeSilently} cannot un-silence the outer one on its way out.
+ *
+ * Module-level and **transient**: it is not part of `WorkshopState`, is never
+ * persisted, and is never read during a render. It exists for the length of one
+ * synchronous call, which is exactly as long as a zustand subscriber has to be
+ * able to see it.
+ */
+let silentWrites = 0
+
+/**
+ * Run a store write that **no user gesture asked for**, so that history-shaped
+ * subscribers can tell it apart from an edit.
+ *
+ * ## The state this exists to make unreachable
+ *
+ * `canvas/useHistory.ts` records an undo entry on every change of `placements`,
+ * by subscription, and that is deliberately unconditional: fourteen actions
+ * write that map and a hook that had to be told about each of them would rot.
+ * The default-hold pass (`builder/three/holds.ts`) is the first writer that is
+ * **not** an edit — it is the app finishing a placement the user already made —
+ * and left unmarked it deadlocks undo outright: placing a host records one
+ * entry, the solver's write records a second, and `Ctrl`+`Z` then restores the
+ * unsolved state, which the solver immediately re-solves. That re-solve is a
+ * fresh change, so `record` pushes it and `history.ts#record` **clears
+ * `future`** — the press undoes nothing, the redo branch is destroyed, and the
+ * placement itself can never be reached.
+ *
+ * ## Why here, and why a flag rather than a parameter
+ *
+ * This generalises the `applying` ref `useHistory` already keeps for its own
+ * restore, which exists for exactly the same reason and cannot be reused
+ * because the solver is not the thing applying an undo. Putting it in the store
+ * rather than in the hook keeps *one* mechanism for *"this write is not a
+ * gesture"* and puts it where every writer can reach it, and a flag rather than
+ * a parameter is what lets it stay true across the fourteen existing actions
+ * without changing one of their signatures.
+ *
+ * Zustand notifies subscribers **synchronously inside `setState`**, so a
+ * subscriber reading {@link isSilentWrite} during the notification sees `true`
+ * for a write made inside `fn` and `false` for everything else. `finally`, so a
+ * throw inside `fn` cannot silence the rest of the session — the same reason
+ * `useHistory` clears `applying` in one.
+ */
+export function writeSilently(fn: () => void): void {
+  silentWrites += 1
+  try {
+    fn()
+  } finally {
+    silentWrites -= 1
+  }
+}
+
+/** Whether the write being notified came from {@link writeSilently}. */
+export function isSilentWrite(): boolean {
+  return silentWrites > 0
+}
+
 /** Clear the builder scene, keeping the lock preference. */
 export function clearPlacements(): void {
   useWorkshopStore.setState({ placements: {}, generated: {} })
@@ -275,12 +347,39 @@ export function clearPlacements(): void {
  *     A re-solve that produces the same file is the common case and is not news.
  *   - `'unknown-placement'` is a stale drag or a race, and it is a bug in the
  *     caller rather than an outcome of the room.
+ *   - `'unknown-slot'` is the same class of bug one level down, and it belongs
+ *     to the **hold** actions alone: a hold is a fill of the file a slot holds,
+ *     so a slot with no fill has no file, no mounts and nowhere to put an
+ *     accessory. Writing anyway would mean inventing the slot's own fill, which
+ *     is a decision no hold action is entitled to make. `fillSlot` and
+ *     `pinFill` never return it — an absent slot is what they exist to fill.
  *
  * Collapsing the first two is the specific mistake that would make a lock
  * change look like it had done nothing when it had in fact honoured forty pins,
  * or look like it had honoured them when the candidate set had simply not moved.
  */
-export type FillOutcome = 'filled' | 'unchanged' | 'kept-pinned' | 'unknown-placement'
+export type FillOutcome = 'filled' | 'unchanged' | 'kept-pinned' | 'unknown-placement' | 'unknown-slot'
+
+/**
+ * The placement map with one slot's fill replaced.
+ *
+ * Two spreads deep and both are load bearing: the map and the instance are each
+ * replaced rather than mutated, so a subscriber to an untouched instance keeps
+ * its object identity and does not re-render — and the fills the caller does not
+ * name keep theirs, which is what makes an edit to one slot invisible to the
+ * other four. Every fill write in this file — slot level and hold level — goes
+ * through here, so that property is stated once rather than at seven call sites.
+ */
+function withFill(
+  state: WorkshopState,
+  id: PlacementId,
+  instance: TemplateInstance,
+  slot: SlotName,
+  fill: SlotFill,
+): WorkshopState['placements'] {
+  const updated: TemplateInstance = { ...instance, fills: { ...instance.fills, [slot]: fill } }
+  return { ...state.placements, [id]: updated }
+}
 
 /**
  * Write one slot's fill, or leave it alone.
@@ -288,6 +387,22 @@ export type FillOutcome = 'filled' | 'unchanged' | 'kept-pinned' | 'unknown-plac
  * The shared half of {@link fillSlot} and {@link pinFill}. `guardPinned` is the
  * only difference between them and it is the whole of contract **C-k**: the
  * solver must not overwrite a pinned fill and the user must always be able to.
+ *
+ * ## A new file drops the holds, and the same file keeps them
+ *
+ * A hold is a fill of the *file* in this slot (`schema.ts#SlotFill`), so the
+ * accessories are answers about that file's own mounts. Put a different wall in
+ * the slot and those answers are about a wall that is no longer there: the new
+ * one declares its own sockets, and carrying a torch across would hang it on a
+ * mount that may not exist. So they go — to `undefined`, *never solved*, which is
+ * precisely the state the next default-hold pass owns, rather than to `{}`, which
+ * would tell that pass the new file had already been considered.
+ *
+ * The same file keeps them, and that case is the common one rather than the
+ * exotic one: `pinFill` on the file the solver already chose is one press in the
+ * editor, and a promotion that emptied the sockets would lose the user's
+ * accessories for saying *yes, that one*. The tile is the whole test — the
+ * `pinned` bit says who chose the file, not which file it is.
  */
 function writeFill(id: PlacementId, slot: SlotName, fill: SlotFill, guardPinned: boolean): FillOutcome {
   let outcome: FillOutcome = 'unknown-placement'
@@ -304,8 +419,9 @@ function writeFill(id: PlacementId, slot: SlotName, fill: SlotFill, guardPinned:
       return state
     }
     outcome = 'filled'
-    const updated: TemplateInstance = { ...current, fills: { ...current.fills, [slot]: fill } }
-    return { placements: { ...state.placements, [id]: updated } }
+    const held = existing?.tile === fill.tile ? existing?.holds : undefined
+    const written: SlotFill = held === undefined ? fill : { ...fill, holds: held }
+    return { placements: withFill(state, id, current, slot, written) }
   })
   return outcome
 }
@@ -528,13 +644,278 @@ export function unpinFill(id: PlacementId, slot: SlotName): UnpinOutcome {
       return state
     }
     outcome = 'unpinned'
-    const updated: TemplateInstance = {
-      ...current,
-      fills: { ...current.fills, [slot]: { tile: existing.tile, pinned: false } },
-    }
-    return { placements: { ...state.placements, [id]: updated } }
+    /* Spread rather than rebuilt from `tile`, so the fill's **holds** survive:
+       the file has not changed, so neither have its mounts, and an unpin that
+       emptied them would delete the user's accessories for handing one decision
+       back. `writeFill` keeps them on the same file for the same reason. */
+    return { placements: withFill(state, id, current, slot, { ...existing, pinned: false }) }
   })
   return outcome
+}
+
+/* --------------------------------------------------------------------- holds */
+
+/* Five actions, four of which are the fill actions one level down — and that is
+   the whole design.
+
+   `schema.ts#SlotFill` argues the shape: a hold is a fill of the file a slot is
+   filled with, so it carries the same two fields and earns the same four verbs —
+   `fillHold` for the solver, `pinHold` for the user, `clearHold` for *take it
+   out* and `unpinHold` for *you decide again*. Every argument on the slot-level
+   four applies unchanged and is not repeated below: contract **C-k**'s refusal
+   to overwrite a pin, its refusal of a `pinned` boolean parameter, `clearFill`'s
+   reason for having no guarded twin, and `unpinFill`'s reason for keeping the
+   file.
+
+   What is genuinely new is three things and nothing else:
+
+     - **A hold needs a filled slot.** Writing into one that has none returns
+       `'unknown-slot'` (see `FillOutcome`) rather than creating the fill.
+     - **`undefined` and `{}` are different answers.** `clearHold` of the last
+       hold leaves the empty map, because *the user took it out* has to survive a
+       reload as something other than *nobody has looked yet*.
+     - **`fillHolds` writes a whole file's mounts at once**, which is what a
+       default-hold pass has to do and what no repetition of `fillHold` could do:
+       an accessory the new answer does not name must *go*. */
+
+/**
+ * Write one hold of one slot's fill, or leave it alone.
+ *
+ * The shared half of {@link fillHold} and {@link pinHold}, mirroring
+ * {@link writeFill}'s guard exactly — the difference is one level of lookup and
+ * one extra refusal, the slot that has no fill to hold anything.
+ */
+function writeHold(
+  id: PlacementId,
+  slot: SlotName,
+  hold: HoldName,
+  fill: HoldFill,
+  guardPinned: boolean,
+): FillOutcome {
+  let outcome: FillOutcome = 'unknown-placement'
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    const filled = current.fills[slot]
+    if (filled === undefined) {
+      outcome = 'unknown-slot'
+      return state
+    }
+    const existing = filled.holds?.[hold]
+    if (guardPinned && existing?.pinned === true) {
+      outcome = 'kept-pinned'
+      return state
+    }
+    if (existing !== undefined && existing.tile === fill.tile && existing.pinned === fill.pinned) {
+      outcome = 'unchanged'
+      return state
+    }
+    outcome = 'filled'
+    const holds = { ...filled.holds, [hold]: fill }
+    return { placements: withFill(state, id, current, slot, { ...filled, holds }) }
+  })
+  return outcome
+}
+
+/**
+ * Fit an accessory into one hold **automatically** — the default-hold pass's
+ * write.
+ *
+ * Writes `pinned: false` and **refuses a hold the user has pinned**, returning
+ * `'kept-pinned'`. {@link fillSlot}'s docblock has the argument in full and it
+ * is unchanged here: the refusal belongs in the store because a pass that simply
+ * forgot to skip pinned holds would discard every deliberate choice in the room
+ * with nothing failing and nothing on screen to say so. There is deliberately no
+ * `pinned` parameter, for contract **C-k**'s reason — two names cannot be
+ * confused, and one boolean argument one copy-paste away can.
+ */
+export function fillHold(id: PlacementId, slot: SlotName, hold: HoldName, tile: TileId): FillOutcome {
+  return writeHold(id, slot, hold, { tile, pinned: false }, true)
+}
+
+/**
+ * Fit an accessory into one hold **because the user said so** — the editor's
+ * write.
+ *
+ * Writes `pinned: true` and never refuses, so it never returns `'kept-pinned'`:
+ * a user's pick overrides their previous pick as readily as it overrides a
+ * solved one. The sibling of {@link pinFill}, and it exists for the same reason
+ * rather than as a parameter on {@link fillHold}.
+ */
+export function pinHold(id: PlacementId, slot: SlotName, hold: HoldName, tile: TileId): FillOutcome {
+  return writeHold(id, slot, hold, { tile, pinned: true }, false)
+}
+
+/**
+ * **Take an accessory out of a hold** — and leave the fill saying it was solved.
+ *
+ * The one thing that is not a restatement of {@link clearFill}: clearing the
+ * **last** hold leaves `holds === {}` rather than removing the field. `{}` is
+ * *solved, and nothing is in it*; `undefined` is *nobody has looked yet*, which
+ * is the state a default-hold pass owns. Deleting the field would hand this fill
+ * back to that pass, and the torch the user just removed would be back on the
+ * next hydrate — a delete key that undoes itself.
+ *
+ * Everything else is `clearFill`'s: no guarded twin, because the only caller is
+ * the user and no solver clears; and no refusal of a pinned hold, because
+ * emptying a mount you chose is the strongest form of "I no longer want my
+ * choice".
+ *
+ * `'unchanged'` covers a hold that is not there **and** a slot that has no fill
+ * at all. Both are *there is nothing here to remove*, already true and reached
+ * from two directions, and a caller told them apart would have nothing different
+ * to do — the same reading {@link unpinFill} gives an empty slot. The asymmetry
+ * with {@link fillHold}'s `'unknown-slot'` is the point: writing needs a file to
+ * write into, and removing does not.
+ */
+export function clearHold(id: PlacementId, slot: SlotName, hold: HoldName): ClearOutcome {
+  let outcome: ClearOutcome = 'unknown-placement'
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    const filled = current.fills[slot]
+    if (filled?.holds?.[hold] === undefined) {
+      outcome = 'unchanged'
+      return state
+    }
+    outcome = 'cleared'
+    const holds = { ...filled.holds }
+    // `delete`, never `= undefined`, for `clearFill`'s reason: `salvageHolds`
+    // and every renderer walk `Object.keys`, and a key holding `undefined` is a
+    // hold that is there to all of them and nowhere on the model.
+    delete holds[hold]
+    return { placements: withFill(state, id, current, slot, { ...filled, holds }) }
+  })
+  return outcome
+}
+
+/**
+ * **Hand one hold back to the default-hold pass** — drop the `pinned` bit and
+ * keep the accessory.
+ *
+ * {@link unpinFill}'s argument, one level down and with the same two halves: it
+ * is what stops {@link pinHold} being a one-way door, and it keeps a printable
+ * file where {@link clearHold} leaves a socket empty. It does not re-solve and
+ * cannot — that needs the composition index and therefore the catalog, which is
+ * the dependency `schema.ts#TemplateId` spends its docblock keeping out of the
+ * store's file closure — so the write is the store's and the repair is the
+ * caller's.
+ */
+export function unpinHold(id: PlacementId, slot: SlotName, hold: HoldName): UnpinOutcome {
+  let outcome: UnpinOutcome = 'unknown-placement'
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    const filled = current.fills[slot]
+    const existing = filled?.holds?.[hold]
+    if (filled === undefined || existing === undefined || !existing.pinned) {
+      outcome = 'unchanged'
+      return state
+    }
+    outcome = 'unpinned'
+    const holds = { ...filled.holds, [hold]: { tile: existing.tile, pinned: false } }
+    return { placements: withFill(state, id, current, slot, { ...filled, holds }) }
+  })
+  return outcome
+}
+
+/**
+ * **Fit every hold of one fill in one write** — the default-hold pass's
+ * wholesale answer.
+ *
+ * ## Why the whole map rather than a loop over {@link fillHold}
+ *
+ * `setPlacementFilters`' argument, applied to the mounts of one file. The holds
+ * of a fill are **one answer**: a pass walks a file's mounts and decides all of
+ * them together, so writing them one at a time would put a half-fitted wall on
+ * screen for a render and record several undo steps for one decision. And a loop
+ * could not express the important half at all — an accessory the new answer does
+ * *not* name has to go, and no sequence of writes says "and nothing else".
+ *
+ * ## Pinned holds are kept, which is the opposite of what `setPlacementFilters`
+ * does
+ *
+ * That action may overwrite a pin because its one caller decides which pins the
+ * new filters still admit and reports every one it drops. This one has no such
+ * caller: it is the solver's write, so contract **C-k** applies to it exactly as
+ * it applies to {@link fillHold}, and a pinned hold survives whether or not the
+ * incoming map names it. A user who wants their torch gone has {@link clearHold}.
+ *
+ * ## It never writes `holds: undefined`
+ *
+ * An empty map is a **result** — *I looked at this file's mounts and nothing goes
+ * in them* — and `undefined` is the absence of one. Writing `undefined` here
+ * would make the pass run again on every hydrate for ever, and would silently
+ * undo a user who had emptied the last socket. So `fillHolds(id, slot, {})` marks
+ * the fill solved, and that is the whole of the difference from doing nothing.
+ *
+ * `'kept-pinned'` is reported when the pins are the **only** reason nothing
+ * moved: a pass that wrote nothing because the user had already chosen
+ * everything is a different fact from a pass with nothing to do, and it is the
+ * count §3.3 has to disclose. A write that lands *and* keeps a pin reports
+ * `'filled'`, because it wrote.
+ */
+export function fillHolds(
+  id: PlacementId,
+  slot: SlotName,
+  holds: Readonly<Record<HoldName, HoldFill>>,
+): FillOutcome {
+  let outcome: FillOutcome = 'unknown-placement'
+  useWorkshopStore.setState((state) => {
+    const current = state.placements[id]
+    if (current === undefined) return state
+    const filled = current.fills[slot]
+    if (filled === undefined) {
+      outcome = 'unknown-slot'
+      return state
+    }
+    const existing = filled.holds
+    /* Walked through `filledSlots` rather than `Object.entries`, for the reason
+       `schema.ts` gives it: a branded key survives in an array and is dropped in
+       key position, so this is the one shape that hands back a `HoldName` the
+       map can be indexed with. */
+    const next: Record<HoldName, HoldFill> = {}
+    for (const name of filledSlots(existing ?? {})) {
+      const held = existing?.[name]
+      if (held?.pinned === true) next[name] = held
+    }
+    let keptPinned = false
+    for (const name of filledSlots(holds)) {
+      const held = holds[name]
+      if (held === undefined) continue
+      if (next[name] !== undefined) {
+        keptPinned = true
+        continue
+      }
+      /* Parsed entry by entry, and **only the incoming ones**. This is the one
+         hold action taking a caller-built map rather than a branded
+         {@link TileId} the type system has already vouched for, so a malformed
+         file id has to fail at the call that produced it — `placeTemplate`'s
+         reason. Parsing the *merged* fill instead would clone every kept pinned
+         hold, and a wholesale write would then replace objects it did not
+         touch: a subscriber to an untouched accessory would re-render, and
+         nothing in the type system would say why. */
+      next[HoldNameSchema.parse(name)] = HoldFillSchema.parse(held)
+    }
+    if (existing !== undefined && sameHolds(existing, next)) {
+      outcome = keptPinned ? 'kept-pinned' : 'unchanged'
+      return state
+    }
+    outcome = 'filled'
+    return { placements: withFill(state, id, current, slot, { ...filled, holds: next }) }
+  })
+  return outcome
+}
+
+/** Whether two hold maps name the same accessories, chosen by the same party. */
+function sameHolds(a: Readonly<Record<HoldName, HoldFill>>, b: Readonly<Record<HoldName, HoldFill>>): boolean {
+  const names = filledSlots(a)
+  if (names.length !== filledSlots(b).length) return false
+  return names.every((name) => {
+    const one = a[name]
+    const other = b[name]
+    return one !== undefined && other !== undefined && one.tile === other.tile && one.pinned === other.pinned
+  })
 }
 
 /* ------------------------------------------------------------------- filters */
@@ -590,6 +971,22 @@ export type FiltersOutcome = 'set' | 'unchanged' | 'unknown-placement'
  *
  * The `'unchanged'` case returns the identical state object, so pressing the chip
  * an instance is already on records no step either.
+ *
+ * ## The holds are carried across, slot by slot, on an unchanged file
+ *
+ * The rule {@link writeFill} applies to one slot, applied here to the whole map:
+ * a slot whose new fill names the **same file** keeps that file's holds, and a
+ * slot whose file changed loses them, because they were answers about the old
+ * file's mounts. Without it this action would be the one hole in that rule, and
+ * the hole would be the live path — `relock.ts#reSolveInstance` rebuilds every
+ * declared slot as `{ tile, pinned }`, so re-arming a filter would strip every
+ * accessory in the instance, including from the slots the change did not touch.
+ * Fixing it here rather than there is deliberate: the caller decides *files*, and
+ * what a file's holds survive is this module's invariant to keep.
+ *
+ * The carry-across is what keeps pressing the chip an instance is already on a
+ * genuine no-op, too — the holds-aware {@link sameInstance} would otherwise see a
+ * difference in every slot and write.
  */
 export function setPlacementFilters(
   id: PlacementId,
@@ -604,7 +1001,11 @@ export function setPlacementFilters(
        handed over a malformed tag or slot name should fail at the call that
        produced it, where the stack still names the culprit, rather than at a
        hydration months later where it reads as storage corruption. */
-    const updated: TemplateInstance = TemplateInstanceSchema.parse({ ...current, filters, fills })
+    const updated: TemplateInstance = TemplateInstanceSchema.parse({
+      ...current,
+      filters,
+      fills: withKeptHolds(current.fills, fills),
+    })
     if (sameInstance(current, updated)) {
       outcome = 'unchanged'
       return state
@@ -616,12 +1017,43 @@ export function setPlacementFilters(
 }
 
 /**
+ * A whole fills map with each unchanged file's holds carried over from the map
+ * it replaces.
+ *
+ * Same file, same mounts, same accessories — so the holds come across; a
+ * different file has different mounts and the incoming fill's own reading stands,
+ * which for every caller today is *never solved* and is what the next
+ * default-hold pass wants. A caller that does supply holds for a slot whose file
+ * it is not changing is honoured only where the current fill has none: the store
+ * will not overwrite an accessory the user can see with one a filter press
+ * carried in, and {@link fillHolds} is the action for writing them deliberately.
+ */
+function withKeptHolds(
+  current: TemplateInstance['fills'],
+  incoming: TemplateInstance['fills'],
+): TemplateInstance['fills'] {
+  const out: TemplateInstance['fills'] = {}
+  for (const slot of filledSlots(incoming)) {
+    const fill = incoming[slot]
+    if (fill === undefined) continue
+    const held = current[slot]?.tile === fill.tile ? (current[slot]?.holds ?? fill.holds) : fill.holds
+    out[slot] = held === undefined ? fill : { ...fill, holds: held }
+  }
+  return out
+}
+
+/**
  * Whether two instances carry the same filters and the same fills.
  *
  * So that a filter change that lands on the position the instance was already at
  * returns the identical state object and wakes no subscriber — the same courtesy
  * {@link fillSlot}'s `'unchanged'` extends, and it matters more here because this
  * action writes the whole map on every press.
+ *
+ * **Holds are part of "the same fill"**, and the tri-state is compared as three:
+ * a fill that was never solved and one solved to nothing are different values, so
+ * an incoming map that differs only in that has to be written. Reading them as
+ * equal would drop the write and leave a fill claiming to be unsolved for ever.
  */
 function sameInstance(a: TemplateInstance, b: TemplateInstance): boolean {
   if (a.filters.length !== b.filters.length) return false
@@ -631,7 +1063,10 @@ function sameInstance(a: TemplateInstance, b: TemplateInstance): boolean {
   return keys.every((slot) => {
     const one = a.fills[slot]
     const other = b.fills[slot]
-    return one !== undefined && other !== undefined && one.tile === other.tile && one.pinned === other.pinned
+    if (one === undefined || other === undefined) return false
+    if (one.tile !== other.tile || one.pinned !== other.pinned) return false
+    if (one.holds === undefined || other.holds === undefined) return one.holds === other.holds
+    return sameHolds(one.holds, other.holds)
   })
 }
 

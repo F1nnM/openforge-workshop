@@ -109,7 +109,7 @@ import { useCallback, useMemo, useState } from 'react'
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
 import { useAnnouncer } from '@/builder/canvas/hooks'
 import type { UndoControls } from '@/builder/canvas/useHistory'
-import type { CatalogAssets, CatalogRecord } from '@/catalog'
+import type { CatalogAssets, CatalogFile, CatalogRecord } from '@/catalog'
 import type { Resolution } from '@/materials'
 import { resolveMaterial } from '@/materials'
 import type { PlacementId, SlotName } from '@/store'
@@ -123,6 +123,7 @@ import type { SurfaceStatus } from './edits'
 import { describeSurface } from './edits'
 import type { FillAuthorities } from './fills'
 import { createPlacementFiller } from './fills'
+import { useHoldSolver } from './holds'
 import type { Room3D } from './instances'
 import { buildRoom3D, roomBlobs } from './instances'
 import { meshoptSupported } from './loadLod'
@@ -206,6 +207,23 @@ export interface BuilderRoomProps {
    */
   readonly fill: FillAuthorities
   /**
+   * The parsed catalog index, for the default-hold pass and nothing else.
+   *
+   * Not derivable from anything else this component holds, which is why it is a
+   * prop: `PlanCatalog` is a memoised lookup over the file and keeps none of it,
+   * and a `CompositionIndex` is built *from* the file rather than carrying one.
+   * `compositionIndexFor` is a `WeakMap` on this same object, so passing the
+   * screen's own parsed file means the pass shares the index the bill and the
+   * slots panel already built rather than building a second one.
+   *
+   * **Required, for {@link BuilderRoomProps.fill}'s reason and not a weaker
+   * one.** `BuilderScreen` renders this surface only with a resolved index, so
+   * there is no loading state for an optional prop to model — what an optional
+   * one would model is a forgotten wiring, silently, as a room whose walls hold
+   * no torches and whose bill then refuses the download.
+   */
+  readonly file: CatalogFile
+  /**
    * Row **C8**: the owner's right click, passed straight through to the surface.
    *
    * Nothing is done to it here and nothing can be — the dialog it opens is
@@ -233,6 +251,7 @@ export function BuilderRoom({
   tools,
   assets,
   fill,
+  file,
   history,
   onEditSlots,
   onStatus,
@@ -342,6 +361,24 @@ export function BuilderRoom({
     enabled: decodable,
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   })
+
+  /**
+   * The default-hold pass, beside the mesh store for the same reason it is a
+   * hook at all: it is work derived from the room's placements, it writes to the
+   * store rather than to this component, and it must run wherever the room runs.
+   *
+   * The files a template's slots are filled with declare composition slots of
+   * their own — a torch socket in a wall — and row 8 made an empty **required**
+   * one an incomplete bill and a refused download. {@link filler} above answers
+   * for the template's slots at the moment of the click; this answers for the
+   * mounts of the files it chose, once per fill, and `holds.ts` carries the
+   * argument for *once*.
+   *
+   * Its writes are marked silent, because a default hold is not an edit — see
+   * `@/store#writeSilently`, and `canvas/useHistory.ts` for what recording one
+   * as an edit does to undo.
+   */
+  useHoldSolver(file)
 
   const resolve = useMemo(() => memoisedResolutions(catalog), [catalog])
   const room = useMemo(
@@ -540,8 +577,9 @@ function SurfaceNotice({
 
   /*
      Row A4b's own line, re-worded by row **C5** and kept last for the same
-     reason: it is the least alarming of the five and the only one the user can
-     act on from here.
+     reason: it is among the least alarming of the six and it is the last one on
+     the list the user can act on from here — the accessory line below it names a
+     gap in the build's own measurements, which nothing in this app can close.
 
      **What changed is how often it is true.** A4b wrote it as *"the state every
      placement lands in until row C2's fill solver runs"*, and it was — the click
@@ -560,6 +598,27 @@ function SurfaceNotice({
         {unfilled === 1 ? 'One placed template has' : `${String(unfilled)} placed templates have`} no parts the
         archive could fill, so {unfilled === 1 ? 'it draws' : 'they draw'} nothing. Open{' '}
         {unfilled === 1 ? 'its slots' : 'their slots'} to choose parts, or try another size.
+      </p>
+    )
+  }
+
+  /*
+     Last, and below the unfilled line, because the ordering rule this list is
+     written to is *least alarming last* and this is the one row on it the user
+     can do nothing at all about — the mount is missing from the build's
+     measurements, not from anything on screen.
+
+     There is nothing to outline either, which is what separates it from the
+     missing-mesh plate above: an accessory with no measured mount has no
+     coordinates, so the plan cannot even say *where* the torch is missing from.
+     `PlanScene.unplaced` carries the bill's own sentence per row; this is the
+     count, and the bill is where the reason is read.
+  */
+  if (room.unplaced > 0) {
+    return (
+      <p className="of-b3d-plate" role="status">
+        {room.unplaced === 1 ? 'One accessory has' : `${String(room.unplaced)} accessories have`} no measured mount,
+        so {room.unplaced === 1 ? 'it is' : 'they are'} in the bill and draw nothing here.
       </p>
     )
   }

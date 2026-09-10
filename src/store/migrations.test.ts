@@ -13,25 +13,31 @@
  *   1. **The version gate.** Row V1 deleted the migration ladder — see
  *      `migrations.ts` for the owner decision that licensed it, and for why row
  *      A1's 5 → 6 rung would have to *fabricate* rather than convert — so the
- *      first obligation is that every shape that ever shipped is *discarded*,
- *      wholly and audibly, rather than half-read into the current shape.
- *   2. **The expiry.** The licence to discard is a fact about deployment, and it
- *      will pass silently. One guard here is the closest in-repo proxy for it.
+ *      obligation is that every shape that never reached a user is *discarded*,
+ *      wholly and audibly, rather than half-read into the current shape, and
+ *      that the one shape which **did** reach a user is climbed instead.
+ *   2. **The expiry, which has happened.** The licence to discard was a fact
+ *      about deployment and the deployment exists, so the guard here is no
+ *      longer a reminder but a mechanism: this build must read both the version
+ *      it writes and the one below it, and neither claim can be satisfied by a
+ *      readable set that follows the stamp around.
  *   3. **Garbage.** Every input below reached this list because it is something
  *      a browser can actually hand back. None may throw; all must produce a
  *      valid state.
  *   4. **Salvage detail.** What a *current-version* blob keeps and loses, which
  *      is the part of this module the ladder's removal did not touch — and which
- *      row A1 extended one level down, into a placement's `fills`.
+ *      row A1 extended one level down, into a placement's `fills`, and this row
+ *      one level further, into a fill's `holds`.
  */
 import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
 import { ANOTHER_TILE, A_TEMPLATE, A_TILE, aGeneratedBase } from './fixture'
-import { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
+import { READABLE_VERSIONS, STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
 import {
   DEFAULT_LOCK_SYSTEM,
+  HoldName,
   PlacementId,
   SlotName,
   WorkshopState as WorkshopStateSchema,
@@ -64,6 +70,9 @@ const PLACEMENT_C = PlacementId.parse('c3d4e5f6-7081-4923-ab4c-5d6e7f809123')
 const FLOOR = SlotName.parse('floor')
 const WALL = SlotName.parse('right wall')
 
+/** One hold of the wall's file — the socket an accessory goes into. */
+const TORCH = HoldName.parse('torch')
+
 /** One generated base, through `placeRecipe`. See `fixture.ts`. */
 const GENERATED_BASE = aGeneratedBase({ x: 4, z: 0, rotation: 90 })
 
@@ -75,6 +84,12 @@ const GENERATED_BASE = aGeneratedBase({ x: 4, z: 0, rotation: 90 })
  * template with a slot nothing can fill, so a "normal" scene has them, and a
  * fixture that was always complete would let the reader's handling of an absent
  * fill go untested on the main path.
+ *
+ * **All three hold states are in it**, because they are three and not two: the
+ * wall carries one hold, the floor of the second instance is *solved and empty*
+ * (`{}`), and every other fill was *never solved* (no key at all). A fixture
+ * carrying only the first would let the reader collapse the other two — which is
+ * the one mistake that survives a round trip looking like success.
  */
 const SCENE = {
   placements: {
@@ -84,7 +99,10 @@ const SCENE = {
       x: 0,
       z: 0,
       rotation: 0,
-      fills: { [FLOOR]: { tile: TILE_A, pinned: false }, [WALL]: { tile: TILE_B, pinned: true } },
+      fills: {
+        [FLOOR]: { tile: TILE_A, pinned: false },
+        [WALL]: { tile: TILE_B, pinned: true, holds: { [TORCH]: { tile: TILE_A, pinned: true } } },
+      },
       filters: ['component|door|arched', 'size|width|2', 'size|depth|2'],
     },
     [PLACEMENT_B]: {
@@ -93,7 +111,7 @@ const SCENE = {
       x: 2.5,
       z: -1.5,
       rotation: 270,
-      fills: { [FLOOR]: { tile: TILE_A, pinned: false } },
+      fills: { [FLOOR]: { tile: TILE_A, pinned: false, holds: {} } },
       /* `[]` is *any* on every axis — a real choice, and the one every instance
          placed before the field existed was in. */
       filters: [],
@@ -104,17 +122,27 @@ const SCENE = {
   lockChosen: false,
 } as const
 
-/** {@link SCENE}'s instances with the `filters` field taken back off. */
-const withoutFilters = (scene: typeof SCENE) => ({
-  ...scene,
-  placements: Object.fromEntries(
-    Object.entries(scene.placements).map(([id, instance]) => {
-      const rest: Record<string, unknown> = { ...instance }
-      delete rest.filters
-      return [id, rest]
-    }),
-  ),
-})
+/**
+ * {@link SCENE} as an older version wrote it: with `filters`, with `holds`, or
+ * with neither.
+ *
+ * One helper for both fields rather than two composed ones, because they sit at
+ * different depths — `filters` on the instance and `holds` inside each fill — and
+ * a composition would have to agree about the type of the half-stripped shape in
+ * between. It works on a JSON clone so no fixture is mutated, which is the same
+ * round trip `localStorage` performs anyway.
+ */
+function asWrittenWithout(fields: { readonly filters?: true; readonly holds?: true }): Record<string, unknown> {
+  const clone = throughJSON(SCENE) as { placements: Record<string, Record<string, unknown>> }
+  for (const instance of Object.values(clone.placements)) {
+    if (fields.filters === true) delete instance.filters
+    if (fields.holds !== true) continue
+    for (const fill of Object.values(instance.fills as Record<string, Record<string, unknown>>)) {
+      delete fill.holds
+    }
+  }
+  return clone
+}
 
 /**
  * The placement map as versions 1–4 wrote it: keyed by **file**.
@@ -214,7 +242,7 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
        once by the stamp and again by `salvageTemplate`. `migrations.ts` states
        why an additive field bumps the stamp anyway — one version number must
        name one shape — and this entry is what makes the claim testable. */
-    { ...withoutFilters(SCENE), design: undefined },
+    { ...asWrittenWithout({ filters: true, holds: true }), design: undefined },
   ],
   [
     7,
@@ -224,9 +252,37 @@ const HISTORICAL_BLOBS: readonly (readonly [version: number, label: string, blob
        what every instance here meant. So the **gate** is the only thing
        discarding it, which is the claim `migrations.ts` makes about an additive
        bump and this entry is what makes it testable. */
-    withoutFilters(SCENE),
+    asWrittenWithout({ filters: true, holds: true }),
+  ],
+  [
+    8,
+    'the shape that shipped: fills with no holds',
+    /* **The one entry in this table that is not discarded**, and the reason is
+       deployment rather than shape: version 8 is what a real user's browser
+       holds, so `readPersistedState` climbs from it. See the identity-rung tests
+       below, and `migrations.ts` for why versions 1–7 stay discarded. */
+    asWrittenWithout({ holds: true }),
   ],
 ]
+
+/**
+ * The historical shapes that are still *discarded*, which is all of them but the
+ * last.
+ *
+ * Version 8 is the exception because it is the only one a browser outside this
+ * repo can be holding: it is the shape that was served at the app's public URL,
+ * so discarding it would throw away a stranger's room. Versions 1–7 never
+ * reached anyone, which is what the owner's licence was about, so their discard
+ * is unchanged — see `migrations.ts`, including why a 5 → 6 rung would have to
+ * *fabricate* a room rather than convert one.
+ *
+ * Derived from the reader's **own** list rather than from `STORE_VERSION - 1`,
+ * which would exempt whatever version happened to be one below the stamp and so
+ * would keep agreeing with the reader no matter how wrong the reader was. This
+ * asks the module which versions it climbs and holds every other one to the
+ * discard.
+ */
+const DISCARDED_BLOBS = HISTORICAL_BLOBS.filter(([version]) => !READABLE_VERSIONS.includes(version))
 
 /** Deep clone through JSON, the way `localStorage` round-trips a payload. */
 function throughJSON(value: unknown): unknown {
@@ -245,7 +301,7 @@ describe('the version gate', () => {
     )
   })
 
-  it.each(HISTORICAL_BLOBS)('discards a version %i payload (%s) and says so', (version, _label, blob) => {
+  it.each(DISCARDED_BLOBS)('discards a version %i payload (%s) and says so', (version, _label, blob) => {
     const recovered = readPersistedState(blob, version)
 
     expect(recovered.state).toEqual(defaultWorkshopState())
@@ -257,8 +313,40 @@ describe('the version gate', () => {
     expect(recovered.dropped[0]).toContain('discarded')
   })
 
-  it.each(HISTORICAL_BLOBS)('discards a version %i payload (%s) through JSON too', (version, _label, blob) => {
+  it.each(DISCARDED_BLOBS)('discards a version %i payload (%s) through JSON too', (version, _label, blob) => {
     expect(readPersistedState(throughJSON(blob), version).state).toEqual(defaultWorkshopState())
+  })
+
+  it('climbs the one rung there is: a version 8 blob keeps its fills and has no holds', () => {
+    // Version 8 is the shape that shipped, so it is the first blob this reader
+    // may not throw away — the licence to discard ended when the app got its
+    // public URL. The rung is the identity, and that is a fact about the change
+    // rather than laziness: `holds` is additive and an absent one means *never
+    // solved*, which is exactly what every version 8 fill is.
+    const recovered = readPersistedState(asWrittenWithout({ holds: true }), STORE_VERSION - 1)
+
+    expect(recovered.dropped).toEqual([])
+    expect(recovered.state).toEqual(WorkshopStateSchema.parse(asWrittenWithout({ holds: true })))
+    const wall = recovered.state.placements[PLACEMENT_A]?.fills[WALL]
+    expect(wall).toEqual({ tile: TILE_B, pinned: true })
+    expect(wall?.holds).toBeUndefined()
+    // The rest of the scene arrives whole, which is the half a discard loses.
+    expect(Object.keys(recovered.state.placements).sort()).toEqual([PLACEMENT_A, PLACEMENT_B].sort())
+    expect(recovered.state.lock).toBe('magnetic')
+  })
+
+  it('round-trips a version 9 blob with its holds, including the empty one', () => {
+    // The three hold states have to survive as three. `{}` coming back as
+    // absent would be the failure that looks like success: a later default-hold
+    // pass would refit a socket the user had deliberately emptied.
+    const recovered = readPersistedState(throughJSON(SCENE), STORE_VERSION)
+
+    expect(recovered.dropped).toEqual([])
+    expect(recovered.state.placements[PLACEMENT_A]?.fills[WALL]?.holds).toEqual({
+      [TORCH]: { tile: TILE_A, pinned: true },
+    })
+    expect(recovered.state.placements[PLACEMENT_B]?.fills[FLOOR]?.holds).toEqual({})
+    expect(recovered.state.placements[PLACEMENT_A]?.fills[FLOOR]?.holds).toBeUndefined()
   })
 
   it('does not half-read an old scene into the new one', () => {
@@ -267,7 +355,7 @@ describe('the version gate', () => {
     // so a reader that shrugged and kept the coordinates would hand the app a
     // room of pieces made of nothing. The gate is what stops that, and
     // `salvageTemplate` is the second line if a hand edit gets past it.
-    for (const [version, , blob] of HISTORICAL_BLOBS) {
+    for (const [version, , blob] of DISCARDED_BLOBS) {
       expect(readPersistedState(blob, version).state.placements).toEqual({})
     }
     expect(salvageWorkshopState({ placements: FILE_PLACEMENTS }).state.placements).toEqual({})
@@ -349,47 +437,73 @@ describe('the version gate', () => {
 /* ------------------------------------------------------------------ the expiry */
 
 /**
- * The licence to discard, and the guard that makes its expiry arrive.
+ * The licence to discard — **which has expired** — and the guard that makes the
+ * next author notice.
  *
- * `migrations.ts` says plainly when discarding stops being allowed: **the moment
- * a build is served to a user who is not a developer.** That is a fact about
- * deployment and nothing in the process can observe it, so this guard uses the
- * closest in-repo proxy — a pre-1.0 version number — and its failure message,
- * not its assertion, is the deliverable.
+ * `migrations.ts` said plainly when discarding would stop being allowed: the
+ * moment a build is served to a user who is not a developer. That moment has
+ * passed: the app is served at its public URL, so a blob under `STORAGE_KEY` can
+ * belong to a stranger and their room is not disposable.
  *
- * **What makes it capable of failing:** it reads `package.json` off disk and
- * asserts the major version is 0. Editing `"version": "0.1.0"` to `"1.0.0"`
- * turns it red, which was checked rather than assumed. What it cannot prove is
- * the thing it stands in for: a deploy from a 0.x tree is entirely possible, and
- * this test would pass through it. It is a reminder with teeth, not a gate.
+ * The `package.json` guard that used to stand here has gone with it. It was a
+ * proxy for an event, the event has happened, and a reminder about something
+ * that already occurred is the no-op this repo cleans up rather than keeps. What
+ * replaces it is a guard with an actual mechanism, and the mechanism is that
+ * `READABLE_VERSIONS` holds **literal** numbers rather than arithmetic on
+ * {@link STORE_VERSION}:
  *
- * Row A1 is the third row to lean on this licence and by far the heaviest —
- * `STORE_VERSION` 5 → 6 discards a user's whole room, and unlike V1 and V4 there
- * is no rung a later author could retrofit that would not *invent* the room it
- * claimed to recover. The guard is deliberately not weakened for it.
+ *   - Bump the stamp to 10 and leave the list at `[8, 9]` and the *current*
+ *     version is no longer readable, so the first test below fails — along with
+ *     every test in this file that reads a payload at the current version, and
+ *     the whole of `workshopStore.test.ts`' persistence block, because the app
+ *     now discards its own writes.
+ *   - Add 10 to the list without converting anything and the second test still
+ *     holds only if 9 is still there, which is the rung.
+ *
+ * A derived `[STORE_VERSION - 1, STORE_VERSION]` would pass both of those
+ * forever, which is exactly the shape of guard that reads as protection and is
+ * none: it agrees with the reader by construction, however wrong the reader is.
+ *
+ * **Measured rather than asserted:** editing `STORE_VERSION` to 10 and touching
+ * nothing else turns 13 tests red across three files — this one first, then the
+ * current-version reads in the gate block and the persistence block of
+ * `workshopStore.test.ts`. That is what the claim in `migrations.ts` rests on.
  */
 describe('the licence to discard persisted state', () => {
-  it('is still valid, because this repo has not called itself 1.0.0', () => {
-    const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { version?: unknown; private?: unknown }
-    expect(typeof manifest.version).toBe('string')
-    const major = Number.parseInt(String(manifest.version).split('.')[0] ?? '', 10)
+  it('has expired, so this build reads the version it writes', () => {
+    // The half a bump breaks first. `READABLE_VERSIONS` does not follow
+    // `STORE_VERSION`, so moving the stamp without editing the list leaves the
+    // app unable to read its own blob, and this line is where that lands.
+    expect(
+      READABLE_VERSIONS,
+      'STORE_VERSION moved and READABLE_VERSIONS did not, so this build discards its own ' +
+        'writes. Read the "the licence has expired" section of src/store/migrations.ts: a bump ' +
+        'needs a rung, which means adding the new version to that list and converting the old one.',
+    ).toContain(STORE_VERSION)
+    expect(readPersistedState(throughJSON(SCENE), STORE_VERSION).state).not.toEqual(defaultWorkshopState())
+  })
+
+  it('has expired, so the version below the current one is still readable', () => {
+    // And the other half: the rung itself. A real user's browser holds the
+    // previous shape — the app is served at its public URL — so discarding it
+    // throws away their room.
+    const recovered = readPersistedState(asWrittenWithout({ holds: true }), STORE_VERSION - 1)
 
     expect(
-      major,
-      'package.json has left 0.x, which means this is about to ship or has shipped. ' +
-        "Discarding a user's saved room is no longer allowed: read the " +
-        '"When this licence expires" section of src/store/migrations.ts and write a ' +
-        'migration rung before bumping STORE_VERSION again.',
-    ).toBe(0)
+      recovered.state,
+      'STORE_VERSION moved without a rung for the version below it: add it to READABLE_VERSIONS ' +
+        'and convert it. See the "the licence has expired" section of src/store/migrations.ts.',
+    ).not.toEqual(defaultWorkshopState())
   })
 
   it('is recorded where the code that relies on it lives', () => {
-    // Not a spelling check on a docblock: the expiry cannot be enforced, so the
-    // sentence *is* the mechanism, and a refactor that dropped it would leave
-    // the next author with a discard and no idea it was conditional. Asserted on
-    // the source text because there is nowhere else for it to be.
+    // Not a spelling check on a docblock: what a future shape change owes a
+    // user's saved room cannot be enforced by a type, so the sentence *is* the
+    // mechanism, and a refactor that dropped it would leave the next author
+    // guessing. Asserted on the source text because there is nowhere else for it
+    // to be.
     const source = readFileSync('src/store/migrations.ts', 'utf8')
-    expect(source).toContain('When this licence expires')
+    expect(source).toContain('served at its public URL')
     expect(source).toContain('served to a user who is not a developer')
   })
 
@@ -472,6 +586,41 @@ const GARBAGE: readonly (readonly [string, unknown])[] = [
     { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { floor: { tile: TILE_A, pinned: 'yes' } } } } },
   ],
   ['an empty slot name', { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { '': { tile: TILE_A } } } } }],
+  // Holds, which are the population this row added one level further down.
+  [
+    'a string where holds belong',
+    { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { floor: { tile: TILE_A, pinned: false, holds: 'torch' } } } } },
+  ],
+  [
+    'a null hold',
+    { placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { floor: { tile: TILE_A, pinned: false, holds: { torch: null } } } } } },
+  ],
+  [
+    'a hold that holds holds',
+    {
+      placements: {
+        [PLACEMENT_A]: {
+          ...AN_INSTANCE,
+          fills: {
+            floor: { tile: TILE_A, pinned: false, holds: { torch: { tile: TILE_A, pinned: false, holds: {} } } },
+          },
+        },
+      },
+    },
+  ],
+  [
+    'a prototype payload among the holds',
+    {
+      placements: {
+        [PLACEMENT_A]: {
+          ...AN_INSTANCE,
+          fills: {
+            floor: { tile: TILE_A, pinned: false, holds: JSON.parse(`{"__proto__":{"polluted":true}}`) as unknown },
+          },
+        },
+      },
+    },
+  ],
   [
     'a prototype payload among the fills',
     {
@@ -768,6 +917,126 @@ describe('salvaging an instance’s fills', () => {
     })
     expect(Object.keys(recovered.state.placements[PLACEMENT_A]?.fills ?? {})).toHaveLength(2)
     expect(recovered.dropped).toEqual([])
+  })
+})
+
+/* ---------------------------------------------------------------------- holds */
+
+/**
+ * A hold is a fill of a fill, so its salvage is the fill's own shape check one
+ * level down — and the two things that are *not* shared are the whole content of
+ * this block: the tri-state (`undefined` is never solved, `{}` is solved) and the
+ * refusal to nest.
+ */
+describe('salvaging a fill’s holds', () => {
+  const fillWith = (holds: unknown) => ({
+    placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { [WALL]: { tile: TILE_A, pinned: false, holds } } } },
+  })
+  const holdsOf = (recovered: ReturnType<typeof salvageWorkshopState>) =>
+    recovered.state.placements[PLACEMENT_A]?.fills[WALL]?.holds
+
+  it('reads an absent holds map as never solved, silently', () => {
+    // Every version 8 fill is in this state and so is every fresh one, so it is
+    // the ordinary reading rather than a drop.
+    const recovered = salvageWorkshopState({
+      placements: { [PLACEMENT_A]: { ...AN_INSTANCE, fills: { [WALL]: { tile: TILE_A, pinned: false } } } },
+    })
+    expect(holdsOf(recovered)).toBeUndefined()
+    expect('holds' in (recovered.state.placements[PLACEMENT_A]?.fills[WALL] ?? {})).toBe(false)
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('keeps an empty holds map, because solved-and-empty is not never-solved', () => {
+    const recovered = salvageWorkshopState(fillWith({}))
+    expect(holdsOf(recovered)).toEqual({})
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('keeps a hold and its pin', () => {
+    const recovered = salvageWorkshopState(fillWith({ [TORCH]: { tile: TILE_B, pinned: true } }))
+    expect(holdsOf(recovered)).toEqual({ [TORCH]: { tile: TILE_B, pinned: true } })
+    expect(recovered.dropped).toEqual([])
+  })
+
+  it('drops a hold whose value is not a fill, and names it', () => {
+    // Per-entry, for the same reason a fill is: one unreadable accessory costs
+    // that socket and not the wall it is in.
+    const recovered = salvageWorkshopState(
+      fillWith({ [TORCH]: { tile: TILE_B, pinned: true }, brazier: 'a torch, obviously' }),
+    )
+    expect(holdsOf(recovered)).toEqual({ [TORCH]: { tile: TILE_B, pinned: true } })
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}.fills.${WALL}.holds.brazier: expected an object, found "a torch, obviously"`,
+    ])
+  })
+
+  it('drops a hold whose file is unreadable, and keeps the slot’s own fill', () => {
+    const recovered = salvageWorkshopState(fillWith({ [TORCH]: { tile: 'nonsense', pinned: false } }))
+    expect(recovered.state.placements[PLACEMENT_A]?.fills[WALL]?.tile).toBe(TILE_A)
+    expect(holdsOf(recovered)).toEqual({})
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}.fills.${WALL}.holds.${TORCH}: tile is not a file id ("nonsense")`,
+    ])
+  })
+
+  it('falls back to auto for a hold with no pinned bit, which the next pass repairs', () => {
+    const recovered = salvageWorkshopState(fillWith({ [TORCH]: { tile: TILE_B } }))
+    expect(holdsOf(recovered)).toEqual({ [TORCH]: { tile: TILE_B, pinned: false } })
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}.fills.${WALL}.holds.${TORCH}: pinned is not a boolean (undefined), read as auto`,
+    ])
+  })
+
+  it('refuses a hold that holds holds, which the shape cannot express', () => {
+    // The schema closes this by construction — `HoldFill` has no `holds` field —
+    // and a blob can still carry one, so the reader says what it found rather
+    // than stripping it in silence. Silence would hide a build that had started
+    // writing a shape this one cannot read.
+    const recovered = salvageWorkshopState(
+      fillWith({ [TORCH]: { tile: TILE_B, pinned: false, holds: { candle: { tile: TILE_A, pinned: false } } } }),
+    )
+    expect(holdsOf(recovered)).toEqual({})
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}.fills.${WALL}.holds.${TORCH}: a hold cannot carry holds of its own`,
+    ])
+  })
+
+  it('reads an unreadable holds map as never solved rather than as solved-and-empty', () => {
+    // The direction is the whole assertion, and it is `pinned`'s argument in a
+    // second place: *never solved* is repaired by the next default-hold pass,
+    // where *solved and empty* would freeze an answer nobody gave.
+    const recovered = salvageWorkshopState(fillWith(['torch']))
+    expect(holdsOf(recovered)).toBeUndefined()
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}.fills.${WALL}: holds is not an object (array), read as never solved`,
+    ])
+  })
+
+  it('refuses a prototype key among the holds', () => {
+    // A hold name is `z.string().min(1)` for the reason a slot name is, so this
+    // map's keys rule nothing out either and the check is load bearing.
+    const recovered = salvageWorkshopState(
+      fillWith(JSON.parse(`{"__proto__":{"tile":"tiles/x.stl","pinned":true}}`) as unknown),
+    )
+    expect(holdsOf(recovered)).toEqual({})
+    expect(recovered.dropped).toEqual([
+      `placements.${PLACEMENT_A}.fills.${WALL}.holds.__proto__: unsafe key`,
+    ])
+    const probe: Record<string, unknown> = {}
+    expect(probe.tile).toBeUndefined()
+  })
+
+  it('refuses an empty hold name', () => {
+    const recovered = salvageWorkshopState(fillWith({ '': { tile: TILE_B, pinned: false } }))
+    expect(holdsOf(recovered)).toEqual({})
+    expect(recovered.dropped).toEqual([`placements.${PLACEMENT_A}.fills.${WALL}.holds.: not a hold name`])
+  })
+
+  it('is idempotent, so a re-read of a salvaged scene reports nothing', () => {
+    const once = salvageWorkshopState(SCENE)
+    const twice = salvageWorkshopState(once.state)
+    expect(twice.state).toEqual(once.state)
+    expect(twice.dropped).toEqual([])
   })
 })
 

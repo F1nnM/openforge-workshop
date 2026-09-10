@@ -5,6 +5,15 @@
  * `slotPicker.ts` carries the corpus measurements and the semantics. This file is
  * the control, and three decisions in it are worth stating.
  *
+ * ## One card per item, and per **file** where only a sculpt tells them apart
+ *
+ * The grid is an item grid — an item's files are usually one print in several
+ * joineries, and `selectVariant` hands out the one the lock preference asks for.
+ * `door_lintel.1/2/3.stl` are three wood-grain sculpts of one design instead, so
+ * `slotPicker.ts#sculptsOf` expands such an item into one card per file, each
+ * carrying the part of the filename that differs as its label. Nothing else about
+ * this control changes: a card is still a press, and a press still names a file.
+ *
  * ## The grid is not virtualised, and does not need to be
  *
  * Hazard: a sprite sheet is 2,560×1,024 and decodes to roughly **10.5 MB**, so a
@@ -37,17 +46,21 @@
  * `VisuallyHidden` is `position: fixed` with pinned offsets, and a grid cell is
  * the last place to discover what that does to a clipped span.
  *
- * ## The choice is state, and it is deliberately not persisted
+ * ## The choice is state here and a **prop** where an owner holds it
  *
- * `@/store`'s docblock is explicit that everything in `WorkshopState` is
- * persisted and that ephemeral UI state belongs in a component. A slot fill is
- * held here, keyed by {@link slotChoiceKey} — the parent **file** plus the slot
- * name, which is unique within a record over all 8,702 of them. There is no
- * channel to persist it through yet: the bill of tiles is built from placements
- * and row G5 owns the selection channel, so what this picker can honestly do
- * with a pick is put the file in the library, which is what the builder's panel
- * does. Here it narrows the remaining slots and nothing else, which is the
- * capability the row is about.
+ * Two modes, and the second is not a generalisation for its own sake. The
+ * drawer's use is uncontrolled: nothing in a catalog page has anywhere to put a
+ * pick, so the selection lives here, keyed by {@link slotChoiceKey} — the parent
+ * **file** plus the slot name, unique within a record over all 8,702 of them —
+ * and narrows the remaining slots and nothing else.
+ *
+ * The builder's slot editor does have somewhere: `SlotFill.holds` is the
+ * store's key for a slot of a *file*, so the room, the bill and this grid all
+ * read one value. There it passes {@link SlotFillsProps.selection} and this
+ * component keeps no opinion of its own — a local copy that could disagree with
+ * the room is the one failure mode a controlled prop removes. The picker still
+ * writes nothing itself: `@/screens/detail/slots` must not import `@/store`, so
+ * a press is reported through `onPick` and the owner decides.
  */
 import { useMemo, useState } from 'react'
 
@@ -86,24 +99,49 @@ export interface SlotFillsProps {
    */
   readonly parent: TileId
   /**
+   * The selection to display, when the owner holds it.
+   *
+   * Present makes this a controlled component: the map shown is this one, the
+   * local copy is not written and a press moves nothing until the owner comes
+   * back with a new value. `builder/panels/slots/SlotEditor.tsx` builds it from
+   * the placed fill's `holds` — `slotAccessories.ts#fillAccessories` is the one
+   * derivation — which is what makes the grid and the room one answer rather
+   * than two.
+   *
+   * Absent leaves the drawer's own behaviour exactly as it was — a pick is held
+   * here and persisted nowhere.
+   */
+  readonly selection?: SlotSelection
+  /**
+   * Slot names to leave out of the grid list, because the owner has something
+   * truer to say about them.
+   *
+   * One caller and one reason: the builder's slot editor omits a slot the host
+   * mesh was **printed holding** — `CatalogRecord.modelledIn`, measured on the
+   * three `floor,brazier+small.2x2` floors that stand 31.6–33.2 mm tall because
+   * the brazier is sculpted on — where a grid would offer a second brazier for a
+   * floor that already has one, and the editor says *built into this piece*
+   * instead. The drawer passes none.
+   *
+   * They are still **resolved**: an omitted slot contributes its tags to its
+   * siblings' `constrain` like any other, so what is left on screen is narrowed
+   * by what the mesh already holds. Only the rendering is dropped.
+   */
+  readonly omit?: readonly string[]
+  /**
    * Told which **file** a slot now contributes, with `undefined` for "cleared".
    *
-   * The picker's report of its own state, and it is a report rather than a
-   * persistence hook. **No consumer persists a pick, and row C3 measured why
-   * rather than deferring it:** an accessory slot is a slot of a *file*, one
-   * level below a template's own slots, and `TemplateInstance.fills` is
-   * `Record<SlotName, SlotFill>` with `SlotFill` being `{ tile, pinned }` —
-   * flat, with no key for a fill of a fill. Writing one under its bare name
-   * would land it beside the template's slots, where `resolve.ts#readFills`
-   * walks `template.parts` and would not bill it, while
-   * `canvas/catalog.ts#parts` walks every key of `fills` and would draw it. So
-   * all three call sites deliberately decline, and each says so in its own copy.
+   * The picker's report of its own state rather than its write, and the
+   * distinction is the module rule: `@/screens/detail/slots` must not import
+   * `@/store`, so the surface that has somewhere to put a pick is the surface
+   * that puts it there. The builder's slot editor answers this by pinning the
+   * hold onto the placed fill, under the recipe slot that holds the host file;
+   * the drawer answers it by narrowing the remaining slots and nothing else.
    *
-   * What the callback is still for is the one fact the DOM states only inside an
-   * accessible name: **which of an item's files** a card contributes. The grid
-   * is an item grid and `selectVariant` picks the print (C1's two-step), so a
-   * caller composing a preview of a finished piece needs the `TileId` rather
-   * than the card.
+   * The `TileId` is the other half of what it carries, and it is the one fact
+   * the DOM states only inside an accessible name: **which of an item's files** a
+   * card contributes. The grid is an item grid and `selectVariant` picks the
+   * print (C1's two-step).
    */
   readonly onPick?: (slot: string, tile: TileId | undefined) => void
 }
@@ -115,18 +153,28 @@ export interface SlotFillsProps {
  * declare no config and a further 2,451 declare only a `base` slot, so the
  * common case for this component is to render nothing.
  */
-export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
+export function SlotFills({ catalog, omit, parent, onPick, selection }: SlotFillsProps) {
   const index = useMemo(() => (catalog === undefined ? undefined : compositionIndexFor(catalog)), [catalog])
   const materialOf = useMemo(() => (catalog === undefined ? null : tileMaterials(catalog)), [catalog])
-  const [selection, setSelection] = useState<SlotSelection>({})
+  const [held, setHeld] = useState<SlotSelection>({})
   const [open, setOpen] = useState<string | null>(null)
+
+  // The owner's map when there is one, and this component's own otherwise. See
+  // the module note: a controlled picker keeps no second opinion.
+  const picked = selection ?? held
 
   // Recomputed on every pick, because that is the row: `constrain` reads sibling
   // selections, so a candidate set is correct only until the next click. The
   // whole pass measures 0.09 ms mean and 2.3 ms worst over the real corpus.
+  const resolved = useMemo(
+    () => (index === undefined ? [] : slotStates(index, parent, picked)),
+    [index, parent, picked],
+  )
+  /* Filtered after the resolution and not before it: an omitted slot is still a
+     sibling, so its tags still narrow the ones on screen. See `omit`. */
   const states = useMemo(
-    () => (index === undefined ? [] : slotStates(index, parent, selection)),
-    [index, parent, selection],
+    () => (omit === undefined ? resolved : resolved.filter((state) => !omit.includes(state.name))),
+    [omit, resolved],
   )
   // `materialOf` is null exactly when `catalog` is undefined, so this narrows
   // both at once rather than leaving a fallback resolver that cannot be reached.
@@ -148,13 +196,18 @@ export function SlotFills({ catalog, parent, onPick }: SlotFillsProps) {
           onPick={(tile) => {
             // A second press on the chosen card clears it, which is what makes
             // an optional slot reachable again without a separate control.
-            const next = tile === undefined || selection[state.name] === tile ? undefined : tile
-            setSelection((prev) => {
-              const merged = { ...prev }
-              if (next === undefined) delete merged[state.name]
-              else merged[state.name] = next
-              return merged
-            })
+            const next = tile === undefined || picked[state.name] === tile ? undefined : tile
+            // Controlled: the owner's value is what renders, so writing this one
+            // would be a second source of truth that a refused write leaves
+            // showing a pick the room does not hold.
+            if (selection === undefined) {
+              setHeld((prev) => {
+                const merged = { ...prev }
+                if (next === undefined) delete merged[state.name]
+                else merged[state.name] = next
+                return merged
+              })
+            }
             onPick?.(state.name, next)
           }}
           open={shown === state.name}
@@ -275,7 +328,10 @@ function SlotFill({
           emptySlotReason(state)
         ) : (
           <>
-            {`${String(state.options.length)} ${state.options.length === 1 ? 'item fits' : 'items fit'}, over `}
+            {/* *To pick from* and not *items*, since F5: a card is an item where
+                the lock preference chooses between its files and one **print**
+                where nothing does, so the two numbers are cards and files. */}
+            {`${String(state.options.length)} to pick from, over `}
             {`${String(state.candidates)} ${state.candidates === 1 ? 'file' : 'files'}.`}
             {dead === 0
               ? ''
@@ -293,7 +349,7 @@ function SlotFill({
         <>
           <ul className="of-slotfill-grid">
             {state.options.map((option) => (
-              <li key={String(option.address)}>
+              <li key={option.variant.id}>
                 <OptionCard
                   catalog={catalog}
                   material={materialOf(option.variant.id)}
@@ -377,6 +433,12 @@ function OptionCard({
         thumb={option.variant.thumb}
       />
       <span className="of-slotfill-cardname">{option.aggregate.name}</span>
+      {/* F5: what tells this card apart from the item's other cards, when one
+          item's files are offered one per card. `undefined` on every card that
+          stands for a whole item, which is most of them. */}
+      {option.label === undefined ? null : (
+        <span className="of-slotfill-cardvariant">{option.label}</span>
+      )}
       {option.deadEnd ? <span className="of-slotfill-why">{reason}</span> : null}
       {option.rescues.length === 0 ? null : (
         <span className="of-slotfill-why" data-tone="open">
@@ -389,7 +451,13 @@ function OptionCard({
 
 /** The accessible name of a card: what it is, which file, and what it costs. */
 function cardLabel(option: SlotOption, reason: string): string {
-  const parts = [option.aggregate.name, option.variant.file]
+  // The visible label rides in the name too, and before the filename: on the
+  // three lintel sculpts it is the only thing between *Wood Door Lintel* and
+  // *Wood Door Lintel*, and a screen-reader user hears the name alone.
+  const parts =
+    option.label === undefined
+      ? [option.aggregate.name, option.variant.file]
+      : [option.aggregate.name, option.label, option.variant.file]
   if (option.deadEnd) parts.push(`unavailable — ${reason}`)
   else if (option.rescues.length > 0) parts.push(`opens the ${option.rescues.join(' and ')} slot`)
   return parts.join(' — ')

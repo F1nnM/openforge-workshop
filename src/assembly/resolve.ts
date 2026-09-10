@@ -57,11 +57,20 @@
  * grid, and the file is chosen from the item afterwards. It is the only reason
  * `@/catalog`'s aggregate layer is still named in this file.
  */
-import type { CatalogRecord, TileAggregate, VariantSelection } from '@/catalog'
-import { selectVariant } from '@/catalog'
+import type { CatalogRecord, PartSlot, TileAggregate, VariantSelection } from '@/catalog'
+import { copiesOf, isModelledIn, mountsFor, selectVariant } from '@/catalog'
 import type { CompositionIndex, SlotTags } from '@/composition'
 import { resolveSlotTags } from '@/composition'
-import type { LockSystem, SlotFill, SlotName, TemplateId, TemplateInstance } from '@/store'
+import type {
+  HoldFill,
+  HoldName,
+  LockSystem,
+  SlotFill,
+  SlotName,
+  TemplateId,
+  TemplateInstance,
+} from '@/store'
+import { filledSlots } from '@/store'
 
 import type { AssemblyIndex } from './assemblyIndex'
 import { PRINT_OPTIONS } from './assemblyIndex'
@@ -201,6 +210,100 @@ export interface AssemblyPart {
   record: CatalogRecord
   /** `true` when the user chose this file, `false` when the default solver did. */
   pinned: boolean
+  /**
+   * The accessory slot of {@link slot}'s **own file** this part fills, when it
+   * is an accessory rather than a tile.
+   *
+   * Absent for a recipe part, which is what makes `hold === undefined` the test
+   * for *is this a tile on the grid*. `slot` stays the template slot in both
+   * cases, so a hold's provenance is the pair: the wall the torch is in, and the
+   * socket it is in on that wall.
+   */
+  hold?: HoldName
+  /**
+   * Copies to print of {@link record}.
+   *
+   * **1 for a recipe part, and the copies drawn for a hold.** A slot is one
+   * place on the grid, so a template part is always a single print; an accessory
+   * slot is not — a 1×1 full pillar carries a torch socket on each of its four
+   * faces, and one `torch` hold in it is four torches, while a single `wide`
+   * doorway takes two door leaves.
+   *
+   * So it is `max(1, Σ copiesOf(mount, anchor))` over the host's measured mounts
+   * for that slot, and not their count: `catalog/mounts.ts#copiesOf` is the same
+   * answer `buildRoom3D` draws, so the bill charges for what the room shows. The
+   * `max` is for a host nobody has measured, which still bills the accessory once
+   * rather than dropping the file the user chose — see `notes.ts#hold-unplaced`.
+   */
+  quantity: number
+}
+
+/**
+ * One accessory slot of one filled slot's file, resolved.
+ *
+ * Present for **every** declared accessory slot of every resolved fill, filled
+ * or not, for {@link ResolvedSlotFill}'s reason one level down: 1,047 of the
+ * 1,244 accessory declarations in the corpus are required, so an unfilled one is
+ * a hole in the print and has to be a value a caller can render rather than an
+ * absence it infers by differencing the host's `config.parts` against the fill's
+ * `holds` map.
+ *
+ * Plus one per hold naming a slot the host does **not** declare, which is the
+ * `hold-off-slot` case: dropping it would leave a file the room draws and the
+ * bill does not list.
+ */
+export interface ResolvedHold {
+  /** The **template** slot whose file holds this accessory. */
+  readonly slot: SlotName
+  /** The accessory slot of that file — a `config.parts` name, never `base`. */
+  readonly hold: HoldName
+  /**
+   * `PartSlot.optional !== true`, resolved.
+   *
+   * Always `true` for an undeclared hold: there is no declaration to be required
+   * by, so a stray hold can never refuse a download.
+   */
+  readonly optional: boolean
+  /** The hold as persisted, or `undefined` for a declared slot with nothing in it. */
+  readonly fill: HoldFill | undefined
+  /** The record it resolved to. `undefined` for an empty slot or a retired id. */
+  readonly record: CatalogRecord | undefined
+  /**
+   * Measured mounts for this slot on the host — `mountsFor(host, hold).length`.
+   *
+   * `0` means *nowhere to put it*, and it is the ordinary reading today rather
+   * than an exceptional one: `CatalogRecord.mounts` is absent both for a host
+   * with no accessory slot and for a host nobody has measured, and the shipped
+   * artefact carries no measurement at all until `npm run mounts` has walked the
+   * archive.
+   */
+  readonly mounts: number
+  /**
+   * The host's own mesh already holds what this slot asks for —
+   * `catalog/mounts.ts#isModelledIn`.
+   *
+   * Only ever `true` for a hold somebody wrote into such a slot, because
+   * {@link accessorySlots} does not declare one: the walk's first pass never
+   * produces it and the second pass does. It is what keeps the accessory out of
+   * the bill and out of `BillOfTiles.unplaced` while still reporting it —
+   * `hold-modelled-in`, `info`, zero copies, drawn nowhere.
+   */
+  readonly modelledIn: boolean
+  /**
+   * **Copies to print** — `Σ copiesOf(mount, record.anchor)` over those mounts.
+   *
+   * Not `mounts` and not always equal to it: a `wide` doorway is one measured
+   * opening that takes **two** door leaves, so a bill counting mounts was one
+   * leaf short on all 85 of them, while the room — which asks the same
+   * `copiesOf` — drew both. `catalog/mounts.ts#copiesOf` is the single answer
+   * both read, because the two disagreeing is a download that cannot fill the
+   * doorway it came with.
+   *
+   * Equal to `mounts` for every unanchored insert, whose copies cannot be
+   * counted any other way: one per mount is what {@link ResolvedHold.mounts}
+   * already meant, and an insert nobody has measured is billed and not drawn.
+   */
+  readonly copies: number
 }
 
 /**
@@ -245,15 +348,36 @@ export interface ResolvedInstance {
   template: AssemblyTemplate | undefined
   /** Every declared slot, in the template's declared order. Empty for an unknown template. */
   slots: ResolvedSlotFill[]
-  /** The files to print, in slot order. One per resolved fill; **not** one per slot. */
+  /**
+   * Every accessory slot of every resolved fill, in the host's declared order.
+   *
+   * The `slots` field one level down — see {@link ResolvedHold}. Empty for most
+   * instances: 1,005 of the 8,702 live files (11.6%) declare an accessory slot
+   * at all, so a room of plain floors and walls resolves no holds whatever.
+   */
+  holds: ResolvedHold[]
+  /**
+   * The files to print, in slot order — each with the copies it costs.
+   *
+   * One per resolved fill *and* one per resolved hold, immediately after the
+   * slot that holds it; **not** one per slot and not one per mount. The four
+   * torches of a four-socket pillar are one part with a `quantity` of 4, because
+   * they are one file and one download.
+   */
   parts: AssemblyPart[]
   notes: Note[]
   /**
-   * Every declared non-optional slot resolved to a record.
+   * Every declared non-optional slot **and accessory slot** resolved to a
+   * record.
    *
    * `false` for an unknown template as well, because an instance whose recipe
    * this build does not hold cannot be shown to be complete. This is the
    * per-instance half of the download gate; `BillOfTiles.complete` is the other.
+   *
+   * The accessory half is not a widening of the same rule but the same rule
+   * applied to the same kind of thing: 1,047 of the 1,244 accessory declarations
+   * are required, and a pack missing the door of a doorway is a pack one file
+   * short of a printable model exactly as a pack missing the doorway is.
    */
   complete: boolean
 }
@@ -277,8 +401,8 @@ export interface ResolvedInstance {
  * It takes an aggregate and returns a selection, and it never sees a placement —
  * which is why it outlived the rule it came from. Its callers are
  * `builder/canvas/catalog.ts` (so the canvas draws the file the bill lists),
- * `builder/panels/slots/planSlots.ts` (a composition slot is a property of a
- * *file*), `screens/builder/BuilderScreen.tsx`, and row C2's fill solver, which
+ * `builder/panels/slots/slotAccessories.ts` (a composition slot is a property of
+ * a *file*), `screens/builder/BuilderScreen.tsx`, and row C2's fill solver, which
  * needs it for the same two-step every candidate grid uses: pick the item, then
  * pick the file.
  */
@@ -311,6 +435,7 @@ export function resolveInstance(
       instance,
       template: undefined,
       slots: [],
+      holds: [],
       parts: [],
       notes: [note('unknown-template', message, { placement: instance.id })],
       complete: false,
@@ -320,6 +445,7 @@ export function resolveInstance(
   const notes: Note[] = []
   const parts: AssemblyPart[] = []
   const slots: ResolvedSlotFill[] = []
+  const holds: ResolvedHold[] = []
 
   const filled = readFills(instance, template, index)
   const tagsByName = tagsOfFills(context.composition, filled)
@@ -362,12 +488,217 @@ export function resolveInstance(
     const { fill, record } = entry
     const admissible = admits(context, template, part, tagsByName, fill.tile)
     slots.push({ slot, optional, fill, record, admissible })
-    parts.push({ slot, record, pinned: fill.pinned })
+    parts.push({ slot, record, pinned: fill.pinned, quantity: 1 })
     notes.push(...slotNotes(instance, template, part, slot, record, admissible, context.lock))
+
+    // The accessories fitted into *this file*. Walked here rather than in a
+    // second pass because everything it needs is in hand: the host record
+    // carries both the declarations (`config.parts`) and the measurements
+    // (`mounts`), and neither exists for a fill this catalog cannot resolve.
+    for (const held of resolveHolds(slot, fill, record, index)) {
+      holds.push(held)
+      notes.push(...holdNotes(instance, record, held))
+      if (held.record !== undefined && !held.modelledIn) {
+        parts.push({
+          slot,
+          record: held.record,
+          pinned: held.fill?.pinned === true,
+          hold: held.hold,
+          quantity: Math.max(1, held.copies),
+        })
+      } else if (held.record === undefined && !held.optional) {
+        complete = false
+      }
+    }
   }
 
-  return { instance, template, slots, parts, notes, complete }
+  return { instance, template, slots, holds, parts, notes, complete }
 }
+
+/* --------------------------------------------------------------- the holds */
+
+/**
+ * The accessory slots of one filled slot's file, resolved.
+ *
+ * Two passes and they are not interchangeable. The first walks what the **host
+ * declares** — `config.parts`, in fixture order — so an unfilled required slot
+ * is a value rather than an absence; the second walks what the **fill holds**
+ * and emits the entries the first could not name, which is the `hold-off-slot`
+ * population.
+ *
+ * A **modelled-in** slot is dropped from the declarations too, and for the
+ * opposite reason: `base` is a slot nothing here can fill, and a modelled-in one
+ * is a slot the host has already filled. The fixture asks for a brazier the
+ * floor is holding — `CatalogRecord.modelledIn`, measured — so the piece is
+ * complete as it prints: no line in the bill, no copy in the download, and above
+ * all not an `unfilled` entry refusing one. A hold somebody wrote into it
+ * anyway still comes back through the second pass and is reported at `info`;
+ * see {@link holdNotes}.
+ *
+ * `base` is dropped from the declarations and it is not an accessory slot by any
+ * reading: 2,451 of the 3,695 live file slots are `base`, the builder's base
+ * comes from footprint congruence rather than from the texture-inheriting slot,
+ * and treating one as an accessory would put a required hole in 2,451 hosts that
+ * nothing in the app can fill. `screens/detail/slots/slotPicker.ts#pickerSlots`
+ * makes the same cut for the same reason — the constant is not shared because
+ * `@/assembly` must not import from a screen.
+ */
+function resolveHolds(
+  slot: SlotName,
+  fill: SlotFill,
+  host: CatalogRecord,
+  index: AssemblyIndex,
+): ResolvedHold[] {
+  const out: ResolvedHold[] = []
+  const declared = accessorySlots(host)
+
+  for (const part of declared) {
+    out.push(resolvedHold(slot, holdName(part.name), part.optional === true, fill, host, index))
+  }
+
+  for (const name of filledSlots(fill.holds ?? {})) {
+    if (declared.some((part) => part.name === name)) continue
+    // Required-ness comes from a declaration and there is none, so an undeclared
+    // hold is `optional` — it prints, `hold-off-slot` says it does not fit, and
+    // it never refuses a download.
+    out.push(resolvedHold(slot, name, true, fill, host, index))
+  }
+  return out
+}
+
+/** One {@link ResolvedHold}: the persisted hold, the record it names, and the mounts for it. */
+function resolvedHold(
+  slot: SlotName,
+  hold: HoldName,
+  optional: boolean,
+  fill: SlotFill,
+  host: CatalogRecord,
+  index: AssemblyIndex,
+): ResolvedHold {
+  const held = fill.holds?.[hold]
+  const record = held === undefined ? undefined : index.byId.get(held.tile)
+  const mounts = mountsFor(host, hold)
+  return {
+    slot,
+    hold,
+    optional,
+    fill: held,
+    record,
+    modelledIn: isModelledIn(host, hold),
+    mounts: mounts.length,
+    copies: mounts.reduce((total, mount) => total + copiesOf(mount, record?.anchor), 0),
+  }
+}
+
+/**
+ * Every note that is a fact about one hold.
+ *
+ * Four, and none of them is `slot-unfilled`'s: an empty required accessory slot
+ * is carried by {@link ResolvedInstance.complete} and `BillOfTiles.unfilled`
+ * alone, because `slot-unfilled`'s copy is about the 128 template parts and a
+ * roll-up that mixed the two would tell a user a *recipe* slot is empty when a
+ * torch socket is.
+ */
+function holdNotes(instance: TemplateInstance, host: CatalogRecord, held: ResolvedHold): Note[] {
+  const notes: Note[] = []
+  const subject = { placement: instance.id, slot: held.slot }
+
+  if (held.fill !== undefined && held.record === undefined) {
+    notes.push(
+      note(
+        'hold-unknown-tile',
+        `the ${held.hold} in ${host.name} names ${held.fill.tile}, which is not in this catalog build.`,
+        { ...subject, tileId: held.fill.tile },
+      ),
+    )
+  }
+  if (held.record === undefined) return notes
+
+  // Before `hold-off-slot`, because `accessorySlots` drops a modelled-in slot and
+  // an off-slot note would then say *this host has no such slot* of a slot the
+  // host declares and has already filled. The accessory is real, it prints, and
+  // it has nowhere to go on a piece that does not need it.
+  if (isModelledIn(host, held.hold)) {
+    notes.push(
+      note(
+        'hold-modelled-in',
+        `${host.name} has its ${held.hold} built in, so ${held.record.name} is not needed and is not drawn.`,
+        { ...subject, tileId: held.record.id },
+      ),
+    )
+    return notes
+  }
+  if (!hasDeclaration(host, held.hold)) {
+    notes.push(
+      note(
+        'hold-off-slot',
+        `${host.name} declares no ${held.hold} slot, so ${held.record.name} will print and will not fit.`,
+        { ...subject, tileId: held.record.id },
+      ),
+    )
+    // **And nothing else.** An undeclared slot has no mount by construction, so
+    // `hold-unplaced` would fire beside this one on every off-slot hold and add
+    // *the plan cannot draw it* to *there is nowhere on the host it goes* — the
+    // second note being a consequence of the first rather than a second fact.
+    return notes
+  }
+  if (held.mounts === 0) {
+    notes.push(
+      note(
+        'hold-unplaced',
+        `nothing has measured where a ${held.hold} attaches to ${host.name}, so ${held.record.name} ` +
+          'is in the bill and cannot be drawn.',
+        { ...subject, tileId: held.record.id },
+      ),
+    )
+    // **And nothing else**, for the reason `hold-off-slot` returns above: the
+    // two measurement gaps are one repair — run `tools/mounts/` over this pair —
+    // and a hold that hit both would report it twice.
+    return notes
+  }
+  if (held.record.anchor === undefined) {
+    notes.push(
+      note(
+        'hold-unanchored',
+        `nothing has measured where ${held.record.name} plugs in, so it is in the bill and cannot be drawn.`,
+        { ...subject, tileId: held.record.id },
+      ),
+    )
+  }
+  return notes
+}
+
+function hasDeclaration(host: CatalogRecord, hold: HoldName): boolean {
+  return accessorySlots(host).some((part) => part.name === hold)
+}
+
+/**
+ * The accessory slots a host file declares — `config.parts` without `base`.
+ *
+ * One function rather than the filter written twice, so *what counts as an
+ * accessory slot* has a single answer: {@link resolveHolds} walks it and
+ * {@link hasDeclaration} tests against it, and a host that declared a slot the
+ * note said was undeclared would be exactly the disagreement this row is
+ * closing. 3,036 live tiles (34.9%) declare a `config` at all and 2,501 of those
+ * carry exactly one slot, so the scan is over a one-element array in the
+ * overwhelming case.
+ */
+function accessorySlots(host: CatalogRecord): readonly PartSlot[] {
+  return (host.config?.parts ?? []).filter(
+    (part) => part.name !== BASE_SLOT && !isModelledIn(host, part.name),
+  )
+}
+
+/**
+ * The slot name that is a base match and not an accessory.
+ *
+ * 2,451 of the 3,695 live file slots. `screens/detail/slots/slotPicker.ts`
+ * exports the same constant and this is deliberately not that import:
+ * `@/assembly` must not reach into a screen, and a shared constant in a third
+ * module would be a module for one string. The *fact* is asserted in both
+ * places instead.
+ */
+const BASE_SLOT = 'base'
 
 /* ------------------------------------------------------------ the slot notes */
 
@@ -580,6 +911,22 @@ function admits(
  */
 function slotName(part: AssemblySlot): SlotName {
   return part.name as SlotName
+}
+
+/**
+ * A host's declared accessory-slot name, as the type that addresses `holds`.
+ *
+ * {@link slotName} for the other brand, and the same argument: `HoldName` is
+ * dropped in key position, so the cast buys nothing there and everything at
+ * `fillHold(id, slot, hold, tile)`, where it is the only thing saying which of
+ * the three strings is which. Minting it here means a consumer can take a
+ * {@link ResolvedHold.hold} straight to that action.
+ *
+ * The second loop of {@link resolveHolds} needs no cast: `filledSlots` reads the
+ * key type off the map it is given, which is why it exists.
+ */
+function holdName(name: string): HoldName {
+  return name as HoldName
 }
 
 /**

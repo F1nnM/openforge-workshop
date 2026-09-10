@@ -15,7 +15,8 @@
  * the thing tested.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import type { MockInstance } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { TileId } from '@/catalog'
 
@@ -23,6 +24,24 @@ import { FILL, PARENT, SLOT_CATALOG } from './fixture'
 import { SlotFills } from './SlotFills'
 
 const tile = (id: string): TileId => id as unknown as TileId
+
+/*
+  A duplicate React key (two cards sharing one `<li key>`) fails silently in
+  the rendered DOM — the second card just doesn't mount — and only shows up as
+  a `console.error` warning. Guarding it here is what turned "one card per
+  print" (`option.variant.id` as the key, not `option.address`) from a visual
+  regression nobody would notice into a test failure.
+*/
+let consoleError: MockInstance<(...args: unknown[]) => void>
+
+beforeEach(() => {
+  consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+})
+
+afterEach(() => {
+  expect(consoleError).not.toHaveBeenCalled()
+  consoleError.mockRestore()
+})
 
 /** `onPick` is spread rather than passed as `undefined`: `exactOptionalPropertyTypes`. */
 function mount(parent: string, onPick?: (slot: string, picked: TileId | undefined) => void) {
@@ -57,18 +76,59 @@ describe('a file with nothing to choose', () => {
   })
 })
 
+/* ------------------------------------------------------- one card per sculpt */
+
+describe('an item whose files differ only by sculpt', () => {
+  it('renders a card per print, with the label that tells them apart', () => {
+    // **F5.** Three wood-grain sculpts of one lintel: three cards, and the label
+    // is the only thing on the card that differs, so it has to be rendered and
+    // not merely computed.
+    mount(PARENT.sculptWall)
+
+    const cards = within(group('lintel'))
+      .getAllByRole('button')
+      .filter((card) => (card.textContent ?? '').startsWith('Wood Door Lintel'))
+
+    expect(cards.map((card) => card.textContent)).toEqual([
+      'Wood Door Lintel1',
+      'Wood Door Lintel2',
+      'Wood Door Lintel3',
+    ])
+    // And in the accessible name, before the filename: a screen-reader user
+    // moving through the grid hears the name alone, and three cards called
+    // *Wood Door Lintel* would be three of the same thing.
+    expect(cards[0]).toHaveAccessibleName('Wood Door Lintel — 1 — door_lintel.1.stl')
+  })
+
+  it('names the file the pressed card stands for', () => {
+    const picks: [string, TileId | undefined][] = []
+    mount(PARENT.sculptWall, (slot, picked) => {
+      picks.push([slot, picked])
+    })
+
+    fireEvent.click(within(group('lintel')).getByRole('button', { name: /Wood Door Lintel — 2/ }))
+    expect(picks).toEqual([['lintel', FILL.lintelWoodTwo]])
+  })
+})
+
 /* ------------------------------------------------------------ the greyed card */
 
 describe('dead-end greying', () => {
+  /*
+    `wallSiblings` and not `wallTowne`, and the swap is F2: the towne torch
+    empties `wallTowne`'s **base** slot, which is the room's own slot rather than
+    a sibling of the torch, so the picker no longer calls that a dead end. The
+    greyed card is the one that closes another *accessory* slot.
+  */
   it('greys the pick that closes another slot, and says what it closes', () => {
-    mount(PARENT.wallTowne)
+    mount(PARENT.wallSiblings)
 
     const towne = screen.getByRole('button', { name: /Towne Torch/ })
     expect(towne).toHaveAttribute('aria-disabled', 'true')
-    expect(towne).toHaveAccessibleName(/Leaves no base this piece can be printed on/)
+    expect(towne).toHaveAccessibleName(/Leaves the top slot with nothing to fill it/)
     // Rendered as well as announced: a sighted user needs the reason too, and a
     // tooltip would hide the row's whole point behind a hover.
-    expect(towne).toHaveTextContent('Leaves no base this piece can be printed on.')
+    expect(towne).toHaveTextContent('Leaves the top slot with nothing to fill it.')
 
     // The harmless sibling is an ordinary card.
     const stone = screen.getByRole('button', { name: /Dungeon Stone Torch/ })
@@ -76,8 +136,16 @@ describe('dead-end greying', () => {
     expect(stone).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('keeps a greyed card focusable, so its reason is reachable', () => {
+  it('greys nothing on a wall whose only closed slot is its base', () => {
     mount(PARENT.wallTowne)
+    const towne = screen.getByRole('button', { name: /Towne Torch/ })
+    expect(towne).not.toHaveAttribute('aria-disabled')
+    expect(towne).toHaveAttribute('aria-pressed', 'false')
+    expect(group('torch')).not.toHaveTextContent('would close another slot')
+  })
+
+  it('keeps a greyed card focusable, so its reason is reachable', () => {
+    mount(PARENT.wallSiblings)
     const towne = screen.getByRole('button', { name: /Towne Torch/ })
     towne.focus()
     expect(towne).toHaveFocus()
@@ -86,7 +154,7 @@ describe('dead-end greying', () => {
 
   it('declines the pick rather than preventing the press', () => {
     const picks: (string | undefined)[] = []
-    mount(PARENT.wallTowne, (_slot, picked) => {
+    mount(PARENT.wallSiblings, (_slot, picked) => {
       picks.push(picked)
     })
 
@@ -99,8 +167,8 @@ describe('dead-end greying', () => {
   })
 
   it('counts the greyed cards in the slot’s note', () => {
-    mount(PARENT.wallTowne)
-    expect(group('torch')).toHaveTextContent('2 items fit, over 3 files.')
+    mount(PARENT.wallSiblings)
+    expect(group('torch')).toHaveTextContent('2 to pick from, over 3 files.')
     expect(group('torch')).toHaveTextContent('1 of them would close another slot')
   })
 })
@@ -141,10 +209,10 @@ describe('a pick', () => {
     // narrows it. This is the capability C1 emitted 0 bytes for: the set is
     // correct only until the next click.
     mount(PARENT.archway)
-    expect(group('lintel')).toHaveTextContent('2 items fit, over 2 files.')
+    expect(group('lintel')).toHaveTextContent('2 to pick from, over 2 files.')
 
     fireEvent.click(screen.getByRole('button', { name: /Towne Torch/ }))
-    expect(group('lintel')).toHaveTextContent('1 item fits, over 1 file.')
+    expect(group('lintel')).toHaveTextContent('1 to pick from, over 1 file.')
   })
 
   it('leaves the others alone when the pick contributes nothing new', () => {
@@ -153,7 +221,7 @@ describe('a pick', () => {
     // in the live corpus and it has to look like nothing happening.
     mount(PARENT.archway)
     fireEvent.click(screen.getByRole('button', { name: /Dungeon Stone Torch/ }))
-    expect(group('lintel')).toHaveTextContent('2 items fit, over 2 files.')
+    expect(group('lintel')).toHaveTextContent('2 to pick from, over 2 files.')
   })
 
   it('offers to clear an optional slot once something is in it', () => {
@@ -170,14 +238,81 @@ describe('a pick', () => {
   })
 })
 
+/* ------------------------------------------------------ the owner's selection */
+
+/**
+ * The controlled mode row C3's builder panel needs.
+ *
+ * The drawer's own use is uncontrolled and stays that way — a pick there narrows
+ * the remaining slots and is not persisted anywhere — but the plan's accessory
+ * section holds the answer in `SlotFill.holds` and writes it to the store. So it
+ * hands the selection down, and what it hands down is what is shown: the picker
+ * must not keep a second copy that can disagree with the room.
+ */
+describe('a selection the owner holds', () => {
+  const controlled = (torch: string | undefined) => (
+    <SlotFills
+      catalog={SLOT_CATALOG}
+      parent={tile(PARENT.archway)}
+      selection={torch === undefined ? {} : { torch: tile(torch) }}
+    />
+  )
+
+  it('shows the owner’s pick, and follows it when the owner changes it', () => {
+    const { rerender } = render(controlled(FILL.torchStone))
+    expect(screen.getByRole('button', { name: /Dungeon Stone Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    rerender(controlled(FILL.torchTowne))
+    expect(screen.getByRole('button', { name: /Dungeon Stone Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+    expect(screen.getByRole('button', { name: /Towne Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
+  it('leaves a press to the owner rather than moving on its own', () => {
+    // The whole of *controlled*: the card reports the pick and waits. An owner
+    // that refuses the write leaves the grid where it was, which is the state
+    // the room is actually in.
+    const picks: [string, string | undefined][] = []
+    render(
+      <SlotFills
+        catalog={SLOT_CATALOG}
+        parent={tile(PARENT.archway)}
+        selection={{}}
+        onPick={(slot, picked) => {
+          picks.push([slot, picked])
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Dungeon Stone Torch/ }))
+
+    expect(picks).toEqual([['torch', FILL.torchStone]])
+    expect(screen.getByRole('button', { name: /Dungeon Stone Torch/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+})
+
 /* -------------------------------------------------------------- the rescue */
 
 describe('a pick that opens a slot', () => {
   it('says so on the card', () => {
-    mount(PARENT.wallLow)
-    const top = screen.getByRole('button', { name: /Dungeon Stone Secret Door Top/ })
-    expect(top).toHaveTextContent('Opens the base slot.')
-    expect(top).toHaveAccessibleName(/opens the base slot/)
+    // `wallRescue`, for the greying's reason: the corpus's own rescues open the
+    // base, which the picker neither shows nor resolves, so the case it can
+    // still report is one accessory slot opening another.
+    mount(PARENT.wallRescue)
+    const top = screen.getAllByRole('button', { name: /Dungeon Stone Secret Door Top/ })[0]
+    expect(top).toHaveTextContent('Opens the crosshead slot.')
+    expect(top).toHaveAccessibleName(/opens the crosshead slot/)
     expect(top).not.toHaveAttribute('aria-disabled')
   })
 })

@@ -32,7 +32,7 @@ import { buildAssemblyIndex, buildBillOfTiles } from '@/assembly'
 import type { BlobId, CatalogFile, CatalogRecord, TileId } from '@/catalog'
 import { CatalogFile as CatalogFileSchema, MEASURED_SPRITE_SHEET } from '@/catalog'
 import { createCompositionIndex } from '@/composition'
-import type { PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
+import type { HoldName, PlacementId, SlotName, TemplateId, TemplateInstance } from '@/store'
 
 import { ATTRIBUTION_COLUMNS, attributionCsv, licenceText } from './attribution'
 import { ZIP32_LIMIT, framingLength, needsZip64, predictZipLength, utf8Length } from './clientZip'
@@ -67,6 +67,12 @@ interface RawRow {
   id: string
   blob: string
   bytes: number
+  /** The accessory slots this file declares, for the hold case below. */
+  config?: CatalogRecord['config']
+  /** Where they attach, measured — the mounts the bill counts copies over. */
+  mounts?: CatalogRecord['mounts']
+  /** How an insert plugs in, measured. A `wide` doorway's copies depend on it. */
+  anchor?: CatalogRecord['anchor']
 }
 
 /**
@@ -116,6 +122,9 @@ function catalogOf(rows: readonly RawRow[]): CatalogFile {
         layer: 'integral',
         tags: [0],
         foot: { shape: 'wall', length: 1 },
+        ...(row.config === undefined ? {} : { config: row.config }),
+        ...(row.mounts === undefined ? {} : { mounts: row.mounts }),
+        ...(row.anchor === undefined ? {} : { anchor: row.anchor }),
       }
     }),
   })
@@ -410,6 +419,117 @@ describe('md5 dedupe', () => {
     ])
     // One file's bytes, not two.
     expect(plan.download.bytes).toBe(5_000)
+  })
+
+  /**
+   * An accessory is a file like any other, and the plan needs no new code for it.
+   *
+   * The bill counts a hold **once per copy drawn** — a wall carrying two torch
+   * sockets prints two torches — and a plan is built from `bill.lines`, so
+   * the count arrives here as an ordinary `quantity` and the file is fetched
+   * once. This test exists because nothing in `src/download` was changed for
+   * holds, and a claim like that is worth an assertion rather than a sentence.
+   */
+  it('carries a hold into the plan, once per measured mount and one download', () => {
+    const socketAt = (x: number) => ({
+      slot: 'torch',
+      kind: 'socket' as const,
+      face: '-y' as const,
+      normal: [0, -1, 0] as const,
+      at: [x, -6.35, 38.1] as const,
+      axis: [0, 0.4226, 0.9063] as const,
+      section: [5.5, 3] as const,
+      depth: 14,
+    })
+    const catalog = catalogOf([
+      {
+        id: 'tiles/x/wall+torch.stl',
+        blob: md5(41),
+        bytes: 6_000,
+        config: { parts: [{ name: 'torch', tags: { require: [{ tag: 'part|torch' }] } }] },
+        // The measured pair on a 4-unit s_system wall, at x = ±25.2.
+        mounts: [socketAt(-25.2), socketAt(25.2)],
+      },
+      { id: 'tiles/x/torch.stl', blob: md5(42), bytes: 1_000 },
+    ])
+    const host = place('tiles/x/wall+torch.stl', 1)
+    const holding: TemplateInstance = {
+      ...host,
+      fills: {
+        [FIXTURE_SLOT]: {
+          tile: 'tiles/x/wall+torch.stl' as TileId,
+          pinned: false,
+          holds: { ['torch' as HoldName]: { tile: 'tiles/x/torch.stl' as TileId, pinned: false } },
+        },
+      },
+    }
+    const bill = buildBillOfTiles([holding], buildAssemblyIndex(catalog), contextFor(catalog))
+    const plan = buildArchivePlan(bill, { assets: ASSETS, generatedAt: GENERATED_AT })
+
+    const torch = plan.files.find((file) => file.tileIds.includes('tiles/x/torch.stl' as TileId))
+    expect(torch?.quantity).toBe(2)
+    expect(plan.files).toHaveLength(2)
+    // Two torches to print, one torch to fetch.
+    expect(plan.download.bytes).toBe(7_000)
+  })
+
+  /**
+   * The other way a hold reaches two prints, and the one a mount count misses.
+   *
+   * A `wide` doorway is a **single** measured opening authored for two 24.6 mm
+   * leaves, so the plan has to carry two prints of one file off one mount —
+   * `catalog/mounts.ts#copiesOf` is what says so, and it is the same function
+   * `buildRoom3D` draws the pair by, which is what keeps the pack able to fill
+   * the room it came from.
+   */
+  it('carries both leaves of a wide doorway into the plan, on one mount', () => {
+    const catalog = catalogOf([
+      {
+        id: 'tiles/x/wall+door.stl',
+        blob: md5(43),
+        bytes: 6_000,
+        config: { parts: [{ name: 'door', tags: { require: [{ tag: 'part|door' }] } }] },
+        mounts: [
+          {
+            slot: 'door',
+            kind: 'opening' as const,
+            face: '-y' as const,
+            normal: [0, -1, 0] as const,
+            at: [0, -6.35, 24] as const,
+            width: 47.5,
+            sill: 4.5,
+            head: 44,
+            openTop: true,
+            leaves: 2 as const,
+          },
+        ],
+      },
+      {
+        id: 'tiles/x/door.stl',
+        blob: md5(44),
+        bytes: 1_500,
+        // 24.6 mm of leaf in a 47.5 mm opening: half of a pair.
+        anchor: { kind: 'leaf' as const, at: [0, 0, 0] as const, axis: [0, 1, 0] as const, size: [24.6, 3.9, 35.5] as const },
+      },
+    ])
+    const host = place('tiles/x/wall+door.stl', 1)
+    const holding: TemplateInstance = {
+      ...host,
+      fills: {
+        [FIXTURE_SLOT]: {
+          tile: 'tiles/x/wall+door.stl' as TileId,
+          pinned: false,
+          holds: { ['door' as HoldName]: { tile: 'tiles/x/door.stl' as TileId, pinned: false } },
+        },
+      },
+    }
+    const bill = buildBillOfTiles([holding], buildAssemblyIndex(catalog), contextFor(catalog))
+    const plan = buildArchivePlan(bill, { assets: ASSETS, generatedAt: GENERATED_AT })
+
+    const leaf = plan.files.find((file) => file.tileIds.includes('tiles/x/door.stl' as TileId))
+    expect(leaf?.quantity).toBe(2)
+    expect(plan.files).toHaveLength(2)
+    expect(plan.download.bytes).toBe(7_500)
   })
 })
 

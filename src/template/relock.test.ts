@@ -244,11 +244,15 @@ describe('the pinned bit', () => {
     const first = reSolveScene(scene(), index, context)
     const again = reSolveScene(scene(), index, context)
 
-    expect(first.outcomes).toEqual({ filled: 3, unchanged: 0, 'kept-pinned': 0, 'unknown-placement': 0 })
+    // `'unknown-slot'` is in the tally and is always 0 here: it belongs to the
+    // store's hold actions, which need a filled slot to fit an accessory into,
+    // and this driver writes the slots themselves.
+    const none = { 'kept-pinned': 0, 'unknown-placement': 0, 'unknown-slot': 0 }
+    expect(first.outcomes).toEqual({ filled: 3, unchanged: 0, ...none })
     // A re-solve that produces the same files is the common case and is not
     // news. Collapsing it into `kept-pinned` is what would make a lock change
     // look like it had honoured forty pins when it had honoured none.
-    expect(again.outcomes).toEqual({ filled: 0, unchanged: 3, 'kept-pinned': 0, 'unknown-placement': 0 })
+    expect(again.outcomes).toEqual({ filled: 0, unchanged: 3, ...none })
   })
 
   it('costs no solver work for a pinned slot but still writes through the store', () => {

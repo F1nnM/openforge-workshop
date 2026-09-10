@@ -36,6 +36,8 @@
  */
 export {
   DEFAULT_LOCK_SYSTEM,
+  HoldFill,
+  HoldName,
   LockSystem,
   PlacementId,
   Rotation,
@@ -50,7 +52,7 @@ export {
 } from './schema'
 
 export type { RecoveredState } from './migrations'
-export { STORE_VERSION, readPersistedState, salvageWorkshopState } from './migrations'
+export { STORE_VERSION, UNSAFE_KEYS, readPersistedState, salvageWorkshopState } from './migrations'
 
 export { STORAGE_KEY, clearPersistedWorkshopState, requestPersistentStorage } from './storage'
 
@@ -63,11 +65,16 @@ export type {
 } from './workshopStore'
 export {
   clearFill,
+  clearHold,
   clearPlacements,
+  fillHold,
+  fillHolds,
   fillSlot,
+  isSilentWrite,
   moveGeneratedPlacement,
   movePlacement,
   pinFill,
+  pinHold,
   placeGeneratedBase,
   placeTemplate,
   removeGeneratedPlacement,
@@ -87,6 +94,7 @@ export {
   setPlacementFilters,
   setRoomDesign,
   unpinFill,
+  unpinHold,
   useGeneratedPlacements,
   useLockChosen,
   useLockSystem,
@@ -95,6 +103,7 @@ export {
   usePlacements,
   useRoomDesign,
   useWorkshopStore,
+  writeSilently,
 } from './workshopStore'
 
 export type { GeneratedMeshState } from './meshes'

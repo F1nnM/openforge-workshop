@@ -76,7 +76,7 @@ import { Suspense, lazy } from 'react'
 
 import type { PlanCatalog, PlanScene, PlanTools } from '@/builder/canvas'
 import type { UndoControls } from '@/builder/canvas/useHistory'
-import type { CatalogAssets } from '@/catalog'
+import type { CatalogAssets, CatalogFile } from '@/catalog'
 import type { PlacementId, SlotName } from '@/store'
 
 import type { SurfaceStatus } from './edits'
@@ -118,6 +118,16 @@ export interface Builder3DPanelProps {
    */
   readonly fill: FillAuthorities
   /**
+   * The parsed catalog index, for the room's default-hold pass.
+   *
+   * A **type-only** import, `FillAuthorities`' reason exactly: the value is the
+   * screen's own parsed file and nothing about this prop puts a solver or an
+   * index on this side of the lazy line. Required for that prop's reason too —
+   * the screen renders this only with a resolved index, and a forgotten wiring
+   * should be a compile error rather than a room of empty torch sockets.
+   */
+  readonly file: CatalogFile
+  /**
    * Row **C8**: open the slot editor on one placed instance, with the slot the
    * pointer was over pre-selected.
    *
@@ -154,6 +164,7 @@ export function Builder3DPanel({
   tools,
   assets,
   fill,
+  file,
   history,
   onEditSlots,
   onStatus,
@@ -169,6 +180,7 @@ export function Builder3DPanel({
           assets={assets}
           fill={fill}
           history={history}
+          file={file}
           {...(onEditSlots === undefined ? {} : { onEditSlots })}
           {...(onStatus === undefined ? {} : { onStatus })}
           {...(fetchImpl === undefined ? {} : { fetchImpl })}

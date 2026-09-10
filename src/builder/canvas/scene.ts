@@ -26,8 +26,8 @@
  * outlines, renamed from `parts` precisely so that every reader of the old field
  * is a compile error rather than an array of the wrong things.
  *
- * Four failure modes are first-class outputs rather than exceptions, because all
- * four are reachable from a *valid* persisted scene:
+ * Five failure modes are first-class outputs rather than exceptions, because all
+ * five are reachable from a *valid* persisted scene:
  *
  *   - **`unknown`** — a fill names a file this catalog build does not hold. A
  *     scene saved last month or a share link can name one: a file leaves the
@@ -47,6 +47,11 @@
  *     and it must not be a `PlanPiece` with an empty `parts` array and a
  *     degenerate box. It is reported so the surface can draw a marker over the
  *     cell and the panel can offer a Remove.
+ *   - **`unplaced`** — an **accessory** with nowhere to go: the host declares no
+ *     such slot, or nobody has measured where one attaches to it. Unlike the
+ *     three above it is not about a tile of the room at all, and unlike them the
+ *     thing it names is still printed — `src/assembly/resolve.ts` bills it and
+ *     the zip contains it. See {@link PlanUnplaced}.
  *   - **`conflicts`** — see `overlap.ts`.
  *
  * ## Paint order retires with the single-band piece
@@ -94,12 +99,21 @@
  *     single id can name a piece in either list without ambiguity. That is what
  *     lets {@link pieceAt} and `move.ts` take the union.
  */
-import type { CatalogRecord, TileId } from '@/catalog'
-import { DEFAULT_ROTATION_STEP_DEG } from '@/catalog'
+import type { CatalogRecord, Mount, TileId } from '@/catalog'
+import { DEFAULT_ROTATION_STEP_DEG, isModelledIn, mountsFor } from '@/catalog'
 import type { GeneratedPiece } from '@/generator/placement/geometry'
 import { generatedPiece } from '@/generator/placement/geometry'
 import { GENERATED_SHAPES } from '@/generator/placement/scene'
-import type { PlacementId, SlotFill, SlotName, TemplateId, TemplateInstance, WorkshopState } from '@/store'
+import type {
+  HoldFill,
+  HoldName,
+  PlacementId,
+  SlotFill,
+  SlotName,
+  TemplateId,
+  TemplateInstance,
+  WorkshopState,
+} from '@/store'
 
 import type { PlanCatalog, PlanStyle, ResolvedSlotPart } from './catalog'
 import type {
@@ -181,6 +195,91 @@ export interface PlanPiecePart {
   readonly label: string
 }
 
+/**
+ * One accessory, fitted into one measured mount of one part.
+ *
+ * ## One per **(hold, mount)**, and the bill is why
+ *
+ * A hold is a single entry in the store — *there is a torch in this wall* — and
+ * the host may present several places to put one: a 4-unit s_system wall carries
+ * two torch sockets and a full pillar four. `assembly/bill.ts` prices that hold
+ * at **the copies drawn**, because that is how many the user has to print. So
+ * the room draws one accessory per mount too, and the two agree by construction
+ * rather than by a comment: a projection that produced one accessory per *hold*
+ * would show one torch on a pillar the bill charges four for.
+ *
+ * A `PlanAccessory` is still one per *(hold, mount)* rather than per copy: the
+ * two half-leaves of a wide doorway are one measured opening, and `copiesOf` —
+ * which both the bill and `buildRoom3D` read — is what turns that one entry into
+ * the two instances and the quantity of 2.
+ *
+ * {@link index} is the position in `mountsFor(host.record, hold)` — the host's
+ * own measurement order, which `catalog/mounts.ts` keeps stable so that *"the
+ * first one"* means the same thing on every render — and it is what lets a
+ * renderer key an instance without hashing a float triple.
+ *
+ * ## The host is a **part**, not a piece
+ *
+ * Everything a {@link Mount} carries is in the host mesh's own frame, so placing
+ * one needs that part's box, angle and elevation. A piece has five parts with
+ * five different answers; naming the part is the only way to say which. It is
+ * the identical object from {@link PlanPiece.parts}, so a renderer that has
+ * already built a transform per part looks it up by reference.
+ */
+export interface PlanAccessory {
+  /** The host's slot in the template — `left wall`, not the accessory slot. */
+  readonly slot: SlotName
+  /** The host file's own composition slot this fits into — `torch`, `door`. */
+  readonly hold: HoldName
+  /** The accessory as the store holds it: the file, and whether the user chose it. */
+  readonly fill: HoldFill
+  /** The insert's record. `record.blob` is the mesh to draw. */
+  readonly record: CatalogRecord
+  /** The drawn part this hangs off. One of {@link PlanPiece.parts}, by reference. */
+  readonly host: PlanPiecePart
+  /** Where on the host it attaches, measured off the host mesh. */
+  readonly mount: Mount
+  /**
+   * Its position in the host's mounts for this hold: 0, 1, … in measurement order.
+   *
+   * **Not a key on its own.** It counts within one *(slot, hold)* pair, so a
+   * wall with a `torch` and a `door` has two accessories both at `index` 0, and
+   * an instance with two walls has four. A renderer keying its instances needs
+   * the triple `(slot, hold, index)` — unique within a piece, and stable across
+   * a re-projection because all three come off the store and the host's own
+   * measurement order rather than off the list position.
+   */
+  readonly index: number
+}
+
+/**
+ * An accessory that is real and has nowhere to go — and why.
+ *
+ * The module note's fifth failure mode, and a **separate list from
+ * {@link PlanOmission}**
+ * because it is about a different thing: an omission names a slot of a template
+ * and offers a Remove for the placement, where this names a hold *inside* a slot
+ * that is drawing perfectly well. Folding the two would put a row saying *"this
+ * wall cannot be drawn"* beside a wall the user can see.
+ *
+ * It is where the room and the bill deliberately **disagree about what happens**
+ * and agree about the facts: `assembly/resolve.ts` puts these in the zip — the
+ * user can still print the torch — and the plan cannot draw them, so they are
+ * listed instead of dropped. `reason` is the bill's own sentence for the same
+ * fault, so a user reading the panel and the bill is told one thing twice rather
+ * than two things once.
+ */
+export interface PlanUnplaced {
+  readonly id: PlacementId
+  /** The host's slot in the template. */
+  readonly slot: SlotName
+  /** The accessory slot it was fitted into. */
+  readonly hold: HoldName
+  /** The file the accessory names. Present always — a missing file is `unknown`. */
+  readonly tile: TileId
+  readonly reason: string
+}
+
 /** One drawable placement: a template instance and its filled slots. */
 export interface PlanPiece {
   /**
@@ -211,6 +310,18 @@ export interface PlanPiece {
    * this; per-part collision reads `part.polygons`.
    */
   readonly polygons: readonly PlanPart[]
+  /**
+   * Every accessory of every part, one per measured mount. **Empty, never absent.**
+   *
+   * Data for the 3D room and nothing else: an insert hangs off a host's face and
+   * occupies no square, so it contributes no polygon, does not widen {@link box}
+   * and can neither cause nor suffer a {@link conflict}. Two torches in a wall
+   * are the same footprint as the wall.
+   *
+   * `[]` rather than optional so a renderer maps it without a guard, which is
+   * {@link parts}' rule applied to the field beside it.
+   */
+  readonly accessories: readonly PlanAccessory[]
   /** The axis-aligned box over every part, which is what the instance occupies. */
   readonly box: PlanBox
   readonly conflict: boolean
@@ -354,6 +465,14 @@ export interface PlanScene {
   readonly undrawable: readonly PlanOmission[]
   /** One per instance with no filled slots at all. See the module note. */
   readonly unfilled: readonly PlanOmission[]
+  /**
+   * One per accessory the room cannot place: no measured mount, or no such slot.
+   *
+   * Its own list rather than a fourth {@link PlanOmission} — see
+   * {@link PlanUnplaced}. The accessory is still in the bill and still in the
+   * zip; what is missing is somewhere to draw it.
+   */
+  readonly unplaced: readonly PlanUnplaced[]
   /** The bounding box of everything drawn, generated bases included, or `null`. */
   readonly bounds: PlanBox | null
 }
@@ -490,21 +609,168 @@ function drawnShape(shape: PlanShape, layout: SlotLayout): PlanShape {
 }
 
 /**
+ * The one declared slot that is a base match and not an accessory.
+ *
+ * 2,451 of the 3,695 live file slots. `assembly/resolve.ts#accessorySlots` makes
+ * the same cut for the same reason — the builder's base comes from footprint
+ * congruence, not from the texture-inheriting slot — and the constant is
+ * restated rather than imported because `builder/canvas` must not depend on
+ * `@/assembly`. The *fact* is asserted in both places instead: `plan.test.ts`
+ * pins a `base` hold to the same sentence the bill gives it.
+ */
+const BASE_SLOT = 'base'
+
+/**
+ * Whether the host file declares this **accessory** slot.
+ *
+ * `base` is excluded, so a hold named `base` is off-slot here exactly as it is
+ * in the bill. Without the cut the two surfaces would word one fault
+ * differently: the bill would say *"declares no base slot"* and the room, having
+ * found the declaration and no mount under it, would say *"nothing has measured
+ * where a base attaches"* — of a slot that is not an attachment point at all.
+ */
+function declaresHold(host: CatalogRecord, hold: HoldName): boolean {
+  return (host.config?.parts ?? []).some((part) => part.name !== BASE_SLOT && part.name === hold)
+}
+
+/**
+ * The accessories of one drawn part, and the four ways a hold does not become one.
+ *
+ * Five answers per hold, in the order `assembly/resolve.ts#holdNotes` decides
+ * them, so the panel and the bill name one fault the same way and never both:
+ *
+ *   1. **The file is gone.** An `unknown` omission, exactly as for a stranded
+ *      slot fill — with the hold named, because *"the left wall is retired"* and
+ *      *"the torch in the left wall is retired"* are different repairs.
+ *   2. **The host has it built in.** `hold-modelled-in`: the mesh already
+ *      carries what the slot asks for — a floor whose brazier is sculpted on —
+ *      so the accessory is not needed, not drawn, and (alone among these) not
+ *      in the bill either. Before 3, because a modelled-in slot is one
+ *      {@link isModelledIn} can answer without asking whether the host declares
+ *      it: `assembly/resolve.ts#accessorySlots` drops a modelled-in slot from
+ *      the declarations it hands the bill, so an off-slot check run first would
+ *      call a slot the host declares and has already filled *undeclared*.
+ *   3. **The host declares no such slot.** `hold-off-slot`: it prints and it
+ *      will not fit. Nothing about mounts is added, because an undeclared slot
+ *      has none by construction and the second sentence would be a consequence
+ *      of the first rather than a second fact.
+ *   4. **Nobody has measured where it attaches.** `hold-unplaced`. The host may
+ *      well have the socket; this build has no coordinates for it.
+ *   5. **Nobody has measured how it plugs in.** `hold-unanchored`: the *insert*
+ *      carries no {@link CatalogRecord.anchor}, so there is no point on its own
+ *      mesh to seat on the host's mount. The mirror image of 4, and it gets a
+ *      row for the same reason: `three/instances.ts#addAccessory` skips an
+ *      anchorless insert and `roomBlobs` does not even fetch it, so without this
+ *      the file would be billed, drawn nowhere, and reported by nothing.
+ *
+ * Everything else is one accessory per mount — see {@link PlanAccessory}.
+ */
+function partAccessories(
+  id: PlacementId,
+  instance: TemplateInstance,
+  part: PlanPiecePart,
+  catalog: PlanCatalog,
+): {
+  readonly accessories: readonly PlanAccessory[]
+  readonly omissions: readonly PlanOmissionOf[]
+  readonly unplaced: readonly PlanUnplaced[]
+} {
+  const accessories: PlanAccessory[] = []
+  const omissions: PlanOmissionOf[] = []
+  const unplaced: PlanUnplaced[] = []
+
+  for (const held of catalog.holds(instance, part.slot)) {
+    const record = held.record
+    if (record === undefined) {
+      omissions.push({
+        list: 'unknown',
+        omission: {
+          id,
+          template: instance.template,
+          slot: part.slot,
+          tile: held.fill.tile,
+          reason:
+            `The ${held.hold} in ${part.record.name} names ${held.fill.tile}, ` +
+            'which is not in this catalog build; it may have been retired.',
+        },
+      })
+      continue
+    }
+    const address = { id, slot: part.slot, hold: held.hold, tile: held.fill.tile }
+    // Before `hold-off-slot`, because `accessorySlots` drops a modelled-in slot
+    // from the host's own declarations: an off-slot check run first would call
+    // a slot the host declares and has already filled *undeclared*, of a slot
+    // that is real and has somewhere to go — the piece was printed holding it.
+    // `resolve.ts#holdNotes` decides it in this order for the same reason, and
+    // this is the same sentence read off the room.
+    if (isModelledIn(part.record, held.hold)) {
+      unplaced.push({
+        ...address,
+        reason: `${part.record.name} has its ${held.hold} built in, so ${record.name} is not needed and is not drawn.`,
+      })
+      continue
+    }
+    if (!declaresHold(part.record, held.hold)) {
+      unplaced.push({
+        ...address,
+        reason: `${part.record.name} declares no ${held.hold} slot, so ${record.name} will print and will not fit.`,
+      })
+      continue
+    }
+    const mounts = mountsFor(part.record, held.hold)
+    if (mounts.length === 0) {
+      unplaced.push({
+        ...address,
+        reason:
+          `Nothing has measured where a ${held.hold} attaches to ${part.record.name}, ` +
+          `so ${record.name} is in the bill and cannot be drawn.`,
+      })
+      continue
+    }
+    // The insert's own half of the measurement, and the last thing checked
+    // because it is a fact about the accessory rather than about the host: one
+    // row for the file, however many mounts it would otherwise have taken.
+    if (record.anchor === undefined) {
+      unplaced.push({
+        ...address,
+        reason: `Nothing has measured where ${record.name} plugs in, so it is in the bill and cannot be drawn.`,
+      })
+      continue
+    }
+    for (const [index, mount] of mounts.entries()) {
+      accessories.push({ slot: part.slot, hold: held.hold, fill: held.fill, record, host: part, mount, index })
+    }
+  }
+
+  return { accessories, omissions, unplaced }
+}
+
+/**
  * Resolve one instance into a piece, or say why it is not one.
  *
  * Returns the piece **and** its omissions, because the two are one walk over the
  * fill map: a five-slot template with one retired file and one `none` footprint
  * is a three-part piece *and* two omissions, and computing them separately would
  * walk `catalog.parts` twice and could disagree.
+ *
+ * The accessories are a **second pass over the parts that drew**, and that is
+ * the whole of *"a hold under a part that is not drawn produces nothing"*: a
+ * stranded or unplaceable slot never becomes a part, so its holds are never
+ * looked at and the part's own omission is the one row the user gets.
  */
 function resolveInstance(
   id: PlacementId,
   instance: TemplateInstance,
   catalog: PlanCatalog,
   style: (record: CatalogRecord) => PlanStyle,
-): { readonly piece: PlanPiece | null; readonly omissions: readonly PlanOmissionOf[] } {
+): {
+  readonly piece: PlanPiece | null
+  readonly omissions: readonly PlanOmissionOf[]
+  readonly unplaced: readonly PlanUnplaced[]
+} {
   const slots = catalog.parts(instance)
   const omissions: PlanOmissionOf[] = []
+  const unplaced: PlanUnplaced[] = []
   const parts: PlanPiecePart[] = []
   const origin: PlanPoint = [instance.x, instance.z]
 
@@ -558,6 +824,16 @@ function resolveInstance(
     parts.push(placePart(slot, drawn, slotGeometry(drawn, slot.layout, origin, instance.rotation), style))
   }
 
+  // The second pass. It runs over `parts` and not over `slots`, which is what
+  // makes a hold under an undrawn host silent — see this function's note.
+  const accessories: PlanAccessory[] = []
+  for (const part of parts) {
+    const fitted = partAccessories(id, instance, part, catalog)
+    accessories.push(...fitted.accessories)
+    omissions.push(...fitted.omissions)
+    unplaced.push(...fitted.unplaced)
+  }
+
   const box = unionBox(parts.map((part) => part.box))
   if (box === undefined) {
     // No part drew. When the fill map was empty this is the `unfilled` state and
@@ -577,7 +853,7 @@ function resolveInstance(
         },
       })
     }
-    return { piece: null, omissions }
+    return { piece: null, omissions, unplaced }
   }
 
   return {
@@ -587,11 +863,13 @@ function resolveInstance(
       placement: instance,
       parts,
       polygons: parts.flatMap((part) => part.polygons),
+      accessories,
       box,
       conflict: false,
       label: describeInstance(instance, parts, box),
     },
     omissions,
+    unplaced,
   }
 }
 
@@ -623,10 +901,12 @@ export function buildPlanScene(
   const unknown: PlanOmission[] = []
   const undrawable: PlanOmission[] = []
   const unfilled: PlanOmission[] = []
+  const unplaced: PlanUnplaced[] = []
 
   for (const [key, instance] of Object.entries(placements)) {
-    const { piece, omissions } = resolveInstance(key as PlacementId, instance, catalog, style)
+    const { piece, omissions, unplaced: fitted } = resolveInstance(key as PlacementId, instance, catalog, style)
     if (piece !== null) drawable.push(piece)
+    unplaced.push(...fitted)
     for (const entry of omissions) {
       if (entry.list === 'unknown') unknown.push(entry.omission)
       else if (entry.list === 'undrawable') undrawable.push(entry.omission)
@@ -668,6 +948,7 @@ export function buildPlanScene(
     unknown,
     undrawable,
     unfilled,
+    unplaced,
     bounds: unionBox([...pieces, ...generatedPieces].map((piece) => piece.box)) ?? null,
   }
 }
@@ -787,10 +1068,18 @@ export function reanchorPiece(piece: ScenePiece, anchor: PlanPoint): ScenePiece 
   })
   // Non-empty by `PlanPiece.parts`'s own invariant, so the union is always a box.
   const box = unionBox(parts.map((part) => part.box)) ?? piece.box
+  // The accessories are re-pointed and not merely carried: `PlanAccessory.host`
+  // is one of `parts` **by reference** and every part here is a new object, so a
+  // spread would hand the move preview torches still hanging at the old origin.
+  // By slot, because a slot names at most one part of an instance; the fallback
+  // is unreachable — an accessory's slot *is* one of these parts — and is a total
+  // answer where a non-null assertion would be a promise.
+  const hosts = new Map<SlotName, PlanPiecePart>(parts.map((part) => [part.slot, part]))
   return {
     ...piece,
     parts,
     polygons: parts.flatMap((part) => part.polygons),
+    accessories: piece.accessories.map((one) => ({ ...one, host: hosts.get(one.slot) ?? one.host })),
     box,
     label: describeInstance(piece.placement, parts, box),
   }

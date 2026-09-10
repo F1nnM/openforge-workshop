@@ -253,6 +253,54 @@ RANKED_PRINT_MODIFIERS = ("topless", "unsupported")
 # `footprint_key`.
 PARAMETRIC_KEYS = ("arc:*", "diag:*", "wall:*")
 
+# The one slot name that is joinery rather than an accessory. 2,451 of the 3,695
+# live slots are `base`, and they say "print a base under this topper" -- a
+# placement fact the assembly resolver owns, not somewhere an accessory goes.
+# Mirrors `JOINERY_SLOT` in tools/mounts/catalog.ts.
+JOINERY_SLOT = "base"
+
+# What kind of place each accessory slot names, and therefore what the measuring
+# run looks for in the mesh. Mirrors `SLOT_CLASSES` in tools/mounts/classify.ts,
+# which is the authority: the slot NAME is the only cheap evidence available
+# before 16.34 GB of STL is read, and it decides whether a host gets a 31-angle
+# tilt sweep (socket, pocket), a through-cast (opening), a read from above
+# (hole), or one bounding box (surface, grate).
+#
+# `grate` is its own class and not `opening`: a grate half is a plate laid into a
+# channel rather than something hung in a hole. The table is exhaustive over the
+# corpus and the invariant below fails if a slot name appears that is not in it,
+# which is the signal that the tool needs teaching before the next run.
+SLOT_CLASSES = {
+    "arch": "opening",
+    "archway": "opening",
+    "beam": "surface",
+    "brace": "surface",
+    "brazier": "surface",
+    "brazier_base": "surface",
+    "broken_section": "surface",
+    "crosshead": "surface",
+    "door": "opening",
+    "fracture slope": "surface",
+    "frame": "opening",
+    "grate": "grate",
+    "grate (left)": "grate",
+    "grate (right)": "grate",
+    "grate door": "opening",
+    "grate flange": "grate",
+    "lintel": "opening",
+    "portcullis": "opening",
+    "shutters": "opening",
+    "slab_1": "surface",
+    "slab_2": "surface",
+    "statue": "surface",
+    "support": "surface",
+    "top": "surface",
+    "torch": "socket",
+    "trapdoor": "hole",
+    "treasure": "pocket",
+    "window": "opening",
+}
+
 
 def load(fixtures: pathlib.Path) -> list[dict]:
     rows: list[dict] = []
@@ -1516,6 +1564,53 @@ def main() -> int:
     out.append(("tiles with a REQUIRED slot", f"{required_any} ({pct(required_any, n)})", "the only tiles that are genuinely incomplete alone"))
     self_sufficient = n - required_any
     out.append(("self-sufficient tiles", f"{self_sufficient} ({pct(self_sufficient, n)})", "no required companion part"))
+
+    # ------------------------------------------------------------ accessory mounts
+    # The work list `npm run mounts` reads, re-derived from the fixtures rather
+    # than from the index, so the two have to agree. The tool keys on md5 because
+    # a measurement is a property of the MESH -- `pipeline/mounts/inventory.json`
+    # is filed by blob, and the 1,005 host records collapse to 995 host meshes.
+    # `tools/mounts/corpus.test.ts` asserts the same four numbers against the
+    # measured artefact; this row is the corpus's own statement of them.
+    host_rows = [
+        r
+        for r in with_config
+        if any(p.get("name") != JOINERY_SLOT for p in (r["config"].get("parts") or []))
+    ]
+    host_blobs = {
+        (r.get("file_metadata") or {}).get("md5")
+        for r in host_rows
+        if (r.get("file_metadata") or {}).get("md5")
+    }
+    insert_blobs = {
+        (r.get("file_metadata") or {}).get("md5")
+        for r in live
+        if layer_of(r) == "insert" and (r.get("file_metadata") or {}).get("md5")
+    }
+    out.append(("accessory host records", str(len(host_rows)), "live rows declaring a config slot that is not `base` — the corpus's own statement that something gets fitted in"))
+    out.append(("accessory host blobs", str(len(host_blobs)), "distinct md5 among those rows — what the measuring run actually reads, and what the inventory is keyed on"))
+    out.append(("insert blobs", str(len(insert_blobs)), "distinct md5 among live rows whose layer is `insert` — the meshes that get an anchor"))
+
+    accessory_slots = [
+        p for r in host_rows for p in (r["config"].get("parts") or []) if p.get("name") != JOINERY_SLOT
+    ]
+    unknown_slots = sorted({p.get("name") for p in accessory_slots if p.get("name") not in SLOT_CLASSES})
+    slot_classes = Counter(SLOT_CLASSES.get(p.get("name"), "?") for p in accessory_slots)
+    out.append(
+        (
+            "accessory slot declarations by class",
+            f"{sum(slot_classes.values())}: " + ", ".join(f"{v} {k}" for k, v in sorted(slot_classes.items())),
+            "counted per RECORD; across the host blobs it is 1,230, because rows sharing a mesh union their slots",
+        )
+    )
+    if unknown_slots:
+        failures.append(
+            f"slot names with no class in SLOT_CLASSES, so the measuring run would skip them: {unknown_slots}"
+        )
+    if sum(slot_classes.values()) != len(accessory_slots):
+        failures.append("the slot-class histogram does not account for every accessory slot")
+    if len(host_blobs) > len(host_rows):
+        failures.append("more host meshes than host records -- md5 is missing on some rows")
 
     # ---------------------------------------------------------------- textures
     roots = Counter()

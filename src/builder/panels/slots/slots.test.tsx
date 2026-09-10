@@ -1,23 +1,22 @@
 // @vitest-environment jsdom
 /**
- * The plan's pieces and their slots — the inventory, the panel, and row C3's
- * editor.
+ * A placed piece's slots — row C3's editor, and the accessories the files in it
+ * hold.
  *
- * Three groups of assertions, and each one is about something no other surface
- * in the app can say:
+ * Two groups of assertions, and each is about something no other surface in the
+ * app can say:
  *
- *   - **the accessory inventory** — a drawing's *open* composition slots are
- *     counted at all, and the count separates a slot the user can fill from one
- *     **nothing in the archive can** (9 of the corpus's 1,244 declarations);
- *   - **the panel** — one row per placed piece, naming the family and what it
- *     still needs, and opening the editor on a **right click** as well as on a
- *     press, because §3.3 asks for both;
  *   - **the editor** — the design filter, the greyed dead end, the write that is
  *     `pinned`, and the refusal. The refusal is the row's headline and is the
  *     one thing the guided-assembly walk cannot report on its own: a card that
  *     would empty a still-**open** sibling is greyed before it is pressed, and a
  *     card that would invalidate a sibling's **existing fill** is pressed,
  *     refused, and told why.
+ *   - **the accessories under a filled slot** — the composition picker, mounted
+ *     under the recipe slot whose file opens it, writing `pinHold` /
+ *     `clearHold`. What a hold **costs** (one copy per measured mount), what
+ *     nothing has **measured**, what the host was **printed holding**, and which
+ *     required slot is still a hole in the print.
  *
  * The fixture is row C2's, shared with the drawer's picker rather than copied:
  * the dead-end case is delicate enough that two versions of it would drift.
@@ -29,19 +28,17 @@
  * library they landed in was gone. They are back, against the destination the
  * templates plan intended: `pinFill` on the placed instance, `pinned: true`.
  *
- * ## A holder is a filled slot, since row A8
+ * ## The accessory assertions moved here with the control — F7
  *
- * Every `at(…)` below is a **template instance with one fill**, and the fill
- * names the file whose accessory slots the assertion is about. That is a
- * simplification rather than a translation: a placement used to name a design and
- * `planSlots` had to resolve it to a file through the lock preference, because
- * `config` differs between an item's variants. A fill *is* the file, so the
- * preference is gone from the signature and `FILL.torchStone` versus
- * `FILL.torchStoneFlex` — two files of one item, which this file's subject turns
- * on — is now a distinction a test can simply state.
- *
- * One instance with two filled slots is two holders, and the last test in the
- * inventory block is what pins that.
+ * They were a section in the bill column (`AccessorySection`, and a `planSlots`
+ * inventory over the whole drawing behind it), which is where an accessory was
+ * chosen until the owner ruled otherwise: *"move the accessory choosing out of
+ * the sidebar and into the tile/slots editing popup."* So the plan-wide
+ * inventory is gone — nothing asks *which pieces on this drawing open a slot*
+ * any more — and what is left is `slotAccessories.ts#fillAccessories` over one
+ * fill, asserted through the dialog that renders it. {@link HOST_TEMPLATE} is
+ * the one-slot recipe those assertions place, because the file whose accessory
+ * slots they are about has to be *in a slot of a recipe* to be reachable at all.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
@@ -49,10 +46,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildAssemblyIndex } from '@/assembly'
 import type { TileId } from '@/catalog'
+import { CatalogFile as CatalogFileSchema } from '@/catalog'
 import type { RecipeTemplate } from '@/assembly'
 import { FILL, PARENT, SLOT_CATALOG } from '@/screens/detail/slots/fixture'
 import type { TemplateInstance } from '@/store'
 import {
+  HoldName,
   PlacementId,
   SlotName,
   TemplateId,
@@ -61,8 +60,6 @@ import {
   useWorkshopStore,
 } from '@/store'
 
-import { AccessorySection } from './AccessorySection'
-import { planSlots } from './planSlots'
 import type { SlotEditTarget } from './SlotEditor'
 import { SlotEditor } from './SlotEditor'
 import { slotEditorModel } from './slotEditor'
@@ -157,13 +154,39 @@ const FILTERED_TEMPLATE: RecipeTemplate = {
   ],
 }
 
-const TEMPLATES = (id: string): RecipeTemplate | undefined =>
-  [EDITOR_TEMPLATE, MITRE_TEMPLATE, FILTERED_TEMPLATE].find((one) => one.id === id)
-
-/** The accessory inventory over a plan, which is all this section is now. */
-function accessories(placements: Record<string, TemplateInstance>) {
-  return render(<AccessorySection catalog={SLOT_CATALOG} placements={placements} />)
+/**
+ * A one-slot recipe whose slot takes a **host wall**, so the file in it is one
+ * that opens accessory slots of its own.
+ *
+ * The accessory assertions need a recipe for the same reason the editor does: an
+ * accessory is a slot of a file, and a file is only on the plan by being in a
+ * slot of a placed recipe. `shape|wall` admits every parent in row C2's fixture
+ * — the archway with its four measured torch sockets, the two-accessory-slot
+ * walls, and the contradiction — so one recipe reaches all of them and the fill
+ * is on-slot, which keeps `fill-off-slot`'s copy out of these assertions.
+ */
+const HOST_TEMPLATE: RecipeTemplate = {
+  id: 'fixture-host-wall',
+  name: 'Fixture: Host Wall',
+  source: 'fixture',
+  tags: ['object|tile'],
+  parts: [{ name: 'wall', tags: { require: [{ tag: 'shape|wall' }] }, fulfills: [] }],
 }
+
+const TEMPLATES = (id: string): RecipeTemplate | undefined =>
+  [EDITOR_TEMPLATE, MITRE_TEMPLATE, FILTERED_TEMPLATE, HOST_TEMPLATE].find((one) => one.id === id)
+
+/**
+ * The same fixture with the archway's `lintel` **built into its mesh** —
+ * `CatalogRecord.modelledIn`, the measurement's verdict for the three
+ * `floor,brazier+small.2x2` floors whose brazier is sculpted on.
+ */
+const BUILT_IN_CATALOG = CatalogFileSchema.parse({
+  ...SLOT_CATALOG,
+  records: SLOT_CATALOG.records.map((record) =>
+    record.id === PARENT.archway ? { ...record, modelledIn: ['lintel'] } : record,
+  ),
+})
 
 /**
  * The editor, mounted the way `BuilderScreen` mounts it.
@@ -180,7 +203,14 @@ function accessories(placements: Record<string, TemplateInstance>) {
  * whose part was under the pointer. Held in state rather than fixed, so the
  * Escape assertion is a real round trip.
  */
-function editor(placements: Record<string, TemplateInstance>, target: SlotEditTarget) {
+function editor(
+  placements: Record<string, TemplateInstance>,
+  target: SlotEditTarget,
+  /* The index the dialog reads. Only the built-in case passes another, and it
+     keeps `ASSEMBLY`: `modelledIn` is the one field between the two catalogs and
+     nothing in the assembly walk reads it. */
+  catalog = SLOT_CATALOG,
+) {
   function Host() {
     const [editing, setEditing] = useState<SlotEditTarget | null>(target)
     const instance = editing === null ? undefined : placements[editing.placement]
@@ -188,7 +218,7 @@ function editor(placements: Record<string, TemplateInstance>, target: SlotEditTa
     if (instance === undefined || template === undefined) return null
     return (
       <SlotEditor
-        catalog={SLOT_CATALOG}
+        catalog={catalog}
         index={ASSEMBLY}
         instance={instance}
         key={`${instance.id}:${editing?.slot ?? ''}`}
@@ -203,63 +233,60 @@ function editor(placements: Record<string, TemplateInstance>, target: SlotEditTa
   return render(<Host />)
 }
 
-/**
- * The one recipe these tests place.
- *
- * A slug rather than one of the 40 real ids: `planSlots` never looks a template
- * up — it walks the fills — so the family it names is not one of this file's
- * facts, and naming a real one would imply the fills below belong to its slots.
- */
-const A_RECIPE = 'slots-fixture'
-
-/** The one placement key the editor tests read back, branded once. */
+/** The one placement key these tests read back, branded once. */
 const KEY = PlacementId.parse('a')
 
 /** The `top` slot, branded once — a `Record<SlotName, …>` will not take a literal. */
 const TOP = SlotName.parse('top')
 
+/** {@link HOST_TEMPLATE}'s one slot, which is where a host file sits. */
+const WALL = SlotName.parse('wall')
+
 /** The stone base, which is what the towne top would strand. */
 const BASE_STONE = 'tiles/dungeon_stone/bases/base/stone%base.2x.stl'
 
-/** A file this index does not hold — the orphan case. */
+/** A file this index does not hold — a fill whose accessories are unknowable. */
 const RETIRED_TILE = 'tiles/gone/forever.stl' as TileId
 
-/** An instance whose one fill names {@link RETIRED_TILE}, at the origin. */
-function atRetired(): TemplateInstance {
-  return instance({ fill: RETIRED_TILE, x: 0, z: 0 })
-}
-
 /**
- * An instance holding one file per slot, at a cell.
+ * One placed {@link HOST_TEMPLATE} whose `wall` slot holds `parent`, **holding**
+ * the accessories given.
  *
- * The slots are named `slot0`, `slot1`, … because `planSlots` orders a holder's
- * siblings by slot name and nothing here depends on the recipe's declared order;
- * `id` is a placeholder the caller's map key overwrites in the store and which
- * this inventory reads only as `holder.placement`.
+ * Keyed under {@link KEY} because the presses below write to the store and
+ * `pinHold` addresses a placement by its map key. `pinned: true` on the holds
+ * throughout: those fixtures stand for a choice already made.
  */
-function instance({ fill, fills, x, z }: { fill?: TileId; fills?: readonly TileId[]; x: number; z: number }): TemplateInstance {
-  const tiles = fills ?? (fill === undefined ? [] : [fill])
+function hosting(
+  parent: string,
+  holds?: Readonly<Record<string, string>>,
+): Record<string, TemplateInstance> {
   return {
-    id: PlacementId.parse('p'),
-    template: TemplateId.parse(A_RECIPE),
-    x,
-    z,
-    rotation: 0,
-    fills: Object.fromEntries(
-      tiles.map((tile, at) => [SlotName.parse(`slot${String(at)}`), { tile, pinned: false }]),
-    ),
-    /* *Any* on every axis, which is what these fixtures are about: a position
-       narrows the slot lists and each test that cares passes its own. */
-    filters: [],
+    [KEY]: {
+      id: KEY,
+      template: TemplateId.parse(HOST_TEMPLATE.id),
+      x: 0,
+      z: 0,
+      rotation: 0,
+      fills: {
+        [WALL]: {
+          tile: parent as TileId,
+          pinned: false,
+          ...(holds === undefined
+            ? {}
+            : {
+                holds: Object.fromEntries(
+                  Object.entries(holds).map(([hold, tile]) => [
+                    HoldName.parse(hold),
+                    { tile: tile as TileId, pinned: true },
+                  ]),
+                ),
+              }),
+        },
+      },
+      filters: [],
+    },
   }
 }
-
-/** An instance whose single fill is one named fixture file. */
-function at(id: string, x: number, z: number): TemplateInstance {
-  return instance({ fill: id as TileId, x, z })
-}
-
-const plan = (entries: Record<string, TemplateInstance>) => entries
 
 beforeEach(() => {
   resetWorkshop()
@@ -270,91 +297,6 @@ afterEach(() => {
   resetWorkshop()
 })
 
-/* ------------------------------------------------------------- the inventory */
-
-describe('planSlots', () => {
-  it('finds nothing in a plan of pieces that hold nothing', () => {
-    const inventory = planSlots(
-      SLOT_CATALOG,
-      plan({ a: at(PARENT.plainFloor, 0, 0), b: at(PARENT.baseOnly, 1, 0) }),
-    )
-    expect(inventory).toMatchObject({ slots: 0, required: 0, unfillable: 0, holders: [] })
-    expect(inventory.byName).toEqual([])
-  })
-
-  it('counts the slots a plan opens, and how many of them are required', () => {
-    const inventory = planSlots(
-      SLOT_CATALOG,
-      plan({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.wallLow, 1, 0) }),
-    )
-    // `torch` is optional, `top` is not — and `base` is neither, because the
-    // base match is A6's and never appears here.
-    expect(inventory.slots).toBe(2)
-    expect(inventory.required).toBe(1)
-    expect(inventory.byName).toEqual([
-      { name: 'top', count: 1 },
-      { name: 'torch', count: 1 },
-    ])
-  })
-
-  it('separates a slot nothing in the archive can fill from one the user can', () => {
-    const inventory = planSlots(
-      SLOT_CATALOG,
-      plan({ a: at(PARENT.contradiction, 0, 0), b: at(PARENT.wallTowne, 1, 0) }),
-    )
-    expect(inventory.slots).toBe(2)
-    expect(inventory.unfillable).toBe(1)
-  })
-
-  it('reads the plan in depth-then-across order, the same as the bill', () => {
-    const inventory = planSlots(
-      SLOT_CATALOG,
-      plan({
-        far: at(PARENT.wallLow, 0, 4),
-        nearRight: at(PARENT.wallTowne, 3, 0),
-        nearLeft: at(PARENT.pairedGrate, 0, 0),
-      }),
-    )
-    expect(inventory.holders.map((holder) => holder.placement)).toEqual([
-      'nearLeft',
-      'nearRight',
-      'far',
-    ])
-  })
-
-  it('gives one instance a holder per filled slot, because each file has its own', () => {
-    // Row A8's change of unit, stated: a template instance is up to five files
-    // and each declares its own accessory slots, so a single placed recipe can
-    // open several. `wallTowne` opens `torch` and `pairedGrate` opens two grates.
-    const inventory = planSlots(
-      SLOT_CATALOG,
-      plan({
-        one: instance({
-          fills: [PARENT.wallTowne as TileId, PARENT.pairedGrate as TileId],
-          x: 0,
-          z: 0,
-        }),
-      }),
-    )
-    expect(inventory.holders).toHaveLength(2)
-    // Keyed by placement *and* slot, so two holders of one instance are distinct
-    // React keys rather than a duplicate.
-    expect(inventory.holders.map((holder) => holder.id)).toEqual(['one|slot0', 'one|slot1'])
-    expect(inventory.holders.map((holder) => holder.parent)).toEqual([
-      PARENT.wallTowne,
-      PARENT.pairedGrate,
-    ])
-  })
-
-  it('calls a fill the index has retired an orphan rather than dropping it', () => {
-    const inventory = planSlots(SLOT_CATALOG, plan({ gone: atRetired() }))
-    expect(inventory.orphans).toEqual(['gone'])
-    expect(inventory.holders).toEqual([])
-  })
-})
-
-/* ------------------------------------------------------------- the piece list */
-
 /**
  * An instance of {@link EDITOR_TEMPLATE} with named fills.
  *
@@ -364,7 +306,7 @@ describe('planSlots', () => {
  */
 function piece(fills: Readonly<Record<string, string>>, x = 0, z = 0): TemplateInstance {
   return {
-    /* {@link KEY}, and it has to match the map key the panel is given: `pinFill`
+    /* {@link KEY}, and it has to match the map key the editor is given: `pinFill`
        addresses the store by `TemplateInstance.id` and the schema's rule is that
        the key wins, so a fixture whose two disagree would silently write
        nothing. */
@@ -383,73 +325,201 @@ function piece(fills: Readonly<Record<string, string>>, x = 0, z = 0): TemplateI
   }
 }
 
-/* ------------------------------------------------------ the accessory list */
+/* ----------------------------------------- what the file in a slot holds */
 
-describe('AccessorySection', () => {
+/**
+ * **The accessory picker, in the editor and writing — F7.**
+ *
+ * The owner's ruling: *"move the accessory choosing out of the sidebar and into
+ * the tile/slots editing popup."* So these assertions are about the dialog now,
+ * and they are the same facts the deleted sidebar section had to carry — what the
+ * piece holds is what the grid shows, a press pins it onto that fill, a second
+ * press takes it out, and each slot says what it costs.
+ *
+ * The archway rather than the torch wall, because it is the fixture's one
+ * measured host and the mount lines are read off it — four torch sockets and an
+ * unmeasured `lintel`. Its `{ filter }` entry also means the towne torch merely
+ * narrows the lintel, where on `wallSiblings` the same card empties the `top`
+ * slot and is declined.
+ */
+describe('the accessories under a filled slot', () => {
   /**
-   * **The empty state is the normal state, so it is nothing at all.**
-   *
-   * 1,005 of the archive's 8,702 files declare a slot — 11.5% — so the common
-   * plan opens none, and this section used to spend a four-line paragraph
-   * quoting that arithmetic at every user who had not placed a torch wall. In a
-   * fixed-height column beside a parts list, an explanation of why there is
-   * nothing to show costs the parts list four lines on nearly every visit.
+   * The editor over the **store's** scene, because the presses below write there
+   * and `pinHold` addresses a placement by its key.
    */
-  it('renders nothing when the plan opens no accessory', () => {
-    const { container } = accessories({ a: at(PARENT.plainFloor, 0, 0) })
-    expect(container).toBeEmptyDOMElement()
+  function open(placements: Record<string, TemplateInstance>, catalog = SLOT_CATALOG) {
+    useWorkshopStore.setState({ placements })
+    editor(useWorkshopStore.getState().placements, { placement: KEY }, catalog)
+    return screen.getByRole('dialog')
+  }
+
+  /** The holds of the one fill, as the store has them after a press. */
+  const held = () => useWorkshopStore.getState().placements[KEY]?.fills[WALL]?.holds
+
+  /**
+   * One accessory card, **inside the accessory block**.
+   *
+   * Scoped and not `screen.getByRole`, because the dialog holds two grids and
+   * their names overlap: the recipe slot's own candidates include *Dungeon Stone
+   * Torch Wall 2x*, which is a wall that takes a torch, beside the accessory
+   * grid's *Dungeon Stone Torch*, which is the torch. A press on the wrong one
+   * would write a fill rather than a hold.
+   */
+  const holdsBlock = () =>
+    screen.getByRole('dialog').querySelector<HTMLElement>('.of-sloted-holds')!
+  const holdCard = (name: RegExp) => within(holdsBlock()).getByRole('button', { name })
+
+  it('renders no accessory block for a file that opens no slot', () => {
+    // 88.5% of the archive: `fillAccessories` answers `undefined` and the row is
+    // the recipe slot alone. `baseOnly` declares a `base` part and nothing else,
+    // which is A6's base match rather than an accessory.
+    const dialog = open(hosting(PARENT.baseOnly))
+    expect(dialog.querySelector('.of-sloted-holds')).toBeNull()
   })
 
-  it('states what a pick here is, in one line, because it keeps nothing', () => {
-    accessories({ a: at(PARENT.wallTowne, 0, 0), b: at(PARENT.wallLow, 2, 0) })
-    expect(screen.getByText(/2 slots open on 2 pieces, 1 of them required/)).toBeInTheDocument()
-    // The reason is structural — `TemplateInstance.fills` is one level, so there
-    // is no key for a slot of a *file* — and a picker that silently kept nothing
-    // would be the one thing worse than saying so. Cut to a line, not to zero.
-    expect(screen.getByText(/a fill can name a recipe’s slot, not a file’s/)).toBeInTheDocument()
+  it('renders none for a fill this build has retired, whose slots are unknowable', () => {
+    const dialog = open(hosting(RETIRED_TILE))
+    expect(dialog.querySelector('.of-sloted-holds')).toBeNull()
   })
 
-  it('names each accessory holder with its slot and grid position', () => {
-    accessories({ a: at(PARENT.wallTowne, 3.5, 2) })
-    expect(screen.getByText(/slot0 · x 3\.5, z 2/)).toBeInTheDocument()
-    expect(screen.getByText(/Dungeon Stone Torch Wall 2x/)).toBeInTheDocument()
+  it('mounts the picker under the recipe slot whose file opens it', () => {
+    const dialog = open(hosting(PARENT.archway))
+    const holds = dialog.querySelector<HTMLElement>('.of-sloted-holds')
+    expect(holds).not.toBeNull()
+    // The row and its accessories are one list item, so the grid is under the
+    // file it belongs to rather than under the dialog.
+    expect(holds!.closest('li')?.querySelector('.of-sloted-slotname')?.textContent).toBe('wall')
+    expect(within(holds!).getByRole('group', { name: 'Fill the torch slot' })).toBeInTheDocument()
+    expect(within(holds!).getByRole('group', { name: 'Fill the lintel slot' })).toBeInTheDocument()
   })
 
-  it('calls an unfillable accessory slot an archive gap rather than a step to take', () => {
-    accessories({ a: at(PARENT.contradiction, 0, 0) })
-    expect(screen.getByText(/gap in the archive, not a step to take/)).toBeInTheDocument()
+  it('shows what the piece already holds as the chosen card', () => {
+    open(hosting(PARENT.archway, { torch: FILL.torchStone }))
+    expect(holdCard(/Dungeon Stone Torch/)).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('pins a pick onto the hold it names', () => {
+    open(hosting(PARENT.archway, {}))
+    fireEvent.click(holdCard(/Towne Torch/))
+    // `pinned: true` — the user chose it, so contract C-k's default-hold pass
+    // must not overwrite it on the next hydrate.
+    expect(held()).toEqual({ torch: { tile: FILL.torchTowne, pinned: true } })
+  })
+
+  it('takes the accessory out again on a second press of the card it holds', () => {
+    open(hosting(PARENT.archway, { torch: FILL.torchStone }))
+    fireEvent.click(holdCard(/Dungeon Stone Torch/))
+    // `{}` and not `undefined`: *the user took it out* has to survive a reload as
+    // something other than *nobody has looked yet*. See `clearHold`.
+    expect(held()).toEqual({})
+  })
+
+  it('says how many mounts a slot fills, so the bill’s quantity is no surprise', () => {
+    // One copy per measured mount, and four torches for one press is a number a
+    // user cannot account for unless the picker says so first.
+    open(hosting(PARENT.archway, {}))
+    expect(screen.getByText(/torch × 4 mounts/)).toBeInTheDocument()
+  })
+
+  it('says when nothing has measured where an accessory goes', () => {
+    // `CatalogRecord.mounts` is absent both for a host with no accessory slot and
+    // for one nobody has measured, so *counted once, not drawn* is the honest
+    // reading of the archive today rather than an error state.
+    open(hosting(PARENT.archway, {}))
+    expect(
+      screen.getByText(/lintel: no measured mount — counted once, not drawn/),
+    ).toBeInTheDocument()
+  })
+
+  it('says a slot the host was printed holding is built in, and offers no grid for it', () => {
+    /* **F6.** Not *no measured mount* — there is nothing to measure and nothing
+       missing. And no grid either: offering one would offer a second brazier for
+       a floor that was printed carrying one, which is what `SlotFills`' `omit`
+       exists for. The slot is still resolved, so the torch beside it is narrowed
+       by what the mesh already holds. */
+    const dialog = open(hosting(PARENT.archway, {}), BUILT_IN_CATALOG)
+    expect(screen.getByText(/lintel: built into this piece/)).toBeInTheDocument()
+    expect(screen.queryByText(/lintel: no measured mount/)).toBeNull()
+    expect(within(dialog).queryByRole('group', { name: 'Fill the lintel slot' })).toBeNull()
+    expect(within(dialog).getByRole('group', { name: 'Fill the torch slot' })).toBeInTheDocument()
+  })
+
+  it('gives a required accessory slot the weight of an empty recipe slot', () => {
+    /* The same hole one level down: `wallLow`'s `top` slot is required —
+       `optional` is absent, and absence means required — so the piece will print
+       incomplete until it is filled, and the download refuses either way. Both of
+       the archway's slots are optional, which is why this one is the low wall. */
+    const dialog = open(hosting(PARENT.wallLow))
+    expect(within(dialog).getByText(/top needs a choice/)).toBeInTheDocument()
+    expect(dialog.querySelector('.of-sloted-holdgap')).not.toBeNull()
+  })
+
+  it('says nothing about a required slot the piece already holds', () => {
+    const dialog = open(hosting(PARENT.wallLow, { top: FILL.topWall }))
+    expect(dialog.querySelector('.of-sloted-holdgap')).toBeNull()
+  })
+
+  it('counts a required hold naming a retired file as a hole, not as filled', () => {
+    /*
+      The two surfaces have to agree. `resolveInstance` refuses the download for a
+      required hold whose record is missing — an empty socket *and* an accessory
+      the archive has dropped — and `billView.ts#holeFaults` faults both, so a
+      dialog that read the second as filled would say nothing over a scene the
+      bill panel is refusing. The grid agrees: a retired id matches no card, so
+      the slot renders with nothing chosen.
+    */
+    const dialog = open(hosting(PARENT.wallLow, { top: RETIRED_TILE }))
+    expect(within(dialog).getByText(/top needs a choice/)).toBeInTheDocument()
+    expect(holdCard(/Dungeon Stone Secret Door Top/)).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('greys the dead-end accessory pick here too, because the picker is the same one', () => {
-    accessories({ a: at(PARENT.wallTowne, 0, 0) })
-    expect(screen.getByRole('button', { name: /Towne Torch/ })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    )
+    // `wallSiblings`: the pick that closes another *accessory* slot. A pick that
+    // only empties the host's base part is not a dead end — F2 — and
+    // `wallTowne`'s towne torch is exactly that one.
+    open(hosting(PARENT.wallSiblings))
+    expect(holdCard(/Towne Torch/)).toHaveAttribute('aria-disabled', 'true')
   })
 
-  it('says how many placements it cannot describe', () => {
-    accessories({ gone: atRetired() })
+  it('calls a slot nothing in the archive fits a gap rather than a step to take', () => {
+    // 9 of the corpus's 1,244 declarations are unsatisfiable, and the picker's own
+    // sentence is the one the editor shows: there is nothing here for the user to
+    // press.
+    open(hosting(PARENT.contradiction))
     expect(
-      // "a file", not "an item": a fill names a file (decision D1), so an orphan
-      // is a file the index has retired rather than an item it has lost.
-      screen.getByText(/1 placement names a file this index no longer holds/),
+      screen.getByText(/Nothing in the archive fits this slot, so this piece cannot be completed/),
     ).toBeInTheDocument()
   })
 
-  it('scopes each accessory picker to that placement’s own file', () => {
-    const { container } = accessories({
-      a: at(PARENT.wallTowne, 0, 0),
-      b: at(PARENT.pairedGrate, 2, 0),
+  it('scopes each block to its own slot’s file', () => {
+    /* Two fills, each opening its own accessory slots, so a two-file piece gets
+       two blocks and a press in one cannot land on the other. `MITRE_TEMPLATE`
+       rather than {@link HOST_TEMPLATE}, because that is the fixture with more
+       than one slot. */
+    useWorkshopStore.setState({
+      placements: {
+        [KEY]: {
+          id: KEY,
+          template: TemplateId.parse(MITRE_TEMPLATE.id),
+          x: 0,
+          z: 0,
+          rotation: 0,
+          fills: {
+            [SlotName.parse('floor')]: { tile: PARENT.pairedGrate as TileId, pinned: false },
+            [SlotName.parse('wall')]: { tile: PARENT.archway as TileId, pinned: false },
+          },
+          filters: [],
+        },
+      },
     })
-    // By class, not by `listitem`: the option cards are list items too, which is
-    // the right markup for a grid and makes the role ambiguous here.
-    const holders = [...container.querySelectorAll<HTMLElement>('.of-planslots-holder')]
-    expect(holders).toHaveLength(2)
-    expect(within(holders[0]!).getByRole('group', { name: 'Fill the torch slot' })).toBeInTheDocument()
+    editor(useWorkshopStore.getState().placements, { placement: KEY })
+
+    const blocks = [...document.querySelectorAll<HTMLElement>('.of-sloted-holds')]
+    expect(blocks).toHaveLength(2)
     expect(
-      within(holders[1]!).getByRole('group', { name: 'Fill the grate (left) slot' }),
+      within(blocks[0]!).getByRole('group', { name: 'Fill the grate (left) slot' }),
     ).toBeInTheDocument()
+    expect(within(blocks[1]!).getByRole('group', { name: 'Fill the torch slot' })).toBeInTheDocument()
   })
 })
 

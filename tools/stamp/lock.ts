@@ -37,6 +37,13 @@
  *     and demand a `SCHEMA_VERSION` bump for an event no derivation took part
  *     in. `CatalogRecord.thumb` is therefore `false` on every record of the
  *     locked build, which is what makes the digest a statement about this tree.
+ *   - **the mount inventory** — `BuildOptions.mounts`, passed as
+ *     `emptyMountInventory()` on the same argument one artefact along.
+ *     `pipeline/mounts/inventory.json` records what 16.34 GB of somebody else's
+ *     meshes measured to the last time they were read, and a re-measurement is
+ *     not a derivation this tree performs. `CatalogRecord.mounts` and
+ *     `CatalogRecord.anchor` are therefore absent from every record of the
+ *     locked build.
  *
  * What is left is the derivation code, `src/catalog/schema.ts` and the corpus.
  *
@@ -101,7 +108,13 @@ import { z } from 'zod'
 import type { CatalogFile } from '../../src/catalog'
 import { CatalogFile as CatalogFileSchema, SCHEMA_VERSION } from '../../src/catalog'
 import type { FixtureRow } from '../../pipeline'
-import { PAYLOAD_TIMESTAMP, PIPELINE_VERSION, buildCatalog, emptyManifest } from '../../pipeline'
+import {
+  PAYLOAD_TIMESTAMP,
+  PIPELINE_VERSION,
+  buildCatalog,
+  emptyManifest,
+  emptyMountInventory,
+} from '../../pipeline'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -220,6 +233,9 @@ export function lockedBuild(rows: readonly FixtureRow[]): CatalogFile {
     // Deliberately not `thumbBlobs(readThumbInventory())`. See the module note:
     // the bucket's contents are input, and a backfill is not a derivation.
     thumbs: new Set(),
+    // The same argument, one artefact along: 16.34 GB of somebody else's meshes
+    // is an input, and measuring them is not a derivation this tree performs.
+    mounts: emptyMountInventory(),
   }).file
 }
 

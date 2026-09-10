@@ -43,6 +43,7 @@ import type { SlotTags } from '../src/composition'
 
 import { buildCatalog } from './build'
 import { fixturesDir, loadFixtureRows } from './fixtures'
+import { emptyMountInventory } from './mounts'
 import { emptyManifest } from './ordinals'
 import type { Role, RoleInput } from './role'
 import { FORMS, ROLES, inferRole } from './role'
@@ -66,6 +67,7 @@ describeCorpus(title, () => {
         rows: loadFixtureRows(FIXTURES_DIR),
         manifest: emptyManifest(),
         thumbs: new Set(),
+        mounts: emptyMountInventory(),
         fixturesRef: 'test',
         /* The payload epoch, so the byte figures below are the quotable ones. */
         builtAt: PAYLOAD_TIMESTAMP,
